@@ -13,7 +13,7 @@ MONTHS = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oc
 def resolver(service, ats="icims"):
     profile = Profile(
         work=[
-            WorkEntry(company="Department of Computer Science", title="ML Research Engineer", start="2025-07", current=True),
+            WorkEntry(company="Example Research Lab", title="ML Research Engineer", start="2025-07", current=True),
             WorkEntry(company="Example AI", title="Data Science Intern", start="2023-07", end="2024-08"),
         ]
     )

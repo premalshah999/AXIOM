@@ -10,20 +10,20 @@ ALIASES = {"icims": "icims"}
 def test_a_listed_platform_gets_a_plus_address_on_gmail_only():
     assert ats_address("alex.doe.applicant@gmail.com", "icims", ALIASES) == "alex.doe.applicant+icims@gmail.com"
     assert ats_address("alex.doe.applicant@gmail.com", "workday", ALIASES) == "alex.doe.applicant@gmail.com"
-    assert ats_address("alex@umd.edu", "icims", ALIASES) == "alex@umd.edu"  # plus-addressing is not assumed elsewhere
+    assert ats_address("alex@example.edu", "icims", ALIASES) == "alex@example.edu"  # plus-addressing is not assumed elsewhere
     assert ats_address("alex+jobs@gmail.com", "icims", ALIASES) == "alex+jobs@gmail.com"
 
 
 def test_a_plus_address_maps_back_to_its_mailbox():
     assert base_address("Alex.Doe.Applicant+icims@gmail.com") == "alex.doe.applicant@gmail.com"
-    assert base_address("alex+tag@umd.edu") == "alex+tag@umd.edu"
+    assert base_address("alex+tag@example.edu") == "alex+tag@example.edu"
 
 
 def test_a_domain_alias_for_platforms_that_fold_plus_addresses():
     # ADP (Avalon 2026-10-19): "Another user account already exists with the provided email address" for local+adp@.
     aliases = {"adp": "@googlemail.com"}
     assert ats_address("alex.doe.applicant@gmail.com", "adp", aliases) == "alex.doe.applicant@googlemail.com"
-    assert ats_address("alex@umd.edu", "adp", aliases) == "alex@umd.edu"
+    assert ats_address("alex@example.edu", "adp", aliases) == "alex@example.edu"
     assert ats_address("alex@googlemail.com", "adp", aliases) == "alex@googlemail.com"
     assert base_address("Alex.Doe.Applicant@GoogleMail.com") == "alex.doe.applicant@gmail.com"
 
