@@ -42,7 +42,9 @@ def test_every_setting_is_documented():
     missing = sorted(setting_names() - set(entries()))
     assert not missing, f"Add these settings to .env.example: {missing}"
     text = EXAMPLE.read_text()
-    assert not [alias for alias in alias_names() if alias not in text], "mention each alias next to its setting"
+    assert not [alias for alias in alias_names() if alias not in text], (
+        "mention each alias next to its setting"
+    )
 
 
 def test_no_stale_or_misspelled_entries():
@@ -91,4 +93,6 @@ def test_blank_active_lines_are_all_string_settings():
         if commented or value != "" or name in COMPOSE_ONLY:
             continue
         field = Settings.model_fields[name.lower()] if name.lower() in Settings.model_fields else None
-        assert field is None or field.annotation is str, f"{name} is active and blank but is not a string setting"
+        assert field is None or field.annotation is str, (
+            f"{name} is active and blank but is not a string setting"
+        )

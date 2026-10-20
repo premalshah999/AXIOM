@@ -23,7 +23,9 @@ async def test_watch_records_health_and_keeps_going_when_chrome_is_down(service,
 
     monkeypatch.setattr(close_tabs, "close_inactive_tabs", sweep)
     try:
-        await close_tabs.watch(service.db, "http://host.docker.internal:9224", 15, sleep=stop_after_two_sweeps)
+        await close_tabs.watch(
+            service.db, "http://host.docker.internal:9224", 15, sleep=stop_after_two_sweeps
+        )
     except asyncio.CancelledError:
         pass
     assert calls == ["http://host.docker.internal:9224"] * 2

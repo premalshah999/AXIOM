@@ -76,7 +76,9 @@ def test_a_bad_port_is_rejected(checkout):
 
 
 def test_chrome_launchers_use_their_own_ports_and_profiles(checkout):
-    worker = run(checkout, "chrome-worker.sh", DRY_RUN="1", CHROME_BIN="/bin/true", CHROME_WORKER_PORT="39224")
+    worker = run(
+        checkout, "chrome-worker.sh", DRY_RUN="1", CHROME_BIN="/bin/true", CHROME_WORKER_PORT="39224"
+    )
     twin = run(checkout, "chrome-twin.sh", DRY_RUN="1", CHROME_BIN="/bin/true", CHROME_TWIN_PORT="39225")
     assert worker.returncode == 0 and twin.returncode == 0, worker.stderr + twin.stderr
     assert "--remote-debugging-port=39224" in worker.stdout.splitlines()
@@ -101,7 +103,11 @@ def test_a_running_chrome_is_left_alone(checkout):
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         result = run(
-            checkout, "chrome-worker.sh", DRY_RUN="1", CHROME_BIN="/bin/true", CHROME_WORKER_PORT=str(server.server_port)
+            checkout,
+            "chrome-worker.sh",
+            DRY_RUN="1",
+            CHROME_BIN="/bin/true",
+            CHROME_WORKER_PORT=str(server.server_port),
         )
     finally:
         server.shutdown()

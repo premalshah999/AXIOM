@@ -18,7 +18,11 @@ def settings(**values):
 @pytest.mark.parametrize(
     ("ats", "cause", "needed"),
     [
-        ("workday", STUCK, 2),  # an ordinary failure on an ordinary platform: retry once on an ATS worker first
+        (
+            "workday",
+            STUCK,
+            2,
+        ),  # an ordinary failure on an ordinary platform: retry once on an ATS worker first
         ("successfactors", STUCK, 1),  # known-hard platform
         ("SAP", STUCK, 1),  # names are normalized
         ("workday", "navigation_stalled", 1),  # a stalled controller will not be fixed by the same strategy
@@ -67,8 +71,17 @@ def test_specialists_get_a_larger_budget_than_ats_workers():
 
 def test_the_per_job_token_cap_scales_for_specialists(service):
     with service.db.session() as s:
-        s.add(Job(id="j", identity="j", url="https://j.example.test/1", ats="workday", status="waiting_browser",
-                  company="j", title="Engineer"))
+        s.add(
+            Job(
+                id="j",
+                identity="j",
+                url="https://j.example.test/1",
+                ats="workday",
+                status="waiting_browser",
+                company="j",
+                title="Engineer",
+            )
+        )
         s.add(Run(id="r", job_id="j", state="failed", mode="submit", packet={}))
         s.add(Event(run_id="r", kind="model_call", message="x", data={"prompt_tokens": 2_000_000}))
     with service.db.session() as s:
@@ -86,19 +99,45 @@ def failed_run(service, job_id, run_id, ats, *, cause=STUCK, pool="normal", stat
         "worker_pool": pool,
         "recovery_cause": cause,
         "blocker_type": "observation_failure" if cause == "navigation_stalled" else "control_failure",
-        "browser_checkpoint": {"resume_sha": "abc", "failed_strategies": {"fill:email": {"attempts": [{"state": "failed"}]}}},
+        "browser_checkpoint": {
+            "resume_sha": "abc",
+            "failed_strategies": {"fill:email": {"attempts": [{"state": "failed"}]}},
+        },
     }
     with service.db.session() as s:
         if not s.get(Job, job_id):
-            s.add(Job(id=job_id, identity=job_id, url=f"https://{job_id}.example.test/jobs/1", ats=ats,
-                      status="waiting_browser", company=job_id, title="Engineer"))
-        s.add(Run(id=run_id, job_id=job_id, state=state, mode="submit", reason="Browser did not advance", packet=packet))
+            s.add(
+                Job(
+                    id=job_id,
+                    identity=job_id,
+                    url=f"https://{job_id}.example.test/jobs/1",
+                    ats=ats,
+                    status="waiting_browser",
+                    company=job_id,
+                    title="Engineer",
+                )
+            )
+        s.add(
+            Run(
+                id=run_id,
+                job_id=job_id,
+                state=state,
+                mode="submit",
+                reason="Browser did not advance",
+                packet=packet,
+            )
+        )
     return packet
 
 
 def schedule(service, run_id, packet, config=None, **result):
-    result = {"recovery_cause": packet["recovery_cause"], "blocker_type": packet["blocker_type"],
-              "browser_checkpoint": packet["browser_checkpoint"], "reason": "Browser did not advance", **result}
+    result = {
+        "recovery_cause": packet["recovery_cause"],
+        "blocker_type": packet["blocker_type"],
+        "browser_checkpoint": packet["browser_checkpoint"],
+        "reason": "Browser did not advance",
+        **result,
+    }
     with service.db.session() as s:
         run = s.get(Run, run_id)
         schedule_recovery(s, config or service.config, run, result)
@@ -138,7 +177,9 @@ def test_a_stalled_controller_goes_to_a_specialist_after_one_failure(service):
 
 def test_with_no_specialists_a_hard_platform_retries_on_ats_workers(service):
     packet = failed_run(service, "off", "off-1", "successfactors")
-    recovery, escalation = schedule(service, "off-1", packet, config=service.config.model_copy(update={"specialist_workers": 0}))
+    recovery, escalation = schedule(
+        service, "off-1", packet, config=service.config.model_copy(update={"specialist_workers": 0})
+    )
     assert recovery["status"] == "scheduled" and escalation is None
 
 

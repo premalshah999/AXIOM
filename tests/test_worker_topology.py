@@ -5,7 +5,15 @@ import pytest
 from jobpilot.application_slots import claim_slot
 from jobpilot.config import Settings, Topology
 from jobpilot.db import Job, Run
-from jobpilot.pipeline_comparison import NORMAL, SPECIALIST, as_topology, pool_capacity, pool_slot_ids, slots, snapshot
+from jobpilot.pipeline_comparison import (
+    NORMAL,
+    SPECIALIST,
+    as_topology,
+    pool_capacity,
+    pool_slot_ids,
+    slots,
+    snapshot,
+)
 
 
 def settings(**values):
@@ -64,16 +72,36 @@ def test_the_dashboard_snapshot_follows_the_configured_split(service):
     view = snapshot(service.db, Topology(4, 1))
     assert (view["normal_workers"], view["specialist_workers"]) == (4, 1)
     assert [(w["slot"], w["lane"]) for w in view["assignments"]] == [
-        (1, NORMAL), (2, NORMAL), (3, NORMAL), (4, NORMAL), (5, SPECIALIST),
+        (1, NORMAL),
+        (2, NORMAL),
+        (3, NORMAL),
+        (4, NORMAL),
+        (5, SPECIALIST),
     ]
 
 
 def add_run(service, name, pool, slot, state="running"):
     with service.db.session() as s:
-        s.add(Job(id=name, identity=name, url=f"https://{name}.example.test/jobs/1", ats="workday", status=state,
-                  company=name, title="Engineer"))
-        s.add(Run(id=name + "-run", job_id=name, state=state, mode="submit",
-                  packet={"worker_pool": pool, "worker_slot": slot}))
+        s.add(
+            Job(
+                id=name,
+                identity=name,
+                url=f"https://{name}.example.test/jobs/1",
+                ats="workday",
+                status=state,
+                company=name,
+                title="Engineer",
+            )
+        )
+        s.add(
+            Run(
+                id=name + "-run",
+                job_id=name,
+                state=state,
+                mode="submit",
+                packet={"worker_pool": pool, "worker_slot": slot},
+            )
+        )
 
 
 def test_each_pool_has_its_own_capacity(service):

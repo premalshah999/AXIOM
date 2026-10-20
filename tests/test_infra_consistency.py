@@ -85,7 +85,7 @@ def test_the_image_never_receives_secrets_or_local_state():
 def test_the_dashboard_is_built_by_the_image_not_copied_from_a_laptop():
     text = dockerfile()
     assert "COPY --from=dashboard /build/jobpilot/static ./jobpilot/static" in text
-    assert "outDir: \"../jobpilot/static\"" in (ROOT / "frontend" / "vite.config.ts").read_text()
+    assert 'outDir: "../jobpilot/static"' in (ROOT / "frontend" / "vite.config.ts").read_text()
 
 
 def test_ci_takes_its_runtime_versions_from_the_repository():
@@ -101,7 +101,9 @@ def test_ci_covers_lint_tests_dashboard_and_the_image():
     assert ci["permissions"] == {"contents": "read"}
     steps = " ".join(str(step) for step in ci["jobs"]["python"]["steps"])
     assert 'pytest -q -m "not browser"' in steps and "ruff check" in steps
-    assert ci["jobs"]["browser"]["continue-on-error"] is True, "browser tests stay advisory until they are stable"
+    assert ci["jobs"]["browser"]["continue-on-error"] is True, (
+        "browser tests stay advisory until they are stable"
+    )
     image = " ".join(str(step) for step in ci["jobs"]["image"]["steps"])
     assert "scripts/setup.sh" in image and "docker compose up -d --build --wait" in image
 
@@ -111,6 +113,8 @@ def test_the_app_listens_on_the_port_it_publishes():
     container too, so the container must listen on the very port Compose publishes (a fixed 8080 broke both whenever
     APP_PORT was changed)."""
     text = dockerfile()
-    assert re.search(r'^CMD \[.*--port .*\$APP_PORT', text, re.M), "serve on $APP_PORT, not a fixed port"
-    assert re.search(r"HEALTHCHECK[\s\S]*os\.environ\['APP_PORT'\]", text), "health check the port the app serves"
-    assert "--port 8080" not in text and "--port\", \"8080" not in text
+    assert re.search(r"^CMD \[.*--port .*\$APP_PORT", text, re.M), "serve on $APP_PORT, not a fixed port"
+    assert re.search(r"HEALTHCHECK[\s\S]*os\.environ\['APP_PORT'\]", text), (
+        "health check the port the app serves"
+    )
+    assert "--port 8080" not in text and '--port", "8080' not in text
