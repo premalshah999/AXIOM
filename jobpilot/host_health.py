@@ -59,6 +59,7 @@ OUTAGE_NEUTRAL_STATES = {"paused", "cancelled", "skipped", "queued", "running", 
 DEADLINE_CAUSES = {"operation_timeout", "control_timeout"}
 
 INTERRUPTED = "Worker interrupted before submission; draft recovery scheduled"
+DRAIN_POLL_SECONDS = 1.0
 
 
 class Gate(NamedTuple):

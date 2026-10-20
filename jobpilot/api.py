@@ -129,6 +129,9 @@ def create_app(config: Settings | None = None):
             # Samples how late the event loop runs; the gates in host_health read it (docs/forensics, 4.2).
             load_task = asyncio.create_task(watch_host(db))
         yield
+        if config.enable_workers and config.shutdown_drain_seconds:
+            # First of all, while the workers, outbox and mail poller still run: a stop must not cut a commit.
+            await service.drain(config.shutdown_drain_seconds)
         if load_task:
             load_task.cancel()
             await asyncio.gather(load_task, return_exceptions=True)

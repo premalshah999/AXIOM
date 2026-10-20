@@ -745,6 +745,12 @@ class Service:
             control = s.get(Setting, "control").value
             if control.get("paused"):
                 raise ValueError("Workers were paused before submission")
+            from .host_health import ServerDraining, draining
+
+            if draining():
+                # A stop (deploy) never cuts a commit: none may begin now, and Service.drain waits for those under way.
+                # Checked inside this transaction, which `committing` shares, so no commit can slip in unseen.
+                raise ServerDraining()
             if run.state != "running" or run.mode != "submit":
                 raise ValueError("Submission is not authorized for this run")
             if not job.demo:
@@ -762,6 +768,36 @@ class Service:
                     raise ValueError("Daily submission cap reached")
                 budget.submissions += 1
             run.state = "submitting"
+
+    def committing(self):
+        """Applications whose commit is in flight (or whose verification continuation is). Holds the reservation lock."""
+        with self.db.exclusive() as s:
+            return list(s.scalars(select(Run.id).where(Run.state == "submitting")))
+
+    async def drain(self, grace):
+        """Make a stop safe: start nothing, begin no commit, and wait up to `grace` seconds for commits under way.
+
+        Called by the app's shutdown (uvicorn's SIGTERM from `docker compose up/stop/restart`), so every deploy goes
+        through it. A commit that finishes is recorded as usual; one that outlives `grace` is left `submitting` and
+        becomes submission_unknown at the next start (workers.recover_interrupted). Returns the run ids still
+        committing when it gave up, also saved as the `last_drain` setting.
+        """
+        import time
+
+        from . import host_health
+
+        host_health.begin_drain()
+        began = time.monotonic()
+        left = await asyncio.to_thread(self.committing)
+        while left and time.monotonic() - began < grace:
+            await asyncio.sleep(host_health.DRAIN_POLL_SECONDS)
+            left = await asyncio.to_thread(self.committing)
+        await asyncio.to_thread(
+            self.db.set_setting,
+            "last_drain",
+            {"at": now(), "waited_seconds": round(time.monotonic() - began), "still_committing": left},
+        )
+        return left
 
     def authorize_validation_retry(self, run_id, rejection):
         """Keep one submission reservation; retries need a recorded, explicit field rejection."""

@@ -2734,6 +2734,18 @@ class BrowserEngine:
         self.result = candidate
         return "", False
 
+    async def try_reserve_commit(self):
+        """None when the commit is reserved, else the result that ends this attempt with nothing submitted.
+
+        A server stop is a free, immediate resume after the restart (host_health.refused_commit_result)."""
+        from .host_health import refused_commit_result
+
+        try:
+            await self.reserve_commit()
+        except ValueError as exc:
+            return refused_commit_result(exc)
+        return None
+
     async def reserve_commit(self):
         """Reserve the one submission, or resubmit a repaired employer refusal under it.
 
@@ -3018,14 +3030,8 @@ class BrowserEngine:
             refresh = getattr(self.form, "refresh_greenhouse_phone", None)
             if refresh:
                 await refresh()
-            try:
-                await self.reserve_commit()
-            except ValueError as exc:
-                return {
-                    "state": "waiting_browser",
-                    "reason": str(exc),
-                    "recovery_cause": "control_observation",
-                }
+            if refused := await self.try_reserve_commit():
+                return refused
         self.armed = True
         before = await self.form.proof()
         self.pre_commit_proof = before

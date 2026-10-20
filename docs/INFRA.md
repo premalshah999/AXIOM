@@ -18,7 +18,7 @@ This is what was found and what replaced it.
 | One frontend in `frontend/` | Already single, but built outside the image or not at all for patch deploys. | Still `frontend/` only. It is built inside the image by a Node stage (`tsc -b` then `vite build` into `jobpilot/static`). `jobpilot/static` is gitignored and dockerignored, so a stale local build can never reach an image. |
 | `.dockerignore` sent all of `docs/` and `.env.example` into the build | Context noise. | Only `docs/third-party.md` and `docs/licenses/` (needed by the package build) are included; `.env*` never is. |
 | No log limits | Container logs grow without bound on a machine with little disk. | json-file, 10 MB x 3. |
-| 10 s stop grace | A restart could kill the app while it released drafts. | 45 s. |
+| 10 s stop grace | A restart killed the app wherever it was; a commit under way became an unknown submission. | 180 s, and the app drains first (see "Stopping and deploying"). |
 
 Kept as they were: the non-root user (uid 10001), `init: true`, `shm_size: 1gb` (Chromium), `no-new-privileges`, `cap_drop: ALL`,
 the named volumes `postgres` and `applicant-data`, PostgreSQL user and database name `applypilot` (renaming them would
@@ -113,6 +113,44 @@ by Workday (already tuned separately), then SuccessFactors, Eightfold and SmartR
 controls and stalls rather than waits. Dayforce is included for the navbar and picker problems in `docs/rea/`. Treat the
 list as a starting point and edit it from the failure analysis.
 
+## Stopping and deploying
+
+Every supported way to restart the app is a stop: `docker compose up -d --build app`, `docker compose restart app`,
+`docker compose stop`. All send SIGTERM, and the app **drains** before it exits (`Service.drain`, `jobpilot/host_health.py`).
+No script, hold or manual step is needed; the code does what the old `hold.sh` plus `deploy.sh` did, in the app.
+
+1. uvicorn stops accepting requests (waiting at most 15 s for open ones).
+2. Nothing new starts: `dispatch_limit` is 0, the claim of a browser slot leaves queued runs `queued`, retries and the
+   autopilot wait.
+3. No application may begin its commit: `reserve_submission` refuses (`ServerDraining`). That run ends with "Worker
+   interrupted before submission; draft recovery scheduled", costs no start and no repair attempt, and resumes after the
+   restart.
+4. Commits already under way are awaited, up to `SHUTDOWN_DRAIN_SECONDS` (default 150 s). `compose.yaml` allows 180 s
+   before SIGKILL, so keep that value at least 30 s above it. `select value from settings where key = 'last_drain'`
+   shows how long the last drain waited and which runs were still committing when it gave up.
+5. Then the workers, mail polling and browser connections close and the process exits. Applications that were only
+   filling a form stop where they are; at the next start they are marked interrupted and resume from the saved draft
+   (`workers.recover_interrupted`), again at no cost in starts.
+
+A stop with nothing committing is as quick as before. `docker compose up -d --build` builds the image while the old
+container keeps working, then stops it, so the drain is the only wait.
+
+**What can still turn a commit into "Worker interrupted during submit; reconcile before retrying"** (a
+`submission_unknown` that is never retried blindly):
+
+- SIGKILL before the drain ends: `docker kill`, `docker compose down -t 0`, `restart -t 0`, the out-of-memory killer,
+  Docker Desktop quitting, a host crash or power loss.
+- A commit that outlives the drain. Typical commits take 10 to 90 s (Workday, Oracle and SmartRecruiters watch the page for
+  up to 90 s after the click; Dayforce up to 60 s). A Greenhouse emailed code or an Oracle code wait can add up to 150 s;
+  at 150 s the drain gives up and lists the run in `last_drain.still_committing`.
+- The `db` container restarting under a running app (the one-time cut-over recreates it): in-flight runs lose their
+  connection and stay `running` or `submitting` until the app restarts. Stop the app first, then recreate `db`.
+- A crash of the app process itself (an unhandled error in the loop, a segmentation fault).
+
+The `execution_v2_deployment_hold` setting still works (`stage: draining` stops all intake, and `retry_due`, the
+autopilot and queue admission honour it) but a deploy no longer needs it; a forgotten hold keeps stopping intake, so
+never leave it at `draining`.
+
 ## Host Chromes
 
 `scripts/chrome-worker.sh` (port 9224) and `scripts/chrome-twin.sh` (port 9225) start Chrome with the same flags and
@@ -139,7 +177,8 @@ file run from another directory would otherwise create empty volumes under the n
    default written in the old `compose.yaml` (`${POSTGRES_PASSWORD:-...}`). A volume keeps its first password, and Compose refuses to start without the variable.
 2. Replace `WORKERS=6` with `NORMAL_WORKERS=6` and `SPECIALIST_WORKERS=2`, or leave `WORKERS=6` to keep six workers and no
    specialists for now. Keep `BROWSER_CDP_URL` and `BROWSER_TWIN_CDP_URL`.
-3. Hold and drain as usual (`hold.sh`), then `docker compose up -d --build --remove-orphans`. The database container is recreated as well,
+3. Hold and drain as usual (`hold.sh`; the container being replaced is the old build, which cannot drain itself, so wait for
+   `select count(*) from runs where state = 'submitting'` to reach 0), then `docker compose up -d --build --remove-orphans`. The database container is recreated as well,
    because its image reference changes from `postgres:17-bookworm` to the pinned `postgres:17.11-bookworm` (same PostgreSQL 17.11, a separate build): a few
    seconds of downtime with the data volume untouched, which is why the drain comes first. `--remove-orphans` deletes the old
    `browser-cleanup` container. Then remove its stale image and the layered images: `docker image ls` and `docker image rm` the

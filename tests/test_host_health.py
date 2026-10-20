@@ -428,3 +428,17 @@ async def test_a_queued_run_stays_queued_when_the_server_is_stopping(service):
     with service.db.session() as s:
         run = s.get(Run, "stop-run")
         assert run.state == "queued" and run.started_at is None
+
+
+def test_runtime_health_reports_the_host_gates(client, service):
+    host_health.begin_drain()
+    body = client.get("/api/runtime-health").json()
+    host = body["host"]
+    assert host["draining"] is True and host["state"] in {"unknown", "ok", "loaded", "overloaded"}
+    assert host["browser_failures_in_a_row"] == 0 and host["browser_paused_until"] is None
+    now = datetime.now(UTC)
+    service.db.set_setting(
+        "browser_outage", {"failures": 3, "last_at": now.isoformat(), "until": (now + timedelta(minutes=1)).isoformat()}
+    )
+    host = client.get("/api/runtime-health").json()["host"]
+    assert host["browser_failures_in_a_row"] == 3 and host["browser_paused_until"]
