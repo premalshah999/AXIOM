@@ -4,6 +4,8 @@
 !.env.example
 .data/
 data/
+# jobpilot/data holds the packaged employer catalog the job board imports at startup; it is source, not runtime data.
+!jobpilot/data/
 *.db
 *.db-shm
 *.db-wal
