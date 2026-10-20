@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from .db import Event, Job, Review, Run, Setting, now
 from .admission import employer_partition, outcome_for
+from .specialist import handoff_threshold, handoff_trigger
 
 CAUSES = {
     "site_temporary",
@@ -31,7 +32,7 @@ SENDER_WAITS = 2  # Back-to-back lease waits; the start limit also caps all brow
 # Lease waits more than an hour apart are separate attempts: Ford's two waits on 10-17 exhausted its 10-18 retry.
 SENDER_CHAIN_SECONDS = 3600
 REPAIR_STRATEGY_VERSION = "owned-review-repair-observation-v4"
-SPECIALIST_LIMIT = 2
+SPECIALIST_LIMIT = 2  # default of the SPECIALIST_ATTEMPTS setting; the code reads config.specialist_attempts
 # Browser/control repairs have only eight minutes including all waits. Provider
 # and site outages retain their own admission/circuit gates.
 LOCAL_RETRY_DELAY_SECONDS = 30
@@ -435,8 +436,11 @@ def schedule_recovery(session, config, run, result):
     from .pipeline_comparison import SPECIALIST, pool_for
 
     hard_attempts = specialist_attempts(session, run.job_id)
+    hard_limit = config.specialist_attempts
     eligible = _eligible_specialist_history(session, run, result)
-    handoff = pool_for(run) == SPECIALIST or len(eligible) >= 2
+    ats = (session.get(Job, run.job_id) or Job()).ats or ""
+    needed = handoff_threshold(config, ats, cause)
+    handoff = pool_for(run) == SPECIALIST or (needed is not None and len(eligible) >= needed)
     if handoff and eligible:
         checkpoint = result.get("browser_checkpoint") or run.packet.get("browser_checkpoint", {})
         envelope = {
@@ -447,7 +451,8 @@ def schedule_recovery(session, config, run, result):
             "cause": cause,
             "failure_signature": signature,
             "safe_failed_strategies": _safe_strategy_summary(checkpoint),
-            "attempt_limit": SPECIALIST_LIMIT,
+            "attempt_limit": hard_limit,
+            "trigger": handoff_trigger(config, ats, cause, len(eligible)) or "specialist_retry",
         }
         from .pipeline_comparison import normalize_ats
 
@@ -466,12 +471,12 @@ def schedule_recovery(session, config, run, result):
             "normal_attempts": attempts,
             "attempt_limit": limit,
             "specialist_attempts": hard_attempts,
-            "specialist_attempt_limit": SPECIALIST_LIMIT,
+            "specialist_attempt_limit": hard_limit,
             "worker_pool": SPECIALIST,
             "failure_signature": signature,
             "failure_engine_version": run.packet.get("engine_version"),
-            "scheduled": hard_attempts < SPECIALIST_LIMIT,
-            "status": "specialist_scheduled" if hard_attempts < SPECIALIST_LIMIT else "specialist_exhausted",
+            "scheduled": hard_attempts < hard_limit,
+            "status": "specialist_scheduled" if hard_attempts < hard_limit else "specialist_exhausted",
             "not_before": now(),
             "updated_at": now(),
         }
@@ -490,7 +495,7 @@ def schedule_recovery(session, config, run, result):
             "scheduled": False,
             "status": "specialist_blocked",
             "specialist_attempts": hard_attempts,
-            "specialist_attempt_limit": SPECIALIST_LIMIT,
+            "specialist_attempt_limit": hard_limit,
             "updated_at": now(),
         }
         if row:
@@ -563,7 +568,7 @@ async def retry_due(service):
     with service.db.session() as s:
         from .pipeline_comparison import NORMAL, SPECIALIST, pool_capacity
 
-        pools = {pool: pool_capacity(s, pool, service.config.workers) for pool in (NORMAL, SPECIALIST)}
+        pools = {pool: pool_capacity(s, pool, service.config.topology) for pool in (NORMAL, SPECIALIST)}
         occupied = sum(pool.occupied for pool in pools.values())
         room = max(0, provider_room - occupied)
         employers = set().union(*(pool.employers for pool in pools.values()))
@@ -598,10 +603,10 @@ async def retry_due(service):
                 if not service.mail.recovery_sender_ready(s, job, recovery):
                     continue  # No browser start or retry spent while the known lease is held.
                 pool = assign_pool(s, job, source)
-                if not pool_capacity(s, pool, service.config.workers).available:
+                if not pool_capacity(s, pool, service.config.topology).available:
                     continue  # A full pool must not stop due drafts in the other pool.
                 if (pool == SPECIALIST and recovery.get("cause") != "worker_interrupted"
-                        and specialist_attempts(s, job_id) >= SPECIALIST_LIMIT):
+                        and specialist_attempts(s, job_id) >= service.config.specialist_attempts):
                     continue
                 employer = employer_partition(job)
             if employer in employers:

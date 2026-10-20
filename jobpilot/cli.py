@@ -261,7 +261,7 @@ def main():
                     f"FAIL    Gmail IMAP login: {type(exc).__name__}. Check the app password and that IMAP is enabled."
                 )
         print(
-            f"{config.workers} workers · {config.application_timeout}s budget · {config.daily_application_limit} submissions/day"
+            f"{config.normal_workers} ATS workers + {config.specialist_workers} specialists · {config.application_timeout}s budget · {config.daily_application_limit} submissions/day"
         )
         print("Run `jobpilot token` to view your dashboard access token.")
 

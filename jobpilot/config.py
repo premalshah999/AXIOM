@@ -1,14 +1,45 @@
 import os
 import secrets
+import warnings
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Application owners share one browser and event loop; the last two are specialists.
+# Application owners share one browser and event loop. At most this many run at once, ATS workers and specialists together.
 MAX_WORKERS = 32
+MAX_NORMAL_WORKERS = 30
+MAX_SPECIALIST_WORKERS = 4
+
+
+@dataclass(frozen=True)
+class Topology:
+    """How many browser owners run, split into ATS workers and specialists.
+
+    Slots are numbered ATS workers 1..N, then specialists N+1..N+S (six and two by default: 1-6 and 7-8).
+    """
+
+    normal: int = 6
+    specialist: int = 2
+
+    @property
+    def total(self) -> int:
+        return self.normal + self.specialist
+
+    def slot_ids(self, pool: str) -> list[int]:
+        if pool == "specialist":
+            return list(range(self.normal + 1, self.total + 1))
+        return list(range(1, self.normal + 1))
+
+
+def legacy_topology(total: int) -> Topology:
+    """The layout the old single WORKERS number implied: slots 1-6 are ATS workers and 7-8 specialists, and a larger
+    fleet keeps two specialists as its last slots. WORKERS=6 therefore meant six ATS workers and no specialist."""
+    total = max(0, min(MAX_WORKERS, int(total)))
+    return Topology(min(total, 6), max(0, total - 6)) if total <= 8 else Topology(total - 2, 2)
 
 
 class Settings(BaseSettings):
@@ -112,7 +143,22 @@ class Settings(BaseSettings):
     # Persisted waits release their browser slot; delivery need not happen in
     # the short synchronous polling window. Never renew this limit on retry.
     mail_durable_wait_seconds: int = Field(default=1200, ge=300, le=1800)
-    workers: int = Field(default=8, ge=1, le=MAX_WORKERS)
+    # Worker topology (docs/INFRA.md). ATS workers take every new application and run that platform's own flow. Specialists
+    # take difficult or already-failed ones (the SPECIALIST_* rules below) and get a somewhat larger budget.
+    normal_workers: int = Field(default=6, ge=1, le=MAX_NORMAL_WORKERS)
+    specialist_workers: int = Field(default=2, ge=0, le=MAX_SPECIALIST_WORKERS)
+    # Deprecated single knob for the total. While set it keeps the old implied layout (see legacy_topology).
+    workers: int = Field(default=0, ge=0, le=MAX_WORKERS)
+    # Wall-clock time, model calls and the per-job token cap are this many times larger on a specialist.
+    specialist_budget_multiplier: float = Field(default=1.5, ge=1, le=3)
+    # Failures on ATS workers before a job moves to a specialist.
+    specialist_after_failures: int = Field(default=2, ge=1, le=5)
+    # Specialist attempts per job before it is left for the owner.
+    specialist_attempts: int = Field(default=2, ge=1, le=5)
+    # Platforms where one failure is enough (comma separated): their hard steps rarely yield to a plain retry.
+    specialist_hard_ats: str = "successfactors,eightfold,smartrecruiters,dayforce"
+    # A stalled controller (no progress on an unchanged form) also needs only one failure.
+    specialist_on_stall: bool = True
     retain_paused_browser: bool = False
     recovery_max_attempts: int = Field(default=2, ge=0, le=3)
     recovery_delay_seconds: int = Field(default=120, ge=30, le=1800)
@@ -131,6 +177,8 @@ class Settings(BaseSettings):
     chromium_path: str = ""
     # Desktop Chrome for Docker on Mac (`python -m jobpilot.cli browser`), e.g. http://host.docker.internal:9224
     browser_cdp_url: str = ""
+    # Seconds between sweeps that close leftover application tabs on the desktop Chrome (BROWSER_CDP_URL). 0 disables.
+    tab_cleanup_seconds: int = Field(default=15, ge=0, le=300)
     # Owner decision 2026-10-19: a second local Chrome that Playwright never attaches to mints hCaptcha tokens
     # (`python -m jobpilot.cli twin-browser`), e.g. http://host.docker.internal:9225. Empty disables it.
     browser_twin_cdp_url: str = ""
@@ -149,6 +197,28 @@ class Settings(BaseSettings):
     enable_workers: bool = True
     enable_demo: bool = True
     allow_private_urls: bool = False  # Tests only. Never enabled by the production image.
+
+    @model_validator(mode="after")
+    def resolve_topology(self):
+        if "workers" in self.model_fields_set and self.workers:
+            if self.model_fields_set & {"normal_workers", "specialist_workers"}:
+                raise ValueError("Set NORMAL_WORKERS and SPECIALIST_WORKERS, or the deprecated WORKERS, not both")
+            layout = legacy_topology(self.workers)
+            warnings.warn(
+                f"WORKERS={self.workers} is deprecated and means {layout.normal} ATS workers + {layout.specialist} "
+                "specialists. Set NORMAL_WORKERS and SPECIALIST_WORKERS instead.",
+                UserWarning,
+                stacklevel=2,
+            )
+            self.normal_workers, self.specialist_workers = layout.normal, layout.specialist
+        if self.normal_workers + self.specialist_workers > MAX_WORKERS:
+            raise ValueError(f"NORMAL_WORKERS + SPECIALIST_WORKERS may not exceed {MAX_WORKERS}")
+        self.workers = self.normal_workers + self.specialist_workers
+        return self
+
+    @property
+    def topology(self) -> Topology:
+        return Topology(self.normal_workers, self.specialist_workers)
 
     @property
     def llm_api_key(self):

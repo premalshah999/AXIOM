@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select
 
 from .db import Event, Job, Run, Setting, now
+from .specialist import pool_boost
 
 MAX_TIER = 3
 TIERS = {
@@ -64,9 +65,10 @@ def job_tokens(session, job_id, hours=24):
     )
 
 
-def job_over_budget(session, db, job_id):
+def job_over_budget(session, db, job_id, boost=1.0):
+    """Has this job read its token cap in the last 24 hours? `boost` scales the cap for a specialist (pool_boost)."""
     cap = ((db.get_setting("runner_tiers", {}) or {}).get("job_token_cap")) or JOB_TOKEN_CAP
-    return job_tokens(session, job_id) >= cap
+    return job_tokens(session, job_id) >= cap * boost
 
 
 def clamp(tier):
@@ -97,8 +99,9 @@ def job_tier(db, job_id):
     return clamp((db.get_setting("runner_tier:" + job_id, {}) or {}).get("tier", 1))
 
 
-def call_limit(config, tier):
-    return max(config.max_model_calls, TIERS[clamp(tier)]["calls"])
+def call_limit(config, tier, pool=None):
+    """Model calls one run may make; a specialist's run (`pool`) gets SPECIALIST_BUDGET_MULTIPLIER times as many."""
+    return int(max(config.max_model_calls, TIERS[clamp(tier)]["calls"]) * pool_boost(config, pool))
 
 
 def apply_model(db, config, run_id, thinking, timeout):
@@ -127,10 +130,10 @@ def provider_for(db, config, tier):
     return config
 
 
-def time_budget(budget, tier, ats=""):
+def time_budget(budget, tier, ats="", boost=1.0):
     # No Workday extension: confirmed Workday runs take 4-5 minutes; a longer budget only let
-    # failing runs burn 20 minutes (owner, 2026-10-14).
-    return int(min(1200, budget * TIERS[clamp(tier)]["time"]))
+    # failing runs burn 20 minutes (owner, 2026-10-14). `boost` is a specialist's multiplier (pool_boost).
+    return int(min(1200 * boost, budget * TIERS[clamp(tier)]["time"] * boost))
 
 
 def agent_steps(tier):

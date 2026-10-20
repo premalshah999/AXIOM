@@ -113,6 +113,11 @@ def create_app(config: Settings | None = None):
 
         worker_bots = asyncio.create_task(poll_all(service))
         mail_task = asyncio.create_task(service.mail.poll())
+        tab_task = None
+        if config.enable_workers and config.browser_cdp_url and config.tab_cleanup_seconds:
+            from .operations.close_tabs import watch as watch_tabs
+
+            tab_task = asyncio.create_task(watch_tabs(db, config.browser_cdp_url, config.tab_cleanup_seconds))
         from .outbox import poll as poll_outbox
 
         service.outbox_running = True
@@ -126,6 +131,9 @@ def create_app(config: Settings | None = None):
             await asyncio.gather(scheduler_task, return_exceptions=True)
         mail_task.cancel()
         await asyncio.gather(mail_task, return_exceptions=True)
+        if tab_task:
+            tab_task.cancel()
+            await asyncio.gather(tab_task, return_exceptions=True)
         if bot:
             bot.cancel()
             await asyncio.gather(bot, return_exceptions=True)
@@ -554,7 +562,7 @@ def create_app(config: Settings | None = None):
             "heartbeat": db.get_setting("scheduler_heartbeat", {}),
             "outbox_pending": pending,
             "workers": config.workers,
-            "application_workers": application_workers(db, config.workers),
+            "application_workers": application_workers(db, config.topology),
             "models": selected(db, config),
             "production_target": __import__(
                 "jobpilot.autopilot", fromlist=["production_progress"]

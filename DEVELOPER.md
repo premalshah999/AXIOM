@@ -2,14 +2,13 @@
 
 ## Run and maintain
 
-Use Python 3.12, Node 22 and Docker Compose. Copy `.env.example` to `.env`, configure keys privately, and set its permissions to 0600. Never commit secrets or applicant data.
+Use Python 3.12, Node 22 and Docker Compose; the exact versions are pinned in `.python-version`, `.nvmrc` and the Dockerfile. `make up` (`scripts/setup.sh`) creates `.env` from `.env.example` with a generated database password, builds the one image, starts it with PostgreSQL and prints the address. Add provider keys to `.env` privately (it is created with permissions 0600). Never commit secrets or applicant data. Install steps for other people are in [docs/SETUP.md](docs/SETUP.md); the image, settings audit, worker topology and cut-over notes are in [docs/INFRA.md](docs/INFRA.md).
 
 ```sh
 uv sync --frozen
-npm ci --prefix frontend
-npm run build --prefix frontend
-docker compose build app
-docker compose up -d --wait
+make frontend      # npm ci && npm run build, into jobpilot/static, for local development
+make up            # build the image and start the app
+docker compose up -d --build --no-deps app   # later releases: rebuilds the changed layers (code and dashboard) only
 ```
 
 The dashboard is at http://127.0.0.1:8080. `docker compose exec app jobpilot token` prints the private access token; view it locally. `GET /healthz` is the unauthenticated health check. The running code identifier is returned by `/api/runtime-health` and `jobpilot.runtime.engine_version()`.
@@ -31,7 +30,7 @@ Applicant state belongs in the existing private storage and Docker volumes, neve
 
 ## Application pipeline
 
-`service.py` owns canonical queue admission and submission reservations. Queue only through `POST /api/jobs/{id}/queue`. `workers.py` owns durable execution; `outbox.py` delivers background continuations. `application_slots.py` limits browser owners to eight and releases slots during saved fact/email waits.
+`service.py` owns canonical queue admission and submission reservations. Queue only through `POST /api/jobs/{id}/queue`. `workers.py` owns durable execution; `outbox.py` delivers background continuations. `application_slots.py` limits browser owners to `NORMAL_WORKERS` + `SPECIALIST_WORKERS` (6 + 2) and releases slots during saved fact/email waits.
 
 `browser.py` coordinates one writer per application. Desktop owners reuse a healthy automation connection without repeating HTTP endpoint discovery; a new connection gets one bounded discovery retry. Owners share one automation connection per runtime event loop; each retains its own page and lease. A frozen saved tab does not trigger a fresh all-page attachment for every new owner. ATS adapters and model navigation use `forms.py` observations and verified widget actions. `answers.py` resolves supported profile facts, reviewed knowledge and a model answer batch. Required unknown personal facts remain questions. The demographic decline policy recognizes the offered label Undeclared without inferring race. Embedded job-alert frequency fields are excluded from application questions, and alert signup is refused. General job-search/catalog controls are refused during an owned application; the controller must save the profile and return to the original posting. The complete-employment attestation carries all compact confirmed employer rows under one citable reference. Answer calls include a compact confirmed applicant context plus scoped knowledge. Editable pickers search before declaring a value unavailable. Institution catalogs follow the current applicant instruction: prefer offered Other and skip optional institutions when Other is absent; free-text institutions retain the actual school. A sibling provider failure is reported after supported answers commit and conditional fields are rescanned; saved progress survives it. `answer_quality.py` checks objective saved facts locally. Its model second opinion is advisory and cannot overwrite answers or reopen completed pages. Page checks do not buy audit calls; final advice is cached across reloads. Supported factual repairs get two bounded attempts, then retain a non-retryable draft. Optional audit failures do not block the owner; actual field validation remains independent. A final submit requires the durable reservation and an armed page. Intermediate click permission cannot authorize a button that changed to Submit, including buttons inside shadow DOM.
 
@@ -120,7 +119,7 @@ The October 4 engine is retired: drafts that still carry its pipeline name conti
 
 ## ATS owners and difficult-flow escalation
 
-`pipeline_comparison` reserves six normal slots and two specialist slots. New jobs receive guidance for their actual ATS. Historical drafts continue on the current engine; the model-directed continuous controller runs only while runner tiers are enabled (off since 2026-10-14). Private account, mail and CAPTCHA helpers remain shared; there is one writer per job. Complete history, supported facts, resume identity and final-submit reservations survive handoff.
+`pipeline_comparison` reserves `NORMAL_WORKERS` (6) normal slots and `SPECIALIST_WORKERS` (2) specialist slots; `specialist.py` decides which failed drafts move to a specialist and how much larger its budget is (docs/INFRA.md, "Workers"). New jobs receive guidance for their actual ATS. Historical drafts continue on the current engine; the model-directed continuous controller runs only while runner tiers are enabled (off since 2026-10-14). Private account, mail and CAPTCHA helpers remain shared; there is one writer per job. Complete history, supported facts, resume identity and final-submit reservations survive handoff.
 
 Repeated actionable failures on an unsubmitted draft may hand off after the previous browser owner has detached. The specialist reads retained failure evidence and must choose a different supported strategy. Missing personal facts, unavailable providers, email waits and uncertain submissions do not become speculative retries. Specialist attempts have their own finite budget; they cannot consume the six regular slots or reset exhausted ordinary attempts. Global employer ownership still applies across both queues.
 

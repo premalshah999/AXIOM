@@ -322,9 +322,13 @@ class Service:
                 board = self.db.get_setting("job_board_settings", {}) or {}
                 if board.get("early_career_only", True) and SENIOR.search(job.title):
                     raise QueueBlocked("Outside the saved career-level policy", code="seniority")
+            from .pipeline_comparison import assign_pool
+            from .specialist import pool_boost
             from .tiers import job_over_budget
 
-            if mode == "submit" and job_over_budget(s, self.db, job_id):
+            # A job already routed to a specialist has the larger token cap.
+            routed = assign_pool(s, job, s.get(Run, recovery_source_run) if recovery_source_run else None)
+            if mode == "submit" and job_over_budget(s, self.db, job_id, pool_boost(self.config, routed)):
                 raise QueueBlocked(
                     "This job already used its model budget for today; it will not be retried until tomorrow",
                     code="job_budget",
@@ -401,11 +405,11 @@ class Service:
                 source = s.get(Run, recovery_source_run)
                 control = s.get(Setting, "control").value
                 from .pipeline_comparison import SPECIALIST, assign_pool
-                from .recovery import SPECIALIST_LIMIT, specialist_attempts
+                from .recovery import specialist_attempts
 
                 specialist = source and assign_pool(s, job, source) == SPECIALIST
                 exhausted = (
-                    specialist_attempts(s, job_id) >= SPECIALIST_LIMIT
+                    specialist_attempts(s, job_id) >= self.config.specialist_attempts
                     if specialist
                     else recovery_row is not None
                     and recovery_row.value.get("attempts", 0)
@@ -564,13 +568,13 @@ class Service:
             worker_pool = assign_pool(s, job, pipeline_source)
             if (
                 worker_pool != "normal"
-                and pool_capacity(s, worker_pool, self.config.workers).available <= 0
-                and pool_capacity(s, "normal", self.config.workers).available > 0
+                and pool_capacity(s, worker_pool, self.config.topology).available <= 0
+                and pool_capacity(s, "normal", self.config.topology).available > 0
             ):
                 # The specialist pool has 2 slots and its escalation flag is carried forward on
                 # every retry; a full specialist pool must not idle 18 normal workers (2026-10-14).
                 worker_pool = "normal"
-            if pool_capacity(s, worker_pool, self.config.workers).available <= 0:
+            if pool_capacity(s, worker_pool, self.config.topology).available <= 0:
                 raise QueueBlocked(
                     "This worker pool is busy; the saved job will resume when capacity opens",
                     outcome="deferred",
@@ -1183,7 +1187,7 @@ class Service:
                     return
                 from .pipeline_comparison import pool_for, pool_capacity
 
-                if pool_capacity(s, pool_for(source), self.config.workers).available <= 0:
+                if pool_capacity(s, pool_for(source), self.config.topology).available <= 0:
                     raise QueueBlocked(
                         "Verification owner pool is busy",
                         outcome="deferred",
@@ -1403,7 +1407,7 @@ class Service:
 
         if not hasattr(self, "browser_pools"):
             self.browser_pools = {
-                pool: asyncio.Semaphore(len(pool_slot_ids(pool, self.config.workers))) for pool in POOLS
+                pool: asyncio.Semaphore(len(pool_slot_ids(pool, self.config.topology))) for pool in POOLS
             }
         with self.db.session() as s:
             run = s.get(Run, run_id)
@@ -1484,7 +1488,7 @@ class Service:
                 if (
                     occupied < self.config.workers
                     and not same_employer
-                    and slots(s, row, self.config.workers)
+                    and slots(s, row, self.config.topology)
                     and may_start(s, current_job, row)
                     and self.mail.recovery_sender_ready(
                         s, current_job,
@@ -1495,7 +1499,7 @@ class Service:
                     from .application_slots import claim_slot
 
                     record_start(s, current_job, row)
-                    claim_slot(s, row, self.config.workers)
+                    claim_slot(s, row, self.config.topology)
                     row.state, row.started_at = (
                         ("submitting" if row.packet.get("verification_only") else "running"),
                         now(),
@@ -1514,14 +1518,16 @@ class Service:
         try:
             with self.db.session() as s:
                 self.check_cooldown(s, s.get(Job, run["job_id"]))
+            from .specialist import pool_boost
             from .tiers import clamp, time_budget
 
-            # The outer deadline follows the run's own (tier and ATS) budget plus cleanup;
+            # The outer deadline follows the run's own (tier, ATS and worker pool) budget plus cleanup;
             # a fixed base cut tier-2/3 runs off at ~945 s.
             outer = time_budget(
                 max(self.config.application_timeout, self.config.multipage_timeout),
                 clamp((run.get("packet") or {}).get("runner_tier", 1)),
                 job.get("ats", ""),
+                boost=pool_boost(self.config, (run.get("packet") or {}).get("worker_pool")),
             )
             run_budget = max(outer, self.config.application_timeout, self.config.multipage_timeout) + 45
             lifetime = (run.get("packet") or {}).get("application_deadline")

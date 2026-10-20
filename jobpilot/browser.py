@@ -941,9 +941,15 @@ class BrowserEngine:
                 if adapters or ats in MULTIPAGE
                 else self.config.application_timeout
             )
+            from .specialist import pool_boost
             from .tiers import clamp, time_budget
 
-            budget = time_budget(budget, clamp(run["packet"].get("runner_tier", 1)), ats)
+            budget = time_budget(
+                budget,
+                clamp(run["packet"].get("runner_tier", 1)),
+                ats,
+                boost=pool_boost(self.config, run["packet"].get("worker_pool")),
+            )
             self.budget = budget
             self.emit(
                 "browser",

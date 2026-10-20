@@ -274,7 +274,9 @@ class MeteredTransport(httpx.AsyncBaseTransport):
                 raise BudgetExceeded("Daily model budget reached")
             from .tiers import call_limit
 
-            if run and run.model_calls >= call_limit(self.config, self.tier):
+            if run and run.model_calls >= call_limit(
+                self.config, self.tier, (run.packet or {}).get("worker_pool")
+            ):
                 raise BudgetExceeded("Application model-call limit reached")
             budget.spent += reserve
             if run:

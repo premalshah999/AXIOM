@@ -1,11 +1,12 @@
-# Only pyproject.toml, uv.lock, jobpilot/, frontend/, LICENSE and docs/ reach the image.
+# The build context is what the Dockerfile COPYs: pyproject.toml, uv.lock, jobpilot/, frontend/, LICENSE and
+# docs/third-party.md + docs/licenses/. Everything else stays out, so secrets and local state never reach a layer.
 .git
 .github
 .vscode
+.idea
 .deepeval
 .env
 .env.*
-!.env.example
 .data
 .venv
 .venv-*
@@ -14,8 +15,13 @@
 __pycache__
 **/__pycache__
 frontend/node_modules
+# The dashboard is always built inside the image, never copied from a local build.
 jobpilot/static
 tests
 scripts
+Makefile
+docs/*
+!docs/third-party.md
+!docs/licenses
 *.log
 .DS_Store

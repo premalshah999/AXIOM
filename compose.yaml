@@ -1,11 +1,31 @@
+# AXIOM: two services, one image.
+#
+#   db   PostgreSQL. Not published to the host; only the app container can reach it.
+#   app  The API, the dashboard and every worker, built from ./Dockerfile.
+#
+# The worker Chrome (CDP 9224) and the twin Chrome (CDP 9225) run on the host, not here; see docs/SETUP.md.
+# Closing leftover application tabs on the worker Chrome runs inside the app (TAB_CLEANUP_SECONDS), so there is no
+# third container and no second image to drift out of date.
+#
+# Project name: `axiom` unless COMPOSE_PROJECT_NAME is set (in .env or the shell). The volumes are named after it,
+# so an existing installation keeps its data by keeping its project name (see docs/INFRA.md, "Cut-over").
+name: axiom
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
 services:
   db:
-    image: postgres:17-bookworm
+    # The major version must not change under an existing data volume; minor releases are safe.
+    image: postgres:17.11-bookworm
     restart: unless-stopped
     environment:
       POSTGRES_DB: applypilot
       POSTGRES_USER: applypilot
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-container-database}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (scripts/setup.sh creates it)}
     volumes:
       - postgres:/var/lib/postgresql/data
     healthcheck:
@@ -13,23 +33,31 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    logging: *logging
+
   app:
-    build: .
+    build:
+      context: .
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     restart: unless-stopped
     init: true
     shm_size: 1gb
+    # The app releases drafts on shutdown; give it time before SIGKILL.
+    stop_grace_period: 45s
     env_file: .env
     environment:
       DATA_DIR: /app/.data
-      DATABASE_URL: postgresql+psycopg://applypilot:${POSTGRES_PASSWORD:-local-container-database}@db:5432/applypilot
-      DBOS_DATABASE_URL: postgresql+psycopg://applypilot:${POSTGRES_PASSWORD:-local-container-database}@db:5432/applypilot
-      # Always use the Chromium version installed into this image.
+      # Listens on this port inside the container, and the same number is published, so BASE_URL works from both sides.
+      APP_PORT: ${APP_PORT:-8080}
+      DATABASE_URL: postgresql+psycopg://applypilot:${POSTGRES_PASSWORD}@db:5432/applypilot
+      DBOS_DATABASE_URL: postgresql+psycopg://applypilot:${POSTGRES_PASSWORD}@db:5432/applypilot
+      # The browser origin must equal BASE_URL, so it follows the published port unless .env overrides it.
+      BASE_URL: ${BASE_URL:-http://127.0.0.1:${APP_PORT:-8080}}
+      # Always use the Chromium installed in this image, never a host path copied from a native .env.
       CHROMIUM_PATH: ""
-      # glibc's default 8x-cores malloc arenas let the threaded app grow 2 GB -> 5.4 GB in 15 minutes
-      # under a 10-run load (2026-10-15); two arenas keep freed memory reusable.
-      MALLOC_ARENA_MAX: "2"
     ports:
-      - "127.0.0.1:8080:8080"
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8080}:${APP_PORT:-8080}"
     volumes:
       - applicant-data:/app/.data
     depends_on:
@@ -39,26 +67,8 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-  browser-cleanup:
-    image: applypilot-app
-    pull_policy: never
-    restart: unless-stopped
-    init: true
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql+psycopg://applypilot:${POSTGRES_PASSWORD:-local-container-database}@db:5432/applypilot
-    command: [python, -m, jobpilot.operations.close_tabs, --watch, "15"]
-    volumes:
-      - ./jobpilot/operations/close_tabs.py:/app/jobpilot/operations/close_tabs.py:ro
-    depends_on:
-      db:
-        condition: service_healthy
-    healthcheck:
-      disable: true
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+    logging: *logging
+
 volumes:
   postgres:
   applicant-data:
