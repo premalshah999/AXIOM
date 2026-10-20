@@ -46,3 +46,16 @@ async def test_silently_truncated_prose_is_fitted_and_refilled(page, tmp_path):
 
     fitted = fit_length(LONG, len(kept))
     assert len(fitted) <= 120 and fitted.endswith(".") and LONG.startswith(fitted[:40])
+
+
+def test_typing_allowance_grows_with_the_text_and_stays_under_the_write_budget():
+    # Playwright sleeps 12 ms per key plus the key events' round trips: 257 characters need about 4 s on an idle
+    # host, so the old fixed 4 s allowance timed out a long answer half typed.
+    from jobpilot.forms import FIELD_WRITE_SECONDS
+    from jobpilot.widgets import KEY_DELAY_MS, typing_timeout
+
+    assert typing_timeout("N/A") == 4000  # Short answers keep the caller's allowance.
+    assert typing_timeout("x" * 257) >= 257 * KEY_DELAY_MS * 2
+    assert typing_timeout("x" * 300) > typing_timeout("x" * 200)
+    assert typing_timeout("x" * 5000) < FIELD_WRITE_SECONDS * 1000
+    assert typing_timeout("x" * 10, floor=8000) == 8000

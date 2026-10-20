@@ -713,6 +713,17 @@ async def pointer_path(handle):
         return None
 
 
+KEY_DELAY_MS = 12
+
+
+def typing_timeout(text, floor=4000):
+    """Milliseconds Playwright needs to press `text` key by key: the 12 ms per-key delay plus the key events' round
+    trips, with the same again for a busy host, capped under the 12 s field write budget (forms.FIELD_WRITE_SECONDS).
+    A fixed 4 s allowance cannot type more than about 250 characters even on an idle machine, so a long answer to a
+    control that rejects fill() timed out half typed (found as a load-sensitive test failure, 2026-10-20)."""
+    return max(floor, min(11_000, 1500 + 30 * len(str(text))))
+
+
 async def human_type(el, value, timeout=4000, *, retype=False, rematch=None):
     """Fill and read back a plain input; use keys only when the write is rejected."""
     text = str(value)
@@ -739,7 +750,7 @@ async def human_type(el, value, timeout=4000, *, retype=False, rematch=None):
     await el.fill("", timeout=timeout)
     if rematch and await el.count() != 1:
         el = await rematch()
-    await el.press_sequentially(text, delay=12, timeout=timeout)
+    await el.press_sequentially(text, delay=KEY_DELAY_MS, timeout=typing_timeout(text, timeout))
     return el
 
 

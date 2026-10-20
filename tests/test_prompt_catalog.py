@@ -98,7 +98,7 @@ async def test_phone_widget_that_ignores_value_writes_gets_typed_digits(page):
     await el.fill("555-555-0100")
     assert await widgets.phone_rejected(el, "555-555-0100")
     await el.fill("")
-    await el.press_sequentially("555-555-0100", delay=5)
+    await el.press_sequentially("5555550100", delay=5)
     assert not await widgets.phone_rejected(el, "555-555-0100")
 
 
@@ -213,13 +213,14 @@ async def test_phone_is_refilled_after_country_picker_clears_it(page):
 
     form.scan = scan
     form.expected["phone"] = await form.fill(field, "555-555-0100")
-    assert await page.input_value("#phone") == "555-555-0100"
+    # The widget rejects the programmatic write, so the form types the digits key by key.
+    assert await page.input_value("#phone") == "5555550100"
     await page.select_option("#country", "United Kingdom +44")  # Commits after the number.
     assert await page.input_value("#phone") == ""
     await form.settle_phone()
     assert await page.input_value("#phone") != ""
     assert await widgets.phone_rejected(page.locator("#phone"), "555-555-0100") is False
-    assert await page.input_value("#phone") == "555-555-0100"
+    assert await page.input_value("#phone") == "5555550100"
 
 
 UI5_STATE_PICKER = """<input id=state role=combobox aria-haspopup=listbox aria-controls=statelist
