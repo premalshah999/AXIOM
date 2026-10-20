@@ -322,12 +322,12 @@ class Service:
                 board = self.db.get_setting("job_board_settings", {}) or {}
                 if board.get("early_career_only", True) and SENIOR.search(job.title):
                     raise QueueBlocked("Outside the saved career-level policy", code="seniority")
-            from .pipeline_comparison import assign_pool
+            from .pipeline_comparison import routed_pool
             from .specialist import pool_boost
             from .tiers import job_over_budget
 
-            # A job already routed to a specialist has the larger token cap.
-            routed = assign_pool(s, job, s.get(Run, recovery_source_run) if recovery_source_run else None)
+            # A job already routed to a specialist has the larger token cap, whichever run it continues from.
+            routed = routed_pool(s, job, recovery_source_run)
             if mode == "submit" and job_over_budget(s, self.db, job_id, pool_boost(self.config, routed)):
                 raise QueueBlocked(
                     "This job already used its model budget for today; it will not be retried until tomorrow",
@@ -496,19 +496,9 @@ class Service:
                     "location": "New York",
                     "facts": {"first_name": "Alex", "last_name": "Example"},
                 }
-            continuation = (
-                source
-                if recovery_source_run
-                else next(
-                    (
-                        r
-                        for r in sorted(previous, key=lambda r: r.created_at, reverse=True)
-                        if r.state
-                        in {"waiting_answer", "needs_review", "waiting_browser", "timed_out", "paused"}
-                    ),
-                    None,
-                )
-            )
+            from .pipeline_comparison import continued_run
+
+            continuation = continued_run(previous, source if recovery_source_run else None)
             path = self.config.data_dir / "resumes" / chosen.filename
             from .execution_services import pin_resume
 
