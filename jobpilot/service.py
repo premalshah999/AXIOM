@@ -555,7 +555,7 @@ class Service:
             pipeline_source = continuation or (
                 s.get(Run, recovery_source_run) if recovery_source_run else None
             )
-            worker_pool = assign_pool(s, job, pipeline_source)
+            assigned_pool = worker_pool = assign_pool(s, job, pipeline_source)
             if (
                 worker_pool != "normal"
                 and pool_capacity(s, worker_pool, self.config.topology).available <= 0
@@ -684,7 +684,10 @@ class Service:
                 batch_row.value = batch
             job.status = "queued"
             result = record(run)
-        self.db.event(run.id, "queued", "Application queued", {"mode": mode, "resume": chosen.name})
+            from .specialist import routing_note
+
+            routing = routing_note(assigned_pool, worker_pool, pipeline_source.packet if pipeline_source else None)
+        self.db.event(run.id, "queued", "Application queued", {"mode": mode, "resume": chosen.name, **routing})
         if self.dispatch:
             try:
                 await self.dispatch(run.id)

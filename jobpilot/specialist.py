@@ -44,6 +44,22 @@ def handoff_trigger(config, ats, cause, failures):
     return "repeated_failure"
 
 
+def routing_note(assigned, ran_in, source_packet):
+    """What a run's queued event says about its worker pool, so every handoff (or a handoff that did not happen)
+    can be explained from the run's timeline: the trigger, the failures before it, and a busy specialist pool."""
+    note = {"pool": ran_in}
+    if assigned == SPECIALIST:
+        escalation = (source_packet or {}).get("specialist_escalation") or {}
+        note["specialist_trigger"] = escalation.get("trigger") or "unrecorded"
+        note["after_failures"] = len(escalation.get("normal_failure_run_ids") or [])
+        note["failure_cause"] = escalation.get("cause")
+        if ran_in != SPECIALIST:
+            note["specialist_fallback"] = (
+                "The specialist workers were busy, so this run used an ATS worker with the regular budget"
+            )
+    return note
+
+
 def pool_boost(config, pool):
     """Budget multiplier for a worker pool: specialists get more, ATS workers exactly what is configured."""
     return config.specialist_budget_multiplier if pool == SPECIALIST else 1.0

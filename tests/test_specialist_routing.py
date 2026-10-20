@@ -10,6 +10,7 @@ from jobpilot.answer_quality import advice_budget
 from jobpilot.config import Settings
 from jobpilot.db import Event, Job, Run
 from jobpilot.pipeline_comparison import continued_run, routed_pool
+from jobpilot.specialist import routing_note
 
 ESCALATION = {
     "eligible": True,
@@ -78,6 +79,25 @@ async def test_the_same_job_on_an_ats_worker_is_still_refused_at_the_ordinary_ca
     assert blocked.value.code == "job_budget"
 
 
+def test_the_queued_event_names_the_trigger_of_a_handoff():
+    note = routing_note("specialist", "specialist", {"specialist_escalation": ESCALATION})
+    assert note == {
+        "pool": "specialist",
+        "specialist_trigger": "hard_ats",
+        "after_failures": 2,
+        "failure_cause": "navigation_stalled",
+    }
+
+
+def test_a_busy_specialist_pool_is_recorded_as_a_fallback_not_hidden():
+    note = routing_note("specialist", "normal", {"specialist_escalation": ESCALATION})
+    assert note["pool"] == "normal" and note["specialist_trigger"] == "hard_ats"
+    assert "regular budget" in note["specialist_fallback"]
+
+
+def test_an_ordinary_run_records_only_its_pool():
+    assert routing_note("normal", "normal", None) == {"pool": "normal"}
+    assert routing_note("specialist", "specialist", {})["specialist_trigger"] == "unrecorded"
 
 
 def test_the_optional_audit_keeps_two_calls_of_the_runs_own_cap():
