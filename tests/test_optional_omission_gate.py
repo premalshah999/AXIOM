@@ -1,6 +1,6 @@
 """The form leaves an optional picker empty when it cannot commit the applicant's fact (offered choices do not
 support it, or the write budget runs out). The answer-quality gate then flagged the blank against the saved fact as a
-"confirmed fact mismatch" and blocked submission: Atlassian's Work Experience Country/State (India, Gujarat) held a
+"confirmed fact mismatch" and blocked submission: Atlassian's Work Experience Country/State (India, Maharashtra) held a
 complete application back on 2026-10-19."""
 
 from types import SimpleNamespace

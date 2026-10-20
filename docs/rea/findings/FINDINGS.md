@@ -129,7 +129,7 @@ Fixes, each with a failing test first:
    - A short, non-scrolling dropdown skips type-ahead. Degree "BE" took 8.3 s before the owner policy chose BS.
    - The major policy: recorded major → `major_part` (an offered name made of its words, at least 2) → Computer
      Science. The model no longer picks among unrelated results ("Data Processing" for Data Science).
-5. **3609f55 — "Other" is the last school search.** Lennar's list has no Gujarat Technological University.
+5. **3609f55 — "Other" is the last school search.** Lennar's list has no entry for the applicant's undergraduate university.
 6. **3230310 — value-free network journal.** NetworkMonitor records method, path, query keys, status, timing and
    redacted 4xx messages. Each step record gets `network`; repair evidence gets `network_failures`.
 

@@ -26,7 +26,7 @@ SCAN = (Path(__file__).parent / "js" / "scan.js").read_text()
 FIELD_WRITE_SECONDS = 12
 # A school search that finds nothing falls back to shorter searches and then "Other"; each empty result can wait out
 # its option wait. On slow Workday tenants the chain outlasted 12 s and the field never committed (Lennar's
-# "Gujarat Technological University", 27 deadline failures on school fields since 10-16).
+# "Nanyang Technological University", 27 deadline failures on school fields since 10-16).
 SCHOOL_LABEL = re.compile(r"\bschool\b|\buniversity\b|\binstitution\b|\bcollege\b", re.I)
 # A picker of employers to name the applicant's own (not "Have you worked for this employer?").
 EMPLOYER_PICKER = re.compile(

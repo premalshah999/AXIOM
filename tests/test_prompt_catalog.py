@@ -514,7 +514,7 @@ async def test_prompt_uses_settled_search_results_that_do_not_repeat_the_query(p
 
 
 async def test_a_school_missing_from_the_list_commits_the_offered_other(page):
-    """Lennar's Workday list has no "Gujarat Technological University" and shows "Other" only when searched; the
+    """Lennar's Workday list has no "Nanyang Technological University" and shows "Other" only when searched; the
     Education 2 school stayed empty until the stall budget ran out (10-17). Search Other last; only an Other-style
     option or the exact school may commit."""
     await page.set_content("""<div data-automation-id=multiSelectContainer>
@@ -524,14 +524,14 @@ async def test_a_school_missing_from_the_list_commits_the_offered_other(page):
       <script>
       window.queries=[];
       function search(q){window.queries.push(q);const m=document.getElementById('menu');m.hidden=false;
-        const items = q==='Other' ? ['Other'] : q==='Gujarat' ? ['Gujarat University'] : ['No Items.'];
+        const items = q==='Other' ? ['Other'] : q==='Nanyang' ? ['Nanyang University'] : ['No Items.'];
         m.innerHTML=items.map(t=>'<div role=option data-automation-id=promptOption onclick="pick(this)">'+t+'</div>').join('');}
       function pick(e){document.getElementById('school').insertAdjacentHTML('beforeend',
         '<span data-automation-id=selectedItem>'+e.textContent+'</span>');e.parentElement.hidden=true;}
       document.addEventListener('keydown',e=>{if(e.key==='Escape')document.getElementById('menu').hidden=true});
       </script>""")
     chosen = await widgets.prompt(
-        page.main_frame, page.locator("#school"), "Gujarat Technological University", school_scope=True
+        page.main_frame, page.locator("#school"), "Nanyang Technological University", school_scope=True
     )
     assert chosen == "Other"
     assert (await page.evaluate("window.queries"))[-1] == "Other"

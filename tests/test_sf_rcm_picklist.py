@@ -47,7 +47,7 @@ async def test_rcm_picklist_without_the_answer_fails_cleanly(page):
 SCHOOLS = PICKLIST.replace(
     "const ALL = ['Maine', 'Maryland', 'Massachusetts', 'Texas'];",
     "const ALL = [...Array(150).keys()].map(i => 'University of Place ' + i)"
-    ".concat(['University of Maryland-College Park', 'University of Maryland-Baltimore County']);",
+    ".concat(['University of Michigan-Ann Arbor', 'University of Michigan-Dearborn']);",
 ).replace(
     "show(ALL.filter(s => s.toLowerCase().startsWith(input.value.toLowerCase())))",
     "show(ALL.filter(s => s.toLowerCase().includes(input.value.toLowerCase())).slice(0, 20))",
@@ -56,8 +56,8 @@ SCHOOLS = PICKLIST.replace(
 
 async def test_rcm_school_catalog_is_searched_by_name_and_matches_its_spelling(page):
     # Cargill 2026-10-16: "Univ" listed 20 of hundreds of universities, and the catalog spells the
-    # campus with a hyphen; the profile's "University of Maryland, College Park" was never found.
+    # campus with a hyphen; the profile's "University of Michigan, Ann Arbor" was never found.
     await page.set_content(SCHOOLS)
     el = page.locator("[id='17:_input']")
-    committed = await widgets.combobox(page.main_frame, el, "University of Maryland, College Park")
-    assert committed == "University of Maryland-College Park"
+    committed = await widgets.combobox(page.main_frame, el, "University of Michigan, Ann Arbor")
+    assert committed == "University of Michigan-Ann Arbor"

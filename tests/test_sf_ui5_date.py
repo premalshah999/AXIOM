@@ -98,6 +98,6 @@ def test_current_role_end_date_is_today_only_on_successfactors(service):
 def test_picker_display_matches_the_month_only_fact():
     field = {"label": "Start Date", "type": "text"}
     assert widgets.same_value(field, "Dec 1, 2025", "12/2025")
-    assert widgets.same_value(field, "May 13, 2003", "05/13/2003")
+    assert widgets.same_value(field, "June 2, 2001", "06/02/2001")
     assert not widgets.same_value(field, "Dec 1, 2025", "11/2025")
-    assert not widgets.same_value(field, "May 14, 2003", "05/13/2003")
+    assert not widgets.same_value(field, "June 3, 2001", "06/02/2001")

@@ -16,8 +16,8 @@ PROFILE = {
     "first_name": "Alex",
     "last_name": "Rivera",
     "address": {"city": "Springfield", "state": "MD", "country": "United States"},
-    "education": [{"school": "University of Maryland", "degree": "Master of Science", "gpa": "3.9/4.0"}],
-    "facts": {"metro_region": "Bethesda"},
+    "education": [{"school": "University of Michigan", "degree": "Master of Science", "gpa": "3.9/4.0"}],
+    "facts": {"metro_region": "Towson"},
 }
 STEP = {
     "url": "https://acme.taleo.net/careersection/careersection/candidateacquisition/flow.jsf",
@@ -26,7 +26,7 @@ STEP = {
     "fields": [
         {"label": "GPA", "type": "text", "required": False, "filled": True, "error": "", "options": []},
         {"label": "Region", "type": "select", "required": False, "filled": False, "error": "",
-         "options": ["Not Specified", "Bethesda", "Rockville"]},
+         "options": ["Not Specified", "Towson", "Rockville"]},
         {"label": "Have you ever been convicted of a felony?", "type": "select", "required": True, "filled": False,
          "error": "", "options": ["Yes", "No"]},
     ],
@@ -61,7 +61,7 @@ def test_fixes_are_checked_against_the_page_and_the_applicants_own_values(servic
         diagnosis="GPA must be numeric; Region needs a value",
         field_fixes=[
             FieldFix(label="GPA", value="3.9"),
-            FieldFix(label="Region", value="Bethesda"),
+            FieldFix(label="Region", value="Towson"),
             FieldFix(label="Region", value="Rockville"),
             FieldFix(label="Have you ever been convicted of a felony?", value="No"),
             FieldFix(label="Password", value="hunter2"),
@@ -69,7 +69,7 @@ def test_fixes_are_checked_against_the_page_and_the_applicants_own_values(servic
         ],
     )
     accepted, rejected = check_fixes(plan, ev, profile)
-    assert [(f.label, f.value) for f in accepted] == [("GPA", "3.9"), ("Region", "Bethesda")]
+    assert [(f.label, f.value) for f in accepted] == [("GPA", "3.9"), ("Region", "Towson")]
     assert {label for label, _ in rejected} == {
         "Region",
         "Have you ever been convicted of a felony?",
@@ -178,7 +178,7 @@ async def test_successful_or_final_runs_are_never_touched(service, tmp_path, sta
 async def test_a_run_already_waiting_on_owner_answers_is_left_alone(service, tmp_path):
     run_id, _, _ = seed(service, tmp_path, state="needs_review", reason="Needs your answer")
     with service.db.exclusive() as s:
-        s.add(Review(run_id=run_id, question="Region", options=["Bethesda"], key="k", reason=""))
+        s.add(Review(run_id=run_id, question="Region", options=["Towson"], key="k", reason=""))
     assert (await repair_run(service, run_id))["skipped"] == "waiting on the owner"
 
 

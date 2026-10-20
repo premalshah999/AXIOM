@@ -11,7 +11,7 @@ from jobpilot.schemas import Profile
 PROFILE = {
     "education": [
         {"school": "University of Michigan, Ann Arbor", "degree": "Master of Science", "field_of_study": "Data Science"},
-        {"school": "Gujarat Technological University", "degree": "BE",
+        {"school": "Nanyang Technological University", "degree": "BE",
          "field_of_study": "Information & Communication Technology"},
     ]
 }

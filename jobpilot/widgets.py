@@ -2380,7 +2380,7 @@ def prompt_fallback_queries(value, school_scope=False):
         "technology",
     }
     distinctive = [w for w in re.findall(r"[A-Za-z]+", str(value)) if w.lower() not in generic and len(w) > 2]
-    # Last: a list without the school offers "Other" only when searched (Lennar, Gujarat Technological University).
+    # Last: a list without the school offers "Other" only when searched (Lennar, Nanyang Technological University).
     # school_option_matches commits nothing else from that search.
     return [q for q in dict.fromkeys([head, *distinctive[:1], "Other"]) if q and q != str(value)]
 
