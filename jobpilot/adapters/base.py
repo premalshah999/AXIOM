@@ -1193,15 +1193,8 @@ class Adapter:
         self.before_commit = await self.form.proof()
         page = await self.form.scan()
         self.commit_pages.add(self.signature(Step.REVIEW, page))
-        if not self.committed:
-            try:
-                await asyncio.to_thread(self.service.reserve_submission, self.e.run_id)
-            except ValueError as exc:
-                return {
-                    "state": "waiting_browser",
-                    "reason": str(exc),
-                    "recovery_cause": "control_observation",
-                }
+        if not self.committed and (refused := await self.e.try_reserve_commit()):
+            return refused
         self.e.armed = True
         self.committed = True
         for frame in self.page.frames:

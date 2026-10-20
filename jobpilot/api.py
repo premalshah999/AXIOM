@@ -122,7 +122,19 @@ def create_app(config: Settings | None = None):
 
         service.outbox_running = True
         outbox_task = asyncio.create_task(poll_outbox(service))
+        load_task = None
+        if config.enable_workers:
+            from .host_health import watch as watch_host
+
+            # Samples how late the event loop runs; the gates in host_health read it (docs/forensics, 4.2).
+            load_task = asyncio.create_task(watch_host(db))
         yield
+        if config.enable_workers and config.shutdown_drain_seconds:
+            # First of all, while the workers, outbox and mail poller still run: a stop must not cut a commit.
+            await service.drain(config.shutdown_drain_seconds)
+        if load_task:
+            load_task.cancel()
+            await asyncio.gather(load_task, return_exceptions=True)
         outbox_task.cancel()
         await asyncio.gather(outbox_task, return_exceptions=True)
         service.outbox_running = False
@@ -551,16 +563,22 @@ def create_app(config: Settings | None = None):
     def runtime_health():
         from .runtime import engine_version
         from .db import Outbox
+        from . import host_health
         from .provider_health import selected
         from .pipeline_comparison import snapshot as application_workers
 
         with db.session() as s:
-            pending = s.scalar(select(func.count()).select_from(Outbox).where(Outbox.state != "delivered"))
+            pending = s.scalar(
+                select(func.count()).select_from(Outbox).where(Outbox.state.not_in(["delivered", "dead"]))
+            )
+            dead = s.scalar(select(func.count()).select_from(Outbox).where(Outbox.state == "dead"))
         return {
             "engine_version": engine_version(),
+            "host": host_health.snapshot(db),
             "scheduler": db.get_setting("scheduler_health", {}),
             "heartbeat": db.get_setting("scheduler_heartbeat", {}),
             "outbox_pending": pending,
+            "outbox_dead": dead,
             "workers": config.workers,
             "application_workers": application_workers(db, config.topology),
             "models": selected(db, config),

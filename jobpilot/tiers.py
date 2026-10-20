@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 
+from .application_budget import nothing_sent
 from .db import Event, Job, Run, Setting, now
 from .specialist import pool_boost
 
@@ -47,7 +48,17 @@ COOLDOWN = timedelta(seconds=90)
 # Input tokens one job may consume in 24 hours before further runs wait. Failed jobs were
 # retried until they had used millions of tokens (a long form costs ~450k per failed run).
 JOB_TOKEN_CAP = 1_600_000
-TRANSIENT = {"worker_capacity", "provider_unavailable", "tailoring_pending"}
+# Gates that lift by themselves (host_health.check): the retry waits instead of being marked handled.
+TRANSIENT = {
+    "worker_capacity",
+    "provider_unavailable",
+    "tailoring_pending",
+    "draining",
+    "browser_unavailable",
+    "browser_probe",
+    "host_overloaded",
+    "host_loaded",
+}
 _cache: dict[str, tuple[int, float]] = {}
 
 
@@ -154,6 +165,7 @@ def _candidates(db, limit):
                 Run.id,
                 Run.job_id,
                 Run.reason,
+                Run.state,
                 Run.packet["runner_tier"].as_integer(),
                 Run.packet["waiting_kind"].as_string(),
                 Job.ats,
@@ -173,9 +185,13 @@ def _candidates(db, limit):
             .order_by(Run.finished_at.desc())
             .limit(max(200, limit * 40))
         ).all()
-        for rid, job_id, reason, run_tier, waiting, ats, _status in rows:
+        for rid, job_id, reason, state, run_tier, waiting, ats, _status in rows:
             tier = clamp(run_tier or 1)
             if ats in excluded or waiting == "email" or EXTERNAL.search(reason or "") or tier >= MAX_TIER:
+                continue
+            if nothing_sent(state, reason):
+                # A deploy, a busy mail sender, a dead Chrome or an overloaded host stopped it before the employer saw
+                # anything; a stronger runner (more calls, thinking on) cannot fix that and only spends a tier.
                 continue
             if (s.get(Setting, "runner_tier:" + job_id) or Setting(key="", value={})).value.get(
                 "from_run"

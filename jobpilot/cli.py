@@ -133,7 +133,10 @@ def main():
 
         from .api import create_app
 
-        uvicorn.run(create_app(config), host=args.host, port=args.port, log_level="warning")
+        # A hung request must not hold the stop up: the drain runs in the lifespan shutdown, after this wait.
+        uvicorn.run(
+            create_app(config), host=args.host, port=args.port, log_level="warning", timeout_graceful_shutdown=15
+        )
     elif args.command == "login":
         asyncio.run(capture_session(config, args.url))
     elif args.command == "probe":

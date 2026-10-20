@@ -25,15 +25,25 @@ MAX_SECONDS = 480
 MAX_STARTS = 3
 SETTING = "application_budget"
 NOTHING_SENT_STATES = {"timed_out", "waiting_browser"}
+# The worker Chrome could not open a page (browser.BrowserUnavailable). Three runs ended "The local Chrome debugging
+# endpoint could not be reached" (2026-10-11) and were counted as starts because only the other two texts were listed.
+BROWSER_OUTAGE = (
+    "Open the ApplyPilot Chrome window",
+    "The local Chrome debugging endpoint could not be reached",
+    # "... at attach_target (TimeoutError). No employer form was opened." (Michelin, HeyGen 2026-10-19)
+    "Chrome worker tab initialization failed",
+)
+# A deadline timeout while the host's event loop was running late (host_health.host_overloaded_result): the clock ran
+# out because the machine was overloaded, not because of the form. 70 runs on 2026-10-18/19 each lost one of three starts.
+HOST_OVERLOADED = "The worker host was overloaded"
 NOTHING_SENT = (
     "Another application kept the same email sender busy",
-    "Open the ApplyPilot Chrome window",
+    *BROWSER_OUTAGE,
     "The browser tab closed unexpectedly",
     "The selected model provider is unavailable",
     "Worker interrupted before submission",
     "A platform bot check paused",  # bot_wall.PAUSED
-    # "... at attach_target (TimeoutError). No employer form was opened." (Michelin, HeyGen 2026-10-19)
-    "Chrome worker tab initialization failed",
+    HOST_OVERLOADED,
 )
 
 

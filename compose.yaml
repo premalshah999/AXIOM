@@ -43,8 +43,9 @@ services:
     restart: unless-stopped
     init: true
     shm_size: 1gb
-    # The app releases drafts on shutdown; give it time before SIGKILL.
-    stop_grace_period: 45s
+    # A stop drains first: no new work, no new commit, and up to SHUTDOWN_DRAIN_SECONDS (150) for commits under way
+    # (Service.drain). SIGKILL after this would turn a commit still running into an unknown submission.
+    stop_grace_period: 180s
     env_file: .env
     environment:
       DATA_DIR: /app/.data

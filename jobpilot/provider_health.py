@@ -6,6 +6,7 @@ import time
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from . import host_health
 from .db import Setting
 
 COOLDOWN_SECONDS = 300
@@ -115,11 +116,21 @@ def selected(db, config):
     }
 
 
-def dispatch_limit(db, config):
+def dispatch_gate(db, config):
+    """Whether, and how widely, new work may start: the model's cooldown first, then the host (host_health.check)."""
     states = [s["state"] for s in selected(db, config).values()]
     if any(state in {"cooldown", "recovering"} for state in states):
-        return 0
+        return host_health.Gate(
+            0,
+            "provider_unavailable",
+            "The selected model is cooling down after failed requests; saved work is retained",
+        )
     # HTTP acquire() already allows exactly one productive recovery request.
     # A browser can spend time on local fields/mail before needing the model;
     # reducing the entire application pool to that browser stalls the others.
-    return config.workers
+    # The host can still be too slow or the worker Chrome gone: then fewer applications run at once, or none.
+    return host_health.check(config.workers, db=db)
+
+
+def dispatch_limit(db, config):
+    return dispatch_gate(db, config).limit

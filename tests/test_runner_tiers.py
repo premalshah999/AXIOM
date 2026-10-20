@@ -1,7 +1,10 @@
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
+import pytest
+
 from jobpilot import tiers
+from jobpilot.application_budget import HOST_OVERLOADED
 from jobpilot.db import Event, Job, Run
 
 
@@ -244,3 +247,32 @@ def test_deepseek_cache_hits_are_priced_at_the_cache_rate(service):
     cached = token_cost(cfg, 1_000_000, 0, cache_hit_tokens=900_000)
     assert abs(full - 0.3) < 1e-9
     assert abs(cached - (0.1 * 0.3 + 0.9 * 0.03)) < 1e-9
+
+
+@pytest.mark.parametrize(
+    "reason, escalated",
+    [
+        ("Browser did not advance", True),
+        (HOST_OVERLOADED + " and the application ran out of time before anything was sent", False),
+        ("Worker interrupted before submission; draft recovery scheduled", False),
+        ("Open the ApplyPilot Chrome window: the browser is responding", False),
+    ],
+)
+def test_tier_escalation_skips_runs_that_sent_nothing(service, reason, escalated):
+    """A deploy, a dead Chrome or an overloaded host stopped these before the employer saw anything; a stronger
+    runner (more calls, thinking on) cannot fix that and only spends one of the three tiers."""
+    old = (datetime.now(UTC) - timedelta(minutes=10)).isoformat()
+    with service.db.session() as s:
+        s.add(Job(id="tier", identity="tier", url="https://fixture.test/tier", ats="workday",
+                  status="waiting_browser", company="Tier", title="Engineer"))
+        s.add(Run(id="tier-1", job_id="tier", state="waiting_browser", mode="submit", reason=reason,
+                  created_at=old, finished_at=old, packet={"runner_tier": 1, "match_approved": True}))
+    found = [job_id for _, job_id, _ in tiers._candidates(service.db, 4)]
+    assert (found == ["tier"]) is escalated
+
+
+def test_the_new_gate_codes_wait_instead_of_marking_a_job_handled():
+    """host_health.check refuses with these codes while it lasts; escalation must retry later, not give up on the job."""
+    from jobpilot.tiers import TRANSIENT
+
+    assert {"draining", "browser_unavailable", "browser_probe", "host_overloaded", "host_loaded"} <= TRANSIENT

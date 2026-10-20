@@ -160,6 +160,9 @@ class Settings(BaseSettings):
     # A stalled controller (no progress on an unchanged form) also needs only one failure.
     specialist_on_stall: bool = True
     retain_paused_browser: bool = False
+    # Seconds a stop (SIGTERM from `docker compose up/stop/restart`) waits for applications that are committing
+    # before the process exits. 0 stops at once. Keep the compose stop_grace_period at least 30 s longer.
+    shutdown_drain_seconds: int = Field(default=150, ge=0, le=600)
     recovery_max_attempts: int = Field(default=2, ge=0, le=3)
     recovery_delay_seconds: int = Field(default=120, ge=30, le=1800)
     discovery_workers: int = Field(default=3, ge=1, le=12)

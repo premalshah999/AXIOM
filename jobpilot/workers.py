@@ -10,6 +10,7 @@ from sqlalchemy import select
 from .db import Job, Run, Source, now, record
 from .discovery import discover
 from .admission import employer_partition
+from .host_health import INTERRUPTED
 from .runtime import engine_version
 
 SERVICE = None
@@ -308,9 +309,7 @@ def recover_interrupted(service):
             committed = row.state == "submitting"
             row.state = "submission_unknown" if committed else "waiting_browser"
             row.reason, row.finished_at = (
-                "Worker interrupted during submit; reconcile before retrying"
-                if committed
-                else "Worker interrupted before submission; draft recovery scheduled",
+                "Worker interrupted during submit; reconcile before retrying" if committed else INTERRUPTED,
                 now(),
             )
             s.get(Job, row.job_id).status = row.state

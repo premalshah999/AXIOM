@@ -7,6 +7,7 @@ import re
 
 from sqlalchemy import select
 
+from .application_budget import BROWSER_OUTAGE, HOST_OVERLOADED
 from .db import Event, Job, Review, Run, Setting, now
 from .admission import employer_partition, outcome_for
 from .specialist import handoff_threshold, handoff_trigger
@@ -25,6 +26,8 @@ CAUSES = {
     "browser_unavailable",
     # One model timeout parked Lumen and PayPal (2026-10-14) while 293/295 calls succeeded.
     "provider_unavailable",
+    # A deadline timeout while the host's event loop ran late (host_health): nothing was sent.
+    "host_overloaded",
 }
 SENDER_BUSY = "Another application kept the same email sender busy"
 BROWSER_UNAVAILABLE = "Open the ApplyPilot Chrome window"
@@ -86,8 +89,8 @@ def automatic_attempts(session, job_id):
             and run.packet.get("worker_pool", "normal") != "specialist"
             and not run.packet.get("email_wait_resume")
             and run.packet.get("recovery_continuation_cause") != "worker_interrupted"
-            # Waiting behind a sibling's email sent nothing; it is not a repair attempt.
-            and not (run.reason or "").startswith((SENDER_BUSY, BROWSER_UNAVAILABLE))
+            # Waiting behind a sibling's email, a dead Chrome or an overloaded host sent nothing; not a repair attempt.
+            and not (run.reason or "").startswith((SENDER_BUSY, *BROWSER_OUTAGE, HOST_OVERLOADED))
         )
         for run in session.scalars(select(Run).where(Run.job_id == job_id))
     )
@@ -398,11 +401,11 @@ def schedule_recovery(session, config, run, result):
         else:
             session.add(Setting(key=key, value=value))
         return
-    if cause in {"sender_busy", "browser_unavailable", "provider_unavailable"}:
+    if cause in {"sender_busy", "browser_unavailable", "provider_unavailable", "host_overloaded"}:
         # Another owner holds this employer's email sender (usually a sibling job
-        # waiting for its verification email). Nothing was sent: defer behind it
-        # without spending a repair attempt, marking an unchanged failure or
-        # opening the employer circuit.
+        # waiting for its verification email), the browser or model is down, or the host is overloaded.
+        # Nothing was sent: defer behind it without spending a repair attempt, marking an unchanged
+        # failure or opening the employer circuit. retry_due also waits for host_health's gate.
         chained = previous.get("updated_at", "") >= (
             datetime.now(UTC) - timedelta(seconds=SENDER_CHAIN_SECONDS)
         ).isoformat()

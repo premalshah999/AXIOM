@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from jobpilot.db import Job, Run, Setting
 from jobpilot.admission import QueueBlocked
-from jobpilot.application_budget import require_allowance
+from jobpilot.application_budget import HOST_OVERLOADED, require_allowance
 
 AT = datetime(2026, 10, 17, 7, tzinfo=UTC)
 
@@ -88,3 +88,41 @@ async def test_expired_verification_keeps_uncertain_submission_protection(servic
     with service.db.session() as s:
         assert s.get(Run,'expired-verify').state=='submission_unknown'
         assert s.get(Job,'budget').status=='submission_unknown'
+
+
+def test_free_timeouts_do_not_use_up_a_jobs_three_starts(service):
+    """An overloaded host's deadline timeout (host_health.host_overloaded_result) sent nothing: not a start."""
+    at = datetime(2026, 10, 20, 7, tzinfo=UTC)
+    free = HOST_OVERLOADED + " and the application ran out of time before anything was sent; it is retried"
+    with service.db.exclusive() as s:
+        s.add(Job(id="budget", identity="budget", url="https://example.test/job/9"))
+        s.flush()
+        for i in range(3):
+            s.add(Run(id=f"free{i}", job_id="budget", mode="submit", state="timed_out", reason=free,
+                      started_at=(at - timedelta(seconds=300 - i)).isoformat()))
+    with service.db.session() as s:
+        assert require_allowance(s, "budget", at=at)  # still three starts left
+    with service.db.exclusive() as s:
+        for i in range(3):
+            s.add(Run(id=f"spent{i}", job_id="budget", mode="submit", state="timed_out",
+                      reason="Application exceeded the 600-second execution budget", started_at=(at - timedelta(seconds=60 - i)).isoformat()))
+    with service.db.session() as s, pytest.raises(QueueBlocked) as caught:
+        require_allowance(s, "budget", at=at)
+    assert caught.value.code == "application_retry_limit"
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "Open the ApplyPilot Chrome window: the browser is responding, but its automation connection is unavailable.",
+        # Three runs ended with this text on 2026-10-11 and were counted as starts.
+        "The local Chrome debugging endpoint could not be reached after a bounded retry. No employer form was opened.",
+        "Chrome worker tab initialization failed at create_target (TimeoutError). No employer form was opened.",
+        "The worker host was overloaded and the application ran out of time before anything was sent",
+    ],
+)
+def test_a_dead_chrome_or_an_overloaded_host_sent_nothing(reason):
+    from jobpilot.application_budget import nothing_sent
+
+    assert nothing_sent("timed_out", reason) and nothing_sent("waiting_browser", reason)
+    assert not nothing_sent("submission_unknown", reason)  # a commit in flight is never "nothing sent"

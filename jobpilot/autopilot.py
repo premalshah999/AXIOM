@@ -590,10 +590,13 @@ async def tick(service):
             batch.update(state="complete", finished_at=now())
             persist_batch(db, batch)
             return
-        from .provider_health import dispatch_limit
+        from .provider_health import dispatch_gate
 
-        provider_room = dispatch_limit(db, service.config)
-        batch["waiting_for_provider"] = provider_room == 0
+        gate = dispatch_gate(db, service.config)
+        provider_room = gate.limit
+        batch["waiting_for_provider"] = provider_room == 0 and gate.code == "provider_unavailable"
+        # Not the model: the worker Chrome is gone or the server is stopping (host_health.check).
+        batch["held_by_host"] = gate.code if provider_room == 0 and gate.code != "provider_unavailable" else ""
         if not provider_room:
             persist_batch(db, batch)
             return
