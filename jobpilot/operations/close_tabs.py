@@ -1,6 +1,7 @@
 """Close recorded inactive application targets without attaching to worker pages."""
 
 import argparse
+import asyncio
 import json
 import socket
 import time
@@ -117,6 +118,34 @@ def close_inactive_tabs(db, endpoint, client):
             )
             row.value = value
     return {"closed": closed, "pending": len(failures)}
+
+
+async def watch(db, endpoint, seconds=15, *, sleep=asyncio.sleep):
+    """Run the cleanup inside the app, off the event loop. Replaces the old `browser-cleanup` sidecar container,
+    which ran a second copy of this module from a different image.
+
+    It never attaches Playwright to a worker page: it reads the target list over browser-level CDP and closes only
+    targets whose job has no active run, exactly as the CLI below does.
+    """
+    if not endpoint:
+        return
+    with httpx.Client(timeout=2, trust_env=False) as client:
+        while True:
+            try:
+                result = await asyncio.to_thread(close_inactive_tabs, db, endpoint, client)
+                await asyncio.to_thread(
+                    db.set_setting, "inactive_tab_cleanup", {**result, "checked_at": now(), "state": "healthy"}
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                # Chrome not running yet or restarting: report it and keep watching.
+                await asyncio.to_thread(
+                    db.set_setting,
+                    "inactive_tab_cleanup",
+                    {"checked_at": now(), "state": "unavailable", "error_type": type(exc).__name__},
+                )
+            await sleep(max(5, seconds))
 
 
 def main():
