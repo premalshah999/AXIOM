@@ -54,7 +54,29 @@ EMAIL_IN_USE = re.compile(r"email address(?: and phone number)? (?:is|are) alrea
 # A workflow can end on an optional third-party assessment (Goldbelt 2026-10-19: an Employment Tax Credit questionnaire,
 # "optional ... navigate away"). iCIMS has already received the application; its candidate dashboard says so
 # ("2026-20717 Junior Data Analyst Received Submission").
-DASHBOARD_RECEIVED = re.compile(r"received submission|submitted|under review|in review|application received", re.I)
+DASHBOARD_RECEIVED = re.compile(
+    r"\b(?:received submission|submitted|under review|in review|application received)\b", re.I
+)
+# A row that says the application is unfinished or unsent is never a receipt, whatever else it contains
+# ("Incomplete - application not submitted"). Its action links ("Continue Application", "Withdraw") are on every row.
+DASHBOARD_UNFINISHED = re.compile(
+    r"\b(?:incomplete|draft|in progress|unsubmitted|not (?:yet )?(?:been )?(?:submitted|received|sent))\b", re.I
+)
+
+
+def dashboard_status(row, title=""):
+    """The status words of this requisition's dashboard row when it reads as received, else None.
+
+    The row text carries the job title, so the title is removed before the status is read: a posting called
+    "Submitted Claims Analyst" made every one of its rows look submitted. Rows that say incomplete or not submitted are
+    never received, which kept a false confirmation (or a false "already applied") from ending a run.
+    """
+    text = re.sub(re.escape(title), " ", row or "", flags=re.I) if title else row or ""
+    if DASHBOARD_UNFINISHED.search(text):
+        return None
+    found = DASHBOARD_RECEIVED.search(text)
+    return found[0] if found else None
+
 FLAGGED_JS = r"""() => {
   const red = c => { const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c || ''); return !!m && +m[1] >= 150 && +m[2] <= 90 && +m[3] <= 90; };
   const out = [];
@@ -249,12 +271,12 @@ class ICIMS(Adapter):
     async def dashboard_receipt(self, navigate=True):
         """This requisition's row as a confirmed result when it reads as received, or None."""
         url, row = await self.dashboard_row(navigate)
-        status = DASHBOARD_RECEIVED.search(row) if row else None
+        status = dashboard_status(row, self.job.get("title", ""))
         if not status:
             return None
         return {
             "state": "confirmed",
-            "reason": f"The employer's candidate dashboard lists this application as {status[0]}",
+            "reason": f"The employer's candidate dashboard lists this application as {status}",
             "receipt": {
                 "url": url,
                 "confirmation": row,
@@ -272,7 +294,7 @@ class ICIMS(Adapter):
         page, so the run stopped while the row said "Incomplete"). Continue an incomplete application from the posting;
         a received one is this run's receipt only when this run walked its steps, otherwise it was already applied."""
         url, row = await self.dashboard_row(navigate=False)
-        if row and DASHBOARD_RECEIVED.search(row):
+        if dashboard_status(row, self.job.get("title", "")):
             if getattr(self, "step_submits", 0) or self.committed:
                 return await self.dashboard_receipt(navigate=False)
             return {

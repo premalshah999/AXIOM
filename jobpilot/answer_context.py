@@ -206,7 +206,12 @@ DIRECTIVE = re.compile(
 # Capital One: "... support does include documentation needed for F-1 OPT ... your answer to this question will be
 # “Yes.”" The listed statuses come before the definition.
 ANSWER_WILL_BE_YES = re.compile(r"(?:answer|response)[^.]{0,60}?\b(?:will|should|must|would)\s+be\W{0,3}yes", re.I)
-NEGATION = re.compile(r"\b(?:not|never|no longer|neither|nor)\b|n['’]t\b", re.I)
+# "Select Yes if you hold a visa other than F-1 OPT" and "(excluding OPT)" exclude the status they name.
+NEGATION = re.compile(
+    r"\b(?:not|never|no longer|neither|nor|other than|except(?:ing)?|excluding|excludes?|exclusive of|besides|"
+    r"apart from|aside from|unless)\b|n['’]t\b",
+    re.I,
+)
 
 
 def recorded_status(facts):

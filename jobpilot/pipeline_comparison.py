@@ -55,6 +55,31 @@ def assign_pool(session, job, source=None):
     return NORMAL
 
 
+# Runs a new run of the same job continues from when nothing names a recovery source (an owner's Apply, answered
+# questions, a resumed pause).
+CONTINUABLE_STATES = frozenset({"waiting_answer", "needs_review", "waiting_browser", "timed_out", "paused"})
+
+
+def continued_run(runs, source=None):
+    """The run a new one picks up from: the recovery source, else the newest run waiting on the owner or the browser."""
+    if source is not None:
+        return source
+    waiting = [run for run in runs if run.state in CONTINUABLE_STATES]
+    return max(waiting, key=lambda run: run.created_at, default=None)
+
+
+def routed_pool(session, job, source_id=None):
+    """The pool the next run of `job` is assigned to, before any capacity fallback.
+
+    Admission needs this early (a specialist's token cap is larger) and must agree with the pool the run is given:
+    it used to look only at the recovery source, so an owner's Apply on a job whose last run was handed to a
+    specialist was admitted under the ATS workers' cap and then ran with the specialist's budget.
+    """
+    runs = list(session.scalars(select(Run).where(Run.job_id == job.id)))
+    source = session.get(Run, source_id) if source_id else None
+    return assign_pool(session, job, continued_run(runs, source))
+
+
 def assign(session, job, source=None):
     """The engine for a new run. The runner tier decides: tier 1 is the cheap current engine
     (hybrid controller, ~45k tokens a run); tier 2 and up use the model-led agent

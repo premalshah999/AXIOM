@@ -70,6 +70,17 @@ answer solely because you prefer another wording. No credentials enter this audi
 """
 
 
+def advice_budget(config, run, reserve=2):
+    """An optional second opinion may not spend the run's last `reserve` model calls: the owning answer and navigation
+    agents keep them. The cap is the run's own (a specialist's is larger, SPECIALIST_BUDGET_MULTIPLIER)."""
+    if run is None:
+        return True
+    from .tiers import call_limit
+
+    packet = run.packet or {}
+    return run.model_calls < call_limit(config, packet.get("runner_tier", 1), packet.get("worker_pool")) - reserve
+
+
 def money_range(text):
     """($low, $high) for '$80,000 - $100,000' style choices; a single amount ('80000', the recorded
     desired salary; CVS 2026-10-14) is the range (amount, amount); anything else None."""
@@ -600,7 +611,7 @@ async def audit_form(form, *, current_page=False):
             run = session.get(Run, resolver.run_id)
             # Preserve the remaining requests for the owning answer/navigator
             # agents; an optional second opinion cannot consume their last calls.
-            model_budget = not run or run.model_calls < resolver.config.max_model_calls - 2
+            model_budget = advice_budget(resolver.config, run)
     if (
         risky
         and not current_page

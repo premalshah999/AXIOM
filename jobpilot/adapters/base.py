@@ -822,7 +822,9 @@ class Adapter:
         obs = await self.form.scan()
         # authenticate() hands over application forms that embed account fields; those classify as account steps
         # (iCIMS's candidate profile: password boxes beside the resume and name fields, saved by Submit Profile).
-        owned = self.classify(obs)
+        # Only those two steps extend what this handler owns: a page that became an emailed-code step, a review or a
+        # confirmation while it was filled has its own handler in the main loop, not a Next click.
+        embedded = {self.classify(obs)} & {Step.CREATE_ACCOUNT, Step.SIGN_IN}
         nxt = self.find_next(obs)
         final = await self.observed_final(obs)
         if not nxt and final:
@@ -852,7 +854,7 @@ class Adapter:
         step = self.classify(obs)
         # The iCIMS profile was refused here on every pass (ICE, iPipeline 2026-10-19): it classifies as account
         # creation, so Submit Profile was never pressed and the third pass reported a failed sign-in.
-        if step not in {Step.FORM, owned}:
+        if step != Step.FORM and step not in embedded:
             return None
         if semantic_state(obs)["page"] != page:
             return None  # The callback submitted this page; the next one is filled before anything is clicked.
