@@ -1,0 +1,26 @@
+"""Taleo (Bealls 2026-10-17): a resumed run reopened candidateacquisition/flow.jsf by URL and Taleo answered with its
+"career section unavailable" page. JSF flow routes restart from the posting instead."""
+
+from types import SimpleNamespace
+
+from jobpilot.browser import BrowserEngine
+
+JOB = "https://beallsinc.taleo.net/careersection/bealls+outlet+mobile/jobdetail.ftl?job=260000GI"
+
+
+def route_for(url, ats="taleo"):
+    engine = SimpleNamespace(
+        job={"ats": ats, "url": JOB}, run_record={"packet": {}}, desktop_resume_state=lambda saved: {"url": url}
+    )
+    return BrowserEngine.desktop_resume_route(engine, {})
+
+
+def test_taleo_flow_pages_are_not_reopened_by_url():
+    assert route_for("https://beallsinc.taleo.net/careersection/careersection/candidateacquisition/flow.jsf") is None
+    assert route_for("https://beallsinc.taleo.net/careersection/iam/accessmanagement/login.jsf") is None
+
+
+def test_other_saved_routes_still_reopen():
+    assert route_for(JOB) == JOB
+    flow = "https://beallsinc.taleo.net/careersection/careersection/candidateacquisition/flow.jsf"
+    assert route_for(flow, ats="custom") == flow

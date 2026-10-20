@@ -1,0 +1,112 @@
+"""Bounded recovery covers hard ATSs, excluding dead, protected and owner-waiting jobs."""
+
+from datetime import UTC, datetime
+
+from jobpilot.autopilot import persist_stalled
+from jobpilot.db import Job, Review, Run
+
+ROLES = ["Software Development Engineer", "Data Science"]
+
+
+def seed(service, company, title, ats, state, reason, n):
+    with service.db.exclusive() as s:
+        job = Job(identity=f"ps-{n}", url=f"https://example.test/{n}", company=company, title=title, ats=ats, status="ready")
+        s.add(job)
+        s.flush()
+        run = Run(job_id=job.id, state=state, mode="submit", packet={}, reason=reason,
+                  created_at=datetime(2026, 10, 17, 1, n % 59, tzinfo=UTC).isoformat())
+        s.add(run)
+        s.flush()
+        return job.id, run.id
+
+
+async def test_free_slots_resume_the_right_stalled_jobs(service, monkeypatch):
+    resumed = []
+
+    async def fake_manage(service, job_id, action, **kwargs):
+        resumed.append(job_id)
+        return {"run_id": "r"}
+
+    monkeypatch.setattr("jobpilot.job_control.manage", fake_manage)
+    monkeypatch.setattr("jobpilot.autopilot.datetime", type("D", (), {"now": staticmethod(lambda tz=None: datetime(2026, 10, 17, 5, tzinfo=UTC))}))
+    ok1, _ = seed(service, "Acme", "Software Engineer I", "workday", "waiting_browser", "did not advance", 1)
+    same_employer, _ = seed(service, "Acme", "Data Scientist", "workday", "timed_out", "tab failed", 2)
+    captcha, _ = seed(service, "Beta", "Software Engineer", "workday", "waiting_browser", "2Captcha: SOLVER_ERROR", 3)
+    icims, _ = seed(service, "Gamma", "Software Engineer", "icims", "waiting_browser", "did not advance", 4)
+    off_role, _ = seed(service, "Delta", "Data Analyst", "workday", "waiting_browser", "did not advance", 5)
+    asking, asking_run = seed(service, "Eps", "Software Engineer", "successfactors", "needs_review", "needs answers", 6)
+    with service.db.exclusive() as s:
+        s.add(Review(run_id=asking_run, question="Q", options=[], key="k", reason=""))
+    ef1, _ = seed(service, "Zeta", "Software Engineer", "eightfold", "waiting_browser", "did not advance", 7)
+    ef2, _ = seed(service, "Eta", "Data Scientist", "eightfold", "waiting_browser", "did not advance", 8)
+    ok2, _ = seed(service, "Theta", "SDE I", "successfactors", "waiting_browser", "did not advance", 9)
+    batch = {}
+    started = await persist_stalled(service, 10, ROLES, batch)
+    assert set(resumed) == {ok1, icims, ef1, ok2} and started == 4 and len(batch["persisted"]) == 4
+    assert same_employer not in resumed and captcha not in resumed
+    assert off_role not in resumed and asking not in resumed and ef2 not in resumed
+
+
+async def test_a_job_that_keeps_stalling_backs_off(service, monkeypatch):
+    """Short repair backoff cannot bypass maintenance or the total retry limit."""
+    from jobpilot.autopilot import PERSIST_DAILY, persist_wait
+
+    resumed = []
+
+    async def fake_manage(service, job_id, action, **kwargs):
+        resumed.append(job_id)
+        return {"run_id": "r"}
+
+    monkeypatch.setattr("jobpilot.job_control.manage", fake_manage)
+    monkeypatch.setattr("jobpilot.autopilot.datetime", type("D", (), {"now": staticmethod(lambda tz=None: datetime(2026, 10, 17, 5, 30, tzinfo=UTC))}))
+
+    def job(company, reason, finished_minute, runs=1):
+        with service.db.exclusive() as s:
+            row = Job(identity=f"bo-{company}", url=f"https://example.test/{company}", company=company,
+                      title="Software Engineer", ats="oracle", status="ready")
+            s.add(row)
+            s.flush()
+            for i in range(runs):
+                at = datetime(2026, 10, 17, 5, finished_minute - runs + 1 + i, tzinfo=UTC).isoformat()
+                s.add(Run(job_id=row.id, state="waiting_browser", mode="submit", packet={}, reason=reason,
+                          created_at=at, finished_at=at))
+            return row.id
+
+    fresh = job("Fresh", "did not advance", 30)  # just finished: waits 30 seconds
+    rested = job("Rested", "did not advance", 26)  # one run, ended 4 minutes ago
+    looping = job("Looping", "did not advance", 25, runs=4)  # 4 runs today: waits 24 minutes
+    maintenance = job("Honeywell", "Oracle Cloud Fusion is showing a scheduled maintenance page", 10)
+    spent = job("Spent", "did not advance", 15, runs=PERSIST_DAILY)
+    await persist_stalled(service, 10, ROLES, {})
+    assert resumed == [rested]
+    assert persist_wait(1, "x").seconds == 30 and persist_wait(2, "x").seconds == 60
+    assert persist_wait(1, "scheduled maintenance").seconds == 3600
+    assert not {fresh, looping, maintenance, spent} & set(resumed)
+
+
+async def test_runs_that_sent_nothing_do_not_use_the_days_retries(service, monkeypatch):
+    # Goldman Sachs (2026-10-18): two deployment interruptions filled the daily quota of a job whose fix had deployed.
+    from jobpilot.autopilot import PERSIST_DAILY
+
+    resumed = []
+
+    async def fake_manage(service, job_id, action, **kwargs):
+        resumed.append(job_id)
+        return {"run_id": "r"}
+
+    monkeypatch.setattr("jobpilot.job_control.manage", fake_manage)
+    monkeypatch.setattr("jobpilot.autopilot.datetime", type("D", (), {"now": staticmethod(lambda tz=None: datetime(2026, 10, 17, 5, 30, tzinfo=UTC))}))
+    reasons = ["Worker interrupted before submission; draft recovery scheduled",
+               "Another application kept the same email sender busy; nothing was sent. Requeue this job"] * PERSIST_DAILY
+    with service.db.exclusive() as s:
+        row = Job(identity="gs", url="https://example.test/gs", company="Goldman Sachs", title="Software Engineer",
+                  ats="oracle", status="ready")
+        s.add(row)
+        s.flush()
+        for i, reason in enumerate([*reasons, "The browser did not advance within its recovery budget"]):
+            at = datetime(2026, 10, 17, 5, 10 + i, tzinfo=UTC).isoformat()
+            s.add(Run(job_id=row.id, state="waiting_browser" if i % 2 == 0 or i == len(reasons) else "timed_out",
+                      mode="submit", packet={}, reason=reason, created_at=at, finished_at=at))
+        job_id = row.id
+    await persist_stalled(service, 10, ROLES, {})
+    assert resumed == [job_id]

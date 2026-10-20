@@ -1,0 +1,400 @@
+"""Due work, ready applications, deferrals, source health and honest status.
+
+These return decisions only. Codex's DBOS workers execute them: discovery
+fetches, classification, tailoring and — for applications — `service.queue`,
+which keeps configured owner admission, final-submit reservation, budgets and the
+submission guard authoritative.
+"""
+
+from datetime import UTC, datetime, timedelta
+
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select
+
+from .._store import now
+from .classify import eligible as classified_eligible, outcomes as classified_outcomes
+from .graduation import graduation_gate
+from .policy import DiscoveryPolicy, fresh, gate, protected
+from .tables import DcDeferral, DcSourceHealth
+
+COMMITTED = {"confirmed", "submission_unknown", "already_applied"}
+ACTIVE = {"queued", "running", "submitting"}
+
+
+class Capacity(BaseModel):
+    owners_total: int = 7
+    owners_busy: int = 0
+
+
+class DueWork(BaseModel):
+    sources: list[str] = Field(default_factory=list)
+    classify: list[list[str]] = Field(default_factory=list)
+    tailor: list[str] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
+class ReadyApplication(BaseModel):
+    job_id: str
+    artifact_id: str
+    resume_id: str
+    score: int | None
+    posted_at: str | None
+    posted_basis: str
+
+
+def capacity(db, owners_total=7) -> Capacity:
+    from ...db import Run
+
+    with db.session() as s:
+        busy = s.scalar(select(func.count()).select_from(Run).where(Run.state.in_(["running", "submitting"])))
+    return Capacity(owners_total=owners_total, owners_busy=busy or 0)
+
+
+def _candidates(db, policy: DiscoveryPolicy, at) -> tuple[list[dict], dict]:
+    """Never-attempted, non-archived jobs that are fresh (listed) or manually imported."""
+    from ...db import Job, JobListing, Run, Setting
+
+    stats = {"stale_or_undated": 0, "protected": 0, "controlled": 0, "attempted": 0, "out_of_scope": 0}
+    # Classification and tailoring spend only on the owner's ATS scope (ats_focus.exclude):
+    # 1000 unclassified postings were mostly sites the autopilot will never apply to.
+    excluded_ats = set((db.get_setting("ats_focus", {}) or {}).get("exclude", []))
+    board = db.get_setting("job_board_settings", {}) or {}
+    seen_cutoff = at - timedelta(hours=max(6, board.get("interval_hours", 2) * 2 + 1))
+    with db.session() as s:
+        excluded_ats.update(
+            row.key.removeprefix("ats_outage:")
+            for row in s.scalars(select(Setting).where(Setting.key.like("ats_outage:%")))
+            if row.value.get("until", "") > at.isoformat()
+        )
+        attempted = set(s.scalars(select(Run.job_id).distinct()))
+        controls = {
+            row.key.removeprefix("job_control:"): (row.value or {}).get("state")
+            for row in s.scalars(select(Setting).where(Setting.key.like("job_control:%")))
+        }
+        # Only a link the applicant added (origin "manual") is a candidate without a listing. A board or feed
+        # import without one never passed the board screen: 983 unscreened postings from new boards
+        # (2026-10-18) would otherwise fill every classification batch with jobs that can never be dispatched.
+        manual = {
+            row.key.removeprefix("job_origin:")
+            for row in s.scalars(select(Setting).where(Setting.key.like("job_origin:%")))
+            if (row.value or {}).get("kind") == "manual"
+        }
+        rows = s.execute(
+            select(Job, JobListing)
+            .outerjoin(JobListing, JobListing.job_id == Job.id)
+            .where(Job.demo.is_(False), Job.status != "archived")
+        ).all()
+        out = []
+        for job, listing in rows:
+            if job.ats in excluded_ats:
+                stats["out_of_scope"] += 1
+                continue
+            if job.id in attempted:
+                stats["attempted"] += 1
+                continue
+            if controls.get(job.id) in {"paused", "deleted"}:
+                stats["controlled"] += 1
+                continue
+            if protected(s, job.url):
+                stats["protected"] += 1
+                continue
+            if listing is not None:
+                ok, basis = fresh(listing.posted_at, listing.date_basis, listing.first_seen, policy, at)
+                try:
+                    seen = datetime.fromisoformat(listing.last_seen.replace("Z", "+00:00"))
+                    seen = seen if seen.tzinfo else seen.replace(tzinfo=UTC)
+                except (ValueError, TypeError, AttributeError):
+                    seen = None
+                if not ok or not listing.active or seen is None or seen < seen_cutoff:
+                    stats["stale_or_undated"] += 1
+                    continue
+                posted, country = listing.posted_at, listing.country
+            elif job.id in manual:
+                basis, posted, country = "manual", None, ""  # a pasted link is the applicant's choice
+            else:
+                stats["stale_or_undated"] += 1
+                continue
+            out.append(
+                {
+                    "id": job.id,
+                    "url": job.url,
+                    "identity": job.identity,
+                    "title": job.title,
+                    "company": job.company,
+                    "location": job.location,
+                    "country": country,
+                    "description": job.description or "",
+                    "status": job.status,
+                    "score": job.score,
+                    "resume_id": job.resume_id,
+                    "posted_at": posted,
+                    "posted_basis": basis,
+                }
+            )
+    return out, stats
+
+
+def _deferred(db, at) -> set:
+    with db.session() as s:
+        return set(s.scalars(select(DcDeferral.job_id).where(DcDeferral.not_before > at.isoformat())))
+
+
+def _eligible(db, jobs, profile, policy):
+    from .roles import matching_role
+
+    # Backpressure must count jobs dispatch can actually use. Old high scores
+    # cannot make off-role, senior or otherwise gated jobs block new ranking.
+    roles = profile.get("target_roles") or []
+    jobs = [j for j in jobs if not gate(j, policy)
+            and (not roles or matching_role(j["title"], roles))]
+    mine = classified_eligible(db, jobs, profile, policy)
+    # Jobs the application's ranker already marked ready count as eligible too,
+    # unless the posting's stated graduation window excludes every recorded degree.
+    for job in jobs:
+        if (
+            job["id"] not in mine
+            and job["status"] == "ready"
+            and (job["score"] or 0) >= policy.minimum_fit
+            and not graduation_gate(job, profile)
+        ):
+            mine[job["id"]] = {"score": job["score"], "eligible": True, "resume_id": job["resume_id"]}
+    return mine
+
+
+def ready_manual_job_ids(db, policy=None, at=None):
+    """Master-resume imports need no tailored artifact to enter dispatch.
+
+    Use the same freshness, protection, classification and deferral checks as
+    tailored applications. Queue admission still validates the selected resume.
+    """
+    policy, at = policy or DiscoveryPolicy(), at or datetime.now(UTC)
+    jobs, _ = _candidates(db, policy, at)
+    deferred = _deferred(db, at)
+    jobs = [j for j in jobs if j["posted_basis"] == "manual" and j["id"] not in deferred]
+    good = _eligible(db, jobs, db.get_setting("profile", {}) or {}, policy)
+    return {
+        j["id"] for j in jobs
+        if j["id"] in good and j["status"] == "ready" and not gate(j, policy)
+        and db.get_setting("job_origin:" + j["id"], {}).get("kind") == "manual"
+    }
+
+
+def ready_applications(
+    db, policy: DiscoveryPolicy | None = None, limit: int = 6, at=None, data_dir=None
+) -> list[ReadyApplication]:
+    """Eligible, guarded, undeferred jobs with a `ready` tailored resume, best first."""
+    from ..resumes import current_artifact
+
+    policy, at = policy or DiscoveryPolicy(), at or datetime.now(UTC)
+    profile = db.get_setting("profile", {}) or {}
+    jobs, _ = _candidates(db, policy, at)
+    deferred = _deferred(db, at)
+    good = _eligible(db, [j for j in jobs if j["id"] not in deferred], profile, policy)
+    out = []
+    for job in sorted(jobs, key=lambda j: (-(good.get(j["id"], {}).get("score") or 0), j["posted_at"] or "")):
+        if job["id"] not in good:
+            continue
+        artifact = current_artifact(db, job["id"], data_dir)
+        if not artifact:
+            continue
+        out.append(
+            ReadyApplication(
+                job_id=job["id"],
+                artifact_id=artifact.artifact_id,
+                resume_id=artifact.source_resume_id,
+                score=good[job["id"]].get("score"),
+                posted_at=job["posted_at"],
+                posted_basis=job["posted_basis"],
+            )
+        )
+        if len(out) >= limit:
+            break
+    return out
+
+
+def discover_due(
+    db, policy: DiscoveryPolicy | None = None, cap: Capacity | None = None, at=None, data_dir=None
+) -> DueWork:
+    from ...db import Source
+    from ..resumes import preparation_state
+
+    policy, at = policy or DiscoveryPolicy(), at or datetime.now(UTC)
+    cap = cap or capacity(db, policy.owners)
+    profile = db.get_setting("profile", {}) or {}
+    jobs, _ = _candidates(db, policy, at)
+    deferred = _deferred(db, at)
+    jobs = [j for j in jobs if j["id"] not in deferred]
+    good = _eligible(db, jobs, profile, policy)
+    # Current-identity readiness: a stale variant or an expired build lease counts as not prepared.
+    artifacts = {j: preparation_state(db, j, data_dir) for j in good}
+    ready = sum(1 for j in good if artifacts.get(j) == "ready")
+    building = sum(1 for j in good if artifacts.get(j) == "building")
+    work = DueWork()
+    # Tailoring: keep a bounded number of ready resumes ahead of the owners.
+    budget = policy.owners * policy.tailor_lookahead - ready - building
+    waiting = [j for j in good if artifacts.get(j) in {"none", "stale"}]
+    waiting.sort(key=lambda j: -(good[j].get("score") or 0))
+    if budget > 0:
+        work.tailor = waiting[:budget]
+    elif waiting:
+        work.reasons.append(
+            f"Tailoring paused: {ready + building} resumes already ahead of {policy.owners} owners"
+        )
+    # Classification: only while the eligible pipeline is short. Jobs that
+    # already have a run are not dispatched again by the autopilot (recovery,
+    # protection and employer caps own them), so they do not fill the pipeline.
+    from ...db import Run
+
+    with db.session() as s:
+        attempted = (
+            set(s.scalars(select(Run.job_id).where(Run.job_id.in_(list(good))).distinct())) if good else set()
+        )
+    pipeline = len([j for j in good if j not in attempted])
+    outcomes = classified_outcomes(db, jobs, profile)
+    unclassified = [
+        j["id"]
+        for j in jobs
+        if j["id"] not in good
+        and (
+            j["id"] not in outcomes
+            or (
+                outcomes[j["id"]]["status"] == "failed"
+                and (outcomes[j["id"]]["retry_at"] or "") <= at.isoformat()
+            )
+        )
+        and j["status"] not in {"skipped", "review"}
+        and not gate(j, policy)
+    ]
+    if pipeline < policy.owners * policy.classify_lookahead:
+        ids = unclassified[: policy.owners * policy.classify_lookahead * 2]
+        work.classify = [
+            ids[i : i + policy.classify_batch] for i in range(0, len(ids), policy.classify_batch)
+        ]
+    elif unclassified:
+        work.reasons.append(f"Classification paused: {pipeline} eligible jobs already waiting")
+    # Discovery: only while unclassified inventory is short; respect source backoff.
+    if len(unclassified) < policy.owners * policy.classify_lookahead:
+        with db.session() as s:
+            cooling = set(
+                s.scalars(
+                    select(DcSourceHealth.source_id).where(DcSourceHealth.next_attempt_at > at.isoformat())
+                )
+            )
+            sources = s.execute(
+                select(Source.id, Source.next_run, Source.last_run).where(Source.enabled.is_(True))
+            )
+            due = []
+            for sid, next_run, last_run in sources:
+                if sid in cooling:
+                    continue
+                try:
+                    scheduled = datetime.fromisoformat(next_run.replace("Z", "+00:00"))
+                    scheduled = scheduled if scheduled.tzinfo else scheduled.replace(tzinfo=UTC)
+                except (ValueError, TypeError, AttributeError):
+                    continue
+                if scheduled <= at:
+                    due.append((last_run or "", sid))
+            # Source schedules can contain Eastern offsets while `at` is UTC.
+            # Compare instants before bounding work; future rows must not keep
+            # crowding never-scanned or older sources out of the planner.
+            work.sources = [sid for _, sid in sorted(due)[:60]]
+        if cooling:
+            work.reasons.append(f"{len(cooling)} sources cooling down after errors")
+    else:
+        work.reasons.append("Discovery paused: enough unclassified inventory")
+    if cap.owners_busy >= cap.owners_total:
+        work.reasons.append("All application owners are busy")
+    return work
+
+
+def defer(db, job_id: str, reason: str, seconds: int):
+    """A temporary cooldown delays a job; it is never discarded."""
+    until = (datetime.now(UTC) + timedelta(seconds=max(1, seconds))).isoformat()
+    with db.exclusive() as s:
+        row = s.get(DcDeferral, job_id)
+        if row:
+            row.reason, row.not_before = reason[:200], until
+        else:
+            s.add(DcDeferral(job_id=job_id, reason=reason[:200], not_before=until))
+    return until
+
+
+def record_source(db, source_id: str, ok: bool, error: str = "", policy: DiscoveryPolicy | None = None):
+    policy = policy or DiscoveryPolicy()
+    at = datetime.now(UTC)
+    with db.exclusive() as s:
+        row = s.get(DcSourceHealth, source_id)
+        if row is None:
+            row = DcSourceHealth(source_id=source_id, failures=0)
+            s.add(row)
+        if ok:
+            row.failures, row.next_attempt_at, row.last_error, row.last_ok = 0, None, "", now()
+        else:
+            row.failures = (row.failures or 0) + 1
+            wait = min(
+                policy.source_backoff_minutes * 2 ** (row.failures - 1), policy.source_backoff_max_hours * 60
+            )
+            row.next_attempt_at = (at + timedelta(minutes=wait)).isoformat()
+            row.last_error = error[:250]
+        return {"failures": row.failures, "next_attempt_at": row.next_attempt_at}
+
+
+def status(db, policy: DiscoveryPolicy | None = None, cap: Capacity | None = None, at=None) -> dict:
+    """Pipeline counts and the current bottleneck, stated plainly."""
+    from ..resumes.tables import RsArtifact
+
+    policy, at = policy or DiscoveryPolicy(), at or datetime.now(UTC)
+    cap = cap or capacity(db, policy.owners)
+    profile = db.get_setting("profile", {}) or {}
+    jobs, excluded = _candidates(db, policy, at)
+    outcomes = classified_outcomes(db, jobs, profile)
+    good = _eligible(db, jobs, profile, policy)
+    gated = {}
+    for j in jobs:
+        reason = (outcomes.get(j["id"], {}).get("result") or {}).get("gate") or gate(j, policy)
+        if reason:
+            gated[reason] = gated.get(reason, 0) + 1
+    with db.session() as s:
+        tailoring = dict(s.execute(select(RsArtifact.status, func.count()).group_by(RsArtifact.status)).all())
+    ready = len(ready_applications(db, policy, limit=10_000, at=at))
+    basis = {}
+    for j in jobs:
+        basis[j["posted_basis"]] = basis.get(j["posted_basis"], 0) + 1
+    failed_cls = sum(1 for o in outcomes.values() if o["status"] == "failed")
+    unclassified = sum(1 for j in jobs if j["id"] not in outcomes and j["id"] not in good)
+    free = max(0, cap.owners_total - cap.owners_busy)
+    if not jobs:
+        bottleneck = "No fresh, unattempted listings. Discovery continues on schedule."
+    elif ready and free:
+        bottleneck = (
+            f"{ready} applications are ready and {free} owners are free; the executor picks them up next."
+        )
+    elif ready:
+        bottleneck = "All application owners are busy. Ready applications wait for a free owner."
+    elif good:
+        bottleneck = (
+            f"Tailoring: {len(good)} eligible jobs are waiting for a tailored resume "
+            f"({tailoring.get('building', 0)} building, {tailoring.get('failed', 0)} need repair)."
+        )
+    elif unclassified or failed_cls:
+        bottleneck = f"Classification: {unclassified} not yet ranked, {failed_cls} waiting to retry."
+    else:
+        bottleneck = "No eligible jobs in current inventory. Discovery continues on schedule."
+    return {
+        "fresh_jobs": len(jobs),
+        "posting_basis": basis,
+        "excluded": excluded,
+        "gated": gated,
+        "classification": {
+            "eligible": len(good),
+            "ineligible": sum(1 for o in outcomes.values() if o["status"] in {"ok", "rejected"})
+            - len([j for j in good if j in outcomes]),
+            "failed": failed_cls,
+            "unclassified": unclassified,
+        },
+        "tailoring": tailoring,
+        "ready_to_apply": ready,
+        "owners": {"total": cap.owners_total, "busy": cap.owners_busy},
+        "bottleneck": bottleneck,
+        "policy": policy.model_dump(),
+    }

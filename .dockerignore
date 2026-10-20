@@ -1,0 +1,21 @@
+# Only pyproject.toml, uv.lock, jobpilot/, frontend/, LICENSE and docs/ reach the image.
+.git
+.github
+.vscode
+.deepeval
+.env
+.env.*
+!.env.example
+.data
+.venv
+.venv-*
+.pytest_cache
+.ruff_cache
+__pycache__
+**/__pycache__
+frontend/node_modules
+jobpilot/static
+tests
+scripts
+*.log
+.DS_Store
