@@ -37,8 +37,12 @@ NOT_REPAIRABLE = re.compile(
 CONTACT_QUESTION = re.compile(
     r"\b(?:what|which)\b[^?]{0,80}\b(?:e-?mail(?: address)?|phone(?: number)?|mobile(?: number)?)\b", re.I
 )
-# The evidence's masks for the applicant's email and numbers; never an answer.
-MASKED_VALUE = re.compile(r"\[(?:email|number|phone|private|redacted)\]", re.I)
+# The evidence's masks for the applicant's email and numbers; never an answer. mask() shows a phone number or long id
+# with every digit as 9 and the format kept, so a run of seven or more nines is the mask too: the agent saved
+# "9999999999" as a Greenhouse Phone override (Stripe, 2026-10-18).
+MASKED_VALUE = re.compile(
+    r"\[(?:email|number|phone|private|redacted)\]|(?<!\d)\+?(?:9[ ()+.-]*){7,}(?!\d)", re.I
+)
 SENSITIVE = re.compile(
     r"password|passcode|\bssn\b|social security|passport|driver.?s? licen[cs]e|national id|tax id|\bbank\b|"
     r"routing|account number|credit card|one.?time|verification code|security answer|date of birth|birth ?date",

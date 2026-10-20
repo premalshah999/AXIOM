@@ -255,6 +255,28 @@ class BrowserUnavailable(RuntimeError):
     """The worker's desktop browser is not running; nothing was opened or sent."""
 
 
+def exception_diagnostics(exc):
+    """Class, first message line and last jobpilot frames of an exception, safe to store in events.
+
+    Never from a typing call, whose text can echo typed values; URLs and addresses are masked because a verification
+    link carries its token in the query. After the commit the controller used to replace every exception with one
+    sentence, so 8 unknown Greenhouse submissions on 2026-10-18/19 left no cause behind.
+    """
+    import traceback
+
+    own = [f for f in traceback.extract_tb(exc.__traceback__) if "/jobpilot/" in f.filename]
+    first = (str(exc).splitlines() or [""])[0]
+    if re.search(r"\b(?:fill|type|press|insert_?text|press_sequentially)\(", first):
+        first = ""
+    first = re.sub(r"https?://\S+", "<url>", first)
+    first = re.sub(r"[\w.+-]+@[\w-]+\.[\w.-]+", "<email>", first)
+    return {
+        "exception": type(exc).__name__,
+        "message": first[:200],
+        "locations": [f"{Path(f.filename).name}:{f.lineno}:{f.name}" for f in own[-5:]],
+    }
+
+
 class NavigationDecision(BaseModel):
     action: Literal[
         "fill",
@@ -1198,14 +1220,7 @@ class BrowserEngine:
                 )
                 if not self.armed
                 else "",
-                "diagnostics": {
-                    "exception": type(exc).__name__,
-                    # First line only, and never from a typing call, whose text can echo typed values.
-                    "message": ""
-                    if re.search(r"\b(?:fill|type|press|insert_?text|press_sequentially)\(", first := (str(exc).splitlines() or [""])[0])
-                    else first[:200],
-                    "locations": [f"{Path(f.filename).name}:{f.lineno}:{f.name}" for f in own[-5:]],
-                },
+                "diagnostics": exception_diagnostics(exc),
             }
             if confirmed := await self.confirm_post_commit():
                 self.result = confirmed
@@ -4332,6 +4347,7 @@ class BrowserEngine:
                     self.result = {
                         "state": "submission_unknown",
                         "reason": "Submission was attempted but its outcome could not be verified. Automatic retries are disabled.",
+                        "diagnostics": exception_diagnostics(exc),
                     }
                     return
                 from .widgets import interaction_failure
