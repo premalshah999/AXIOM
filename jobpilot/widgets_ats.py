@@ -105,8 +105,8 @@ def month_component(label):
 def pick_qualified(rows, wanted, state):
     """Pick the one offered row that qualifies a ZIP or city; anything ambiguous returns None.
 
-    CX remote address rows carry qualifiers, e.g. "Springfield, Montgomery, Maryland,
-    United States" for a city and "00000, Springfield, Maryland, United States" for a
+    CX remote address rows carry qualifiers, e.g. "Ann Arbor, Washtenaw, Michigan,
+    United States" for a city and "48104, Ann Arbor, Michigan, United States" for a
     ZIP, so exact equality with the bare value cannot match them. Split on the raw
     commas first: widgets.norm() strips punctuation, so it must run per segment.
     """

@@ -1357,7 +1357,7 @@ async def _rcm_paginated(frame, el, value):
                 if found:
                     break
             if not found:
-                # The entry can be spelled differently from the answer ("University of Maryland-College Park").
+                # The entry can be spelled differently from the answer ("University of Michigan-Ann Arbor").
                 listed = await frame.evaluate(RCM_LIST)
                 pick = next((t for t in listed if school_option_matches(text, t)), None) or best_option(
                     listed, text
@@ -2356,7 +2356,7 @@ async def shown_prompt_options(frame, container):
 
 
 def school_head(value):
-    """The institution part of a school name: "University of Maryland, College Park" -> "University of Maryland"."""
+    """The institution part of a school name: "University of Michigan, Ann Arbor" -> "University of Michigan"."""
     return re.split(r"\s*[,\u2013\u2014]\s*|\s+-\s+", str(value))[0].strip() or str(value)
 
 
@@ -2365,7 +2365,7 @@ def prompt_fallback_queries(value, school_scope=False):
     words = str(value).split()
     if not school_scope:
         return [words[0]] if len(words) > 1 else []
-    # "University of Maryland, College Park" -> "University of Maryland" -> "Maryland".
+    # "University of Michigan, Ann Arbor" -> "University of Michigan" -> "Michigan".
     head = re.split(r"\s*[,\u2013\u2014]\s*|\s+-\s+", str(value))[0].strip()
     generic = {
         "university",
@@ -2445,8 +2445,8 @@ async def prompt(frame, container, value, choose=None, school_scope=False):
             return committed
     await dismiss_pickers(frame)
     inp = await open_prompt(container)
-    # Workday school lists name the institution ("University of Maryland"): searching the profile's
-    # "University of Maryland, College Park" never matched and waited out the result wait before the
+    # Workday school lists name the institution ("University of Michigan"): searching the profile's
+    # "University of Michigan, Ann Arbor" never matched and waited out the result wait before the
     # fallback. school_option_matches still decides which campus may be committed.
     first = school_head(value) if school_scope else str(value)
     await inp.fill("", timeout=4000)
@@ -2484,8 +2484,8 @@ async def prompt(frame, container, value, choose=None, school_scope=False):
     fallbacks = [query for query in prompt_fallback_queries(value, school_scope) if query != first]
     for query in [] if choice else fallbacks:
         # Employer taxonomies may say "Management Information Systems" where
-        # the resume says "Information Systems", or "University of Maryland -
-        # College Park" where it says "..., College Park". Search a shorter term,
+        # the resume says "Information Systems", or "University of Michigan -
+        # Ann Arbor" where it says "..., Ann Arbor". Search a shorter term,
         # then select only from actual results using the original applicant context.
         await inp.fill("")
         before = await shown_prompt_options(frame, container)

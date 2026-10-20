@@ -797,16 +797,8 @@ INTENTS = [
     (re.compile(r"conditional job offer.{0,180}withdrawn", re.I), ["conditional_job_offer_withdrawn"]),
     (re.compile(r"FINRA.{0,60}licen[sc]|licen[sc].{0,60}FINRA", re.I), ["has_finra_licenses"]),
     (
-        re.compile(r"graduate.{0,80}(?:RiseUp|NextGen)|(?:RiseUp|NextGen).{0,80}graduate", re.I),
-        ["servicenow_riseup_graduate"],
-    ),
-    (
         re.compile(r"experience.{0,60}travel.{0,40}(?:extensively|for work)", re.I),
         ["past_extensive_work_travel"],
-    ),
-    (
-        re.compile(r"current employer.{0,60}(?:customer of|uses?).{0,15}ServiceNow", re.I),
-        ["current_employer_uses_servicenow"],
     ),
     (
         re.compile(
@@ -2759,8 +2751,8 @@ class Resolver:
         if SIGNATURE.search(f["label"]) and f.get("type") in {"text", "textarea"} and p.name:
             return Answer(field_id=f["id"], value=p.name, disposition="answer", evidence_ids=["profile:name"])
         addr = p.address
-        # The owner (2026-10-17): Springfield is the city, but closest-metropolitan-region questions, and Region
-        # pickers that do not offer that city (Taleo "Place of Residence"), take the saved metro region: Bethesda.
+        # An applicant's city can be a suburb. Closest-metropolitan-region questions, and Region pickers that do not
+        # offer that city (Taleo "Place of Residence"), take the saved metro region (facts.metro_region).
         metro = str((p.facts or {}).get("metro_region") or "").strip()
         metro_question = bool(
             re.search(r"\bmetro(?:politan)?\b.{0,20}\b(?:area|region)\b|\b(?:closest|nearest) (?:major )?(?:city|metro)", label)
@@ -3280,7 +3272,7 @@ class Resolver:
             return Answer(field_id=f["id"], disposition="skip", reason="No such history row") if region else None
         entry = entries[index]
         if region:
-            # A history row's State/Country come only from that row's own location ("College Park, MD" ->
+            # A history row's State/Country come only from that row's own location ("Ann Arbor, MI" ->
             # Maryland, United States; "Ahmedabad, India" -> India, no state), never from the home address.
             value = history_region(getattr(entry, "location", "") or "", region[1].startswith("country"))
             answer = self._ans(f, value, [f"profile:{kind}.{index}.location"]) if value else None

@@ -284,7 +284,7 @@ def relevant_fact(label, key):
         "termination": r"termination_history|ever_fired|involuntarily_discharged|asked_to_resign",
         "clearance": r"security_clearance|clearance_level",
         "prior_employment": r"previously_employed_here|previous_employee|employment_history_complete|"
-        r"previously_employed_at_applying_company|worked_at_linkedin_or_microsoft",
+        r"previously_employed_at_applying_company|\bworked_at_\w+",
         "client_relationship": r"company_relationships|client_relationships|company_connections",
         "corruption": r"corrupt|brib",
         "government": r"government|public_employ|official|politically_exposed|corrupt|brib",

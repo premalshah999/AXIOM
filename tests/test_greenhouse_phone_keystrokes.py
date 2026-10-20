@@ -41,7 +41,7 @@ def test_phone_comparison_ignores_the_country_prefix_and_format():
 
     phone = {"type": "tel", "label": "Phone"}
     assert widgets.same_value(phone, "+1 555-555-0100", "(555) 555-0100")
-    assert not widgets.same_value(phone, "+1 240-501-3451", "(555) 555-0100")
+    assert not widgets.same_value(phone, "+1 555-555-0101", "(555) 555-0100")
 
 
 async def test_prefilled_greenhouse_phone_is_retyped_once_per_run(page, tmp_path, service):
