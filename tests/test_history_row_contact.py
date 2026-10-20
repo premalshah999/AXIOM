@@ -14,10 +14,10 @@ def profile():
         address=Address(line1="1 Home St", city="Springfield", state="Maryland", postal_code="00000",
                         country="United States"),
         work=[
-            WorkEntry(company="Robert H. Smith School of Business", title="AI Engineer", location="College Park, MD",
-                      start="2025-12", current=True),
-            WorkEntry(company="Example AI", title="Data Science Intern", location="Ahmedabad, India",
-                      start="2023-08", end="2024-06"),
+            WorkEntry(company="Example Research Lab", title="Software Engineer", location="Ann Arbor, MI",
+                      start="2024-01", current=True),
+            WorkEntry(company="Example AI", title="Data Intern", location="Pune, India",
+                      start="2021-06", end="2022-05"),
         ],
     )
 
@@ -39,24 +39,24 @@ def test_employer_address_zip_and_phone_stay_blank(service):
 
 
 def test_a_rows_region_comes_from_its_own_location(service):
-    states = ["Maryland", "Virginia"]
+    states = ["Maryland", "Michigan", "Virginia"]
     countries = ["United States", "India"]
-    assert local(service, row("State", 1, "combobox", states)).value == "Maryland"
+    assert local(service, row("State", 1, "combobox", states)).value == "Michigan"
     assert local(service, row("Country", 1, "combobox", countries)).value == "United States"
     assert local(service, row("Country", 2, "combobox", countries)).value == "India"
-    # Ahmedabad's state is not recorded: never the home state, never a guess.
+    # Pune's state is not recorded: never the home state, never a guess.
     assert local(service, row("State", 2, "combobox", states)).disposition == "skip"
     # A row the profile does not have never borrows the home address.
     assert local(service, row("State", 5, "combobox", states)).disposition == "skip"
 
 
 def test_a_city_box_gets_the_city(service):
-    assert local(service, row("City", 2)).value == "Ahmedabad"
+    assert local(service, row("City", 2)).value == "Pune"
 
 
 def test_region_parsing():
-    assert history_region("College Park, MD", False) == "Maryland"
-    assert history_region("College Park, Maryland", True) == "United States"
-    assert history_region("Ahmedabad, Gujarat, India", False) == "Gujarat"
-    assert history_region("Ahmedabad, India", False) == ""
+    assert history_region("Ann Arbor, MI", False) == "Michigan"
+    assert history_region("Ann Arbor, Michigan", True) == "United States"
+    assert history_region("Pune, Maharashtra, India", False) == "Maharashtra"
+    assert history_region("Pune, India", False) == ""
     assert history_region("Remote", True) == ""

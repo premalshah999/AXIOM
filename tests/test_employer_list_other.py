@@ -1,6 +1,6 @@
 """Goldman Sachs' Oracle form asks "Name of Latest Employer" from a fixed company list (1-800 CONTACTS, Accenture,
 Robert Half International...). The applicant's employer is not on it, and the field never committed (2026-10-18).
-Only the list's own Other / not listed choice may commit; a similar name ("Robert Half" for "Robert H. Smith") never."""
+Only the list's own Other / not listed choice may commit; a similar name ("Robert Half" for "Robert H. Example") never."""
 
 from unittest.mock import AsyncMock
 
@@ -31,12 +31,12 @@ async def test_an_unlisted_employer_commits_only_the_lists_other(page, companies
     choose = AsyncMock(return_value="Robert Half International")
     if expected:
         chosen = await widgets.combobox(page.main_frame, page.locator("#employer"),
-                                        "Robert H. Smith School of Business", choose=choose, employer_scope=True)
+                                        "Robert H. Example Institute", choose=choose, employer_scope=True)
         assert chosen == expected and await page.evaluate("window.picked") == expected
     else:
         with pytest.raises(ValueError):
             await widgets.combobox(page.main_frame, page.locator("#employer"),
-                                   "Robert H. Smith School of Business", choose=choose, employer_scope=True)
+                                   "Robert H. Example Institute", choose=choose, employer_scope=True)
         assert await page.evaluate("window.picked") is None
     choose.assert_not_called()
 
@@ -73,6 +73,6 @@ async def test_oracle_driver_commits_the_lists_other_for_an_unlisted_employer(pa
     await page.goto(ORACLE_URL)
     field = {"id": "employer", "label": "Name of Latest Employer", "type": "combobox"}
     committed = await select_combo(page.main_frame, page.locator("#employer"), field,
-                                   "Robert H. Smith School of Business", AsyncMock(return_value=None))
+                                   "Robert H. Example Institute", AsyncMock(return_value=None))
     assert committed == "Other"
     assert await page.evaluate("window.picked") == "Other"

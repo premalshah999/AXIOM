@@ -122,7 +122,7 @@ Fixes, each with a failing test first:
    next write. HPE: 6 fields × ~31 s deadline; 95 such deadlines across 15 runs. `FormSession.live_locator`/`retag`
    adopt the rebuilt control by its unique name, else rescan once. `discover_options` no longer runs a full scan per
    picker.
-2. **5ce5045 — school prompt searches the institution first.** "University of Maryland", not "…, College Park".
+2. **5ce5045 — school prompt searches the institution first.** "University of Michigan", not "…, Ann Arbor".
 3. **f8eb717 — `wait_options(changed_from=…)`.** A settled list that replaced the pre-search list counts as the
    result. Requiring the query text cost 4 s per search; Field of Study was taking 7–10 s.
 4. **d7611cd — dropdowns and majors.**

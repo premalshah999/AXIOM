@@ -146,17 +146,17 @@ def test_location_city_picks_recorded_city_in_recorded_state(service):
     from jobpilot.schemas import Address
 
     r = Resolver(
-        profile(address=Address(city="College Park", state="MD", country="United States")),
+        profile(address=Address(city="Springfield", state="MD", country="United States")),
         service.db,
         service.config,
     )
     options = [
-        "College Park, Georgia, United States",
-        "College Park, Maryland, United States",
-        "Collegeville, PA",
+        "Springfield, Illinois, United States",
+        "Springfield, Maryland, United States",
+        "Springfield Gardens, NY",
     ]
     assert (
-        r.policy_choice(field("Location (City)", options), options) == "College Park, Maryland, United States"
+        r.policy_choice(field("Location (City)", options), options) == "Springfield, Maryland, United States"
     )
     assert (
         r.policy_choice(field("City", ["Baltimore, MD", "Rockville, MD"]), ["Baltimore, MD", "Rockville, MD"])

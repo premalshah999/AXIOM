@@ -103,7 +103,7 @@ application:
 
 | Area | Facts |
 |---|---|
-| Work authorization | `work_authorization_US`, `requires_future_sponsorship_US`, `current_immigration_status_US` (e.g. "OPT; expiration July 2029", "U.S. citizen", "H-1B"), `us_citizen`, `citizenship` |
+| Work authorization | `work_authorization_US`, `requires_future_sponsorship_US`, `current_immigration_status_US` (e.g. "OPT; expiration June 2030", "U.S. citizen", "H-1B"), `us_citizen`, `citizenship` |
 | Background | `criminal_conviction`, `has_non_compete`, `has_non_solicitation`, `has_employment_restrictions`, `ever_fired` |
 | Relationships | `previously_employed_here`, `has_relatives_at_employer`, `government_employment_history`, `government_official`, `company_relationships` |
 | Export control | `export_control_restricted_country_history`, `has_asylee_status` |

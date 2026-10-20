@@ -51,9 +51,10 @@ to resume is either here or linked from here. Update the **Status board** whenev
 | New canonical repo (this one) | `~/Desktop/applypilot/axiom` → GitHub `premalshah999/AXIOM` (`main`) |
 | Legacy, October 4 (redacted) | AXIOM branch `legacy/oct-04` |
 | Legacy, before the overhaul (redacted) | AXIOM branch `legacy/oct-20` |
-| Old production source (until cut-over) | `~/Desktop/applypilot/v3` (repo `ApplyPilot`, branch `v3-oct17`, head `2755c37`) |
-| Live compose project | `~/Desktop/applypilot/ApplyPilot/compose.yaml` (containers `applypilot-app-1`, `applypilot-db-1`, `applypilot-browser-cleanup-1`) |
-| Deploy, status and SQL helpers (old layout) | `~/Desktop/applypilot/codex-handoff/bin/` (`deploy.sh`, `q.sh`, `api.sh`, `hold.sh`) |
+| Old production source (before the cut-over; legacy) | `~/Desktop/applypilot/v3` (repo `ApplyPilot`, branch `v3-oct17`) |
+| Live compose project (since the 2026-10-20 cut-over) | `~/Desktop/applypilot/axiom/compose.yaml` with `axiom/.env` (project `applypilot`; containers `applypilot-app-1`, `applypilot-db-1`) |
+| Deploy | `cd ~/Desktop/applypilot/axiom && docker compose up -d --build --no-deps app`, between `hold.sh draining` and `hold.sh complete` |
+| Status and SQL helpers | `~/Desktop/applypilot/codex-handoff/bin/` (`q.sh` read-only SQL, `api.sh`, `hold.sh`). `deploy.sh` is retired: it patch-builds the old tree |
 | REA maps, tools, findings | `docs/rea/` |
 | Agent worktrees | `~/Desktop/applypilot/axiom-wt/<workstream>` on branch `agent/<workstream>` |
 
@@ -112,6 +113,13 @@ passes before each production deploy.
 | 2026-10-20 00:10 | All five agents stopped on the first account's session limit with one commit between them (QA: `.gitignore` hid `jobpilot/data/employer_catalog.json`, so a fresh clone could not start; cherry-picked to `main`) | done |
 | 2026-10-20 | Second account. **At most two agents run at once.** Forensics and infra resumed; architecture, QA and performance are queued | in progress |
 | 2026-10-20 | Knowledge base and validators (orchestrator, `main`). Every refusal since October 14 reviewed; status-defined sponsorship answers (University of Chicago, Intel), U.S.-person status, background-check consent, e-signatures, topic and critical-regex false positives. Two wrong deterministic answers fixed (Intel "No" through a DACA shortcut; background-check willingness "No"). `docs/KNOWLEDGE.md` and `tests/test_screening_validation.py` | done, deploy pending |
+| 2026-10-20 | Infra merged (`a2c3a2a`): one image, `app` + `db` compose, pinned versions, 6+2 topology (`jobpilot/specialist.py`), CI, `docs/INFRA.md`, `docs/SETUP.md`. Forensics merged (`d34ea60`): `docs/forensics/FAILURE_ANALYSIS.md`, embedded Greenhouse code fix, exception diagnostics, masked-phone repair guard | done |
+| 2026-10-20 | Production: 12 hidden successes reconciled to `confirmed` (Perpay, Ford, Texas Instruments, United Placement, Booz Allen ×2, Chewy, HPE ×3, Viridien, Visa) from their recorded triage evidence | done |
+| 2026-10-20 ~02:00 | **Cut-over: production now runs from `axiom` `main` (`b49ee2a`).** `axiom/.env` was made from the old `.env`: `COMPOSE_PROJECT_NAME=applypilot`, the existing `POSTGRES_PASSWORD`, `NORMAL_WORKERS=6`, `SPECIALIST_WORKERS=2`. `docker compose up -d --remove-orphans` recreated `applypilot-app-1` and `applypilot-db-1` (volumes kept) and removed `browser-cleanup`. Deploy from now on: `cd ~/Desktop/applypilot/axiom && docker compose up -d --build --no-deps app`, under the hold. The old `ApplyPilot/compose.yaml` and `codex-handoff/bin/deploy.sh` must not be used again | done; hold release and post-checks pending |
+| 2026-10-20 | Hold released after the cut-over checks: data intact (5,899 jobs, 4,998 runs, 678 facts); runtime reports 6 normal + 2 specialist workers, scheduler active. `job_token_cap` restored to 600,000 (company limit 12) | done |
+| 2026-10-20 | The other 47 `submission_unknown` jobs triaged read-only against their saved final pages: none shows a confirmation (most have no saved page). They stay unknown; `autopilot.resubmit_unknown` decides them with its receipt check | done |
+| last step | Turn the job board's auto-apply back on (`PUT /api/job-board/settings` with `auto_apply: true`; it starts a batch of `batch_target`), unpause the held jobs (Schwab ×3, By Light), after the final deploy. Atlassian and the duplicate iPipeline stay paused | pending |
+| 2026-10-20 | Personal details removed from tests and REA docs before pushing: the owner's school, former employer, internship city, county, metro region and OPT expiry date are replaced with synthetic equivalents | done |
 | 2026-10-20 | De-personalization leftovers found on the way: a hard-coded home town in `jobboard.US_PLACE` (removed); surname leftovers in tests and comments (fixed); an absolute scratch path in `docs/rea/tools/drive.mjs` (fixed). Owner-specific comments ("Springfield", "Bethesda") remain for the architecture pass | partly done |
 
 ## How to resume

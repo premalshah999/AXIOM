@@ -11,8 +11,8 @@ def test_closest_option_uses_synonyms_containment_and_degree_level():
     assert closest_option("Asian Indian", races) == "Asian"
     degrees = ["High School", "Bachelor's Degree", "Master's Degree", "Doctorate"]
     assert closest_option("MS Data Science", degrees) == "Master's Degree"
-    schools = ["University of Maryland", "University of Maryland Baltimore County", "Maryland Institute College of Art"]
-    assert closest_option("University of Maryland, College Park", schools) == "University of Maryland"
+    schools = ["University of Michigan", "University of Michigan-Dearborn", "Michigan Technological University"]
+    assert closest_option("University of Michigan, Ann Arbor", schools) == "University of Michigan"
 
 
 def test_negation_and_ambiguity_never_pick_an_option():

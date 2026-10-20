@@ -3273,7 +3273,7 @@ class Resolver:
         entry = entries[index]
         if region:
             # A history row's State/Country come only from that row's own location ("Ann Arbor, MI" ->
-            # Maryland, United States; "Ahmedabad, India" -> India, no state), never from the home address.
+            # Michigan, United States; "Pune, India" -> India, no state), never from the home address.
             value = history_region(getattr(entry, "location", "") or "", region[1].startswith("country"))
             answer = self._ans(f, value, [f"profile:{kind}.{index}.location"]) if value else None
             return answer or Answer(
@@ -3289,7 +3289,7 @@ class Resolver:
                 return None  # A history date/name cannot establish a checkbox proposition.
             value = getattr(entry, attr)
             if attr == "location" and value and re.fullmatch(r"(?:city|town)", normalize(f["label"])):
-                value = str(value).split(",")[0].strip()  # "Ahmedabad, India" -> "Ahmedabad" in a City box
+                value = str(value).split(",")[0].strip()  # "Pune, India" -> "Pune" in a City box
             if attr == "current":
                 value = "true" if value else "false"
                 if f.get("type") != "checkbox":

@@ -102,7 +102,7 @@ Why, case by case:
 - REA, observing SmartRecruiters (`ev_14e7c1a4…`): before typing, 0 options. Typing "Bethes" fired exactly one
   debounced request, `GET /oneclick-ui/api/location/autocomplete?q=Bethes` (Angular zone XHR), and 4 options
   appeared.
-- The accessibility tree (`ev_a5726c46…`) names them "Bethesda, MD, US", "Bethesda, OH, US", "Bethesda, Wales,
+- The accessibility tree (`ev_a5726c46…`) names them "Springfield, MD, US", "Springfield, OH, US", "Springfield, Wales,
   United Kingdom" and "Cannot find your city? Click here to fill in manually". The last one is an action, not a
   value.
 - Reading these fields before typing can only fail.
@@ -170,7 +170,7 @@ bots. We have never filled it, since no event mentions it. Make it a hard rule: 
 
 ## Not the problem (checked, so don't spend time here)
 
-- **SmartRecruiters shadow-DOM option text.** `visible_options` reads it correctly ("Bethesda, MD, US").
+- **SmartRecruiters shadow-DOM option text.** `visible_options` reads it correctly ("Springfield, MD, US").
 - **Permanent menus on other ATSs.** None on the public Workday, Oracle, SuccessFactors, iCIMS, Taleo, Eightfold
   or SmartRecruiters pages. Application pages behind login weren't checked.
 

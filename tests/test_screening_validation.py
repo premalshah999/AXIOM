@@ -21,7 +21,7 @@ OPT_FACTS = {
     "us_citizen": False,
     "citizenship": "Canada",
     "country_of_citizenship": "Canada",
-    "current_immigration_status_US": "OPT; expiration July 2029",
+    "current_immigration_status_US": "OPT; expiration June 2030",
     "requires_future_sponsorship_US": False,
     "work_authorization_US": "Yes, authorized to work for any employer in the USA (applicant confirmed)",
     "has_asylee_status": False,

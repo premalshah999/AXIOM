@@ -38,7 +38,7 @@ def test_owner_answer_not_offered_falls_to_other_or_asks(service):
 
 
 def test_education_closest_then_top_three_then_other(service):
-    edu = [EducationEntry(school="University of Maryland, College Park", degree="Master of Science", field_of_study="Data Science")]
+    edu = [EducationEntry(school="University of Michigan, Ann Arbor", degree="Master of Science", field_of_study="Data Science")]
     r = resolver(service, education=edu)
     # The owner's approved equivalent (Computer Science) still wins whenever it is offered.
     assert r.local(field("Major", ["Computer Science", "Data Analytics", "History"])).value == "Computer Science"

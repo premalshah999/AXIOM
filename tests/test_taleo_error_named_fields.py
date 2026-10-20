@@ -15,7 +15,7 @@ ERRORS = (
 PAGE = f"""<div role="alert">{ERRORS}</div>
 <label for="country">Country *</label><select id="country" required><option></option><option selected>United States</option></select>
 <label for="state">State/Province *</label><select id="state" required><option></option><option selected>Maryland</option></select>
-<label for="region">Region</label><select id="region"><option></option><option>Prince George's County</option><option>Montgomery County</option></select>
+<label for="region">Region</label><select id="region"><option></option><option>Anne Arundel County</option><option>Howard County</option></select>
 <label for="primary">Primary Number *</label><select id="primary" required><option></option><option>Home Phone</option><option>Cellular Phone</option><option>Work Phone</option></select>
 <label for="home">Home Phone Number</label><input id="home">
 <label for="cell">Cellular Number</label><input id="cell">
@@ -102,7 +102,7 @@ async def test_a_page_demanded_field_without_an_answer_becomes_an_owner_question
     report = await form.fill_current()
     region = next((p for p in report["pending"] if p.get("question", "").startswith("Region")), {})
     assert region.get("blocker_type") == "missing_fact"
-    assert "Montgomery County" in region.get("options", [])
+    assert "Howard County" in region.get("options", [])
 
 
 async def test_a_gpa_the_page_calls_invalid_is_written_as_a_number(page, tmp_path):

@@ -40,14 +40,14 @@ async def test_model_cannot_commit_unoffered_catalog_value(page):
 def test_school_prompt_fallback_queries_keep_the_institution():
     from jobpilot.widgets import prompt_fallback_queries, school_option_matches
 
-    queries = prompt_fallback_queries("University of Maryland, College Park", school_scope=True)
-    assert queries == ["University of Maryland", "Maryland", "Other"]
+    queries = prompt_fallback_queries("University of Michigan, Ann Arbor", school_scope=True)
+    assert queries == ["University of Michigan", "Michigan", "Other"]
     # Shorter searches never widen what may be selected.
     assert school_option_matches(
-        "University of Maryland, College Park", "University of Maryland - College Park"
+        "University of Michigan, Ann Arbor", "University of Michigan - Ann Arbor"
     )
     assert not school_option_matches(
-        "University of Maryland, College Park", "University of Maryland Global Campus"
+        "University of Michigan, Ann Arbor", "University of Michigan-Dearborn"
     )
     assert prompt_fallback_queries("Information Systems") == ["Information"]
 
@@ -380,7 +380,7 @@ def test_pick_qualified_city_commits_the_row_in_the_applicant_state():
     from jobpilot.widgets_ats import pick_qualified
 
     rows = [
-        {"text": "Springfield, Montgomery, Maryland, United States"},
+        {"text": "Springfield, Washington, Maryland, United States"},
         {"text": "Springfield, Shelby, Tennessee, United States"},
     ]
     assert pick_qualified(rows, "Springfield", "MD") == rows[0]
@@ -416,13 +416,13 @@ async def test_oracle_options_read_grid_rows_of_its_own_listbox_only(page):
 
     await page.set_content("""<input id=city role=combobox aria-controls=city-listbox popup=grid>
       <div id=city-listbox role=grid>
-        <div role=row><div role=gridcell>Springfield, Montgomery, Maryland, United States</div></div>
+        <div role=row><div role=gridcell>Springfield, Washington, Maryland, United States</div></div>
         <div role=row><div role=gridcell>Springfield, Shelby, Tennessee, United States</div></div>
       </div>
       <div id=sibling-listbox role=grid><div role=row><div role=gridcell>Sibling popup row</div></div></div>""")
     texts = [o["text"] for o in await _options(page.locator("#city"), "oracle")]
     assert texts == [
-        "Springfield, Montgomery, Maryland, United States",
+        "Springfield, Washington, Maryland, United States",
         "Springfield, Shelby, Tennessee, United States",
     ]
 
@@ -459,8 +459,8 @@ async def test_unexplained_state_event_records_path_ids_and_title(page):
 
 
 async def test_school_prompt_searches_the_institution_first(page):
-    """Workday school lists name the institution ("University of Maryland"); a search for the profile's full
-    "University of Maryland, College Park" never matched and waited out its 4 s before the fallback (School or
+    """Workday school lists name the institution ("University of Michigan"); a search for the profile's full
+    "University of Michigan, Ann Arbor" never matched and waited out its 4 s before the fallback (School or
     University was the top Workday prompt failure on 10-17)."""
     import time
 
@@ -471,9 +471,9 @@ async def test_school_prompt_searches_the_institution_first(page):
       <script>
       window.queries=[];
       function search(q){window.queries.push(q);const m=document.getElementById('menu');m.hidden=false;
-        m.innerHTML = q==='University of Maryland'
-          ? '<div role=option data-automation-id=promptOption onclick="pick(this)">University of Maryland</div>'
-            + '<div role=option data-automation-id=promptOption onclick="pick(this)">University of Maryland Global Campus</div>'
+        m.innerHTML = q==='University of Michigan'
+          ? '<div role=option data-automation-id=promptOption onclick="pick(this)">University of Michigan</div>'
+            + '<div role=option data-automation-id=promptOption onclick="pick(this)">University of Michigan-Dearborn</div>'
           : '<div role=option>No Items.</div>';
       }
       function pick(e){document.getElementById('school').insertAdjacentHTML('beforeend',
@@ -481,10 +481,10 @@ async def test_school_prompt_searches_the_institution_first(page):
       </script>""")
     started = time.monotonic()
     chosen = await widgets.prompt(
-        page.main_frame, page.locator("#school"), "University of Maryland, College Park", school_scope=True
+        page.main_frame, page.locator("#school"), "University of Michigan, Ann Arbor", school_scope=True
     )
-    assert chosen == "University of Maryland"
-    assert await page.evaluate("window.queries") == ["University of Maryland"]
+    assert chosen == "University of Michigan"
+    assert await page.evaluate("window.queries") == ["University of Michigan"]
     assert time.monotonic() - started < 3
 
 

@@ -12,7 +12,7 @@ CAPITAL_ONE = (
 )
 FACTS = {
     "requires_future_sponsorship_US": False,
-    "current_immigration_status_US": "OPT; expiration July 2029",
+    "current_immigration_status_US": "OPT; expiration June 2030",
 }
 
 
