@@ -84,3 +84,21 @@ def test_the_dashboard_is_built_by_the_image_not_copied_from_a_laptop():
     text = dockerfile()
     assert "COPY --from=dashboard /build/jobpilot/static ./jobpilot/static" in text
     assert "outDir: \"../jobpilot/static\"" in (ROOT / "frontend" / "vite.config.ts").read_text()
+
+
+def test_ci_takes_its_runtime_versions_from_the_repository():
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    assert "node-version-file: .nvmrc" in ci and not re.search(r"^\s*node-version:", ci, re.M)
+    assert "python-version:" not in ci, "setup-uv reads .python-version"
+    assert f'version: "{build_args()["UV_VERSION"]}"' in ci, "CI and the image must use the same uv"
+
+
+def test_ci_covers_lint_tests_dashboard_and_the_image():
+    ci = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text())
+    assert {"python", "browser", "dashboard", "image"} <= set(ci["jobs"])
+    assert ci["permissions"] == {"contents": "read"}
+    steps = " ".join(str(step) for step in ci["jobs"]["python"]["steps"])
+    assert 'pytest -q -m "not browser"' in steps and "ruff check" in steps
+    assert ci["jobs"]["browser"]["continue-on-error"] is True, "browser tests stay advisory until they are stable"
+    image = " ".join(str(step) for step in ci["jobs"]["image"]["steps"])
+    assert "scripts/setup.sh" in image and "docker compose up -d --build --wait" in image
