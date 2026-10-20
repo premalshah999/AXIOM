@@ -1,5 +1,7 @@
 """Capital One 2026-10-14: a question that defines Yes for OPT support is answered Yes for an OPT applicant."""
 
+import pytest
+
 from jobpilot.answer_context import status_defined_answer
 from jobpilot.answers import Resolver
 from jobpilot.schemas import Profile
@@ -41,3 +43,25 @@ def test_resolver_answers_yes_and_validator_accepts_it(service):
     assert answer.value == "Yes" and answer.evidence_ids == ["fact:current_immigration_status_US"]
     facts, evidence, learned = r.answer_sources()
     assert r._validate_answer(field, answer, facts, evidence, learned).disposition == "answer"
+
+
+# The question lists the statuses it excludes as well as those it defines (review of the answer validation, 2026-10-20):
+# "other than F-1 OPT" was read as naming F-1 OPT, so an OPT applicant was told to answer Yes.
+OPT = {"current_immigration_status_us": "F-1 OPT"}
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        'Select "Yes" if you hold a work visa other than F-1 OPT.',
+        'Select "Yes" if you need sponsorship (excluding F-1 OPT and CPT).',
+        'Answer "Yes" if you hold any nonimmigrant visa, except OPT.',
+    ],
+)
+def test_a_status_the_question_excludes_does_not_define_the_answer(label):
+    assert status_defined_answer(f"Will you require sponsorship? {label}", OPT) is None
+
+
+def test_a_status_the_question_lists_still_defines_the_answer():
+    label = 'Will you require sponsorship? Select "Yes" if you hold a visa such as H-1B or F-1 OPT.'
+    assert status_defined_answer(label, OPT) == (True, ["fact:current_immigration_status_US"])
