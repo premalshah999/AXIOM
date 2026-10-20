@@ -122,7 +122,16 @@ def create_app(config: Settings | None = None):
 
         service.outbox_running = True
         outbox_task = asyncio.create_task(poll_outbox(service))
+        load_task = None
+        if config.enable_workers:
+            from .host_health import watch as watch_host
+
+            # Samples how late the event loop runs; the gates in host_health read it (docs/forensics, 4.2).
+            load_task = asyncio.create_task(watch_host(db))
         yield
+        if load_task:
+            load_task.cancel()
+            await asyncio.gather(load_task, return_exceptions=True)
         outbox_task.cancel()
         await asyncio.gather(outbox_task, return_exceptions=True)
         service.outbox_running = False
@@ -551,6 +560,7 @@ def create_app(config: Settings | None = None):
     def runtime_health():
         from .runtime import engine_version
         from .db import Outbox
+        from . import host_health
         from .provider_health import selected
         from .pipeline_comparison import snapshot as application_workers
 
@@ -558,6 +568,7 @@ def create_app(config: Settings | None = None):
             pending = s.scalar(select(func.count()).select_from(Outbox).where(Outbox.state != "delivered"))
         return {
             "engine_version": engine_version(),
+            "host": host_health.snapshot(db),
             "scheduler": db.get_setting("scheduler_health", {}),
             "heartbeat": db.get_setting("scheduler_heartbeat", {}),
             "outbox_pending": pending,

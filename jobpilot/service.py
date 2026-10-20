@@ -293,12 +293,13 @@ class Service:
 
         if controller_policy is not None:
             validate_policy(controller_policy)
-        from .provider_health import dispatch_limit
+        from .provider_health import dispatch_gate
 
-        if not dispatch_limit(self.db, self.config):
+        gate = dispatch_gate(self.db, self.config)
+        if not gate.limit:
             raise QueueBlocked(
-                "The selected model is cooling down after failed requests; saved work is retained",
-                code="provider_unavailable",
+                gate.reason,
+                code=gate.code,
                 outcome="deferred",
                 not_before=(datetime.now(UTC) + timedelta(seconds=30)).isoformat(),
             )
@@ -427,7 +428,14 @@ class Service:
                     or (
                         # Lease waits sent nothing, so a carried-over repair count must not strand them.
                         recovery_row.value.get("cause")
-                        not in {"email_matched", "sender_busy", "browser_unavailable", "provider_unavailable", "worker_interrupted"}
+                        not in {
+                            "email_matched",
+                            "sender_busy",
+                            "browser_unavailable",
+                            "provider_unavailable",
+                            "worker_interrupted",
+                            "host_overloaded",
+                        }
                         and exhausted
                     )
                     or not source
@@ -886,6 +894,17 @@ class Service:
                     )
             if state not in TERMINAL:
                 state = "failed"
+            from . import host_health
+
+            if overloaded := host_health.host_overloaded_result(
+                result, run_state=run.state, started_at=run.started_at
+            ):
+                # The clock ran out while the host's event loop was running late (host_health): not the form's fault
+                # and nothing was sent, so this start is free and the retry waits for the host to recover.
+                result = overloaded
+            host_health.note_browser(
+                s, state=state, reason=result.get("reason", ""), started_at=run.started_at
+            )
             evidence = result.get("receipt", {})
             website_proof = (
                 evidence.get("type") == "explicit_confirmation_page"
@@ -1429,6 +1448,7 @@ class Service:
         first_attempt = False
         while True:
             claimed = False
+            idle = 1
             with self.db.exclusive() as s:
                 row = s.get(Run, run_id)
                 if not row or row.state != "queued":
@@ -1443,6 +1463,12 @@ class Service:
                     return
                 if s.get(Setting, "control").value.get("paused"):
                     return
+                from . import host_health
+
+                if host_health.draining():
+                    return  # The server is stopping: the run stays queued and starts after the restart.
+                # A run queued earlier still waits while the host runs late or the worker Chrome is gone.
+                gate = host_health.check(self.config.workers, session=s)
                 from .application_budget import require_allowance
 
                 try:
@@ -1485,8 +1511,15 @@ class Service:
 
                 current_job = s.get(Job, row.job_id)
                 recovery_row = s.get(Setting, "draft_recovery:" + row.job_id)
+                # An emailed code expires: a continuation is not held back for load, only for a dead browser or a stop.
+                urgent = bool(row.packet.get("email_wait_resume") or row.packet.get("verification_only"))
+                allowed = (
+                    self.config.workers
+                    if urgent and gate.code in {"host_loaded", "host_overloaded"}
+                    else min(self.config.workers, gate.limit)
+                )
                 if (
-                    occupied < self.config.workers
+                    occupied < allowed
                     and not same_employer
                     and slots(s, row, self.config.topology)
                     and may_start(s, current_job, row)
@@ -1511,9 +1544,11 @@ class Service:
                     s.get(Job, row.job_id).status = "running"
                     run, job = record(row), record(s.get(Job, row.job_id))
                     claimed = True
+                else:
+                    idle = 5 if gate.limit == 0 else 1
             if claimed:
                 break
-            await asyncio.sleep(1)
+            await asyncio.sleep(idle)
         started = time.monotonic()
         try:
             with self.db.session() as s:
