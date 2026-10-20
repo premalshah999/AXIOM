@@ -7,7 +7,6 @@ import re
 from datetime import UTC, datetime, timedelta
 
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 
 from .._store import digest, norm, now
 from ..knowledge.employers import tenant_alias
@@ -198,7 +197,3 @@ def protected(s, url: str) -> bool:
     except Exception:
         return False
     return s.get(Setting, guard_key(identity)) is not None
-
-
-def known_requisitions(s, keys):
-    return {r.id: r for r in s.scalars(select(DcRequisition).where(DcRequisition.id.in_(list(keys))))}

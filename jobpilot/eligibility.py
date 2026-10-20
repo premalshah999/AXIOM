@@ -15,7 +15,7 @@ from bs4 import BeautifulSoup
 from sqlalchemy import select
 
 from .answer_context import SPONSOR_KEYS, boolean
-from .db import Job, Run
+from .db import Run
 
 
 STATUS_KEYS = {"visa_status", "current_immigration_status_us", "current_visa_status_us"}
@@ -225,41 +225,3 @@ def require_eligibility(session, job, profile, data_dir=None):
             code="eligibility_conflict",
         )
     return check
-
-
-def backfill_candidates(session, profile, data_dir=None, limit=100):
-    """Report only; no state mutation, model call, queue action or submission replay."""
-    candidates = []
-    for job in session.scalars(
-        select(Job)
-        .where(
-            Job.demo.is_(False),
-            Job.status.in_(["ready", "review", "failed", "needs_review", "waiting_answer"]),
-        )
-        .order_by(Job.id)
-    ):
-        if session.scalar(
-            select(Run.id)
-            .where(
-                Run.job_id == job.id,
-                Run.state.in_(
-                    ["queued", "running", "submitting", "confirmed", "submission_unknown", "already_applied"]
-                ),
-            )
-            .limit(1)
-        ):
-            continue
-        check = eligibility_for_job(session, job, profile, data_dir)
-        if check.conflicts or check.uncertainties:
-            candidates.append(
-                {
-                    "job_id": job.id,
-                    "status": job.status,
-                    "verdict": "unmet" if check.conflicts else "unknown",
-                    "sources": sorted({f.source for f in check.findings}),
-                    "subjects": sorted({f.subject for f in check.findings}),
-                }
-            )
-        if len(candidates) >= limit:
-            break
-    return candidates

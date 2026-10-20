@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass
 
 from .._store import norm
-from .evidence import Inventory, Unit
+from .evidence import Inventory
 
 REQ_HEAD = re.compile(
     r"^\s*(?:requirements|qualifications|minimum qualifications|basic qualifications|required|"
@@ -105,7 +105,3 @@ def select(
     t = norm(description)
     skills = sorted(inv.skills, key=lambda s: (not contains(t, s), inv.skills.index(s)))
     return Selection(roles, projects, skills, kw, optional)
-
-
-def rendered_units(sel: Selection) -> list[Unit]:
-    return [u for units in list(sel.roles.values()) + list(sel.projects.values()) for u in units]
