@@ -47,7 +47,7 @@ US_PLACE = re.compile(
     r"Washington[ ,]+DC|District of Columbia|Chicago|Austin|Dallas|Houston|"
     r"Atlanta|Denver|Pittsburgh|Philadelphia|Phoenix|Charlotte|Raleigh|"
     r"Minneapolis|Salt Lake City|Mountain View|Sunnyvale|Palo Alto|Redmond|"
-    r"Arlington[ ,]+(?:VA|Virginia)|Springfield[ ,]+MD|"
+    r"Arlington[ ,]+(?:VA|Virginia)|"
     r"California|Massachusetts|Maryland|Virginia|Texas|Colorado|New Jersey|"
     r"[A-Za-z .]+,[ ]*(?:CA|NY|WA|MA|VA|MD|IL|TX|CO|AZ|NC|NJ|GA|PA|FL|OH|UT|OR|MI|MN|WI)\b)",
     re.I,

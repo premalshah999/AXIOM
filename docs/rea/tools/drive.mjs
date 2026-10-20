@@ -3,7 +3,7 @@
 //   goto URL | click CSS | clicktext TEXT | fill CSS TEXT | type CSS TEXT [delayMs] | press CSS KEY
 //   count CSS | texts CSS [max] | url | shot FILE | frames | wait MS
 import { createRequire } from "node:module";
-const require = createRequire("/private/tmp/claude-501/-Users-AlexQshah-Desktop-applypilot/5b02cb92-d861-4883-a359-df644dc8574e/scratchpad/rea-tool/node_modules/");
+const require = createRequire(import.meta.url);
 const { chromium } = require("playwright-core");
 const [cmd, a, b, c] = process.argv.slice(2);
 const browser = await chromium.connectOverCDP("http://127.0.0.1:9339");

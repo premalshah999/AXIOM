@@ -14,7 +14,7 @@ import time
 from uuid import uuid4
 
 from .schemas import ReviewedAnswer
-from .answer_context import semantic_text
+from .answer_context import US_PERSON_CLASS, semantic_text, us_person_question
 
 
 async def organize(db, config):
@@ -74,11 +74,23 @@ DATA_USE_CONSENT = re.compile(
 )
 
 
+# Government employment or office. A government-issued ID, a federal contractor's EEO notice and an "employer
+# sponsored" activity are not; the Department of Defense is ("serve as an official or employee of the DoD").
+GOVERNMENT = (
+    r"\bgovernment(?![- ]issued)(?!\s+(?:id|identification|photo|contractor)\b)|public (?:institution|sector|university)|"
+    r"department of defense|\bdod\b|federal (?:agency|employee)|public official"
+)
+# "If your work is under NDA, describe what you built" is an instruction, not a question about an agreement.
+NDA_INSTRUCTION = re.compile(r"\bif\b[^.?;]{0,60}\bunder (?:an? )?(?:nda|non.?disclosure)\b", re.I)
+
+
 def _topic(text):
     for name, pattern in [
         (
             "export_control",
-            r"export.?control|export.{0,20}regulat|sanction|embargo|restricted countr|import/export",
+            r"export.?control|export.{0,20}regulat|sanction|embargo|restricted countr|import/export|"
+            r"\b(?:nationals?|citizens?|residents?)\b.{0,80}\b(?:cuba|iran|north korea|syria|crimea)\b|"
+            r"foreign countr(?:y|ies) of (?:risk|concern)|foreign talent",
         ),
         (
             "source",
@@ -87,7 +99,8 @@ def _topic(text):
         (
             "client_relationship",
             r"organization.{0,250}(?:client|partner)|client.{0,200}(?:prime contractor|partner)|"
-            r"(?:employed|professional relationship).{0,150}\bclient\b",
+            r"(?:employed|professional relationship).{0,150}\bclient\b|"
+            r"\b(?:negotiate|influence|sign)\b.{0,60}\bcontracts?\b",
         ),
         (
             "clearance",
@@ -98,16 +111,21 @@ def _topic(text):
             # not the applicant's own employment.
             "referral",
             r"\b(?:relatives?|related (?:to|persons?|individuals?|parties)|family members?|spouse|domestic partner|"
-            r"close personal relationship)\W{0,3}s?\b.{0,120}(?:employ|work)",
+            r"close personal relationship)\W{0,3}s?\b.{0,120}(?:employ|work|colleague|coworker|co-worker|staff)",
         ),
         (
             "prior_employment",
             r"(?:previously|ever|formerly|currently) (?:been )?(?:employed|worked|work) (?:by|for|at|with)"
             r"(?![^?]*(?:government|public (?:institution|sector)|military))|"
             r"(?:current or former|former|current) employee (?:of|at|for)|"
-            r"(?:have you|are you|were you).{0,35}(?:worked for|employed by) (?:this|our) (?:organi[sz]ation|company)",
+            r"(?:have you|are you|were you).{0,35}(?:worked for|employed by) (?:this|our) (?:organi[sz]ation|company)|"
+            r"\b(?:current|former|active)\b.{0,25}\b(?:contractor|consultant)s?\b",
         ),
-        ("sponsorship", r"sponsor|" + IMMIGRATION_VISA),
+        (
+            "sponsorship",
+            r"\bsponsor(?:ship|s|ing)?\b|\bsponsored\s+(?:visa|immigration|work)|(?:visa|employer|company)[- ]sponsored|"
+            + IMMIGRATION_VISA,
+        ),
         (
             # "Are you at least 18 years or older? (... authorization to work)" asks about age.
             "age",
@@ -116,7 +134,8 @@ def _topic(text):
         (
             "authorization",
             r"authoriz.{0,35}work|work authoriz|employment authoriz|right to work|eligible to work|"
-            r"(?:legally )?entitled to work|\bead\b|\bopt\b|optional practical training|work permit",
+            r"(?:legally )?entitled to work|\bead\b|(?-i:\bOPT\b)|optional practical training|work permit|"
+            r"(?:legally|lawfully) (?:able|allowed|permitted) to work|right to (?:live and )?work|employment eligibility",
         ),
         ("conviction", r"convict|felon"),
         (
@@ -125,11 +144,14 @@ def _topic(text):
         ),
         ("termination", r"\bfired\b|involuntarily discharged|asked to resign"),
         ("corruption", r"corrupt|bribery|bribe"),
-        ("government", r"government|public (?:institution|sector|university)"),
-        ("citizenship", r"citizen|nationality"),
+        ("government", GOVERNMENT),
+        # "Citizens" (a bank) is an employer, not citizenship.
+        ("citizenship", r"\bcitizen(?:ship)?\b|\bcitizens of\b|nationality"),
         (
             "restriction",
             r"\bnda\b|non.?disclosure|\brestrict(?:ive|ions?)?\b|"
+            r"(?:agreements?|covenants?)\b.{0,160}\b(?:engage in competition|compete with|not to compete|solicit\w*|"
+            r"contact (?:customers|clients))|"
             r"\bnon[\s-]?(?:compet(?:e|ition)|solicit(?:ation)?)\b|employment agreements|"
             r"(?:agreements?|understanding|commitments?).{0,150}(?:restrict|limit|prevent|affect|interfere).{0,100}"
             r"(?:employment|new job|work|joining|performing.{0,30}services)",
@@ -137,13 +159,14 @@ def _topic(text):
         # "related to any professional license" is a disciplinary question, not a referral.
         (
             "referral",
-            r"\breferr\w*|\brelatives?\b|"
+            r"\breferr\w*\b(?!\s+to\s+as\b)|\brelatives?\b|"
             r"\brelated (?:to )?(?:(?:an?|any|the|our) )?(?:employees?|persons?|individuals?|people|anyone|someone)\b",
         ),
         (
             "consent",
-            r"\bconsent\b|\bagree(?:d|s|ing)?\b|\bcertify\b|"
-            r"(?:automated tools|artificial intelligence|\bAI\b).{0,100}(?:review|process|screen|evaluate).{0,60}(?:your|my|this|job) application|"
+            r"\bconsent(?:s|ed|ing)?\b|\bagree(?:d|s|ing)?\b|\bcertify\b|"
+            r"(?:automated tools|artificial intelligence|\bAI\b).{0,100}(?:review|process|screen|evaluat).{0,60}"
+            r"(?:your|my|this|job) (?:application|candidacy)|"
             r"(?:opt[- ]out|opting out).{0,150}(?:application|processed|tools)",
         ),
         ("demographic", r"\bgender\b|ethnic|\brace\b|veteran|disab|sexual orientation|hispanic|transgender"),
@@ -163,6 +186,7 @@ def topic(text):
     # Definitions can mention another subject (commercial referrals are defined
     # as non-governmental). The question itself determines its evidence scope.
     # Employers sometimes prepend policy definitions to the actual question.
+    text = NDA_INSTRUCTION.sub(" ", text)
     questions = re.findall(
         r"\b(?:are you|do you|have you|were you|will you|did you|are any of your)\b[^?]*\?",
         text,
@@ -229,7 +253,10 @@ def relevant_fact(label, key):
     """Critical disclosures must cite a fact about that subject, not any true fact."""
     subject = topic(label)
     if subject == "export_control" and re.search(
-        r"(?:list|state|provide).{0,150}countr.{0,100}(?:citizen|permanent resident)", label, re.I
+        r"(?:list|state|provide|indicate|identify|select).{0,150}countr.{0,100}(?:citizen|permanent resident)|"
+        r"(?:national|citizen|permanent resident)s?\b.{0,80}\b(?:following countries|cuba|iran|north korea|syria)",
+        label,
+        re.I,
     ):
         # Citizenship details in an export-control form are distinct from an
         # export-eligibility judgement or an unrecorded travel history.
@@ -238,11 +265,7 @@ def relevant_fact(label, key):
                 r"citizen|nationality|permanent_residen|export_control|sanction|restricted_country", key, re.I
             )
         )
-    if subject == "export_control" and re.search(
-        r"U\.?\s?S\.? (?:citizen|person)|lawful permanent resident|permanent resident|asylee|refugee",
-        label,
-        re.I,
-    ):
+    if (subject == "export_control" and US_PERSON_CLASS.search(label)) or us_person_question(label):
         # "Export controls do not apply to U.S. Persons. Are you a U.S. Citizen, a Lawful Permanent
         # Resident, ... Asylee, or ... Refugee?" (Intuitive 2026-10-14) asks U.S.-person status.
         return bool(
@@ -264,7 +287,7 @@ def relevant_fact(label, key):
         r"previously_employed_at_applying_company|worked_at_linkedin_or_microsoft",
         "client_relationship": r"company_relationships|client_relationships|company_connections",
         "corruption": r"corrupt|brib",
-        "government": r"government|public_employ",
+        "government": r"government|public_employ|official|politically_exposed|corrupt|brib",
         "citizenship": r"citizen|nationality",
         "restriction": r"nda|non.?disclosure|restrict|non[\s_-]?(?:compet|solicit)",
         "referral": r"referr|relat",

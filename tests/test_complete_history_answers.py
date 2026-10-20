@@ -256,9 +256,12 @@ def test_opt_definition_in_field_help_prevents_generic_sponsorship_shortcut(serv
     )
     f = field("Will you require employment-based visa sponsorship?")
     f["hint"] = "Select YES if you are an F-1 student working under OPT or STEM OPT."
-    assert resolver.local(f) is None
+    # The field help defines Yes for the recorded status; the stored "no sponsorship" flag must not answer No.
+    answer = resolver.local(f)
+    assert answer.value == "Yes" and answer.evidence_ids == ["fact:current_immigration_status_US"]
     assert question_identity(f) != question_identity({**f, "hint": ""})
-    assert "opt" in resolver.context_packets["q"].question.text
+    # Without the definition, the plain flag still answers the plain question.
+    assert resolver.local({**f, "hint": ""}).value == "No"
 
 
 @pytest.mark.parametrize("confirmed", [False, True])

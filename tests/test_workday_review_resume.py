@@ -75,4 +75,4 @@ async def test_attached_resume_goes_straight_to_submit_checks(monkeypatch):
     w = driver(Form(uploaded=True))
     assert await w.on_review({"text": NO_RESUME}) == {"state": "reviewed"}
     w = driver(Form())
-    assert await w.on_review({"text": "Resume/CV Alex_Shah_Resume.pdf"}) == {"state": "reviewed"}
+    assert await w.on_review({"text": "Resume/CV Alex_Doe_Resume.pdf"}) == {"state": "reviewed"}

@@ -108,7 +108,11 @@ passes before each production deploy.
 |---|---|---|
 | 2026-10-20 | Legacy branches pushed (redacted), AXIOM `main` seeded from the October 20 snapshot | done |
 | 2026-10-20 | REA maps, tools and findings copied to `docs/rea/` (redacted) | done |
-| 2026-10-20 | Agent worktrees created; five agents started | in progress |
+| 2026-10-20 | Agent worktrees created; five agents started | done |
+| 2026-10-20 00:10 | All five agents stopped on the first account's session limit with one commit between them (QA: `.gitignore` hid `jobpilot/data/employer_catalog.json`, so a fresh clone could not start; cherry-picked to `main`) | done |
+| 2026-10-20 | Second account. **At most two agents run at once.** Forensics and infra resumed; architecture, QA and performance are queued | in progress |
+| 2026-10-20 | Knowledge base and validators (orchestrator, `main`). Every refusal since October 14 reviewed; status-defined sponsorship answers (University of Chicago, Intel), U.S.-person status, background-check consent, e-signatures, topic and critical-regex false positives. Two wrong deterministic answers fixed (Intel "No" through a DACA shortcut; background-check willingness "No"). `docs/KNOWLEDGE.md` and `tests/test_screening_validation.py` | done, deploy pending |
+| 2026-10-20 | De-personalization leftovers found on the way: a hard-coded home town in `jobboard.US_PLACE` (removed); surname leftovers in tests and comments (fixed); an absolute scratch path in `docs/rea/tools/drive.mjs` (fixed). Owner-specific comments ("Springfield", "Bethesda") remain for the architecture pass | partly done |
 
 ## How to resume
 

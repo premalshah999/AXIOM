@@ -144,6 +144,25 @@ def _overlap(a: set, b: set) -> float:
     return len(a & b) / len(a | b) if a and b else 0.0
 
 
+# Words that say nothing about which fact a question needs.
+_FILLER = {
+    "a", "an", "and", "any", "are", "be", "can", "do", "does", "for", "have", "how", "i", "if", "in", "is", "it",
+    "me", "my", "of", "on", "or", "our", "please", "the", "this", "to", "what", "which", "will", "with", "would",
+    "you", "your",
+}
+
+
+def _terms(text) -> set:
+    return {w for w in words(str(text).replace("_", " ")) if w not in _FILLER}
+
+
+def _similarity(asked: set, f: KnFact) -> float:
+    """Word overlap between the question and a fact's key, question and short value."""
+    value = (f.value or {}).get("v")
+    shown = value if isinstance(value, (str, int, float, bool)) and len(str(value)) <= 200 else ""
+    return _overlap(asked, _terms(f"{f.key.removeprefix('kf:')} {f.question} {shown}"))
+
+
 _PROFILE_DIGESTS: dict = {}
 
 
@@ -273,19 +292,25 @@ def retrieve_answer_context(
                     )
             except Exception:
                 pass
-        # 4. Structured facts of the same category (e.g. authorization facts).
+        # 4. Structured facts of the same category (e.g. authorization facts). A disclosure category keeps all of
+        # them in stored order (few, and an absent one must stay visible). A broad category ("additional" holds
+        # dozens) is ranked by similarity to the question, so the packet's item budget holds the relevant ones.
         seen = {i.fact_id for i in items}
         category_facts = [
             f
             for f in s.scalars(
                 base.where(
                     KnFact.category == qid.category, KnFact.layer == "confirmed", KnFact.key.like("kf:%")
-                )
+                ).order_by(KnFact.key)
             )
             if f.id not in seen and f.key not in ROW_CATEGORIES.values()
         ]
-        for f in category_facts:
-            (expired.append(f.id) if _expired(f, at) else items.append(_item(f, "fact", "category")))
+        live = [f for f in category_facts if not _expired(f, at)]
+        expired += [f.id for f in category_facts if _expired(f, at)]
+        if qid.category not in DISCLOSURES:
+            asked = _terms(qid.text)
+            live.sort(key=lambda f: -_similarity(asked, f))
+        items += [_item(f, "fact", "category") for f in live]
         # 4b. Native confirmed answers of the same category, keyed by their own question.
         # A paraphrase changes the exact key, so these surface as candidates the
         # reasoner must interpret; they never become exact_answer. Migration mirrors

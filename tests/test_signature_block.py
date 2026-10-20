@@ -23,7 +23,7 @@ def field(label, type_="textarea"):
 
 def test_nda_signature_block_is_signed(service):
     r = Resolver(
-        Profile(first_name="Alex", last_name="Shah", accept_all_application_terms=True),
+        Profile(first_name="Alex", last_name="Doe", accept_all_application_terms=True),
         service.db,
         service.config,
     )
@@ -32,10 +32,10 @@ def test_nda_signature_block_is_signed(service):
 
 
 def test_no_policy_or_ordinary_question_is_not_signed(service):
-    r = Resolver(Profile(first_name="Alex", last_name="Shah"), service.db, service.config)
+    r = Resolver(Profile(first_name="Alex", last_name="Doe"), service.db, service.config)
     assert r.signature_block(field(NDA)) is None
     r = Resolver(
-        Profile(first_name="Alex", last_name="Shah", accept_all_application_terms=True),
+        Profile(first_name="Alex", last_name="Doe", accept_all_application_terms=True),
         service.db,
         service.config,
     )
@@ -45,7 +45,7 @@ def test_no_policy_or_ordinary_question_is_not_signed(service):
 def test_name_from_verified_facts_signs(service):
     """Live profile: first/last names are verified facts, the explicit fields are empty."""
     r = Resolver(
-        Profile(facts={"first_name": "Alex", "last_name": "Shah"}, accept_all_application_terms=True),
+        Profile(facts={"first_name": "Alex", "last_name": "Doe"}, accept_all_application_terms=True),
         service.db,
         service.config,
     )

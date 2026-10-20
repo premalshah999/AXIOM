@@ -3978,7 +3978,7 @@ class FormSession:
             and self.resume_path.name in await self._page_text()
         ):
             # A resumed draft already lists our resume file (ASSA ABLOY SuccessFactors "CV/Resume:
-            # Alex_Shah_Resume.pdf", 2026-10-14). The page itself is the evidence; a page that says
+            # Alex_Doe_Resume.pdf", 2026-10-14). The page itself is the evidence; a page that says
             # "No Response" (Jabil Workday) does not name the file and stays unverified.
             self.uploaded = self.upload_verified = True
         greenhouse_uploads = await self.greenhouse_uploads()

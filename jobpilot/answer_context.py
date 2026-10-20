@@ -111,6 +111,31 @@ def defined_screening(label):
     )
 
 
+def question_head(label):
+    """The question itself: employer boilerplate after its question mark ("does not
+    disqualify you...") must not negate it."""
+    head, mark, _ = str(label).partition("?")
+    return head + mark if mark and len(head) > 20 else str(label)
+
+
+# A sentence about the applicant, as opposed to a statement about the position.
+ABOUT_APPLICANT = re.compile(r"\b(?:you|your|yourself|I|my|me)\b", re.I)
+
+
+def asked_text(text):
+    """The question without the employer's statements before it.
+
+    "This position requires authorization to work in the US without sponsorship. Will you now or in the future
+    require sponsorship?" asks only about sponsorship, and "This position does not sponsor any Visa assistance.
+    Please confirm you are authorized to work in the US" only about authorization. Reading the opening statement as a
+    proposition refused the right answer (2026-10-14, 2026-10-18).
+    """
+    pieces = re.split(r"(?<=[.!])(?<!U\.S\.)(?<!e\.g\.)(?<!i\.e\.)\s+(?=[A-Z])", str(text))
+    while len(pieces) > 1 and not ABOUT_APPLICANT.search(pieces[0]):
+        pieces.pop(0)
+    return " ".join(pieces)
+
+
 def eligibility_propositions(label):
     """Return required subjects and polarity for the common US eligibility question.
 
@@ -119,11 +144,16 @@ def eligibility_propositions(label):
     """
     if defined_screening(label):
         return None
+    label = asked_text(label)
     auth, sponsor = AUTH.search(label), SPONSOR.search(label)
     if not sponsor:
         return None
     negative_sponsor = bool(WITHOUT_SPONSOR.search(label))
     if auth:
+        # The sponsorship mention nearest before the authorization: in "Do you require sponsorship, or will you
+        # require sponsorship in the future for employment authorization?" the second clause sponsors the
+        # authorization. Reading the first mention made it "authorized or sponsored" and forced a Yes (2026-10-18).
+        sponsor = ([m for m in SPONSOR.finditer(label) if m.start() < auth.start()] or [sponsor])[-1]
         between = label[min(auth.end(), sponsor.end()) : max(auth.start(), sponsor.start())]
         if sponsor.start() < auth.start() and not re.search(
             r"\?|\b(?:or|and)\s+(?:are|do|will|would|have|is|can|did)\s+you\b", between, re.I
@@ -149,37 +179,150 @@ def eligibility_propositions(label):
     return None
 
 
-# Statuses a question can name when it defines its own answer ("support includes F-1 OPT ... answer Yes").
-STATUS_PATTERNS = (
-    r"\bSTEM\s+OPT\b",
-    r"\bOPT\b",
-    r"\bCPT\b",
-    r"\bH-?1B1?\b",
-    r"\bTN\b",
-    r"\bE-?3\b",
-    r"\bJ-?1\b",
-    r"\bL-?1\b",
-    r"\bO-?1\b",
+# How a recorded immigration status is written, and the names a question may use for it. Acronyms are matched
+# case-sensitively ("opt out" is not OPT). A plain F-1 covers its OPT and CPT periods; "F-1 CPT" does not name OPT.
+STATUS_NAMES = (
+    (
+        r"\bOPT\b|(?i:optional practical training)",
+        r"\b(?:STEM\s+)?OPT\b|(?i:optional practical training)|\bF-?1\b(?!\s+CPT\b)",
+    ),
+    (
+        r"\bCPT\b|(?i:curricular practical training)",
+        r"\bCPT\b|(?i:curricular practical training)|\bF-?1\b(?!\s+(?:STEM\s+)?OPT\b)",
+    ),
+    (r"\bH-?1B1?\b", r"\bH-?1B1?\b"),
+    (r"\bTN\b", r"\bTN\b"),
+    (r"\bE-?3\b", r"\bE-?3\b"),
+    (r"\bJ-?1\b", r"\bJ-?1\b"),
+    (r"\bL-?1\b", r"\bL-?1\b"),
+    (r"\bO-?1\b", r"\bO-?1\b"),
 )
+_QUOTE = r"[\"'“”‘’]?"
+_ANSWER_VERB = r"(?:select|answer|choose|check|mark|respond(?:\s+with)?|click)"
+# "Select "yes" if ...", "should answer “No”"; not "answer ‘Yes/No’" or "answer Yes or No", which define nothing.
+DIRECTIVE = re.compile(
+    rf"\b{_ANSWER_VERB}\s+{_QUOTE}(?P<answer>yes|no)\b{_QUOTE}(?!\s*(?:/|or\b)\s*{_QUOTE}(?:yes|no)\b)", re.I
+)
+# Capital One: "... support does include documentation needed for F-1 OPT ... your answer to this question will be
+# “Yes.”" The listed statuses come before the definition.
+ANSWER_WILL_BE_YES = re.compile(r"(?:answer|response)[^.]{0,60}?\b(?:will|should|must|would)\s+be\W{0,3}yes", re.I)
+NEGATION = re.compile(r"\b(?:not|never|no longer|neither|nor)\b|n['’]t\b", re.I)
+
+
+def recorded_status(facts):
+    """The applicant's recorded US immigration status, or ""."""
+    for key, value in facts.items():
+        if key.casefold().removeprefix("fact:") == "current_immigration_status_us" and value:
+            return str(value)
+    return ""
+
+
+def _names_status(text, label_pattern):
+    """The condition names the status, and no negation sits just before the name."""
+    for hit in re.finditer(label_pattern, text):
+        if not NEGATION.search(text[max(0, hit.start() - 30) : hit.start()]):
+            return True
+    return False
+
+
+# Where the clause before an instruction starts: a question mark, colon, semicolon, "if", or a sentence end that is not
+# "e.g." or "i.e." (a capital letter must follow, so "U.S. on a visa" stays one clause).
+CLAUSE_START = re.compile(r"[?!;:]|(?i:\bif\b)|(?<!e\.g)(?<!i\.e)\.\s+(?=[A-Z])")
+
+
+def _directive_conditions(label):
+    """(answer, condition) for every instruction in the label that ties an answer to a condition."""
+    hits = list(DIRECTIVE.finditer(label))
+    for i, hit in enumerate(hits):
+        answer = hit["answer"].casefold() == "yes"
+        after = label[hit.end() :]
+        if m := re.match(r"\s+if\b", after):
+            # "Select "yes" if you are in the U.S. on a nonimmigrant ... visa (e.g. F-1 (including OPT) ...)"
+            stop = hits[i + 1].start() - hit.end() if i + 1 < len(hits) else len(after)
+            condition = after[m.end() : min(stop, 240)]
+            condition = re.split(r"\bplease note\b", condition, maxsplit=1, flags=re.I)[0]
+        else:
+            # "(OPT and CPT participants should answer “No”)", "if you are on F-1 OPT, answer “Yes”", Intel's "NOTE:
+            # Individuals with work authorization issued pursuant to their student visa (e.g., F-1, J-1, M-1) ...
+            # should answer “Yes”". The clause runs back to the previous sentence, colon or "if"; parentheses stay in.
+            begin = hits[i - 1].end() if i else 0
+            condition = CLAUSE_START.split(label[max(begin, hit.start() - 300) : hit.start()])[-1]
+        yield answer, condition
 
 
 def status_defined_answer(label, facts):
-    """The question defines Yes for listed statuses, and the applicant's recorded status is listed.
+    """The question defines its answer for the applicant's recorded status: (answer is Yes, evidence) or None.
 
-    Capital One: "immigration related support does include documentation needed for F-1 OPT ...
-    If you require this type of support, your answer to this question will be 'Yes'". An OPT
-    applicant's honest answer is Yes, even though they need no visa sponsorship.
+    Owner rule: a sponsorship question is answered Yes only when the question itself tells holders of the applicant's
+    status (F-1 OPT) to answer Yes, and No otherwise. The stored sponsorship flag answers the plain visa question.
+    - University of Chicago 2026-10-18: "Select "yes" if you are in the U.S. on a nonimmigrant or dual-intent visa
+      (e.g. F-1 (including OPT), J-1 ...)". The validator read only the first sentence and refused the right Yes 19 times.
+    - "Are you legally able to work ... without sponsorship ...? (OPT and CPT participants should answer “No”)".
+    - Capital One 2026-10-14: "immigration related support does include documentation needed for F-1 OPT ... your
+      answer to this question will be “Yes.”"
     """
-    if not re.search(
-        r"(?:answer|response)[^.]{0,60}?\b(?:will|should|must|would)\s+be\W{0,3}yes", label, re.I
-    ):
+    status = recorded_status(facts)
+    names = [name for own, name in STATUS_NAMES if re.search(own, status, re.I)]
+    if not names:
         return None
-    status = str(
-        facts.get("current_immigration_status_us") or facts.get("fact:current_immigration_status_US") or ""
-    )
-    for pattern in STATUS_PATTERNS:
-        if re.search(pattern, status, re.I) and re.search(pattern, label, re.I):
-            return True, ["fact:current_immigration_status_US"]
+    refs = ["fact:current_immigration_status_US"]
+    answers = {
+        answer
+        for answer, condition in _directive_conditions(label)
+        if any(_names_status(condition, name) for name in names)
+    }
+    if len(answers) == 1:
+        return next(iter(answers)), refs
+    if not answers and ANSWER_WILL_BE_YES.search(label) and any(re.search(name, label) for name in names):
+        return True, refs
+    return None
+
+
+# U.S.-person classes (export control, "U.S. worker" reporting). A question listing several of them asks one status.
+US_PERSON_CLASS = re.compile(
+    r"U\.?\s?S\.?\s+(?:citizen|national|person|worker)|united states (?:citizen|national)|"
+    r"(?:lawful |legal )?permanent resident|green.?card|\basylee|granted asylum|\brefugee|protected individual",
+    re.I,
+)
+US_PERSON_ASK = re.compile(
+    r"\bare you\b(?:\s+(?:currently|presently))?\s+(?:a|an|any|one|in one|among|either)\b", re.I
+)
+US_PERSON_KEYS = (
+    "us_citizen",
+    "us_national",
+    "permanent_resident",
+    "lawful_permanent_resident",
+    "green_card_holder",
+    "has_asylee_status",
+    "has_refugee_status",
+)
+
+
+def us_person_question(text):
+    """The question lists U.S.-person classes and asks whether the applicant is one of them.
+
+    "Are you a U.S. Citizen, U.S. National, Lawful Permanent Resident ..., Asylee, or Refugee?", Micron's "A U.S.
+    worker is defined ... as a 1) U.S. citizen ... 5) person granted asylum. Are you in one of the above five
+    groups?", and an export-control "Are you any of the following?" whose options are the classes.
+    """
+    kinds = {m.group(0).casefold()[:6] for m in US_PERSON_CLASS.finditer(text or "")}
+    return len(kinds) >= 3 and bool(US_PERSON_ASK.search(text or ""))
+
+
+def us_person(facts):
+    """(is a U.S. person, evidence) when the applicant's facts decide it, else None.
+
+    Any true citizen, national, permanent-resident, asylee or refugee fact makes the applicant one. A false citizen
+    fact together with a recorded nonimmigrant status (F-1 OPT, H-1B ...) means they are none of the classes.
+    """
+    values = {str(k).casefold().removeprefix("fact:"): (k, v) for k, v in facts.items()}
+    present = [values[k] for k in US_PERSON_KEYS if k in values]
+    if yes := [k for k, v in present if boolean(v) is True]:
+        return True, ["fact:" + yes[0]]
+    status = recorded_status(facts)
+    citizen = values.get("us_citizen")
+    if citizen and boolean(citizen[1]) is False and any(re.search(own, status, re.I) for own, _ in STATUS_NAMES):
+        return False, ["fact:" + citizen[0], "fact:current_immigration_status_US"]
     return None
 
 
@@ -203,7 +346,9 @@ def evaluate_eligibility(label, facts):
 def required_topics(label):
     from .knowledge import topic
 
-    proposition = eligibility_propositions(label)
+    # Only the question itself: "Are you a U.S. Citizen ... or Refugee? ... They do not need ... sponsorship" asks one
+    # status question, and its explanation is not a second (authorization and sponsorship) proposition.
+    proposition = eligibility_propositions(question_head(label))
     if proposition and "authorization" in proposition:
         return {"authorization", "sponsorship"}
     return {topic(label)} - {""}

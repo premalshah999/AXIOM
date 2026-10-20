@@ -7,7 +7,16 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from .models import effective_thinking, structured
-from .knowledge import DATA_USE_CONSENT, IMMIGRATION_VISA, applicable, question_text, relevant_fact, topic
+from .knowledge import (
+    DATA_USE_CONSENT,
+    GOVERNMENT,
+    IMMIGRATION_VISA,
+    NDA_INSTRUCTION,
+    applicable,
+    question_text,
+    relevant_fact,
+    topic,
+)
 from .schemas import Answer, AnswerBatch, Profile
 from .answer_context import (
     AUTH_KEYS,
@@ -15,6 +24,10 @@ from .answer_context import (
     CACHE_VERSION,
     digest,
     evaluate_eligibility,
+    question_head,
+    us_person,
+    us_person_question,
+    US_PERSON_CLASS,
     status_defined_answer,
     defined_screening,
     supported_boolean,
@@ -468,6 +481,14 @@ def strip_fact_annotations(value):
     """Internal provenance notes ("(applicant confirmed)") never reach an employer's form (OmegaHires 2026-10-14)."""
     return FACT_ANNOTATION.sub("", value).strip() if isinstance(value, str) else value
 
+# An option that asserts the status before declining its details ("I am a protected veteran, but I choose not to
+# self-identify the classifications to which I belong") is an answer, not a decline.
+ASSERTED_STATUS = re.compile(r"^\s*(?:I am|I'm|I identify as)\b[^,]{0,60},?\s*but\b", re.I)
+
+
+def declines(option):
+    return bool(DECLINE.search(str(option))) and not ASSERTED_STATUS.search(str(option))
+
 
 def demographic_topic(text):
     if DATA_CONSENT.search(text or ""):
@@ -475,10 +496,16 @@ def demographic_topic(text):
     return next((name for name, rx in DEMOGRAPHIC_TOPICS.items() if rx.search(text or "")), None)
 
 
+# Legal disclosures a model may answer only from the applicant's facts. Precise on purpose: "National Defense
+# Authorization Act", "Authentication, Authorization" (a security skill), "authorized to prescribe", "government ID",
+# "Citizens" (a bank), "agenda" and "referred to as" are not disclosures (2026-10-18/19 production refusals).
 CRITICAL = re.compile(
-    IMMIGRATION_VISA + r"|sponsor|authoriz|citizen|convict|criminal|government|public (?:institution|sector)|"
-    r"nda\b|non.?disclosure|corrupt|restrictive|non[\s-]?(?:compet|solicit)|\breferr\w*|consent|(?<!dis)agree\b|certify|"
-    r"export.?control|sanction|embargo|security clearance|clearance level|\bfired\b|involuntarily discharged|asked to resign",
+    IMMIGRATION_VISA + r"|sponsor|authori[sz](?:ed|ation)\b.{0,40}\b(?:work|be employed|employment)\b|"
+    r"(?:work|employment)\s+authori[sz]|\bauthori[sz]e\b|\bcitizen(?:ship)?\b|\bcitizens of\b|convict|criminal|"
+    + GOVERNMENT
+    + r"|\bnda\b|non.?disclosure|corrupt|restrictive|non[\s-]?(?:compet|solicit)|\breferr\w*\b(?!\s+to\s+as\b)|consent|"
+    r"(?<!dis)agree\b|certify|export.?control|sanction|embargo|security clearance|clearance level|\bfired\b|"
+    r"involuntarily discharged|asked to resign",
     re.IGNORECASE,
 )
 
@@ -487,14 +514,49 @@ CONTACT_CONSENT = re.compile(
     r"\b(?:I )?(?:authori[sz]e|consent|agree)\b.{0,80}\b(?:communicat\w*|contact\w*|reach out|text(?: message)?s?|sms|call)\b",
     re.I,
 )
-ACKNOWLEDGEMENT = re.compile(r"\bI (?:understand|acknowledge|have read|agree|accept|certify|consent)\b", re.I)
+ACKNOWLEDGEMENT = re.compile(
+    r"\bI (?:understand|acknowledge|have read|agree|accept|certify|consent|authori[sz]e|am consenting|hereby)\b|"
+    r"\bif you consent\b|\bdo you (?:consent|agree)\b|\bby (?:checking|selecting|clicking|submitting)\b.{0,40}\byou (?:consent|agree)\b",
+    re.I,
+)
+# Consent to a hiring check ("If extended a job offer, are you willing to submit to a comprehensive background check?",
+# "I am willing to submit to a review of my criminal history"). It discloses nothing about the applicant's record, and a
+# recorded clean record does not answer it: that answered "No" to a willingness question (2026-10-19).
+CHECK_WILLINGNESS = re.compile(
+    r"\b(?:willing|agree|consent|authori[sz]e)\b.{0,40}\b(?:submit|undergo|complete|to)\b.{0,60}"
+    r"\b(?:background|criminal|drug|screen\w*|check|investigation|review|verification)\b",
+    re.I,
+)
+# A statement about the applicant's own record turns a consent into a disclosure.
+RECORD_STATEMENT = re.compile(
+    r"\b(?:have|has|had)\s+(?:not\s+|never\s+)?(?:ever\s+)?been\s+(?:convicted|charged|arrested)|\bconvicted\b|"
+    r"\b(?:no|any|never)\b.{0,20}\bcriminal (?:record|history|conviction)",
+    re.I,
+)
 # Applicant disclosures an acknowledgement could embed. Phrase-level, so legal boilerplate
 # ("no representative is authorized to ...", "terminate my employment") does not count.
 EMBEDDED_DISCLOSURE = re.compile(
     r"authori[sz]ed to work|work authori[sz]ation|eligib\w* to work|sponsor|\bvisa\b|citizen|"
-    r"convict|criminal|felon|misdemeanor|non[\s-]?(?:compet|solicit)|restrictive covenant|"
+    r"convict|felon|misdemeanor|\b(?:no|any|never)\b.{0,20}criminal|non[\s-]?(?:compet|solicit)|restrictive covenant|"
     r"government (?:employ|official)|security clearance|export control|sanction|"
     r"(?:been|ever been) (?:fired|terminated|discharged)|asked to resign|related to|relative",
+    re.I,
+)
+
+
+# Blackstone 2026-10-18: "please select those you are most interested in applying to. By selecting below, you consent
+# to Blackstone ... considering you for relevant opportunities within other business units."
+SELECTION_CONSENT = re.compile(
+    r"\bby (?:selecting|choosing|checking)\b[^.]{0,30}\b(?:below|an? option|any|these|this)\b[^.]{0,20}"
+    r"\byou (?:consent|agree|acknowledge)\b",
+    re.I,
+)
+# A typed signature box under a certification ("By entering your name into the field below, you certify that this
+# application is truthful and complete").
+SIGNED_CERTIFICATION = re.compile(
+    r"\b(?:sign(?:ature|ed|ing)?|e-?signature|initials)\b|"
+    r"\b(?:enter|entering|type|typing|input|provide)\s+(?:in\s+)?(?:your\s+)?(?:full\s+|legal\s+)?name\b|"
+    r"\b(?:certify|attest)\b",
     re.I,
 )
 
@@ -507,13 +569,17 @@ def policy_acknowledgement(label, answer, facts, subjects):
     question went to the owner. A statement that also embeds a real disclosure (conviction,
     sponsorship, non-compete, ...) still needs its own fact.
     """
-    if "fact:application_consent_policy" not in facts or set(subjects) - {"consent"}:
+    if "fact:application_consent_policy" not in facts or set(subjects) - {"consent", "background_check"}:
         return False
-    if not ACKNOWLEDGEMENT.search(label) or EMBEDDED_DISCLOSURE.search(label):
+    if SELECTION_CONSENT.search(label) and not EMBEDDED_DISCLOSURE.search(label):
+        return True  # Choosing an offered option is the consent; the choice itself is validated as any other.
+    willing = CHECK_WILLINGNESS.search(label) and not RECORD_STATEMENT.search(label)
+    if not (willing or ACKNOWLEDGEMENT.search(label)) or EMBEDDED_DISCLOSURE.search(label):
         return False
     return bool(
         re.match(
-            r"\s*(?:yes|i agree|agree|accept|i accept|i understand|i acknowledge|true|checked)\b",
+            r"\s*(?:yes|i agree|agree|accept|i accept|i understand|i acknowledge|i consent|consent|opt[- ]?in|"
+            r"i am willing|willing|true|checked)\b",
             str(answer.value or ""),
             re.I,
         )
@@ -523,7 +589,7 @@ def policy_acknowledgement(label, answer, facts, subjects):
 def critical_question(label):
     # Protect scoped disclosures by meaning even if their label has no legal
     # keyword. Employer names must not be doing the work of this safeguard.
-    return bool(CRITICAL.search(label)) or topic(label) in {
+    return bool(CRITICAL.search(NDA_INSTRUCTION.sub(" ", label))) or topic(label) in {
         "prior_employment",
         "client_relationship",
         "consent",
@@ -590,7 +656,7 @@ ACCOMMODATION = re.compile(
     re.I,
 )
 SIGNATURE = re.compile(
-    r"\b(?:signature|sign your (?:full )?name|type your (?:full )?(?:legal )?name|"
+    r"\b(?:signature|sign your (?:full )?name|type your (?:full )?(?:legal )?name|by entering your (?:full )?name|"
     r"full name as signature|e[\s-]?sign(?:ature)?|"
     r"full legal name as evidence.{0,60}(?:read|agree))\b",
     re.I,
@@ -600,13 +666,6 @@ SIGNATURE = re.compile(
 # A fully observed catalog offers no option for the applicant's saved source. Choosing
 # another option cannot be truthful, so the browser stops at the first refusal.
 UNOFFERED_SOURCE = "The saved application source is not in the observed catalog"
-
-
-def question_head(label):
-    """The question itself: employer boilerplate after its question mark ("does not
-    disqualify you...") must not negate it."""
-    head, mark, _ = str(label).partition("?")
-    return head + mark if mark and len(head) > 20 else str(label)
 
 
 NEGATED = re.compile(r"\b(?:not|never|no longer|n't|unable|cannot)\b", re.IGNORECASE)
@@ -1514,8 +1573,9 @@ class Resolver:
                     evidence_ids=["fact:excluded_from_federal_healthcare_programs"],
                     reason="Confirmed No",
                 )
-        if re.search(r"deferred action|\bdaca\b", label, re.I):
-            # Answered by the recorded immigration status (John Deere, 2026-10-13).
+        if re.search(r"deferred action|\bdaca\b", question_head(label), re.I):
+            # Answered by the recorded immigration status (John Deere, 2026-10-13). Only a question about DACA itself:
+            # Intel's sponsorship question lists DACA among examples, and this answered it "No" (2026-10-19).
             status = str((self.profile.facts or {}).get("current_immigration_status_US") or "")
             if status and not re.search(r"deferred action|\bdaca\b", status, re.I):
                 no = [o for o in options if NO_OPTION.search(str(o))]
@@ -1703,7 +1763,14 @@ class Resolver:
         f = {**f, "label": screening_text(f)}
         if answer := self.demographic_decline(f):
             return answer
+        # A question that defines its own answer for the applicant's recorded status is the most specific signal.
+        if answer := self.status_answer(f):
+            return answer
         if answer := self.owner_policy_answer(f):
+            return answer
+        if answer := self.us_person_answer(f):
+            return answer
+        if answer := self.check_consent_answer(f):
             return answer
         if answer := self.located_in_answer(f):
             return answer
@@ -1750,7 +1817,8 @@ class Resolver:
         if answer is not None:
             return answer
         if defined_screening(f["label"]):
-            return None  # Retrieve facts and reason over the employer's full answer definition.
+            # The employer's definition names the applicant's recorded status, or a model reasons over it.
+            return self.status_answer(f)
         return self._local({**f, "label": self.context_labels[f["id"]]})
 
     def demographic_decline(self, f):
@@ -1765,7 +1833,7 @@ class Resolver:
             return None
         if not self.demographic_rule(f).decline_first:
             return None
-        decline = [o for o in f.get("options", []) if DECLINE.search(o) and not placeholder_option(o)]
+        decline = [o for o in f.get("options", []) if declines(o) and not placeholder_option(o)]
         if not decline:
             return None
         return self._ans(
@@ -1782,7 +1850,7 @@ class Resolver:
         # A generic label ("Please Select:") takes its topic from the options it offers.
         topic = demographic_topic(f.get("label", "")) or demographic_topic(" ".join(map(str, options))) or "other"
         rule = self.answer_rules.demographics[topic]
-        decline = next((o for o in options if DECLINE.search(o) and not placeholder_option(o)), None)
+        decline = next((o for o in options if declines(o) and not placeholder_option(o)), None)
         if rule.decline_first and decline:
             return self._ans(
                 f, decline, ["policy:demographics"], "Applicant declines voluntary demographic disclosure"
@@ -3337,20 +3405,112 @@ class Resolver:
                 return True
         return False
 
+    def signature_ok(self, field, answer):
+        """A typed signature under a certification: the applicant's own first and last name, optionally with a date.
+
+        The signature box of "I certify that the facts set forth in this Application for Employment are true and
+        complete ..." was refused as an unsupported disclosure 19 times (2026-10-17/19).
+        """
+        label = str(field.get("label", ""))
+        if field.get("options") or not self.profile.accept_all_application_terms:
+            return False
+        if not SIGNED_CERTIFICATION.search(label) or EMBEDDED_DISCLOSURE.search(label):
+            return False
+        p = self.profile
+        parts = [normalize(p.first_name or ""), normalize(p.last_name or "")]
+        if not all(parts):
+            parts = normalize(p.name or "").split()[:1] + normalize(p.name or "").split()[-1:]
+        own = set(" ".join([normalize(p.name or ""), normalize(p.first_name or ""), normalize(p.middle_name or ""),
+                            normalize(p.last_name or "")]).split())
+        words = normalize(str(answer.value or "")).split()
+        return (
+            len(parts) == 2
+            and all(part and set(part.split()) <= set(words) for part in parts)
+            and all(w in own or re.fullmatch(r"\d{1,4}", w) for w in words)
+        )
+
+    def us_person_answer(self, f):
+        """A U.S.-person status question, answered from the citizenship and immigration facts.
+
+        Micron 2026-10-18: the model answered "Yes" to "Are you in one of the above five groups?" (U.S. citizen,
+        national, permanent resident, refugee, asylee) for an applicant on F-1 OPT.
+        """
+        options = [str(o) for o in f.get("options") or []]
+        if f.get("type") == "checkbox" or not us_person_question(f["label"] + " " + " ".join(options)):
+            return None
+        known = us_person(self._facts())
+        if known is None:
+            return None
+        truth, evidence = known
+        if options and all(re.match(r"\s*(?:yes|no)\b", o, re.I) for o in options):
+            pick = [o for o in options if re.match(r"\s*yes\b" if truth else r"\s*no\b", o, re.I)]
+        elif options and not truth:
+            # Category options: the one naming no U.S.-person class ("Other", "None of the above").
+            pick = [
+                o
+                for o in options
+                if not US_PERSON_CLASS.search(o) and re.search(r"\bother\b|\bnone\b|\bnot\b|^\s*no\b", o, re.I)
+            ]
+        else:
+            return None  # Which class a U.S. person belongs to needs that specific fact.
+        if len(pick) != 1:
+            return None
+        return Answer(
+            field_id=f["id"],
+            value=pick[0],
+            disposition="answer",
+            evidence_ids=evidence,
+            reason="U.S.-person status from the citizenship and immigration facts",
+        )
+
+    def check_consent_answer(self, f):
+        """Willingness to undergo a background check or drug screen follows the accept-all-terms policy."""
+        options = [str(o) for o in f.get("options") or []]
+        label = str(f.get("label", ""))
+        if not self.profile.accept_all_application_terms or not CHECK_WILLINGNESS.search(label):
+            return None
+        if RECORD_STATEMENT.search(label) or EMBEDDED_DISCLOSURE.search(label):
+            return None
+        if f.get("type") == "checkbox":
+            return Answer(field_id=f["id"], value="true", disposition="answer", evidence_ids=["policy:consent"])
+        yes = [o for o in options if re.match(r"\s*(?:yes|i am willing|i agree|agree)\b", o, re.I)]
+        if len(yes) != 1:
+            return None
+        return Answer(
+            field_id=f["id"],
+            value=yes[0],
+            disposition="answer",
+            evidence_ids=["policy:consent"],
+            reason="Consent to a hiring check under the accept-all-terms policy",
+        )
+
+    def status_answer(self, f):
+        """The question defines its answer for the applicant's recorded immigration status.
+
+        The stored sponsorship flag answers the plain visa question; a question that tells F-1 OPT holders to
+        answer Yes (or No) is answered as it says (see answer_context.status_defined_answer).
+        """
+        defined = status_defined_answer(f["label"], self._facts())
+        if not defined or f.get("type") == "checkbox":
+            return None
+        truth, refs = defined
+        word = "yes" if truth else "no"
+        options = f.get("options", [])
+        hits = [o for o in options if re.match(rf"\s*{word}\b", str(o), re.I)]
+        if options and len(hits) != 1:
+            return None
+        return Answer(
+            field_id=f["id"],
+            value=hits[0] if hits else word.capitalize(),
+            disposition="answer",
+            evidence_ids=refs,
+            reason="The question defines its answer for the recorded status",
+        )
+
     def _intent_answer(self, f, label):
-        if defined := status_defined_answer(f["label"], self._facts()):
-            # The question defines Yes for the applicant's recorded status; the stored
-            # sponsorship flag answers a different (visa-only) question.
-            yes = [o for o in f.get("options", []) if re.match(r"\s*yes\b", str(o), re.I)]
-            if f.get("options") and len(yes) != 1:
-                return None
-            return Answer(
-                field_id=f["id"],
-                value=yes[0] if yes else "Yes",
-                disposition="answer",
-                evidence_ids=defined[1],
-                reason="Question defines Yes for the recorded status",
-            )
+        if f.get("type") != "checkbox" and status_defined_answer(f["label"], self._facts()):
+            # The question's own definition decides, never the stored sponsorship flag.
+            return self.status_answer(f)
         if re.search(r"currently (?:based|located|living|residing)", label):
             return None  # Current residence and willingness to relocate are different facts.
         facts = self._facts()
@@ -3395,6 +3555,12 @@ class Resolver:
                 solicitation = facts.get("has_non_solicitation")
                 if solicitation not in (None, "") and not no_fact(solicitation):
                     return None
+            if (
+                "criminal_conviction" in keys
+                and CHECK_WILLINGNESS.search(f["label"])
+                and not RECORD_STATEMENT.search(f["label"])
+            ):
+                return None  # Willingness to undergo a check is consent, not the applicant's record.
             if "previously_employed_here" in keys and self.names_recorded_employer(f["label"]):
                 return None  # A recorded employer is named: the owner's "No" policy cannot apply.
             if "previously_employed_here" in keys and re.search(
@@ -4313,6 +4479,7 @@ class Resolver:
 
         critical_ok = (
             not critical_question(field["label"])
+            or self.signature_ok(field, a)
             or (bool(subjects) and all(supports(subject) for subject in subjects))
             or (not subjects and exact_support())
             # The batch path validates against retrieval-scoped facts; the consent policy is a
@@ -4396,6 +4563,14 @@ class Resolver:
                 expected = proposition[0]
                 if bool(re.match(r"^(?:yes|true)\b", value, re.I)) != expected:
                     cause = "question_polarity"
+        if not cause and value is not None:
+            catalog = field["label"] + " " + " ".join(map(str, field.get("options", [])))
+            known = us_person(self._facts()) if us_person_question(catalog) else None
+            if known is not None and (
+                (re.match(r"^(?:yes|no)\b", value, re.I) and bool(re.match(r"^yes\b", value, re.I)) != known[0])
+                or (not known[0] and US_PERSON_CLASS.search(value))
+            ):
+                cause = "question_polarity"
         if not cause and value is not None and self.graduation_choice_valid(field, value) is False:
             cause = "question_time_scope"
         if value is not None and field.get("maxlength", -1) > 0 and len(value) > field["maxlength"]:
