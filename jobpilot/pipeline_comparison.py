@@ -6,6 +6,7 @@ use the current ATS controller; the scheduler persists any specialist handoff.
 
 from sqlalchemy import select
 
+from .config import MAX_WORKERS, Topology, legacy_topology
 from .db import Job, Run
 
 LEGACY = "oct04-825c1b6"
@@ -17,9 +18,7 @@ KEY = "pipeline_comparison"
 NORMAL = "normal"
 SPECIALIST = "specialist"
 POOLS = (NORMAL, SPECIALIST)
-NORMAL_SLOTS = tuple(range(1, 7))
-SPECIALIST_SLOTS = (7, 8)
-MAX_SLOTS = 32
+MAX_SLOTS = MAX_WORKERS
 
 
 def _get(row, key, default=None):
@@ -82,13 +81,14 @@ def assign(session, job, source=None):
     return CURRENT if pipeline in {LEGACY, AGENTIC, REASONING} else pipeline
 
 
+def as_topology(limit):
+    """A Topology from the settings object (config.topology) or, for older callers and tests, a legacy total."""
+    return limit if isinstance(limit, Topology) else legacy_topology(limit)
+
+
 def pool_slot_ids(pool=NORMAL, limit=8):
-    n = max(0, min(MAX_SLOTS, limit))
-    if n <= 8:
-        # The original six normal + two specialist layout.
-        return [slot for slot in (SPECIALIST_SLOTS if pool == SPECIALIST else NORMAL_SLOTS) if slot <= n]
-    # Larger fleets keep two specialists, as the last two slots.
-    return list(range(n - 1, n + 1)) if pool == SPECIALIST else list(range(1, n - 1))
+    """The slot numbers of a pool: ATS workers are 1..N and specialists the next S slots (6 and 2: 1-6 and 7-8)."""
+    return as_topology(limit).slot_ids(pool)
 
 
 def slots(session, run, limit=8):
@@ -149,9 +149,9 @@ def snapshot(db, limit=8):
                 "available": value.available,
             }
         workers = []
-        # The same layout the allocator uses (fleets above 8 keep their last two slots for specialists).
-        specialist_slots = set(pool_slot_ids(SPECIALIST, limit))
-        for slot in range(1, max(0, min(MAX_SLOTS, limit)) + 1):
+        topology = as_topology(limit)
+        specialist_slots = set(topology.slot_ids(SPECIALIST))
+        for slot in range(1, topology.total + 1):
             owner = active.get(slot)
             lane = SPECIALIST if slot in specialist_slots else NORMAL
             ats = normalize_ats(owner[1].ats) if owner else "general"

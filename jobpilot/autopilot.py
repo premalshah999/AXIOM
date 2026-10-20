@@ -277,7 +277,7 @@ def batch_snapshot(service):
         "dispatched": batch.get("queued", 0),
         "attempted_jobs": len(batch_jobs),
         "active": capacity_now.occupied,
-        "application_workers": worker_snapshot(db, service.config.workers),
+        "application_workers": worker_snapshot(db, service.config.topology),
         "awaiting_answer": awaiting,
         "blocked": blocked,
         "failed": failed,
@@ -579,7 +579,7 @@ async def tick(service):
             occupied_slots = slots.occupied
             from .pipeline_comparison import NORMAL, pool_capacity
 
-            normal_room = pool_capacity(s, NORMAL, service.config.workers).available
+            normal_room = pool_capacity(s, NORMAL, service.config.topology).available
             today = datetime.now(ZoneInfo(service.config.timezone)).date().isoformat()
             budget = s.get(Budget, today)
             available_submissions = service.config.daily_application_limit - (

@@ -562,7 +562,7 @@ def create_app(config: Settings | None = None):
             "heartbeat": db.get_setting("scheduler_heartbeat", {}),
             "outbox_pending": pending,
             "workers": config.workers,
-            "application_workers": application_workers(db, config.workers),
+            "application_workers": application_workers(db, config.topology),
             "models": selected(db, config),
             "production_target": __import__(
                 "jobpilot.autopilot", fromlist=["production_progress"]

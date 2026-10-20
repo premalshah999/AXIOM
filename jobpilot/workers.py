@@ -329,7 +329,7 @@ async def start(service):
     from .pipeline_comparison import POOLS, pool_slot_ids
 
     for pool in POOLS:
-        count = len(pool_slot_ids(pool, service.config.workers))
+        count = len(pool_slot_ids(pool, service.config.topology))
         if not count:
             continue
         await DBOS.register_queue_async(
