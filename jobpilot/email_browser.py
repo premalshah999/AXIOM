@@ -319,6 +319,26 @@ class EmailBrowser:
             {"route_path": "/careers/apply"},
         )
 
+    def embedded_code_frames_allowed(self, fields, obs):
+        """A Greenhouse form embedded on the employer's own site may take its emailed code in the board iframe.
+
+        Roblox, Stripe, Waymo and Toast open the employer's page (careers.roblox.com, stripe.com) and render the
+        application in a job-boards.greenhouse.io iframe. The page-level origin check can never pass for them: the
+        top-level URL is the employer's, and the mail rule lists only email-link origins. 13 of the 21 embedded jobs
+        never succeeded; Roblox ended with "Add this employer's login origin..." (2026-10-18), Stripe and Waymo
+        ended unknown 2 to 11 s after the commit, before any mail was read.
+
+        Safe because the code is typed only into inputs whose own frame passes the strict per-frame check
+        (code_origin_allowed: Greenhouse board or embed URL of this exact job, https, no credentials, the
+        post-submit code prompt on screen). The employer page itself never receives the code.
+        """
+        frames = getattr(self.engine.form, "frames", None) or {}
+        return bool(
+            fields
+            and self.greenhouse_submission(obs)
+            and all(f["id"] in frames and self.code_origin_allowed(frames[f["id"]].url, obs) for f in fields)
+        )
+
     def code_origin_allowed(self, url, obs):
         """Official Greenhouse board aliases may verify only this exact job.
 
@@ -335,7 +355,12 @@ class EmailBrowser:
             # The employer's own login origin (careers.qualcomm.com, Qualcomm Eightfold 2026-10-14)
             # may take this run's emailed code; shared ATS hosts never qualify.
             return True
-        if self.greenhouse_submission(obs) and host in {"boards.greenhouse.io", "job-boards.greenhouse.io"}:
+        if self.greenhouse_submission(obs) and host in {
+            "boards.greenhouse.io",
+            "job-boards.greenhouse.io",
+            "boards.eu.greenhouse.io",
+            "job-boards.eu.greenhouse.io",
+        }:
             from .ats import canonicalize
 
             if (
@@ -530,7 +555,7 @@ class EmailBrowser:
             # label is this employer's own name joins its rule (2026-10-14).
             self.rule["link_origins"] = self.mail.add_link_origin(self.rule["id"], page_origin)
         if not (
-            self.code_origin_allowed(e.page.url, obs)
+            (self.code_origin_allowed(e.page.url, obs) or self.embedded_code_frames_allowed(fields, obs))
             if kind == "code"
             else page_origin in self.rule["link_origins"]
         ):
@@ -597,9 +622,9 @@ class EmailBrowser:
                 # Sites may rerender or redirect while delivery is pending. Reinspect before injecting a secret.
                 obs = await e.form.scan()
                 _, fields = self.state(obs)
-                if not self.code_origin_allowed(e.page.url, obs) or any(
-                    not self.code_origin_allowed(e.form.frames[f["id"]].url, obs) for f in fields
-                ):
+                if not (
+                    self.code_origin_allowed(e.page.url, obs) or self.embedded_code_frames_allowed(fields, obs)
+                ) or any(not self.code_origin_allowed(e.form.frames[f["id"]].url, obs) for f in fields):
                     raise ValueError("Verification page changed to an origin outside the employer rule")
                 code_ids = {f["id"] for f in fields}
                 if not self.greenhouse_submission(obs) and self.application_fields(obs, code_ids):
@@ -637,8 +662,10 @@ class EmailBrowser:
                 if self.greenhouse_submission(obs) and not button:
                     # Greenhouse enables Submit only after all code digits are filled.
                     refreshed = await e.form.scan()
-                    if not self.greenhouse_submission(refreshed) or not self.code_origin_allowed(
-                        e.page.url, refreshed
+                    _, refreshed_fields = self.state(refreshed)
+                    if not self.greenhouse_submission(refreshed) or not (
+                        self.code_origin_allowed(e.page.url, refreshed)
+                        or self.embedded_code_frames_allowed(refreshed_fields, refreshed)
                     ):
                         raise ValueError("Application verification changed before confirmation")
                     enabled = [
