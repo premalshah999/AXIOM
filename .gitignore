@@ -1,0 +1,29 @@
+# Applicant data and credentials
+.env
+.env.*
+!.env.example
+.data/
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite*
+storage-state*.json
+access-token
+application-exports/
+# Build and development files
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+frontend/node_modules/
+frontend/*.tsbuildinfo
+jobpilot/static/*
+!jobpilot/static/.gitkeep
+.idea/
+.DS_Store
+*.log

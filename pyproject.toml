@@ -1,0 +1,44 @@
+[project]
+name = "applypilot-studio"
+version = "1.0.0"
+description = "A self-hosted job application control room with evidence-backed browser workers"
+requires-python = ">=3.12,<3.14"
+license = "AGPL-3.0-only"
+dependencies = [
+  "fastapi==0.142.2", "uvicorn==0.54.0", "sqlalchemy==2.1.1",
+  "pydantic-settings==2.15.0", "httpx[socks]==0.28.1", "python-multipart==0.0.32",
+  "pydantic-ai-slim[openai]==1.70.0", "browser-use==0.13.10", "dbos==3.2.0",
+  "playwright==1.58.0", "pypdf==6.16.2", "croniter==6.2.4", "itsdangerous==2.2.0",
+  "psycopg[binary]==3.3.6",
+  "beautifulsoup4==4.14.3",
+  "cryptography==50.0.2", "mcp==2.1.1",
+]
+
+[dependency-groups]
+dev = ["pytest>=9,<10", "pytest-asyncio>=1,<2", "ruff>=0.15,<1"]
+
+[project.scripts]
+jobpilot = "jobpilot.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["jobpilot"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"docs/licenses" = "jobpilot/static/licenses"
+"docs/third-party.md" = "jobpilot/static/third-party.md"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B"]
+ignore = ["B008"] # FastAPI File/Form dependency declarations are intentional defaults.
