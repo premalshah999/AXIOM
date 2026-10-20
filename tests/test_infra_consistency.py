@@ -69,7 +69,9 @@ def test_compose_has_exactly_the_app_and_the_database():
     assert "build" in app and "image" not in app, "the app image is built here, under the project's own name"
     assert "POSTGRES_PASSWORD:?" in db["environment"]["POSTGRES_PASSWORD"], "no built-in database password"
     # Published on loopback unless the owner asks otherwise.
-    assert app["ports"] == ["${APP_BIND:-127.0.0.1}:${APP_PORT:-8080}:8080"]
+    assert app["ports"] == ["${APP_BIND:-127.0.0.1}:${APP_PORT:-8080}:${APP_PORT:-8080}"]
+    # The app must listen where it is published (see test_the_app_listens_on_the_port_it_publishes).
+    assert app["environment"]["APP_PORT"] == "${APP_PORT:-8080}"
 
 
 def test_the_image_never_receives_secrets_or_local_state():
@@ -102,3 +104,13 @@ def test_ci_covers_lint_tests_dashboard_and_the_image():
     assert ci["jobs"]["browser"]["continue-on-error"] is True, "browser tests stay advisory until they are stable"
     image = " ".join(str(step) for step in ci["jobs"]["image"]["steps"])
     assert "scripts/setup.sh" in image and "docker compose up -d --build --wait" in image
+
+
+def test_the_app_listens_on_the_port_it_publishes():
+    """BASE_URL is the address typed in the browser. The demo form and `jobpilot verify` open it from inside the
+    container too, so the container must listen on the very port Compose publishes (a fixed 8080 broke both whenever
+    APP_PORT was changed)."""
+    text = dockerfile()
+    assert re.search(r'^CMD \[.*--port .*\$APP_PORT', text, re.M), "serve on $APP_PORT, not a fixed port"
+    assert re.search(r"HEALTHCHECK[\s\S]*os\.environ\['APP_PORT'\]", text), "health check the port the app serves"
+    assert "--port 8080" not in text and "--port\", \"8080" not in text

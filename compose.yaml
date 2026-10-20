@@ -48,6 +48,8 @@ services:
     env_file: .env
     environment:
       DATA_DIR: /app/.data
+      # Listens on this port inside the container, and the same number is published, so BASE_URL works from both sides.
+      APP_PORT: ${APP_PORT:-8080}
       DATABASE_URL: postgresql+psycopg://applypilot:${POSTGRES_PASSWORD}@db:5432/applypilot
       DBOS_DATABASE_URL: postgresql+psycopg://applypilot:${POSTGRES_PASSWORD}@db:5432/applypilot
       # The browser origin must equal BASE_URL, so it follows the published port unless .env overrides it.
@@ -55,7 +57,7 @@ services:
       # Always use the Chromium installed in this image, never a host path copied from a native .env.
       CHROMIUM_PATH: ""
     ports:
-      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8080}:8080"
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8080}:${APP_PORT:-8080}"
     volumes:
       - applicant-data:/app/.data
     depends_on:

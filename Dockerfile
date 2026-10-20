@@ -32,6 +32,7 @@ ENV PYTHONUNBUFFERED=1 \
     ANONYMIZED_TELEMETRY=false \
     BROWSER_USE_LOGGING_LEVEL=warning \
     DATA_DIR=/app/.data \
+    APP_PORT=8080 \
     MALLOC_ARENA_MAX=2 \
     PATH=/app/.venv/bin:$PATH
 WORKDIR /app
@@ -72,7 +73,9 @@ LABEL org.opencontainers.image.title="AXIOM" \
 ENV AXIOM_REVISION=${GIT_SHA}
 
 USER pilot
+# The app listens on APP_PORT inside the container, and Compose publishes the same number, so BASE_URL (the address in
+# the browser) is also correct from inside: the built-in demo form and `jobpilot verify` open it from the container.
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"
-CMD ["jobpilot", "serve", "--host", "0.0.0.0", "--port", "8080"]
+  CMD ["python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ['APP_PORT'] + '/healthz', timeout=3)"]
+CMD ["sh", "-c", "exec jobpilot serve --host 0.0.0.0 --port \"$APP_PORT\""]

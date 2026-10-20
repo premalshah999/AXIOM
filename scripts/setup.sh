@@ -96,9 +96,8 @@ if ! docker compose up -d --build --wait --wait-timeout 900; then
   exit 1
 fi
 
-address=$(docker compose port app 8080 2>/dev/null | tail -n 1 || true)
-port=${address##*:}
-url=$(sed -n 's/^BASE_URL=//p' .env | tail -n 1)
+port=${APP_PORT:-$(sed -n 's/^APP_PORT=//p' .env | tail -n 1)}
+url=${BASE_URL:-$(sed -n 's/^BASE_URL=//p' .env | tail -n 1)}
 url=${url:-http://127.0.0.1:${port:-8080}}
 
 say ""
