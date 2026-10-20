@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from croniter import croniter
@@ -223,10 +223,23 @@ async def enqueue_feed_if_due(service):
     return True
 
 
+# A tick that runs this late was recovered after downtime (a sleeping laptop, a hang, a restart).
+STALE_TICK = timedelta(minutes=5)
+
+
+def stale_tick(scheduled_time, current=None):
+    """Is this scheduled tick too late to act? The next live tick does its work. Hundreds of recovered ticks each took
+    the global lock and a pooled connection, and exhausted the pool at every start (2026-10-20)."""
+    at = scheduled_time if scheduled_time.tzinfo else scheduled_time.replace(tzinfo=UTC)
+    return (current or datetime.now(UTC)) - at > STALE_TICK
+
+
 @DBOS.workflow(max_recovery_attempts=1)
 async def scheduled_tick(scheduled_time: datetime, context: dict):
     from .jobboard import managed_ids
 
+    if stale_tick(scheduled_time):
+        return
     SERVICE.db.set_setting("scheduler_heartbeat", {"at": now(), "engine_version": engine_version()})
     paused = SERVICE.db.get_setting("control", {}).get("paused")
     current = datetime.now(ZoneInfo(SERVICE.config.timezone))

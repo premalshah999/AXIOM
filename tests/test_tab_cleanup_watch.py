@@ -54,3 +54,37 @@ async def test_unreachable_chrome_is_reported_not_raised(service, monkeypatch):
         pass
     health = service.db.get_setting("inactive_tab_cleanup")
     assert health["state"] == "unavailable" and health["error_type"] == "OSError"
+
+
+def test_the_sweep_reads_only_target_fields_and_takes_no_lock_when_nothing_is_open(service, monkeypatch):
+    """Each desktop_job value also holds the run's ledger and checkpoints (22.6 MB over 1,562 rows in production).
+    Loading them all every 15 s inside the app starved its threads and exhausted the connection pool (2026-10-20)."""
+    import httpx
+    from sqlalchemy import event
+
+    from jobpilot.db import Run, Setting
+    from jobpilot.operations import close_tabs
+
+    with service.db.session() as s:
+        s.add_all(
+            [
+                Run(id="done", job_id="job", state="confirmed"),
+                Setting(key="desktop_job:job", value={"target_id": None, "ledger": {"field": "x" * 200_000}}),
+            ]
+        )
+    monkeypatch.setattr(close_tabs, "_targets", lambda endpoint, client: {})
+    statements = []
+
+    def record(conn, cursor, statement, *args):
+        statements.append(statement)
+
+    event.listen(service.db.engine, "before_cursor_execute", record)
+    try:
+        with httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=[]))) as client:
+            assert close_tabs.close_inactive_tabs(service.db, "http://chrome.test", client) == {"closed": 0, "pending": 0}
+    finally:
+        event.remove(service.db.engine, "before_cursor_execute", record)
+    joined = "\n".join(statements)
+    assert "BEGIN IMMEDIATE" not in joined and "pg_advisory_xact_lock" not in joined
+    assert "settings.value AS settings_value" not in joined
+    assert service.db.get_setting("desktop_job:job")["ledger"]["field"] == "x" * 200_000

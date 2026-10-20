@@ -39,41 +39,67 @@ def _targets(endpoint, client):
                 return {t["targetId"]: t for t in message["result"]["targetInfos"] if t.get("type") == "page"}
 
 
+def _ownership(session):
+    """(key, target_id, inactive_target_id, inactive_target_ids) of every application's recorded Chrome targets,
+    extracted in SQL so the rest of each value is never transferred or parsed."""
+    value = Setting.value
+    return session.execute(
+        select(
+            Setting.key,
+            value["target_id"].as_string(),
+            value["inactive_target_id"].as_string(),
+            value["inactive_target_ids"],
+        ).where(Setting.key.like("desktop_job:%"))
+    ).all()
+
+
 def close_inactive_tabs(db, endpoint, client):
     if not endpoint:
         return {"closed": 0, "pending": 0}
     endpoint = endpoint.rstrip("/")
     targets = _targets(endpoint, client)
-    pending = {}
-    # Detach ownership atomically before network work. A subsequently queued
-    # owner opens its own page instead of adopting a target being closed.
-    with db.exclusive() as session:
+    # A read-only snapshot of who owns which target, without the global lock and without loading the rows: each
+    # desktop_job value also holds the run's ledger and checkpoints (1,562 rows, 22.6 MB in production). Parsing all of
+    # them every 15 s inside the app starved its threads and exhausted the connection pool (2026-10-20).
+    with db.session() as session:
         active_jobs = set(session.scalars(select(Run.job_id).where(Run.state.in_(ACTIVE))))
-        known_jobs = set(session.scalars(select(Run.job_id)))
-        rows = list(session.scalars(select(Setting).where(Setting.key.like("desktop_job:%"))))
-        protected = {
-            row.value.get("target_id") for row in rows if row.key.removeprefix("desktop_job:") in active_jobs
-        }
-        while True:
-            related = {t.get("openerId") for tid, t in targets.items() if tid in protected}
-            related.update(tid for tid, t in targets.items() if t.get("openerId") in protected)
-            related.discard(None)
-            if related <= protected:
-                break
-            protected.update(related)
-        for row in rows:
-            jid = row.key.removeprefix("desktop_job:")
-            if jid in active_jobs or jid not in known_jobs:
-                continue
-            value = row.value
-            target = value.get("inactive_target_id") or value.get("target_id")
-            owned = set(value.get("inactive_target_ids", [])) | ({target} if target else set())
-            owned -= protected
-            if not owned:
-                continue
-            # Keep ledger, upload/checkpoint, armed state and proof intact.
-            row.value = {**value, "target_id": None, "inactive_target_ids": sorted(owned)}
-            pending.update({tid: row.key for tid in owned})
+        known_jobs = set(session.scalars(select(Run.job_id).distinct()))
+        rows = _ownership(session)
+    protected = {target for key, target, _, _ in rows if key.removeprefix("desktop_job:") in active_jobs}
+    protected.discard(None)
+    while True:
+        related = {t.get("openerId") for tid, t in targets.items() if tid in protected}
+        related.update(tid for tid, t in targets.items() if t.get("openerId") in protected)
+        related.discard(None)
+        if related <= protected:
+            break
+        protected.update(related)
+    candidates = {}
+    for key, target, inactive, inactive_ids in rows:
+        jid = key.removeprefix("desktop_job:")
+        if jid in active_jobs or jid not in known_jobs:
+            continue
+        owner = inactive or target
+        owned = set(inactive_ids or []) | ({owner} if owner else set())
+        owned -= protected
+        if owned:
+            candidates[key] = owned
+    pending = {}
+    if candidates:
+        # Detach ownership atomically before network work. A job queued since the snapshot keeps its page, and a
+        # subsequently queued owner opens its own page instead of adopting a target being closed.
+        with db.exclusive() as session:
+            jobs = [key.removeprefix("desktop_job:") for key in candidates]
+            now_active = set(session.scalars(select(Run.job_id).where(Run.state.in_(ACTIVE), Run.job_id.in_(jobs))))
+            for key, owned in candidates.items():
+                row = session.get(Setting, key)
+                if row is None or key.removeprefix("desktop_job:") in now_active:
+                    continue
+                # Keep ledger, upload/checkpoint, armed state and proof intact.
+                row.value = {**row.value, "target_id": None, "inactive_target_ids": sorted(owned)}
+                pending.update({tid: key for tid in owned})
+    if not pending:
+        return {"closed": 0, "pending": 0}
     # Only descendants of our recorded targets qualify. Browser/mail/user tabs
     # with no application ownership record are never selected by URL or title.
     while True:

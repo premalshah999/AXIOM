@@ -217,13 +217,20 @@ def record(obj):
     return {c.name: getattr(obj, c.name) for c in obj.__table__.columns}
 
 
+# Connections for one app process: eight application workers, the discovery, matching, classification and tailoring
+# queues, the scheduler, the mail poller and API requests. SQLAlchemy's default (5 + 10 overflow) ran out under load.
+POOL_SIZE, POOL_OVERFLOW = 10, 20
+
+
+def engine_options(url):
+    if url.startswith("sqlite"):
+        return {"connect_args": {"check_same_thread": False, "timeout": 30}, "pool_pre_ping": True}
+    return {"pool_pre_ping": True, "pool_size": POOL_SIZE, "max_overflow": POOL_OVERFLOW, "pool_timeout": 30}
+
+
 class Database:
     def __init__(self, url):
-        self.engine = create_engine(
-            url,
-            connect_args={"check_same_thread": False, "timeout": 30} if url.startswith("sqlite") else {},
-            pool_pre_ping=True,
-        )
+        self.engine = create_engine(url, **engine_options(url))
         if url.startswith("sqlite"):
 
             @event.listens_for(self.engine, "connect")

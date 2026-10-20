@@ -178,7 +178,7 @@ class Settings(BaseSettings):
     # Desktop Chrome for Docker on Mac (`python -m jobpilot.cli browser`), e.g. http://host.docker.internal:9224
     browser_cdp_url: str = ""
     # Seconds between sweeps that close leftover application tabs on the desktop Chrome (BROWSER_CDP_URL). 0 disables.
-    tab_cleanup_seconds: int = Field(default=15, ge=0, le=300)
+    tab_cleanup_seconds: int = Field(default=60, ge=0, le=300)
     # Owner decision 2026-10-19: a second local Chrome that Playwright never attaches to mints hCaptcha tokens
     # (`python -m jobpilot.cli twin-browser`), e.g. http://host.docker.internal:9225. Empty disables it.
     browser_twin_cdp_url: str = ""
