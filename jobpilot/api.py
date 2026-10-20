@@ -568,13 +568,17 @@ def create_app(config: Settings | None = None):
         from .pipeline_comparison import snapshot as application_workers
 
         with db.session() as s:
-            pending = s.scalar(select(func.count()).select_from(Outbox).where(Outbox.state != "delivered"))
+            pending = s.scalar(
+                select(func.count()).select_from(Outbox).where(Outbox.state.not_in(["delivered", "dead"]))
+            )
+            dead = s.scalar(select(func.count()).select_from(Outbox).where(Outbox.state == "dead"))
         return {
             "engine_version": engine_version(),
             "host": host_health.snapshot(db),
             "scheduler": db.get_setting("scheduler_health", {}),
             "heartbeat": db.get_setting("scheduler_heartbeat", {}),
             "outbox_pending": pending,
+            "outbox_dead": dead,
             "workers": config.workers,
             "application_workers": application_workers(db, config.topology),
             "models": selected(db, config),

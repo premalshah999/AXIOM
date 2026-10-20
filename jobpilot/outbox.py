@@ -10,6 +10,15 @@ from sqlalchemy.orm import aliased
 from .db import Job, Outbox, Review, Run, Setting, now, record
 
 
+# A delivery that keeps failing is parked as "dead" after this many attempts instead of being retried for ever. Retries
+# back off to five minutes, so 12 attempts is about an hour and 288 about a day. Chat, report and repair deliveries are
+# worth an hour; the rest may be waiting out a legitimate deferral (a spent daily model budget, an employer's pacing).
+# Production history: every row was eventually delivered, the most retried needed 53 attempts (fact_resume) and 40
+# (notify, before the per-run cap in telegram.record_notification_error).
+MAX_ATTEMPTS = {"notify": 12, "report": 12, "refill": 12, "repair": 6}
+DEFAULT_MAX_ATTEMPTS = 288
+
+
 def enqueue(session, kind, key, payload=None, run_id=""):
     identity = hashlib.sha256((kind + ":" + key).encode()).hexdigest()
     row = session.get(Outbox, identity)
@@ -171,12 +180,19 @@ async def process_one(service, kinds=None):
                 row.state, row.lease_until = "pending", 0
         raise
     except Exception as exc:
+        dead = None
         with service.db.exclusive() as s:
             row = s.get(Outbox, item["id"])
             if owns_delivery(row, item):
-                row.state, row.lease_until = "pending", 0
-                row.available_at = time.time() + min(300, 2 ** min(row.attempts, 8))
                 row.error = type(exc).__name__  # Provider payloads and secrets never enter the outbox.
+                if row.attempts >= MAX_ATTEMPTS.get(row.kind, DEFAULT_MAX_ATTEMPTS):
+                    row.state, row.lease_until, row.finished_at = "dead", 0, now()
+                    dead = (row.kind, row.run_id, row.attempts, row.error)
+                else:
+                    row.state, row.lease_until = "pending", 0
+                    row.available_at = time.time() + min(300, 2 ** min(row.attempts, 8))
+        if dead:
+            park(service, *dead)
     else:
         with service.db.exclusive() as s:
             row = s.get(Outbox, item["id"])
@@ -184,6 +200,20 @@ async def process_one(service, kinds=None):
                 row.state, row.lease_until, row.error = "delivered", 0, ""
                 row.finished_at = now()
     return True
+
+
+def park(service, kind, run_id, attempts, error):
+    """A delivery gave up for good: say so on its run, and stop the Telegram path from retrying around it."""
+    if not run_id:
+        return
+    try:
+        service.db.event(
+            run_id, "outbox_dead", f"Delivery of {kind} gave up after {attempts} attempts ({error})", {"kind": kind}
+        )
+        if kind == "notify":
+            service.db.set_setting("telegram_run_pending:" + run_id, {"pending": False})
+    except Exception:
+        pass  # Parking is bookkeeping; the row is already dead.
 
 
 async def poll(service):
