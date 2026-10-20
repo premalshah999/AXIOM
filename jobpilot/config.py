@@ -170,7 +170,8 @@ class Settings(BaseSettings):
     daily_application_limit: int = Field(default=100, ge=1, le=500)
     daily_budget_usd: float = Field(default=5, gt=0)
     max_model_calls: int = Field(default=18, ge=1, le=80)
-    timezone: str = "America/New_York"
+    # IANA zone for the daily limit, the daily budget, schedules and "today" on forms. scripts/setup.sh writes the computer's.
+    timezone: str = "UTC"
     # Dashboard snapshot: polls older than this are answered from the last result while it refreshes in
     # the background (0 always builds it in the request). A write through the API makes it stale.
     snapshot_cache_seconds: float = Field(default=5, ge=0, le=60)
