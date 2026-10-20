@@ -1,7 +1,7 @@
 # Architecture
 
-How AXIOM / ApplyPilot is built today, and how it should be built. Part 1 describes the code as it is on `main` (checked
-against the source, with file names so you can follow it). Part 2 is the target design for the restructure, which is a
+How AXIOM / ApplyPilot is built today, and how it should be built. Part 1 describes the code as it is on `main` at
+`69d921b` (2026-10-20), checked against the source, with file names so you can follow it. Part 2 is the target design for the restructure, which is a
 separate, later step: nothing in this document moves a file.
 
 Related documents: [KNOWLEDGE.md](KNOWLEDGE.md) (how a question is answered), [INFRA.md](INFRA.md) (image, compose,
@@ -258,7 +258,7 @@ confirmed because a CAPTCHA solved, an account activated, a talent community joi
 Jobs and job detail (`jobs.tsx`, `jobdetail.tsx`), Ledger (`ledger.tsx`), Job board (`jobboard.tsx`), Setup
 (`setup.tsx`, `autonomy.tsx`, `mail.tsx`), the first-run guide (`onboarding.tsx`), the question inbox (`questions.tsx`)
 and the v2 feature screens (`features.tsx`, `editor.tsx`: knowledge, discovery, resumes). The session is an HttpOnly cookie;
-browser code never sees the access token.
+browser code never sees the access token. The routes it calls, their problems and a cleaner route design are in [API.md](API.md).
 
 ## 12. Policies encoded in code (audit, 2026-10-20)
 
@@ -277,7 +277,7 @@ token cap (settings, `GET/PUT /api/limits`); ATS scope (`ats_focus`).
 | `DEFAULT_ROLES` (ML/AI roles) used when a profile had none | A profile with no target roles searches and matches nothing; the setup guide already requires a role | none |
 | `TITLE_ADMIT_FAMILIES` fixed list behind `admit_by_title`, with software-only exclusion words | The profile's own target roles that name a discipline; generic-only roles ("Developer", "Graduate Engineer") never qualify; exclusion words that appear in the profile's own roles are not exclusions (`roles.admitted_by_title`) | none: the original applicant's seventeen roles reduce to exactly the old eleven families |
 | `TIMEZONE` default `America/New_York` | `UTC`; `scripts/setup.sh` writes the computer's zone | the original installation's production `.env` already sets `TIMEZONE`; any installation that relied on the old default must set it |
-| School, employer, city, county, metro and e-mail-domain names of the original applicant in tests, comments and `docs/rea` | synthetic names | none |
+| The original applicant's school, employer, city, county, metro region, date of birth and e-mail domain in tests, comments and `docs/rea` | One synthetic mapping, applied on `main` (`b49ee2a`, `7408a40`, `78416b3`); this pass removed the last two leftovers, a university e-mail domain in the alias test and a research department in the iCIMS history test | none |
 
 **Still hard-coded (decisions for the owner of `answers.py` and the admission code).**
 
@@ -289,7 +289,7 @@ token cap (settings, `GET/PUT /api/limits`); ATS scope (`ats_focus`).
 | `answers.talent_pool_opt_out`, `policy_choice` (narrowest data-sharing option) | Talent-community and data-sharing opt-ins are always declined | follow `accept_required_marketing` / a `join_talent_communities` setting |
 | `service._queue`, `jobboard.role_matches`, `features/discovery/feeds.keep` | Internships are excluded everywhere | profile `job_types` (default full-time) |
 | `jobboard.BoardSettings.early_career_only = True`, `features/discovery/policy.SENIOR` | Early-career-only discovery by default | a setup-guide choice that sets the board setting |
-| `admission.UNKNOWN_RESUBMIT["enabled"] = True` | A run in `submission_unknown` with no receipt is resubmitted up to twice after 30 minutes | default `False`, with a one-time migration that writes `enabled: true` for an installation that already has runs and no saved `enabled`. See [forensics/FAILURE_ANALYSIS.md](forensics/FAILURE_ANALYSIS.md) (F7: duplicate submissions) |
+| `admission.UNKNOWN_RESUBMIT["enabled"] = True` | A run in `submission_unknown` with no receipt is resubmitted up to twice after 30 minutes | default `False`, with a one-time migration that writes `enabled: true` for an installation that already has runs and no saved `enabled` (the original installation saves only `max_resubmits`, so it would otherwise lose the behaviour). See [forensics/FAILURE_ANALYSIS.md](forensics/FAILURE_ANALYSIS.md) (F7: duplicate submissions) |
 | `service.complete` ("owner rule") | A job whose form asks for an SSN, national or bank number is removed | product rule; rename the comment and the reason text |
 
 ## 13. Knowledge facts and settings the resolver reads
