@@ -71,7 +71,7 @@ For Anthropic use `LLM_PROVIDER=haiku` with `HAIKU_API_KEY` (or `ANTHROPIC_API_K
 
 ## The worker Chrome (for real job sites)
 
-Without this, AXIOM uses a headless browser inside Docker. That is enough for the built-in demo (`make verify`) but many
+Without this, AXIOM uses a headless browser inside Docker. That is enough for the built-in demo but many
 employers block it. For real applications run a normal Chrome on your Mac and point AXIOM at it:
 
 ```sh
@@ -132,9 +132,13 @@ in `.env.example`.
 | Stop (your data is kept) | `make down` |
 | See the logs | `make logs` |
 | Container status and health | `make ps` |
-| Run the built-in demo end to end | `make verify` |
 | Update to the latest version | `make update` (pause applications first; the app restarts) |
 | Print the access token | `make token` (treat it like a password) |
+
+**Self-test (optional).** `make verify` runs two synthetic applications against a demo form built into the app, in the
+image's own browser, and prints PASS or FAIL. It is meant for a brand-new installation, before you create your account:
+it uses a fixed synthetic applicant, so it fails by design once your own profile exists, and it leaves demo jobs behind,
+which closes the open sign-up (sign in with `make token` instead). Skip it unless something looks wrong.
 
 **Back up** the two Docker volumes (`<project>_postgres` and `<project>_applicant-data`, where the project is `axiom`
 unless you changed it) and your `.env`. The `applicant-data` volume holds your uploaded resumes, the mailbox encryption

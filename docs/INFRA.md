@@ -138,7 +138,9 @@ file run from another directory would otherwise create empty volumes under the n
    and `POSTGRES_PASSWORD=local-container-database` (the password the existing volume was created with). Compose refuses to start without it.
 2. Replace `WORKERS=6` with `NORMAL_WORKERS=6` and `SPECIALIST_WORKERS=2`, or leave `WORKERS=6` to keep six workers and no
    specialists for now. Keep `BROWSER_CDP_URL` and `BROWSER_TWIN_CDP_URL`.
-3. Hold and drain as usual (`hold.sh`), then `docker compose up -d --build --remove-orphans`. `--remove-orphans` deletes the old
+3. Hold and drain as usual (`hold.sh`), then `docker compose up -d --build --remove-orphans`. The database container is recreated as well,
+   because its image reference changes from `postgres:17-bookworm` to the pinned `postgres:17.11-bookworm` (same PostgreSQL 17.11, a separate build): a few
+   seconds of downtime with the data volume untouched, which is why the drain comes first. `--remove-orphans` deletes the old
    `browser-cleanup` container. Then remove its stale image and the layered images: `docker image ls` and `docker image rm` the
    ones that are not the new `applypilot-app`. Volumes are untouched.
 4. `docker compose up -d --build --no-deps app` replaces `deploy.sh`'s patch layer for later releases; unlike the patch layer it also
@@ -158,5 +160,9 @@ file run from another directory would otherwise create empty volumes under the n
   confirm that specialists add value before the hard-platform fast track is relied on.
 - **Image publishing.** Building takes 5 to 10 minutes on a first install. Publishing the image from CI to a registry would
   reduce a friend's install to a pull; deliberately not done here.
+- **`jobpilot verify` is order dependent.** It drives the built-in demo form, which accepts only a fixed synthetic applicant, so it
+  fails on an installation that already has a real profile, and the demo jobs it creates close the open first-run sign-up
+  (`owner_account.fresh_installation`). CI and `make verify` therefore run it on a clean installation. A verification that
+  can run beside real data would need the demo to carry its own profile.
 - **Linux hosts.** `host.docker.internal` and Chrome's loopback-only debugging port make the host-Chrome workers macOS-only.
 - **Defaults** to review: `DEEPSEEK_THINKING`, `TIMEZONE`, `ENABLE_DEMO`, and the strict Origin check (see the audit table).

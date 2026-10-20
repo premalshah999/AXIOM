@@ -22,7 +22,7 @@ ps: ## Show container status and health
 token: ## Print the dashboard access token (a secret: keep it private)
 	@docker compose exec app jobpilot token
 
-verify: ## Run two synthetic browser applications against the built-in demo form
+verify: ## Self-test on a brand-new installation, before you create your account (see docs/SETUP.md)
 	docker compose exec app jobpilot verify
 
 update: ## Pull the latest code and rebuild. Pause applications first: the app restarts
