@@ -65,7 +65,7 @@ def test_existing_env_without_a_password_is_refused_not_guessed(checkout):
     (checkout / ".env").write_text("LLM_PROVIDER=deepseek\n")
     result = run(checkout, "setup.sh", "--env-only")
     assert result.returncode != 0
-    assert "POSTGRES_PASSWORD" in result.stderr and "local-container-database" in result.stderr
+    assert "POSTGRES_PASSWORD" in result.stderr and "old compose.yaml" in result.stderr
     assert (checkout / ".env").read_text() == "LLM_PROVIDER=deepseek\n"
 
 

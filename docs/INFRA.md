@@ -13,7 +13,7 @@ This is what was found and what replaced it.
 | `applypilot-app:latest`: 3.58 GB, 509 layers | `codex-handoff/bin/deploy.sh` stacked a `FROM applypilot-app:latest` + `COPY jobpilot/` layer on every deploy. Patch layers never delete files, and they never rebuild the dashboard, so the code and the frontend could disagree. | One Dockerfile. 2.49 GB, 30 layers. Dependencies and Chromium are separate layers, so a normal rebuild (`docker compose up -d --build app`) changes only the code layers and takes seconds. Patch layering is no longer needed. |
 | Playwright installed Chromium and its headless shell | The shell (334 MB) is never used: the code launches the full Chromium binary with `--headless=new`. | `playwright install --with-deps --no-shell chromium`. |
 | Base images `node:22-bookworm-slim`, `python:3.12-slim-bookworm`, `postgres:17-bookworm` | Floating tags: two builds a week apart could differ. | Pinned in the Dockerfile through ARGs: Node 22.23.2, Python 3.12.15, uv 0.12.18. PostgreSQL pinned to 17.11. `.nvmrc` and `.python-version` hold the same versions for CI and local tools; `tests/test_infra_consistency.py` fails if they drift. |
-| Database password `local-container-database` built into compose | A known password on every installation. | `POSTGRES_PASSWORD` is required and `scripts/setup.sh` generates it. The database is never published to the host. |
+| A database password written into compose as the default | A known password on every installation. | `POSTGRES_PASSWORD` is required and `scripts/setup.sh` generates it. The database is never published to the host. |
 | `ports: 127.0.0.1:8080:8080` fixed; `BASE_URL` separate | Changing the port broke every browser write (the API rejects an Origin that is not `BASE_URL`). | `APP_PORT` and `APP_BIND`; `BASE_URL` defaults from `APP_PORT`. |
 | One frontend in `frontend/` | Already single, but built outside the image or not at all for patch deploys. | Still `frontend/` only. It is built inside the image by a Node stage (`tsc -b` then `vite build` into `jobpilot/static`). `jobpilot/static` is gitignored and dockerignored, so a stale local build can never reach an image. |
 | `.dockerignore` sent all of `docs/` and `.env.example` into the build | Context noise. | Only `docs/third-party.md` and `docs/licenses/` (needed by the package build) are included; `.env*` never is. |
@@ -135,7 +135,8 @@ The live project is `applypilot` and its volumes are `applypilot_postgres` and `
 file run from another directory would otherwise create empty volumes under the name `axiom`.
 
 1. In the production `.env` set `COMPOSE_PROJECT_NAME=applypilot` (keeps the volumes and the `applypilot-app-1` / `applypilot-db-1` names)
-   and `POSTGRES_PASSWORD=local-container-database` (the password the existing volume was created with). Compose refuses to start without it.
+   and `POSTGRES_PASSWORD` set to the value the existing volume was created with: the production `.env`'s `POSTGRES_PASSWORD` if it has one, otherwise the
+   default written in the old `compose.yaml` (`${POSTGRES_PASSWORD:-...}`). A volume keeps its first password, and Compose refuses to start without the variable.
 2. Replace `WORKERS=6` with `NORMAL_WORKERS=6` and `SPECIALIST_WORKERS=2`, or leave `WORKERS=6` to keep six workers and no
    specialists for now. Keep `BROWSER_CDP_URL` and `BROWSER_TWIN_CDP_URL`.
 3. Hold and drain as usual (`hold.sh`), then `docker compose up -d --build --remove-orphans`. The database container is recreated as well,

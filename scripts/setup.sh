@@ -71,7 +71,7 @@ else
   say "Using the existing .env (not modified)."
   if ! grep -Eq '^POSTGRES_PASSWORD=.+' .env; then
     fail ".env has no POSTGRES_PASSWORD. If this computer already has an AXIOM or ApplyPilot database volume, set it to
-the password that database was created with (an installation from before this setup used local-container-database).
+the password that database was created with (an installation from before this setup took it from the default in its old compose.yaml).
 Otherwise add a new one: printf 'POSTGRES_PASSWORD=%s\n' \"\$(openssl rand -hex 24)\" >> .env"
   fi
 fi
