@@ -1,8 +1,8 @@
 # Architecture
 
 How AXIOM / ApplyPilot is built today, and how it should be built. Part 1 describes the code as it is on `main` at
-`69d921b` (2026-10-20), checked against the source, with file names so you can follow it. Part 2 is the target design for the restructure, which is a
-separate, later step: nothing in this document moves a file.
+`69d921b` (2026-10-20), checked against the source, with file names so you can follow it. Part 2 is the target design
+for the restructure, which is a separate, later step: nothing in this document moves a file.
 
 Related documents: [KNOWLEDGE.md](KNOWLEDGE.md) (how a question is answered), [INFRA.md](INFRA.md) (image, compose,
 configuration, worker settings), [SETUP.md](SETUP.md) (running your own copy), [API.md](API.md) (every route),
@@ -23,6 +23,24 @@ It is built around three promises:
   the applicant. A run is `confirmed` only with evidence of the employer's own acknowledgement.
 - **No duplicates.** One writer per job, one employer at a time, submission reservations and uncertain-submission guards.
 - **The applicant's facts are data, never code.** A friend's copy runs with their own profile and knowledge base.
+
+**Terms used in the code.** "Owner" means two different things: the *installation owner* (the applicant who signed up:
+`owner_account.py`, `owner_apply.py`) and an *application owner* (the task that holds one browser slot and one tab; the
+documents say worker or slot). The rest:
+
+| Term | Meaning |
+|---|---|
+| job, run | A posting (`jobs` row). One attempt to apply to it (`runs` row); a job can have many runs |
+| draft | A filled, unsubmitted form kept (tab and checkpoint) for recovery |
+| packet | JSON on a run: profile snapshot, pool, slot, pipeline, controller policy, recovery and escalation state |
+| receipt | JSON on a run: the evidence that it was submitted (section 10) |
+| reservation | The one durable claim to press Submit for a job (`reserve_commit`); it is what stops duplicates |
+| review | A question a run is waiting on (`reviews` row), answered in the dashboard or on Telegram |
+| fact, policy | A confirmed value about the applicant (`Profile.facts`, `kn_facts`); a standing decision (a `Profile` flag or `answer_rules`) |
+| ATS, adapter | The employer's applicant-tracking platform; the deterministic driver for one (`adapters/`) |
+| pool, slot, tier | The ATS-worker or specialist group; one browser owner; the strength level of a retry (`tiers.py`) |
+| partition | The employer key that makes the queue run one job per employer at a time |
+| outbox | Transactional delivery table for follow-ups (`application_outbox`: dispatch, report, repair, refill, notify, mail_resume, fact_resume, tailor) |
 
 ## 2. Processes and stores
 
@@ -145,6 +163,26 @@ platform, it moves to the specialist pool (section 6). Missing facts, mail waits
 submissions are typed waits, not retries. `repair_agent.py` reads a failed run's evidence and applies a guarded data fix
 (an answer override for one field, an instruction for the next attempt, or a question for the applicant).
 
+### 5.1 One click on Apply, end to end
+
+1. The dashboard calls `applyJob(id)` (`frontend/src/api.ts`) → `POST /api/jobs/{id}/apply` → `owner_apply.apply`.
+2. `apply` marks the job `ready` with its resume (or the first uploaded one) when it was not, grants a fresh start
+   allowance unless the job may already be submitted, and calls `owner_apply.start` → `Service.queue(job_id, "submit")`.
+3. `_queue` runs the admission guards (section 4.3). A resume still being tailored answers *preparing*
+   (`outbox` kind `tailor`); a temporary refusal is remembered in `settings['owner_apply:<job>']` and answered *waiting*, and
+   `autopilot.tick` calls `owner_apply.due` to start it when admission allows. A permanent refusal is an error.
+4. On success `_queue` writes the `runs` row (`queued`), sets `jobs.status = queued`, records a `queued` event and calls
+   `workers.dispatch`, which enqueues `apply_workflow(run_id)` on `applications_<pool>` with the employer as partition key. If
+   the enqueue fails the run is delivered through the outbox (kind `dispatch`); the run is never created twice.
+5. DBOS calls `Service.execute`; `_execute_owned` claims the run (section 5) and starts `BrowserEngine.run`.
+6. The engine fills and verifies the form (section 7) and returns a result dict; `Service.complete` records the state,
+   receipt and reason, releases the slot, schedules recovery, creates `reviews` for missing facts, and enqueues outbox
+   work: a failure `report`, the `repair` agent, a `refill` of the free slot, a `notify` for Telegram, and a `mail_resume` when
+   an email wait was matched.
+7. Later and out of band: `receipts.check_receipts` (the mail poll) confirms a `submission_unknown` run when the employer's
+   acknowledgement arrives; an answer to a question (`POST /api/reviews/{id}` or Telegram) calls `Service.resolve_review`,
+   which saves it as a fact and requeues the waiting run.
+
 ## 6. Worker pools
 
 A worker is a browser slot. `NORMAL_WORKERS` (6) are the ATS workers, slots 1-6; `SPECIALIST_WORKERS` (2) are slots 7-8
@@ -248,8 +286,9 @@ Two properties matter for the architecture:
 | Authenticated employer email | `receipts.check_receipts` / `acknowledgement()` matching sender, recipient, employer and exact title to one attempted run | `email_confirmed`; a verification or activation message is never a receipt |
 | The applicant's word | `POST /api/runs/{id}/reconcile` → `receipt.type = user_reconciled` | only for `submission_unknown` and `already_applied` |
 
-`evidence_reconciliation` is `pending` for confirmations recorded by an older detector until re-verified; pending runs are not counted. Nothing marks a run
-confirmed because a CAPTCHA solved, an account activated, a talent community joined or an upload succeeded.
+`evidence_reconciliation` is `pending` for confirmations recorded by an older detector until they are re-verified;
+pending runs are not counted. Nothing marks a run confirmed because a CAPTCHA was solved, an account was activated, a
+talent community was joined or an upload succeeded.
 
 ## 11. Frontend
 
@@ -295,10 +334,10 @@ token cap (settings, `GET/PUT /api/limits`); ATS scope (`ats_focus`).
 ## 13. Knowledge facts and settings the resolver reads
 
 Existing keys, so retrieval and the setup guide stay aligned. Facts live in `Profile.facts` and are mirrored as
-`kn_facts` rows `kf:<key>`; `migration.FACT_CATEGORY` and the first matching rule of `questions.CATEGORY_RULES` pick the category from the key's words
-(self-identification keys land in `demographics`, clearance keys in `clearance`, authorization and sponsorship keys in
-`work_authorization`, a key such as `has_relatives_at_employer` in `employer_relationship`; a key no rule matches is
-`additional`).
+`kn_facts` rows `kf:<key>`. `migration.FACT_CATEGORY` and the first matching rule of `questions.CATEGORY_RULES` pick the
+category from the key's words: self-identification keys land in `demographics`, clearance keys in `clearance`,
+authorization and sponsorship keys in `work_authorization`, a key such as `has_relatives_at_employer` in
+`employer_relationship`, and a key no rule matches in `additional`.
 
 | Group | Keys | Read by |
 |---|---|---|
@@ -326,7 +365,7 @@ the frontend and the docs; every module's imports (including function-level impo
 `widgets.page_is_blank`, `widgets_ats.read_combo` (used by tests only), `features/knowledge/models.Provenance` (documents a
 JSON shape; unused as a type, in the knowledge package that is under change).
 
-**No module is unreferenced.** Every module is imported somewhere. The structure hides problems instead: 
+**No module is unreferenced.** Every module is imported somewhere. The structure hides problems instead:
 677 imports sit inside functions, mostly to dodge import cycles, so the static import graph shows none while the real
 dependencies run in every direction (`answers` → `widgets`, `pipeline_comparison`, `execution_services`; `forms` → `answers`).
 
@@ -336,7 +375,7 @@ dependencies run in every direction (`answers` → `widgets`, `pipeline_comparis
 |---|---|---|
 | Two knowledge stores and two knowledge APIs | `knowledge.py` + `settings['profile'].reviewed_answers` + `/api/knowledge`, versus `features/knowledge` (`kn_facts`) + `/api/v2/knowledge` | one store (`kn_facts`), one API; `knowledge.py` shrinks to the matching helpers the resolver uses |
 | Three discovery stacks | `discovery.py` (import, rank, per-ATS scrapers), `jobboard.py` + `jobsearch.py` (board sources, catalogs, web search), `features/discovery` (policy, feeds, readiness) | one `discovery` package; `SENIOR`/`ENTRY`/`INTERN`/`NEW_GRAD` are defined in more than one place |
-| Three ways to apply | `POST /api/jobs/{id}/apply`, `/api/jobs/{id}/queue`, `/api/jobs/batch-queue`, `/api/jobs/{id}/approve`, `/api/job-board/apply` | see [API.md](API.md) |
+| Five ways to start an application | `POST /api/jobs/{id}/apply`, `/api/jobs/{id}/queue`, `/api/jobs/batch-queue`, `/api/jobs/{id}/approve`, `/api/job-board/apply` | see [API.md](API.md) |
 | Two ways to add a source | `POST /api/sources`, `POST /api/job-board/sources` | one route with a `managed` flag |
 | Several controllers | guided flow, adapters, `run_desktop_navigator`, `run_agent`, `continuous_agent.py`, `control_agent.py` | `continuous_agent.py`, the `reasoning_first` navigator and `tiers.escalate_due` run only while runner tiers are enabled (off in the original installation since 2026-10-14); decide whether to keep them |
 | Pipeline names | `pipeline_comparison.LEGACY/REASONING/AGENTIC/CURRENT` | retained drafts keep old names; new runs use `current`. Remove with the last retained draft |
@@ -345,6 +384,30 @@ dependencies run in every direction (`answers` → `widgets`, `pipeline_comparis
 `/api/jobs/{id}/approve`, `/api/runs/{id}/cancel`, `/api/job-board/search` (no caller in the dashboard, tests or scripts;
 see [API.md](API.md)).
 
+## 15. Module map
+
+Every module of `jobpilot/`, by area. Line counts are given for the modules over 1,000 lines.
+
+| Area | Modules | Responsibility |
+|---|---|---|
+| **Entry points** | `cli.py`, `mcp_server.py`, `verify.py`, `demo.py` | Commands; read-only MCP over stdio; the synthetic end-to-end check and its fake employer |
+| **HTTP** | `api.py` (1.1k), `owner_account.py`, `mail_api.py`, `jobboard_api.py`, `features/{knowledge,resumes,discovery}/router.py` | App factory, middleware, lifespan and the 109 routes ([API.md](API.md)) |
+| **Core** | `config.py`, `db.py`, `schemas.py`, `network.py`, `runtime.py`, `dbos_sqlite.py`, `features/_store.py` | Settings; tables and sessions; `Profile` and the request models; the SSRF-safe fetch; version tags; feature-table helpers |
+| **Application** | `service.py` (1.6k), `admission.py`, `application_budget.py`, `application_pacing.py`, `application_slots.py`, `execution_services.py`, `job_control.py`, `owner_apply.py`, `archive.py`, `outbox.py` | `Service` (queue, execute, complete, reconcile, reviews); admission guards and capacity; lifetime allowance; employer and ATS pacing; slot claims; resume pinning and tailoring requests; pause, resume and delete; one-click apply; archived history; transactional delivery |
+| **Scheduling and recovery** | `workers.py`, `autopilot.py`, `recovery.py`, `tiers.py`, `pipeline_comparison.py`, `specialist.py`, `controller_policy.py`, `repair_agent.py`, `failure_reports.py`, `run_trace.py`, `provider_health.py` | DBOS workflows, queues and the minute tick; the unattended batch; bounded retries and specialist handoff; runner tiers and budgets; pools, slots and engine choice; the repair agent; failure summaries; per-run timing |
+| **Discovery** | `discovery.py`, `jobboard.py`, `jobsearch.py`, `ats.py`, `eligibility.py`, `features/discovery/{classify,feeds,graduation,policy,postings,readiness,roles,tables}.py` | Import, ranking and per-ATS scrapers; board sources and catalogs; web-search expansion; platform detection; hiring restrictions versus facts; cached classification, curated feeds, freshness, dedupe, readiness, target-role matching |
+| **Answers and knowledge** | `answers.py` (4.8k), `answer_context.py`, `answer_quality.py`, `answer_rules.py`, `knowledge.py`, `evidence_equivalence.py`, `inference_agent.py`, `sensitive_ids.py`, `letters.py`, `features/knowledge/*` | The resolver; question identity and eligibility propositions; the pre-submit review; owner-editable fallback chains; the legacy answer store; interpretation of conflicting facts; inference before asking; identifier detection; cover letters; the versioned store, retrieval, employer identity, writing |
+| **Resumes** | `features/resumes/*` | Master resume, evidence inventory, tailoring, LaTeX editor and compiler |
+| **Engine** | `browser.py` (4.4k), `browser_contracts.py`, `forms.py` (5.2k), `widgets.py` (2.7k), `widgets_ats.py`, `phone_fields.py`, `history_editor_guard.py`, `js/scan.js`, `desktop_cdp.py`, `privacy.py`, `playwright_fast.py`, `diagnostics.py`, `bot_wall.py` | `BrowserEngine`; shared observation types; `FormSession`; control drivers and per-platform pickers; phone groups; the DOM scanner; tab ownership on the host Chrome; cookie and geolocation handling; masked diagnostics; platform-wide bot walls |
+| **Adapters** | `adapters/base.py` (1.8k), `adapters/{workday,oracle,icims,others}.py` (`icims.py` 1.5k), `workday.py` (1.2k) | The deterministic multi-page driver and one subclass per platform; Workday account setup |
+| **Model-led controllers** | `continuous_agent.py`, `control_agent.py`, `vision.py` | Opt-in agent owner and bounded reasoning over one control (run only while runner tiers are enabled); optional observation of a masked screenshot |
+| **CAPTCHA** | `captcha.py`, `captcha_client.py`, `captcha_observation.py`, `captcha_same_ip.py`, `captcha_twin.py`, `captcha_visual.py` | Token workflow and SDK client; read-only frame observation; same-IP image solving; twin-Chrome tokens |
+| **Mail and accounts** | `mail.py` (1.9k), `mail_errors.py`, `inbox.py`, `gmail_imap.py`, `email_browser.py`, `email_alias.py`, `receipts.py`, `accounts.py` (1.6k) | Challenges, rules, extraction and the vault; sanitized errors; the adapter-facing view; read-only IMAP; code and link actions in the owning browser; plus-addresses; receipt matching; employer account store and flows |
+| **Models** | `models.py`, `model_admission.py`, `agent_settings.py`, `jev.py` | LLM clients with budgets; process-wide request admission; role and helper switches; typed choice decisions |
+| **Telegram** | `telegram.py` (1.7k), `telegram_workers.py` | Main bot and per-slot bots |
+| **Operations** | `operations/{cancel,close_tabs,reset}.py` | Maintenance that is not part of application execution |
+| **Frontend** | `frontend/src/*.tsx` | The dashboard (section 11); built into `jobpilot/static` |
+
 ---
 
 # Part 2. Target design
@@ -352,20 +415,20 @@ see [API.md](API.md)).
 This is the plan for the restructure ("Phase B"). It starts only after the other branches are merged, because it moves
 files that all of them edit.
 
-## 15. What is wrong with the structure
+## 16. What is wrong with the structure
 
-- A flat package of about 130 modules; four of them hold 17,000 lines (`forms.py` 5.2k, `answers.py` 4.7k, `browser.py`
-  4.4k, `widgets.py` 2.7k). 30 of the 669 functions in the eleven largest modules are longer than 150 lines; the longest are `Resolver._local` (916),
-  `BrowserEngine.run` (769), `run_desktop_navigator` (608), `FormSession.fill_current` (546), `FormSession._fill` (526) and
-  `FormSession.proof` (471).
+- A flat package of about 130 modules; four of them hold 17,000 lines (`forms.py` 5.2k, `answers.py` 4.8k, `browser.py`
+  4.4k, `widgets.py` 2.7k). 30 of the 669 functions in the eleven largest modules are longer than 150 lines; the longest
+  are `Resolver._local` (916), `BrowserEngine.run` (769), `run_desktop_navigator` (608), `FormSession.fill_current` (546),
+  `FormSession._fill` (526) and `FormSession.proof` (471).
 - No layering: 677 function-level imports hide cycles. A change in `widgets.py` can break answers, and the answer module
   imports queue-level code for a prompt string.
-- Two knowledge stores, three discovery stacks, two source routes and four ways to apply.
+- Two knowledge stores, three discovery stacks, two source routes and five ways to start an application.
 - `api.py` holds 54 route handlers, the middleware, the snapshot builder and SQL inside one 1,065-line function (`create_app`).
 - The `settings` table is used as a document store for per-job state.
 - No migration framework (`create_all` only), so a column change cannot ship.
 
-## 16. Principles
+## 17. Principles
 
 1. **Layers, one direction.** A package imports only from layers below it. A test (`tests/test_layering.py`, an `ast` scan)
    fails on an upward import, and function-level imports of project modules are not allowed outside `api` wiring.
@@ -375,7 +438,7 @@ files that all of them edit.
 5. **State in tables.** Per-job and per-run documents move out of `settings`; real migrations (Alembic) ship the first schema change.
 6. **Every file is movable.** Moves are mechanical (`git mv` plus import rewrites) and tested one package at a time.
 
-## 17. Layers and packages
+## 18. Layers and packages
 
 ```
 L5 interfaces    api/  telegram/  cli  mcp_server  (frontend/)
@@ -397,7 +460,7 @@ Rules that follow from it, with today's violations to fix first:
   persists it.
 - `api` and `telegram` call `applications` and `knowledge` services; they never reach into `browser` or `forms`.
 
-## 18. Target directory layout
+## 19. Target directory layout
 
 ```
 jobpilot/
@@ -414,7 +477,7 @@ jobpilot/
   models/          client.py  admission.py  health.py  settings.py  jev.py  vision.py
   eligibility.py   ats.py
   answers/         resolver.py (the cascade)  patterns.py  intents.py  contact.py  history.py  demographics.py  consent.py
-                   choices.py (option matching, fallbacks)  eligibility.py (answer_context)  validate.py  model_batch.py
+                   choices.py (option matching, fallbacks)  propositions.py (answer_context)  validate.py  model_batch.py
                    prompts.py  quality.py  rules.py (answer_rules)  inference.py
   widgets/         core.py (options, popups)  click.py  dropdown.py  combobox.py  prompt.py (Workday)  date.py  phone.py
                    pills.py  upload.py  matching.py  ats/ (oracle.py  successfactors.py  ui5.py  icims.py  dayforce.py)
@@ -436,11 +499,11 @@ jobpilot/
 tests/             unit/  integration/ (API, DB)  browser/ (Chromium fixtures)  regression/ (one file per ATS incident)
 ```
 
-## 19. Splitting the mega-modules
+## 20. Splitting the mega-modules
 
 | Today | Target | How |
 |---|---|---|
-| `answers.py` (4.7k) | `answers/` | Tables (`CONTACT`, `NAMES`, `ADDRESS`, `WORK`, `EDUCATION`, the regexes, `INTENTS`) → `patterns.py` and `intents.py`. `Resolver._local` (916 lines) is a cascade of independent rules; each rule becomes a function `(resolver, field) -> Answer | None` in `contact.py`, `history.py`, `demographics.py`, `consent.py`, `choices.py`, `eligibility.py`, and `_local` becomes a list of them in order. `_resolve` and `jev_choices` → `model_batch.py`; `_validate_answer` (321) → `validate.py`; the model instructions (a 200-line string) → `prompts.py` |
+| `answers.py` (4.8k) | `answers/` | Tables (`CONTACT`, `NAMES`, `ADDRESS`, `WORK`, `EDUCATION`, the regexes, `INTENTS`) → `patterns.py` and `intents.py`. `Resolver._local` (916 lines) is a cascade of independent rules; each rule becomes a function `(resolver, field) -> Answer | None` in `contact.py`, `history.py`, `demographics.py`, `consent.py`, `choices.py`, `eligibility.py`, and `_local` becomes a list of them in order. `_resolve` and `jev_choices` → `model_batch.py`; `_validate_answer` (321) → `validate.py`; the model instructions (a 200-line string) → `prompts.py` |
 | `forms.py` (5.2k) | `forms/` | `FormSession` keeps state and the contract (`session.py`). `scan` → `scan.py`; `fill_current` (546) and `_fill` (526) split by control kind into `fill.py` and `options.py`; `proof` (471) → `proof.py` with the confirmation helpers; `click` and submit-control classification → `submit.py`; `rejection` and `repair_validation` → `rejection.py`; `NetworkMonitor` → `network.py` |
 | `browser.py` (4.4k) | `browser/` | `BrowserEngine.run` (769) becomes phases: `open_application`, `detect_platform`, `choose_controllers`, `finish`. `run_desktop_navigator` (608) and `run_agent` (249) → `flows/`; `_finish`, `watch_submission`, `reserve_commit` → `submit.py`; draft checkpoint and retention → `draft.py`; `handle_account*`, `handle_email`, `browser_challenge` → `account.py`, `email.py`, `challenges.py` |
 | `widgets.py` (2.7k) + `widgets_ats.py` | `widgets/` | 83 functions by control family: matching helpers (`norm`, `best_option`, dates, money, phone) → `core/matching.py`; popups and options → `core.py`; clicking and typing → `click.py`; `dropdown`, `combobox`, `prompt` (226), `pills`, `date_parts`, `select`, `checkbox` one module each; Oracle, SuccessFactors, UI5 and iCIMS pickers → `ats/` |
@@ -448,7 +511,7 @@ tests/             unit/  integration/ (API, DB)  browser/ (Chromium fixtures)  
 | `api.py` (1.1k) | `api/` | `create_app` (middleware, lifespan, routers) and one router module per resource, as proposed in [API.md](API.md) |
 | `mail.py` (1.9k), `accounts.py` (1.6k), `telegram.py` (1.7k), `adapters/base.py` (1.8k), `adapters/icims.py` (1.5k), `workday.py` (1.2k) | `mail/`, `accounts/`, `telegram/`, `adapters/*/` | Same method: one module per responsibility, long handlers (`MailService.poll_once` 320, `AccountFlow.handle` 431, `_handle_update` 379, `WorkdayAuth.run` 351) split by step |
 
-## 20. Order of work and safeguards
+## 21. Order of work and safeguards
 
 1. **Freeze and measure.** Run the whole suite once on the merged `main`; record the result. Add `tests/test_layering.py` in
    report-only mode listing today's violations.
