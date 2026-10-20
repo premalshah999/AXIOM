@@ -52,7 +52,7 @@ valid only for string settings. The example keeps every default commented out fo
 | `DEEPSEEK_THINKING` | The old example said `disabled`, the developer guide says production answers run with thinking off, but the code default is `enabled` (slower and dearer). | The example keeps `disabled` active. **Recommend flipping the code default**; not changed here to avoid a behaviour change in the architecture branch's area. |
 | `TELEGRAM_WAIT_SECONDS` | Old example 120, code 0. | Example follows the code. |
 | `WORKERS` | Old example and code 8, production 6 (which meant no specialists). | Replaced, see Workers. |
-| `TIMEZONE` | Defaults to `America/New_York`, the original owner's zone. It decides the daily limit, the daily budget and schedules. | `scripts/setup.sh` writes the computer's zone. **Recommend `UTC` or a required value in code.** |
+| `TIMEZONE` | Defaults to `UTC`. It decides the daily limit, the daily budget, schedules and the date written on forms. | `scripts/setup.sh` writes the computer's zone. An installation that relied on the old `America/New_York` default must set `TIMEZONE` in its `.env` (the original owner's production file does). |
 | `CAPTCHA_SAME_IP`, `CAPTCHA_TWIN_HOSTS` | `true` / `icims.com` encode decisions taken for one owner's setup. | Documented; harmless without a 2Captcha key. |
 | `ENABLE_DEMO` | `true` in the production image: the demo employer form and `/api/demo` are reachable. | Needed by `jobpilot verify` and the first-run tour, so left on; flagged. |
 | `POSTGRES_PASSWORD` | Was a constant in compose. | Required and generated. |

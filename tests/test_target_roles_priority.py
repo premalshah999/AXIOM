@@ -1,6 +1,6 @@
-"""Search filters and new-grad priority come from each profile (2026-10-17). The owner's targets are Data Science,
-Machine Learning Engineer, AI Engineer and Software Development Engineer, with new-grad postings applied to first;
-other users set their own in Setup."""
+"""Search filters and new-grad priority come from each profile. The sample targets are Data Science, Machine Learning
+Engineer, AI Engineer and Software Development Engineer, with new-grad postings applied to first; every applicant
+sets their own in Setup, and a profile with none matches nothing."""
 
 from datetime import UTC, datetime
 

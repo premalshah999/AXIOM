@@ -13,7 +13,7 @@ from sqlalchemy import select
 
 from .admission import QueueBlocked
 from .db import Job, Run, Setting
-from .features.knowledge.employers import name_aliases, resolve, tenant_alias
+from .features.knowledge.employers import name_aliases, tenant_alias
 from .features.knowledge.tables import KnAlias
 
 ASHBY_KEY = "application_pacing:ashby"
@@ -154,16 +154,6 @@ def require_ats_admission(session, job, run_id=None):
                 code="ats_pacing",
                 not_before=datetime.fromtimestamp(available, UTC).isoformat(),
             )
-
-
-def company_identity(session, name, url=""):
-    """Existing explicit employer aliases first; exact normalized name otherwise."""
-    aliases = name_aliases(name or "")
-    # Unknown tenant host alone cannot invent a company name for historical counts.
-    if not aliases:
-        return None
-    found = resolve(session, name=name, url=url, create=False)
-    return found.id if found else "name:" + aliases[-1]
 
 
 EMPLOYER_CAP_PREFIX = "employer_cap:"
@@ -312,10 +302,3 @@ def require_company_limit(session, job, run_id=None):
             code="company_limit",
             not_before=None if permanent else datetime.fromtimestamp(time.time() + 60, UTC).isoformat(),
         )
-
-
-def next_ashby_start(session):
-    """Return a retry timestamp without holding a browser slot or sleeping."""
-    saved = session.get(Setting, ASHBY_KEY)
-    at = float(saved.value.get("started_at", 0)) + ASHBY_GAP if saved else time.time()
-    return datetime.fromtimestamp(at, UTC).isoformat()

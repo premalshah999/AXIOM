@@ -24,7 +24,7 @@ First run and sign-in (`owner_account.py`, `frontend/src/onboarding.tsx`): an in
 - `frontend/src/`: dashboard source; `jobpilot/static/` is generated build output.
 - `tests/`: focused regressions and synthetic shared fixtures.
 - `scripts/demo_instance.sh`: a throwaway local instance for showing sign-up and the setup guide.
-- `docs/`: third-party notices and licenses (copied into the image) and Telegram worker notes.
+- `docs/`: `ARCHITECTURE.md` (system design and target layout), `API.md` (every route), `KNOWLEDGE.md` (answers), `SETUP.md` and `INFRA.md`, the per-ATS maps in `rea/`, third-party notices and licenses (copied into the image) and Telegram worker notes.
 
 Applicant state belongs in the existing private storage and Docker volumes, never source fixtures or documentation. This file is the maintained guide. Earlier versions are branches, not folders: `v1-oct04` (commit `825c1b6`, the October 4 engine) and `v2-oct15` (the code before the October 15 cleanup).
 

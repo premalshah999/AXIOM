@@ -22,6 +22,7 @@ full walk-through, with API keys, the Gmail app password, the worker Chrome and 
 
 - [docs/SETUP.md](docs/SETUP.md): install and everyday use, for anyone.
 - [docs/INFRA.md](docs/INFRA.md): image, compose, settings audit, worker topology and cut-over notes.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how the system is built, where its state lives, and the target design. [docs/API.md](docs/API.md): every HTTP route and its review. [docs/KNOWLEDGE.md](docs/KNOWLEDGE.md): how a question is answered.
 - [.env.example](.env.example): every setting, its default and whether it is required.
 - [DEVELOPER.md](DEVELOPER.md): developer guide. [docs/OVERHAUL.md](docs/OVERHAUL.md): the October 2026 overhaul plan and status.
 

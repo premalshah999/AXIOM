@@ -138,9 +138,9 @@ def role_matches(title, description, profile):
         return False
     if re.search(r"\bintern(?:ship)?\b", title, re.I):
         return False
-    from .features.discovery.roles import DEFAULT_ROLES, matching_role
+    from .features.discovery.roles import matching_role
 
-    roles = profile.target_roles or list(DEFAULT_ROLES)
+    roles = profile.target_roles  # A profile with no roles matches nothing: the applicant sets them in Setup.
     # Synonym-aware: "Software Development Engineer" also matches "Software Engineer II" and "SDE". A profile's
     # own role wins over the generic exclusions below (a product manager's profile targets "Product Manager").
     if matching_role(title, roles):
@@ -168,11 +168,11 @@ def role_matches(title, description, profile):
 
 
 def workday_searches(profile):
-    """Workday tenant search terms from the profile's own target roles (2026-10-17: these were hard-coded to one
-    applicant's AI/ML roles), plus "new grad" for profiles that apply to new-grad roles first."""
-    from .features.discovery.roles import DEFAULT_ROLES, search_terms
+    """Workday tenant search terms from the profile's own target roles, plus "new grad" for profiles that apply to
+    new-grad roles first."""
+    from .features.discovery.roles import search_terms
 
-    terms = search_terms(profile.target_roles or list(DEFAULT_ROLES), limit=6)
+    terms = search_terms(profile.target_roles, limit=6)
     if getattr(profile, "job_priority", "new_grad_first") == "new_grad_first":
         terms.append("new grad")
     return list(dict.fromkeys(terms))
