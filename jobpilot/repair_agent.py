@@ -30,7 +30,7 @@ NOT_REPAIRABLE = re.compile(
     # The app's own waits: the recovery scheduler retries these once the sender, browser or worker is back.
     # Honeywell (2026-10-18): this agent read a sender wait as a missing email address and asked the owner.
     r"email sender busy|open the applypilot chrome|browser tab closed unexpectedly|worker interrupted|"
-    r"tab initialization failed",
+    r"tab initialization failed|chrome debugging endpoint|worker host was overloaded",
     re.I,
 )
 # The applicant's email address and phone number are always saved (masked as [email] and 9s in the evidence).
