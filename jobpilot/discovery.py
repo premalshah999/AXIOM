@@ -558,19 +558,22 @@ async def rank(db, config, job_id):
     return result.model_dump()
 
 
-TITLE_ADMITTED = "Admitted by title (owner policy): "
+TITLE_ADMITTED = "Admitted by title (admit_by_title setting): "
 
 
 def title_admits(profile, title, reason=""):
-    """Owner policy (2026-10-18): a core-family title qualifies a posting the fit score would skip."""
+    """A title of the profile's own specific target roles qualifies a posting the fit score would skip, for a profile
+    that turned on admit_by_title (features/discovery/roles.admitted_by_title)."""
     from .features.discovery.roles import admitted_by_title
 
-    return bool(getattr(profile, "admit_by_title", False)) and admitted_by_title(title, reason)
+    return bool(getattr(profile, "admit_by_title", False)) and admitted_by_title(
+        title, reason, getattr(profile, "target_roles", ())
+    )
 
 
 def readmit_by_title(db, live_ids):
-    """Return skipped postings that the admit-by-title policy qualifies to the pipeline (owner, 2026-10-18: most
-    underscored postings in the core role families were good matches). Only postings still listed (`live_ids`),
+    """Return skipped postings that the admit-by-title setting qualifies to the pipeline (most underscored postings in
+    a role the applicant named were good matches). Only postings still listed (`live_ids`),
     never attempted, inside the deterministic gate and without a hard blocker in their ranking reason."""
     from .db import Run
     from .features.discovery import gate, policy_for

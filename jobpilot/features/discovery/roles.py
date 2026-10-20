@@ -32,8 +32,6 @@ SYNONYMS = (
     ("product manager",),
 )
 STOP = {"and", "or", "of", "the", "a", "an", "in", "for", "with", "to", "at"}
-# Where a profile has no target roles yet, discovery keeps its original AI/ML focus.
-DEFAULT_ROLES = ("Machine Learning Engineer", "AI Engineer")
 
 
 def words(text):
@@ -76,19 +74,20 @@ def search_terms(roles, limit=6):
     return list(dict.fromkeys(t for t in terms if t))[:limit]
 
 
-# Owner 2026-10-18: postings in these families were usually good matches even when the fit score was low, so a profile
-# with admit_by_title applies to them by title. Broad families ("Developer", "Graduate Engineer", "Research Engineer")
-# do not qualify: they caught silicon, verification and lab roles.
-TITLE_ADMIT_FAMILIES = (
-    "data scientist", "data analyst", "analytics engineer", "machine learning engineer", "machine learning scientist",
-    "ai engineer", "software engineer", "forward deployed engineer", "data engineer", "full stack engineer",
-    "backend engineer",
-)
-NOT_SOFTWARE = re.compile(
-    r"\b(?:embedded|firmware|hardware|silicon|soc|fpga|asic|rtl|verification|validation|semiconductor|packaging|"
-    r"analog|mechanical|electrical|manufacturing|bilingual)\b",
-    re.I,
-)
+# A profile with admit_by_title applies by title to postings of its own target roles, whatever the fit score said:
+# most underscored postings in a role the applicant named were good matches. Roles named only by a generic word
+# ("Developer", "Graduate Engineer", "New Grad Engineer", "Platform Engineer", "Research Engineer") are too broad to
+# trust by title: they caught silicon, verification and lab work, so they never qualify.
+BROAD_WORDS = frozenset({
+    "engineer", "developer", "scientist", "analyst", "specialist", "associate", "junior", "graduate", "grad", "new",
+    "entry", "level", "early", "career", "university", "platform", "infrastructure", "research",
+})
+# Title words that mark work outside a software or data profile. Words the profile's own roles contain (a
+# mechanical engineer's "mechanical") are not exclusions for that profile.
+OUTSIDE_FIELD_WORDS = frozenset({
+    "embedded", "firmware", "hardware", "silicon", "soc", "fpga", "asic", "rtl", "verification", "validation",
+    "semiconductor", "packaging", "analog", "mechanical", "electrical", "manufacturing", "bilingual",
+})
 # A numbered level from 3 up ("Full-stack Engineer 4", "Data Engineer 3") is past early career.
 LEVEL = re.compile(r"\b(?:engineer|scientist|developer|analyst)\s*(?:[3-9]|v)\b", re.I)
 # Requirements the applicant's facts cannot meet; a title never overrides them.
@@ -99,8 +98,22 @@ HARD_BLOCKER = re.compile(
 )
 
 
-def admitted_by_title(title, reason=""):
-    """Whether a posting's title alone qualifies it under the owner's admit-by-title policy."""
-    if NOT_SOFTWARE.search(title or "") or LEVEL.search(title or "") or HARD_BLOCKER.search(reason or ""):
+def specific_roles(roles):
+    """The target roles named by a discipline rather than only by a generic word."""
+    return [role for role in roles or () if set(words(role)) - BROAD_WORDS]
+
+
+def admitted_by_title(title, reason="", roles=()):
+    """Whether a posting's title alone qualifies it for a profile with admit_by_title: it matches one of the
+    profile's own specific target roles, is not outside the profile's field or past early career, and the ranking
+    found no requirement the applicant cannot meet."""
+    specific = specific_roles(roles)
+    if not specific:
         return False
-    return bool(matching_role(title, TITLE_ADMIT_FAMILIES))
+    own = {word for role in specific for word in words(role)}
+    outside = sorted(OUTSIDE_FIELD_WORDS - own)
+    if outside and re.search(r"\b(?:" + "|".join(outside) + r")\b", title or "", re.I):
+        return False
+    if LEVEL.search(title or "") or HARD_BLOCKER.search(reason or ""):
+        return False
+    return bool(matching_role(title, specific))

@@ -139,9 +139,9 @@ async def web_results(config, query):
 
 
 def queries(profile, cursor, count):
-    from .features.discovery.roles import DEFAULT_ROLES, search_terms
+    from .features.discovery.roles import search_terms
 
-    roles = [r[:100] for r in search_terms(profile.target_roles or list(DEFAULT_ROLES))]
+    roles = [r[:100] for r in search_terms(profile.target_roles)]
     # New-grad-first profiles search entry-level postings; others search the role alone.
     level = (
         ' ("new grad" OR "entry level" OR "junior" OR "Engineer I")'

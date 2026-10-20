@@ -1,6 +1,9 @@
-"""Owner 2026-10-18: most postings the fit score skipped in the core role families were good matches. A profile with
-admit_by_title applies to them by title, unless the title is hardware or past early career, or the ranking found a
-requirement the applicant cannot meet (clearance, citizenship, another language). One click applies any job."""
+"""Most postings the fit score skipped in a role the applicant named were good matches. A profile with admit_by_title
+applies to them by title, unless the title is outside the profile's field or past early career, or the ranking found a
+requirement the applicant cannot meet (clearance, citizenship, another language). One click applies any job.
+
+The roles are the profile's own: a broad one ("Developer", "Graduate Engineer") never qualifies by title, and a profile
+without roles admits nothing."""
 
 from datetime import UTC, datetime
 
@@ -9,7 +12,14 @@ import pytest
 from jobpilot.admission import QueueBlocked
 from jobpilot.db import Job, Resume, Run, Setting
 from jobpilot.discovery import TITLE_ADMITTED, readmit_by_title
-from jobpilot.features.discovery.roles import admitted_by_title
+from jobpilot.features.discovery.roles import admitted_by_title, specific_roles
+
+# A software and data applicant's roles, broad ones included.
+ROLES = [
+    "Data Science", "Machine Learning Engineer", "AI Engineer", "Software Development Engineer", "Developer",
+    "Forward Deployed Engineer", "Graduate Engineer", "New Grad Engineer", "Full Stack Engineer", "Data Engineer",
+    "Platform Engineer", "Data Analyst", "Analytics Engineer", "Backend Engineer",
+]
 
 
 @pytest.mark.parametrize("title,admitted", [
@@ -20,24 +30,52 @@ from jobpilot.features.discovery.roles import admitted_by_title
     ("SWE, Platform", True),
     ("Forward Deployed Engineer", True),
     ("AI Engineer - Agents", True),
-    ("Formal Verification Engineer New Grad", False),  # hardware, caught only by "New Grad Engineer"
+    ("Formal Verification Engineer New Grad", False),  # hardware; "New Grad Engineer" is a broad role
     ("Semiconductor Packaging Research Engineer", False),
     ("Full-stack Engineer 4 (Go & Kubernetes)", False),  # level 4
     ("Embedded Software Engineer", False),
     ("Entry Level Korean Bilingual QA / Test Engineer", False),
     ("Senior Data Scientist", True),  # the deterministic gate rejects seniority separately
 ])
-def test_core_families_qualify_by_title(title, admitted):
-    assert admitted_by_title(title) is admitted
+def test_titles_of_the_profiles_own_roles_qualify_by_title(title, admitted):
+    assert admitted_by_title(title, roles=ROLES) is admitted
 
 
 def test_a_requirement_the_applicant_cannot_meet_still_skips():
-    assert not admitted_by_title("Software Engineer I", "Requires an active TS/SCI clearance and U.S. citizenship")
-    assert admitted_by_title("Software Engineer I", "Asks for 3+ years of Kubernetes; applicant has 1.5")
+    reason = "Requires an active TS/SCI clearance and U.S. citizenship"
+    assert not admitted_by_title("Software Engineer I", reason, ROLES)
+    assert admitted_by_title("Software Engineer I", "Asks for 3+ years of Kubernetes; applicant has 1.5", ROLES)
+
+
+def test_only_roles_named_by_a_discipline_count():
+    assert specific_roles(ROLES) == [
+        "Data Science", "Machine Learning Engineer", "AI Engineer", "Software Development Engineer",
+        "Forward Deployed Engineer", "Full Stack Engineer", "Data Engineer", "Data Analyst", "Analytics Engineer",
+        "Backend Engineer",
+    ]
+    assert not admitted_by_title("Software Developer", roles=["Developer", "Graduate Engineer"])
+    assert not admitted_by_title("Data Engineer I")  # a profile without roles admits nothing
+
+
+def test_another_field_is_not_excluded_by_the_software_words():
+    mechanical = ["Mechanical Engineer"]
+    assert admitted_by_title("Mechanical Engineer I", roles=mechanical)
+    assert not admitted_by_title("Electrical Engineer I", roles=mechanical)  # not one of its roles
+    assert admitted_by_title("Electrical Engineer I", roles=["Electrical Engineer"])
+    embedded = ["Embedded Software Engineer", "Software Engineer"]
+    assert admitted_by_title("Embedded Software Engineer II", roles=embedded)  # "embedded" is the profile's own word
+    assert not admitted_by_title("Silicon Software Engineer", roles=embedded)  # "silicon" is not
 
 
 def _profile(service, admit=True):
-    service.db.set_setting("profile", {"first_name": "Alex", "target_roles": ["Software Engineer"], "admit_by_title": admit})
+    service.db.set_setting(
+        "profile",
+        {
+            "first_name": "Alex",
+            "target_roles": ["Software Engineer", "Data Engineer", "Machine Learning Engineer", "AI Engineer"],
+            "admit_by_title": admit,
+        },
+    )
 
 
 def _job(s, n, title, status="skipped", reason="Resume fit 40/100 is below the unattended threshold 54"):
