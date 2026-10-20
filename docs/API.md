@@ -296,17 +296,17 @@ any route changes: they are what makes the rename in section 5 safe.
 | `POST /api/login`, `POST /api/account/login` | `POST /api/session` `{token}` or `{email, password}` | P1 (S3, D7) |
 | `POST /api/logout` | `DELETE /api/session` (server-side revocation) | P1 (S2) |
 | `GET /api/account`, `POST /api/account/signup`, `POST /api/account/password` | `GET /api/owner`, `POST /api/owner`, `PUT /api/owner/password` | P2 |
-| `GET|PUT /api/onboarding` | `GET|PUT /api/owner/onboarding` | P2 |
+| `GET`, `PUT /api/onboarding` | `GET`, `PUT /api/owner/onboarding` | P2 |
 | `GET /api/snapshot` | `GET /api/state` (counters, settings, open questions) | P1 (I7) |
 | – | `GET /api/jobs?status&q&page&size`, `GET /api/runs?job_id&state&page&size`, `GET /api/reviews` | P1 (I7) |
 | `GET /api/runtime-health` | `GET /api/health` (authenticated detail); `/healthz` unchanged | P2 |
-| `GET|PUT /api/control`, `/api/limits`, `/api/agents` | `GET|PUT /api/settings/control`, `/settings/limits`, `/settings/agents` | P2 |
+| `GET`, `PUT` on `/api/control`, `/api/limits`, `/api/agents` | `GET`, `PUT` on `/api/settings/control`, `/settings/limits`, `/settings/agents` | P2 |
 | `GET /api/job-board`, `/job-board/search`, `PUT /job-board/settings` | `GET /api/discovery`, `PUT /api/settings/discovery` | P1 (D3) |
 | `POST /api/job-board/sources` | `POST /api/sources` with `managed` | P1 (D2) |
 | `POST /api/job-board/scrape`, `POST /api/sources/{id}/discover` | `POST /api/scans`, `POST /api/sources/{id}/scan` | P2 |
 | `POST /api/job-board/autopilot/start` | `POST /api/autopilot/batches` | P2 |
-| `/api/v2/discovery/status|feeds|feeds/refresh` | `/api/discovery/status`, `/api/discovery/feed`, `POST /api/discovery/feed/sweeps` (durable queue, I9) | P1 |
-| `/api/v2/discovery/due|ready|requisitions|sources/health` | `/api/admin/discovery/…` | P2 |
+| `/api/v2/discovery/status`, `/feeds`, `/feeds/refresh` | `/api/discovery/status`, `/api/discovery/feed`, `POST /api/discovery/feed/sweeps` (durable queue, I9) | P1 |
+| `/api/v2/discovery/due`, `/ready`, `/requisitions`, `/sources/health` | `/api/admin/discovery/…` | P2 |
 | `POST /api/jobs/{id}/apply`, `/queue`, `/approve`, `POST /api/jobs/batch-queue`, `POST /api/job-board/apply` | `POST /api/jobs/{id}/apply` (optional options) and `POST /api/jobs/apply` (`job_ids`) | P1 (D1) |
 | `POST /api/jobs/{id}/rank` | unchanged (or `/ranking`) | – |
 | `POST /api/runs/{id}/check-email` | `POST /api/runs/{id}/receipt-check` | P2 |
