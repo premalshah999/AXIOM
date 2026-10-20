@@ -166,7 +166,7 @@ submissions are typed waits, not retries. `repair_agent.py` reads a failed run's
 ### 5.1 One click on Apply, end to end
 
 1. The dashboard calls `applyJob(id)` (`frontend/src/api.ts`) → `POST /api/jobs/{id}/apply` → `owner_apply.apply`.
-2. `apply` marks the job `ready` with its resume (or the first uploaded one) when it was not, grants a fresh start
+2. `apply` marks the job `ready` with its resume (or the first uploaded one) when it was not, resets a spent start
    allowance unless the job may already be submitted, and calls `owner_apply.start` → `Service.queue(job_id, "submit")`.
 3. `_queue` runs the admission guards (section 4.3). A resume still being tailored answers *preparing*
    (`outbox` kind `tailor`); a temporary refusal is remembered in `settings['owner_apply:<job>']` and answered *waiting*, and
