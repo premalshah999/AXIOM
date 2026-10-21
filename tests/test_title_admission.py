@@ -197,3 +197,26 @@ async def test_a_deferred_click_starts_with_the_autopilot_off(service, monkeypat
     assert started == [job_id]
     with service.db.session() as s:
         assert s.get(Setting, owner_apply.KEY + job_id) is None
+
+
+async def test_a_deferred_click_also_starts_while_a_batch_runs(service, monkeypatch):
+    """2026-10-21: with a batch active and its own candidates used up, the owner's deferred iCIMS and SuccessFactors
+    clicks waited for the batch to end while the workers idled."""
+    from jobpilot import autopilot, owner_apply
+
+    with service.db.exclusive() as s:
+        s.add(Resume(id="master", name="Master", filename="master.pdf", sha256="m"))
+        job_id = _job(s, 10, "Data Engineer I")
+    service.db.set_setting(owner_apply.KEY + job_id, {"at": "2026-10-21T00:00:00+00:00", "not_before": ""})
+    service.db.set_setting("control", {"paused": False, "auto_submit": True})
+    service.db.set_setting("job_board_settings", {"enabled": True, "auto_apply": True})
+    service.dispatch = object()
+    calls = []
+
+    async def owner_requests(svc):
+        calls.append(svc)
+
+    monkeypatch.setattr(autopilot, "owner_requests_only", owner_requests)
+    autopilot.start_batch(service.db, 10)
+    await autopilot.tick(service)
+    assert calls, "the owner's deferred clicks were not offered the batch's free slots"

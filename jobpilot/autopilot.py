@@ -855,6 +855,14 @@ async def tick(service):
                 queued_now += await resubmit_unknown(service, min(UNKNOWN_PER_TICK, room - queued_now))
             except Exception as exc:
                 batch["last_error"] = type(exc).__name__
+        if queued_now < room:
+            try:
+                # The owner's deferred Apply clicks (iCIMS/SuccessFactors pacing, a busy sender) start while a batch runs
+                # too, in the slots it leaves free. They used to wait until the batch ended: with the batch's own
+                # candidates exhausted, 57 iCIMS/SuccessFactors clicks sat while workers idled (2026-10-21).
+                await owner_requests_only(service)
+            except Exception as exc:
+                batch["last_error"] = type(exc).__name__
         batch["waiting_for_jobs"] = not (active or queued_now) and not any(
             j["id"] not in set(batch["considered_ids"]) for j in jobs
         )
