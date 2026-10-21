@@ -18,6 +18,7 @@ from .routes import (
     jobs,
     knowledge,
     mail,
+    owner,
     profile,
     resumes,
     runs,
@@ -51,11 +52,10 @@ def create_app(config: Settings | None = None):
     app.include_router(mail.router(service))
     app.include_router(job_board.router(service))
     from ..features import install as install_features
-    from ..owner_account import install as install_owner_account
 
     install_features(app, service)
     # Owner sign-up/sign-in and onboarding (2026-10-15); routes before the frontend catch-all.
-    install_owner_account(app, service, signer, config.secure_cookies)
+    app.include_router(owner.router(service, signer, config.secure_cookies))
 
     app.include_router(health.router(service))
     app.include_router(session.router(service, signer))

@@ -27,6 +27,14 @@ def router(service) -> APIRouter:
     db, config = service.db, service.config
     r = APIRouter()
 
+    @r.get("/api/profile")
+    def profile_read():
+        from ...schemas import Profile
+
+        return Profile.model_validate(db.get_setting("profile", {}) or {}).model_dump(
+            exclude={"reviewed_answers", "approved_answers", "forgotten_answers"}
+        )
+
     @r.put("/api/profile")
     async def profile(data: Profile):
         # Do not replace exact answers added concurrently by Telegram reviews.

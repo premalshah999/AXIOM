@@ -16,6 +16,18 @@ def router(service) -> APIRouter:
     db, config = service.db, service.config
     r = APIRouter()
 
+    @r.get("/api/resumes")
+    def resume_list():
+        """Uploaded resume variants without their text (the onboarding resume step reads this)."""
+        with db.session() as s:
+            rows = s.scalars(
+                select(Resume).where(Resume.demo.is_(False)).order_by(Resume.created_at.desc())
+            ).all()
+            return [
+                {"id": row.id, "name": row.name, "roles": list(row.roles or []), "created_at": row.created_at}
+                for row in rows
+            ]
+
     @r.post("/api/resumes")
     async def upload_resume(file: UploadFile = File(...), name: str = Form(...), roles: str = Form("")):
         content = await file.read(5 * 1024 * 1024 + 1)
