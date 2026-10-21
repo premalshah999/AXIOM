@@ -28,29 +28,35 @@ def router(service, cache: SnapshotCache) -> APIRouter:
     @r.get("/api/successful-applications")
     def successes():
         with db.session() as s:
+            # Columns only: whole runs decoded every packet on each dashboard poll and starved the event loop
+            # the browsers share (2026-10-21).
             rows = s.execute(
-                select(Run, Job)
+                select(
+                    Run.id, Run.receipt, Run.finished_at, Run.created_at,
+                    Job.id.label("job_id"), Job.title, Job.company, Job.url, Job.ats,
+                )
                 .join(Job, Run.job_id == Job.id)
                 .where(Run.state == "confirmed", Job.demo.is_(False))
                 .order_by(Run.finished_at.desc())
             ).all()
             seen, results = set(), []
-            for run, job in rows:
-                if job.id in seen or run.receipt.get("evidence_reconciliation") == "pending":
+            for row in rows:
+                receipt = row.receipt or {}
+                if row.job_id in seen or receipt.get("evidence_reconciliation") == "pending":
                     continue
-                seen.add(job.id)
+                seen.add(row.job_id)
                 results.append(
                     {
-                        "job_id": job.id,
-                        "run_id": run.id,
-                        "title": job.title,
-                        "company": job.company,
-                        "url": job.url,
-                        "applied_at": run.finished_at or run.created_at,
-                        "ats": job.ats,
-                        "website_confirmed": bool(run.receipt.get("website_confirmed")),
-                        "email_confirmed": trusted_email(run.receipt),
-                        "existing_application": bool(run.receipt.get("existing_application_notice")),
+                        "job_id": row.job_id,
+                        "run_id": row.id,
+                        "title": row.title,
+                        "company": row.company,
+                        "url": row.url,
+                        "applied_at": row.finished_at or row.created_at,
+                        "ats": row.ats,
+                        "website_confirmed": bool(receipt.get("website_confirmed")),
+                        "email_confirmed": trusted_email(receipt),
+                        "existing_application": bool(receipt.get("existing_application_notice")),
                     }
                 )
             return {"applications": results}

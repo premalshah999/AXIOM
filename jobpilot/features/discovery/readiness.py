@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from .._store import now
 from .classify import eligible as classified_eligible, outcomes as classified_outcomes
 from .graduation import graduation_gate
-from .policy import DiscoveryPolicy, fresh, gate, protected
+from .policy import DiscoveryPolicy, fresh, gate, guard_keys, protected
 from .tables import DcDeferral, DcSourceHealth
 
 COMMITTED = {"confirmed", "submission_unknown", "already_applied"}
@@ -84,6 +84,7 @@ def _candidates(db, policy: DiscoveryPolicy, at) -> tuple[list[dict], dict]:
             .outerjoin(JobListing, JobListing.job_id == Job.id)
             .where(Job.demo.is_(False), Job.status != "archived")
         ).all()
+        guards = guard_keys(s)
         out = []
         for job, listing in rows:
             if job.ats in excluded_ats:
@@ -95,7 +96,7 @@ def _candidates(db, policy: DiscoveryPolicy, at) -> tuple[list[dict], dict]:
             if controls.get(job.id) in {"paused", "deleted"}:
                 stats["controlled"] += 1
                 continue
-            if protected(s, job.url):
+            if protected(s, job.url, guards):
                 stats["protected"] += 1
                 # An earlier pipeline already applied (its submission guard survives resets). Leaving the job "ready"
                 # showed 84 of 218 ready jobs on the board as applicable, and every one was refused at the queue.

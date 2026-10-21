@@ -185,7 +185,17 @@ def register(
     return row.job_id or job["id"], (row.job_id or job["id"]) != job["id"]
 
 
-def protected(s, url: str) -> bool:
+def guard_keys(s) -> set:
+    """Every submission guard key, read once for a whole scan. One lookup per identity of 6,445 jobs, twice per
+    autopilot tick, kept the shared event loop overloaded and new starts held to one at a time (2026-10-21)."""
+    from sqlalchemy import select
+
+    from ...db import Setting
+
+    return set(s.scalars(select(Setting.key).where(Setting.key.like("submission_guard:%"))))
+
+
+def protected(s, url: str, guards: set | None = None) -> bool:
     """Codex's submission guard: an earlier confirmed/uncertain job survives resets."""
     from ...db import Setting
     from ...operations.reset import guard_key
@@ -196,4 +206,6 @@ def protected(s, url: str) -> bool:
         identities = identity_variants(url)
     except Exception:
         return False
+    if guards is not None:
+        return any(guard_key(identity) in guards for identity in identities)
     return any(s.get(Setting, guard_key(identity)) is not None for identity in identities)

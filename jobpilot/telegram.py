@@ -10,10 +10,10 @@ from urllib.parse import urlsplit
 from types import SimpleNamespace
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import aliased
+from sqlalchemy.orm import aliased, defer
 
 from .answers import normalize
-from .db import Event, Job, Review, Run, now
+from .db import Event, Job, Review, Run, Setting, now
 
 HELP = (
     "✈️ ApplyPilot\nYour application companion\n\n"
@@ -598,6 +598,9 @@ async def ask_next_question(service, allow_live=False):
                 )
             ):
                 service.db.set_setting("telegram_question", {})
+            # This runs on the loop every browser shares, every few seconds. Decoding each candidate run's packet
+            # (190 open questions, nearly all already sent) and reading one marker per question overloaded it
+            # (2026-10-21); the packet now loads only for a question still to send.
             candidates = s.execute(
                 select(Review, Run, Job)
                 .join(Run, Review.run_id == Run.id)
@@ -607,15 +610,18 @@ async def ask_next_question(service, allow_live=False):
                     Job.status.notin_(["archived", "paused"]),
                     Run.state.in_(["waiting_answer", "needs_review", *LIVE]),
                 )
+                .options(defer(Run.packet), defer(Run.receipt))
                 .order_by(Review.created_at)
             ).all()
+            sent = {
+                key.removeprefix("telegram_question_sent:")
+                for key in s.scalars(select(Setting.key).where(Setting.key.like("telegram_question_sent:%")))
+            }
             chosen = None
             for review, run, job in candidates:
+                if review.key in {"manual", "session"} or review.id in sent:
+                    continue
                 if not accepts_run(service, run):
-                    continue
-                if review.key in {"manual", "session"}:
-                    continue
-                if service.db.get_setting("telegram_question_sent:" + review.id):
                     continue
                 if s.scalar(
                     select(Run.id).where(Run.job_id == run.job_id, Run.created_at > run.created_at).limit(1)
