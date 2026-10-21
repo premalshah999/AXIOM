@@ -417,6 +417,16 @@ class FlowHandleMixin:
         if dfid == "sign_in":
             self.attempts.add(("dayforce_id", "signin"))
         await e.email_verification.prepare_submission()
+        if creating:
+            from ..privacy import acknowledge_privacy_notice
+
+            profile = getattr(getattr(e.form, "resolver", None), "profile", None)
+            if await acknowledge_privacy_notice(
+                getattr(e.form, "page", None), authorized=bool(getattr(profile, "accept_all_application_terms", False))
+            ):
+                # NetApp (2026-10-21): Create was refused twice for the unopened notice, then the flow switched to a
+                # sign-in that could never succeed.
+                e.emit("account", "Acknowledged the employer's privacy notice before creating the account")
         e.emit("account", "Creating an employer account" if creating else "Signing in with the saved account")
         await e.form.click(buttons[0]["id"], auth_control=True)
         e.page = e.form.page
