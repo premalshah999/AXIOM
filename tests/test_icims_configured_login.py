@@ -211,6 +211,8 @@ def test_schwab_wrapper_login_does_not_turn_signed_in_profile_into_account_creat
         ("/jobs/9316/associate-software-engineer/questions?global=1&in_iframe=1", True),
         ("/jobs/9316/associate-software-engineer/questions?in_iframe=1", False),  # may be the last step
         ("/jobs/9316/associate-software-engineer/eeo?in_iframe=1", False),
+        # VTG 2026-10-21 (run 322d461da2764a4f9c7c1dac967062b7): the GDPR step returns to the job.
+        ("/jobs/gdpr?jobid=9316&redirectAfterGdpr=job&useRedirectUrl=1", True),
     ],
 )
 def test_early_protocol_steps_are_never_the_final_submit(service, path, intermediate):

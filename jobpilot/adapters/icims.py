@@ -209,9 +209,12 @@ class ICIMS(Adapter):
             # Without a readable progress caption, the protocol still knows two steps that always precede another:
             # the candidate profile and the global questions. The recovery agent committed VTG's application on an
             # intermediate Submit and parked it at step 3 of 4 (EEO) as submission_unknown (2026-10-21).
+            # The GDPR step (/jobs/gdpr?jobid=...&redirectAfterGdpr=job) returns to the job: VTG's "Are you a European
+            # Union (EU) resident?" Submit was held as the final submit and the run stalled (2026-10-21).
             return any(
-                EARLY_STEP.search(urlsplit(u).path) and (not urlsplit(u).path.endswith("/questions")
-                                                         or "global=1" in urlsplit(u).query)
+                (EARLY_STEP.search(urlsplit(u).path) and (not urlsplit(u).path.endswith("/questions")
+                                                          or "global=1" in urlsplit(u).query))
+                or (urlsplit(u).path.rstrip("/").endswith("/jobs/gdpr") and "redirectAfterGdpr" in urlsplit(u).query)
                 for u in {obs.get("url", "")} | {f.get("frame_url") or "" for f in obs.get("fields", [])}
             )
         if step[0] < step[1]:

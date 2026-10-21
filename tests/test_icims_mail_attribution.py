@@ -76,3 +76,21 @@ async def test_different_icims_employers_no_longer_share_one_lease(service, kind
     other_rule = {**rule, "employer_origin": other_origin, "link_origins": ["https://login.icims.com"]}
     with service.db.session() as session:
         assert bool(service.mail.sender_blocker(session, other_rule, "other", kind)) is blocked
+
+
+async def test_a_central_reset_window_closes_after_three_minutes(service):
+    """Atlassian and Mass Markets (2026-10-21) each held iCIMS's one sender for 20 minutes waiting for a Central reset
+    that never came; Central mails a reset within seconds when the account exists."""
+    import time
+
+    from jobpilot.mail.challenges import CENTRAL_RESET_WAIT
+
+    _, run, rule = await configured(service)
+    with service.db.exclusive() as session:
+        row = session.get(MailRule, rule["id"])
+        row.sender_domains = ["icims.com"]
+        row.employer_origin = "https://login.icims.com"
+        row.link_origins = ["https://login.icims.com"]
+    rule = service.mail.rule_for("https://login.icims.com")
+    reset = service.mail.begin(run["id"], rule, "alex@example.test", "password_reset")
+    assert reset["expires"] - time.time() <= CENTRAL_RESET_WAIT + 2
