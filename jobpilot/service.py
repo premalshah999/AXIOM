@@ -476,14 +476,12 @@ class Service:
             if not job.demo and (not profile.name or not profile.email):
                 raise ValueError("Complete your profile name and email before applying")
             if not job.demo:
-                from .agent_settings import for_role
+                from .agent_settings import for_role, missing_key_message
 
-                if any(
-                    not for_role(self.db, self.config, role).llm_api_key for role in ("answers", "navigator")
-                ):
-                    raise ValueError(
-                        "Configure the selected answer and navigation provider keys before live browser runs"
-                    )
+                for role in ("answers", "navigator"):
+                    role_config = for_role(self.db, self.config, role)
+                    if not role_config.llm_api_key:
+                        raise ValueError(missing_key_message(role_config.llm_provider))
             if mode == "submit" and not job.demo:
                 control = s.get(Setting, "control").value
                 if not control.get("auto_submit"):
