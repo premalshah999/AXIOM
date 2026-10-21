@@ -469,6 +469,18 @@ class ICIMS(Adapter):
     def find_apply(self, obs):
         accounts = getattr(self, "accounts", None)
         record = accounts.record(self.job["url"]) if accounts else {}
+        if record.get("state") in KNOWN_ACCOUNT | {"created_locally"} and not self.employer_session(obs):
+            # Atlassian offers a requisition-owned returning route; use it for the saved employer account.
+            for button in obs["controls"]:
+                target = urlsplit(urljoin(obs["url"], button.get("href", "")))
+                job = re.search(r"/jobs/(\d+)(?:/|$)", urlsplit(self.job["url"]).path)
+                target_job = re.search(r"/jobs/(\d+)(?:/|$)", target.path)
+                if (
+                    not button.get("disabled") and job and target_job and job[1] == target_job[1]
+                    and target.scheme == "https" and target.netloc == urlsplit(self.job["url"]).netloc
+                    and target.path.endswith("/login") and parse_qs(target.query).get("loginOnly") == ["1"]
+                ):
+                    return button
         if (
             accounts
             and accounts.may_create
@@ -504,13 +516,13 @@ class ICIMS(Adapter):
                 job_path
                 and target_job
                 and job_path[1] == target_job[1]
+                and target.scheme == "https"
                 and target.netloc == urlsplit(obs["url"]).netloc
-                and APPLY_ICIMS.search(b["label"])
                 and query.get("mode") == ["apply"]
                 and query.get("apply") == ["yes"]
             ):
                 # Observed iCIMS entry uses /job?mode=apply&apply=yes,
-                # including pages whose desktop/mobile labels are combined.
+                # including VTG's combined "Apply HereApply" label. The protocol target is authoritative.
                 return b
         job_specific = [b for b in controls if b["label"].strip().casefold() == "apply for this job online"]
         if job_specific:
@@ -678,6 +690,12 @@ class ICIMS(Adapter):
             # EEO, Job Specific Questions and the forms packet: application steps, filled before their Submit. Their
             # URL names the step; Prime's packet page has no progress caption and was read as unknown (2026-10-21).
             return Step.FORM
+        if (
+            re.fullmatch(r"/jobs/\d+/[^/]+/job/?", path)
+            and self.find_apply(obs)
+            and all(f.get("html_id") == "footer-language-selector" and f.get("name") == "url" for f in fields)
+        ):
+            return Step.JOB  # Atlassian's footer locale menu is not an application question.
         return super().classify_page(obs)
 
     def mail_job(self, kind):
@@ -1207,6 +1225,12 @@ class ICIMS(Adapter):
             f["frame_url"] for f in obs["fields"]
             if f.get("frame_url") and (f.get("icims_name") or "").startswith("PersonProfileFields.")
         }
+        if not profile_frames:
+            profile_frames = {
+                b["frame_url"] for b in obs["controls"]
+                if b.get("frame_url") and urlsplit(b["frame_url"]).netloc == employer.netloc
+                and re.fullmatch(r"log ?out|sign out", b["label"], re.I)
+            }
         controls = [b for b in obs["controls"] if not profile_frames or b.get("frame_url") in profile_frames]
         return bool(
             location.scheme == employer.scheme == "https"
@@ -1527,7 +1551,7 @@ class ICIMS(Adapter):
         }:
             # Preserve existence evidence before a rejected sign-in changes state.
             self.accounts.mark(
-                url, record["state"], identity_exists_at=record.get("identity_exists_at") or now()
+                url, record["state"], self.accounts.saved(url), identity_exists_at=record.get("identity_exists_at") or now()
             )
             record = self.accounts.record(url)
         # A reset request is not proof that the currently configured credential

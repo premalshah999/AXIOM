@@ -566,3 +566,37 @@ owner's standing 10-12 rule (decline when offered) applied. This is not a defect
   `type=text`. The employer error requires digits 0–9 with a value between 0 and 10. Its last POST carried 679
   characters for this field. The two onsite acknowledgement fields were present in that POST; unchecked flags in
   a later form snapshot alone were not sufficient to identify the cause. Numeric widget handling remains under review.
+
+
+### Returning routes, numeric widgets and custom dates
+
+- Hamilton's value-free `Q1768` structure was replayed in the dedicated REA browser with synthetic text only:
+  `ev_fe3be62af37bd28aefcd19f273ed756af27858c0fb920d2a940d86712d314b76`. This is a fixture replay, not a live
+  authenticated Hamilton session. Its `iCIMS_Forms_NumberField` class now yields a numeric field in scans, scoped
+  strictly to iCIMS hosts. A browser regression rejects prose and accepts a numeric answer without model calls.
+- Atlassian returning-login observation `ev_2e10c8204156dab4d654c97e6e1e153a970a095e5ff1122b427e3732c7df8f9b`:
+  the requisition's `/login?loginOnly=1&redirect=App` reaches Central's identifier screen. No credentials were used.
+  The public job page has a `select[name=url]#footer-language-selector`; its content frame offers a requisition-owned
+  Log back in link. That footer select is not an application field. The adapter chooses the observed returning route
+  for an existing/local employer account and switches back to Apply once the content frame shows Log Out.
+  Locally created iCIMS credentials now precede another employer's configured password. Recording account existence
+  preserves the saved credential explicitly.
+- VTG run `153ca3d84d6645c487578111845d7430` exposed a separate entry failure: the link text is
+  `Apply HereApply`, while its target remains the same job's `/job?mode=apply&apply=yes`. REA on the public posting
+  confirmed that target. Entry selection now uses the same-host, same-requisition protocol parameters without
+  requiring a printed Apply phrase.
+- ICE form posts (including run `219a4917844749168505eab4946a466a`) contain
+  `PersonProfileFields.rcf2023_Month/_Date/_Year` and `rcf2024` equivalents; the saved form labels them Start Date
+  and End Date under separate work-history groups. Custom date IDs contain digits and were excluded by the earlier
+  date regex. They now keep the employer question caption, receive date-part metadata, and remain grouped by row,
+  frame and history group. A missing day in one row cannot be supplied by another row's day control.
+
+### Live validation after `5fa1086`
+
+| Employer / job | Run | Evidence | Model cost |
+|---|---|---|---|
+| Schwab .Net Developer | `4aa7e4866afe45869710faa372ac8405` | Own `job?mode=submit_apply`, “Your application was submitted successfully” | $0.0140 |
+| Schwab Power Platform | `1f100e4f71ca425ba28ddc2ac5677a21` | Own `job?mode=submit_apply`, same employer receipt text | $0.0152 |
+
+Full Stack and Prime retries were refused by the existing daily model-budget guard. No cap was raised and no
+confirmed application was retried. VTG, Hamilton, Atlassian and custom-date changes need further live validation.

@@ -51,6 +51,14 @@ class Accounts:
 
         require(self.service.db, "accounts")
         saved = self.saved(url)
+        if (
+            saved
+            and self.record(url).get("state") == "created_locally"
+            and (urlsplit(self.store.job_url).hostname or "").endswith(".icims.com")
+        ):
+            # Atlassian's newly created employer profile has its own password; the configured iCIMS login
+            # may belong to another employer. Try the saved credential through the ordinary rejection flow.
+            return saved
         if saved and self.record(url).get("state") in {"password_reset", "authenticated"}:
             # A password this app set by reset (or proved by signing in) beats a configured one that the
             # employer rejected (iCIMS 2026-10-17: the configured Central password was stale).

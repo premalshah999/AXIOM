@@ -13,7 +13,7 @@ import re
 ICIMS_FRAME = re.compile(r"^https://[^/]*\.icims\.com/", re.I)
 ROW = re.compile(r"^-?\d+_")
 # iCIMS date fields are three controls: <base>_Month and <base>_Date menus and a four-character <base>_Year box.
-DATE_PART = re.compile(r"^(?P<base>[A-Za-z]+Fields\.[A-Za-z]+)_(?P<part>Month|Date|Year)$")
+DATE_PART = re.compile(r"^(?P<base>(?:[A-Za-z]+Fields\.)?(?:rcf\d+)|[A-Za-z]+Fields\.[A-Za-z]+)_(?P<part>Month|Date|Year)$")
 PART_WORD = {"Month": "Month", "Date": "Day", "Year": "Year"}
 ACCOUNT = {"PersonProfileFields.Login", "PersonProfileFields.Password", "PersonProfileFields.Password_Confirm"}
 SIGNED_IN = re.compile(r"log ?out|sign out", re.I)
@@ -41,14 +41,24 @@ def apply(fields, controls):
     for f in own:
         f["icims_name"] = name = protocol_name(f)
         if match := DATE_PART.match(name):
-            dates.setdefault(match["base"], []).append((f, match["part"]))
-    for base, parts in dates.items():
-        caption = words(base.split(".", 1)[1])
+            raw = (f.get("name") or f.get("html_id") or name).removesuffix("_icimsDropdown")
+            key = (f.get("frame_url"), f.get("group"), raw.rsplit("_", 1)[0], match["base"])
+            dates.setdefault(key, []).append((f, match["part"]))
+    for (*_, base), parts in dates.items():
+        if re.search(r"(?:^|\.)rcf\d+$", base):
+            # Custom question IDs have no semantic meaning. Keep their employer caption, while protocol
+            # suffixes determine the date parts (ICE's PersonProfileFields.rcf2023/rcf2024).
+            captions = [re.sub(r"\s*\b(?:Month|Day|Date|Year)\s*$", "", f["label"], flags=re.I).strip()
+                        for f, _ in parts]
+            caption = next((label for label in captions if label), "")
+        else:
+            caption = words(base.split(".", 1)[1])
         present = sorted(PART_WORD[part] for _, part in parts)
         for f, part in parts:
             # One date in three controls: each answers only its part, and iCIMS refuses a date missing any part
             # ("Please fill in all date fields"), so the parts are answered together or not at all.
-            f["label"] = f"{caption} {PART_WORD[part]}"
+            if caption:
+                f["label"] = f"{caption} {PART_WORD[part]}"
             f["date_parts"] = present
     if any(SIGNED_IN.fullmatch(c.get("label", "").strip()) for c in controls):
         for f in own:

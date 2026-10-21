@@ -58,6 +58,25 @@ def test_other_platforms_are_untouched():
     assert other["label"] == "Year" and "icims_name" not in other
 
 
+def test_custom_date_protocol_keeps_question_caption_and_separates_rows():
+    """ICE, run 219a4917844749168505eab4946a466a, 2026-10-21 audit: rcf2023/2024 posts date triplets."""
+    parts = [
+        {**field("Start Date Month", "1_PersonProfileFields.rcf2023_Month", type_="select"), "group": "Work Experience 1"},
+        {**field("Day", "1_PersonProfileFields.rcf2023_Date", type_="select"), "group": "Work Experience 1"},
+        {**field("Year", "1_PersonProfileFields.rcf2023_Year"), "group": "Work Experience 1"},
+        {**field("Start Date Month", "2_PersonProfileFields.rcf2023_Month", type_="select"), "group": "Work Experience 2"},
+        {**field("Year", "2_PersonProfileFields.rcf2023_Year"), "group": "Work Experience 2"},
+        field("Available Date Month", "rcf123_Month", type_="select"),
+        field("Day", "rcf123_Date", type_="select"),
+        field("Year", "rcf123_Year"),
+    ]
+    apply(parts, [])
+    assert [f["label"] for f in parts[:3]] == ["Start Date Month", "Start Date Day", "Start Date Year"]
+    assert all(f["date_parts"] == ["Day", "Month", "Year"] for f in parts[:3])
+    assert all(f["date_parts"] == ["Month", "Year"] for f in parts[3:5])
+    assert [f["label"] for f in parts[5:]] == ["Available Date Month", "Available Date Day", "Available Date Year"]
+
+
 async def test_the_saved_login_needs_no_verified_answer(page, tmp_path):
     """Schwab 2026-10-21: read-back asked for "Login" ("Required field has no verified answer") on a signed-in profile."""
     from jobpilot.answers import Resolver

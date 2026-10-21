@@ -396,7 +396,11 @@
       .filter(n=>visible(n) && precedes(title,n) && (!nextTitle || precedes(n,nextTitle)))
       .map(textOf).join(' ') : '';
     fields.push({
-      id: id(el), label: tidy(blockQuestion(el, f.label)), type: f.type, required: !!f.required, options: f.options || [],
+      id: id(el), label: tidy(blockQuestion(el, f.label)),
+      // Hamilton's Q1768 is type=text but its iCIMS widget accepts numbers only (2026-10-21).
+      type: f.type === 'text' && /\.icims\.com$/i.test(location.hostname)
+        && el.classList.contains('iCIMS_Forms_NumberField') ? 'number' : f.type,
+      required: !!f.required, options: f.options || [],
       value: f.value == null ? '' : String(f.value), section: section(el), group: groupOf(el),
       history_kind: historyRow(el)?.kind || '', history_identity: historyRow(el)?.identity || {},
       maxlength: f.maxlength ?? (el.maxLength || -1), autocomplete: el.autocomplete || '',
