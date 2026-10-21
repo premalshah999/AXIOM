@@ -223,3 +223,16 @@ def test_early_protocol_steps_are_never_the_final_submit(service, path, intermed
     obs["text"] = ""
     obs["fields"] = [{"id": "q", "type": "select", "label": "Question", "frame_url": url}]
     assert adapter(service, obs).step_before_last(obs) is intermediate
+
+
+def test_a_packet_forms_repeated_submit_bar_is_one_step_submit(service):
+    """VTG 2026-10-21 (run 6823ecb767ad475f8a87221c00ffe8e9): "Save & Return Later | Submit" above and below form 1 of 2
+    read as two submits, so the step was committed as the application's."""
+    url = "https://careers-vtgdefense.icims.com/jobs/9316/engineer/form?form=Voluntary&isPacket=1&in_iframe=1"
+    obs = observation(url, password=False, email=False)
+    obs["controls"] = [{"id": i, "label": label, "href": ""} for i, label in
+                       enumerate(["Save & Return Later", "Submit", "Save & Return Later", "Submit"])]
+    value = adapter(service, obs)
+    assert value.step_submit(obs)["id"] == 3
+    obs["controls"].append({"id": 9, "label": "Next", "href": ""})
+    assert value.step_submit(obs) is None  # Two different actions stay ambiguous.

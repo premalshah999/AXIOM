@@ -225,13 +225,17 @@ class ICIMS(Adapter):
         return bool(counter and int(counter[1]) < int(counter[2]))
 
     def step_submit(self, obs):
-        """The one Submit/Next control of an application step, or None."""
+        """The one Submit/Next control of an application step, or None. Packet forms repeat their bar above and below
+        the form ("Save & Return Later | Submit" twice): one action. Read as two, VTG's form 1 of 2 had no step submit
+        and its Submit was committed as the application's (run 6823ecb7, 2026-10-21)."""
         controls = [
             b
             for b in obs["controls"]
             if not b.get("disabled") and not b.get("href") and STEP_SUBMIT.fullmatch(b["label"].strip())
         ]
-        return controls[0] if len(controls) == 1 else None
+        if len({b["label"].strip().casefold() for b in controls}) == 1:
+            return controls[-1]
+        return None
 
     async def packet_continues(self):
         for frame in self.page.frames:
