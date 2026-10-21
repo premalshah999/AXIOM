@@ -31,7 +31,7 @@ def test_master_import_needs_no_tailored_artifact_but_keeps_guards(service):
         session.add(Run(job_id=attempted, state="confirmed", mode="submit"))
         session.add(DcDeferral(job_id=deferred, reason="fixture", not_before=(datetime.now(UTC)+timedelta(hours=1)).isoformat()))
         session.get(Job, senior).title = "Senior Software Engineer"
-    assert ready_manual_job_ids(service.db, DiscoveryPolicy()) == {good}
+    assert ready_manual_job_ids(service.db, DiscoveryPolicy(early_career_only=True)) == {good}
 
 
 def test_ineligible_old_scores_do_not_block_new_classification(service):
@@ -45,4 +45,4 @@ def test_ineligible_old_scores_do_not_block_new_classification(service):
             {**base, "id": "offrole", "title": "Data Analyst"},
             {**base, "id": "senior", "title": "Senior Software Engineer"},
             {**base, "id": "foreign", "title": "Software Engineer", "location": "London, UK"}]
-    assert set(_eligible(service.db, jobs, profile, DiscoveryPolicy())) == {"good"}
+    assert set(_eligible(service.db, jobs, profile, DiscoveryPolicy(early_career_only=True))) == {"good"}
