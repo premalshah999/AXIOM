@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, parse_qsl, urlencode, urljoin, urlsplit, urlu
 
 from sqlalchemy import select
 
-from ..db import MailChallenge, MailRule, Setting, now
+from ..db import Event, MailChallenge, MailRule, Run, Setting, now
 from ..accounts import account_tenant
 from ..schemas import Answer
 
@@ -1317,7 +1317,44 @@ class ICIMS(Adapter):
                     await self.form.fill(field, answer.value)
         return await super().on_email_entry(obs)
 
+    def employer_holds_resume(self, obs):
+        """iCIMS keeps the resume posted with an accepted candidate profile, and the later steps of that application
+        carry no upload of their own. VTG (2026-10-21) resumed at its last step in a new run, and the final submit was
+        refused for want of a resume attachment although run 153ca3d8 had posted the profile with it (302).
+
+        True on a step after the profile when an earlier run of this job posted the profile with a stored resume
+        (Resume_TEMP or an attached file) and iCIMS accepted it."""
+        paths = {urlsplit(obs.get("url", "")).path} | {urlsplit(f.get("frame_url") or "").path for f in obs["fields"]}
+        if not any(PROTOCOL_STEP.search(path) for path in paths) or self.form.resume_fields():
+            return False
+        with self.service.db.session() as session:
+            posts = session.scalars(
+                select(Event.data)
+                .join(Run, Run.id == Event.run_id)
+                .where(Run.job_id == self.job["id"], Event.kind == "form_post")
+            )
+            for data in posts:
+                shape = {str(name): str(size) for name, size in (data or {}).get("shape") or []}
+                stored = shape.get("PortalProfileFields.Resume_TEMP", "0") not in {"", "0"} or re.fullmatch(
+                    r"file:[^:]*:[1-9]\d*", shape.get("PortalProfileFields.Resume_File", "")
+                )
+                if (
+                    str((data or {}).get("path", "")).endswith("/candidate")
+                    and (data or {}).get("status") == 302
+                    and stored
+                ):
+                    return True
+        return False
+
+    def adopt_employer_resume(self, obs):
+        if getattr(self.form, "upload_verified", True) or not hasattr(self.form, "resume_fields"):
+            return  # Already attached in this run, or a form without upload tracking.
+        if self.employer_holds_resume(obs):
+            self.form.uploaded = self.form.upload_verified = self.form.resume_on_file = True
+            self.emit("resume_on_file", "The employer holds the resume from this application's accepted profile")
+
     async def on_form(self, obs):
+        self.adopt_employer_resume(obs)
         if self.employer_profile_editor(obs):
             self.accounts.mark(obs["url"], "authenticated")
         if await self.returning_candidate_login(obs):

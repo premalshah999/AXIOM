@@ -2949,6 +2949,8 @@ class BrowserEngine:
                 "recovery_cause": "control_observation",
                 "recoverable": True,
             }
+        if adopt := getattr(getattr(self, "fallback_mail_adapter", None), "adopt_employer_resume", None):
+            adopt(await self.form.scan())  # iCIMS: a later step of an application whose profile holds the resume.
         report = await self.form.verify()
         # Dependent questions or an acknowledged privacy dialog can reveal the
         # upload after the earlier fill pass. Complete that visible requirement

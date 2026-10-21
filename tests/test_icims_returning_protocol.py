@@ -70,3 +70,43 @@ def test_other_employer_has_no_access_to_saved_local_password(service, foreign):
     value, _ = returning_page(service)
     value.accounts.mark(value.job["url"], "created_locally", {"email": "alex@example.test", "password": "SyntheticLocal9!"})
     assert value.accounts.saved(foreign) is None
+
+
+@pytest.mark.parametrize(
+    "status,shape,page,holds",
+    [
+        (302, [["PortalProfileFields.Resume_TEMP", 148604], ["PortalProfileFields.Resume_File", "file::0"]], "eeo", True),
+        (302, [["PortalProfileFields.Resume_File", "file:pdf:111452"]], "questions", True),
+        (200, [["PortalProfileFields.Resume_File", "file:pdf:111452"]], "eeo", False),  # refused, not accepted
+        (302, [["PortalProfileFields.Resume_TEMP", 0], ["PortalProfileFields.Resume_File", "file::0"]], "eeo", False),
+        (302, [["PortalProfileFields.Resume_TEMP", 148604]], "candidate", False),  # the profile itself uploads
+    ],
+)
+def test_a_later_step_uses_the_resume_the_accepted_profile_holds(service, status, shape, page, holds):
+    """VTG, runs 153ca3d84d6645c487578111845d7430 and 118a5c2ad2094cbeb5ed2273d45ff10b, 2026-10-21: a resumed run's final
+    submit was refused for want of a resume attachment although the profile had been posted with it (302)."""
+    from types import SimpleNamespace
+
+    from jobpilot.db import Event, Job, Run
+
+    with service.db.exclusive() as s:
+        job = Job(identity=f"vtg-{status}-{page}-{len(shape)}", url="https://careers-acme.icims.com/jobs/42/engineer/job",
+                  company="Acme", title="Engineer")
+        s.add(job)
+        s.flush()
+        run = Run(job_id=job.id, state="needs_review", mode="submit", packet={})
+        s.add(run)
+        s.flush()
+        s.add(Event(run_id=run.id, kind="form_post", message="post",
+                    data={"path": "/jobs/42/engineer/candidate", "status": status, "shape": shape}))
+        job_id = job.id
+    url = f"https://careers-acme.icims.com/jobs/42/engineer/{page}?in_iframe=1"
+    obs = {"url": url, "fields": [{"id": "g", "type": "select", "label": "Gender", "frame_url": url}], "controls": []}
+    value, _ = returning_page(service)
+    value.job = {**value.job, "id": job_id}
+    value.form.resume_fields = lambda: []
+    value.form.upload_verified = False
+    value.emit = lambda *args: None
+    assert value.employer_holds_resume(obs) is holds
+    value.adopt_employer_resume(obs)
+    assert bool(getattr(value.form, "resume_on_file", False)) is holds
