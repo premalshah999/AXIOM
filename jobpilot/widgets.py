@@ -1167,21 +1167,39 @@ OUTSIDE_PICKER_CLICK = """() => {
 }"""
 
 
+OPEN_LISTS = (
+    "[role=listbox]:not([data-automation-id=\"selectedItemList\"]):not([aria-label=\"items selected\"]),[role=menu]"
+)
+
+# One call: the outside click, the toggle of pickers that ignore it, and a count of the lists still visible. Every
+# picker write starts here, and the three calls it used to make (plus a wait_for_function that answered at once on a
+# quiet page) were five protocol calls before the first option was read.
+DISMISS_PICKERS_JS = (
+    "() => {\n  ("
+    + OUTSIDE_PICKER_CLICK
+    + """)();
+  // Workday's questionnaire pickers close through their own trigger and can
+  // ignore both Escape and outside clicks. Toggle only explicitly open,
+  // observed field pickers; never a navigation or submit control.
+  for (const e of document.querySelectorAll('[aria-haspopup=listbox][aria-expanded=true]')) {
+    if (!e.getClientRects().length || !e.matches('button,[role=button]')) continue;
+    const original=e.getAttribute('type');
+    if(e.tagName==='BUTTON')e.type='button';
+    e.click();
+    if(e.tagName==='BUTTON'){if(original===null)e.removeAttribute('type');else e.setAttribute('type',original)}
+  }
+  return [...document.querySelectorAll('"""
+    + OPEN_LISTS
+    + """')]
+    .filter(e=>e.getClientRects().length && getComputedStyle(e).visibility!=='hidden').length;
+}"""
+)
+
+
 async def dismiss_pickers(frame):
     """Ensure a picker can only read its own choices, including ARIA-poor portals."""
-    await frame.evaluate(OUTSIDE_PICKER_CLICK)
-    await frame.evaluate("""() => {
-      // Workday's questionnaire pickers close through their own trigger and can
-      // ignore both Escape and outside clicks. Toggle only explicitly open,
-      // observed field pickers; never a navigation or submit control.
-      for (const e of document.querySelectorAll('[aria-haspopup=listbox][aria-expanded=true]')) {
-        if (!e.getClientRects().length || !e.matches('button,[role=button]')) continue;
-        const original=e.getAttribute('type');
-        if(e.tagName==='BUTTON')e.type='button';
-        e.click();
-        if(e.tagName==='BUTTON'){if(original===null)e.removeAttribute('type');else e.setAttribute('type',original)}
-      }
-    }""")
+    if not await frame.evaluate(DISMISS_PICKERS_JS):
+        return
     try:
         await frame.wait_for_function(
             """() => ![...document.querySelectorAll('[role=listbox]:not([data-automation-id="selectedItemList"]):not([aria-label="items selected"]),[role=menu]')]
