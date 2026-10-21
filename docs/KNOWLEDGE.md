@@ -99,15 +99,19 @@ The validator also checks the answer's direction where facts decide it:
 ## Setting up a new applicant (friends and family)
 
 Fill the profile (setup wizard), then confirm these facts. Each one prevents a question from being asked on every
-application:
+application. The wizard writes most of them; the rest you add in Setup > Profile > Facts, which is a JSON object, for
+example `"has_non_solicitation": false`. Key names are lower case except `current_immigration_status_US`, which keeps
+its capitals, so copy the spelling below or from the wizard's own entries.
 
-| Area | Facts |
-|---|---|
-| Work authorization | `work_authorization_US`, `requires_future_sponsorship_US`, `current_immigration_status_US` (e.g. "OPT; expiration June 2030", "U.S. citizen", "H-1B"), `us_citizen`, `citizenship` |
-| Background | `criminal_conviction`, `has_non_compete`, `has_non_solicitation`, `has_employment_restrictions`, `ever_fired` |
-| Relationships | `previously_employed_here`, `has_relatives_at_employer`, `government_employment_history`, `government_official`, `company_relationships` |
-| Export control | `export_control_restricted_country_history`, `has_asylee_status` |
-| Other | `over_18`, `valid_drivers_license`, `willing_to_relocate`, `willing_to_travel`, `availability`, salary expectation |
+| Area | Facts | Written by the wizard |
+|---|---|---|
+| Work authorization | `work_authorization_us`, `requires_future_sponsorship_us`, `current_immigration_status_US` (e.g. "OPT; expiration June 2030", "U.S. citizen", "H-1B"), `us_citizen`, `country_of_citizenship` | yes |
+| Background | `criminal_conviction`, `has_non_compete`, `has_employment_restrictions`, `ever_fired` | yes |
+| Background | `has_non_solicitation` | no: add it |
+| Relationships | `has_relatives_at_employer`, `government_employment_history`, `government_official` | yes |
+| Relationships | `previously_employed_here`, `company_relationships` | no: add them (the wizard answers "worked here before" from your work history) |
+| Export control | `export_control_restricted_country_history`, `has_asylee_status` | no: add them |
+| Other | `over_18`, `valid_drivers_license`, `willing_to_relocate`, `willing_to_travel`, `availability`, salary expectation | yes |
 
 Answers given later in the review inbox or on Telegram are saved as confirmed facts and reused.
 

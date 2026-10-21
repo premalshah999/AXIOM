@@ -746,7 +746,7 @@ function ResumeStep({ draft, setDraft }: StepProps & { setDraft: React.Dispatch<
       setMessage(parts.length ? "Found " + parts.join(", ") + ". Review them on the next steps." : "Resume read.");
     } catch (e) {
       setState("error");
-      setMessage((e as Error).message);
+      setMessage(`${(e as Error).message} Your resume is saved; you can fill in the next steps by hand.`);
     }
   }
 
