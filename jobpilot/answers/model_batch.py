@@ -609,7 +609,7 @@ class ModelBatchMixin:
             field = by_id[answers[i].field_id]
             key = "inference:" + self.cache_key(field)
             if key in self.answer_cache:
-                return i, self.answer_cache[key]
+                return i, self.answer_cache[key], "answered"
             async with slots:
                 inferred, outcome = await infer(self, field)
             if inferred is not None:

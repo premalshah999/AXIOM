@@ -541,3 +541,28 @@ owner's standing 10-12 rule (decline when offered) applied. This is not a defect
   inputs have no native `required` attribute. Selecting `#dropdownResults li[value=US]` and filling
   `css_phoneNumber` clears the error and produces a pending hCaptcha execution in the content frame.
   This is a missing phone-input path, not evidence that nested-frame CAPTCHA observation is broken.
+
+
+### Follow-up evidence and implementation
+
+- VTG REA evidence `ev_b8f087375297fd2614824153466e524acbef1ed82ec5abfda60675881b8866aa`: `eu_resident`
+  says “If you are a California resident, please check this box.” It has no native required flag. With a throwaway
+  email, leaving both `eu_resident` and the hidden `accept_gdpr` unchecked executes hCaptcha once. Neither checkbox
+  appears in FormData. Employer POSTs were intercepted; the probe navigated away before any application submission.
+  The truthful non-resident path is unchecked. The adapter resolves this named checkbox from residence facts,
+  including the alternate California/UK wording, and leaves ordinary consent decisions with the resolver.
+- Schwab's country picker has no options in the initial scan. The existing FormSession widget code successfully
+  selected United States on the dedicated REA page. Email entry now fills the observed `dropdown` picker before
+  `css_phoneNumber`, using profile-backed resolver answers, before the email handler submits.
+- Live retry `606d58ac40794dbb8dcc2e7a1757db29` passed CAPTCHA and Central sign-in but classified the signed-in
+  candidate profile as account creation: the wrapper still displayed Sign up / Log in while the content frame
+  displayed Log Out / Update Profile. Session detection now scopes controls to the frame containing
+  `PersonProfileFields.*`. This prevents an unrelated wrapper login from overriding the employer session.
+- Prime `0ef849663776443aa0c0100f89cd690f`, `06-form.form.json`, carries packet fields such as
+  `icims_f_Any_Relatives_Employed_Here`. A repeated inference cache hit returned two tuple members while its caller
+  requires three. The cache now returns its answered outcome too; a regression verifies a remounted field gets the
+  cached answer with its current ID and no second model call.
+- Hamilton `495c533051ae4ff492598936213d1400`: `Q1768` has widget class `iCIMS_Forms_NumberField` despite
+  `type=text`. The employer error requires digits 0–9 with a value between 0 and 10. Its last POST carried 679
+  characters for this field. The two onsite acknowledgement fields were present in that POST; unchecked flags in
+  a later form snapshot alone were not sufficient to identify the cause. Numeric widget handling remains under review.

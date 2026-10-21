@@ -15,6 +15,7 @@ from sqlalchemy import select
 
 from ..db import MailChallenge, MailRule, Setting, now
 from ..accounts import account_tenant
+from ..schemas import Answer
 
 from .base import Adapter, Step, KNOWN_ACCOUNT
 
@@ -1202,12 +1203,17 @@ class ICIMS(Adapter):
 
     def employer_session(self, obs):
         location, employer = urlsplit(obs.get("url", "")), urlsplit(self.job["url"])
+        profile_frames = {
+            f["frame_url"] for f in obs["fields"]
+            if f.get("frame_url") and (f.get("icims_name") or "").startswith("PersonProfileFields.")
+        }
+        controls = [b for b in obs["controls"] if not profile_frames or b.get("frame_url") in profile_frames]
         return bool(
             location.scheme == employer.scheme == "https"
             and location.netloc == employer.netloc
             and not obs.get("errors")
-            and any(re.fullmatch(r"log ?out|sign out", b["label"], re.I) for b in obs["controls"])
-            and not any(re.fullmatch(r"log ?in[.!]?|sign in", b["label"], re.I) for b in obs["controls"])
+            and any(re.fullmatch(r"log ?out|sign out", b["label"], re.I) for b in controls)
+            and not any(re.fullmatch(r"log ?in[.!]?|sign in", b["label"], re.I) for b in controls)
         )
 
     def employer_profile_editor(self, obs):
@@ -1238,9 +1244,45 @@ class ICIMS(Adapter):
         await self.form.settle(timeout=8)
         return True
 
+    async def email_agreement_answer(self, field):
+        # VTG's eu_resident is an assertion of residence, not consent to read a notice. REA (2026-10-21)
+        # reached hCaptcha with it unchecked. The displayed region varies while the protocol name stays fixed.
+        name = field.get("icims_name") or field.get("name")
+        label = field.get("label", "").lower()
+        if name == "eu_resident" and field["type"] == "checkbox" and "california" in label:
+            profile = self.form.resolver.profile
+            country = str(profile.facts.get("country_of_residence") or profile.address.country or "").strip().lower()
+            state = profile.address.state.strip().lower()
+            us = country in {"us", "usa", "united states", "united states of america"}
+            uk = country in {"uk", "gb", "gbr", "united kingdom", "great britain"}
+            if not country or (us and not state):
+                return Answer(field_id=field["id"], disposition="review", blocker_type="missing_fact",
+                              reason="The residence checkbox requires a known country and state")
+            resident = (us and state in {"ca", "california"}) or (uk and bool(re.search(r"united kingdom|\buk\b", label)))
+            return Answer(field_id=field["id"], value="true" if resident else "false", disposition="answer",
+                          evidence_ids=["profile:address", "fact:country_of_residence"] if profile.facts.get("country_of_residence")
+                          else ["profile:address"], reason="Residence from the applicant's saved address")
+        return await super().email_agreement_answer(field)
+
     async def on_email_entry(self, obs):
         if await self.returning_candidate_login(obs):
             return None
+        # Schwab validates these before executing hCaptcha, even without native required attributes.
+        # The country picker owns countryCodeSelect; its visible protocol id is dropdown.
+        if any(f.get("icims_name") == "css_loginName" for f in obs["fields"]):
+            phone_fields = [
+                {**f, "label": label}
+                for name, label in (("countryCodeSelect", "Phone Country Code"), ("css_phoneNumber", "Phone Number"))
+                for f in obs["fields"]
+                if f.get("icims_name") == name or (name == "countryCodeSelect" and f.get("html_id") == "dropdown")
+            ]
+            if phone_fields:
+                answers = await self.form.resolver.resolve(phone_fields)
+                for field, answer in zip(phone_fields, answers):
+                    if answer.disposition != "answer":
+                        return self.defer("The iCIMS email step requires the applicant's phone country and number",
+                                          [self.review_for(field)], blocker_type="missing_fact")
+                    await self.form.fill(field, answer.value)
         return await super().on_email_entry(obs)
 
     async def on_form(self, obs):

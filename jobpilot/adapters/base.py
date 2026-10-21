@@ -599,6 +599,9 @@ class Adapter:
         known = [b for b in obs["controls"] if b.get("html_id") and b["html_id"] in self.email_submit_ids]
         return self.find_next(obs) or (known[0] if known else None) or next(iter(self.buttons(obs, AUTH_BUTTON)), None)
 
+    async def email_agreement_answer(self, field):
+        return (await self.form.resolver.resolve([field]))[0]
+
     async def on_email_entry(self, obs):
         if not self.accounts.email:
             return self.defer("Set ACCOUNT_EMAIL (or your profile email) so I can identify you to employers")
@@ -633,7 +636,7 @@ class Adapter:
                         # A consent asked as a menu (Atlassian's "By selecting continue ... you acknowledge"). Other
                         # menus on the step, such as Schwab's phone country code, are not agreements.
                         seen.add(f["id"])
-                        answer = (await self.form.resolver.resolve([f]))[0]
+                        answer = await self.email_agreement_answer(f)
                         if answer.disposition != "answer":
                             return self.defer(
                                 "A required agreement on the email step needs your approval", [self.review_for(f)]
@@ -648,7 +651,7 @@ class Adapter:
                 if f["value"] == "true":
                     continue
                 seen.add(f["id"])
-                answer = (await self.form.resolver.resolve([f]))[0]
+                answer = await self.email_agreement_answer(f)
                 if answer.disposition == "answer" and answer.value == "true":
                     await self.form.fill(f, "true")
                 elif answer.disposition == "answer" and answer.value == "false":

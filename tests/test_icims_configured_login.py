@@ -180,3 +180,25 @@ def test_the_forms_packet_is_an_application_step_by_its_path(service, step, fram
                       "options": ["Yes", "No"], "frame_url": url, "automation_id": "", "icims_name": "rcf1"}]
     obs["controls"] = [{"id": "n", "label": "Submit", "href": "", "automation_id": "", "aria_label": ""}]
     assert adapter(service, obs).classify(obs) == Step.FORM
+
+
+def test_schwab_wrapper_login_does_not_turn_signed_in_profile_into_account_creation(service):
+    """Schwab, run 606d58ac40794dbb8dcc2e7a1757db29, 2026-10-21: wrapper Log in masked the profile's Log Out."""
+    from jobpilot.adapters.base import Step
+
+    url = "https://careers-acme.icims.com/jobs/42/engineer/candidate?mode=apply&apply=yes"
+    frame_url = url + "&in_iframe=1"
+    obs = observation(url)
+    for field in obs["fields"]:
+        field.update(frame_url=frame_url, icims_name="PersonProfileFields." + field["id"].title())
+    obs["controls"] = [
+        {"id": "login", "label": "Log in", "href": "/jobs/login", "frame_url": url},
+        {"id": "signup", "label": "Sign up", "href": "/connect", "frame_url": url},
+        {"id": "logout", "label": "Log Out", "href": "/logout", "frame_url": frame_url},
+        {"id": "update", "label": "Update Profile", "href": "", "frame_url": frame_url},
+    ]
+    a = adapter(service, obs)
+    assert a.classify(obs) == Step.FORM
+    assert a.find_next(obs)["id"] == "update"
+    obs["controls"].append({"id": "real-login", "label": "Log in", "href": "/login", "frame_url": frame_url})
+    assert not a.employer_session(obs)

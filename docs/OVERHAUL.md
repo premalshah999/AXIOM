@@ -107,6 +107,7 @@ passes before each production deploy.
 
 | Date | Item | State |
 |---|---|---|
+| 2026-10-21 | iCIMS follow-up: phone protocol before CAPTCHA; factual VTG residence checkbox; frame-scoped signed-in profile; Prime inference-cache tuple repair. Initial commit `2b76ecc` deployed healthy. Schwab ×3 and VTG retried, still stalled; Prime retry refused by daily model budget. | 1,349 fast tests and 21 browser tests passed; follow-up deploy pending; no new confirmations |
 | 2026-10-21 | iCIMS handoff: restrict consent menus, classify packet/question/EEO paths, keep replaced controls unverified, and prevent new candidates entering talent networks. Behavior regressions added. REA isolated Schwab's pre-CAPTCHA phone validation. | 1,340 fast tests and 21 targeted browser tests passed; deploy and live validation pending |
 | 2026-10-20 | Legacy branches pushed (redacted), AXIOM `main` seeded from the October 20 snapshot | done |
 | 2026-10-20 | REA maps, tools and findings copied to `docs/rea/` (redacted) | done |
