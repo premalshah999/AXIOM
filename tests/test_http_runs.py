@@ -85,3 +85,7 @@ def test_an_answer_must_not_be_empty(client):
 def test_answering_an_unknown_review_is_a_client_error(client):
     answer = client.post("/api/reviews/unknown", json={"answer": "Yes"})
     assert 400 <= answer.status_code < 500
+
+
+def test_the_receipt_check_for_an_unknown_run_is_not_a_server_error(client):
+    assert client.post("/api/runs/unknown/check-email").status_code < 500

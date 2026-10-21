@@ -24,3 +24,39 @@ def test_the_master_resume_starts_unapproved(client):
 def test_discovery_status_and_feed_state(client):
     assert client.get("/api/v2/discovery/status").status_code == 200
     assert client.get("/api/v2/discovery/feeds").status_code == 200
+
+
+def test_a_confirmed_answer_is_saved_listed_and_retired(client):
+    saved = client.post(
+        "/api/v2/knowledge/facts", json={"question": "Are you willing to work onsite?", "value": "Yes"}
+    )
+    assert saved.status_code == 200, saved.text
+    listed = client.get("/api/v2/knowledge/facts", params={"q": "onsite"}).json()
+    assert listed["total"] >= 1
+    fact = next(i for i in listed["items"] if "onsite" in i["question"].lower())
+    retired = client.post(f"/api/v2/knowledge/facts/{fact['id']}/retire", json={})
+    assert retired.status_code == 200 and "store_version" in retired.json()
+
+
+def test_an_unknown_attestation_is_a_422(client):
+    assert (
+        client.post("/api/v2/knowledge/attestations/unknown", json={"statement": "I confirm"}).status_code
+        == 422
+    )
+    assert "items" in client.get("/api/v2/knowledge/attestations").json()
+
+
+def test_knowledge_employers_are_paged(client):
+    page = client.get("/api/v2/knowledge/employers").json()
+    assert {"items", "total", "page", "size"} <= set(page)
+
+
+def test_the_discovery_diagnostics_answer(client):
+    for path in ("due", "ready", "requisitions", "sources/health"):
+        assert client.get(f"/api/v2/discovery/{path}").status_code == 200, path
+
+
+def test_resume_reads_that_need_no_master_answer(client):
+    for path in ("evidence", "editor/templates", "artifacts"):
+        assert client.get(f"/api/v2/resumes/{path}").status_code == 200, path
+    assert client.get("/api/v2/resumes/artifacts/unknown").status_code in {404, 422}

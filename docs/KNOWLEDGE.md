@@ -1,7 +1,7 @@
 # Knowledge base and answering
 
 How ApplyPilot answers an application question: where the applicant's facts live, how a question finds them, when a
-model is involved, and the checks that stop a wrong or invented answer. Read this before changing `jobpilot/answers.py`,
+model is involved, and the checks that stop a wrong or invented answer. Read this before changing `jobpilot/answers/`,
 `jobpilot/answer_context.py`, `jobpilot/knowledge.py` or `jobpilot/features/knowledge/`.
 
 ## Principles
@@ -44,7 +44,7 @@ These are the applicant's standing decisions, applied by general code:
 ## How one question is answered
 
 ```
-field ──► Resolver.local (deterministic)            jobpilot/answers.py
+field ──► Resolver.local (deterministic)            jobpilot/answers/local_rules.py
             │  demographic decline · status-defined answers · policy facts · U.S.-person status
             │  · hiring-check consent · profile fields · history rows · INTENTS (label → fact key)
             │  · exact retrieval answers
@@ -56,7 +56,7 @@ field ──► Resolver.local (deterministic)            jobpilot/answers.py
             ▼
           AnswerBatch model call (cites evidence ids)
             ▼
-          Resolver._validate_answer                   jobpilot/answers.py
+          Resolver._validate_answer                   jobpilot/answers/validate.py
             │  evidence exists · critical questions cite a fact on their subject · polarity checks
             │  · consent policy · typed signature · offered option · length limit
             ▼

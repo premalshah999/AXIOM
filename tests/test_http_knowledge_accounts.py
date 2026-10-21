@@ -87,3 +87,11 @@ def test_a_session_file_that_is_not_json_is_refused(client):
         files={"file": ("state.json", b"not json", "application/json")},
     )
     assert answer.status_code == 400
+
+
+def test_onboarding_defaults_to_the_first_step_and_saves_progress(client):
+    first = client.get("/api/onboarding").json()
+    assert first["step"] == "resume" and first["completed"] is False
+    saved = client.put("/api/onboarding", json={"step": "contact", "completed": False})
+    assert saved.status_code == 200 and saved.json()["step"] == "contact"
+    assert client.put("/api/onboarding", json={"step": "nonsense", "completed": False}).status_code == 400
