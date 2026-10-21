@@ -477,7 +477,10 @@ def test_conflicting_demographic_answers_use_same_employer_answer(service):
 
 
 def test_source_falls_back_to_a_truthful_general_category(service):
-    resolver = Resolver(Profile(application_source="LinkedIn"), service.db, service.config, employer="ICF")
+    rules = {"source_order": ["company website", "internet search"], "source_any_channel": True}
+    resolver = Resolver(
+        Profile(application_source="LinkedIn", answer_rules=rules), service.db, service.config, employer="ICF"
+    )
     options = [
         "Browsing the internet",
         "ICF Career Page",
@@ -488,7 +491,7 @@ def test_source_falls_back_to_a_truthful_general_category(service):
     assert resolver.local(f).value == "Saw ICF on social media"
     f["options"] = ["Browsing the internet", "ICF Career Page", "Met ICF on campus"]
     assert resolver.local(f).value == "Browsing the internet"
-    # Owner policy 2026-10-13: the employer's careers page is an accepted source.
+    # The profile lists the employer's careers page as an accepted source.
     f["options"] = ["ICF Career Page", "Met ICF on campus"]
     assert resolver.local(f).value == "ICF Career Page"
     f["options"] = ["Met ICF on campus", "Employee referral"]

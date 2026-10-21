@@ -12,6 +12,15 @@ NO_FACTS = {
 }
 
 
+SOURCES = {
+    "source_order": [
+        "linkedin", "company website", "ziprecruiter", "indeed", "internet search", "job board", "glassdoor",
+        "social media",
+    ],
+    "source_any_channel": True,
+}
+
+
 def profile(**extra):
     return Profile(
         education=[
@@ -82,7 +91,7 @@ def test_degree_policy_ignores_yes_no_questions(service):
 
 
 def test_source_picks_any_listed_source_in_owner_order(service):
-    r = Resolver(profile(), service.db, service.config)
+    r = Resolver(profile(answer_rules=SOURCES), service.db, service.config)
     options = ["Employee Referral", "Indeed", "Career Fair"]
     assert r.policy_choice(field("How did you hear about us?", options), options) == "Indeed"
     options = ["Agency", "Company Website", "Other"]
@@ -95,9 +104,27 @@ def test_source_picks_any_listed_source_in_owner_order(service):
 
 
 def test_local_source_answer_uses_fallback_when_saved_source_not_offered(service):
-    r = Resolver(profile(), service.db, service.config)
+    r = Resolver(profile(answer_rules=SOURCES), service.db, service.config)
     a = r.local(field("How did you hear about us?", ["Referral", "ZipRecruiter", "Newspaper"]))
     assert a.disposition == "answer" and a.value == "ZipRecruiter"
+
+
+def test_source_order_is_the_profiles_own(service):
+    options = ["Indeed", "Company Website", "Newspaper"]
+    mine = {"source_order": ["company website", "indeed"]}
+    r = Resolver(profile(answer_rules=mine), service.db, service.config)
+    assert r.policy_choice(field("How did you hear about us?", options), options) == "Company Website"
+    # A channel outside the known vocabulary matches as a word; no catch-all unless the profile allows it.
+    r = Resolver(profile(answer_rules={"source_order": ["newspaper"]}), service.db, service.config)
+    assert r.policy_choice(field("How did you hear about us?", options), options) == "Newspaper"
+    r = Resolver(profile(answer_rules={"source_order": ["glassdoor"]}), service.db, service.config)
+    assert r.policy_choice(field("How did you hear about us?", options), options) is None
+
+
+def test_no_source_order_by_default(service):
+    r = Resolver(profile(), service.db, service.config)
+    options = ["Indeed", "Company Website", "Facebook"]
+    assert r.policy_choice(field("How did you hear about us?", options), options) is None
 
 
 def yes_no(label):
@@ -175,7 +202,7 @@ def test_location_city_picks_recorded_city_in_recorded_state(service):
 
 
 def test_source_any_plain_channel_when_no_listed_source(service):
-    r = Resolver(profile(), service.db, service.config)
+    r = Resolver(profile(answer_rules=SOURCES), service.db, service.config)
     for options, expected in (
         (["Facebook", "Twitter"], "Facebook"),
         (["Employee"], None),

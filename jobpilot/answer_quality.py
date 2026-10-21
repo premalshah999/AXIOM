@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from playwright.async_api import Error as PlaywrightError
 
 from .answer_context import SPONSOR_KEYS, defined_screening, digest, relevant_context
+from .answer_rules import delegated_facts
 from .answers import critical_question, degree_level, normalize
 from .db import Run
 from .knowledge import applicable, relevant_fact, topic
@@ -129,10 +130,7 @@ def context(resolver):
         facts["fact:application_consent_policy"] = "Accept application terms and privacy notices."
     if profile.accept_required_marketing:
         facts["fact:required_marketing_policy"] = "Accept required marketing only."
-    if profile.autonomous:
-        facts["fact:compensation_choice_policy"] = "Desired compensation is a delegated preference."
-        facts["fact:travel_percentage_choice_policy"] = "Travel willingness is a delegated preference."
-        facts["fact:application_role_type_policy"] = "Infer employment type from this job."
+    facts.update(delegated_facts(resolver.answer_rules, profile.autonomous))
     evidence = {"evidence:" + e.id: e.text for e in profile.evidence}
     if resolver.resume_text:
         evidence["resume:selected"] = resolver.resume_text[:12000]
