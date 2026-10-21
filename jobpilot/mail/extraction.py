@@ -50,6 +50,10 @@ UNBRANDED_SEARCH_TERMS = [
 UNBRANDED_MAX_CANDIDATES = 10
 
 
+# A verification continuation in a link's own URL (iCIMS: ".../login?step=email&hashed=...&token=...").
+VERIFY_URL = re.compile(r"verif|confirm|token|activate|[?&](?:step|hashed|key|code)=|/login\b", re.I)
+
+
 def extract_message(message, rule, challenge, *, identity_only=False, diagnostics=None):
     """Return one unambiguous token; message text never becomes model instructions."""
 
@@ -128,6 +132,7 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
     message_link_cue = bool(re.search(link_cue, " ".join(values.get("subject", [])), re.I))
     texts, links, size = [], [], 0
     cued = set()  # Anchors whose own text is the cue, not only the subject.
+    plain = []  # Anchors with no cue in their text or the subject ("Click here").
 
     def walk(part, depth=0):
         nonlocal size
@@ -169,6 +174,8 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
                         cued.add(a["href"])
                     if anchor_cue or message_link_cue:
                         links.append(a["href"])
+                    else:
+                        plain.append(a["href"])
             # Workday also sends bare URLs inside HTML, without <a> elements.
             # Require the same nearby reset/verification cue as plain text.
             for match in re.finditer(r"https://[^\s<>\"']+", text):
@@ -180,6 +187,28 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
             walk(child, depth + 1)
 
     walk(message.get("payload", {}))
+    if challenge["kind"] == "link" and not links:
+        # EBSCO's iCIMS verification mail (2026-10-21) was rejected as token_format on every poll: its button had no
+        # verification wording in its text or the subject. The one link on the employer's own origin whose URL is a
+        # verification continuation is the link; anything ambiguous or off-origin still never opens.
+        own = set()
+        for href in plain:
+            try:
+                if urlsplit(href).scheme == "https" and origin(href) in rule["link_origins"] and VERIFY_URL.search(href):
+                    own.add(href)
+            except ValueError:
+                continue
+        if len(own) == 1:
+            links.append(next(iter(own)))
+    if diagnostics is not None:
+        diagnostics["subject"] = " ".join(values.get("subject", []))[:80]
+        hosts = set()
+        for href in links + plain:
+            try:
+                hosts.add(urlsplit(href).hostname or "")
+            except ValueError:
+                continue
+        diagnostics["link_hosts"] = sorted(h for h in hosts if h)[:10]
     # Some employers label the OTP in the subject. It has passed the same
     # envelope, tenant, recipient and window checks as the message body.
     text = "\n".join(values.get("subject", []) + texts)

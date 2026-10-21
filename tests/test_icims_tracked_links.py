@@ -70,3 +70,40 @@ async def test_the_link_visit_adds_only_the_tracker_hop():
     assert engine.verification_origins is None
     await adapter.open_link("https://login.icims.com/u/reset-password?ticket=fixture")
     assert seen["origins"] == {"https://login.icims.com"}
+
+
+TENANT = "https://careers-acme.icims.com"
+TENANT_RULE = {"sender_domains": ["icims.com"], "link_origins": [TENANT]}
+
+
+def verify_mail(html, subject="Complete your application"):
+    msg = reset_mail(html)
+    for header in msg["payload"]["headers"]:
+        if header["name"] == "Subject":
+            header["value"] = subject
+    return msg
+
+
+def link_challenge():
+    return {**challenge(), "kind": "link"}
+
+
+def test_an_uncued_button_is_the_link_when_it_alone_continues_on_the_employer_origin():
+    """EBSCO 2026-10-21: the iCIMS verification button said "Click here" under a plain subject, so the mail was
+    rejected as token_format on every poll and its wait held iCIMS's one mail sender."""
+    link = TENANT + "/jobs/2112/software-dev-engineer-i/login?step=email&hashed=-625886742&token=abc123"
+    msg = verify_mail(f'<p>Hello</p><a href="{link}">Click here</a> <a href="{TENANT}/jobs/intro">Careers home</a>')
+    assert extract_message(msg, TENANT_RULE, link_challenge()) == {"kind": "link", "value": link}
+
+
+def test_uncued_links_stay_rejected_when_ambiguous_or_off_origin():
+    one = TENANT + "/jobs/1/a/login?step=email&hashed=1"
+    two = TENANT + "/jobs/2/b/login?step=email&hashed=2"
+    diagnostics = {}
+    assert extract_message(verify_mail(f'<a href="{one}">Here</a><a href="{two}">Here</a>'), TENANT_RULE,
+                           link_challenge(), diagnostics=diagnostics) is None
+    assert diagnostics["subject"] == "Complete your application" and diagnostics["link_hosts"] == ["careers-acme.icims.com"]
+    off = "https://evil.example/login?step=email&hashed=1"
+    assert extract_message(verify_mail(f'<a href="{off}">Here</a>'), TENANT_RULE, link_challenge()) is None
+    # A code wait never takes an uncued link.
+    assert extract_message(verify_mail(f'<a href="{one}">Here</a>'), TENANT_RULE, {**challenge(), "kind": "code"}) is None

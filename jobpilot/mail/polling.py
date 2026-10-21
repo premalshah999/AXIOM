@@ -145,7 +145,7 @@ class PollingMixin:
                         )
                         continue
                     messages = list(listed.get("messages", []))
-                    matches, rejections, rejected_origins = [], {}, set()
+                    matches, rejections, rejected_origins, last_rejected = [], {}, set(), None
                     if c["kind"] in {"code", "auto"} and len(c["open_windows"]) == 1:
                         # Unbranded codes name neither employer nor domain, so the sender
                         # filter above cannot find them. Search this recipient's window
@@ -215,6 +215,11 @@ class PollingMixin:
                             rejection = diagnostics.get("rejection", "token_format")
                             rejections[rejection] = rejections.get(rejection, 0) + 1
                             rejected_origins.update(diagnostics.get("rejected_link_origins", []))
+                            if diagnostics.get("subject") is not None:
+                                last_rejected = {
+                                    "subject": diagnostics.get("subject", ""),
+                                    "link_hosts": diagnostics.get("link_hosts", []),
+                                }
                     scan_seconds = time.monotonic() - scan_started
                     counts = (
                         len(messages),
@@ -237,6 +242,9 @@ class PollingMixin:
                                 "matching_count": len(matches),
                                 "rejection_counts": rejections,
                                 "rejected_link_origins": sorted(rejected_origins)[:20],
+                                # What the last rejected candidate looked like (subject and link hosts, never its token),
+                                # so a new template's format shows in the run without reading the mailbox.
+                                "last_rejected": last_rejected,
                             },
                         )
                     matches = latest_employer_code(matches, c)
