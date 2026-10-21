@@ -710,6 +710,17 @@ class LocalRulesMixin:
             (CONSENT_REQUEST.search(f["label"]) or ACKNOWLEDGEMENT.search(f["label"]))
             and not re.search(r"birth|start|graduat|availab|expir|end date|employ", label)
         )
+        if part := re.fullmatch(r"today s date (month|day|year)", label):
+            # A self-identification form's date in three controls (forms.label_signature_date), in the options' format.
+            today = datetime.now(ZoneInfo(self.config.timezone)).date()
+            candidates = {
+                "year": [str(today.year)],
+                "day": [f"{today.day:02d}", str(today.day)],
+                "month": [today.strftime("%B"), today.strftime("%b"), f"{today.month:02d}", str(today.month)],
+            }[part[1]]
+            for value in candidates:
+                if answer := self._ans(f, value, ["policy:today"]):
+                    return answer
         if (f.get("type") in {"date_parts", "date"} and (TODAY.search(label) or consent_date)) or (
             f.get("type") == "text" and TODAY.search(label) and strict_today
         ):

@@ -68,6 +68,22 @@ def name_phone_numbers(fields):
         previous = field
 
 
+SELF_ID_FORM = re.compile(r"self-identification|\bCC-305\b|\bVEVRAA\b", re.I)
+
+
+def label_signature_date(fields, text):
+    """The federal self-identification forms (CC-305 "Voluntary Self-Identification of Disability") date the form with
+    three controls under a "Date" caption the scanner does not attach: bare Month, Day and Year (DecisionPoint, iCIMS,
+    2026-10-21; the run stopped as "Required application facts are missing: Month; Day; Year"). On such a page they
+    are today's date."""
+    if not SELF_ID_FORM.search(text or ""):
+        return
+    parts = [f for f in fields if f["label"].strip() in {"Month", "Day", "Year"} and not f.get("section") and not f.get("group")]
+    if {f["label"].strip() for f in parts} == {"Month", "Day", "Year"}:
+        for f in parts:
+            f["label"] = f"Today's date ({f['label'].strip()})"
+
+
 def link_companion_text(fields):
     """iCIMS names a question's free-text companion "<question>_Text". ICE's "If applicable, please provide info."
     (rcf3169_Text) belongs to "Do you have any legal restrictions to working in the country where this position is
@@ -1103,6 +1119,7 @@ class FormSession:
         mark_history_rows(self.fields.values())
         name_phone_numbers(list(self.fields.values()))
         link_companion_text(self.fields.values())
+        label_signature_date(list(self.fields.values()), "\n".join(texts))
         obs = {
             "fields": list(self.fields.values()),
             "controls": list(self.buttons.values()),
