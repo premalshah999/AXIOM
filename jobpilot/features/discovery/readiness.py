@@ -97,6 +97,11 @@ def _candidates(db, policy: DiscoveryPolicy, at) -> tuple[list[dict], dict]:
                 continue
             if protected(s, job.url):
                 stats["protected"] += 1
+                # An earlier pipeline already applied (its submission guard survives resets). Leaving the job "ready"
+                # showed 84 of 218 ready jobs on the board as applicable, and every one was refused at the queue.
+                if job.status in {"new", "ready"}:
+                    job.status = "archived"
+                    job.reason = "Already applied by an earlier pipeline (submission guard)"
                 continue
             if listing is not None:
                 ok, basis = fresh(listing.posted_at, listing.date_basis, listing.first_seen, policy, at)

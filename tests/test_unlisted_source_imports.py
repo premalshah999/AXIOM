@@ -33,3 +33,21 @@ def test_only_applicant_links_are_candidates_without_a_listing(service):
     assert "pasted" in ids
     assert not ids & {"board", "feed", "unknown"}
     assert stats["stale_or_undated"] >= 3
+
+
+def test_a_job_an_earlier_pipeline_applied_to_leaves_the_ready_list(service):
+    """2026-10-21: 84 of 218 "ready" jobs carried a submission guard from an earlier pipeline (legacy apply-v2)."""
+    from jobpilot.ats import identity_variants
+    from jobpilot.operations.reset import guard_key
+
+    db = service.db
+    add(db, "applied", "manual")
+    with db.exclusive() as s:
+        s.get(Job, "applied").status = "ready"
+    url = "https://jobs.ashbyhq.com/acme/applied"
+    db.set_setting(guard_key(identity_variants(url)[0]), {"state": "confirmed", "source": "legacy_apply_v2"})
+    jobs, stats = _candidates(db, policy_for(db), datetime.now(UTC))
+    assert "applied" not in {j["id"] for j in jobs} and stats["protected"] == 1
+    with db.session() as s:
+        job = s.get(Job, "applied")
+        assert job.status == "archived" and "earlier pipeline" in job.reason
