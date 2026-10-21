@@ -2490,9 +2490,14 @@ class BrowserEngine:
             # immediate check can park an owner whose page is already advancing.
             # Observe briefly without another purchase or click. The account
             # controller and final evidence guards still verify what advanced.
+            # EBSCO's iCIMS Submit Profile (with the resume upload) posted 5 s after the token, a second after the
+            # run had parked on iCIMS's always-visible "Protected by hCaptcha" badge (2026-10-21). A page that
+            # navigates has acted on the token.
             try:
-                async with asyncio.timeout(2):
-                    while await challenge_frame(self.page) or await checkbox_frame(self.page):
+                async with asyncio.timeout(8):
+                    while (await challenge_frame(self.page) or await checkbox_frame(self.page)) and (
+                        self.page.url == before_url
+                    ):
                         await asyncio.sleep(0.1)
             except TimeoutError:
                 pass
@@ -2544,7 +2549,9 @@ class BrowserEngine:
                     "blocker_type": "captcha",
                     "recovery_cause": "security_challenge",
                 }
-        visible_challenge = await challenge_frame(self.page) or await checkbox_frame(self.page)
+        visible_challenge = self.page.url == before_url and (
+            await challenge_frame(self.page) or await checkbox_frame(self.page)
+        )
         followup = getattr(self.captcha, "has_new_challenge", None)
         if visible_challenge and callable(followup) and await followup(self.page):
             self.emit("captcha", "Website presented a new widget after the previous token handoff")
