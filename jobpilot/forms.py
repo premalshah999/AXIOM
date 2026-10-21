@@ -84,6 +84,10 @@ def label_signature_date(fields, text):
             f["label"] = f"Today's date ({f['label'].strip()})"
 
 
+ICIMS_HOST = re.compile(r"^https://[^/]*\.icims\.com/", re.I)
+ICIMS_RENAMED_RESUME = re.compile(r"\bResume\d{12}\.(?:pdf|docx?)\b")
+
+
 def link_companion_text(fields):
     """iCIMS names a question's free-text companion "<question>_Text". ICE's "If applicable, please provide info."
     (rcf3169_Text) belongs to "Do you have any legal restrictions to working in the country where this position is
@@ -2538,6 +2542,18 @@ class FormSession:
     def workday(self):
         return bool(WORKDAY_HOST.search(self.page.url))
 
+    def icims_renamed_resume(self, text):
+        """iCIMS stores an uploaded resume as "Resume<yyyyMMddHHmm>.pdf" and lists that name, never the uploaded one
+        (Iridium 2026-10-21). Read as "not accepted", the resume was uploaded again; each upload reloaded the page and
+        cleared the password fields, so Submit Profile was refused "Password: required" on every pass. Accepted only on
+        an iCIMS page after this run uploaded the file itself."""
+        return bool(
+            self.uploaded
+            and ICIMS_HOST.search(self.page.url or "")
+            and ICIMS_RENAMED_RESUME.search(text or "")
+            and re.search(r"replace resume|select your resume", text or "", re.I)
+        )
+
     async def wait_upload(self):
         """Wait for the website's own upload acknowledgement, not a fixed delay."""
         try:
@@ -4149,7 +4165,10 @@ class FormSession:
                     if g is not f and g["type"] != "file"
                 )
                 self.upload_verified = (
-                    self.resume_path.name in f["value"] or self.resume_path.name in text or picked
+                    self.resume_path.name in f["value"]
+                    or self.resume_path.name in text
+                    or picked
+                    or self.icims_renamed_resume(text or await self._page_text())
                 )
                 if not self.upload_verified:
                     problems.append("Resume attachment was not accepted")

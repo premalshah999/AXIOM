@@ -36,3 +36,36 @@ async def test_saved_resume_preselected_in_a_picker_is_attached(page, tmp_path):
     assert report["resume_attached"] is True
     other = picker.replace("Alex_Doe_Resume.pdf", "Old_CV_2023.pdf")
     assert (await verify_page(page, tmp_path, other, uploaded=True))["resume_attached"] is False
+
+
+ICIMS_PAGE = (
+    "<h3>Build your profile</h3><p>Or please select your resume from one of the following:</p>"
+    "<div><i>{name}</i> <button>Replace Resume</button><input type=file aria-label='Resume' style='display:none'></div>"
+)
+
+
+async def icims_verify(page, tmp_path, name, uploaded=True, url="https://careers-acme.icims.com/jobs/5186/engineer/candidate"):
+    resume = tmp_path / "Alex_Doe_Resume.pdf"
+    resume.write_bytes(b"%PDF-1.4")
+    html = f"<html><body><label>Name<input value='Alex Doe'></label>{ICIMS_PAGE.format(name=name)}</body></html>"
+
+    async def serve(route):
+        await route.fulfill(body=html, content_type="text/html")
+
+    await page.route(url, serve)
+    await page.goto(url)
+    form = FormSession(page, Resolver(Profile(), None, None), resume, lambda *a: None)
+    await form.scan()
+    form.uploaded = uploaded
+    return await form.verify()
+
+
+async def test_icims_lists_our_upload_under_its_own_name(page, tmp_path):
+    """Iridium 2026-10-21: iCIMS lists the uploaded resume as "Resume<yyyyMMddHHmm>.pdf". Read as not accepted, it was
+    uploaded again; each upload reloaded the page and cleared the passwords, so the profile was refused every time."""
+    assert (await icims_verify(page, tmp_path, "Resume202610211221.pdf"))["resume_attached"] is True
+
+
+async def test_the_icims_rename_counts_only_after_this_runs_own_upload(page, tmp_path):
+    assert (await icims_verify(page, tmp_path, "Resume202610211221.pdf", uploaded=False))["resume_attached"] is False
+    assert (await icims_verify(page, tmp_path, "Old_CV_2023.pdf"))["resume_attached"] is False
