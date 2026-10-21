@@ -603,10 +603,14 @@ class Adapter:
             return None
         if self.attempts["email_entry"] > 2:
             return self.defer("The employer did not accept the email address step")
-        for f in obs["fields"]:
-            if f["type"] == "email" or re.search(r"e-?mail", f["label"], re.I):
-                await self.form.fill(f, self.accounts.email)
-            elif f["type"] == "checkbox" and f["value"] != "true":
+        seen = set()
+
+        async def agree(fields):
+            """Tick each consent box the resolver accepts; return a deferral for a required one it cannot."""
+            for f in fields:
+                if f["type"] != "checkbox" or f["value"] == "true" or f["id"] in seen:
+                    continue
+                seen.add(f["id"])
                 answer = (await self.form.resolver.resolve([f]))[0]
                 if answer.disposition == "answer" and answer.value == "true":
                     await self.form.fill(f, "true")
@@ -616,12 +620,23 @@ class Adapter:
                     return self.defer(
                         "A required agreement on the email step needs your approval", [self.review_for(f)]
                     )
+            return None
+
+        for f in obs["fields"]:
+            if f["type"] == "email" or re.search(r"e-?mail", f["label"], re.I):
+                await self.form.fill(f, self.accounts.email)
+        if deferred := await agree(obs["fields"]):
+            return deferred
         if not await self.arm_mail():
             return self.lease_busy()
         # Accepting Oracle's legal dialog recreates the entry controls.
         target = None
         for _ in range(20):
             obs = await self.form.scan()
+            # Iridium (iCIMS) 2026-10-21: ticking the privacy-notice box reveals an "I accept" box; Next stays
+            # disabled until it is ticked, and the step fell back to the guided flow without it.
+            if deferred := await agree(obs["fields"]):
+                return deferred
             target = self.find_next(obs) or next(iter(self.buttons(obs, AUTH_BUTTON)), None)
             if target:
                 break
