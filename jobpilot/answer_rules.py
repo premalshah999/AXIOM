@@ -44,9 +44,19 @@ class AnswerRules(BaseModel):
 
     # Degree, major and school when the recorded value is not offered.
     education: list[EducationStep] = Field(default_factory=lambda: ["closest", "pick3", "other", "ask"])
+    # A major to choose when a form's list lacks the recorded one (for example "Computer Science"). Empty: none.
+    major_fallback: str = Field(default="", max_length=100)
     demographics: dict[str, DemographicRule] = Field(default_factory=dict)
     guest_apply_first: bool = True  # "Apply without an account" before sign-in or sign-up.
     open_agreement_links: bool = True  # Open documents an agreement asks to review before accepting.
+
+
+def major_patterns(name) -> tuple:
+    """Patterns for an offered major that is, or contains, the fallback major; none when no fallback is set."""
+    name = " ".join(str(name or "").split())
+    if not name:
+        return ()
+    return (re.compile(rf"^{re.escape(name)}$", re.I), re.compile(rf"\b{re.escape(name)}\b", re.I))
 
 
 def rules_for(profile) -> AnswerRules:

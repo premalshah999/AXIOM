@@ -628,7 +628,7 @@ function Policies({ p, set }: { p: Profile; set: Setter }) {
 }
 
 const EDUCATION_STEPS: [EducationStep, string, string][] = [
-  ["closest", "Closest match", "Your approved equivalents first (such as Computer Science or Master’s), then the most similar option."],
+  ["closest", "Closest match", "Your fallback major (below) and the same-level degree first, then the most similar option."],
   ["pick3", "Assistant chooses from the 3 closest", "Only options close to your value are offered to the assistant; unrelated ones never are."],
   ["other", "“Other” or “Not listed”", "When the list offers one."],
   ["ask", "Ask me", "The application waits for your answer while other jobs continue."],
@@ -655,6 +655,7 @@ function rulesWithDefaults(p: Profile): AnswerRules {
   }
   return {
     education: saved.education || ["closest", "pick3", "other", "ask"],
+    major_fallback: saved.major_fallback ?? "",
     demographics,
     guest_apply_first: saved.guest_apply_first ?? true,
     open_agreement_links: saved.open_agreement_links ?? true,
@@ -725,6 +726,14 @@ function AnswerRulesEditor({ p, set }: { p: Profile; set: Setter }) {
             );
           })}
         </ol>
+        <div className="form-grid">
+          <Field
+            label="Fallback major"
+            hint="Chosen when a form’s list lacks your major, for example Computer Science. Leave empty to choose none."
+          >
+            <input value={rules.major_fallback} maxLength={100} onChange={(e) => update({ major_fallback: e.target.value })} />
+          </Field>
+        </div>
       </section>
       <section className="panel">
         <header className="panel-head">

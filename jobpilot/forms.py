@@ -2068,7 +2068,7 @@ class FormSession:
                 from .answers import EDUCATION
 
                 async def major_policy(options, *, partial=False):
-                    # A major is the recorded one, a name made of its words, or (below) Computer Science;
+                    # A major is the recorded one, a name made of its words, or (below) the profile's fallback major;
                     # a model guess among unrelated results committed "Data Processing" for Data Science.
                     return self.resolver.policy_choice(field, options) if self.resolver else None
 
@@ -2082,14 +2082,16 @@ class FormSession:
                         school_scope=bool(SCHOOL_LABEL.search(field["label"])),
                     )
                 except ValueError:
-                    if not is_major or normalize(value) == "computer science":
+                    rules = getattr(self.resolver, "answer_rules", None)
+                    fallback = (getattr(rules, "major_fallback", "") or "").strip()
+                    if not is_major or not fallback or normalize(value) == normalize(fallback):
                         raise
-                    # Owner policy: a major the employer's search catalog lacks falls back to
-                    # Computer Science (R1 RCM: "Data Science" was not offered).
-                    committed = await widgets.prompt(frame, el, "Computer Science", choose=choose)
+                    # A major the employer's search catalog lacks falls back to the profile's fallback major
+                    # (answer_rules.major_fallback; R1 RCM: "Data Science" was not offered).
+                    committed = await widgets.prompt(frame, el, fallback, choose=choose)
                     self.emit(
                         "option_selected",
-                        "Used the owner-approved major for a catalog without the recorded one",
+                        "Used the profile's fallback major for a catalog without the recorded one",
                         {"field": field["label"]},
                     )
         elif kind == "date_parts":

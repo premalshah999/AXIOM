@@ -17,6 +17,7 @@ from .knowledge import (
     relevant_fact,
     topic,
 )
+from .answer_rules import major_patterns
 from .schemas import Answer, AnswerBatch, Profile
 from .answer_context import (
     AUTH_KEYS,
@@ -249,9 +250,8 @@ EDUCATION = {
     "start": re.compile(r"^from$|start|first year|from year", re.I),
     "end": re.compile(r"^to\b|\bend\b|last year|graduat|to year|completion|expected", re.I),
 }
-# Owner policy (2026-10-13), every ATS: when a catalog does not offer the recorded
-# value, choose these offered equivalents rather than stopping the application.
-MAJOR_FALLBACK = (re.compile(r"^computer science$", re.I), re.compile(r"\bcomputer science\b", re.I))
+# When a catalog does not offer the recorded degree, choose one of these offered equivalents rather than stopping the
+# application. The major's fallback is the profile's own (answer_rules.major_fallback).
 DEGREE_FALLBACK = {
     "bachelor": (
         re.compile(r"^bachelor'?s?(?: degree)?$", re.I),
@@ -3133,7 +3133,7 @@ class Resolver:
                 return hit
             if entry.field_of_study and (hit := major_part(entry.field_of_study, options)):
                 return hit
-            return first_matching(options, MAJOR_FALLBACK)
+            return first_matching(options, major_patterns(self.answer_rules.major_fallback))
         if EDUCATION["degree"].search(label):
             if entry is None:
                 ranks = ["doctor", "master", "bachelor"]

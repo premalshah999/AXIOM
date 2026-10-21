@@ -44,13 +44,23 @@ def field(label, options, **extra):
     }
 
 
-def test_major_not_offered_falls_back_to_computer_science(service):
-    r = Resolver(profile(), service.db, service.config)
+def test_major_not_offered_falls_back_to_the_profiles_fallback_major(service):
+    r = Resolver(profile(answer_rules={"major_fallback": "Computer Science"}), service.db, service.config)
     options = ["Biology", "Computer Science", "Economics"]
     assert r.policy_choice(field("Field of Study", options), options) == "Computer Science"
     # The recorded major still wins when offered.
     options = ["Data Science", "Computer Science"]
     assert r.policy_choice(field("Field of Study", options), options) == "Data Science"
+    # Another applicant's fallback is their own.
+    other = Resolver(profile(answer_rules={"major_fallback": "Statistics"}), service.db, service.config)
+    options = ["Biology", "Computer Science", "Statistics (B.S.)"]
+    assert other.policy_choice(field("Field of Study", options), options) == "Statistics (B.S.)"
+
+
+def test_a_profile_without_a_fallback_major_chooses_none(service):
+    r = Resolver(profile(), service.db, service.config)
+    options = ["Biology", "Computer Science", "Economics"]
+    assert r.policy_choice(field("Field of Study", options), options) is None
 
 
 def test_degree_not_offered_uses_same_level_generic_option(service):

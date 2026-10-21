@@ -175,6 +175,7 @@ export type DemographicRule = {
 };
 export type AnswerRules = {
   education: EducationStep[];
+  major_fallback: string;
   demographics: Record<string, DemographicRule>;
   guest_apply_first: boolean;
   open_agreement_links: boolean;
