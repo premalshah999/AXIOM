@@ -20,7 +20,12 @@ from .answers import HISTORY_UNKNOWN, answer_key, job_catalog_search_box, normal
 from .knowledge import topic
 from .browser_contracts import ActionResult, action_result, field_identity, fingerprint
 from .models import AnswerModelUnavailable
+from .playwright_fast import install as install_playwright_fast
 from .privacy import dismiss_cookies
+
+# Every route to a page (the host Chrome over CDP and a private browser) reaches this module, so the single-call
+# Locator.evaluate is installed here as well as in desktop_cdp.
+install_playwright_fast()
 
 SCAN = (Path(__file__).parent / "js" / "scan.js").read_text()
 FIELD_WRITE_SECONDS = 12
