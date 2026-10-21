@@ -395,7 +395,7 @@ def test_complete_feeds_the_browser_circuit(service, monkeypatch):
 
 
 async def test_a_queued_run_waits_while_the_worker_chrome_is_gone(service, monkeypatch):
-    from jobpilot import service as service_module
+    from jobpilot.service import execution as service_module
 
     now = datetime.now(UTC)
     service.db.set_setting(

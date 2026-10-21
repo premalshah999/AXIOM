@@ -86,7 +86,7 @@ async def nothing(*_a, **_k):
 
 @pytest.fixture
 def flow_for(page, service, tmp_path, monkeypatch):
-    monkeypatch.setattr(accounts, "DAYFORCE_ID_OUTCOME_SECONDS", 1)
+    monkeypatch.setattr("jobpilot.accounts.flow_dayforce.DAYFORCE_ID_OUTCOME_SECONDS", 1)
 
     async def make(url, body):
         await page.route(url, lambda route: route.fulfill(content_type="text/html", body=body))

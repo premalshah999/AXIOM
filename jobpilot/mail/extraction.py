@@ -1,0 +1,340 @@
+"""Reading a verification code or link out of one message, and the best code for an employer."""
+
+from bs4 import BeautifulSoup
+from email.utils import getaddresses
+from urllib.parse import urlsplit
+import base64
+import re
+from .helpers import origin
+from .senders import authenticated_sender
+from .senders import oracle_attributed
+from .senders import sender_allowed
+from .senders import tenant_conflict
+from .senders import tracker_allowed
+
+
+CODE_CUE = re.compile(r"verification code|security code|one.time|passcode|\bpin\b|\botp\b|\bcode\b", re.I)
+
+
+# Oracle Recruiting's standard one-time-code mail. Each employer's site may send it
+# from its own domain (uthscsa.edu) rather than oraclecloud.com.
+ORACLE_OTP = re.compile(r"confirm your identity using the one[- ]time pass ?code", re.I)
+
+
+# Unbranded codes: a verification-specific cue is required ("promo code" never qualifies).
+UNBRANDED_CODE_CUE = re.compile(
+    r"verification|one.time|passcode|\b(?:security|login|sign.in|authentication|confirmation|access|verify) code\b|\botp\b",
+    re.I,
+)
+
+
+UNBRANDED_NOT_CODE = re.compile(r"\b(?:promo|coupon|discount|unsubscribe|gift card)\b", re.I)
+
+
+# Widened poll terms, always combined with this recipient and the request window.
+UNBRANDED_SEARCH_TERMS = [
+    '"verification code"',
+    '"security code"',
+    '"one-time code"',
+    '"one time code"',
+    '"one-time passcode"',
+    '"login code"',
+    '"sign-in code"',
+    '"authentication code"',
+    '"confirmation code"',
+    "passcode",
+    "otp",
+]
+
+
+UNBRANDED_MAX_CANDIDATES = 10
+
+
+def extract_message(message, rule, challenge, *, identity_only=False, diagnostics=None):
+    """Return one unambiguous token; message text never becomes model instructions."""
+
+    def reject(reason):
+        if diagnostics is not None:
+            diagnostics["rejection"] = reason
+        return None
+
+    try:
+        received = int(message.get("internalDate", "0")) / 1000
+    except (ValueError, TypeError, OverflowError):
+        return reject("invalid_message")
+    if received < challenge["since"] or received > challenge["expires"]:
+        return reject("request_window")
+    headers = message.get("payload", {}).get("headers", [])
+    values = {}
+    for h in headers:
+        values.setdefault(h["name"].lower(), []).append(h["value"])
+    senders = getaddresses(values.get("from", []))
+    if len(senders) != 1:
+        return reject("sender")
+    address = senders[0][1].lower()
+    domain = address.rpartition("@")[2]
+    tokens = challenge.get("tenant_tokens") or []
+    # An Oracle code mail from a domain outside the rule is accepted only after its
+    # body proves to be that template (checked once the text is read), and still
+    # needs aligned DKIM/SPF, this recipient and this request's window.
+    oracle_template = challenge.get("ats") == "oracle" and challenge["kind"] in {"code", "auto"}
+    outside_rule = False
+    # Unbranded code: a sender outside the rule is decided only after its body is read,
+    # and only when exactly one code window is open for this recipient at arrival.
+    unbranded_sender = False
+    if not domain or not sender_allowed(
+        domain, rule["sender_domains"], tokens, challenge.get("employer_senders", False)
+    ):
+        if oracle_template and domain:
+            outside_rule = True
+        elif domain and challenge.get("open_windows") is not None and challenge["kind"] in {"code", "auto"}:
+            unbranded_sender = True
+        else:
+            return reject("sender")
+    if (
+        not (outside_rule or unbranded_sender)
+        and tenant_conflict(address, domain, tokens)
+        and not (
+            # Links are opened only on this employer's own origins (link_origins
+            # below), so another tenant's link can never be used. The sender-name
+            # heuristic rejected 133 Workday verification mails; none of the
+            # verified Workday runs had a tenant rejection.
+            challenge.get("kind") in {"link", "password_reset"}
+            and rule.get("link_origins")
+            and all(not o.endswith((".myworkday.com", "//myworkday.com")) for o in rule["link_origins"])
+        )
+    ):
+        return reject("tenant")
+    recipients = getaddresses(values.get("to", []) + values.get("delivered-to", []))
+    if challenge["recipient"].lower() not in {a.lower() for _, a in recipients}:
+        return reject("recipient")
+    # Only trust Google's receiving authentication result with aligned DMARC.
+    receiving_auth = next(
+        (
+            value
+            for value in values.get("authentication-results", [])
+            if re.match(r"\s*mx\.google\.com\s*;", value, re.I)
+        ),
+        "",
+    )
+    if not authenticated_sender(receiving_auth, domain):
+        return reject("authentication")
+    reset = challenge["kind"] == "password_reset"
+    link_cue = (
+        r"reset.{0,30}password|password.{0,30}reset"
+        if reset
+        else r"verif|confirm|sign.?in|log.?in|continue|activate"
+    )
+    message_link_cue = bool(re.search(link_cue, " ".join(values.get("subject", [])), re.I))
+    texts, links, size = [], [], 0
+    cued = set()  # Anchors whose own text is the cue, not only the subject.
+
+    def walk(part, depth=0):
+        nonlocal size
+        if depth > 15 or size > 256_000:
+            return
+        # Attached/forwarded messages are separate requests, even when the outer
+        # envelope authenticates. Only parse the employer's inline message.
+        if (
+            part.get("mimeType") == "message/rfc822"
+            or part.get("filename")
+            or any(
+                h.get("name", "").lower() == "content-disposition"
+                and re.match(r"\s*attachment\b", h.get("value", ""), re.I)
+                for h in part.get("headers", [])
+            )
+        ):
+            return
+        encoded = part.get("body", {}).get("data", "")
+        if encoded and part.get("mimeType") in {"text/plain", "text/html"}:
+            if len(encoded) > 350_000:
+                return
+            try:
+                raw = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode("utf-8", "replace")
+            except (ValueError, TypeError):
+                return
+            size += len(raw)
+            if size > 256_000:
+                return
+            soup = BeautifulSoup(raw, "html.parser") if part["mimeType"] == "text/html" else None
+            if soup:
+                for hidden in soup.select("script, style, template, blockquote"):
+                    hidden.decompose()
+            text = soup.get_text(" ", strip=True) if soup else raw
+            texts.append(text)
+            if soup:
+                for a in soup.select("a[href]"):
+                    anchor_cue = bool(re.search(link_cue, a.get_text(" "), re.I))
+                    if anchor_cue:
+                        cued.add(a["href"])
+                    if anchor_cue or message_link_cue:
+                        links.append(a["href"])
+            # Workday also sends bare URLs inside HTML, without <a> elements.
+            # Require the same nearby reset/verification cue as plain text.
+            for match in re.finditer(r"https://[^\s<>\"']+", text):
+                if message_link_cue or re.search(
+                    link_cue, text[max(0, match.start() - 120) : match.end()], re.I
+                ):
+                    links.append(match.group().rstrip(".,)"))
+        for child in part.get("parts", [])[:30]:
+            walk(child, depth + 1)
+
+    walk(message.get("payload", {}))
+    # Some employers label the OTP in the subject. It has passed the same
+    # envelope, tenant, recipient and window checks as the message body.
+    text = "\n".join(values.get("subject", []) + texts)
+    if outside_rule and not ORACLE_OTP.search(text):
+        return reject("sender")
+    if (
+        oracle_template
+        and challenge.get("oracle_peers")
+        and not oracle_attributed(
+            address,
+            senders[0][0],
+            text,
+            challenge.get("employer_name", ""),
+            challenge.get("oracle_pod", ""),
+            challenge["oracle_peers"],
+        )
+    ):
+        return reject("tenant")
+    # SAP's SuccessFactors account mail labels its code "Passcode: …" (2026-10-16).
+    codes = set(
+        re.findall(
+            r"(?i:\b(?:verification code|security code|authentication code|one.time (?:code|passcode|password)|confirmation code|login code|sign.in code|passcode|otp|code|pin)\s*(?:(?:is|below)\s*)?[:#-]?\s*)\b([A-Z0-9]{4,10})\b",
+            text,
+        )
+    )
+    codes.update(
+        re.findall(
+            r"(?i:security code field on your application\s*:)\s*([A-Za-z0-9]{8})\b",
+            text,
+        )
+    )
+    # Individually styled digits become spaces after HTML extraction. Accept
+    # that layout only immediately after an explicit OTP label, never by
+    # joining unrelated numbers elsewhere in the message.
+    codes.update(
+        re.sub(r"[ \t\u200b\u200c\u200d]", "", value)
+        for value in re.findall(
+            r"(?i:\b(?:verification code|security code|authentication code|one.time (?:code|passcode|password)|confirmation code|login code|sign.in code|passcode|otp|pin)\s*(?:is\s*)?[:#-]?\s*)"
+            r"(?<!\d)([0-9](?:[ \t\u200b\u200c\u200d]*[0-9]){3,9})(?![ \t\u200b\u200c\u200d]*[0-9])",
+            text,
+        )
+        if all(len(group) == 1 for group in re.split(r"[ \t\u200b\u200c\u200d]+", value))
+        or not re.search(r"[ \t\u200b\u200c\u200d]", value)
+    )
+    codes.update(
+        re.findall(
+            r"\b([0-9]{4,10})\b(?i:\s+is your (?:verification|security|authentication|one.time|login|sign.in) (?:code|passcode|password))",
+            text,
+        )
+    )
+    codes -= {"PLEASE", "BELOW", "EXPIRES", "VALID", "YOUR", "REQUEST"}
+    fallback_code = False
+    # An "auto" wait (code or link not yet known) may use it only when the mail has no link at all
+    # (Starbucks' Eightfold code mail was rejected as token_format, 2026-10-13).
+    if (
+        not codes
+        and (challenge["kind"] == "code" or (challenge["kind"] == "auto" and not links))
+        and CODE_CUE.search(text)
+        and not unbranded_sender
+    ):
+        # "...code to continue your application with Acme: 482915." One standalone number only;
+        # years, dates and phone fragments are not codes. Never used when a link may be meant.
+        numbers = {
+            n
+            for n in re.findall(r"(?<![\d$.,:/+-])\b(\d{4,8})\b(?![\d.,/-]\d)", text)
+            if not 1900 <= int(n) <= 2100
+        }
+        if len(numbers) == 1:
+            codes = numbers
+            fallback_code = True
+    # Unbranded OTP: this recipient's request is the only open code window in the
+    # mailbox when the mail arrived, the text has a verification cue, and exactly one
+    # labeled code with a digit is present. Links never take this path.
+    covering = [
+        window for window in (challenge.get("open_windows") or []) if window[1] <= received <= window[2]
+    ]
+    single_window = len(covering) == 1 and covering[0][0] == challenge.get("id")
+    unbranded_cue = bool(UNBRANDED_CODE_CUE.search(text))
+    unbranded_ok = bool(
+        challenge.get("open_windows") is not None
+        and challenge["kind"] in {"code", "auto"}
+        and single_window
+        and unbranded_cue
+        and not UNBRANDED_NOT_CODE.search(text)
+        and not fallback_code
+        and len(codes) == 1
+        and re.fullmatch(r"[A-Za-z0-9]{4,10}", next(iter(codes)))
+        and any(ch.isdigit() for ch in next(iter(codes)))
+    )
+    if unbranded_sender and not unbranded_ok:
+        return reject("unbranded_ambiguous" if unbranded_cue and not single_window else "sender")
+    # A shared Greenhouse sender identifies the platform, not the employer.
+    # Require the employer's whole name in the inline mail before considering
+    # its code. Never borrow a sibling employer's newest message. The only
+    # exception is an outside-sender unbranded code that passed the sole-window
+    # rule; an in-rule shared-sender mail still needs the employer's name.
+    if (
+        challenge.get("ats") == "greenhouse"
+        and challenge["kind"] in {"code", "auto"}
+        and not (unbranded_sender and unbranded_ok)
+    ):
+        name = re.sub(r"[^a-z0-9]+", " ", challenge.get("employer_name", "").casefold()).strip()
+        name = re.sub(r"\s+(?:inc|llc|ltd|corp|corporation|limited)$", "", name).strip()
+        body = " " + re.sub(r"[^a-z0-9]+", " ", text.casefold()).strip() + " "
+        if not name or " " + name + " " not in body:
+            return reject("employer_identity")
+    valid_links = set()
+    rejected_origins = set()
+    for link in links:
+        try:
+            link_origin = origin(link)
+            if urlsplit(link).scheme == "https" and link_origin in rule["link_origins"]:
+                valid_links.add(link)
+            elif (
+                urlsplit(link).scheme == "https"
+                and link in cued
+                and tracker_allowed(link_origin, rule["link_origins"])
+            ):
+                # The employer's own button behind iCIMS's click tracker. Its anchor text carries the cue; footer
+                # links behind the same tracker stay rejected even when the subject is the cue.
+                valid_links.add(link)
+            else:
+                rejected_origins.add(link_origin)
+        except ValueError:
+            continue
+    if diagnostics is not None and rejected_origins:
+        diagnostics["rejected_link_origins"] = sorted(rejected_origins)[:20]
+    kind = challenge["kind"]
+    if identity_only:
+        return (
+            {"kind": "link", "value": next(iter(valid_links))}
+            if len(valid_links) == 1
+            else reject("token_format")
+        )
+    if kind in {"code", "auto"} and len(codes) == 1:
+        return {"kind": "code", "value": next(iter(codes))}
+    if kind in {"link", "auto", "password_reset"} and len(valid_links) == 1 and (reset or not codes):
+        return {"kind": "link", "value": next(iter(valid_links))}
+    return reject("ambiguous_token" if len(codes) > 1 or len(valid_links) > 1 else "token_format")
+
+
+def latest_employer_code(matches, challenge):
+    """Newest uniquely timed Greenhouse OTP, after every identity check passed.
+
+    Generic senders, links and tied timestamps retain the ambiguous-match rule.
+    Gmail internalDate is receiving metadata, never an employer-supplied Date.
+    """
+    if (
+        len(matches) < 2
+        or challenge.get("ats") != "greenhouse"
+        or not challenge.get("employer_name")
+        or any(token.get("kind") != "code" for _, token, _, _ in matches)
+    ):
+        return matches
+    dated = sorted(matches, key=lambda item: int(item[2]["internalDate"]), reverse=True)
+    if int(dated[0][2]["internalDate"]) == int(dated[1][2]["internalDate"]):
+        return matches
+    return dated[:1]

@@ -45,7 +45,7 @@ documents say worker or slot). The rest:
 ## 2. Processes and stores
 
 ```
-   browser ── HTTPS/JSON ──►  app container: `jobpilot serve` (uvicorn → FastAPI, jobpilot/api.py)
+   browser ── HTTPS/JSON ──►  app container: `jobpilot serve` (uvicorn → FastAPI, jobpilot/api/)
    (React dashboard)           │
                                ├─ API + the built dashboard (jobpilot/static) + /healthz
    Telegram ◄── long poll ──   ├─ DBOS runtime (workers.py): queues applications_normal, applications_specialist,
@@ -58,7 +58,7 @@ documents say worker or slot). The rest:
 ```
 
 - **One server process owns everything**: the API, the scheduler and every browser owner. There is no separate worker
-  process; a "worker" is a slot (a browser owner), not a process (`application_slots.py`). `Service` (`service.py`) is
+  process; a "worker" is a slot (a browser owner), not a process (`application_slots.py`). `Service` (`service/`) is
   the application core that the API, the scheduler, Telegram and the CLI all call.
 - **Two host Chromes**, started on the machine, never in the container. The worker Chrome (9224) holds one tab per
   running application. The twin (9225) is never attached by Playwright: it only mints hCaptcha tokens for platforms that
@@ -67,7 +67,7 @@ documents say worker or slot). The rest:
 - **Telegram is optional.** A main bot plus up to eight per-slot bots (`telegram.py`, `telegram_workers.py`) deliver
   questions, outcomes and screenshots and accept replies and instructions. It is a view onto the same `reviews` and `runs`
   rows, never an execution owner.
-- **Mail is read-only.** Gmail by app password (IMAP) or OAuth (`gmail_imap.py`, `mail.py`). The app never sends mail or
+- **Mail is read-only.** Gmail by app password (IMAP) or OAuth (`gmail_imap.py`, `mail/`). The app never sends mail or
   marks messages read. Codes and links go to the owning browser, never into a model prompt.
 - **CLI** (`cli.py`): `serve`, `token`, `doctor`, `probe` (dry-run one URL), `trace`, `mcp` (read-only MCP over stdio),
   `verify` (synthetic end-to-end check), `login` (capture a session), `browser` and `twin-browser` (host Chromes).
@@ -83,8 +83,8 @@ documents say worker or slot). The rest:
 | Runs | `runs` (`state`, `packet` JSON, `receipt` JSON), `events` (append-only trace), `reviews` (questions awaiting an answer) | `Service`, `BrowserEngine` | `packet` carries the profile snapshot, pool, slot, pipeline, controller policy, recovery and escalation state |
 | Queue delivery | DBOS system tables, and `application_outbox` | `workers.py`, `outbox.py` | The `queued → running` compare-and-set on `runs` is the real idempotency guard; DBOS only delivers |
 | Resumes | `resumes` (uploaded PDFs, files in the volume), `rs_masters`, `rs_artifacts` (tailored variants) | upload API, `features/resumes` | A run pins one artifact; a continuation cannot change its PDF |
-| Employer accounts and mailboxes | `settings['employer_account:*']` (encrypted), `mailboxes` (encrypted) | `accounts.py`, `mail.py` | Vault key `DATA_DIR/mail-key`. Credentials never enter prompts, events or screenshots |
-| Mail waits | `mail_rules`, `mail_challenges`, `mail_consumption`, `mail_oauth` | `mail.py`, `inbox.py` | A challenge is single-use and bound to sender, recipient, tenant and request time |
+| Employer accounts and mailboxes | `settings['employer_account:*']` (encrypted), `mailboxes` (encrypted) | `accounts/`, `mail/` | Vault key `DATA_DIR/mail-key`. Credentials never enter prompts, events or screenshots |
+| Mail waits | `mail_rules`, `mail_challenges`, `mail_consumption`, `mail_oauth` | `mail/`, `inbox.py` | A challenge is single-use and bound to sender, recipient, tenant and request time |
 | Budgets and limits | `budgets` (daily spend and submissions); settings `application_budget`, `runner_tiers`, `application_pacing`, `unknown_resubmit_policy`… | `application_budget.py`, `tiers.py`, `application_pacing.py` | |
 | Control and policy switches | settings `control` (`paused`, `auto_submit`), `job_board_settings`, `agent_settings`, `ats_focus`, `job_control:<job>`, `execution_v2_deployment_hold`… | API, Telegram, operators | |
 | Run artifacts | `DATA_DIR/runs/<run_id>/` (`answers.json`, `final.png`, `final_outline.txt`, `steps/`) | `BrowserEngine`, `FormSession` | Read by `/api/runs/{id}`, the repair agent and the resubmit guard |
@@ -140,7 +140,7 @@ employer partition, pacing (`may_start`), and the mail sender lease. A slot is r
 The run then executes `BrowserEngine.run(job, run)` under a wall-clock budget set by runner tier, ATS and pool, and
 `Service.complete(run_id, result, elapsed)` records the outcome.
 
-Run states (`service.py`, `TERMINAL`, `ACTIVE`, `RETRYABLE`):
+Run states (`service/states.py`, `TERMINAL`, `ACTIVE`, `RETRYABLE`):
 
 ```
 queued ─► running ─► submitting ─► confirmed                  evidence required (section 10)
@@ -265,11 +265,11 @@ Two properties matter for the architecture:
 
 ## 9. Mail, accounts, CAPTCHA, models
 
-- **Mail** (`mail.py`, `inbox.py`, `gmail_imap.py`, `email_browser.py`): `MailService` polls the mailbox; a *challenge*
+- **Mail** (`mail/`, `inbox.py`, `gmail_imap.py`, `email_browser.py`): `MailService` polls the mailbox; a *challenge*
   is opened by a run (code or link), matched to exactly one eligible message by authenticated sender, recipient, tenant and
   time window, consumed once, and delivered only to the owning browser. A wait longer than 30 seconds is parked as a durable
   request and the slot is released (`resume_mail_wait`).
-- **Accounts** (`accounts.py`, `workday.py`): one shared login per applicant plus one record per employer origin, encrypted;
+- **Accounts** (`accounts/`, `workday.py`): one shared login per applicant plus one record per employer origin, encrypted;
   `AccountFlow` discovers sign-up, sign-in and reset forms on unknown platforms. `email_alias.py` gives a platform a
   Gmail plus-address when it bound the base address to an unusable identity.
 - **Models** (`models.py`, `model_admission.py`, `provider_health.py`, `agent_settings.py`): DeepSeek, MiMo and Claude Haiku
@@ -397,9 +397,12 @@ dependencies run in every direction (`answers` → `widgets`, `pipeline_comparis
 | Several controllers | guided flow, adapters, `run_desktop_navigator`, `run_agent`, `continuous_agent.py`, `control_agent.py` | `continuous_agent.py`, the `reasoning_first` navigator and `tiers.escalate_due` run only while runner tiers are enabled (off in the original installation since 2026-10-14); decide whether to keep them |
 | Pipeline names | `pipeline_comparison.LEGACY/REASONING/AGENTIC/CURRENT` | retained drafts keep old names; new runs use `current`. Remove with the last retained draft |
 
-**Candidates for a later cleanup (not provably unused).** `/api/preflight`, `/api/jobs/batch-queue`,
-`/api/jobs/{id}/approve`, `/api/runs/{id}/cancel`, `/api/job-board/search` (no caller in the dashboard, tests or scripts;
-see [API.md](API.md)).
+**Removed in Phase B (2026-10-20).** `GET /api/preflight`, `POST /api/jobs/{id}/approve`, `POST /api/jobs/batch-queue` and
+`GET /api/job-board/search` (no caller in the dashboard, `jobpilot`, tests, scripts or the operator helpers), with
+`Service.preflight_questions`, `Service.queue_batch` and the `Approval` and `BatchQueue` request models.
+
+**Candidates for a later cleanup (not provably unused).** `POST /api/runs/{id}/cancel` (no dashboard caller; a queued run
+cannot otherwise be cancelled from the UI) and the operator routes listed in [API.md](API.md) 4.2.
 
 ## 15. Module map
 
@@ -408,18 +411,18 @@ Every module of `jobpilot/`, by area. Line counts are given for the modules over
 | Area | Modules | Responsibility |
 |---|---|---|
 | **Entry points** | `cli.py`, `mcp_server.py`, `verify.py`, `demo.py` | Commands; read-only MCP over stdio; the synthetic end-to-end check and its fake employer |
-| **HTTP** | `api.py` (1.1k), `owner_account.py`, `mail_api.py`, `jobboard_api.py`, `features/{knowledge,resumes,discovery}/router.py` | App factory, middleware, lifespan and the 109 routes ([API.md](API.md)) |
+| **HTTP** | `api/` (`app.py`, `middleware.py`, `lifespan.py`, `snapshot.py`, `routes/*.py`), `owner_account.py`, `features/{knowledge,resumes,discovery}/router.py` | App factory, security middleware, lifespan, the snapshot cache and builder, and one router module per resource: `health`, `session`, `owner` (account and onboarding), `state` (snapshot, ledger), `archive`, `profile`, `resumes`, `knowledge` (legacy), `settings`, `jobs`, `runs`, `sources`, `job_board`, `mail`, `accounts`, `demo`, `frontend`. 105 routes ([API.md](API.md)). `owner_account.py` keeps the password hashing, onboarding state and request models |
 | **Core** | `config.py`, `db.py`, `schemas.py`, `network.py`, `runtime.py`, `dbos_sqlite.py`, `features/_store.py` | Settings; tables and sessions; `Profile` and the request models; the SSRF-safe fetch; version tags; feature-table helpers |
-| **Application** | `service.py` (1.6k), `admission.py`, `application_budget.py`, `application_pacing.py`, `application_slots.py`, `execution_services.py`, `job_control.py`, `owner_apply.py`, `archive.py`, `outbox.py` | `Service` (queue, execute, complete, reconcile, reviews); admission guards and capacity; lifetime allowance; employer and ATS pacing; slot claims; resume pinning and tailoring requests; pause, resume and delete; one-click apply; archived history; transactional delivery |
+| **Application** | `service/` (`__init__` assembles `Service` from `queueing.py`, `execution.py`, `completion.py`, `reviews.py`, `migrations.py`; `states.py`), `admission.py`, `application_budget.py`, `application_pacing.py`, `application_slots.py`, `execution_services.py`, `job_control.py`, `owner_apply.py`, `archive.py`, `outbox.py` | `Service` (queue, execute, complete, reconcile, reviews); admission guards and capacity; lifetime allowance; employer and ATS pacing; slot claims; resume pinning and tailoring requests; pause, resume and delete; one-click apply; archived history; transactional delivery |
 | **Scheduling and recovery** | `workers.py`, `autopilot.py`, `recovery.py`, `tiers.py`, `pipeline_comparison.py`, `specialist.py`, `controller_policy.py`, `repair_agent.py`, `failure_reports.py`, `run_trace.py`, `provider_health.py` | DBOS workflows, queues and the minute tick; the unattended batch; bounded retries and specialist handoff; runner tiers and budgets; pools, slots and engine choice; the repair agent; failure summaries; per-run timing |
 | **Discovery** | `discovery.py`, `jobboard.py`, `jobsearch.py`, `ats.py`, `eligibility.py`, `features/discovery/{classify,feeds,graduation,policy,postings,readiness,roles,tables}.py` | Import, ranking and per-ATS scrapers; board sources and catalogs; web-search expansion; platform detection; hiring restrictions versus facts; cached classification, curated feeds, freshness, dedupe, readiness, target-role matching |
-| **Answers and knowledge** | `answers.py` (4.8k), `answer_context.py`, `answer_quality.py`, `answer_rules.py`, `knowledge.py`, `evidence_equivalence.py`, `inference_agent.py`, `sensitive_ids.py`, `letters.py`, `features/knowledge/*` | The resolver; question identity and eligibility propositions; the pre-submit review; owner-editable fallback chains; the legacy answer store; interpretation of conflicting facts; inference before asking; identifier detection; cover letters; the versioned store, retrieval, employer identity, writing |
+| **Answers and knowledge** | `answers/` (patterns: `text`, `contact`, `history`, `sources`, `eligibility`, `demographics`, `consent`, `intents`; the `Resolver`: `resolver.py` core, `local_rules.py` (the `_local` cascade), `demographic_rules`, `history_rules`, `consent_rules`, `policy_rules`, `intent_rules`, `model_batch`, `validate`), `answer_context.py`, `answer_quality.py`, `answer_rules.py`, `knowledge.py`, `evidence_equivalence.py`, `inference_agent.py`, `sensitive_ids.py`, `letters.py`, `features/knowledge/*` | The resolver; question identity and eligibility propositions; the pre-submit review; owner-editable fallback chains; the legacy answer store; interpretation of conflicting facts; inference before asking; identifier detection; cover letters; the versioned store, retrieval, employer identity, writing |
 | **Resumes** | `features/resumes/*` | Master resume, evidence inventory, tailoring, LaTeX editor and compiler |
 | **Engine** | `browser.py` (4.4k), `browser_contracts.py`, `forms.py` (5.2k), `widgets.py` (2.7k), `widgets_ats.py`, `phone_fields.py`, `history_editor_guard.py`, `js/scan.js`, `desktop_cdp.py`, `privacy.py`, `playwright_fast.py`, `diagnostics.py`, `bot_wall.py` | `BrowserEngine`; shared observation types; `FormSession`; control drivers and per-platform pickers; phone groups; the DOM scanner; tab ownership on the host Chrome; cookie and geolocation handling; masked diagnostics; platform-wide bot walls |
 | **Adapters** | `adapters/base.py` (1.8k), `adapters/{workday,oracle,icims,others}.py` (`icims.py` 1.5k), `workday.py` (1.2k) | The deterministic multi-page driver and one subclass per platform; Workday account setup |
 | **Model-led controllers** | `continuous_agent.py`, `control_agent.py`, `vision.py` | Opt-in agent owner and bounded reasoning over one control (run only while runner tiers are enabled); optional observation of a masked screenshot |
 | **CAPTCHA** | `captcha.py`, `captcha_client.py`, `captcha_observation.py`, `captcha_same_ip.py`, `captcha_twin.py`, `captcha_visual.py` | Token workflow and SDK client; read-only frame observation; same-IP image solving; twin-Chrome tokens |
-| **Mail and accounts** | `mail.py` (1.9k), `mail_errors.py`, `inbox.py`, `gmail_imap.py`, `email_browser.py`, `email_alias.py`, `receipts.py`, `accounts.py` (1.6k) | Challenges, rules, extraction and the vault; sanitized errors; the adapter-facing view; read-only IMAP; code and link actions in the owning browser; plus-addresses; receipt matching; employer account store and flows |
+| **Mail and accounts** | `mail/` (`senders`, `extraction`, `vault`, `models`, `constants`, `helpers`; `MailService` from `mailboxes`, `transport`, `rules`, `challenges`, `polling`), `mail_errors.py`, `inbox.py`, `gmail_imap.py`, `email_browser.py`, `email_alias.py`, `receipts.py`, `accounts/` (`tenants`, `pages`, `dayforce`, `store`, `credentials`, `errors`; `AccountFlow` from `flow_dayforce`, `flow_gates`, `flow_handle`) | Challenges, rules, extraction and the vault; sanitized errors; the adapter-facing view; read-only IMAP; code and link actions in the owning browser; plus-addresses; receipt matching; employer account store and flows |
 | **Models** | `models.py`, `model_admission.py`, `agent_settings.py`, `jev.py` | LLM clients with budgets; process-wide request admission; role and helper switches; typed choice decisions |
 | **Telegram** | `telegram.py` (1.7k), `telegram_workers.py` | Main bot and per-slot bots |
 | **Operations** | `operations/{cancel,close_tabs,reset}.py` | Maintenance that is not part of application execution |
@@ -441,7 +444,7 @@ files that all of them edit.
 - No layering: 677 function-level imports hide cycles. A change in `widgets.py` can break answers, and the answer module
   imports queue-level code for a prompt string.
 - Two knowledge stores, three discovery stacks, two source routes and five ways to start an application.
-- `api.py` holds 54 route handlers, the middleware, the snapshot builder and SQL inside one 1,065-line function (`create_app`).
+- `api.py` held 54 route handlers, the middleware, the snapshot builder and SQL inside one 1,065-line function (`create_app`); split in Phase B (section 22).
 - The `settings` table is used as a document store for per-job state.
 - No migration framework (`create_all` only), so a column change cannot ship.
 
@@ -520,13 +523,13 @@ tests/             unit/  integration/ (API, DB)  browser/ (Chromium fixtures)  
 
 | Today | Target | How |
 |---|---|---|
-| `answers.py` (4.8k) | `answers/` | Tables (`CONTACT`, `NAMES`, `ADDRESS`, `WORK`, `EDUCATION`, the regexes, `INTENTS`) → `patterns.py` and `intents.py`. `Resolver._local` (916 lines) is a cascade of independent rules; each rule becomes a function `(resolver, field) -> Answer or None` in `contact.py`, `history.py`, `demographics.py`, `consent.py`, `choices.py`, `eligibility.py`, and `_local` becomes a list of them in order. `_resolve` and `jev_choices` → `model_batch.py`; `_validate_answer` (321) → `validate.py`; the model instructions (a 200-line string) → `prompts.py` |
+| `answers.py` (4.8k) | `answers/` (**split, Phase B**: modules by topic and one mixin per rule family; the per-rule functions and `patterns.py` consolidation remain) | Tables (`CONTACT`, `NAMES`, `ADDRESS`, `WORK`, `EDUCATION`, the regexes, `INTENTS`) → `patterns.py` and `intents.py`. `Resolver._local` (916 lines) is a cascade of independent rules; each rule becomes a function `(resolver, field) -> Answer or None` in `contact.py`, `history.py`, `demographics.py`, `consent.py`, `choices.py`, `eligibility.py`, and `_local` becomes a list of them in order. `_resolve` and `jev_choices` → `model_batch.py`; `_validate_answer` (321) → `validate.py`; the model instructions (a 200-line string) → `prompts.py` |
 | `forms.py` (5.2k) | `forms/` | `FormSession` keeps state and the contract (`session.py`). `scan` → `scan.py`; `fill_current` (546) and `_fill` (526) split by control kind into `fill.py` and `options.py`; `proof` (471) → `proof.py` with the confirmation helpers; `click` and submit-control classification → `submit.py`; `rejection` and `repair_validation` → `rejection.py`; `NetworkMonitor` → `network.py` |
 | `browser.py` (4.4k) | `browser/` | `BrowserEngine.run` (769) becomes phases: `open_application`, `detect_platform`, `choose_controllers`, `finish`. `run_desktop_navigator` (608) and `run_agent` (249) → `flows/`; `_finish`, `watch_submission`, `reserve_commit` → `submit.py`; draft checkpoint and retention → `draft.py`; `handle_account*`, `handle_email`, `browser_challenge` → `account.py`, `email.py`, `challenges.py` |
 | `widgets.py` (2.7k) + `widgets_ats.py` | `widgets/` | 83 functions by control family: matching helpers (`norm`, `best_option`, dates, money, phone) → `core/matching.py`; popups and options → `core.py`; clicking and typing → `click.py`; `dropdown`, `combobox`, `prompt` (226), `pills`, `date_parts`, `select`, `checkbox` one module each; Oracle, SuccessFactors, UI5 and iCIMS pickers → `ats/` |
-| `service.py` (1.6k) | `applications/queue.py`, `lifecycle.py` | `_queue` (429 lines) becomes an ordered list of guard functions, each returning or raising `QueueBlocked`; `complete` (244) becomes `record_outcome` plus small policy functions (confirmation evidence, sensitive-id removal, ineligible residence, cooldown) |
-| `api.py` (1.1k) | `api/` | `create_app` (middleware, lifespan, routers) and one router module per resource, as proposed in [API.md](API.md) |
-| `mail.py` (1.9k), `accounts.py` (1.6k), `telegram.py` (1.7k), `adapters/base.py` (1.8k), `adapters/icims.py` (1.5k), `workday.py` (1.2k) | `mail/`, `accounts/`, `telegram/`, `adapters/*/` | Same method: one module per responsibility, long handlers (`MailService.poll_once` 320, `AccountFlow.handle` 431, `_handle_update` 379, `WorkdayAuth.run` 351) split by step |
+| `service.py` (1.6k) | `applications/queue.py`, `lifecycle.py` (**split into `service/`, Phase B**: one mixin per concern; the guard list and `record_outcome` remain) | `_queue` (429 lines) becomes an ordered list of guard functions, each returning or raising `QueueBlocked`; `complete` (244) becomes `record_outcome` plus small policy functions (confirmation evidence, sensitive-id removal, ineligible residence, cooldown) |
+| `api.py` (1.1k) | `api/` (**done, Phase B**) | `create_app` (`app.py`), `middleware.py`, `lifespan.py`, `snapshot.py` and one router module per resource in `routes/`, as proposed in [API.md](API.md) |
+| `mail.py` (1.9k) and `accounts.py` (1.6k) (**split into packages, Phase B**: patterns and helpers by topic, one mixin per concern; the long handlers `MailService.poll_once` and `AccountFlow.handle` remain), `telegram.py` (1.7k), `adapters/base.py` (1.8k), `adapters/icims.py` (1.5k), `workday.py` (1.2k) | `mail/`, `accounts/`, `telegram/`, `adapters/*/` | Same method: one module per responsibility, long handlers (`MailService.poll_once` 320, `AccountFlow.handle` 431, `_handle_update` 379, `WorkdayAuth.run` 351) split by step |
 
 ## 21. Order of work and safeguards
 
@@ -541,3 +544,24 @@ tests/             unit/  integration/ (API, DB)  browser/ (Chromium fixtures)  
 Each step is one commit series: move with `git mv`, rewrite imports mechanically, run the targeted tests for the package plus
 the browser fixtures it owns, and compare `pytest --collect-only` counts before and after. Behaviour changes are never mixed into a move.
 The production cut-over deploys the restructured image only after the full suite passes; there is no schema change in the restructure.
+
+## 22. Phase B progress (2026-10-20)
+
+Done, on branch `agent/architecture`, each as a pure move checked before and after (the route table of the running
+application, and the AST of every moved function):
+
+| Step | Result |
+|---|---|
+| `api.py` | `api/` package: `app.py` (factory), `middleware.py`, `lifespan.py`, `snapshot.py` (`SnapshotCache`, `build_snapshot`) and 17 router modules. `mail_api.py` and `jobboard_api.py` became `routes/mail.py` and `routes/job_board.py`; the account routes left `owner_account.py` for `routes/owner.py`. Every path, method, auth rule, request and response is unchanged |
+| dead routes | Four routes with no caller were deleted (section 14) |
+| HTTP tests | One test module per router (`tests/test_http_*.py`); 94 of the 105 routes are now called over HTTP (20 of 109 before) |
+| `service.py` | `service/` package: `Service` assembled from five mixins plus `states.py` |
+| `mail.py`, `accounts.py` | `mail/` package (six pattern modules, `MailService` from five mixins) and `accounts/` package (six modules, `AccountFlow` from three mixins) |
+| `answers.py` | `answers/` package: eight pattern modules, `Resolver` assembled from eight mixins |
+
+Not done, on purpose: `browser.py`, `telegram.py`, `adapters/*`, `workday.py` (their tests, and other modules, patch
+module-level names such as `browser.asyncio`, `browser.navigation_observation` and `telegram.api`, which every function of the
+module reads, so a split must move those seams and their tests together; `browser.py` is also under active change in the
+performance and forensics branches); `forms.py`, `widgets.py` and `adapters/greenhouse*` (another agent was editing them). The mixins are a
+mechanical first cut: the next step inside each package is to turn the long methods (`_local` 917 lines, `_queue` 430,
+`complete` 260) into ordered lists of small functions, with behaviour tests beside each change.

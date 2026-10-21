@@ -45,7 +45,7 @@ async def test_length_repair_supplies_actual_limit_and_previous_length(service, 
         for value in ["The contract has ended", "Contract end"]
     ]
     call = AsyncMock(side_effect=answers)
-    monkeypatch.setattr("jobpilot.answers.structured", call)
+    monkeypatch.setattr("jobpilot.answers.model_batch.structured", call)
     result = await resolver._answer_batch(
         [question], "fixture", {"questions": [question]}, {"fact:leaving": "Contract end"}, {}, {}
     )
@@ -71,7 +71,7 @@ async def test_malformed_answer_gets_one_schema_repair_not_provider_outage(
         answers=[Answer(field_id="q", disposition="answer", value="123", evidence_ids=["fact:salary"])]
     )
     call = AsyncMock(side_effect=[malformed, valid if repair_succeeds else malformed])
-    monkeypatch.setattr("jobpilot.answers.structured", call)
+    monkeypatch.setattr("jobpilot.answers.model_batch.structured", call)
     resolver = Resolver(Profile(), service.db, service.config)
     monkeypatch.setattr(resolver, "_validate_answer", lambda field, answer, *args: answer)
     results = await resolver._answer_batch(

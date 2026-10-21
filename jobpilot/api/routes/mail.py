@@ -1,11 +1,13 @@
+import asyncio
+
 import httpx
-from fastapi import Request
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from .db import MailChallenge, MailRule
-from .mail import LIVE, RuleInput
+from ...db import MailChallenge, MailRule
+from ...mail import LIVE, RuleInput
 
 
 class ImapConnect(BaseModel):
@@ -13,14 +15,15 @@ class ImapConnect(BaseModel):
     app_password: str = Field(min_length=1, max_length=64)
 
 
-def install_routes(app, service):
+def router(service) -> APIRouter:
     mail, config = service.mail, service.config
+    r = APIRouter()
 
-    @app.get("/api/mail")
+    @r.get("/api/mail")
     async def status():
         return mail.summary()
 
-    @app.post("/api/mail/connect")
+    @r.post("/api/mail/connect")
     async def connect():
         url, binding = mail.begin_oauth()
         response = JSONResponse({"authorization_url": url})
@@ -35,7 +38,7 @@ def install_routes(app, service):
         )
         return response
 
-    @app.get("/oauth/gmail/callback")
+    @r.get("/oauth/gmail/callback")
     async def callback(request: Request):
         try:
             await mail.finish_oauth(
@@ -51,25 +54,25 @@ def install_routes(app, service):
         response.headers["Cache-Control"] = "no-store"
         return response
 
-    @app.post("/api/mail/imap")
+    @r.post("/api/mail/imap")
     async def connect_imap(data: ImapConnect):
         """Gmail with an app password, for installations without Google sign-in configured."""
         return await mail.connect_imap(data.email, data.app_password)
 
-    @app.post("/api/mail/{mailbox_id}/check")
+    @r.post("/api/mail/{mailbox_id}/check")
     async def check(mailbox_id: str):
         profile = await mail.request(mailbox_id, "/profile")
         return {"connected": True, "email": profile.get("emailAddress", "")}
 
-    @app.delete("/api/mail/{mailbox_id}")
+    @r.delete("/api/mail/{mailbox_id}")
     async def disconnect(mailbox_id: str):
         return await mail.disconnect(mailbox_id)
 
-    @app.post("/api/mail-rules")
+    @r.post("/api/mail-rules")
     async def rule(data: RuleInput):
         return await mail.save_rule(data)
 
-    @app.delete("/api/mail-rules/{rule_id}")
+    @r.delete("/api/mail-rules/{rule_id}")
     async def remove_rule(rule_id: str):
         with service.db.exclusive() as s:
             row = s.get(MailRule, rule_id)
@@ -86,7 +89,7 @@ def install_routes(app, service):
                 )
         return {"removed": True}
 
-    @app.post("/api/mail-challenges/{challenge_id}/cancel")
+    @r.post("/api/mail-challenges/{challenge_id}/cancel")
     async def cancel(challenge_id: str):
         with service.db.session() as s:
             row = s.get(MailChallenge, challenge_id)
@@ -94,3 +97,25 @@ def install_routes(app, service):
                 raise ValueError("No active challenge with this ID")
         mail.outcome(challenge_id, "cancelled", "Cancelled by applicant")
         return {"cancelled": True}
+
+    @r.post("/api/inbox/check")
+    async def inbox_check():
+        if not (config.gmail_address and config.gmail_app_password):
+            raise ValueError("Set GMAIL_ADDRESS and GMAIL_APP_PASSWORD in .env, then restart")
+        from ...gmail_imap import request
+
+        try:
+            await asyncio.to_thread(
+                request,
+                config.gmail_address.strip().lower(),
+                "".join(config.gmail_app_password.split()),
+                "/profile",
+            )
+        except Exception as exc:
+            # imaplib errors carry the server's reply, never the password.
+            raise ValueError(
+                f"Gmail IMAP login failed: {type(exc).__name__}. Check the app password and IMAP access."
+            ) from None
+        return {"connected": True, "folder": "INBOX", "host": "imap.gmail.com"}
+
+    return r
