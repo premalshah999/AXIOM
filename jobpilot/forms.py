@@ -2566,23 +2566,26 @@ class FormSession:
             return False
 
     async def accept_terms_dialog(self):
-        """Resume uploads can open an authorized privacy overlay after the initial page scan."""
+        """Resume uploads can open an authorized privacy overlay after the initial page scan.
+
+        Returns True when it ended on a scan that nothing has changed since, so the caller can use `self.fields`
+        instead of scanning the same page again."""
         await self.cancel_reupload_dialog()
         if not self.resolver.profile.accept_all_application_terms:
-            return
+            return False
         clicked = set()
         for _ in range(2):
             obs = await self.scan()
             dialogs = obs.get("dialogs", [])
             if not dialogs:
-                return
+                return True
             top = dialogs[-1]
             if not re.search(
                 r"privacy|terms|data protection|consent",
                 top.get("title", "") + " " + top.get("text", ""),
                 re.I,
             ):
-                return
+                return True
             buttons = [
                 b
                 for b in obs["controls"]
@@ -2594,7 +2597,7 @@ class FormSession:
             else:
                 action = consent_dialog_action(top, obs)
                 if action is None:
-                    return
+                    return True
             if action["id"] in clicked:
                 # The same overlay survived its own action: stop rather than loop.
                 self.emit(
@@ -2602,7 +2605,7 @@ class FormSession:
                     "Privacy agreement overlay stayed open after its action",
                     {"title": top.get("title", "")[:80]},
                 )
-                return
+                return True
             for f in obs["fields"]:
                 if f["id"] in top["field_ids"] and f["type"] == "checkbox":
                     answer = self.resolver.local(f)
@@ -2611,6 +2614,7 @@ class FormSession:
             clicked.add(action["id"])
             await self.click(action["id"], auth_control=True)
             self.emit("consent", "Accepted the authorized privacy agreement overlay")
+        return False
 
     def catalog_digest(self, field):
         from .answer_context import digest
@@ -2969,8 +2973,8 @@ class FormSession:
             return await self.verify()
         if accept_prefilled is not None:
             self.accept_prefilled = accept_prefilled
-        await self.accept_terms_dialog()
-        await self.scan()
+        if not await self.accept_terms_dialog():
+            await self.scan()
         self.pending = []
         self.expected = {}
         self.expected_labels = {}
@@ -3047,11 +3051,12 @@ class FormSession:
                     await self.locator(field["id"]).set_input_files(str(self.resume_path), timeout=15000)
                 await self.wait_upload()
             self.uploaded = True
-        await self.accept_terms_dialog()
-        await self.scan()
+        if not await self.accept_terms_dialog():
+            await self.scan()
         experience = self.workday and bool(
             await self.page.get_by_role("heading", name="My Experience", exact=True).count()
         )
+        wrote_letter = False
         for field in list(self.fields.values()):
             if (
                 field["type"] != "file"
@@ -3076,13 +3081,19 @@ class FormSession:
             await self.locator(field["id"]).set_input_files(str(letter), timeout=15000)
             await self.wait_upload()
             self.document_uploads[self.field_key(field)] = letter.name
+            wrote_letter = True
             self.emit("document_upload", "Attached the required role-specific cover letter")
         handled, rounds = {}, 0
         unavailable_fields = []
-        await self.blank_phone_extensions()
+        # The scan above is current unless a cover letter was attached or a phone extension blanked since.
+        blanked = await self.blank_phone_extensions()
+        wrote = wrote_letter or blanked
+        observed_now = False  # True while the last scan saw the page as it is, with no write since.
         while rounds < 4:
             rounds += 1
-            await self.scan()
+            if rounds > 1 or wrote:
+                await self.scan()
+            observed_now = True
             todo = []
             for x in self.fields.values():
                 if phone_fields.is_phone_extension(x):
@@ -3127,6 +3138,7 @@ class FormSession:
                 todo.append(x)
             if not todo:
                 break
+            observed_now = False
             # Bealls' Education page kept 'The field "GPA" contains an invalid value' in its alert banner while
             # the scan's error list came back empty; read the visible alerts too.
             try:
@@ -3397,8 +3409,12 @@ class FormSession:
             if not changed and not deferred:
                 break
             await self.settle(timeout=3)
-        # A later answer can hide a question ("I currently work here" hides "To"); drop those.
-        await self.scan()
+        # A later answer can hide a question ("I currently work here" hides "To"); drop those. A loop that ended
+        # because nothing was left to ask has just scanned, with no write since: a second scan reads the same page
+        # (one full scan per fill_current call on every page that needs no work, and the navigator makes that call
+        # each step).
+        if not observed_now:
+            await self.scan()
         pending = []
         for p in self.pending:
             try:
@@ -3672,9 +3688,13 @@ class FormSession:
         return ""
 
     async def blank_phone_extensions(self):
+        """Blank every filled optional extension; True when it wrote to the page."""
+        blanked = False
         for field in list(self.fields.values()):
             if phone_fields.is_phone_extension(field) and field.get("value"):
                 await self.blank_phone_extension(field)
+                blanked = True
+        return blanked
 
     @staticmethod
     def phone_refused(field):
