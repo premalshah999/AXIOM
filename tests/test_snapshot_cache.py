@@ -3,9 +3,12 @@ thread refreshes it; any write through the API makes the next read rebuild it.""
 
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 
 from jobpilot.api import create_app
+
+pytestmark = pytest.mark.integration  # the real app, built by hand
 
 
 def cached_client(config, seconds):

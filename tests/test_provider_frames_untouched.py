@@ -7,6 +7,7 @@ The submit GUARD, the geolocation override and commit arming stay out of those f
 """
 
 import pytest
+import pytest_asyncio
 
 from jobpilot.browser import GUARD
 from jobpilot.captcha import HOOK
@@ -24,7 +25,7 @@ STATE = """() => ({hook: !!window.__jpTokenCaptcha, armed: window.__jpArmed === 
   geolocation: navigator.geolocation.getCurrentPosition.toString().includes('[native code]')})"""
 
 
-@pytest.fixture
+@pytest_asyncio.fixture(loop_scope="session")
 async def framed(page):
     async def fulfill(route):
         await route.fulfill(body="<!doctype html><title>frame</title><p>frame</p>", content_type="text/html")

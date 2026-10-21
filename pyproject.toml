@@ -46,7 +46,16 @@ packages = ["jobpilot"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+asyncio_default_test_loop_scope = "function"
 testpaths = ["tests"]
+# tests/conftest.py applies these from what a test uses (pytest_collection_modifyitems); the fast gate is `-m "not browser"`.
+markers = [
+  "unit: no browser, database or service wiring (the default)",
+  "integration: needs the database, the Service or the API (service, client, app and prepared fixtures)",
+  "browser: drives a real headless Chromium (page fixture); excluded from the fast gate",
+  "regression: pins a failure that happened; its docstring cites the incident and its date",
+]
 
 [tool.ruff]
 line-length = 110

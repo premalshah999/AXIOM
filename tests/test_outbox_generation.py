@@ -10,6 +10,8 @@ from sqlalchemy import select
 from jobpilot.db import Database, Event, Outbox
 from jobpilot import outbox
 
+pytestmark = pytest.mark.integration  # a real database, built by hand
+
 
 @pytest.mark.parametrize("outcome", ["ok", "error", "cancel"])
 async def test_old_callback_preserves_a_rearmed_successor(tmp_path, monkeypatch, outcome):

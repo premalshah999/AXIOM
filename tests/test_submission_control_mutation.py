@@ -10,6 +10,7 @@ from jobpilot.forms import FormSession
 from jobpilot.schemas import Profile
 
 
+@pytest.mark.browser
 async def test_concurrent_workers_receive_distinct_default_context_tabs(config, tmp_path):
     import asyncio
     from playwright.async_api import async_playwright

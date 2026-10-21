@@ -11,6 +11,7 @@ it, a silent pass posts the form by itself and a puzzle is answered in this brow
 from unittest.mock import AsyncMock
 
 import pytest
+import pytest_asyncio
 
 from jobpilot.captcha import DETECT, HOOK, CaptchaSolver
 
@@ -41,7 +42,7 @@ LEVER_SCRIPT = """() => {
 }"""
 
 
-@pytest.fixture
+@pytest_asyncio.fixture(loop_scope="session")
 async def lever(config, page, monkeypatch):
     config.twocaptcha_api_key, config.captcha_same_ip = "fake-key", True
     await page.evaluate(HOOK)

@@ -11,6 +11,7 @@ answer to a search that had not come back yet, so Country=India and State=Maryla
 import json
 
 import pytest
+import pytest_asyncio
 
 from jobpilot import widgets
 
@@ -76,7 +77,7 @@ COUNTRY = '[id="-1_PersonProfileFields.AddressCountry_icimsDropdown"]'
 STATE = '[id="-1_PersonProfileFields.AddressState_icimsDropdown"]'
 
 
-@pytest.fixture
+@pytest_asyncio.fixture(loop_scope="session")
 async def form(page):
     await page.set_content(WIDGET % {"countries": json.dumps(COUNTRIES), "states": json.dumps(STATES)})
     return page
