@@ -134,3 +134,34 @@ def test_the_discovery_guard_checks_both_identities(service):
         s.add(Setting(key=guard_key(legacy_identity), value={"state": "confirmed"}))
     with service.db.session() as s:
         assert protected(s, HINTED) and not protected(s, PLAIN + "?lang=fr")
+
+
+SR = "https://jobs.smartrecruiters.com/Intuitive/744000156658124"
+SR_SLUG = SR + "-full-stack-engineer?oga=true"
+
+
+def test_a_smartrecruiters_posting_is_one_job_with_or_without_its_title_slug():
+    """Intuitive 2026-10-21: /744000156658124 and /744000156658124-full-stack-engineer?oga=true were two jobs, and the
+    same application was submitted twice."""
+    assert canonicalize(SR_SLUG)[1] == canonicalize(SR)[1]
+    assert canonicalize("https://jobs.smartrecruiters.com/Intuitive/744000156658099-full-stack-software-engineer")[1] \
+        != canonicalize(SR)[1]
+    # Rows and guards written before keep matching under their URL-based identity.
+    assert canonicalize(SR_SLUG, requisition_ids=False)[1] in identity_variants(SR_SLUG)
+    sap = "https://careers.sap.com/job/Palo-Alto-Data-Science-Chief-Expert%2C-SCM-CA-94304/1430588133/"
+    assert canonicalize(sap)[1] == canonicalize("https://careers.sap.com/job/Palo-Alto-Renamed/1430588133")[1]
+
+
+async def test_a_confirmed_smartrecruiters_application_blocks_its_slug_twin(service):
+    from jobpilot.admission import QueueBlocked
+
+    # The two rows Intuitive left behind: written before requisition ids, each under its URL-based identity.
+    with service.db.exclusive() as s:
+        for job_id, url in (("plain-sr", SR), ("slug-sr", SR_SLUG)):
+            s.add(Job(id=job_id, identity=canonicalize(url, requisition_ids=False)[1], url=url, ats="smartrecruiters",
+                      title="Full-Stack Engineer", company="Intuitive", status="ready", score=90))
+    with service.db.exclusive() as s:
+        s.add(Run(id="sr-done", job_id="plain-sr", mode="submit", state="confirmed", receipt={}))
+    with pytest.raises(QueueBlocked) as caught:
+        await service._queue("slug-sr", "submit")
+    assert caught.value.code == "submitted_or_uncertain"

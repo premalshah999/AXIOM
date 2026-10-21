@@ -294,14 +294,18 @@ def platform_hint(key, value):
 
 
 def identity_variants(url: str):
-    """Every identity a job at this URL may be stored or guarded under: today's, then the one from before the platform
-    hint was dropped. Rows and `submission_guard:` settings written earlier still carry the older hash."""
-    current = canonicalize(url)[1]
-    legacy = canonicalize(url, keep_platform_hint=True)[1]
-    return (current,) if legacy == current else (current, legacy)
+    """Every identity a job at this URL may be stored or guarded under: today's, then the ones from before the platform
+    hint was dropped and before SmartRecruiters/SuccessFactors requisition ids. Rows and `submission_guard:` settings
+    written earlier still carry the older hashes."""
+    variants = [
+        canonicalize(url)[1],
+        canonicalize(url, keep_platform_hint=True)[1],
+        canonicalize(url, requisition_ids=False)[1],
+    ]
+    return tuple(dict.fromkeys(variants))
 
 
-def canonicalize(url: str, *, keep_platform_hint=False):
+def canonicalize(url: str, *, keep_platform_hint=False, requisition_ids=True):
     p = urlsplit(url.strip())
     if p.scheme not in ("http", "https") or not p.hostname or p.username or p.password:
         raise ValueError("Provide an http(s) application URL without embedded credentials")
@@ -345,6 +349,17 @@ def canonicalize(url: str, *, keep_platform_hint=False):
         match = re.match(r"^/([^/]+)/([0-9a-f-]{36})(?:/application)?$", path, re.I)
         if match:
             identity = f"ashby:{match[1].casefold()}:{match[2].casefold()}"
+    elif ats == "smartrecruiters" and requisition_ids:
+        # One posting, two URLs: /Intuitive/744000156658124 and /Intuitive/744000156658124-full-stack-engineer?oga=true
+        # were two jobs, and the same application was submitted twice (2026-10-21).
+        match = re.match(r"^/([^/]+)/(\d{6,})(?:-[^/]*)?$", path)
+        if match:
+            identity = f"smartrecruiters:{match[1].casefold()}:{match[2]}"
+    elif ats == "successfactors" and requisition_ids:
+        # Career Site Builder URLs carry a title slug before the requisition id (/job/<slug>/<id>/).
+        match = re.search(r"/job/[^/]+/(\d{6,})$", path)
+        if match:
+            identity = f"successfactors:{p.hostname}:{match[1]}"
     if identity == clean and params.get("gh_jid"):
         identity = f"{p.hostname}:greenhouse:{params['gh_jid']}"
     return clean, hashlib.sha256(identity.encode()).hexdigest()
