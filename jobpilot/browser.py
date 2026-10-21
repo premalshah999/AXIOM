@@ -797,6 +797,7 @@ class BrowserEngine:
             # Never activate the tab (2026-10-17: the owner works in other windows and every application pulled
             # Chrome to the front). The desktop Chrome runs without background throttling, so tabs work unfocused.
             restarted_expired = False
+            identity_cleared = False
             await self.prepare_page(page)
             if resumed and job["ats"] in CLEAN_IDENTITY and not (pending or {}).get("armed"):
                 # A saved iCIMS/ADP tab carries the stored sign-in state that sent it into a sign-in that does not exist
@@ -857,6 +858,7 @@ class BrowserEngine:
                     )
             if job["ats"] in CLEAN_IDENTITY and not resumed:
                 await self.clear_platform_identity(page, entry_url, job["ats"])
+                identity_cleared = True
             for attempt in range(0 if resumed else 2):
                 try:
                     await self.open_application_route(page, entry_url, saved_state)
@@ -930,7 +932,10 @@ class BrowserEngine:
                 )
             if run["packet"].get("browser_checkpoint"):
                 checkpoint = run["packet"]["browser_checkpoint"]
-                if restarted_expired:
+                if restarted_expired or identity_cleared:
+                    # A cleared sign-in state is a new session: the employer holds none of the draft's uploads
+                    # (Iridium 2026-10-21 restored "uploaded", skipped the upload before the password, and its later
+                    # upload reloaded the profile and cleared the password).
                     checkpoint = {
                         **checkpoint,
                         "uploaded": False,
@@ -1728,19 +1733,25 @@ class BrowserEngine:
         await page.route("**/*", self.network_guard)
 
     def page_dialog(self, dialog):
-        """Record a browser dialog's type and text, then dismiss it exactly as Playwright did with no handler.
+        """Record a browser dialog's type and text, then dismiss it exactly as Playwright did with no handler (a
+        "Leave site?" prompt is accepted).
         iCIMS's own required-field check is an alert() (portal/field.js validateRequiredFields, REA 2026-10-19);
         dismissed silently, iPipeline's "Submit Profile" just did not submit and nothing said why."""
         self.last_dialog = {"type": dialog.type, "message": str(dialog.message or "")[:300]}
         self.emit("browser_dialog", "The page opened a browser dialog", self.last_dialog)
 
-        async def dismiss():
+        async def answer():
             try:
-                await dialog.dismiss()
+                if dialog.type == "beforeunload":
+                    # "Leave site?" asks about a navigation this run or the site already started. Staying aborted it:
+                    # restarting from a kept iCIMS tab failed net::ERR_ABORTED (Schwab, Iridium 2026-10-21).
+                    await dialog.accept()
+                else:
+                    await dialog.dismiss()
             except PlaywrightError:
                 pass
 
-        asyncio.ensure_future(dismiss())
+        asyncio.ensure_future(answer())
 
     def submission_response(self, response):
         """Record employer HTTP failures during commit without bodies, headers or secrets."""

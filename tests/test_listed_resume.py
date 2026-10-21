@@ -80,3 +80,13 @@ async def test_the_icims_rename_is_never_uploaded_again(page, tmp_path, service)
     form.uploaded = True
     await form.fill_current(accept_prefilled=True)
     assert await page.evaluate("document.querySelector('input[type=file]').files.length") == 0
+
+
+def test_the_icims_rename_is_read_where_innertext_joins_it_to_its_button():
+    """Iridium's live page read "Resume202610211051.pdfReplace Resume": the name runs into the button text."""
+    from types import SimpleNamespace
+
+    form = SimpleNamespace(uploaded=True, page=SimpleNamespace(url="https://careers-iridium.icims.com/jobs/5186/x/candidate"))
+    text = "Or please select your resume from one of the following:\nResume202610211051.pdfReplace Resume\n"
+    assert FormSession.icims_renamed_resume(form, text)
+    assert not FormSession.icims_renamed_resume(SimpleNamespace(uploaded=False, page=form.page), text)

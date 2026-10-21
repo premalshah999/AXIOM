@@ -85,7 +85,8 @@ def label_signature_date(fields, text):
 
 
 ICIMS_HOST = re.compile(r"^https://[^/]*\.icims\.com/", re.I)
-ICIMS_RENAMED_RESUME = re.compile(r"\bResume\d{12}\.(?:pdf|docx?)\b")
+# innerText runs the name into its button ("Resume202610211051.pdfReplace Resume", Iridium 2026-10-21): no end boundary.
+ICIMS_RENAMED_RESUME = re.compile(r"\bResume\d{12}\.(?:pdf|docx?)", re.I)
 
 
 # Select exactly the options with these labels in a native <select multiple>, then fire input and change.

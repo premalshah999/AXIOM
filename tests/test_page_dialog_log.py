@@ -13,3 +13,17 @@ async def test_a_dialog_is_recorded_then_dismissed(page):
     await page.evaluate("() => { alert('Please upload your resume is required.'); return 1; }")
     assert events == [("browser_dialog", {"type": "alert", "message": "Please upload your resume is required."})]
     assert engine.last_dialog["message"].endswith("is required.")
+
+
+async def test_leave_site_is_accepted_so_our_navigation_proceeds(page):
+    """Restarting from a kept iCIMS tab (dirty form, beforeunload) failed net::ERR_ABORTED while the prompt was
+    dismissed (Schwab, Iridium 2026-10-21)."""
+    engine = BrowserEngine.__new__(BrowserEngine)
+    engine.emit = lambda *args: None
+    page.on("dialog", engine.page_dialog)
+    await page.set_content("<input id=x><script>addEventListener('beforeunload', e => { e.preventDefault(); e.returnValue = ''; })</script>")
+    await page.click("#x")  # Chrome shows beforeunload only after a user gesture.
+    await page.keyboard.type("dirty")
+    await page.goto("data:text/html,<p>next</p>")
+    assert engine.last_dialog["type"] == "beforeunload"
+    assert await page.inner_text("p") == "next"
