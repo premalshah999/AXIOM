@@ -318,17 +318,32 @@ token cap (settings, `GET/PUT /api/limits`); ATS scope (`ats_focus`).
 | `TIMEZONE` default `America/New_York` | `UTC`; `scripts/setup.sh` writes the computer's zone | the original installation's production `.env` already sets `TIMEZONE`; any installation that relied on the old default must set it |
 | The original applicant's school, employer, city, county, metro region, date of birth and e-mail domain in tests, comments and `docs/rea` | One synthetic mapping, applied on `main` (`b49ee2a`, `7408a40`, `78416b3`); this pass removed the last two leftovers, a university e-mail domain in the alias test and a research department in the iCIMS history test | none |
 
-**Still hard-coded (decisions for the owner of `answers.py` and the admission code).**
+**Moved to per-profile settings (Phase A.2).** Defaults are neutral; `grandfather.grandfather_preferences` gives an
+installation that already has runs its old values once (see below).
+
+| Was | Now (default for a new install) | Grandfathered value |
+|---|---|---|
+| `answers.MAJOR_FALLBACK`, `forms.py` major fallback: *Computer Science* | `answer_rules.major_fallback` (empty: none) | `Computer Science` |
+| `answers.SOURCE_FALLBACK`, `source_choice`: fixed channel order | `answer_rules.source_order` and `source_any_channel` (empty, false: the applicant is asked) | LinkedIn, company website, ZipRecruiter, Indeed, internet search, job board, Glassdoor, social media; any plain channel |
+| Autonomous prompt and facts: "Negotiable", "open to travel", "full-time early-career employment" | `answer_rules.salary_stance`, `travel_willingness`, `employment_type_sought` (empty: no claim, no fact) | the three phrases |
+| `answers.talent_pool_opt_out` and the narrowest data-sharing choice: always declined | `answer_rules.join_talent_communities` (false: declined) | false |
+| Internships excluded in `service.queue`, `jobboard.role_matches` and `feeds.keep` | `Profile.include_internships` (false) | false |
+| Early-career-only discovery (`BoardSettings`, `DiscoveryPolicy`, `jobboard.screen` and fetchers, `feeds.keep`, `service.queue`) | `job_board_settings.early_career_only` (false) | true |
+| `admission.UNKNOWN_RESUBMIT["enabled"] = True` | `unknown_resubmit_policy.enabled` (false: a resubmission can duplicate an accepted application) | true |
+
+**Grandfather migration** (`jobpilot/grandfather.py`, run by `Service.__init__`, marker setting
+`migrated:grandfather_preferences_v1`). If the database has any run, it writes the values above into the stored profile
+(`answer_rules`, `include_internships`), `job_board_settings` and `unknown_resubmit_policy`, only for keys that are
+absent, so a saved choice (even a deliberate off) is never overwritten. A database without runs keeps the neutral
+defaults. Both paths record the marker, so a fresh installation that gains runs later is never given another person's
+preferences, and the migration never runs twice.
+
+**Still hard-coded.**
 
 | Where | What it encodes | Proposed form |
 |---|---|---|
-| `answers.MAJOR_FALLBACK`, `forms.py` (major prompt fallback) | A major the catalog lacks falls back to *Computer Science* | `answer_rules.major_fallback` (default empty); the original profile sets "Computer Science" |
-| `answers.DEGREE_FALLBACK`, `answers.SOURCE_FALLBACK`, `source_choice` | Equivalent degrees; a fixed order of "how did you hear" channels (LinkedIn, company site, …) | `answer_rules.source_order`; degree equivalents are general vocabulary and can stay |
-| `answers.answer_sources`, `answer_quality.context` (under `profile.autonomous`) | "open to travel", answer "Negotiable" for salary, "the applicant is pursuing full-time early-career employment" | profile fields (`travel_willingness`, `employment_type_sought`, `salary_stance`), set by the setup guide |
-| `answers.talent_pool_opt_out`, `policy_choice` (narrowest data-sharing option) | Talent-community and data-sharing opt-ins are always declined | follow `accept_required_marketing` / a `join_talent_communities` setting |
-| `service._queue`, `jobboard.role_matches`, `features/discovery/feeds.keep` | Internships are excluded everywhere | profile `job_types` (default full-time) |
-| `jobboard.BoardSettings.early_career_only = True`, `features/discovery/policy.SENIOR` | Early-career-only discovery by default | a setup-guide choice that sets the board setting |
-| `admission.UNKNOWN_RESUBMIT["enabled"] = True` | A run in `submission_unknown` with no receipt is resubmitted up to twice after 30 minutes | default `False`, with a one-time migration that writes `enabled: true` for an installation that already has runs and no saved `enabled` (the original installation saves only `max_resubmits`, so it would otherwise lose the behaviour). See [forensics/FAILURE_ANALYSIS.md](forensics/FAILURE_ANALYSIS.md) (F7: duplicate submissions) |
+| `answers.DEGREE_FALLBACK` | Equivalent degrees | general vocabulary; can stay |
+| `features/discovery/policy.SENIOR` | The seniority title words behind `early_career_only` | general vocabulary; can stay |
 | `service.complete` ("owner rule") | A job whose form asks for an SSN, national or bank number is removed | product rule; rename the comment and the reason text |
 
 ## 13. Knowledge facts and settings the resolver reads

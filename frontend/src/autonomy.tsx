@@ -656,6 +656,12 @@ function rulesWithDefaults(p: Profile): AnswerRules {
   return {
     education: saved.education || ["closest", "pick3", "other", "ask"],
     major_fallback: saved.major_fallback ?? "",
+    source_order: saved.source_order ?? [],
+    source_any_channel: saved.source_any_channel ?? false,
+    salary_stance: saved.salary_stance ?? "",
+    travel_willingness: saved.travel_willingness ?? "",
+    employment_type_sought: saved.employment_type_sought ?? "",
+    join_talent_communities: saved.join_talent_communities ?? false,
     demographics,
     guest_apply_first: saved.guest_apply_first ?? true,
     open_agreement_links: saved.open_agreement_links ?? true,
@@ -733,6 +739,16 @@ function AnswerRulesEditor({ p, set }: { p: Profile; set: Setter }) {
           >
             <input value={rules.major_fallback} maxLength={100} onChange={(e) => update({ major_fallback: e.target.value })} />
           </Field>
+          <Field
+            label="“How did you hear about us” order"
+            hint="Used when your own source isn’t offered. Comma separated, best first: LinkedIn, company website, Indeed, job board… Empty asks you."
+            wide
+          >
+            <input value={rules.source_order.join(", ")} onChange={(e) => update({ source_order: list(e.target.value) })} />
+          </Field>
+          <Check checked={rules.source_any_channel} onChange={(v) => update({ source_any_channel: v })} title="Then any other plain channel">
+            Accepts an offered channel that claims no referral or insider relationship.
+          </Check>
         </div>
       </section>
       <section className="panel">
@@ -801,6 +817,9 @@ function AnswerRulesEditor({ p, set }: { p: Profile; set: Setter }) {
           <Check checked={rules.guest_apply_first} onChange={(v) => update({ guest_apply_first: v })} title="Apply as a guest when the site allows it">
             Skips sign-in and account creation when an employer offers “Apply without an account”.
           </Check>
+          <Check checked={rules.join_talent_communities} onChange={(v) => update({ join_talent_communities: v })} title="Join talent communities">
+            Opts in when a form offers to keep your data on file for other roles. Off declines.
+          </Check>
           <Check checked={rules.open_agreement_links} onChange={(v) => update({ open_agreement_links: v })} title="Open linked documents before accepting an agreement">
             Some sites (Dayforce) accept an agreement only after its privacy and terms links were opened.
           </Check>
@@ -812,6 +831,8 @@ function AnswerRulesEditor({ p, set }: { p: Profile; set: Setter }) {
 }
 
 function Preferences({ p, set }: { p: Profile; set: Setter }) {
+  const rules = rulesWithDefaults(p);
+  const rule = (next: Partial<AnswerRules>) => set("answer_rules", { ...rules, ...next });
   return (
     <section className="panel">
       <header className="panel-head">
@@ -846,6 +867,18 @@ function Preferences({ p, set }: { p: Profile; set: Setter }) {
         <Field label="Salary expectation" hint="Leave blank to skip optional salary questions.">
           <input value={p.salary_expectation} onChange={(e) => set("salary_expectation", e.target.value)} />
         </Field>
+        <Field label="Stance on desired pay" hint="Said when pay is asked and no salary is saved, for example Negotiable. Blank says nothing.">
+          <input value={rules.salary_stance} maxLength={60} onChange={(e) => rule({ salary_stance: e.target.value })} />
+        </Field>
+        <Field label="Willingness to travel" hint="For example “open to travel”. Blank claims nothing.">
+          <input value={rules.travel_willingness} maxLength={100} onChange={(e) => rule({ travel_willingness: e.target.value })} />
+        </Field>
+        <Field label="Employment sought" hint="For example “full-time early-career employment”. Blank claims nothing.">
+          <input value={rules.employment_type_sought} maxLength={100} onChange={(e) => rule({ employment_type_sought: e.target.value })} />
+        </Field>
+        <Check checked={!!p.include_internships} onChange={(v) => set("include_internships", v)} title="Include internships and co-ops">
+          Off applies to full-time roles only.
+        </Check>
         <Field label="Availability or notice">
           <input value={p.availability} onChange={(e) => set("availability", e.target.value)} />
         </Field>
