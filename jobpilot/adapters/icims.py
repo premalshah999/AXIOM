@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, parse_qsl, urlencode, urljoin, urlsplit, urlu
 
 from sqlalchemy import select
 
-from ..db import Event, MailChallenge, MailRule, Run, Setting, now
+from ..db import Event, Job, MailChallenge, MailRule, Run, Setting, now
 from ..accounts import account_tenant
 from ..schemas import Answer
 
@@ -1329,16 +1329,25 @@ class ICIMS(Adapter):
         carry no upload of their own. VTG (2026-10-21) resumed at its last step in a new run, and the final submit was
         refused for want of a resume attachment although run 153ca3d8 had posted the profile with it (302).
 
-        True on a step after the profile when an earlier run of this job posted the profile with a stored resume
-        (Resume_TEMP or an attached file) and iCIMS accepted it."""
+        The profile belongs to the employer's portal, not one job: Quest (2026-10-21) confirmed one job with the
+        profile and resume, and its next job opened at the self-identification step, where the final submit was
+        refused for want of a resume although the portal held it.
+
+        True on a step after the profile when an earlier run at this employer's portal posted the profile with a
+        stored resume (Resume_TEMP or an attached file) and iCIMS accepted it."""
         paths = {urlsplit(obs.get("url", "")).path} | {urlsplit(f.get("frame_url") or "").path for f in obs["fields"]}
         if not any(PROTOCOL_STEP.search(path) for path in paths) or self.form.resume_fields():
             return False
+        portal = urlsplit(self.job["url"]).netloc.lower()
         with self.service.db.session() as session:
             posts = session.scalars(
                 select(Event.data)
                 .join(Run, Run.id == Event.run_id)
-                .where(Run.job_id == self.job["id"], Event.kind == "form_post")
+                .join(Job, Job.id == Run.job_id)
+                .where(
+                    Job.url.like(f"https://{portal}/%") if portal else Job.id == self.job["id"],
+                    Event.kind == "form_post",
+                )
             )
             for data in posts:
                 shape = {str(name): str(size) for name, size in (data or {}).get("shape") or []}

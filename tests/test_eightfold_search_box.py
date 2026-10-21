@@ -116,3 +116,14 @@ def test_code_wait_branch_is_recorded_for_the_event_log():
     assert browser.state_branch == "check_email_text"
     assert EmailBrowser.state(browser, {"fields": [], "text": ""})[0] is None
     assert browser.state_branch == "none"
+
+
+def test_a_portal_header_search_box_is_never_an_application_field():
+    """Planview iCIMS, run 81cdfaf4ee294e99b32314ceaf5bde38, 2026-10-21: the portal header's required "Search for:"
+    box (name s) stopped the candidate profile as "The account form needs an answer"."""
+    from jobpilot.forms import site_search
+
+    assert site_search({"type": "text", "label": "Search for:"})
+    assert site_search({"type": "text", "label": "Search"}) and site_search({"type": "search", "label": "Keywords:"})
+    assert not site_search({"type": "text", "label": "Search firm name"})
+    assert not site_search({"type": "text", "label": "How did you hear about us?"})

@@ -99,16 +99,18 @@ SELECT_LABELS_JS = """(e, labels) => {
 
 
 SITE_SEARCH = re.compile(
-    r"(?:submit\s+)?search(?:\s+(?:jobs|careers|keywords?|the site|this site|our site|positions|openings))?|"
+    r"(?:submit\s+)?search(?:\s+for)?(?:\s+(?:jobs|careers|keywords?|the site|this site|our site|positions|openings))?|"
     r"keywords?|job search|search by keyword",
     re.I,
 )
 
 
 def site_search(field):
-    """A career site's search box (iPipeline's "Search", Iridium's hidden required "Submit search", 2026-10-19/21).
-    Read as a required application field it blocked the email step; it is never an application question."""
-    return field.get("type") in {"text", "search"} and bool(SITE_SEARCH.fullmatch(str(field.get("label", "")).strip()))
+    """A career site's search box (iPipeline's "Search", Iridium's hidden required "Submit search", Planview's
+    required "Search for:" in the portal header, 2026-10-19/21). Read as a required application field it blocked the
+    email and profile steps; it is never an application question."""
+    label = str(field.get("label", "")).strip().rstrip(":").strip()
+    return field.get("type") in {"text", "search"} and bool(SITE_SEARCH.fullmatch(label))
 
 
 def link_companion_text(fields):
