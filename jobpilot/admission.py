@@ -111,11 +111,13 @@ def outcome_for(exc):
     return {"outcome": "excluded", "code": "queue_guard", "not_before": None}
 
 
-UNKNOWN_RESUBMIT = {"enabled": True, "max_resubmits": 2, "receipt_wait_minutes": 30}
+# Off unless the installation turns it on (setting unknown_resubmit_policy): a resubmission can duplicate an
+# application the site did accept.
+UNKNOWN_RESUBMIT = {"enabled": False, "max_resubmits": 2, "receipt_wait_minutes": 30}
 
 
 def unknown_resubmit_allowed(session, runs, at=None):
-    """Owner policy (2026-10-12): retry uncertain submissions until confirmed.
+    """When the installation enables it: retry uncertain submissions until confirmed.
 
     Bounded so a site that silently accepts cannot collect a pile of duplicates:
     no confirmed/already-applied run, no matched receipt email, the newest
