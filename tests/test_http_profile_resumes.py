@@ -38,7 +38,7 @@ def test_propose_history_needs_an_uploaded_resume(client):
 def test_organizing_evidence_without_a_model_key_is_a_409(client):
     # A RuntimeError in a handler is a 409 with the message (the shared error mapping).
     answer = client.post("/api/profile/organize", json={})
-    assert answer.status_code == 409 and "no API key" in answer.json()["detail"]
+    assert answer.status_code == 409 and "no api key" in answer.json()["detail"].lower()
 
 
 def test_upload_list_download_and_delete_a_resume(client, resume_pdf):
