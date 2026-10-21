@@ -27,6 +27,9 @@ class Service(QueueingMixin, ExecutionMixin, CompletionMixin, ReviewsMixin, Migr
         from ..grandfather import grandfather_preferences
 
         grandfather_preferences(db)
+        from ..corrections import revert_unfinished_receipts
+
+        revert_unfinished_receipts(db)
         self.migrate_legacy()
         self.relabel_custom_ats()
         from ..features._store import create_tables

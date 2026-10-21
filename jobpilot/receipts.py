@@ -144,6 +144,21 @@ def message_content(message):
     return content
 
 
+# A notice about an application that is not finished: never a receipt, whatever else it says.
+UNFINISHED = re.compile(
+    r"\bincomplete\b|(?:you(?:'ve| have)|we noticed you(?:'ve| have)?) started (?:your|an|the)\b|"
+    r"\bstarted (?:your|an) .{0,40}application|not (?:yet )?(?:been )?(?:submitted|completed|finished)|"
+    r"(?:finish|complete|resume|continue) (?:your|the) application|didn['’]t (?:finish|complete|submit)|"
+    r"application (?:is )?(?:still )?(?:in progress|pending submission|saved as a draft)|\bsaved (?:as a )?draft\b",
+    re.I,
+)
+
+
+def unfinished_receipt(receipt):
+    """A stored email receipt whose subject is a started-or-incomplete notice (it never confirmed anything)."""
+    return bool(UNFINISHED.search(str((receipt or {}).get("subject", ""))))
+
+
 def acknowledgement(message, job, run, allow_missing_title=False):
     headers = {}
     for h in message.get("payload", {}).get("headers", []):
@@ -234,6 +249,8 @@ def acknowledgement(message, job, run, allow_missing_title=False):
         or (not role_match and not job_url_match and not allow_missing_title)
     ):
         return None
+    if UNFINISHED.search(body):
+        return None  # Liberty Mutual's "You've started your ... application!" was taken as a receipt (2026-10-21).
     if not re.search(
         r"thank (?:you|you!) for (?:applying|your application)|thanks for applying|"
         r"(?:received|reviewing) your application|application.{0,60}(?:received|submitted|landed successfully|is in good hands)|"
