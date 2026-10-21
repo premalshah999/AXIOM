@@ -642,10 +642,15 @@ class ICIMS(Adapter):
         # iPipeline's careers portal wraps the email step in its own site, whose header carries "Search" boxes; read as a
         # generic form, the email was refused "The format of the email address is not valid" (2026-10-19).
         own = [f for f in fields if not re.fullmatch(r"search", f["label"].strip(), re.I)]
+        # Schwab's "Privacy Notice and Sign-In" email form loads inside the job page's content frame, so the page path
+        # stays /job. Read as unknown, the navigator clicked its submit without the invisible hCaptcha the email step
+        # needs, and four runs stalled on an unchanged page (2026-10-21). The email field's own frame decides.
+        framed = [f for f in own if urlsplit(f.get("frame_url") or "").path.endswith("/login")]
+        scope = own if path.endswith("/login") else framed
         if (
-            path.endswith("/login")
-            and any(f["type"] == "email" for f in own)
-            and all(f["type"] in {"email", "checkbox"} for f in own)
+            scope
+            and any(f["type"] == "email" for f in scope)
+            and all(f["type"] in {"email", "checkbox"} for f in scope)
         ):
             return Step.EMAIL_ENTRY
         if self.application_step(obs) and fields and not any(f["type"] == "password" for f in fields):

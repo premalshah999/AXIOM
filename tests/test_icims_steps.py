@@ -159,3 +159,23 @@ def test_a_wrapped_email_step_is_still_the_email_step(service):
                 "automation_id": ""},
            ]}
     assert icims(service, obs).classify(obs) == Step.EMAIL_ENTRY
+
+
+def test_an_email_step_inside_the_job_pages_frame_is_the_email_step(service):
+    """Schwab 2026-10-21: "Privacy Notice and Sign-In" loads in the job page's content frame, so the page path stays
+    /job. Read as unknown, the navigator clicked its submit without the step's invisible hCaptcha and stalled."""
+    frame = "https://career-acme.icims.com/jobs/127949/associate-software-engineer/login?in_iframe=1&hashed=1"
+    obs = {"url": "https://career-acme.icims.com/jobs/127949/associate-software-engineer/job?mobile=false&width=1150",
+           "errors": [], "headings": ["Privacy Notice and Sign-In"], "text": "Privacy Notice and Sign-In",
+           "controls": [{"id": "a", "label": "I Acknowledge the Privacy Notice", "href": "", "automation_id": "",
+                         "aria_label": "", "type": "submit"}],
+           "fields": [
+               {"id": "e", "type": "email", "label": "Email Address", "required": True, "value": "", "automation_id": "",
+                "frame_url": frame},
+               {"id": "c", "type": "checkbox", "label": "I have read the Privacy Notice", "required": True, "value": "",
+                "automation_id": "", "frame_url": frame},
+           ]}
+    assert icims(service, obs).classify(obs) == Step.EMAIL_ENTRY
+    # The same fields in a frame that is not the login step are not an email step.
+    other = {**obs, "fields": [{**f, "frame_url": frame.replace("/login", "/candidate")} for f in obs["fields"]]}
+    assert icims(service, other).classify(other) != Step.EMAIL_ENTRY
