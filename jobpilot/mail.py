@@ -1201,7 +1201,7 @@ class MailService:
         handle = run.packet.get("wait_handle", {}) if run else {}
         return bool(
             run
-            and run.state in {"waiting_browser", "submission_unknown"}
+            and run.state in {"waiting_browser", "waiting_email", "submission_unknown"}
             and run.packet.get("waiting_kind") == "email"
             and handle.get("challenge_id", handle.get("id")) == challenge_id
         )

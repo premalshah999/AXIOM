@@ -32,7 +32,8 @@ def test_cancel_preserves_history_proof_and_blocks_recovery(service):
             [
                 Job(id="draft", identity="draft", url="https://example.test/1", status="waiting_answer"),
                 Job(id="sent", identity="sent", url="https://example.test/2", status="confirmed"),
-                Run(id="unsent", job_id="draft", state="waiting_answer", packet={"checkpoint": "kept"}),
+                Run(id="unsent", job_id="draft", state="waiting_answer", packet={"checkpoint": "kept"},
+                    reason="Required profile information is missing"),
                 Run(id="old", job_id="sent", state="paused"),
                 Run(id="proof", job_id="sent", state="confirmed", receipt={"website_confirmed": True}),
                 Run(
@@ -46,6 +47,9 @@ def test_cancel_preserves_history_proof_and_blocks_recovery(service):
     assert result["cancelled_runs"] == 2 and result["preserved_reserved_drafts"] == 1
     with service.db.session() as s:
         assert s.get(Run, "unsent").packet == {"checkpoint": "kept"}
+        # the run's own state and reason survive the cancel (F1: 514 runs lost theirs)
+        reason = s.get(Run, "unsent").reason
+        assert "during maintenance" in reason and "waiting_answer: Required profile information is missing" in reason
         assert s.get(Run, "proof").state == "confirmed"
         assert s.get(Run, "reserved").state == "waiting_browser"
         assert s.get(Job, "sent").status == "confirmed"

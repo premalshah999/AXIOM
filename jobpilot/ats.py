@@ -268,7 +268,26 @@ def icims_requisition_alias(left, right):
 ICIMS_INTERNAL_PORTAL = re.compile(r"^(?:employees|internal|intranet)-([a-z0-9-]+)\.icims\.com$", re.I)
 
 
-def canonicalize(url: str):
+# Job feeds append the platform they read a posting from ("?ats=successfactors", "?ats=pinpointhq"). The employer's
+# page ignores it, and it made one requisition two jobs: ASSA ABLOY's AI Scientist existed with and without the hint,
+# 81 runs in all, and neither job's budget, history or duplicate protection knew about the other (2026-10-14..16).
+# Only a platform name is dropped; any other value of `ats` is somebody's functional parameter and stays.
+PLATFORM_HINTS = frozenset({a.id for a in REGISTRY} | {"pinpointhq"})
+
+
+def platform_hint(key, value):
+    return key.lower() == "ats" and value.strip().casefold() in PLATFORM_HINTS
+
+
+def identity_variants(url: str):
+    """Every identity a job at this URL may be stored or guarded under: today's, then the one from before the platform
+    hint was dropped. Rows and `submission_guard:` settings written earlier still carry the older hash."""
+    current = canonicalize(url)[1]
+    legacy = canonicalize(url, keep_platform_hint=True)[1]
+    return (current,) if legacy == current else (current, legacy)
+
+
+def canonicalize(url: str, *, keep_platform_hint=False):
     p = urlsplit(url.strip())
     if p.scheme not in ("http", "https") or not p.hostname or p.username or p.password:
         raise ValueError("Provide an http(s) application URL without embedded credentials")
@@ -280,6 +299,7 @@ def canonicalize(url: str):
         for k, v in parse_qsl(p.query, keep_blank_values=True)
         if not k.lower().startswith("utm_")
         and k.lower() not in {"source", "ref", "referrer", "sourceid", "jr_id"}
+        and (keep_platform_hint or not platform_hint(k, v))
     ]
     path = p.path.rstrip("/")
     ats = detect(url).id

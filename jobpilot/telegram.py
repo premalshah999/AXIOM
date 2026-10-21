@@ -1123,6 +1123,7 @@ async def notify_outcome(service, run, job):
         "waiting_answer": "💬 This application needs a saved personal fact. I'll send the question separately.",
         "needs_review": "💬 This draft needs an answer or review before it can continue.",
         "waiting_browser": "🔧 This draft is saved, but a browser step needs repair.",
+        # "waiting_email" has no message: a parked wait is not an outcome, and the continuation reports the result.
         "timed_out": "⏳ This attempt ran out of time; it is not a confirmed application.",
         "failed": "🔧 This attempt stopped without confirmation.",
         "closed": "ℹ️ This posting is closed; no application was submitted.",
@@ -1473,7 +1474,8 @@ async def _handle_update(service, update):
                 + f"✅ {len(confirmed_rows(service))} confirmed applications\n"
                 + f"⚙️ {sum(counts[s] for s in ['queued', 'running', 'submitting'])} queued or running\n"
                 + f"💬 {counts['waiting_answer']} waiting for an answer\n"
-                + f"🔎 {counts['waiting_browser']} browser blockers\n\n"
+                + f"🔎 {counts['waiting_browser']} browser blockers\n"
+                + f"📬 {counts['waiting_email']} waiting for an employer email\n\n"
                 + ("⏸ Workers paused" if control.get("paused") else "▶️ Workers active")
                 + "\nUpdates: confirmations and blockers as they happen. Send a link to add a job."
             )

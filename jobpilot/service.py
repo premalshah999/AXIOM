@@ -15,7 +15,7 @@ from .runtime import engine_version, profile_version
 from .run_trace import phase_timing
 
 ACTIVE = {"queued", "running", "submitting"}
-RETRYABLE = {"needs_review", "timed_out", "failed", "waiting_browser"}
+RETRYABLE = {"needs_review", "timed_out", "failed", "waiting_browser", "waiting_email"}
 TERMINAL = {
     "paused",
     "confirmed",
@@ -30,6 +30,8 @@ TERMINAL = {
     "skipped",
     "waiting_answer",
     "waiting_browser",
+    # Parked on a durable wait for an emailed code or link; a continuation run finishes the application. Not a failure.
+    "waiting_email",
 }
 
 
@@ -338,12 +340,12 @@ class Service:
                 raise QueueBlocked(
                     "This application is archived and is outside the active pipeline", code="archived"
                 )
-            from .ats import canonicalize, icims_requisition_alias
+            from .ats import canonicalize, icims_requisition_alias, identity_variants
 
             identity = canonicalize(job.url)[1]
             from .operations.reset import guard_key
 
-            if not job.demo and s.get(Setting, guard_key(identity)):
+            if not job.demo and any(s.get(Setting, guard_key(i)) for i in identity_variants(job.url)):
                 raise QueueBlocked(
                     "An archived application protects this job from duplicate submission.",
                     outcome="protected",
@@ -440,7 +442,7 @@ class Service:
                     )
                     or not source
                     or source.job_id != job_id
-                    or source.state not in {"waiting_browser", "timed_out"}
+                    or source.state not in {"waiting_browser", "waiting_email", "timed_out"}
                     or not source.packet.get("match_approved")
                     or any(r.id != source.id and r.created_at >= source.created_at for r in previous)
                 ):
@@ -964,6 +966,11 @@ class Service:
                 and not rejected
             ):
                 state = "submission_unknown"
+            if state == "waiting_browser" and result.get("waiting_kind") == "email":
+                # A run parked on a durable email wait is waiting, not broken: the matched email resumes it in a
+                # continuation run. It used to share "waiting_browser" with "a control needs repair" and was
+                # counted, reported and messaged as a failure (266 runs, 143 jobs; docs/forensics, F9).
+                state = "waiting_email"
             run.state, run.reason = state, result.get("reason", "")[:4000]
             run.finished_at, run.elapsed = now(), elapsed
             run.packet = {
@@ -1044,6 +1051,7 @@ class Service:
                 "closed",
                 "cancelled",
                 "paused",
+                "waiting_email",  # parked, not failed
             }:
                 enqueue(s, "report", run_id, {"diagnostics": result.get("diagnostics", {})}, run_id=run_id)
             if getattr(self.config, "repair_agent_enabled", True) and state in {
@@ -1198,7 +1206,7 @@ class Service:
                     raise ValueError("A retained, uncertain verification draft is required")
             elif challenge.state not in {"matched", "claimed"}:
                 return
-            if source.state not in {"waiting_browser", "submission_unknown"} or (
+            if source.state not in {"waiting_browser", "waiting_email", "submission_unknown"} or (
                 not restart_verification
                 and source.packet.get("wait_handle", {}).get("challenge_id") != challenge_id
             ):
@@ -1435,7 +1443,7 @@ class Service:
             # owner (Dayforce showed its confirmation after the watch window, 2026-10-16).
             committed = bool(
                 run
-                and run.state in {"needs_review", "waiting_browser"}
+                and run.state in {"needs_review", "waiting_browser", "waiting_email"}
                 and s.scalar(
                     select(Event.id).where(Event.run_id == run_id, Event.kind == "submitting").limit(1)
                 )

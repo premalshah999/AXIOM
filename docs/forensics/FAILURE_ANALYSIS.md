@@ -58,10 +58,13 @@ employer application limits on Ashby (`application_pacing.application_cap`, this
 event flood (8ee5d73), and the iCIMS work listed in the brief. Section 4 states for each cluster when it was last
 seen and what the code does now.
 
-**Left for the orchestrator** (most important first; details in section 7): reconcile the 12 hidden successes and
-triage the 32 untriaged unknowns, grant fresh tries to the jobs whose cause is fixed or environmental, add load
-shedding before the 6+2 worker cut-over, keep deploys from interrupting running applications, and decide the
-open owner items (Lever, ADP identity, Dayforce Global Identity, Honeywell/JPMorgan hCaptcha).
+**Done since** (section 6): load shedding and the worker-Chrome circuit (1590276), drain before stops (08a3029), the
+outbox dead-letter (4299d18), one job per requisition (7ef11c9), the `waiting_email` state (ab4bf0d), the maintenance
+cancel keeping reasons (2535a85). The 12 hidden successes were reconciled on 10-20.
+
+**Left for the orchestrator** (details in section 7): grant fresh tries to the jobs whose cause is fixed or
+environmental, and decide the open owner items (Lever, ADP identity, Dayforce Global Identity, Honeywell/JPMorgan
+hCaptcha).
 
 ## 2. Method and definitions
 
@@ -268,10 +271,9 @@ the cheapest way to recover successes.
   places a full test-suite run and a battery-powered Mac in those hours. `application_budget.nothing_sent`
   (`application_budget.py:30`) does not include deadline timeouts, so a job loses one of its three starts per
   overload hour (1-800 Contacts, Lyft x3, Murj, Roblox, Stripe, Lucid: all `ready` or `timed_out` now).
-  *Live:* yes. Nothing in `autopilot.tick`, `recovery.retry_due` or `provider_health.dispatch_limit` looks at event-loop
-  lag or run slowdown. *Recommendation* (not changed here, infrastructure's area): a loop-lag gate in
-  `dispatch_limit` (stop dispatching while the 95th percentile lag over the last minute exceeds about 2 s) and a
-  "host overloaded" flag that makes deadline timeouts free. Both are small and testable.
+  *Fixed (1590276, 4d759d7):* `host_health.HostLoad` samples event-loop lag; `provider_health.dispatch_limit` halves the
+  workers when loaded and runs one at a time when overloaded; a deadline timeout while overloaded is a free retry
+  (`host_overloaded_result`).
 * **I2 Deploy interrupted: 139 runs, 104 jobs.** 10-12 to 10-19; 84 in the last 48 hours (10-18 19:22 to 19:45:
   35 runs in 23 minutes). `workers.recover_interrupted` (`workers.py:291`) turns `running` into `waiting_browser`
   and schedules recovery; it is correct and costs no start (`NOTHING_SENT`), but every deploy restarts all in-flight
@@ -280,8 +282,8 @@ the cheapest way to recover successes.
   (Workday 157, Greenhouse 74). The worker Chrome answered `/json/version` but refused the automation connection:
   `browser.py:619-631` raises `BrowserUnavailable`, which the run records as "Open the ApplyPilot Chrome window"
   (before e7f6e17 the generic wrapper wrote "Browser control failed at browser.py:441", 158 runs). Both texts are
-  now `NOTHING_SENT` (`application_budget.py:29-39`), so starts are not burned. *Live:* partly. No dispatch circuit
-  breaker exists: during the incident about 250 runs were dispatched into a dead browser in five hours. 10 runs
+  now `NOTHING_SENT` (`application_budget.py:29-39`), so starts are not burned. *Fixed (4d759d7, 1590276):* the texts are nothing-sent and a circuit in `dispatch_limit` pauses starts after three
+  runs in a row that could not open a page (the incident dispatched about 250 runs into a dead browser in five hours). 10 runs
   since 10-18 12:00 (`attach_target`/`create_target` timeouts on 10-19).
 * **I3 Model provider unavailable or budget spent: 174 runs, 107 jobs**, 10-07 to 10-17, none since 10-17 21:49
   (Workday 92). Provider cooldown (`provider_health.py:118`) and the per-job daily model budget are working as
@@ -305,7 +307,7 @@ status:
   requisition remains: **ASSA ABLOY "AI Scientist" (81 runs over two job rows, 10-11 to 10-16)**: required
   State/Province/Region picklist that never accepted a value, work-experience date rows, resume prefill dialog. The
   second row exists only because its URL carries the hint `?ats=successfactors` and `ats.canonicalize` keeps it
-  (two identities for one posting; 41 job URLs carry the hint, ASSA ABLOY is the only duplicate). Open.
+  (two identities for one posting; 41 job URLs carry the hint, ASSA ABLOY is the only duplicate). Fixed by 7ef11c9 (F4).
 * **Workday education and "How did you hear" pickers (about 120 field errors per day on 10-15 to 10-18).**
   Degree "BE" typed into a virtualised list first, school searches with no match, tenants whose source list is only
   "Displaced (US)" / "LOA - Job Search (US)" (Bank of America: 21 runs on 10-13 and 3 on 10-19). Fixed for Degree
@@ -341,8 +343,8 @@ Tables 3.2 give the per-sub-cause counts and example runs.
   sent". Last seen 10-18 21:44 (iCIMS, serialised on purpose). Oracle's per-tenant code attribution and leases
   (10-18, `mail.oracle_attributed`) removed it. Fixed.
 * **E2** is not a failure: the run parked on a durable email wait and a *continuation run* finishes the application
-  (Workday 94, Oracle 67, Eightfold 51, iCIMS 39). It is counted as a failed run because its state is
-  `waiting_browser`. 20 jobs ended here: iCIMS 5 (the Central identity issue, fixed 10-19/20), Eightfold PayPal
+  (Workday 94, Oracle 67, Eightfold 51, iCIMS 39). It was counted as a failed run because its state was
+  `waiting_browser`; since ab4bf0d it is `waiting_email`. 20 jobs ended here: iCIMS 5 (the Central identity issue, fixed 10-19/20), Eightfold PayPal
   (8 runs, no delivery), Citco, Braze, Workday HPE. See flow F9.
 
 ### 4.5 A1 Account, sign-in and sign-up (253 runs, 141 jobs)
@@ -415,26 +417,41 @@ typed; the validator rejects the proposed city because the 10 options shown are 
 
 | # | Flow | Evidence | Status |
 |---|---|---|---|
-| F1 | **The maintenance cancel rewrites history and pauses jobs forever.** `operations/cancel.py:41-60` sets *every* historic draft run of a job to `cancelled`, overwrites `run.reason` ("Owner cancelled saved application during maintenance") and pauses the job (`owner_cancelled_drafts`). | 514 runs, 148 jobs (10-07 to 10-10), $17.75 and 17 hours of work already spent in those runs. The real reasons survive only in `finished` events. 99 jobs are still paused by it (52 are confirmed since, 41 `cancelled` and never retried, 5 unknown, 1 already applied). | Operational tool. The reason is now kept (section 6, F-D); the 41 jobs await a fresh try. |
-| F2 | **Refused retries logged as owner actions.** The autopilot's retry loop wrote "Owner requested resume" for every attempt, accepted or not. | 9,374 such events; 3,230 in one hour on 10-17; 5,702 on 10-17/18. | Fixed (8ee5d73, `job_control.py:94-108`). |
-| F3 | **Retrying a deterministic failure.** Runs 3+ in a row with the same reason. | 455 runs, 16 hours, 3,218 model calls: form stalls (147 runs, 43 jobs), email waits (45), sender busy (38), waiting for an answer (32), captcha (30), answer rejected (27), account (25), agent gave up (17). | Mostly bounded now by `application_budget` (three starts, 480 s optional). The still-open ones are the unattended `resubmit_unknown` and one-click Apply fresh tries on a known identity conflict (ADP 15 runs). |
-| F4 | **One requisition, two job rows.** `ats.canonicalize` keeps the hint `?ats=successfactors`. | ASSA ABLOY: 81 runs, 2 rows, 0 confirmed. 41 job URLs carry the hint. | Open: drop the `ats` hint from the identity (architecture agent; it changes stored identities). |
-| F5 | **Post-commit exceptions lose their cause.** `browser.py:4326` returned one fixed sentence for any `ValueError`/`PlaywrightError` after the commit. | 8 unknown Greenhouse runs on 10-18/19 have no diagnostics. | Fixed (F-B). |
-| F6 | **Wrong origin check for embedded Greenhouse.** See 4.1. | 13 of 21 embedded jobs never succeeded. | Fixed (F-A). |
+| F1 | **The maintenance cancel rewrites history and pauses jobs forever.** `operations/cancel.py:41-60` sets *every* historic draft run of a job to `cancelled`, overwrites `run.reason` ("Owner cancelled saved application during maintenance") and pauses the job (`owner_cancelled_drafts`). | 514 runs, 148 jobs (10-07 to 10-10), $17.75 and 17 hours of work already spent in those runs. The real reasons survive only in `finished` events. 99 jobs are still paused by it (52 are confirmed since, 41 `cancelled` and never retried, 5 unknown, 1 already applied). | Fixed (2535a85): the run's own state and reason are kept in the cancel sentence. The 41 jobs still await a fresh try (section 7). |
+| F2 | **Refused retries logged as owner actions.** The autopilot's retry loop wrote "Owner requested resume" for every attempt, accepted or not. | 9,374 such events; 3,230 in one hour on 10-17; 5,702 on 10-17/18. | Fixed (legacy 8ee5d73, `job_control.py:94-108`; in the first AXIOM import). |
+| F3 | **Retrying a deterministic failure.** Runs 3+ in a row with the same reason. | 455 runs, 16 hours, 3,218 model calls: form stalls (147 runs, 43 jobs), email waits (45), sender busy (38), waiting for an answer (32), captcha (30), answer rejected (27), account (25), agent gave up (17). | Mostly bounded now by `application_budget` (three starts, 480 s optional; legacy, in the first AXIOM import; 4d759d7 stops infrastructure stops from spending a start). The still-open ones are the unattended `resubmit_unknown` and one-click Apply fresh tries on a known identity conflict (ADP 15 runs). |
+| F4 | **One requisition, two job rows.** `ats.canonicalize` keeps the hint `?ats=successfactors`. | ASSA ABLOY: 81 runs, 2 rows, 0 confirmed. 41 job URLs carry the hint. | Fixed (7ef11c9): `ats.canonicalize` drops the platform hint (only a known platform name; any other `ats` value stays). `ats.identity_variants` also looks up the older identity, so rows and `submission_guard:` settings written before still protect and are not duplicated. |
+| F5 | **Post-commit exceptions lose their cause.** `browser.py:4326` returned one fixed sentence for any `ValueError`/`PlaywrightError` after the commit. | 8 unknown Greenhouse runs on 10-18/19 have no diagnostics. | Fixed (47adac4). |
+| F6 | **Wrong origin check for embedded Greenhouse.** See 4.1. | 13 of 21 embedded jobs never succeeded. | Fixed (faa1ffa). |
 | F7 | **Duplicate submissions.** `unknown_resubmit` ("resubmit them till you get a confirmation", owner 10-12) plus retries of runs that had submitted. | 11 jobs with repeated confirmed runs 10-10 to 10-14: Assured Guaranty x3, Perseus Group x3, Asana x2, LSEG x2, Dexcom x2, Cboe x2; Uber, Boston Scientific, Auto-Owners and ibgllc started a new run after a confirmed one. | `Service.queue` now refuses any job with a confirmed or already-applied run (`service.py:369`); the narrowed resubmit only runs when the saved final page shows no confirmation. No second confirmation after 10-13 02:08; two later runs started after a confirmation (Boston Scientific 10-14, ibgllc 10-16) and ended without a submission. |
-| F8 | **The repair agent saves placeholders as answers.** `[email]` x4 (Oracle 10-17, Stripe, Sparksoft and iPipeline 10-18/20) and the masked phone `9999999999` (Stripe 10-18). | 141 `fix_applied` outcomes among 337 repair events; accepted overrides are traced to the masked evidence, which is also what was saved. 34 repair-triggered retries, 9 later confirmed. | `[email]` rejected 10-19; masked numbers fixed here (F-C). |
-| F9 | **A parked wait is reported as a failed run.** The state `waiting_browser` means both "needs repair" and "parked on a durable email wait". | 266 E2 runs (143 jobs) counted as failures; Telegram once messaged each. | Recommendation: separate `waiting_email` state or flag; the continuation is the real run. |
-| F10 | **Deploys interrupt running applications.** | 139 runs; 84 in 48 hours; 35 runs in 23 minutes on 10-18 19:22. | Use the hold/drain stage at cut-over. |
-| F11 | **No load shedding.** See 4.2. | 223 deadline runs, 37.9 hours. | Open (recommended gate). |
-| F12 | **Telegram delivery is retried with no upper bound.** `outbox.py:178` backs off to 300 s and never gives up. | 2,341 `notification_error` events; one run retried 192 times in 2 h 13 (10-13), 1,976 on that day. | Open: dead-letter after N attempts. |
-| F13 | **No dispatch circuit breaker for the worker Chrome.** | I1: about 250 runs into a dead browser on 10-11/12. | Open. |
-| F14 | **An unknown-outcome job is only ever re-examined if its saved final page shows no confirmation, and 32 of 42 were never triaged.** | 4.1 | Orchestrator action. |
+| F8 | **The repair agent saves placeholders as answers.** `[email]` x4 (Oracle 10-17, Stripe, Sparksoft and iPipeline 10-18/20) and the masked phone `9999999999` (Stripe 10-18). | 141 `fix_applied` outcomes among 337 repair events; accepted overrides are traced to the masked evidence, which is also what was saved. 34 repair-triggered retries, 9 later confirmed. | `[email]` rejected 10-19; masked numbers refused as an override (63e07ed). Fixed. |
+| F9 | **A parked wait is reported as a failed run.** The state `waiting_browser` means both "needs repair" and "parked on a durable email wait". | 266 E2 runs (143 jobs) counted as failures; Telegram once messaged each. | Fixed (ab4bf0d): a result with `waiting_kind=email` finishes as `waiting_email`. It files no failure report, asks no repair, sends no Telegram outcome and is neither "blocked" nor "failed" in the batch summary, which counts it separately; the web app labels it "Waiting for email". Lease waits (sender busy) stay `waiting_browser`. Rows written before this change keep the old state, and every consumer still accepts both. |
+| F10 | **Deploys interrupt running applications.** | 139 runs; 84 in 48 hours; 35 runs in 23 minutes on 10-18 19:22. | Fixed (08a3029): every stop drains first (no new commit, wait for commits under way), and `INTERRUPTED` runs cost no start (4d759d7). |
+| F11 | **No load shedding.** See 4.2. | 223 deadline runs, 37.9 hours. | Fixed (1590276): `host_health` loop-lag gate in `provider_health.dispatch_limit`, and a deadline timeout under overload is a free retry. 4d759d7 counts a dead Chrome endpoint and an overloaded host as nothing sent. |
+| F12 | **Telegram delivery is retried with no upper bound.** `outbox.py:178` backs off to 300 s and never gives up. | 2,341 `notification_error` events; one run retried 192 times in 2 h 13 (10-13), 1,976 on that day. | Fixed (4299d18): an outbox delivery that keeps failing is parked as `dead` instead of retried for ever. |
+| F13 | **No dispatch circuit breaker for the worker Chrome.** | I1: about 250 runs into a dead browser on 10-11/12. | Fixed (1590276): three runs in a row that could not open a page pause starts for 1, 2, 4 ... 15 minutes, then one probe run (`host_health.note_browser`, read by `dispatch_limit`). Covered by `tests/test_host_health.py`; nothing more was needed. |
+| F14 | **An unknown-outcome job is only ever re-examined if its saved final page shows no confirmation, and 32 of 42 were never triaged.** | 4.1 | Orchestrator action. Done 2026-10-20: the 12 hidden successes were reconciled; the other 47 `submission_unknown` jobs were triaged read-only and stay unknown for `resubmit_unknown`'s receipt check (docs/OVERHAUL.md). |
 
 ## 6. Fixes made on this branch
 
-In progress. Planned and under way: F-A (embedded Greenhouse emailed-code step), F-B (post-commit failures keep
-their diagnostics), F-C (repair agent never saves masked numbers), F-D (maintenance cancel keeps the original
-reason). Commit ids and tests are added here as each one lands.
+Each has a regression test. The earlier ones are merged to `main`; ids of items fixed outside this branch are in the
+section 5 table.
+
+| Item | Fix | Commit | Test |
+|---|---|---|---|
+| F-A, F6 | Embedded Greenhouse forms take their emailed code in the board iframe | faa1ffa | `test_embedded_greenhouse_code.py` |
+| F-B, F5 | A failure after the commit keeps its exception and code locations | 47adac4 | `test_exception_diagnostics.py` |
+| F-C, F8 | The repair agent refuses a masked phone number as an override | 63e07ed | `test_repair_masked_values.py` |
+| I1, I4, F11, F13 | Load shedding and the worker-Chrome circuit in `dispatch_limit`; nothing-sent accounting | 1590276, 4d759d7 | `test_host_health.py`, `test_application_budget.py`, `test_runner_tiers.py` |
+| F10 | Drain before every stop | 08a3029 | `test_drain.py` |
+| F12 | Dead-letter for a failing outbox delivery | 4299d18 | `test_outbox_generation.py` |
+| F4 | `ats.canonicalize` ignores the feed's platform hint; older identities still found | 7ef11c9 | `test_platform_hint_identity.py` |
+| F9 | `waiting_email` run state for a parked email wait | ab4bf0d | `test_waiting_email_state.py` |
+| F1 | Maintenance cancel keeps each run's state and reason | 2535a85 | `test_cancel_saved_drafts.py` |
+
+Not changed in stored data: runs written before ab4bf0d keep `waiting_browser` with `waiting_kind=email`, and every
+consumer still accepts both states. Jobs stored with the hinted identity keep it; their duplicates are found through
+`identity_variants` rather than migrated.
 
 ## 7. What remains for the orchestrator
 
@@ -446,16 +463,14 @@ reason). Commit ids and tests are added here as each one lands.
    the 41 jobs the maintenance cancel left `cancelled` and paused (check each posting is still open first); and the
    embedded Greenhouse jobs after the F-A fix (Roblox, Stripe, Waymo, Toast), after the unknown ones are triaged so
    nothing is submitted twice.
-3. **Load shedding before the 6+2 cut-over.** A loop-lag gate in `provider_health.dispatch_limit` and a "host
-   overloaded" marker that makes deadline timeouts free (section 4.2). Deploy only through the hold/drain stage.
+3. **Load shedding before the 6+2 cut-over.** Done (1590276, section 6). Deploy only through the hold/drain stage (08a3029).
 4. **Owner or product decisions:** Lever (excluded; needs a CDP-leak-free driver), ADP (needs a non-Gmail address or
    the ADP credentials), Dayforce Global Identity (invisible reCAPTCHA: York Space, Imperial Brady), Oracle
    hCaptcha (JPMorgan Chase x2, Honeywell, 13 to 17 runs each), ASSA ABLOY State/Province picklist, the Bank of
    America "Select One" internal-only variant, Qualtrics' stepped Greenhouse form.
-5. **Small structural fixes for the architecture and QA agents:** ignore the `ats` hint in `ats.canonicalize` (one
-   requisition had two job rows and 81 runs), a distinct `waiting_email` state so parked waits are not failures,
-   a dead-letter after N attempts in `outbox.process_one` (Telegram), a browser-outage circuit breaker in
-   `dispatch_limit`.
+5. **Small structural fixes.** All done (section 6): the `ats` hint (7ef11c9), `waiting_email` (ab4bf0d), the outbox
+   dead-letter (4299d18) and the browser-outage circuit (1590276). The two still-open duplicate-start paths in F3
+   (unattended `resubmit_unknown`, one-click Apply on a known identity conflict) are policy, not code defects.
 6. **Answers (orchestrator):** the Q1/Q2 questions in section 4.9 and the REA lists; the location typeahead
    validator rejection; `knowledge_inference_declined` (292 events).
 

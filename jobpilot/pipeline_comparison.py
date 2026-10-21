@@ -57,7 +57,9 @@ def assign_pool(session, job, source=None):
 
 # Runs a new run of the same job continues from when nothing names a recovery source (an owner's Apply, answered
 # questions, a resumed pause).
-CONTINUABLE_STATES = frozenset({"waiting_answer", "needs_review", "waiting_browser", "timed_out", "paused"})
+CONTINUABLE_STATES = frozenset(
+    {"waiting_answer", "needs_review", "waiting_browser", "waiting_email", "timed_out", "paused"}
+)
 
 
 def continued_run(runs, source=None):

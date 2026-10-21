@@ -538,7 +538,7 @@ async def read_feed(source, profile, cfg, at):
 
 
 async def scrape_source(source, db, config):
-    from .ats import canonicalize
+    from .ats import identity_variants
     from .discovery import add_job
 
     cfg = settings(db)
@@ -613,7 +613,8 @@ async def scrape_source(source, db, config):
             if new:
                 created.append(row["id"])
         if complete:
-            identities = {canonicalize(url)[1] for url in seen}
+            # A job stored before the platform hint was dropped keeps its older identity; both mean "still listed".
+            identities = {identity for url in seen for identity in identity_variants(url)}
             with db.session() as s:
                 for entry, job in s.execute(
                     select(JobListing, Job)

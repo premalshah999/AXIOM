@@ -148,6 +148,8 @@ queued ─► running ─► submitting ─► confirmed                  eviden
    │         ├─► dry_run_passed                                mode = dry_run; never submits
    │         ├─► waiting_answer │ needs_review                 a required personal fact is missing → question → answer → requeue
    │         ├─► waiting_browser                               control or navigation failure, draft retained → recovery
+   │         ├─► waiting_email                                 parked on a durable wait for an emailed code or link; the
+   │         │                                                 matched email starts a continuation run. Not a failure
    │         ├─► timed_out │ failed
    │         └─► closed │ already_applied │ cancelled │ paused │ skipped
 ```

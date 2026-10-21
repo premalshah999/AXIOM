@@ -162,7 +162,9 @@ function RunSection({
   const snapRun = snapshot.runs.find((r) => r.id === runId);
   const live =
     !!snapRun &&
-    (ACTIVE.has(snapRun.state) || snapRun.state === "waiting_browser");
+    (ACTIVE.has(snapRun.state) ||
+      snapRun.state === "waiting_browser" ||
+      snapRun.state === "waiting_email");
   const detail = usePoll<Detail>(
     (signal) => api(`/runs/${runId}`, "GET", undefined, signal),
     live ? 10000 : 3_600_000,
