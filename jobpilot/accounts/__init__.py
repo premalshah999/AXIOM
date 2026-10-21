@@ -43,6 +43,7 @@ from .errors import (
 from .store import (
     AccountStore,
 )
+from ..mail import origin  # re-exported: tests import it from here
 from .credentials import (
     Accounts,
     summary,
@@ -52,6 +53,7 @@ from .flow import (
 )
 
 __all__ = [
+    "origin",
     "ACCOUNT_EXISTS",
     "ACCOUNT_EXISTS_HEADING",
     "ACCOUNT_EXISTS_STEP",
