@@ -10,7 +10,7 @@ import re
 import unicodedata
 
 
-CACHE_VERSION = "answers-v8"
+CACHE_VERSION = "answers-v9"  # v9: group values no longer scope a label (2026-10-21)
 AUTH_KEYS = ("work_authorized_us", "work_authorized", "work_authorization_us")
 SPONSOR_KEYS = ("requires_sponsorship", "requires_future_sponsorship_us", "needs_sponsorship")
 AUTH = re.compile(

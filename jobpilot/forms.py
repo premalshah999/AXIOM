@@ -3165,7 +3165,11 @@ class FormSession:
             # before opening or reasoning over those obsolete child catalogs.
             address_parents = []
             for field in ask:
-                scope = " ".join(str(field.get(k) or "") for k in ("section", "group", "context"))
+                context = field.get("context")
+                scope = " ".join(
+                    [str(field.get(k) or "") for k in ("section", "group")]
+                    + ([context] if isinstance(context, str) else [])  # never the group's other values
+                )
                 if (
                     re.fullmatch(r"country(?: region| territory)?", widgets.norm(field["label"]))
                     and re.search(r"\baddress\b", scope, re.I)

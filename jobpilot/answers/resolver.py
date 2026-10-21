@@ -99,7 +99,13 @@ class Resolver(
                     else ("company", "title", "start"),
                 )
         scoped_label = field["label"]
-        scope = " ".join(str(field.get(k, "")) for k in ("section", "group", "context", "hint"))
+        # A field's "context" is a dict of its group's other values (forms.py). It describes the page, not this
+        # question: iCIMS keeps a whole profile in one group, so "Phone Country Code: (+1) United States" scoped
+        # Email, City and Address as phone questions, and each was answered with the address country (2026-10-21).
+        context = field.get("context")
+        scope = " ".join(
+            [str(field.get(k, "")) for k in ("section", "group", "hint")] + ([context] if isinstance(context, str) else [])
+        )
         if normalize(field["label"]) in {
             "name",
             "country",
