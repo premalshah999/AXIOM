@@ -111,3 +111,21 @@ async def test_a_successfactors_reset_window_closes_after_three_minutes(service)
     rule = service.mail.rule_for("https://careers.westinghousenuclear.com")
     reset = service.mail.begin(run["id"], rule, "alex@example.test", "password_reset")
     assert reset["expires"] - time.time() <= CENTRAL_RESET_WAIT + 2
+
+
+async def test_parking_the_run_keeps_the_reset_cap(service):
+    """Emory (iCIMS Central, 2026-10-21): the reset window opened capped, then the run parked for its email and the
+    durable wait stretched it to 20 minutes again, five times in a row."""
+    import time
+
+    from jobpilot.mail.challenges import CENTRAL_RESET_WAIT
+
+    _, run, rule = await configured(service)
+    with service.db.exclusive() as session:
+        row = session.get(MailRule, rule["id"])
+        row.sender_domains = ["icims.com"]
+        row.employer_origin = "https://staff-emory.icims.com"
+    rule = service.mail.rule_for("https://staff-emory.icims.com")
+    reset = service.mail.begin(run["id"], rule, "alex@example.test", "password_reset")
+    parked = service.mail.persist_wait(reset["id"])
+    assert parked["expires"] - time.time() <= CENTRAL_RESET_WAIT + 2

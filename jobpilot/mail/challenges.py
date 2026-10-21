@@ -42,10 +42,13 @@ class ChallengesMixin:
             row = session.get(MailChallenge, challenge_id)
             if not row or row.state not in LIVE or row.expires <= time.time():
                 raise ValueError("Email verification was cancelled or expired")
-            row.expires = self.window_deadline(
-                session.get(Run, row.run_id),
-                max(row.expires, row.since + self.config.mail_durable_wait_seconds),
-            )
+            durable = row.since + self.config.mail_durable_wait_seconds
+            rule = session.get(MailRule, row.rule_id) if row.kind == "password_reset" else None
+            if rule and set(rule.sender_domains or []) & SHARED_RESET_SENDERS:
+                # Parking the run used to stretch a capped reset to 20 minutes again: Emory's iCIMS Central reset held
+                # the one iCIMS sender for 20 minutes five times in a row (2026-10-21).
+                durable = min(durable, row.since + CENTRAL_RESET_WAIT)
+            row.expires = self.window_deadline(session.get(Run, row.run_id), max(row.expires, durable))
             if row.expires <= time.time():
                 raise ValueError("Application deadline ended")
             handle = record(row)
