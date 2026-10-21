@@ -4187,8 +4187,8 @@ class FormSession:
                 if not same:
                     problems.append(f"Value not accepted: {f['label']}")
                     await self._widget_snapshot(f)
-            if f["type"] == "password" or AUTH.search(f["label"]):
-                continue
+            if f["type"] == "password" or AUTH.search(f["label"]) or f.get("site_account"):
+                continue  # A signed-in profile's saved login is the account, not an answer (Schwab 2026-10-21).
             if f in self.resume_fields():
                 if (self.workday and self.uploaded and self.upload_verified) or getattr(
                     self, "resume_on_file", False

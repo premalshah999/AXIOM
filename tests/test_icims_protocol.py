@@ -56,3 +56,27 @@ def test_other_platforms_are_untouched():
     other = field("Year", "GraduationDate_Year", frame_url="https://boards.greenhouse.io/acme/jobs/1")
     apply([other], [{"label": "Log Out"}])
     assert other["label"] == "Year" and "icims_name" not in other
+
+
+async def test_the_saved_login_needs_no_verified_answer(page, tmp_path):
+    """Schwab 2026-10-21: read-back asked for "Login" ("Required field has no verified answer") on a signed-in profile."""
+    from jobpilot.answers import Resolver
+    from jobpilot.forms import FormSession
+    from jobpilot.schemas import Profile
+
+    url = "https://career-schwab.icims.com/jobs/1/engineer/candidate"
+    html = ("<html><body><a href='#'>Log Out</a><label>Login<input name='PersonProfileFields.Login' required "
+            "value='saved1734895'></label><input type=submit value='Update Profile'></body></html>")
+
+    async def serve(route):
+        await route.fulfill(body=html, content_type="text/html")
+
+    await page.route(url, serve)
+    await page.goto(url)
+    resume = tmp_path / "r.pdf"
+    resume.write_bytes(b"%PDF-1.4")
+    form = FormSession(page, Resolver(Profile(), None, None), resume, lambda *a: None)
+    await form.scan()
+    report = await form.verify()
+    assert not any("Login" in problem for problem in report["problems"])
+    assert report["auth_required"] is False
