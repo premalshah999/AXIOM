@@ -142,3 +142,26 @@ async def test_owner_authorized_reset_replaces_a_rejected_central_password(servi
     await value.on_sign_in(obs)
     assert recover.await_count >= 2
     value.click.assert_not_awaited()
+
+
+def test_the_email_step_is_known_by_its_protocol_name_and_submit_id(service):
+    # Schwab 2026-10-21: email plus an optional phone, submitted by "I Acknowledge the Privacy Notice".
+    from jobpilot.adapters.base import Step
+
+    url = "https://career-schwab.icims.com/jobs/128575/full-stack-developer/login"
+    obs = observation(url, password=False, email=False)
+    obs["fields"] = [
+        {"id": "e", "type": "email", "label": "Email", "required": False, "value": "", "icims_name": "css_loginName",
+         "frame_url": url + "?in_iframe=1", "automation_id": ""},
+        {"id": "c", "type": "combobox", "label": "Phone Country Code", "required": False, "value": "", "options": [],
+         "icims_name": "", "frame_url": url + "?in_iframe=1", "automation_id": ""},
+        {"id": "n", "type": "text", "label": "Number", "required": False, "value": "", "icims_name": "css_phoneNumber",
+         "frame_url": url + "?in_iframe=1", "automation_id": ""},
+    ]
+    submit = {"id": "s", "label": "I Acknowledge the Privacy Notice", "href": "", "html_id": "enterEmailSubmitButton",
+              "automation_id": "", "aria_label": ""}
+    obs["controls"] = [{"id": "x", "label": "Search jobs", "href": "", "html_id": "js-search-toggle",
+                        "automation_id": "", "aria_label": ""}, submit]
+    value = adapter(service, obs)
+    assert value.classify(obs) == Step.EMAIL_ENTRY
+    assert value.email_submit(obs) is submit

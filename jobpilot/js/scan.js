@@ -954,7 +954,7 @@
         || el.value || el.getAttribute('aria-label') || el.getAttribute('title') || ''),
       href: el.getAttribute('href') || '', type: historyEditor(el) ? 'history_select' : el.form ? (el.type || '') : '',
       automation_id: el.dataset.automationId || '', aria_label: el.getAttribute('aria-label') || '',
-      section: section(el), group: groupOf(el),
+      html_id: el.id || '', section: section(el), group: groupOf(el),
       // A progress-step item ("Candidate Info / Questionnaire / Submit") is not an action button.
       stepper: !!el.closest('.ant-steps,[role=tablist]'),
     })).filter(x => x.label);

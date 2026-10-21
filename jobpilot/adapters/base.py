@@ -118,6 +118,7 @@ SIGNIN_LINK = re.compile(
 FORGOT = re.compile(
     r"forgot (?:your )?password|reset (?:your )?password|can'?t sign in|trouble signing in", re.I
 )
+CONSENT_MENUS = {"select", "combobox", "dropdown", "radio"}
 AUTH_BUTTON = re.compile(
     r"^(?:sign in|log ?in|create (?:an? )?account|register|sign up|submit|continue|next|verify|confirm|"
     r"send|reset(?: password)?|save|create profile|set password|change password)$",
@@ -197,6 +198,8 @@ class Adapter:
     next_ids: tuple[str, ...] = ()
     back_ids: tuple[str, ...] = ()
     apply_ids: tuple[str, ...] = ()
+    # Element ids of the email step's own submit, whose label varies by employer.
+    email_submit_ids: tuple[str, ...] = ()
 
     def __init__(self, engine, ats_id=None, name=None):
         if ats_id:
@@ -587,6 +590,12 @@ class Adapter:
             return {"fallback": True}
         await self.click(buttons[-1])
 
+    def email_submit(self, obs):
+        """The email step's own submit: Next, a platform's known submit id (its label varies by employer: iCIMS's
+        "Next" or Schwab's "I Acknowledge the Privacy Notice"), else a generic account button."""
+        known = [b for b in obs["controls"] if b.get("html_id") and b["html_id"] in self.email_submit_ids]
+        return self.find_next(obs) or (known[0] if known else None) or next(iter(self.buttons(obs, AUTH_BUTTON)), None)
+
     async def on_email_entry(self, obs):
         if not self.accounts.email:
             return self.defer("Set ACCOUNT_EMAIL (or your profile email) so I can identify you to employers")
@@ -608,7 +617,21 @@ class Adapter:
         async def agree(fields):
             """Tick each consent box the resolver accepts; return a deferral for a required one it cannot."""
             for f in fields:
-                if f["type"] != "checkbox" or f["value"] == "true" or f["id"] in seen:
+                if f["id"] in seen:
+                    continue
+                if f["type"] != "checkbox":
+                    if f.get("required") and f.get("options") and not f.get("value") and f["type"] in CONSENT_MENUS:
+                        # A consent asked as a menu (Atlassian's "By selecting continue ... you acknowledge").
+                        seen.add(f["id"])
+                        answer = (await self.form.resolver.resolve([f]))[0]
+                        if answer.disposition == "answer":
+                            await self.form.fill(f, answer.value)
+                        else:
+                            return self.defer(
+                                "A required agreement on the email step needs your approval", [self.review_for(f)]
+                            )
+                    continue
+                if f["value"] == "true":
                     continue
                 seen.add(f["id"])
                 answer = (await self.form.resolver.resolve([f]))[0]
@@ -637,7 +660,7 @@ class Adapter:
             # disabled until it is ticked, and the step fell back to the guided flow without it.
             if deferred := await agree(obs["fields"]):
                 return deferred
-            target = self.find_next(obs) or next(iter(self.buttons(obs, AUTH_BUTTON)), None)
+            target = self.email_submit(obs)
             if target:
                 break
             await asyncio.sleep(0.2)

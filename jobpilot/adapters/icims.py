@@ -99,6 +99,9 @@ class ICIMS(Adapter):
     id = "icims"
     name = "iCIMS"
     apply_ids = ()
+    # The email step posts css_loginName from <input type=submit id=enterEmailSubmitButton>; its label is "Next" on most
+    # employers and "I Acknowledge the Privacy Notice" on Schwab (2026-10-21).
+    email_submit_ids = ("enterEmailSubmitButton",)
 
     async def captcha_auth_handoff(self):
         """A delivered callback allows native auth; it does not prove login."""
@@ -649,6 +652,12 @@ class ICIMS(Adapter):
         # needs, and four runs stalled on an unchanged page (2026-10-21). The email field's own frame decides.
         framed = [f for f in own if urlsplit(f.get("frame_url") or "").path.endswith("/login")]
         scope = own if path.endswith("/login") else framed
+        if any(f.get("icims_name") == "css_loginName" for f in own) and not any(
+            f["type"] == "password" for f in own
+        ):
+            # The iCIMS email step by protocol: it posts css_loginName. Schwab's also asks an optional phone, so the
+            # email-and-checkboxes shape below read it as a form with "No way forward" (2026-10-21).
+            return Step.EMAIL_ENTRY
         if (
             scope
             and any(f["type"] == "email" for f in scope)
