@@ -733,7 +733,7 @@ function AgentControls() {
                   hint={
                     provider.available
                       ? provider.model
-                      : "Add this provider's credential on the server to use it."
+                      : "Add its API key to .env, then run docker compose up -d (docs/SETUP.md, Add your keys)."
                   }
                 >
                   <select

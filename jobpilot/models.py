@@ -476,7 +476,9 @@ async def _structured(
     if tier_of(db, run_id) >= 2:
         config = provider_for(db, config, tier_of(db, run_id))
     if not config.llm_api_key:
-        raise RuntimeError("The selected model provider has no API key configured.")
+        from .agent_settings import missing_key_message
+
+        raise RuntimeError(missing_key_message(config.llm_provider))
     thinking = effective_thinking(db, config, thinking)
     timeout = effective_timeout(db, config, thinking, timeout, purpose=output_type.__name__)
     _, thinking, timeout = apply_model(db, config, run_id, thinking, timeout)

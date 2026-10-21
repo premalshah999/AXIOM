@@ -3222,7 +3222,9 @@ class BrowserEngine:
         from .models import http_client
 
         if not self.config.llm_api_key:
-            raise RuntimeError("Configure the selected model provider before running a live application")
+            from .agent_settings import missing_key_message
+
+            raise RuntimeError(missing_key_message(self.config.llm_provider))
         default_actions = list(Tools().registry.registry.actions)
         # Custom submit/review actions are the only terminal paths. The generic
         # browser-use done action can otherwise end a run without submission proof.

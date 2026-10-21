@@ -105,6 +105,15 @@ def verify_deployment(config, *, recheck=None, timeout=420):
         )
         snapshot = fetch(client, "GET", "/api/snapshot").json()
         checks.append("authenticated_api")
+        if not previous:
+            profile = snapshot.get("profile") or {}
+            require(
+                not (profile.get("name") or profile.get("email") or profile.get("first_name")),
+                "This self-test fills a demo form with a fixed synthetic applicant (Alex Example), and a profile "
+                f"already exists here ({profile.get('email') or profile.get('name')}), so the form would refuse the "
+                "submission. Run it on a new installation before you create your account (docs/SETUP.md, "
+                "'Self-test'). To check this installation now, open the dashboard and add a job link instead.",
+            )
         markup = fetch(client, "GET", "/").text
         page = BeautifulSoup(markup, "html.parser")
         assets = [s.get("src", "") for s in page.select('script[type="module"][src]')]

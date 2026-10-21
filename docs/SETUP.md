@@ -11,10 +11,10 @@ sites you apply to.
 |---|---|
 | A Mac | macOS is the supported host. The worker Chrome is a normal Chrome on your Mac. Linux works for the dashboard and the built-in headless browser, but not for the host-Chrome workers (see Troubleshooting). |
 | [Docker Desktop](https://docs.docker.com/get-docker/) | Version 4.30 or newer (Compose v2). In Settings > Resources give it at least 6 GB of memory. |
-| [Google Chrome](https://www.google.com/chrome/) | The workers drive a real Chrome, because many employer sites distrust headless browsers. |
+| [Google Chrome](https://www.google.com/chrome/) | Only for real job sites: the workers drive a real Chrome, because many employer sites distrust headless browsers. Not needed to install, sign up, fill in your profile or try the demo; without it AXIOM uses a headless browser inside Docker. |
 | git | To download AXIOM and update it later. |
 | About 6 GB of free disk | The image is 2.5 GB, plus the database and your data. |
-| A model API key | One of DeepSeek, Xiaomi MiMo or Anthropic. This is what reads job pages and writes answers. A few dollars goes a long way. |
+| A model API key | One of DeepSeek, Xiaomi MiMo or Anthropic. This is what reads job pages and writes answers. A few dollars goes a long way. Without one the dashboard and setup guide work, but reading your resume to prefill the guide and every live application are refused with a message naming the key to add (see Add your keys). |
 | A Gmail account (recommended) | Employers email one-time codes and verification links. AXIOM reads them from the mailbox you connect, with a Google app password. |
 
 Optional: a 2Captcha key (solves captchas, paid per solve) and a Telegram bot (asks you questions on your phone).
@@ -40,9 +40,13 @@ The database tables are created by the app the first time it starts; there is no
 ## First run
 
 1. Open the address. A fresh install lets you create the one account for this computer (name, email, password). After
-   that, only that account, or the access token, can sign in.
+   that, only that account, or the access token, can sign in. The dashboard is called ApplyPilot on screen; AXIOM is
+   the name of the project.
 2. Follow the setup guide: resume upload, contact details, work authorization, the roles you want, screening
-   questions, self-identification, permissions and a final review. Answers are stored once and reused.
+   questions, self-identification, permissions and a final review. Answers are stored once and reused. Reading the
+   resume to prefill the guide needs the model key (next section); if there is none yet, the guide says so and you
+   fill the steps in by hand. The guide covers most of the screening facts; docs/KNOWLEDGE.md lists the few you add
+   in Setup > Profile > Facts.
 3. **Automatic submission is off.** Nothing is sent to an employer until you switch it on in Setup. Start with a dry run
    on a few jobs and read what the workers did.
 
@@ -135,7 +139,7 @@ in `.env.example`.
 | Update to the latest version | `make update` (pause applications first; the app restarts) |
 | Print the access token | `make token` (treat it like a password) |
 
-**Self-test (optional).** `make verify` runs two synthetic applications against a demo form built into the app, in the
+**Self-test (optional, new installations only).** `make verify` runs two synthetic applications against a demo form built into the app, in the
 image's own browser, and prints PASS or FAIL. It is meant for a brand-new installation, before you create your account:
 it uses a fixed synthetic applicant, so it fails by design once your own profile exists, and it leaves demo jobs behind,
 which closes the open sign-up (sign in with `make token` instead). Skip it unless something looks wrong.

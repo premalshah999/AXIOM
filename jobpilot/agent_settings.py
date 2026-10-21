@@ -33,6 +33,19 @@ class AgentDisabled(RuntimeError):
     pass
 
 
+KEY_NAMES = {"deepseek": "DEEPSEEK_API_KEY", "haiku": "HAIKU_API_KEY", "mimo": "MIMO_API_KEY"}
+
+
+def missing_key_message(provider):
+    """What a newcomer does about a model provider without a key: name the setting and where it goes."""
+    name = KEY_NAMES.get(provider, f"{provider}_API_KEY".upper())
+    return (
+        f"No API key for the {provider} model provider. Add {name}=... to the .env file in the AXIOM folder, "
+        "then run `docker compose up -d` (docs/SETUP.md, 'Add your keys'); or choose a provider you have a key "
+        "for in Setup > System."
+    )
+
+
 def current(db, config):
     default = config.llm_provider if config.llm_provider in {"mimo", "deepseek", "haiku"} else "mimo"
     value = db.get_setting("agent_settings", {}) or {}
@@ -79,6 +92,6 @@ def save(db, config, value):
     for role in ("answers", "navigator"):
         provider = getattr(data.models, role)
         if provider != getattr(prior.models, role) and not getattr(config, provider + "_api_key"):
-            raise ValueError(f"Configure the {provider} API key before selecting it")
+            raise ValueError(missing_key_message(provider))
     db.set_setting("agent_settings", data.model_dump())
     return summary(db, config)

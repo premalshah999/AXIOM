@@ -104,8 +104,15 @@ say ""
 say "AXIOM is running:  $url"
 say "  1. Open that address and create your account; the setup guide takes it from there."
 say "  2. Access token for scripts:  docker compose exec app jobpilot token"
+step=3
+if ! grep -Eq '^(DEEPSEEK|HAIKU|ANTHROPIC|MIMO)_API_KEY=.+' .env; then
+  say "  $step. Add a model API key to .env (DEEPSEEK_API_KEY by default), then: docker compose up -d"
+  say "     Until then the dashboard and setup guide work, but resume prefill and real applications are refused."
+  step=$((step + 1))
+fi
 if ! grep -Eq '^BROWSER_CDP_URL=.+' .env; then
-  say "  3. To apply on real job sites, start the worker Chrome (make chrome) and set BROWSER_CDP_URL in .env."
+  say "  $step. To apply on real job sites, start the worker Chrome (make chrome) and set BROWSER_CDP_URL in .env."
   say "     Without it AXIOM uses a headless browser inside Docker, which is enough for the demo only."
 fi
+say "Optional self-test, only before you create your account:  make verify"
 say "Stop: make down.   Logs: make logs.   Full guide: docs/SETUP.md"
