@@ -1038,9 +1038,16 @@ function BackgroundStep({ draft, setFact }: StepProps & { setFact: SetFact }) {
   return (
     <div className="stack">
       <p className="ob-note">
-        “Have you worked for this company before?” ({ASKED.previously}) is answered from your work history: Yes only when
-        the employer appears in it.
+        Answer only what is true; a question you leave unanswered is never answered for you, and ApplyPilot asks you when a
+        form needs it.
       </p>
+      <Question
+        label="Apart from the employers in your work history, have you ever worked for a company you apply to?"
+        asked={ASKED.previously}
+        hint="“Have you worked for this company before?” is answered Yes for an employer in your work history. This answers it for every other employer."
+      >
+        <YesNo {...yn("previously_employed_here")} />
+      </Question>
       <Question label="Do you have relatives working at companies you apply to?" asked={ASKED.relatives} hint="Answer No unless you know of one; you can add exceptions later.">
         <YesNo {...yn("has_relatives_at_employer")} />
       </Question>
@@ -1059,6 +1066,15 @@ function BackgroundStep({ draft, setFact }: StepProps & { setFact: SetFact }) {
           }}
         />
       </Question>
+      <Question label="Are you bound by a non-solicitation agreement (not to contact a former employer's clients or staff)?">
+        <YesNo {...yn("has_non_solicitation")} />
+      </Question>
+      <Question
+        label="Do you have a business, client or personal relationship with companies you apply to?"
+        hint="For example as a client, vendor, partner or friend of an owner."
+      >
+        <YesNo {...yn("company_relationships")} />
+      </Question>
       <Question label="Have you ever been convicted of a crime (excluding minor traffic violations)?">
         <YesNo {...yn("criminal_conviction")} />
       </Question>
@@ -1069,6 +1085,21 @@ function BackgroundStep({ draft, setFact }: StepProps & { setFact: SetFact }) {
             setFact("ever_fired", v);
             setFact("asked_to_resign", v);
             setFact("involuntarily_discharged", v);
+          }}
+        />
+      </Question>
+      <Question
+        label="Are you a citizen or national of, or have you lived in, a country under U.S. export-control restrictions or sanctions?"
+        hint="Defense and technology employers ask this."
+      >
+        <YesNo {...yn("export_control_restricted_country_history")} />
+      </Question>
+      <Question label="Do you hold U.S. asylee or refugee status?">
+        <YesNo
+          value={f.has_asylee_status}
+          onChange={(v) => {
+            setFact("has_asylee_status", v);
+            setFact("has_refugee_status", v);
           }}
         />
       </Question>
@@ -1279,8 +1310,13 @@ function ReviewStep({ draft, go, submit }: StepProps & { go: (i: number) => void
         rows: [
           ["Relatives at employer", yesno(f.has_relatives_at_employer)],
           ["Government employment (5 yrs)", yesno(f.government_employment_history)],
+          ["Worked for other employers you apply to", yesno(f.previously_employed_here)],
           ["Non-compete", yesno(f.has_non_compete)],
+          ["Non-solicitation", yesno(f.has_non_solicitation)],
+          ["Company relationships", yesno(f.company_relationships)],
           ["Criminal conviction", yesno(f.criminal_conviction)],
+          ["Export-control country", yesno(f.export_control_restricted_country_history)],
+          ["Asylee or refugee", yesno(f.has_asylee_status)],
         ],
       },
       {

@@ -99,19 +99,19 @@ The validator also checks the answer's direction where facts decide it:
 ## Setting up a new applicant (friends and family)
 
 Fill the profile (setup wizard), then confirm these facts. Each one prevents a question from being asked on every
-application. The wizard writes most of them; the rest you add in Setup > Profile > Facts, which is a JSON object, for
-example `"has_non_solicitation": false`. Key names are lower case except `current_immigration_status_US`, which keeps
-its capitals, so copy the spelling below or from the wizard's own entries.
+application. The wizard's Work authorization, Roles and logistics and Background steps ask for all of them as yes/no
+questions and store them under the keys below; a question left unanswered stays absent (it is never saved as a
+default No), and the run asks you when a form needs it. Setup > Profile > Facts shows the same facts as JSON for
+editing. Key names are lower case except `current_immigration_status_US`, which keeps its capitals.
 
-| Area | Facts | Written by the wizard |
-|---|---|---|
-| Work authorization | `work_authorization_us`, `requires_future_sponsorship_us`, `current_immigration_status_US` (e.g. "OPT; expiration June 2030", "U.S. citizen", "H-1B"), `us_citizen`, `country_of_citizenship` | yes |
-| Background | `criminal_conviction`, `has_non_compete`, `has_employment_restrictions`, `ever_fired` | yes |
-| Background | `has_non_solicitation` | no: add it |
-| Relationships | `has_relatives_at_employer`, `government_employment_history`, `government_official` | yes |
-| Relationships | `previously_employed_here`, `company_relationships` | no: add them (the wizard answers "worked here before" from your work history) |
-| Export control | `export_control_restricted_country_history`, `has_asylee_status` | no: add them |
-| Other | `over_18`, `valid_drivers_license`, `willing_to_relocate`, `willing_to_travel`, `availability`, salary expectation | yes |
+| Area | Facts |
+|---|---|
+| Work authorization | `work_authorization_us`, `requires_future_sponsorship_us`, `current_immigration_status_US` (e.g. "OPT; expiration June 2030", "U.S. citizen", "H-1B"), `us_citizen`, `country_of_citizenship` |
+| Background | `criminal_conviction`, `has_non_compete`, `has_employment_restrictions`, `has_non_solicitation`, `ever_fired` |
+| Relationships | `has_relatives_at_employer`, `government_employment_history`, `government_official`, `company_relationships` |
+| Prior employment | `previously_employed_here`: "worked for a company you apply to, apart from your work history". An employer named in your work history is always answered Yes |
+| Export control | `export_control_restricted_country_history`, `has_asylee_status` (the wizard also sets `has_refugee_status`) |
+| Other | `over_18`, `valid_drivers_license`, `willing_to_relocate`, `willing_to_travel`, `availability`, salary expectation |
 
 Answers given later in the review inbox or on Telegram are saved as confirmed facts and reused.
 
