@@ -17,6 +17,7 @@ from .knowledge import (
     relevant_fact,
     topic,
 )
+from .answer_rules import delegated_facts, major_patterns, source_patterns
 from .schemas import Answer, AnswerBatch, Profile
 from .answer_context import (
     AUTH_KEYS,
@@ -249,9 +250,8 @@ EDUCATION = {
     "start": re.compile(r"^from$|start|first year|from year", re.I),
     "end": re.compile(r"^to\b|\bend\b|last year|graduat|to year|completion|expected", re.I),
 }
-# Owner policy (2026-10-13), every ATS: when a catalog does not offer the recorded
-# value, choose these offered equivalents rather than stopping the application.
-MAJOR_FALLBACK = (re.compile(r"^computer science$", re.I), re.compile(r"\bcomputer science\b", re.I))
+# When a catalog does not offer the recorded degree, choose one of these offered equivalents rather than stopping the
+# application. The major's fallback is the profile's own (answer_rules.major_fallback).
 DEGREE_FALLBACK = {
     "bachelor": (
         re.compile(r"^bachelor'?s?(?: degree)?$", re.I),
@@ -273,23 +273,6 @@ INTENT_SOURCE = re.compile(
     r"^source(?: type)?$|referral source|^(?:candidate |application )?source\b",
     re.I,
 )
-# "How did you hear about us": any of these is the applicant's source, in this order.
-SOURCE_FALLBACK = tuple(
-    re.compile(p, re.I)
-    for p in (
-        r"\blinked\s?in\b",
-        r"company(?:'s)? (?:web ?site|careers?)|careers? (?:page|site|web ?site)|corporate (?:web ?site|careers?)|"
-        r"(?:our|employer) (?:web ?site|careers?)|career portal",
-        r"\bzip\s?recruiter\b",
-        r"\bindeed\b",
-        r"internet|online search|web search|search engine|\bgoogle\b|\bonline\b",
-        r"job (?:board|site|posting|search (?:site|engine))s?",
-        r"\bglassdoor\b",
-        r"social (?:media|network)|professional network",
-    )
-)
-
-
 # Sources that would claim a relationship or status the applicant does not have.
 NOT_A_SOURCE = re.compile(
     r"refer|employee|colleague|recruiter|agency|staffing|internal|displaced|\bloa\b|leave of absence|"
@@ -299,12 +282,15 @@ NOT_A_SOURCE = re.compile(
 )
 
 
-def source_choice(options):
-    """Owner policy: a listed source in preference order, else any plain channel (e.g. Facebook)."""
+def source_choice(options, rules):
+    """A listed source in the profile's own order (answer_rules.source_order), else, only if the profile allows it
+    (source_any_channel), any plain channel. A profile with neither answers nothing here: the applicant is asked."""
     options = [o for o in options if str(o).strip()]
-    return first_matching(options, SOURCE_FALLBACK) or next(
-        (o for o in options if not NOT_A_SOURCE.search(str(o))), None
-    )
+    if hit := first_matching(options, source_patterns(rules.source_order)):
+        return hit
+    if rules.source_any_channel:
+        return next((o for o in options if not NOT_A_SOURCE.search(str(o))), None)
+    return None
 
 
 # Owner policy (2026-10-13): always "No" to employment with this employer, its parent/sister/
@@ -1669,7 +1655,8 @@ class Resolver:
     def talent_pool_opt_out(self, f):
         """AVEVA 2026-10-15: "Yes, I agree that AVEVA may keep my data on file to be considered for other
         roles ... Indicate 'YES' to Opt In OR 'NO' to Opt Out" was scoped as work authorization and every
-        answer was rejected. It is optional data retention/marketing; the owner policy opts out."""
+        answer was rejected. It is optional data retention/marketing; opted out unless the profile's
+        answer_rules.join_talent_communities says otherwise."""
         label = str(f.get("label", ""))
         if not re.search(
             r"\bopt[ -]?in\b.{0,60}\bopt[ -]?out\b|keep my (?:data|information|details|profile|cv|resume) on file|"
@@ -1678,16 +1665,21 @@ class Resolver:
             re.I,
         ):
             return None
+        join = self.answer_rules.join_talent_communities
         options = [str(o) for o in f.get("options") or []]
         if options:
-            no = [o for o in options if re.match(r"\s*(?:no\b|i do not|i don.t|opt[ -]?out)", o, re.I)]
-            if len(no) != 1:
+            wanted = r"\s*(?:yes\b|i agree|i do|opt[ -]?in)" if join else r"\s*(?:no\b|i do not|i don.t|opt[ -]?out)"
+            picked = [o for o in options if re.match(wanted, o, re.I)]
+            if len(picked) != 1:
                 return None
-            value = no[0]
+            value = picked[0]
         elif f.get("type") in {"text", "textarea"}:
-            value = "NO" if re.search(r"'?\bNO\b'?\s+to opt", label) else "No"
+            if join:
+                value = "YES" if re.search(r"'?\bYES\b'?\s+to opt", label) else "Yes"
+            else:
+                value = "NO" if re.search(r"'?\bNO\b'?\s+to opt", label) else "No"
         elif f.get("type") == "checkbox":
-            value = "false"
+            value = "true" if join else "false"
         else:
             return None
         return Answer(
@@ -1695,7 +1687,7 @@ class Resolver:
             value=value,
             disposition="answer",
             evidence_ids=["policy:marketing"],
-            reason="Optional talent-pool data retention declined under the owner policy",
+            reason="Optional talent-pool data retention " + ("accepted" if join else "declined") + " under the profile's rule",
         )
 
     def repair_override(self, f):
@@ -2217,6 +2209,7 @@ class Resolver:
                 )
         if (
             p.autonomous
+            and self.answer_rules.salary_stance.strip()
             and re.search(r"desired|expected|expectations?|requirements?|preferred", label)
             and re.search(r"salary|compensation|pay", label)
             and not NOT_DESIRED.search(f["label"])
@@ -2225,7 +2218,7 @@ class Resolver:
             and f.get("type") in {"text", "textarea"}
             and not options
         ):
-            return self._ans(f, "Negotiable", ["policy:compensation_choice"])
+            return self._ans(f, self.answer_rules.salary_stance.strip(), ["policy:compensation_choice"])
         if (
             re.search(r"\b(?:full |complete )?legal (?:full )?name\b", label)
             and not re.search(
@@ -2489,7 +2482,7 @@ class Resolver:
             and options
             and not f.get("options_partial")
         ):
-            if value := source_choice(options):
+            if value := source_choice(options, self.answer_rules):
                 return Answer(
                     field_id=f["id"], value=value, evidence_ids=["policy:source"], disposition="answer"
                 )
@@ -2539,7 +2532,7 @@ class Resolver:
             if value is None:
                 # Owner policy: any listed source (LinkedIn, company website, careers page,
                 # ZipRecruiter, Indeed, internet search, ...) is a true answer.
-                value = source_choice(options)
+                value = source_choice(options, self.answer_rules)
             if value is not None:
                 return Answer(
                     field_id=f["id"], value=value, evidence_ids=["policy:source"], disposition="answer"
@@ -3071,14 +3064,14 @@ class Resolver:
             sharing,
             re.I,
         ):
-            # Owner policy: no optional marketing or data sharing. Qualcomm (Eightfold) 2026-10-14:
+            # No optional marketing or data sharing unless the profile joins talent communities. Qualcomm (Eightfold) 2026-10-14:
             # "ANY ROLES GLOBALLY ... Talent Community" vs "ONLY THE ROLE I AM APPLYING FOR".
             narrow = [
                 o
                 for o in options
                 if re.search(r"\bonly\b.{0,40}(?:role|position|job|requisition)", str(o), re.I)
             ]
-            if len(narrow) == 1:
+            if len(narrow) == 1 and not self.answer_rules.join_talent_communities:
                 return narrow[0]
         p = self.profile
         from . import phone_fields
@@ -3106,7 +3099,7 @@ class Resolver:
         if topic(label) == "source" or INTENT_SOURCE.search(label):
             if p.application_source and (hit := option_value(p.application_source, options)):
                 return hit
-            return source_choice(options)
+            return source_choice(options, self.answer_rules)
         if (
             re.search(r"\bcity\b|^location$|^location \(city\)|current location", label, re.I)
             and p.address.city
@@ -3133,7 +3126,7 @@ class Resolver:
                 return hit
             if entry.field_of_study and (hit := major_part(entry.field_of_study, options)):
                 return hit
-            return first_matching(options, MAJOR_FALLBACK)
+            return first_matching(options, major_patterns(self.answer_rules.major_fallback))
         if EDUCATION["degree"].search(label):
             if entry is None:
                 ranks = ["doctor", "master", "bachelor"]
@@ -3790,23 +3783,7 @@ class Resolver:
             )
         if self.profile.application_source:
             facts["fact:application_source_policy"] = self.profile.application_source
-        if self.profile.autonomous:
-            facts["fact:travel_percentage_choice_policy"] = (
-                "Applicant is open to travel and delegates willingness preferences. For a travel "
-                "percentage question, choose an offered percentage consistent with the role, "
-                "using its stated travel requirement where available. This is willingness, not prior travel history."
-            )
-            facts["fact:compensation_choice_policy"] = (
-                "The applicant delegates desired compensation preferences to the agent. "
-                "Prefer negotiable when offered; otherwise choose a reasonable offered range "
-                "using the role's posted pay range and career level. This does not establish "
-                "current or past salary, which must never be invented."
-            )
-            facts["fact:application_role_type_policy"] = (
-                "The applicant is pursuing full-time early-career employment. Infer this application's "
-                "full-time versus internship status from the job title and description. "
-                "Applying for a full-time role is distinct from currently being employed full-time."
-            )
+        facts.update(delegated_facts(self.answer_rules, self.profile.autonomous))
         evidence = {"evidence:" + e.id: e.text for e in self.profile.evidence}
         if self.resume_text:
             evidence["resume:selected"] = self.resume_text[:12000]
@@ -3860,6 +3837,15 @@ class Resolver:
                         "reason": "Knowledge inference was unavailable; retrying before asking the applicant",
                     }
                 )
+
+    def salary_prompt(self):
+        stance = self.answer_rules.salary_stance.strip()
+        if self.profile.autonomous and stance:
+            return (
+                f"Desired compensation is a delegated preference: answer {stance} for free text, or "
+                "choose a reasonable annual amount within the posted range when a number is required. "
+            )
+        return "Desired compensation is stated only by a saved salary expectation; never invent one. "
 
     async def _resolve(self, fields, *, use_local=True):
         resolved, pending = [], []
@@ -4050,9 +4036,8 @@ class Resolver:
                 "rather than paraphrasing a catalog entry. An option_index also represents one selected "
                 "checkboxgroup/multi-select member; use newline-separated value for multiple members. "
                 "Never use an index for free text. "
-                "Desired compensation is a delegated preference: answer Negotiable for free text, or "
-                "choose a reasonable annual amount within the posted range when a number is required. "
-                "A numeric input needs digits only, never a currency symbol or Negotiable. "
+                + self.salary_prompt()
+                + "A numeric input needs digits only, never a currency symbol or prose. "
                 "Relocation preferences apply only to geographic choices, never to eligibility or visa options. "
                 "For date_parts use YYYY-MM-DD when date_parts includes day, otherwise YYYY-MM. "
                 "Return a single date, not prose or a date range. For an expiry question, interpret "

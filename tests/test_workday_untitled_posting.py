@@ -31,6 +31,6 @@ async def test_untitled_workday_row_is_skipped(monkeypatch):
     monkeypatch.setattr(jobboard, "fetch", fetch)
     source = {"url": "https://tenant.wd5.myworkdayjobs.com/External", "kind": "workday", "name": "Tenant"}
     profile = Profile(target_roles=["Machine Learning Engineer"], skills=["Python"])
-    posts, seen, _complete, errors = await jobboard.read_feed(source, profile, None, datetime.now(UTC))
+    posts, seen, _complete, errors = await jobboard.read_feed(source, profile, jobboard.BoardSettings(), datetime.now(UTC))
     assert [p.title for p in posts] == ["Machine Learning Engineer I"]
     assert errors >= 1  # the untitled row is counted, so the feed is not treated as complete

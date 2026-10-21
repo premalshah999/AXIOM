@@ -152,6 +152,7 @@ export type Profile = {
   evidence: { id: string; text: string }[];
   target_roles: string[];
   job_priority: "new_grad_first" | "best_fit_first";
+  include_internships?: boolean;
   target_locations: string[];
   excluded_keywords: string[];
   minimum_fit: number;
@@ -175,6 +176,13 @@ export type DemographicRule = {
 };
 export type AnswerRules = {
   education: EducationStep[];
+  major_fallback: string;
+  source_order: string[];
+  source_any_channel: boolean;
+  salary_stance: string;
+  travel_willingness: string;
+  employment_type_sought: string;
+  join_talent_communities: boolean;
   demographics: Record<string, DemographicRule>;
   guest_apply_first: boolean;
   open_agreement_links: boolean;

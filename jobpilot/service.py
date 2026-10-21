@@ -46,6 +46,9 @@ class Service:
         self.mail = MailService(db, config)
         self.inbox = Inbox(self)
         self.migrate_reviewed_answers()
+        from .grandfather import grandfather_preferences
+
+        grandfather_preferences(db)
         self.migrate_legacy()
         self.relabel_custom_ats()
         from .features._store import create_tables
@@ -320,10 +323,10 @@ class Service:
 
                 if profile.target_roles and not matching_role(job.title, profile.target_roles):
                     raise QueueBlocked("Outside the profile's target roles", code="target_role")
-                if INTERN.search(job.title):
+                if INTERN.search(job.title) and not profile.include_internships:
                     raise QueueBlocked("Internships are excluded from application discovery", code="internship")
                 board = self.db.get_setting("job_board_settings", {}) or {}
-                if board.get("early_career_only", True) and SENIOR.search(job.title):
+                if board.get("early_career_only", False) and SENIOR.search(job.title):
                     raise QueueBlocked("Outside the saved career-level policy", code="seniority")
             from .pipeline_comparison import routed_pool
             from .specialist import pool_boost

@@ -20,25 +20,34 @@ class Session:
 
 
 def test_uncertain_submission_is_retried_after_receipt_window():
-    assert unknown_resubmit_allowed(Session(), [run("waiting_browser"), run("submission_unknown")], NOW)
+    assert unknown_resubmit_allowed(
+        Session({"enabled": True}), [run("waiting_browser"), run("submission_unknown")], NOW
+    )
 
 
 def test_retry_waits_for_receipt_window_and_is_bounded():
-    assert not unknown_resubmit_allowed(Session(), [run("submission_unknown", minutes_ago=5)], NOW)
+    assert not unknown_resubmit_allowed(Session({"enabled": True}), [run("submission_unknown", minutes_ago=5)], NOW)
     three = [run("submission_unknown")] * 3
-    assert not unknown_resubmit_allowed(Session(), three, NOW)
-    assert unknown_resubmit_allowed(Session({"max_resubmits": 5}), three, NOW)
+    assert not unknown_resubmit_allowed(Session({"enabled": True}), three, NOW)
+    assert unknown_resubmit_allowed(Session({"enabled": True, "max_resubmits": 5}), three, NOW)
 
 
 def test_screenshot_confirmed_jobs_are_never_resubmitted():
     marked = run("submission_unknown")
     marked.job_id = "job1"
-    assert not unknown_resubmit_allowed(Session({"verdict": "submitted"}), [marked], NOW)
+    assert not unknown_resubmit_allowed(Session({"enabled": True, "verdict": "submitted"}), [marked], NOW)
 
 
 def test_confirmed_or_receipted_jobs_are_never_resubmitted():
-    assert not unknown_resubmit_allowed(Session(), [run("submission_unknown"), run("confirmed")], NOW)
+    assert not unknown_resubmit_allowed(Session({"enabled": True}), [run("submission_unknown"), run("confirmed")], NOW)
     assert not unknown_resubmit_allowed(
         Session(), [run("submission_unknown", receipt={"email_confirmed": True})], NOW
     )
     assert not unknown_resubmit_allowed(Session({"enabled": False}), [run("submission_unknown")], NOW)
+
+
+def test_resubmission_is_off_unless_the_installation_enables_it():
+    unknown = [run("submission_unknown")]
+    assert not unknown_resubmit_allowed(Session(), unknown, NOW)
+    assert not unknown_resubmit_allowed(Session({"max_resubmits": 2}), unknown, NOW)
+    assert unknown_resubmit_allowed(Session({"enabled": True}), unknown, NOW)

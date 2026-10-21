@@ -27,7 +27,7 @@ from .widgets import US_STATES
 class BoardSettings(BaseModel):
     enabled: bool = True
     interval_hours: Literal[1, 2, 3, 6] = 2
-    early_career_only: bool = True
+    early_career_only: bool = False  # A setup choice; see Setup › Job board.
     web_search: bool = True
     auto_apply: bool = False
     batch_target: int = Field(default=100, ge=1, le=500)
@@ -136,7 +136,7 @@ def us_location(location, country=""):
 def role_matches(title, description, profile):
     if any(re.search(r"\b" + re.escape(x) + r"\b", title, re.I) for x in profile.excluded_keywords if x):
         return False
-    if re.search(r"\bintern(?:ship)?\b", title, re.I):
+    if not profile.include_internships and re.search(r"\bintern(?:ship)?\b", title, re.I):
         return False
     from .features.discovery.roles import matching_role
 
@@ -192,7 +192,9 @@ def candidate_title(title, profile):
 def screen(post, profile, settings):
     if not us_location(post.location, post.country):
         return None, "non_us_or_unknown"
-    if SENIOR.search(post.title) or not role_matches(post.title, post.description, profile):
+    if (settings.early_career_only and SENIOR.search(post.title)) or not role_matches(
+        post.title, post.description, profile
+    ):
         return None, "role_or_seniority"
     years = []
     for match in YEARS.finditer(post.description):
@@ -348,7 +350,7 @@ async def read_feed(source, profile, cfg, at):
             post = Posting(link, j["title"], company, j.get("location", {}).get("name", ""))
             if (
                 us_location(post.location)
-                and not SENIOR.search(post.title)
+                and not (cfg.early_career_only and SENIOR.search(post.title))
                 and candidate_title(post.title, profile)
             ):
                 candidates.append((j, post))
@@ -403,7 +405,7 @@ async def read_feed(source, profile, cfg, at):
                 if (
                     fresh(post.posted, at, cfg.max_age_hours)
                     and us_location(post.location, post.country)
-                    and not SENIOR.search(post.title)
+                    and not (cfg.early_career_only and SENIOR.search(post.title))
                     and candidate_title(post.title, profile)
                 ):
                     try:
@@ -453,7 +455,7 @@ async def read_feed(source, profile, cfg, at):
                     if not title:
                         detail_errors += 1
                         continue
-                    if SENIOR.search(title) or not candidate_title(title, profile):
+                    if (cfg.early_career_only and SENIOR.search(title)) or not candidate_title(title, profile):
                         continue
                     if not re.search(
                         r"Posted (?:Today|Yesterday|[1-7] Days? Ago)", j.get("postedOn", ""), re.I

@@ -60,9 +60,10 @@ def test_offered_supported_source_still_commits_without_model_interpretation(ser
     assert answer.evidence_ids == ["policy:source"]
 
 
-def test_absent_source_uses_owner_source_list(service):
-    # Owner policy 2026-10-13: any listed source (LinkedIn, company website, ...) is a true answer.
-    resolver = Resolver(Profile(), service.db, service.config)
+def test_absent_source_uses_profile_source_list(service):
+    # A profile's own source order (answer_rules.source_order): a listed channel is a true answer.
+    rules = {"source_order": ["linkedin", "company website"], "source_any_channel": True}
+    resolver = Resolver(Profile(answer_rules=rules), service.db, service.config)
     assert resolver.local(field(["LinkedIn", "Employee Referral"])).value == "LinkedIn"
     assert resolver.local(field(["Employee Referral", "Agency"])) is None
 

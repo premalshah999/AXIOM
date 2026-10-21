@@ -22,6 +22,7 @@ def _unknown(service, n, minutes_ago, page=None):
 
 
 async def test_uncertain_applications_are_resubmitted_only_without_a_confirmation(service, monkeypatch):
+    service.db.set_setting("unknown_resubmit_policy", {"enabled": True})  # Off unless the installation enables it.
     _unknown(service, 1, 120, "Apply for Data Scientist\nFirst Name\nSubmit application")
     _unknown(service, 2, 120, "Thank you for applying! We have received your application.")
     _unknown(service, 3, 120)  # No saved final page.

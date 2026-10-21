@@ -44,9 +44,81 @@ class AnswerRules(BaseModel):
 
     # Degree, major and school when the recorded value is not offered.
     education: list[EducationStep] = Field(default_factory=lambda: ["closest", "pick3", "other", "ask"])
+    # A major to choose when a form's list lacks the recorded one (for example "Computer Science"). Empty: none.
+    major_fallback: str = Field(default="", max_length=100)
+    # "How did you hear about us" when the profile's own source is not offered: channels in order of preference
+    # (linkedin, company website, ziprecruiter, indeed, internet search, job board, glassdoor, social media, or any
+    # other name, matched as a word). Empty: none is chosen and the applicant is asked.
+    source_order: list[str] = Field(default_factory=list, max_length=20)
+    # What the applicant states about themselves where an application asks a preference. Empty: nothing is claimed
+    # and a question that needs one goes to the applicant. Used only when the profile applies autonomously.
+    salary_stance: str = Field(default="", max_length=60)  # desired pay, free text (for example "Negotiable")
+    travel_willingness: str = Field(default="", max_length=100)  # for example "open to travel"
+    employment_type_sought: str = Field(default="", max_length=100)  # for example "full-time early-career employment"
+    # Opt in to talent communities and "keep my data on file for other roles" asks. False (the default) declines.
+    join_talent_communities: bool = False
+    source_any_channel: bool = False  # After the list, accept any offered channel that claims no relationship.
     demographics: dict[str, DemographicRule] = Field(default_factory=dict)
     guest_apply_first: bool = True  # "Apply without an account" before sign-in or sign-up.
     open_agreement_links: bool = True  # Open documents an agreement asks to review before accepting.
+
+
+def major_patterns(name) -> tuple:
+    """Patterns for an offered major that is, or contains, the fallback major; none when no fallback is set."""
+    name = " ".join(str(name or "").split())
+    if not name:
+        return ()
+    return (re.compile(rf"^{re.escape(name)}$", re.I), re.compile(rf"\b{re.escape(name)}\b", re.I))
+
+
+def delegated_facts(rules, autonomous) -> dict:
+    """The delegated-preference facts a model answer may cite; one per stated preference, none for a blank one."""
+    facts = {}
+    if not autonomous:
+        return facts
+    if travel := rules.travel_willingness.strip():
+        facts["fact:travel_percentage_choice_policy"] = (
+            f"Applicant is {travel} and delegates willingness preferences. For a travel percentage question, choose "
+            "an offered percentage consistent with the role, using its stated travel requirement where available. "
+            "This is willingness, not prior travel history."
+        )
+    if salary := rules.salary_stance.strip():
+        facts["fact:compensation_choice_policy"] = (
+            f"The applicant delegates desired compensation preferences to the agent, stating: {salary}. "
+            f"Prefer {salary.lower()} when offered; otherwise choose a reasonable offered range "
+            "using the role's posted pay range and career level. This does not establish "
+            "current or past salary, which must never be invented."
+        )
+    if kind := rules.employment_type_sought.strip():
+        facts["fact:application_role_type_policy"] = (
+            f"The applicant is pursuing {kind}. Infer this application's "
+            "full-time versus internship status from the job title and description. "
+            "Applying for a full-time role is distinct from currently being employed full-time."
+        )
+    return facts
+
+
+SOURCE_CHANNELS = {
+    "linkedin": r"\blinked\s?in\b",
+    "company website": r"company(?:'s)? (?:web ?site|careers?)|careers? (?:page|site|web ?site)|"
+    r"corporate (?:web ?site|careers?)|(?:our|employer) (?:web ?site|careers?)|career portal",
+    "ziprecruiter": r"\bzip\s?recruiter\b",
+    "indeed": r"\bindeed\b",
+    "internet search": r"internet|online search|web search|search engine|\bgoogle\b|\bonline\b",
+    "job board": r"job (?:board|site|posting|search (?:site|engine))s?",
+    "glassdoor": r"\bglassdoor\b",
+    "social media": r"social (?:media|network)|professional network",
+}
+
+
+def source_patterns(order) -> tuple:
+    """Patterns for the profile's source channels, in order; a name outside the known channels matches as a word."""
+    patterns = []
+    for name in order or ():
+        name = " ".join(str(name or "").split()).casefold()
+        if name:
+            patterns.append(re.compile(SOURCE_CHANNELS.get(name) or rf"\b{re.escape(name)}\b", re.I))
+    return tuple(patterns)
 
 
 def rules_for(profile) -> AnswerRules:
