@@ -33,11 +33,11 @@ def test_a_rule_needs_a_connected_mailbox_and_exact_sender_domains(client, servi
 
 
 def test_cancelling_a_challenge_that_is_not_waiting_is_a_400(client):
-    assert client.post("/api/mail-challenges/unknown/cancel").status_code == 400
+    assert client.post("/api/mail-challenges/unknown/cancel", json={}).status_code == 400
 
 
 def test_starting_google_sign_in_without_a_client_id_is_a_400(client):
-    answer = client.post("/api/mail/connect")
+    answer = client.post("/api/mail/connect", json={})
     assert answer.status_code == 400 and "GOOGLE_CLIENT_ID" in answer.json()["detail"]
 
 
@@ -56,5 +56,5 @@ def test_the_oauth_callback_is_public_because_the_browser_returns_from_google_wi
 
 
 def test_the_inbox_check_needs_the_env_mailbox(client):
-    answer = client.post("/api/inbox/check")
+    answer = client.post("/api/inbox/check", json={})
     assert answer.status_code == 400 and "GMAIL_ADDRESS" in answer.json()["detail"]

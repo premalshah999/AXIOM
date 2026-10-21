@@ -31,12 +31,14 @@ def test_the_address_and_its_facts_stay_in_step(client, service):
 
 
 def test_propose_history_needs_an_uploaded_resume(client):
-    answer = client.post("/api/profile/extract")
+    answer = client.post("/api/profile/extract", json={})
     assert answer.status_code == 400 and answer.json() == {"detail": "Upload a resume first"}
 
 
-def test_organize_without_evidence_answers(client, service):
-    assert client.post("/api/profile/organize").status_code in {200, 400}
+def test_organizing_evidence_without_a_model_key_is_a_409(client):
+    # A RuntimeError in a handler is a 409 with the message (the shared error mapping).
+    answer = client.post("/api/profile/organize", json={})
+    assert answer.status_code == 409 and "no API key" in answer.json()["detail"]
 
 
 def test_upload_list_download_and_delete_a_resume(client, resume_pdf):

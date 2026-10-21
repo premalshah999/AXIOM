@@ -34,7 +34,7 @@ def test_editing_an_unknown_source_is_404(client):
 
 
 def test_scan_now_needs_a_known_source_and_workers(client):
-    assert client.post("/api/sources/unknown/discover").status_code == 404
+    assert client.post("/api/sources/unknown/discover", json={}).status_code == 404
     source = client.post("/api/sources", json=SOURCE).json()
-    answer = client.post(f"/api/sources/{source['id']}/discover")
+    answer = client.post(f"/api/sources/{source['id']}/discover", json={})
     assert answer.status_code == 400 and answer.json() == {"detail": "Workers are disabled"}

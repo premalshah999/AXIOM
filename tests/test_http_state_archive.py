@@ -32,7 +32,7 @@ def test_archiving_failed_applications_moves_them_to_the_archive_with_a_log(clie
     failed, confirmed = seed_job(service, 1), seed_job(service, 2)
     seed_run(service, failed, state="failed", reason="Employer closed the posting")
     seed_run(service, confirmed, state="confirmed")
-    result = client.post("/api/archive/failed").json()
+    result = client.post("/api/archive/failed", json={}).json()
     assert result["archived"] == 1 and result["log_bytes"] > 0
     listed = client.get("/api/archive").json()
     assert [a["job_id"] for a in listed["applications"]] == [failed]

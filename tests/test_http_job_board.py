@@ -53,7 +53,7 @@ def test_board_settings_reject_an_interval_outside_the_choices(client):
 
 def test_scan_apply_and_batch_need_workers(client):
     for call in (
-        client.post("/api/job-board/scrape"),
+        client.post("/api/job-board/scrape", json={}),
         client.post("/api/job-board/apply", json={"job_ids": ["one"]}),
         client.post("/api/job-board/autopilot/start", json={"target": 10}),
     ):

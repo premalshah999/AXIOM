@@ -46,8 +46,8 @@ def test_only_a_queued_run_can_be_cancelled(client, service):
     job_id = seed_job(service)
     queued = seed_run(service, job_id, state="queued")
     running = seed_run(service, seed_job(service, 2), state="running")
-    assert client.post(f"/api/runs/{running}/cancel").status_code == 400
-    assert client.post(f"/api/runs/{queued}/cancel").json() == {"cancelled": True}
+    assert client.post(f"/api/runs/{running}/cancel", json={}).status_code == 400
+    assert client.post(f"/api/runs/{queued}/cancel", json={}).json() == {"cancelled": True}
     with service.db.session() as s:
         assert s.get(Run, queued).state == "cancelled"
         assert s.get(Job, job_id).status == "cancelled"
@@ -73,9 +73,9 @@ def test_reconcile_records_that_the_application_was_not_submitted(client, servic
 
 
 def test_verify_without_a_retained_draft_is_404_or_409(client, service):
-    assert client.post("/api/runs/unknown/verify").status_code == 404
+    assert client.post("/api/runs/unknown/verify", json={}).status_code == 404
     run_id = seed_run(service, seed_job(service), state="failed")
-    assert client.post(f"/api/runs/{run_id}/verify").status_code in {404, 409}
+    assert client.post(f"/api/runs/{run_id}/verify", json={}).status_code in {404, 409}
 
 
 def test_an_answer_must_not_be_empty(client):
@@ -88,4 +88,4 @@ def test_answering_an_unknown_review_is_a_client_error(client):
 
 
 def test_the_receipt_check_for_an_unknown_run_is_not_a_server_error(client):
-    assert client.post("/api/runs/unknown/check-email").status_code < 500
+    assert client.post("/api/runs/unknown/check-email", json={}).status_code < 500

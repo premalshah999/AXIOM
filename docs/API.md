@@ -269,8 +269,8 @@ Phase B added a contract test module for each router, one file per area (`tests/
 `tests/support_http.py`): health, session, request security (sign-in, Origin, content type, headers, error mapping), jobs, runs,
 the ledger and archive, profile and resumes, settings, sources, legacy knowledge and employer accounts and sessions, the demo
 and dashboard fallback, mail rules and OAuth, the job board and the three `/api/v2` routers. A literal-path scan of the
-tests finds @@COVERED@@ of the 105 remaining routes called over HTTP. Not yet called over HTTP:
-@@UNTESTED@@. Add them before renaming anything: the tests are what makes the rename in section 5 safe.
+tests finds 94 of the 105 remaining routes called over HTTP. Not yet called over HTTP:
+`POST /api/v2/discovery/feeds/refresh` and the `/api/v2/resumes` write routes (`PUT master`, `master/import`, `master/{id}/approve`, `prepare`, `artifacts/{id}/cancel`, `artifacts/{id}/pdf`, `editor/document`, `editor/render`, `editor/compile`, `editor/save`), which need the LaTeX toolchain or a model. Add them before renaming anything: the tests are what makes the rename in section 5 safe.
 
 ## 5. Proposed route design
 

@@ -554,7 +554,7 @@ application, and the AST of every moved function):
 |---|---|
 | `api.py` | `api/` package: `app.py` (factory), `middleware.py`, `lifespan.py`, `snapshot.py` (`SnapshotCache`, `build_snapshot`) and 17 router modules. `mail_api.py` and `jobboard_api.py` became `routes/mail.py` and `routes/job_board.py`; the account routes left `owner_account.py` for `routes/owner.py`. Every path, method, auth rule, request and response is unchanged |
 | dead routes | Four routes with no caller were deleted (section 14) |
-| HTTP tests | One test module per router (`tests/test_http_*.py`), 28 more routes covered over HTTP |
+| HTTP tests | One test module per router (`tests/test_http_*.py`); 94 of the 105 routes are now called over HTTP (20 of 109 before) |
 | `service.py` | `service/` package: `Service` assembled from five mixins plus `states.py` |
 | `answers.py` | `answers/` package: eight pattern modules, `Resolver` assembled from eight mixins |
 

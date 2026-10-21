@@ -26,7 +26,7 @@ def test_the_right_token_sets_a_session_cookie_that_opens_the_api(app, config):
 def test_logout_clears_the_cookie(app, config):
     web = anonymous(app, config)
     web.post("/api/login", json={"token": config.app_token})
-    answer = web.post("/api/logout")
+    answer = web.post("/api/logout", json={})
     assert answer.status_code == 200 and answer.json() == {"ok": True}
     assert web.get("/api/control").status_code == 401
 
