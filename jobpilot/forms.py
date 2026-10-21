@@ -88,6 +88,28 @@ ICIMS_HOST = re.compile(r"^https://[^/]*\.icims\.com/", re.I)
 ICIMS_RENAMED_RESUME = re.compile(r"\bResume\d{12}\.(?:pdf|docx?)\b")
 
 
+# Select exactly the options with these labels in a native <select multiple>, then fire input and change.
+SELECT_LABELS_JS = """(e, labels) => {
+  const wanted = new Set(labels.map(l => l.trim().toLowerCase()));
+  for (const o of e.options) o.selected = wanted.has(o.text.trim().toLowerCase());
+  e.dispatchEvent(new Event('input', {bubbles: true}));
+  e.dispatchEvent(new Event('change', {bubbles: true}));
+}"""
+
+
+SITE_SEARCH = re.compile(
+    r"(?:submit\s+)?search(?:\s+(?:jobs|careers|keywords?|the site|this site|our site|positions|openings))?|"
+    r"keywords?|job search|search by keyword",
+    re.I,
+)
+
+
+def site_search(field):
+    """A career site's search box (iPipeline's "Search", Iridium's hidden required "Submit search", 2026-10-19/21).
+    Read as a required application field it blocked the email step; it is never an application question."""
+    return field.get("type") in {"text", "search"} and bool(SITE_SEARCH.fullmatch(str(field.get("label", "")).strip()))
+
+
 def link_companion_text(fields):
     """iCIMS names a question's free-text companion "<question>_Text". ICE's "If applicable, please provide info."
     (rcf3169_Text) belongs to "Do you have any legal restrictions to working in the country where this position is
@@ -1057,6 +1079,8 @@ class FormSession:
                     item["id"] = f"f{n}-{data['document_id']}-{item['id']}"
                     item["frame_url"] = frame.url
                     item["member_ids"] = item.pop("members", [])
+                    if kind == "fields" and site_search(item):
+                        continue  # The career site's own search box is never an application question.
                     self.frames[item["id"]] = frame
                     getattr(self, kind)[item["id"]] = item
             try:
@@ -1946,8 +1970,14 @@ class FormSession:
                 raise ValueError("Checkbox answer is no longer present")
         elif kind == "select-multiple":
             choices = [v.strip() for v in str(value).splitlines() if v.strip()]
-            await el.select_option([{"label": v} for v in choices], timeout=4000)
-            committed = "\n".join(await el.evaluate("e=>[...e.selectedOptions].map(o=>o.text)"))
+            try:
+                await el.select_option([{"label": v} for v in choices], timeout=4000)
+            except Exception:
+                # iCIMS's EEO "Race (EEO)" (iCIMS_Forms_MultiSelect) refused select_option on every attempt and the
+                # page answered "Race (EEO): required" (Liberty Mutual 2026-10-21). Select the same labelled options in
+                # the page and announce the change; the readback below still decides.
+                await el.evaluate(SELECT_LABELS_JS, choices)
+            committed = "\n".join(await el.evaluate("e=>[...e.selectedOptions].map(o=>o.text.trim())"))
         elif kind == "select":
             committed = await widgets.select(el, value, field.get("widget", ""))
         elif kind == "radio":
