@@ -468,6 +468,21 @@ class NetworkMonitor:
             self.last = time.monotonic()
             self._journal(request, started)
 
+    def pending(self, limit=3):
+        """What keeps the transport busy right now, value-free: 'METHOD host path' of the requests that quiet()
+        counts, newest first. Diagnoses a readiness wait that ran to its deadline."""
+        now = time.monotonic()
+        counted = [
+            (t, request)
+            for request, t in self.inflight.items()
+            if request.resource_type == "document" or now - t < 4
+        ]
+        rows = []
+        for _, request in sorted(counted, key=lambda item: -item[0])[:limit]:
+            parts = urlsplit(request.url)
+            rows.append(f"{request.method} {(parts.hostname or '')[:60]}{TOKEN_SEGMENT.sub('[token]', parts.path)[:100]}")
+        return rows
+
     def quiet(self, period=0.3):
         # Ignore old background polling, but a document request can still replace
         # every observed control (for example, iCIMS resume parsing). The caller's
@@ -478,6 +493,55 @@ class NetworkMonitor:
         ]
         return not recent and now - self.last >= period
 
+
+# Renderer-side readiness wait. One protocol call holds until the frame has been free of meaningful mutations for
+# `quiet` seconds and shows no loading indicator, or `budget` seconds pass; it answers whether the frame is still busy.
+# Polling from Python cost one call per frame every 0.1 s, and each call waits for a busy renderer on the shared worker
+# Chrome. The timers run in the page, which the host Chrome keeps unthrottled (--disable-background-timer-throttling).
+SETTLE_JS = """async ({quiet, budget}) => {
+  if (!window.__jpRenderQuiet) {
+    const state = {changed: performance.now()};
+    // Hidden templates, telemetry nodes and decorative text ticks do not
+    // change the form. Waiting for their silence burns every step's timeout.
+    const semantic = 'input,select,textarea,button,a,label,legend,option,h1,h2,h3,' +
+      '[contenteditable=true],[role=button],[role=combobox],[role=listbox],' +
+      '[role=option],[role=dialog],[role=alert],[role=heading],[aria-busy]';
+    const element = n => n.nodeType === Node.ELEMENT_NODE ? n : n.parentElement;
+    const ignored = n => {
+      const e = element(n);
+      if (!e || e.closest('head,script,style,template,[hidden],[aria-hidden=true]')) return true;
+      return getComputedStyle(e).display === 'none' || getComputedStyle(e).visibility === 'hidden';
+    };
+    const meaningful = r => {
+      const target = element(r.target);
+      // Showing/hiding a container changes its live controls even when
+      // the mutation's target is now hidden.
+      if (r.type === 'attributes' && r.attributeName === 'hidden') return true;
+      if (ignored(r.target)) return false;
+      if (r.type === 'attributes' || target?.closest(semantic)) return true;
+      return r.type === 'childList' && [...r.addedNodes, ...r.removedNodes].some(n => {
+        const e = element(n);
+        return e && !e.matches('script,style,template') &&
+          (e.matches(semantic) || !!e.querySelector(semantic));
+      });
+    };
+    new MutationObserver(records => {
+      if (records.some(meaningful)) state.changed = performance.now();
+    }).observe(document.documentElement, {subtree:true,childList:true,characterData:true,attributes:true,
+      attributeFilter:['hidden','disabled','aria-busy','aria-invalid','aria-expanded','value','checked']});
+    window.__jpRenderQuiet = state;
+  }
+  const isLoading = () => document.readyState !== 'complete' && document.readyState !== 'interactive' ||
+    [...document.querySelectorAll('[aria-busy=true],[data-automation-id="loadingSpinner"],.oj-progress-circle,.spinner,.loading-spinner,.loader')]
+    .some(e => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden');
+  const end = performance.now() + budget * 1000;
+  for (;;) {
+    const now = performance.now();
+    if (!isLoading() && now - window.__jpRenderQuiet.changed >= quiet * 1000) return false;
+    if (now >= end) return true;
+    await new Promise(resolve => setTimeout(resolve, 40));
+  }
+}"""
 
 CONSENT_ACTION = re.compile(r"submit|continue|accept|agree|ok", re.I)
 
@@ -1477,72 +1541,42 @@ class FormSession:
         finally:
             elapsed = time.monotonic() - started
             if elapsed >= 1 and hasattr(self, "emit"):
-                self.emit("settle_timing", "Application readiness wait", {
-                    "seconds": round(elapsed, 2), "settled": settled,
-                    "network_busy": bool(self.network and not self.network.quiet(quiet)),
-                })
+                busy = bool(self.network and not self.network.quiet(quiet))
+                details = {"seconds": round(elapsed, 2), "settled": settled, "network_busy": busy}
+                if not settled:
+                    # What the wait ended on, so a deadline that was hit says whether the page or the site held it.
+                    details["held_by"] = self.__dict__.get("settle_held_by", "")
+                    if busy:
+                        details["requests"] = self.network.pending()
+                self.emit("settle_timing", "Application readiness wait", details)
 
     async def _settle(self, timeout, quiet):
-        """Wait for rendering and transport to settle before trusting a read-back."""
+        """Wait for rendering and transport to settle before trusting a read-back.
+
+        Transport is watched in Python (no protocol calls while the site's own requests are in flight); rendering is
+        watched in the page, one call per frame. Both must be quiet at the same moment: a request that starts while
+        the page waited is caught by the check that follows it."""
         deadline = time.monotonic() + timeout
-        stable = 0
         frames = await self.application_frames()
+        self.settle_held_by = ""
         while time.monotonic() < deadline:
+            if self.network is not None and not self.network.quiet(quiet):
+                self.settle_held_by = "network"
+                await asyncio.sleep(0.05)
+                continue
             try:
+                budget = max(0.05, deadline - time.monotonic())
+                self.settle_held_by = "page"  # Provisional: the deadline can arrive while the page still waits.
                 states = await asyncio.gather(
-                    *(
-                        frame.evaluate(
-                            """quiet => {
-                      if (!window.__jpRenderQuiet) {
-                        const state = {changed: performance.now()};
-                        // Hidden templates, telemetry nodes and decorative text ticks do not
-                        // change the form. Waiting for their silence burns every step's timeout.
-                        const semantic = 'input,select,textarea,button,a,label,legend,option,h1,h2,h3,' +
-                          '[contenteditable=true],[role=button],[role=combobox],[role=listbox],' +
-                          '[role=option],[role=dialog],[role=alert],[role=heading],[aria-busy]';
-                        const element = n => n.nodeType === Node.ELEMENT_NODE ? n : n.parentElement;
-                        const ignored = n => {
-                          const e = element(n);
-                          if (!e || e.closest('head,script,style,template,[hidden],[aria-hidden=true]')) return true;
-                          return getComputedStyle(e).display === 'none' || getComputedStyle(e).visibility === 'hidden';
-                        };
-                        const meaningful = r => {
-                          const target = element(r.target);
-                          // Showing/hiding a container changes its live controls even when
-                          // the mutation's target is now hidden.
-                          if (r.type === 'attributes' && r.attributeName === 'hidden') return true;
-                          if (ignored(r.target)) return false;
-                          if (r.type === 'attributes' || target?.closest(semantic)) return true;
-                          return r.type === 'childList' && [...r.addedNodes, ...r.removedNodes].some(n => {
-                            const e = element(n);
-                            return e && !e.matches('script,style,template') &&
-                              (e.matches(semantic) || !!e.querySelector(semantic));
-                          });
-                        };
-                        new MutationObserver(records => {
-                          if (records.some(meaningful)) state.changed = performance.now();
-                        }).observe(document.documentElement, {subtree:true,childList:true,characterData:true,attributes:true,
-                          attributeFilter:['hidden','disabled','aria-busy','aria-invalid','aria-expanded','value','checked']});
-                        window.__jpRenderQuiet = state;
-                      }
-                      const loading = document.readyState !== 'complete' && document.readyState !== 'interactive' ||
-                        [...document.querySelectorAll('[aria-busy=true],[data-automation-id="loadingSpinner"],.oj-progress-circle,.spinner,.loading-spinner,.loader')]
-                        .some(e => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden');
-                      return loading || performance.now() - window.__jpRenderQuiet.changed < quiet * 1000;
-                    }""",
-                            quiet,
-                        )
-                        for frame in frames
-                    )
+                    *(frame.evaluate(SETTLE_JS, {"quiet": quiet, "budget": budget}) for frame in frames)
                 )
                 busy = any(states)
             except Exception:
-                busy = True
-            idle = not busy and (self.network is None or self.network.quiet(quiet))
-            stable = stable + 1 if idle else 0
-            if stable >= 2:
+                busy = True  # A navigation destroyed the context; the next call observes the new document.
+                self.settle_held_by = "navigation"
+                await asyncio.sleep(0.1)
+            if not busy and (self.network is None or self.network.quiet(quiet)):
                 return True
-            await asyncio.sleep(0.1)
         return False
 
     def resume_fields(self):
