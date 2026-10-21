@@ -107,3 +107,22 @@ def test_uncued_links_stay_rejected_when_ambiguous_or_off_origin():
     assert extract_message(verify_mail(f'<a href="{off}">Here</a>'), TENANT_RULE, link_challenge()) is None
     # A code wait never takes an uncued link.
     assert extract_message(verify_mail(f'<a href="{one}">Here</a>'), TENANT_RULE, {**challenge(), "kind": "code"}) is None
+
+
+TRACKED_ACCOUNT = "https://tracking.icims.com/f/a/acct~~/AAAAAQA~/RgRverifyme"
+TRACKED_FOOTER = "https://tracking.icims.com/f/a/footer~~/AAAAAQA~/RgRprivacy"
+
+
+def test_the_one_tracked_non_footer_button_is_the_account_link():
+    """EBSCO 2026-10-21: "User account with EBSCO Information Services, LLC" linked only through tracking.icims.com,
+    with no verification wording; it was rejected as token_format on every poll."""
+    msg = verify_mail(f'<a href="{TRACKED_ACCOUNT}">Click here</a> <a href="{TRACKED_FOOTER}">Privacy Policy</a>',
+                      subject="User account with Acme Information Services, LLC")
+    assert extract_message(msg, TENANT_RULE, link_challenge()) == {"kind": "link", "value": TRACKED_ACCOUNT}
+
+
+def test_two_tracked_buttons_or_a_non_icims_rule_stay_rejected():
+    two = verify_mail(f'<a href="{TRACKED_ACCOUNT}">Here</a> <a href="{TRACKED_ACCOUNT}2">There</a>')
+    assert extract_message(two, TENANT_RULE, link_challenge()) is None
+    workday = {"sender_domains": ["icims.com"], "link_origins": ["https://acme.wd5.myworkdayjobs.com"]}
+    assert extract_message(verify_mail(f'<a href="{TRACKED_ACCOUNT}">Here</a>'), workday, link_challenge()) is None

@@ -6,6 +6,7 @@ from urllib.parse import urlsplit
 import base64
 import re
 from .helpers import origin
+from .senders import CLICK_TRACKERS
 from .senders import authenticated_sender
 from .senders import oracle_attributed
 from .senders import sender_allowed
@@ -48,6 +49,20 @@ UNBRANDED_SEARCH_TERMS = [
 
 
 UNBRANDED_MAX_CANDIDATES = 10
+
+
+FOOTER_TEXT = re.compile(
+    r"privacy|unsubscribe|terms|help|contact|faq|support|preferences|opt.?out|policy|cookie|copyright|"
+    r"accessibility|legal|careers? home|view (?:in|this) (?:browser|email)",
+    re.I,
+)
+
+
+def _origin_or_none(href):
+    try:
+        return origin(href)
+    except ValueError:
+        return None
 
 
 # A verification continuation in a link's own URL (iCIMS: ".../login?step=email&hashed=...&token=...").
@@ -133,6 +148,7 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
     texts, links, size = [], [], 0
     cued = set()  # Anchors whose own text is the cue, not only the subject.
     plain = []  # Anchors with no cue in their text or the subject ("Click here").
+    anchor_text = {}
 
     def walk(part, depth=0):
         nonlocal size
@@ -176,6 +192,7 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
                         links.append(a["href"])
                     else:
                         plain.append(a["href"])
+                        anchor_text[a["href"]] = a.get_text(" ", strip=True)
             # Workday also sends bare URLs inside HTML, without <a> elements.
             # Require the same nearby reset/verification cue as plain text.
             for match in re.finditer(r"https://[^\s<>\"']+", text):
@@ -200,6 +217,19 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
                 continue
         if len(own) == 1:
             links.append(next(iter(own)))
+        elif not own and any((urlsplit(o).hostname or "").endswith("icims.com") for o in rule["link_origins"]):
+            # EBSCO 2026-10-21: "User account with EBSCO Information Services, LLC" carried its button only behind
+            # iCIMS's click tracker, with no wording. The one tracker link that is not a footer link is the link; the
+            # visit still has to land on the employer's own origin, so a wrong one is refused there.
+            tracked = {
+                href
+                for href in plain
+                if _origin_or_none(href) in CLICK_TRACKERS and not FOOTER_TEXT.search(anchor_text.get(href, ""))
+            }
+            if len(tracked) == 1:
+                href = next(iter(tracked))
+                links.append(href)
+                cued.add(href)
     if diagnostics is not None:
         diagnostics["subject"] = " ".join(values.get("subject", []))[:80]
         hosts = set()
