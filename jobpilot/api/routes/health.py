@@ -18,7 +18,7 @@ def router(service) -> APIRouter:
     def runtime_health():
         from ...runtime import engine_version
         from ...db import Outbox
-        from . import host_health
+        from ... import host_health
         from ...provider_health import selected
         from ...pipeline_comparison import snapshot as application_workers
 
