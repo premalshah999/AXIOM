@@ -53,7 +53,7 @@ to resume is either here or linked from here. Update the **Status board** whenev
 | Legacy, before the overhaul (redacted) | AXIOM branch `legacy/oct-20` |
 | Old production source (before the cut-over; legacy) | `~/Desktop/applypilot/v3` (repo `ApplyPilot`, branch `v3-oct17`) |
 | Live compose project (since the 2026-10-20 cut-over) | `~/Desktop/applypilot/axiom/compose.yaml` with `axiom/.env` (project `applypilot`; containers `applypilot-app-1`, `applypilot-db-1`) |
-| Deploy | `cd ~/Desktop/applypilot/axiom && docker compose up -d --build --no-deps app`, between `hold.sh draining` and `hold.sh complete` |
+| Deploy | `cd ~/Desktop/applypilot/axiom && scripts/deploy.sh` (holds dispatch, refuses while an application is active, `--wait` waits for them, builds, recreates the app, waits for health, always releases the hold) |
 | Status and SQL helpers | `~/Desktop/applypilot/codex-handoff/bin/` (`q.sh` read-only SQL, `api.sh`, `hold.sh`). `deploy.sh` is retired: it patch-builds the old tree |
 | REA maps, tools, findings | `docs/rea/` |
 | Agent worktrees | `~/Desktop/applypilot/axiom-wt/<workstream>` on branch `agent/<workstream>` |
