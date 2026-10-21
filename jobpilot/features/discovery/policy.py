@@ -191,9 +191,9 @@ def protected(s, url: str) -> bool:
     from ...operations.reset import guard_key
 
     try:
-        from ...ats import canonicalize
+        from ...ats import identity_variants
 
-        identity = canonicalize(url)[1]
+        identities = identity_variants(url)
     except Exception:
         return False
-    return s.get(Setting, guard_key(identity)) is not None
+    return any(s.get(Setting, guard_key(identity)) is not None for identity in identities)

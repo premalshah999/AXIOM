@@ -338,12 +338,12 @@ class Service:
                 raise QueueBlocked(
                     "This application is archived and is outside the active pipeline", code="archived"
                 )
-            from .ats import canonicalize, icims_requisition_alias
+            from .ats import canonicalize, icims_requisition_alias, identity_variants
 
             identity = canonicalize(job.url)[1]
             from .operations.reset import guard_key
 
-            if not job.demo and s.get(Setting, guard_key(identity)):
+            if not job.demo and any(s.get(Setting, guard_key(i)) for i in identity_variants(job.url)):
                 raise QueueBlocked(
                     "An archived application protects this job from duplicate submission.",
                     outcome="protected",
