@@ -545,15 +545,23 @@ def admission_revision(db, cfg):
     return hashlib.sha256(json.dumps(policy, sort_keys=True).encode()).hexdigest()[:16]
 
 
+async def owner_requests_only(service):
+    """Start the owner's deferred Apply clicks as admission allows, when no autopilot batch is running."""
+    from .owner_apply import due
+    from .pipeline_comparison import NORMAL, pool_capacity
+
+    with service.db.session() as s:
+        room = pool_capacity(s, NORMAL, service.config.topology).available
+    return await due(service, room)
+
+
 async def tick(service):
     from .discovery import title_admits
 
     db, cfg = service.db, settings(service.db)
     control = db.get_setting("control", {})
     if (
-        not cfg.enabled
-        or db.get_setting("failed_application_clearance_gate", {}).get("enabled")
-        or not cfg.auto_apply
+        db.get_setting("failed_application_clearance_gate", {}).get("enabled")
         or control.get("paused")
         or not control.get("auto_submit")
         or not service.dispatch
@@ -561,9 +569,16 @@ async def tick(service):
         return
     if not hasattr(service, "autopilot_lock"):
         service.autopilot_lock = asyncio.Lock()
+    if not cfg.enabled or not cfg.auto_apply:
+        # The owner's own Apply clicks never depend on the autopilot. With auto-apply off, a click deferred by pacing
+        # or a busy mail sender was promised "it starts on its own" and never did (2026-10-21).
+        async with service.autopilot_lock:
+            await owner_requests_only(service)
+        return
     async with service.autopilot_lock:
         batch = db.get_setting("job_board_autopilot") or start_batch(db, cfg.batch_target)
         if batch.get("state") != "active":
+            await owner_requests_only(service)
             return
         with db.session() as s:
             owned_jobs = select(Run.job_id).where(Run.id.in_(batch["run_ids"]))
