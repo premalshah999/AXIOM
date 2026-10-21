@@ -408,21 +408,29 @@ def field_of(p: "Posting") -> str:
 
 
 # ---------- policy ----------
-def keep(p: Posting, now: datetime, window_days: int, curated: bool) -> str | None:
-    """Reason to drop, or None."""
+def keep(
+    p: Posting,
+    now: datetime,
+    window_days: int,
+    curated: bool,
+    *,
+    internships: bool = False,
+    early_career_only: bool = False,
+) -> str | None:
+    """Reason to drop, or None. Internships and the early-career filters follow the applicant's settings."""
     try:
         posted = datetime.fromisoformat(p.posted_at)
     except ValueError:
         return "undated"
     if posted < now - timedelta(days=window_days) or posted > now + timedelta(hours=14):
         return "stale"
-    if INTERN.search(p.title):
+    if INTERN.search(p.title) and not internships:
         return "internship"
-    if SENIOR.search(p.title):
+    if early_career_only and SENIOR.search(p.title):
         return "senior"
     if OFF_TARGET.search(p.title):
         return "off_target"
-    if not curated and not NEW_GRAD.search(p.title):
+    if early_career_only and not curated and not NEW_GRAD.search(p.title):
         return "not_new_grad"
     if not p.locations or not is_us(p.locations):
         return "non_us"
@@ -468,6 +476,8 @@ async def collect(
     max_boards=1500,
     workday_queries=WORKDAY_QUERIES,
     extra_boards=(),
+    internships=False,
+    early_career_only=False,
 ):
     now = datetime.now(UTC)
     started = time.perf_counter()
@@ -512,7 +522,9 @@ async def collect(
     kept = []
     for group, is_curated in ((curated, True), (swept, False)):
         for p in group:
-            reason = keep(p, now, window_days, is_curated)
+            reason = keep(
+                p, now, window_days, is_curated, internships=internships, early_career_only=early_career_only
+            )
             if reason:
                 report["dropped"][reason] = report["dropped"].get(reason, 0) + 1
             else:
@@ -647,8 +659,15 @@ async def sweep(db, window_days: int = 7) -> dict:
         SWEEP_KEY, {**(db.get_setting(SWEEP_KEY, {}) or {}), "state": "running", "started_at": started}
     )
     try:
+        from ...schemas import Profile
+
+        board = db.get_setting("job_board_settings", {}) or {}
         postings, report = await collect(
-            window_days, workday_queries=workday_queries(db), extra_boards=await asyncio.to_thread(known_boards, db)
+            window_days,
+            workday_queries=workday_queries(db),
+            extra_boards=await asyncio.to_thread(known_boards, db),
+            internships=Profile.model_validate(db.get_setting("profile", {}) or {}).include_internships,
+            early_career_only=bool(board.get("early_career_only", False)),
         )
         counts = await asyncio.to_thread(ingest, db, postings)
         # Jobs should reach ranking with their description; HTML pages are often blocked.

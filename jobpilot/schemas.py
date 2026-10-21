@@ -100,6 +100,8 @@ class Profile(BaseModel):
     ats_email_aliases: dict[str, str] = Field(default_factory=dict)
     # Which ready jobs are applied to first: new-grad postings ahead of everything else, or best fit first.
     job_priority: Literal["new_grad_first", "best_fit_first"] = "new_grad_first"
+    # Internships and co-ops are applied to only when this is set (full-time roles otherwise).
+    include_internships: bool = False
     target_locations: list[str] = Field(default_factory=list)
     excluded_keywords: list[str] = Field(default_factory=list)
     minimum_fit: int = Field(default=70, ge=0, le=100)

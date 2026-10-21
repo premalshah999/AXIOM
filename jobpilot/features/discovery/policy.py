@@ -17,7 +17,7 @@ POLICY_VERSION = "discovery-v2-posting-paths"
 
 class DiscoveryPolicy(BaseModel):
     max_age_days: int = Field(default=30, ge=1, le=30)
-    early_career_only: bool = True
+    early_career_only: bool = False
     us_only: bool = True
     minimum_fit: int = Field(default=70, ge=0, le=100)
     classify_batch: int = Field(default=24, ge=1, le=24)
