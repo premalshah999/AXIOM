@@ -110,7 +110,7 @@ async def test_background_sweep_expires_application_window_without_reading_mail(
 
 
 async def test_queued_sender_retry_never_claims_browser_while_blocked(service, monkeypatch):
-    from jobpilot import service as service_module
+    from jobpilot.service import execution as service_module
     from jobpilot.db import Job, Setting, now
     _, holder, rule = await configured(service)
     service.mail.begin(holder["id"], rule, "alex@example.test", "code")
