@@ -165,14 +165,13 @@ export function ProfileSettings() {
             </p>
           )}
           <details className="fold">
-            <summary>Example keys</summary>
+            <summary>Example keys (the setup guide asks for most of these)</summary>
             <pre>{`{
-  "work_authorized_us": true,
-  "requires_sponsorship": false,
+  "work_authorization_us": true,
+  "requires_future_sponsorship_us": false,
   "over_18": true,
   "willing_to_relocate": true,
-  "security_clearance": "None",
-  "years_experience": 1
+  "has_security_clearance": false
 }`}</pre>
           </details>
           <Field label="Approved consent statements" hint="One exact checkbox label per line. List only commitments you accept.">
