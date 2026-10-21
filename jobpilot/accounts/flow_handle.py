@@ -1,6 +1,6 @@
 """AccountFlow.handle: one pass over the current account page."""
 
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urljoin
 import re
 from ..mail import origin
 from .dayforce import DAYFORCE_ID_ACCOUNT
@@ -137,7 +137,25 @@ class FlowHandleMixin:
             and not page_refused
         ):
             self.attempts.add(("switch", "create"))
-            await e.form.click(create_links[0]["id"], auth_control=True)
+            link = create_links[0]
+            await e.form.click(link["id"], auth_control=True)
+            # Wait for the create form. NetApp, Entergy, Farmers and L3Harris (SuccessFactors, 2026-10-21) were scanned
+            # two seconds after the click, still on Sign In, and ended "explicitly rejected": follow the link itself.
+            settle = getattr(e.form, "settle", None)
+            if settle:
+                await settle(timeout=8)
+            after = await e.form.scan()
+            href = str(link.get("href") or "")
+            if (
+                sum(f["type"] == "password" for f in after.get("fields", [])) < 2
+                and href
+                and not href.startswith(("#", "javascript:"))
+                and getattr(e.form, "page", None) is not None
+            ):
+                await e.form.page.goto(urljoin(after.get("url", "") or account_url, href), wait_until="domcontentloaded",
+                                       timeout=30000)
+                if settle:
+                    await settle(timeout=6)
             e.page = e.form.page
             return True
         exists_refused = any(ACCOUNT_EXISTS.search(x) for x in [*errors, *map(str, obs.get("headings", []))])

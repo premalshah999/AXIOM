@@ -224,3 +224,28 @@ async def test_a_sign_in_the_page_itself_refused_never_switches_to_create(servic
     flow.attempts.add((scope, False))
     await flow.handle()
     assert "create" not in form.clicked and ("switch", "create") not in flow.attempts
+
+
+async def test_a_create_link_that_did_not_navigate_is_followed(service):
+    """NetApp 2026-10-21: the run scanned Sign In again two seconds after clicking "Create an account" and ended
+    "explicitly rejected the account credentials" on a first application."""
+    obs = {
+        "url": URL,
+        "fields": _fields("Password:"),
+        "controls": [{"id": "signin", "label": "Sign In"},
+                     {"id": "create", "label": "Create an account", "href": "/career?company=EYHRISPRD1&create=1"}],
+        "errors": [],
+        "text": "",
+    }
+    flow, form, scope = _flow(service, obs)
+    visited = []
+
+    async def goto(url, **_kwargs):
+        visited.append(url)
+
+    form.page = SimpleNamespace(goto=goto)
+    flow.store.save(URL, flow.store.shared(), "signing_in")
+    flow.attempts.add((scope, False))
+    assert await flow.handle()
+    assert form.clicked == ["create"]
+    assert visited == ["https://career5.successfactors.eu/career?company=EYHRISPRD1&create=1"]
