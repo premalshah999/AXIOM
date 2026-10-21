@@ -56,13 +56,6 @@ def router(service) -> APIRouter:
                 s.add(Setting(key="profile", value=value))
         return {"saved": True}
 
-    @r.get("/api/preflight")
-    def preflight():
-        return {
-            "questions": service.preflight_questions(),
-            "instructions": "Answer required missing facts once. Sensitive answers stay in the authenticated app.",
-        }
-
     @r.post("/api/profile/organize")
     async def organize_profile():
         from ...knowledge import organize

@@ -4,26 +4,13 @@ import asyncio
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from ...admission import QueueBlocked
-from ...db import Job, Resume, Run, record
+from ...db import Job, Run, record
 from ...discovery import add_job, rank_in_thread
 from ...network import public_url
 from ...schemas import JobInput, QueueInput
-from ...service import ACTIVE
-
-
-class BatchQueue(BaseModel):
-    job_ids: list[str] = Field(min_length=1, max_length=500)
-    mode: str = "submit"
-
-
-class Approval(BaseModel):
-    # One click (owner, 2026-10-18): no reason to type; the job's resume, else the first uploaded one.
-    resume_id: str | None = None
-    reason: str = Field(default="", max_length=2000)
 
 
 def router(service) -> APIRouter:
@@ -89,22 +76,6 @@ def router(service) -> APIRouter:
     async def classify(job_id: str):
         return await asyncio.to_thread(rank_in_thread, db, config, job_id)
 
-    @r.post("/api/jobs/{job_id}/approve")
-    async def approve(job_id: str, data: Approval | None = None):
-        data = data or Approval()
-        with db.exclusive() as s:
-            job = s.get(Job, job_id)
-            resume = s.get(Resume, data.resume_id or job.resume_id or "") if job else None
-            if resume is None and job is not None:
-                resume = s.scalar(select(Resume).where(Resume.demo.is_(False)).limit(1))
-            if not job or not resume or resume.demo:
-                raise ValueError("Choose a job and an uploaded resume")
-            if job.status in ACTIVE | {"confirmed", "submission_unknown"}:
-                raise ValueError("Cannot approve an active or submitted job")
-            job.status, job.resume_id = "ready", resume.id
-            job.reason = "Owner approved" + (": " + data.reason.strip() if data.reason.strip() else "")
-        return {"approved": True}
-
     @r.post("/api/jobs/{job_id}/apply")
     async def apply_job(job_id: str):
         """One click: approve (no reason needed) and start; a deferred start is remembered, not an error."""
@@ -113,14 +84,6 @@ def router(service) -> APIRouter:
         from ...owner_apply import apply
 
         return await apply(service, job_id)
-
-    @r.post("/api/jobs/batch-queue")
-    async def batch_queue(data: BatchQueue):
-        if data.mode not in {"submit", "dry_run"}:
-            raise ValueError("Mode must be submit or dry_run")
-        if not service.dispatch:
-            raise ValueError("Workers are disabled")
-        return await service.queue_batch(data.job_ids, data.mode)
 
     @r.post("/api/jobs/{job_id}/queue")
     async def queue(job_id: str, data: QueueInput):

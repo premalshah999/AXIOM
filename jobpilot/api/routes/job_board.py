@@ -59,15 +59,6 @@ def router(service) -> APIRouter:
         count = setup_sources(db, data)
         return {"saved": True, "sources": count}
 
-    @r.get("/api/job-board/search")
-    def search_status():
-        return {
-            "google_configured": bool(config.serper_api_key),
-            "provider": "Google / Serper" if config.serper_api_key else "Free web search (DuckDuckGo / Bing)",
-            "catalog": "Simplify new-grad employer catalog",
-            "queries_per_sweep": config.search_queries_per_sweep,
-        }
-
     @r.post("/api/job-board/sources")
     async def add_source(data: SourceInput):
         await public_url(data.url, config.allow_private_urls)

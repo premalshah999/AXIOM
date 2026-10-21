@@ -10,7 +10,7 @@ from sqlalchemy import and_, or_, select
 from .db import Budget, Event, Job, MailChallenge, Resume, Review, Run, Setting, now, record
 from .knowledge import learned_answer
 from .schemas import Profile
-from .admission import QueueBlocked, employer_partition, outcome_for, temporary_time, require_intake
+from .admission import QueueBlocked, employer_partition, temporary_time, require_intake
 from .runtime import engine_version, profile_version
 from .run_trace import phase_timing
 
@@ -713,22 +713,6 @@ class Service:
                 self.kick_outbox()
         return result
 
-    async def queue_batch(self, job_ids, mode="submit"):
-        queued, skipped = [], []
-        for job_id in dict.fromkeys(job_ids):
-            with self.db.session() as s:
-                job = s.get(Job, job_id)
-                ready = job and job.status == "ready"
-            if not ready:
-                skipped.append({"job_id": job_id, "reason": "Only Ready jobs can be mass applied"})
-                continue
-            try:
-                run = await self.queue(job_id, mode)
-                queued.append({"job_id": job_id, "run_id": run["id"]})
-            except (ValueError, RuntimeError) as exc:
-                skipped.append({"job_id": job_id, "reason": str(exc)[:300], **outcome_for(exc)})
-        return {"queued": queued, "skipped": skipped}
-
     def reserve_submission(self, run_id):
         day = datetime.now(ZoneInfo(self.config.timezone)).date().isoformat()
         with self.db.exclusive() as s:
@@ -1127,44 +1111,6 @@ class Service:
             )
         except Exception:
             return
-
-    def preflight_questions(self):
-        """Only unresolved facts, deduplicated across drafts; no inferred questionnaire."""
-        with self.db.session() as s:
-            rows = s.execute(
-                select(Review, Run, Job)
-                .join(Run, Review.run_id == Run.id)
-                .join(Job, Run.job_id == Job.id)
-                .where(
-                    Review.answer.is_(None),
-                    Run.state.in_(["needs_review", "waiting_answer"]),
-                    Job.status != "archived",
-                )
-                .order_by(Review.created_at)
-            ).all()
-        questions = {}
-        for review, run, job in rows:
-            if self.review_kind({"key": review.key, "reason": review.reason}) != "missing_fact":
-                continue
-            item = questions.setdefault(
-                review.key,
-                {
-                    "id": review.id,
-                    "question": review.question,
-                    "options": review.options,
-                    "reason": review.reason,
-                    "applications": [],
-                    "sensitive": bool(
-                        re.search(
-                            r"social security|\bssn\b|date of birth|birth date|passport",
-                            review.question,
-                            re.I,
-                        )
-                    ),
-                },
-            )
-            item["applications"].append({"run_id": run.id, "company": job.company})
-        return list(questions.values())
 
     @staticmethod
     def review_kind(question):
