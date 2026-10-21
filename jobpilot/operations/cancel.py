@@ -38,8 +38,10 @@ def cancel_saved_drafts(db):
                 preserved += 1
                 protected_jobs.add(run.job_id)
                 continue
+            # The state and reason the run had stay readable; the reason alone used to be overwritten (514 runs).
+            was = f"{run.state}: {run.reason}" if run.reason else run.state
             run.state, run.finished_at = "cancelled", now()
-            run.reason = "Owner cancelled saved application during maintenance"
+            run.reason = f"Owner cancelled saved application during maintenance (was {was})"[:4000]
             cancelled.add(run.id)
         for job_id in jobs:
             job = session.get(Job, job_id)
