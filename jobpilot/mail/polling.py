@@ -1,0 +1,393 @@
+"""The background poll that matches incoming messages to waiting challenges."""
+
+from email.utils import getaddresses
+from sqlalchemy import select
+from urllib.parse import urlsplit
+import asyncio
+import httpx
+import re
+import time
+from ..db import Event
+from ..db import Job
+from ..db import MailChallenge
+from ..db import MailConsumption
+from ..db import MailRule
+from ..db import Mailbox
+from ..db import Run
+from ..db import Setting
+from ..db import record
+from .constants import LIVE
+from .extraction import UNBRANDED_MAX_CANDIDATES
+from .extraction import UNBRANDED_SEARCH_TERMS
+from .extraction import extract_message
+from .extraction import latest_employer_code
+from .helpers import origin
+from .senders import EMPLOYER_SENDER_FAMILIES
+from .senders import oracle_pod
+from .senders import sender_domains_overlap
+from .senders import tenant_tokens
+
+
+class PollingMixin:
+    async def poll_once(self):
+        from ..agent_settings import enabled
+
+        if not enabled(self.db, "email"):
+            return
+        # The active sweep already services all requests. Browser owners must
+        # not line up behind it and each repeat the same slow mailbox scan.
+        # They can claim its result on the next tick or persist their wait now.
+        if self.poll_lock.locked():
+            return
+        async with self.poll_lock:
+            with self.db.exclusive() as s:
+                current = time.time()
+                for c in s.scalars(select(MailChallenge).where(MailChallenge.state.in_(LIVE))):
+                    run = s.get(Run, c.run_id)
+                    c.expires = self.window_deadline(run, c.expires)
+                    if (
+                        c.expires < current
+                        or not run
+                        or (run.state not in {"running", "submitting"} and not self.waiting_owner(run, c.id))
+                    ):
+                        c.state, c.payload, c.reason = (
+                            "expired",
+                            "",
+                            "Application or verification deadline ended",
+                        )
+                pending = [
+                    record(c)
+                    for c in s.scalars(select(MailChallenge).where(MailChallenge.state == "pending"))
+                ]
+            for c in pending:
+                with self.db.session() as s:
+                    row = s.get(MailRule, c["rule_id"])
+                    rule = record(row) if row and row.enabled else None
+                    run = s.get(Run, c["run_id"])
+                    job = s.get(Job, run.job_id) if run else None
+                    # Tenant identity: the employer this run applies to, never message text.
+                    c["tenant_tokens"] = tenant_tokens(
+                        (job.url if job else "") or (rule or {}).get("employer_origin", ""),
+                        job.company if job else "",
+                    )
+                    c["employer_senders"] = bool(job and job.ats in EMPLOYER_SENDER_FAMILIES)
+                    c["ats"] = job.ats if job else ""
+                    c["employer_name"] = job.company if job else ""
+                    # Every live request in this mailbox, read now: an unbranded code is
+                    # accepted only when this request is the sole open window at arrival.
+                    windows = list(
+                        s.scalars(
+                            select(MailChallenge).where(
+                                MailChallenge.mailbox_id == c["mailbox_id"],
+                                MailChallenge.state.in_(["pending", "matched"]),
+                            )
+                        )
+                    )
+                    c["open_windows"] = [(w.id, w.since, w.expires, w.kind) for w in windows]
+                    c["oracle_pod"] = oracle_pod(job.url) if job and job.ats == "oracle" else ""
+                    c["oracle_peers"] = []
+                    if job and job.ats == "oracle":
+                        for w in windows:
+                            peer_run = s.get(Run, w.run_id) if w.id != c["id"] else None
+                            peer = s.get(Job, peer_run.job_id) if peer_run else None
+                            if (
+                                peer
+                                and peer.ats == "oracle"
+                                and w.kind in {"code", "auto"}
+                                and origin(peer.url) != origin(job.url)
+                            ):
+                                c["oracle_peers"].append((peer.company or "", oracle_pod(peer.url)))
+                    # Some Workday tenants send reset mail from their employer's
+                    # domain. An exact tenant link can prove that sender; a shared
+                    # wdN.myworkday.com origin cannot distinguish employers.
+                    c["sender_learning"] = bool(
+                        job
+                        and job.ats == "workday"
+                        and re.fullmatch(
+                            r"[a-z0-9-]+\.wd\d+\.myworkdayjobs\.com", urlsplit(job.url).hostname or ""
+                        )
+                        and origin(job.url) == (rule or {}).get("employer_origin")
+                        and c["kind"] in {"link", "password_reset"}
+                    )
+                if not rule:
+                    self.outcome(c["id"], "cancelled", "Verification rule was removed or disabled")
+                    continue
+                try:
+                    scan_started = time.monotonic()
+                    senders = list(rule["sender_domains"])
+                    if c["employer_senders"]:
+                        senders += c["tenant_tokens"]
+                    terms = ["from:" + d for d in senders]
+                    if c["ats"] == "oracle" and c["kind"] in {"code", "auto"}:
+                        terms.append('subject:"confirm your identity"')
+                    if c["sender_learning"]:
+                        terms += (
+                            ["subject:reset"]
+                            if c["kind"] == "password_reset"
+                            else [
+                                "subject:verify",
+                                "subject:verification",
+                                "subject:confirm",
+                                "subject:activate",
+                            ]
+                        )
+                    query = f"after:{int(c['since'])} to:{c['recipient']} " + "{" + " ".join(terms) + "}"
+                    listed = await self.request(
+                        c["mailbox_id"],
+                        "/messages",
+                        {"q": query, "maxResults": 20, "includeSpamTrash": "true"},
+                    )
+                    if listed.get("nextPageToken"):
+                        self.outcome(
+                            c["id"],
+                            "failed",
+                            "Too many candidate messages to match within the verification budget",
+                        )
+                        continue
+                    messages = list(listed.get("messages", []))
+                    matches, rejections, rejected_origins = [], {}, set()
+                    if c["kind"] in {"code", "auto"} and len(c["open_windows"]) == 1:
+                        # Unbranded codes name neither employer nor domain, so the sender
+                        # filter above cannot find them. Search this recipient's window
+                        # for verification wording; extraction still requires the full
+                        # unbranded rule. Only when this is the sole open request.
+                        unbranded = await self.request(
+                            c["mailbox_id"],
+                            "/messages",
+                            {
+                                "q": f"after:{int(c['since'])} to:{c['recipient']} "
+                                + "{"
+                                + " ".join(UNBRANDED_SEARCH_TERMS)
+                                + "}",
+                                "maxResults": UNBRANDED_MAX_CANDIDATES,
+                                "includeSpamTrash": "true",
+                            },
+                        )
+                        if unbranded.get("nextPageToken"):
+                            rejections["unbranded_over_limit"] = 1
+                        else:
+                            seen = {m["id"] for m in messages}
+                            messages += [m for m in unbranded.get("messages", []) if m["id"] not in seen]
+                    for m in messages[: 20 + UNBRANDED_MAX_CANDIDATES]:
+                        with self.db.session() as s:
+                            if s.get(MailConsumption, c["mailbox_id"] + ":" + m["id"]):
+                                continue
+                        msg = await self.read_message(c["mailbox_id"], m["id"])
+                        if msg is None:
+                            rejections["unreadable_message"] = rejections.get("unreadable_message", 0) + 1
+                            continue
+                        with self.db.session() as s:
+                            if self.message_consumed(s, c["mailbox_id"], msg, c):
+                                rejections["already_consumed"] = rejections.get("already_consumed", 0) + 1
+                                continue
+                        diagnostics, learned_domain = {}, None
+                        try:
+                            token = extract_message(msg, rule, c, diagnostics=diagnostics)
+                            if (
+                                not token
+                                and diagnostics.get("rejection") == "sender"
+                                and c["sender_learning"]
+                            ):
+                                senders = getaddresses(
+                                    [
+                                        h["value"]
+                                        for h in msg["payload"]["headers"]
+                                        if h["name"].lower() == "from"
+                                    ]
+                                )
+                                if len(senders) == 1:
+                                    domain = senders[0][1].rpartition("@")[2].lower()
+                                    proof_rule = {
+                                        **rule,
+                                        "sender_domains": [domain],
+                                        "link_origins": [rule["employer_origin"]],
+                                    }
+                                    if extract_message(msg, proof_rule, c, identity_only=True):
+                                        token = extract_message(msg, proof_rule, c)
+                                        if token:
+                                            learned_domain = domain
+                        except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
+                            self.quarantine(c["mailbox_id"], m["id"], "invalid_message")
+                            token, diagnostics = None, {"rejection": "invalid_message"}
+                        if token:
+                            matches.append((m["id"], token, msg, learned_domain))
+                        else:
+                            rejection = diagnostics.get("rejection", "token_format")
+                            rejections[rejection] = rejections.get(rejection, 0) + 1
+                            rejected_origins.update(diagnostics.get("rejected_link_origins", []))
+                    scan_seconds = time.monotonic() - scan_started
+                    counts = (
+                        len(messages),
+                        len(matches),
+                        tuple(sorted(rejections.items())),
+                        tuple(sorted(rejected_origins)[:20]),
+                    )
+                    changed = self.poll_diagnostics.get(c["id"]) != counts
+                    self.poll_diagnostics[c["id"]] = counts
+                    while len(self.poll_diagnostics) > 200:
+                        self.poll_diagnostics.pop(next(iter(self.poll_diagnostics)))
+                    if matches or scan_seconds > 5 or changed:
+                        self.db.event(
+                            c["run_id"],
+                            "mail_poll",
+                            "Checked the verification mailbox",
+                            {
+                                "elapsed_seconds": round(scan_seconds, 2),
+                                "candidate_count": len(messages),
+                                "matching_count": len(matches),
+                                "rejection_counts": rejections,
+                                "rejected_link_origins": sorted(rejected_origins)[:20],
+                            },
+                        )
+                    matches = latest_employer_code(matches, c)
+                    if len(matches) != 1:
+                        if len(matches) > 1:
+                            self.outcome(
+                                c["id"], "failed", "Multiple matching messages; no code or link was guessed"
+                            )
+                        else:
+                            with self.db.exclusive() as s:
+                                row = s.get(MailChallenge, c["id"])
+                                if row and row.state == "pending":
+                                    row.reason = (
+                                        "No messages in the verification search"
+                                        if not messages
+                                        else f"Found {len(messages)} messages; none matched the verification identity, time and format checks"
+                                    )
+                        continue
+                    message_id, token, msg, learned_domain = matches[0]
+                    matched = None
+                    with self.db.exclusive() as s:
+                        row = s.get(MailChallenge, c["id"])
+                        owner = s.get(Run, row.run_id) if row else None
+                        current_rule = s.get(MailRule, c["rule_id"])
+                        if learned_domain:
+                            # Learning must not create an overlapping active
+                            # sender lease while another employer owns it.
+                            conflict = any(
+                                other.run_id != c["run_id"]
+                                and other.expires > time.time()
+                                and (other_rule := s.get(MailRule, other.rule_id))
+                                and sender_domains_overlap([learned_domain], other_rule.sender_domains)
+                                for other in s.scalars(
+                                    select(MailChallenge).where(MailChallenge.state.in_(LIVE))
+                                )
+                            )
+                            if conflict or not current_rule or not current_rule.enabled:
+                                continue
+                        key = c["mailbox_id"] + ":" + message_id
+                        if (
+                            row
+                            and row.state == "pending"
+                            and row.expires > time.time()
+                            and (
+                                row.kind in {"auto", token["kind"]}
+                                or row.kind == "password_reset"
+                                and token["kind"] == "link"
+                            )
+                            and owner
+                            and (
+                                owner.state in {"running", "submitting"} or self.waiting_owner(owner, row.id)
+                            )
+                            and not self.message_consumed(s, c["mailbox_id"], msg, c)
+                        ):
+                            row.payload, row.message_id, row.state, row.reason = (
+                                self.vault.seal(token),
+                                message_id,
+                                "matched",
+                                "A correlated employer email is ready",
+                            )
+                            if learned_domain:
+                                current_rule.sender_domains = list(
+                                    dict.fromkeys(current_rule.sender_domains + [learned_domain])
+                                )
+                                s.add(
+                                    Event(
+                                        run_id=row.run_id,
+                                        kind="mail_sender_learned",
+                                        message="Learned an authenticated sender from the exact Workday tenant link",
+                                        data={"sender_domain": learned_domain, "challenge_id": row.id},
+                                    )
+                                )
+                            s.add(MailConsumption(key=key, challenge_id=row.id))
+                            meta = s.get(Setting, "mail_request:" + row.id)
+                            generation = (meta.value if meta else {}).get("generation", 1)
+                            matched = (row.run_id, row.id, generation)
+                            if self.waiting_owner(owner, row.id):
+                                from ..outbox import enqueue
+
+                                enqueue(
+                                    s,
+                                    "mail_resume",
+                                    row.id,
+                                    {
+                                        "run_id": row.run_id,
+                                        "challenge_id": row.id,
+                                        "request_id": row.id,
+                                        "generation": generation,
+                                    },
+                                    run_id=row.run_id,
+                                )
+                    if matched:
+                        owner_id, challenge_id, generation = matched
+                        self.db.event(
+                            owner_id,
+                            "EmailMatched",
+                            "A correlated employer email is ready",
+                            {
+                                "challenge_id": challenge_id,
+                                "request_id": challenge_id,
+                                "generation": generation,
+                            },
+                        )
+                except (ValueError, httpx.HTTPError, KeyError, TypeError):
+                    # Do not include provider responses, URLs, codes, or credentials in diagnostics.
+                    with self.db.exclusive() as s:
+                        row = s.get(MailChallenge, c["id"])
+                        box = s.get(Mailbox, c["mailbox_id"])
+                        if row:
+                            row.reason = "Mailbox request failed; check the connection"
+                            if not box or box.state != "connected":
+                                row.state, row.payload = "failed", ""
+
+    async def poll(self):
+        last_receipts = last_drafts = 0
+        receipt_task = draft_task = None
+        try:
+            while True:
+                try:
+                    await self.poll_once()
+                    from ..agent_settings import enabled
+
+                    if (
+                        enabled(self.db, "email")
+                        and time.time() - last_receipts > 60
+                        and (receipt_task is None or receipt_task.done())
+                    ):
+                        from ..receipts import check_receipts
+
+                        if receipt_task is not None:
+                            await asyncio.gather(receipt_task, return_exceptions=True)
+                        last_receipts = time.time()
+                        # Receipt reconciliation can fetch many older messages. OTP/link
+                        # deadlines must keep polling while that independent work runs.
+                        receipt_task = asyncio.create_task(check_receipts(self))
+                    if (
+                        enabled(self.db, "email")
+                        and time.time() - last_drafts > 600
+                        and (draft_task is None or draft_task.done())
+                    ):
+                        from ..receipts import reconcile_recent_drafts
+
+                        if draft_task is not None:
+                            await asyncio.gather(draft_task, return_exceptions=True)
+                        last_drafts = time.time()
+                        draft_task = asyncio.create_task(reconcile_recent_drafts(self))
+                except Exception:
+                    pass  # Public connection/challenge diagnostics never expose raw secrets.
+                await asyncio.sleep(self.config.mail_poll_seconds)
+        finally:
+            for task in (receipt_task, draft_task):
+                if task is not None:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
