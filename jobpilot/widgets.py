@@ -8,6 +8,11 @@ from datetime import date, datetime
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
+from .playwright_fast import install as install_playwright_fast
+
+# The drivers below call Locator.evaluate about a hundred times per form; see playwright_fast.
+install_playwright_fast()
+
 OPTION_SELECTOR = (
     "[role=option],[role=menuitem],[role=menuitemradio],[role=treeitem],.select2-results__option,"
     ".chosen-results li,.ui-menu-item,.pac-item,.oj-listbox-result,.dropdown-location,[data-automation-id=promptOption],"
@@ -533,6 +538,25 @@ def interaction_failure(exc):
     )
 
 
+# A react-select (Greenhouse, Ashby) shows its menu state as a notice inside the menu: "Loading..." while a search is
+# in flight, "No options" when it found nothing. Only a visible notice that says nothing was found counts.
+MENU_NOTICE_JS = r"""() => {
+  const shown = n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden';
+  const notices = [...document.querySelectorAll('[class*="menu-notice"]')].filter(shown);
+  if (notices.some(n => /loading/i.test(n.className + ' ' + n.textContent))) return 'loading';
+  return notices.some(n => /\bno (options|results|matches|items)\b|\bnot found\b|\bnothing found\b/i.test(n.textContent))
+    ? 'none' : '';
+}"""
+
+
+async def menu_notice(frame):
+    """'loading', 'none' (the open menu says nothing matched) or '' when no such notice is shown."""
+    try:
+        return await frame.evaluate(MENU_NOTICE_JS)
+    except Exception:
+        return ""
+
+
 async def wait_options(
     frame,
     scope=None,
@@ -543,14 +567,27 @@ async def wait_options(
     owner=None,
     require_query_match=False,
     changed_from=None,
+    accept=None,
+    stable_for=None,
+    empty_after=None,
 ):
     """Wait for a stable option list. `changed_from` is the list shown before a search: a settled list that
-    replaced it is that search's result even when no option repeats the query text."""
+    replaced it is that search's result even when no option repeats the query text.
+
+    accept(options) -> truthy ends the wait on a settled list the caller can already use (an option that names the
+    query's place differently: "City, MD" against "City, Maryland, United States").
+    stable_for: how long a changed list must stay unchanged to count as the search's result (default: two reads).
+    empty_after: seconds a menu must keep saying "No options" before the wait gives up; a search that found nothing
+    otherwise burned the whole timeout."""
     deadline = time.monotonic() + timeout
     last = []
     matches_query = not query
+    unchanged_since = None
+    empty_since = None
     while time.monotonic() < deadline:
-        if owner is not None:
+        # The owned menu's id is stable while it is open; look it up again only when it was not found yet or
+        # the last read came back empty (the menu may have been re-rendered).
+        if owner is not None and (scope is None or not last):
             scope = await _popup_scope(owner) or scope
         opts = await visible_options(frame, scope, selector)
         matches_query = not query or any(norm(query) in norm(o["text"]) for o in opts)
@@ -558,12 +595,27 @@ async def wait_options(
             # A fixed catalog may say United States while the confirmed query
             # says United States of America. An exact supported alias is already
             # usable; waiting the full timeout cannot improve this observation.
-            matches_query = bool(best_option([o for o in opts if not o.get("disabled")], query))
+            usable = [o for o in opts if not o.get("disabled")]
+            matches_query = bool(best_option(usable, query)) or bool(accept and usable and accept(usable))
         texts = [o["text"] for o in opts]
-        if opts and texts == [o["text"] for o in last] and (
-            matches_query or (changed_from is not None and texts != list(changed_from))
-        ):
+        same = bool(opts) and texts == [o["text"] for o in last]
+        if same and unchanged_since is None:
+            unchanged_since = time.monotonic()
+        elif not same:
+            unchanged_since = None
+        changed = changed_from is not None and texts != list(changed_from)
+        if same and matches_query:
             return opts
+        if same and changed:
+            if stable_for is None or time.monotonic() - unchanged_since >= stable_for:
+                return opts
+        if empty_after is not None and not opts:
+            if await menu_notice(frame) == "none":
+                empty_since = empty_since or time.monotonic()
+                if time.monotonic() - empty_since >= empty_after:
+                    return []
+            else:
+                empty_since = None
         last = opts
         await asyncio.sleep(settle)
     return [] if require_query_match and query and not matches_query else last
@@ -2136,7 +2188,20 @@ async def combobox(
         opts = (
             listed
             if choice
-            else await wait_options(frame, scope, timeout=4, query=value if typed else None, owner=el)
+            else await wait_options(
+                frame,
+                scope,
+                timeout=4,
+                query=value if typed else None,
+                owner=el,
+                # The list shown before the search is not its answer. A search result that has stayed put for
+                # more than half a second is, even when no row repeats the query ("Rivertown, MD" -> "Rivertown,
+                # Maryland, United States"); a menu that keeps saying "No options" is the answer too.
+                changed_from=[o["text"] for o in listed] if typed else None,
+                accept=(lambda rows: resolve([o["text"] for o in eligible(rows)])) if resolve else None,
+                stable_for=0.6,
+                empty_after=1.2 if typed else None,
+            )
         )
     else:
         opts = await wait_options(frame, scope, timeout=3, owner=el)

@@ -132,3 +132,22 @@ costs of the driver's own protocol chatter. The larger remaining costs are the d
 deadline, `requests`: up to three `METHOD host path` strings with token-like path segments redacted. After the
 next production day, `select data->>'held_by', count(*) from events where kind='settle_timing' and
 data->>'settled'='false' group by 1` says which part of the deadline waits is the site and which is the page.
+
+## Round 2: Greenhouse comboboxes (2026-10-21)
+
+Deadline failures since 10-18: Location (City) 25, Degree 22, School 17-20, Country 14. Method: production
+`field_error` / `field_timing` / `verification` events (read-only), the REA map, and a synthetic react-select page
+(`tests/support_react_select.py`) with the observed ids, a debounced remote search, a "Loading..." notice and a
+"No options" notice. The synthetic page reproduced two slow paths on a quiet machine:
+
+| Path | Cause | Before | After |
+|---|---|---|---|
+| Location typed as "City, ST" | `wait_options` waited the whole 4 s for a row containing the query text; the list had settled at once and the applicant's address already picks from it (`location_resolver`) | 5.2 s | about 2 s |
+| School not offered | The menu says "No options"; that is no option row, so the 4 s wait, each alias (2 s) and the "Other" search (2 s) ran in full | 7.0 s, then fail | under 5 s, then fail (same error) |
+
+Not reproduced: Degree and Country on a quiet page take 0.5 s and commit. Their 5-14 s in production is renderer load
+times the call count (32 round trips for a plain pick), so they gain only from the call cut (menu id looked up
+once instead of every poll). Where production evidence stops: `settle_timing.held_by` has not produced data yet (the
+field ships with the next deploy), and the saved step pages are not readable from here, so the real menu text for an
+unlisted School and the real debounce are assumed from the REA map ("Loading..." / "No options" are react-select's
+defaults). The no-results rule needs the notice to persist 1.2 s and never fires while "Loading..." is shown.
