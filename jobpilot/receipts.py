@@ -653,6 +653,7 @@ _DRAFT_COMPARED_LIMIT = 5000
 # Latest-run states where a submission may have happened without proof on the page.
 UNPROVEN_STATES = [
     "waiting_browser",
+    "waiting_email",
     "waiting_answer",
     "paused",
     "failed",

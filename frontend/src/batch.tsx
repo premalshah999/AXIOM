@@ -360,6 +360,7 @@ function Tallies() {
         {link("repair", rt.blocked ?? 0, "blocked or unconfirmed", "fix")}
         {link("repair", rt.failed ?? 0, "not submitted", "bad")}
         {link("active", rt.queued ?? 0, "queued", "run")}
+        {!!rt.waiting_email && link("active", rt.waiting_email, "waiting for an email", "hold")}
       </div>
       <div className="tally-row" aria-label="Inventory">
         <span className="tally-label">Inventory</span>

@@ -211,6 +211,7 @@ export type AutopilotRuntime = {
   attempted_jobs?: number;
   active?: number;
   awaiting_answer?: number;
+  waiting_email?: number;
   blocked?: number;
   failed?: number;
   remaining?: number;

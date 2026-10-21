@@ -72,6 +72,13 @@ export const STATES: Record<string, StateInfo> = {
     explain:
       "The website rejected a control or the page couldn't be read. This isn't a missing fact: the draft is kept and automatic recovery retries it.",
   },
+  waiting_email: {
+    label: "Waiting for email",
+    tone: "hold",
+    group: "active",
+    explain:
+      "The employer is sending a verification code or link. The browser slot was released; when the matching email arrives this application continues by itself. Nothing is needed from you.",
+  },
   timed_out: {
     label: "Timed out",
     tone: "fix",
@@ -210,6 +217,7 @@ export const COMMITTED = new Set([
 export const ACTIVE = new Set(["queued", "running", "submitting"]);
 export const RETRYABLE = new Set([
   "waiting_browser",
+  "waiting_email",
   "timed_out",
   "failed",
   "cancelled",

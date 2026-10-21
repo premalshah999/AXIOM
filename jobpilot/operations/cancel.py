@@ -5,7 +5,7 @@ from sqlalchemy import select
 from ..db import Job, MailChallenge, Outbox, Run, Setting, now
 from .reset import PROTECTED_STATES
 
-DRAFT_STATES = {"queued", "paused", "waiting_answer", "waiting_browser", "needs_review"}
+DRAFT_STATES = {"queued", "paused", "waiting_answer", "waiting_browser", "waiting_email", "needs_review"}
 
 
 def cancel_saved_drafts(db):

@@ -242,6 +242,8 @@ def batch_snapshot(service):
         latest[j].state in {"waiting_browser", "submission_unknown", "timed_out"} for j in batch_jobs
     )
     awaiting = sum(latest[j].state in {"waiting_answer", "needs_review"} for j in batch_jobs)
+    # Parked on an emailed code or link; the matched email resumes it. Neither blocked nor failed.
+    waiting_email = sum(latest[j].state == "waiting_email" for j in batch_jobs)
     failed = sum(latest[j].state in {"failed", "closed", "skipped", "cancelled"} for j in batch_jobs)
     reason = "Complete" if state == "complete" else "Not started"
     action = "Start a batch to discover, rank and apply automatically."
@@ -279,6 +281,7 @@ def batch_snapshot(service):
         "active": capacity_now.occupied,
         "application_workers": worker_snapshot(db, service.config.topology),
         "awaiting_answer": awaiting,
+        "waiting_email": waiting_email,
         "blocked": blocked,
         "failed": failed,
         "remaining": max(0, batch.get("target", cfg.batch_target) - len(confirmed)),
