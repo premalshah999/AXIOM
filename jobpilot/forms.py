@@ -15,7 +15,7 @@ from urllib.parse import parse_qsl, urlsplit, urlunsplit
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
-from . import phone_fields, widgets
+from . import icims_protocol, phone_fields, widgets
 from .answers import HISTORY_UNKNOWN, answer_key, job_catalog_search_box, normalize
 from .knowledge import topic
 from .browser_contracts import ActionResult, action_result, field_identity, fingerprint
@@ -788,6 +788,7 @@ class FormSession:
         self.pending = []
         self.uploaded = False
         self.upload_verified = False
+        self.last_problems = []
         self.network = None
         self.accept_prefilled = False
         self.resume_seen = False
@@ -1148,6 +1149,7 @@ class FormSession:
         name_phone_numbers(list(self.fields.values()))
         link_companion_text(self.fields.values())
         label_signature_date(list(self.fields.values()), "\n".join(texts))
+        icims_protocol.apply(list(self.fields.values()), list(self.buttons.values()))
         obs = {
             "fields": list(self.fields.values()),
             "controls": list(self.buttons.values()),
@@ -3062,7 +3064,13 @@ class FormSession:
                 # replace_workday_resume; the generic fill pass never appends.
                 continue
             # Some ATSs clear the input after upload and list the file instead.
-            if field.get("error") or (not field["value"] and self.resume_path.name not in page_text):
+            if field.get("error") or (
+                not field["value"]
+                and self.resume_path.name not in page_text
+                # iCIMS lists our upload as "Resume<timestamp>.pdf"; each upload reloads the profile and clears the
+                # passwords typed into it, so uploading again looped until "Password: required" (Iridium 2026-10-21).
+                and not self.icims_renamed_resume(page_text)
+            ):
                 if field.get("widget") == "filechooser":
                     before = set(self.buttons)
                     before_fields = set(self.fields)
@@ -3171,6 +3179,7 @@ class FormSession:
                     continue
                 if (
                     x["type"] in ("file", "password")
+                    or x.get("site_account")
                     or handled.get(x["id"]) == self.question_shape(x)
                     or AUTH.search(x["label"])
                     or (
@@ -3813,7 +3822,7 @@ class FormSession:
 
     async def authentication_required(self):
         for f in self.fields.values():
-            if f["type"] != "password" and not AUTH.search(f["label"]):
+            if (f["type"] != "password" and not AUTH.search(f["label"])) or f.get("site_account"):
                 continue
             if f["type"] != "password":
                 # A code/"security code" question blocks only while it is required and unanswered.
@@ -4234,9 +4243,10 @@ class FormSession:
             # Corning (SuccessFactors classic, 2026-10-16): the candidate profile's My Documents already
             # lists the applicant's resume and the application form has no upload of its own.
             self.uploaded = self.upload_verified = self.resume_on_file = True
+        self.last_problems = list(dict.fromkeys(problems))
         return {
             "ok": not problems,
-            "problems": list(dict.fromkeys(problems)),
+            "problems": self.last_problems,
             "verified_fields": sum(x["verified"] for x in self.ledger.values()),
             "resume_attached": self.uploaded and self.upload_verified,
             "pending": self.pending,

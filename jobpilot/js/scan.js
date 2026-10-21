@@ -402,7 +402,7 @@
       maxlength: f.maxlength ?? (el.maxLength || -1), autocomplete: el.autocomplete || '',
       valid: (f.valid ?? ((el.validity ? el.validity.valid : true) && el.getAttribute('aria-invalid') !== 'true'))
         && !error && !composedClosest(el,'spl-internal-form-field')?.hasAttribute('errorstate'),
-      name: el.getAttribute('name') || '', automation_id: el.dataset.automationId || '',
+      name: el.getAttribute('name') || '', html_id: el.id || '', automation_id: el.dataset.automationId || '',
       placeholder: el.getAttribute('placeholder') || '', error, widget: f.widget || '',
       parts: f.parts || [], accept: el.getAttribute('accept') || '', hint: clean([f.hint || '', help, description].join(' ')).slice(0,2500),
       date_format: f.date_format || '',

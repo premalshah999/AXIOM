@@ -1499,7 +1499,24 @@ class Adapter:
             )
         self.attempts[mode] += 1
         if self.attempts[mode] > 2 or self.attempts["sign_in"] + self.attempts["create"] > 4:
+            problems = [p for p in getattr(self.form, "last_problems", []) if not p.startswith("Needs an approved answer")]
+            if problems and any(f["type"] == "file" for f in obs["fields"]):
+                # These account fields belong to an application form that keeps failing its own checks; that is the
+                # failure. Schwab and Iridium (2026-10-21) each ended "Could not sign in" over a graduation year and a
+                # resume upload loop.
+                return self.defer("; ".join(problems[:6]), state="waiting_browser", blocker_type="validation")
             return await self.recover(obs, "Signing in did not succeed")
+        button = self.auth_button(obs, mode)
+        if (
+            button
+            and self.final.search(button["label"])
+            and not getattr(self.form, "uploaded", True)
+            and any(f["type"] == "file" for f in obs["fields"])
+        ):
+            # An application form with embedded account fields: attach the resume before typing the password. iCIMS
+            # posts the upload and reloads the profile, which clears typed passwords (Iridium 2026-10-21).
+            await self.form.fill_current(accept_prefilled=True)
+            obs = await self.form.scan()
         passwords = [f for f in obs["fields"] if f["type"] == "password"]
         for f in passwords:
             frame_url = self.form.frames[f["id"]].url

@@ -301,6 +301,52 @@ def test_graduation_month_uses_only_supported_month_without_appending_year(servi
     assert answer.value == "May" and answer.evidence_ids == ["profile:education.0.end"]
 
 
+ICIMS_DATE = ["Day", "Month", "Year"]
+
+
+def graduation_resolver(service, reviewed=()):
+    return Resolver(
+        Profile(
+            education=[{"school": "Fixture", "degree": "MS", "end": "2027-05"}],
+            reviewed_answers=[
+                {"id": f"r{i}", "question": q, "answer": a, "scope": "personal", "layer": "fact"}
+                for i, (q, a) in enumerate(reviewed)
+            ],
+        ),
+        service.db,
+        service.config,
+    )
+
+
+def date_part(label, kind="select", options=(), required=False):
+    return {**field(label), "type": kind, "options": list(options), "required": required, "date_parts": ICIMS_DATE}
+
+
+def test_split_graduation_date_takes_the_reviewed_day(service):
+    # iCIMS (Schwab 2026-10-21): "Graduation Date Year" received "05/2027" and kept "05/2"; the date needs all parts.
+    resolver = graduation_resolver(service, [("Graduation Date", "21st May 2027")])
+    year = resolver.local(date_part("Graduation Date Year", "text"))
+    month = resolver.local(date_part("Graduation Date Month", options=["Jan", "Apr", "May", "Jun"]))
+    day = resolver.local(date_part("Graduation Date Day", options=[str(n) for n in range(1, 32)]))
+    assert (year.value, month.value, day.value) == ("2027", "May", "21")
+    assert day.evidence_ids == ["profile:education.0.end", "reviewed:r0"]
+
+
+def test_split_graduation_date_is_whole_or_blank(service):
+    resolver = graduation_resolver(service, [("Graduation Date", "05/2027")])  # no day anywhere
+    for label, kind in [("Graduation Date Year", "text"), ("Graduation Date Month", "select"),
+                        ("Graduation Date Day", "select")]:
+        assert resolver.local(date_part(label, kind, ["May", "1", "21"])) is None
+    # Required, the first of the month, as iCIMS's own resume parser fills its rows.
+    required = resolver.local(date_part("Graduation Date Day", options=["1", "2", "21"], required=True))
+    assert required.value == "1"
+
+
+def test_a_lone_graduation_year_needs_no_day(service):
+    answer = graduation_resolver(service).local({**field("Graduation Year"), "type": "text", "options": []})
+    assert answer.value == "2027"
+
+
 @pytest.mark.parametrize("confirmed", [False, True])
 def test_missing_employer_requires_explicit_complete_history_attestation(service, confirmed):
     if confirmed:

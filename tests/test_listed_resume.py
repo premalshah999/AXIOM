@@ -69,3 +69,14 @@ async def test_icims_lists_our_upload_under_its_own_name(page, tmp_path):
 async def test_the_icims_rename_counts_only_after_this_runs_own_upload(page, tmp_path):
     assert (await icims_verify(page, tmp_path, "Resume202610211221.pdf", uploaded=False))["resume_attached"] is False
     assert (await icims_verify(page, tmp_path, "Old_CV_2023.pdf"))["resume_attached"] is False
+
+
+async def test_the_icims_rename_is_never_uploaded_again(page, tmp_path, service):
+    """The fill pass after the upload must not upload again: on iCIMS that reloads the profile and clears passwords."""
+    await icims_verify(page, tmp_path, "Resume202610211221.pdf")
+    resume = tmp_path / "Alex_Doe_Resume.pdf"
+    form = FormSession(page, Resolver(Profile(), service.db, service.config), resume, lambda *a: None)
+    await form.scan()
+    form.uploaded = True
+    await form.fill_current(accept_prefilled=True)
+    assert await page.evaluate("document.querySelector('input[type=file]').files.length") == 0

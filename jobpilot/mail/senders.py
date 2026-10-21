@@ -233,6 +233,41 @@ def oracle_attributed(address, display, text, company, pod, peers):
     )
 
 
+ICIMS_SENDERS = {"icims.com"}
+ICIMS_PORTAL_PREFIX = re.compile(
+    r"^(?:careers?|jobs|campus|internal|external|staff|talent|uscareers|hourly|corporate)-", re.I
+)
+
+
+def icims_names(company, url):
+    """Names an iCIMS employer's mail carries: its company name and its portal's tenant label
+    (careers-ebscoind.icims.com -> ebscoind). A company recorded as an iCIMS host names nothing."""
+    host = (urlsplit(url or "").hostname or "").lower()
+    label = host.split(".")[0] if host.endswith(".icims.com") else ""
+    tenant = re.sub(r"[^a-z0-9]", "", ICIMS_PORTAL_PREFIX.sub("", label))
+    names = set() if re.search(r"\.icims\.", company or "", re.I) else employer_names(company)
+    if len(tenant) >= 4:
+        names.add(tenant)
+    return names - {"icims", "career", "careers"}
+
+
+def icims_attributed(subject, text, names, peer_names):
+    """Whether a shared-sender iCIMS mail is this employer's while another employer's iCIMS window is open.
+
+    iCIMS mails every employer from one sender and routes its buttons through tracking.icims.com, so neither the
+    sender nor the link names the tenant; the subject does ("User account with EBSCO Information Services, LLC").
+    The subject decides when it names exactly one side; otherwise the body must name this employer and no peer."""
+    mine = {n for n in names - peer_names if len(n) >= 4}
+    theirs = {n for n in peer_names - names if len(n) >= 4}
+    for place, shortest in ((subject, 4), (text, 5)):
+        compact = re.sub(r"[^a-z0-9]", "", (place or "").lower())
+        own = any(n in compact for n in mine if len(n) >= shortest)
+        other = any(n in compact for n in theirs if len(n) >= shortest)
+        if own != other:
+            return own
+    return False
+
+
 def tenant_conflict(address, domain, tokens):
     """True when a shared ATS sender visibly names a different tenant than this employer."""
     if not tokens:

@@ -8,6 +8,7 @@ import re
 from .helpers import origin
 from .senders import CLICK_TRACKERS
 from .senders import authenticated_sender
+from .senders import icims_attributed
 from .senders import oracle_attributed
 from .senders import sender_allowed
 from .senders import tenant_conflict
@@ -256,6 +257,19 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
             challenge["oracle_peers"],
         )
     ):
+        return reject("tenant")
+    if (
+        challenge.get("ats") == "icims"
+        and challenge.get("icims_peers")
+        and not icims_attributed(
+            " ".join(values.get("subject", [])),
+            text,
+            set(challenge.get("icims_names", [])),
+            set(challenge["icims_peers"]),
+        )
+    ):
+        # Another employer's iCIMS window is open and this mail does not name this employer: its tracked button
+        # could be theirs.
         return reject("tenant")
     # SAP's SuccessFactors account mail labels its code "Passcode: …" (2026-10-16).
     codes = set(

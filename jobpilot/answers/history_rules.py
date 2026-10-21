@@ -78,6 +78,38 @@ class HistoryRulesMixin:
                 )
         return None
 
+    def graduation_parts(self, f, end, unit):
+        """({"year", "month", "day"}, evidence) for a graduation date asked in parts, or None when the date cannot be
+        given whole. A month-precision profile date takes its day from the owner's reviewed answer naming the same
+        month and year ("21st May 2026"); else, only where the date is required, the first of the month, as iCIMS's
+        own resume parser fills its rows (see history dates below). An optional date stays blank rather than partial."""
+        from ..widgets import parse_date
+
+        try:
+            month, day, year = parse_date(end)
+        except (ValueError, TypeError):
+            return None
+        evidence = ["profile:education.0.end"]
+        if not (month and year):
+            return None
+        if not day and "Day" in (f.get("date_parts") or [unit.title()]):
+            for review in reversed(self.profile.reviewed_answers):
+                if review.scope != "personal" or not re.search(r"graduat", review.question, re.I):
+                    continue
+                try:
+                    m, d, y = parse_date(review.answer)
+                except (ValueError, TypeError):
+                    continue
+                if d and (m, y) == (month, year):
+                    day = d
+                    evidence.append("reviewed:" + review.id)
+                    break
+            else:
+                if not f.get("required"):
+                    return None
+                day = "01"
+        return {"year": year, "month": month, "day": day}, evidence
+
     def graduation_choice_valid(self, field, value):
         """Interpret dated graduation categories, rather than typing a date into a menu."""
         if not self.profile.education or not re.search(r"graduat", field["label"], re.I):
@@ -258,24 +290,38 @@ class HistoryRulesMixin:
                 categories = [o for o in f.get("options", []) if self.graduation_choice_valid(f, o) is True]
                 if len(categories) == 1:
                     return self._ans(f, categories[0], ["profile:education.0.end"])
-                if re.search(r"graduation year", label):
-                    value = entry.end.split("-")[0]
-                elif re.search(r"graduation month", label) and not re.search(r"year", label):
-                    from calendar import month_name
-                    from ..widgets import parse_date
-
-                    try:
-                        month, _, _ = parse_date(entry.end)
-                        value = month_name[int(month)]
-                    except (ValueError, TypeError, IndexError):
+                # iCIMS asks "Graduation Date (Month / Day / Year)" as a Month menu, a Day menu and a 4-character
+                # Year box ("05/2026" became "05/2"), and refuses a date missing any part ("Please fill in all date
+                # fields", Schwab 2026-10-21). Each part gets its own component, all parts or none.
+                part = re.search(r"graduation (?:date )?(year|month|day)\b", label)
+                if part and part[1] == "month" and re.search(r"year", label):
+                    part = None  # "Graduation month/year" asks for both.
+                evidence = ["profile:education.0.end"]
+                if part:
+                    whole = self.graduation_parts(f, entry.end, part[1])
+                    if not whole:
                         return None
+                    components, evidence = whole
+                    number = int(components[part[1]] or 0)
+                    if part[1] == "year":
+                        spellings = [components["year"]]
+                    elif part[1] == "month":
+                        from calendar import month_abbr, month_name
+
+                        spellings = [month_name[number], month_abbr[number], f"{number:02d}", str(number)]
+                    else:
+                        spellings = [str(number), f"{number:02d}"]
+                    options = f.get("options") or []
+                    value = next(
+                        (o for o in options if normalize(o) in {normalize(s) for s in spellings}), spellings[0]
+                    )
                 else:
                     value = (
                         entry.end
                         if f.get("type") in {"date", "date_parts", "month"} or f.get("widget") == "date-text"
                         else month_year(entry.end)
                     )
-                return self._ans(f, value, ["profile:education.0.end"])
+                return self._ans(f, value, evidence)
         if p.education and re.search(
             r"highest (?:level of )?(?:education|(?:academic )?degree)|education level|level of education",
             label,

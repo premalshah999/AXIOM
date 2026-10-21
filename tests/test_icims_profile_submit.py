@@ -17,6 +17,7 @@ def page(url, fields, controls, heading):
     for f in fields:
         f.setdefault("value", "")
         f.setdefault("error", "")
+        f.setdefault("automation_id", "")
     return {"url": url, "fields": fields, "controls": controls, "errors": [], "headings": [heading], "text": heading}
 
 
@@ -173,3 +174,31 @@ async def test_an_email_and_phone_already_in_use_go_to_the_returning_candidate_l
     assert value.e.form.page.goto.await_args.args[0] == "https://eb-acme.icims.com/jobs/login?loginOnly=1&in_iframe=1"
     assert value.accounts.record(value.job["url"]).get("state") == "exists"
     assert await value.returning_candidate_login(obs) is False  # once per run
+
+
+async def test_an_exhausted_profile_reports_the_form_problem_not_a_failed_sign_in(service):
+    # Schwab and Iridium (2026-10-21) both ended "Could not sign in" over a graduation year and a resume loop.
+    value = flow(service, [profile()])
+    value.attempts["create"] = 2
+    value.form.last_problems = ["Value not accepted: Graduation Date Year"]
+    result = await value.authenticate(profile(), "create")
+    assert result["state"] == "waiting_browser" and result["blocker_type"] == "validation"
+    assert "Graduation Date Year" in result["reason"]
+
+
+async def test_the_resume_is_attached_before_the_password_is_typed(service):
+    # iCIMS posts the upload and reloads the profile, clearing typed passwords (Iridium 2026-10-21).
+    from types import SimpleNamespace
+
+    order = []
+    value = flow(service, [profile(), profile(), profile(), eeo()])
+    value.form.uploaded = False
+    value.form.fill_current = AsyncMock(side_effect=lambda **kwargs: order.append("upload"))
+    value.form.resolver = SimpleNamespace(resolve=AsyncMock(return_value=[]))
+    for key in ("pw", "pw2"):
+        value.locators[key].fill = AsyncMock(side_effect=lambda *args, **kwargs: order.append("password"))
+        value.locators[key].evaluate = AsyncMock()
+    value.on_form = AsyncMock(return_value=None)  # The embedded form is handed over; its handling is tested above.
+    await value.authenticate(profile(), "create")
+    assert order[0] == "upload" and "password" in order
+    value.on_form.assert_awaited_once()

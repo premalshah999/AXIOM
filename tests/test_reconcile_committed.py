@@ -29,3 +29,19 @@ def test_a_run_that_never_committed_cannot_be_reconciled(service):
     run_id, _ = seed(service, "waiting_browser", False)
     with pytest.raises(ValueError):
         service.reconcile(run_id, True, "claimed")
+
+
+def test_the_owner_can_record_a_parked_application_they_submitted_themselves(service):
+    # Schwab 2026-10-21: the run parked on its profile page; the owner finished it in the browser.
+    run_id, job_id = seed(service, "waiting_browser", False)
+    service.reconcile(run_id, True, "Your application was submitted successfully.", submitted_by_owner=True)
+    with service.db.session() as s:
+        run = s.get(Run, run_id)
+        assert run.state == "confirmed" and run.receipt["type"] == "owner_submitted"
+        assert s.get(Job, job_id).status == "confirmed"
+
+
+def test_an_active_run_cannot_be_recorded_as_owner_submitted(service):
+    run_id, _ = seed(service, "running", False)
+    with pytest.raises(ValueError):
+        service.reconcile(run_id, True, "claimed", submitted_by_owner=True)

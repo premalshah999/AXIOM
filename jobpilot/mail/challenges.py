@@ -19,6 +19,7 @@ from .constants import STALE_CODE_HOLD
 from .helpers import origin
 from .helpers import run_company
 from .senders import GREENHOUSE_SENDERS
+from .senders import ICIMS_SENDERS
 from .senders import KNOWN_SENDERS
 from .senders import ORACLE_SENDERS
 from .senders import SHARED_SENDER_ATS
@@ -102,6 +103,17 @@ class ChallengesMixin:
                 and origin(rule["employer_origin"]) != origin(other_rule.employer_origin)
             ):
                 # Oracle code mail is attributed to its tenant (oracle_attributed in extract_message).
+                continue
+            if (
+                other_rule
+                and set(rule["sender_domains"]) <= ICIMS_SENDERS
+                and set(other_rule.sender_domains) <= ICIMS_SENDERS
+                and {kind, other.kind} <= {"link", "auto", "code"}
+                and origin(rule["employer_origin"]) != origin(other_rule.employer_origin)
+            ):
+                # iCIMS account mail is attributed to its employer by name (icims_attributed in extract_message).
+                # One lease for every iCIMS employer let one verification run at a time: 49 iCIMS runs ended
+                # waiting for the mailbox or "sender busy" in five days (2026-10-21). Password resets stay serialized.
                 continue
             if (
                 other_rule

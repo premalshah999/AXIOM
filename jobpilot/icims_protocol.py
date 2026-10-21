@@ -1,0 +1,58 @@
+"""The iCIMS form protocol: field meaning from the names every portal posts, not from the label each portal prints.
+
+Every iCIMS employer runs the same server-rendered forms. Across 247 form posts to 15 employers (2026-10-20/21) the
+profile step was always `/candidate` with `PersonProfileFields.*` and `PortalProfileFields.Resume*`, custom
+questions `Q<n>`/`rcf<n>`, and the EEO step `CandProfileFields.*`/`icims_f_*`; repeating rows prefix the name with
+their row id (`1745957_PersonProfileFields.AddressCity`, `-1_` for a new row). The printed labels vary ("Year" or
+"Graduation Date Year" for `CandProfileFields.GraduationDate_Year`). Reading labels put "05/2026" into Schwab's
+four-character year box, and read Schwab's saved login and masked password as a sign-in to perform.
+"""
+
+import re
+
+ICIMS_FRAME = re.compile(r"^https://[^/]*\.icims\.com/", re.I)
+ROW = re.compile(r"^-?\d+_")
+# iCIMS date fields are three controls: <base>_Month and <base>_Date menus and a four-character <base>_Year box.
+DATE_PART = re.compile(r"^(?P<base>[A-Za-z]+Fields\.[A-Za-z]+)_(?P<part>Month|Date|Year)$")
+PART_WORD = {"Month": "Month", "Date": "Day", "Year": "Year"}
+ACCOUNT = {"PersonProfileFields.Login", "PersonProfileFields.Password", "PersonProfileFields.Password_Confirm"}
+SIGNED_IN = re.compile(r"log ?out|sign out", re.I)
+
+
+def protocol_name(field):
+    """The field's iCIMS name without its row prefix. iCIMS search menus are scanned as their visible
+    `<a id="<select id>_icimsDropdown">` anchor, which has no name of its own."""
+    name = field.get("name") or ""
+    html_id = field.get("html_id") or ""
+    if not name and html_id.endswith("_icimsDropdown"):
+        name = html_id.removesuffix("_icimsDropdown")
+    return ROW.sub("", name)
+
+
+def words(identifier):
+    """'GraduationDate' -> 'Graduation Date'."""
+    return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", identifier)
+
+
+def apply(fields, controls):
+    """Name standard iCIMS fields by protocol, in place. Other platforms' fields are untouched."""
+    own = [f for f in fields if ICIMS_FRAME.search(f.get("frame_url") or "")]
+    dates = {}
+    for f in own:
+        f["icims_name"] = name = protocol_name(f)
+        if match := DATE_PART.match(name):
+            dates.setdefault(match["base"], []).append((f, match["part"]))
+    for base, parts in dates.items():
+        caption = words(base.split(".", 1)[1])
+        present = sorted(PART_WORD[part] for _, part in parts)
+        for f, part in parts:
+            # One date in three controls: each answers only its part, and iCIMS refuses a date missing any part
+            # ("Please fill in all date fields"), so the parts are answered together or not at all.
+            f["label"] = f"{caption} {PART_WORD[part]}"
+            f["date_parts"] = present
+    if any(SIGNED_IN.fullmatch(c.get("label", "").strip()) for c in controls):
+        for f in own:
+            if f["icims_name"] in ACCOUNT and f.get("value"):
+                # A signed-in profile shows the account's saved login and a masked password. They are the account,
+                # not questions: never retyped, and never a sign-in still to perform.
+                f["site_account"] = True

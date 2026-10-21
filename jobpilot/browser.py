@@ -251,6 +251,20 @@ REQUIRES_CITIZENSHIP = re.compile(
 )
 
 
+
+# Value-free structure of a form: what each control is (name, id, class, label, menu choices), and only whether it is
+# filled. Step records rely on it where no HTML is kept.
+FORM_STRUCTURE_JS = r"""() => [...document.querySelectorAll('input,select,textarea,button')]
+  .filter(e => e.type !== 'hidden').slice(0, 400).map(e => ({
+    tag: e.tagName.toLowerCase(), type: e.type || '', name: e.name || '', id: e.id || '',
+    cls: String(e.className || '').slice(0, 100),
+    label: ((e.labels && e.labels[0] && e.labels[0].innerText) || e.getAttribute('aria-label') || '').trim().slice(0, 120),
+    required: !!(e.required || e.getAttribute('aria-required') === 'true'),
+    filled: e.type === 'checkbox' || e.type === 'radio' ? e.checked : Boolean(e.value),
+    options: e.tagName === 'SELECT' ? [...e.options].slice(0, 40).map(o => o.text.trim().slice(0, 60)) : undefined,
+  }))"""
+
+
 class BrowserUnavailable(RuntimeError):
     """The worker's desktop browser is not running; nothing was opened or sent."""
 
@@ -2066,6 +2080,16 @@ class BrowserEngine:
                 # .jsonl: step-record readers glob *.json and expect one step summary per file.
                 (folder / f"{name}.catalog.jsonl").write_text("".join(json.dumps(entry) + "\n" for entry in catalog))
             (folder / f"{name}.json").write_text(json.dumps(summary, indent=1))
+            if not metadata_only:
+                # The form's structure in every application frame, without any value. Password steps keep no HTML, and
+                # iCIMS renders its form inside an iframe the page HTML omits: 389 of ~700 iCIMS step records held only
+                # the outer careers page, and none showed a candidate profile (2026-10-21).
+                frames = []
+                for frame in await self.form.application_frames():
+                    frames.append(
+                        {"url": redacted_url(frame.url), "controls": await frame.evaluate(FORM_STRUCTURE_JS)}
+                    )
+                (folder / f"{name}.form.json").write_text(json.dumps(frames, indent=1))
             if sensitive or metadata_only:
                 return
             page = self.form.page

@@ -23,6 +23,7 @@ from .extraction import extract_message
 from .extraction import latest_employer_code
 from .helpers import origin
 from .senders import EMPLOYER_SENDER_FAMILIES
+from .senders import icims_names
 from .senders import oracle_pod
 from .senders import sender_domains_overlap
 from .senders import tenant_tokens
@@ -97,6 +98,14 @@ class PollingMixin:
                                 and origin(peer.url) != origin(job.url)
                             ):
                                 c["oracle_peers"].append((peer.company or "", oracle_pod(peer.url)))
+                    c["icims_names"] = sorted(icims_names(job.company, job.url)) if job and job.ats == "icims" else []
+                    c["icims_peers"] = []
+                    if job and job.ats == "icims":
+                        for w in windows:
+                            peer_run = s.get(Run, w.run_id) if w.id != c["id"] else None
+                            peer = s.get(Job, peer_run.job_id) if peer_run else None
+                            if peer and peer.ats == "icims" and origin(peer.url) != origin(job.url):
+                                c["icims_peers"].extend(sorted(icims_names(peer.company, peer.url)))
                     # Some Workday tenants send reset mail from their employer's
                     # domain. An exact tenant link can prove that sender; a shared
                     # wdN.myworkday.com origin cannot distinguish employers.

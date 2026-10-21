@@ -9,6 +9,9 @@ from ..db import Event, Job, MailChallenge, Review, Run, Setting, now
 from ..run_trace import phase_timing
 from .states import TERMINAL
 
+# Parked states an application can be in when the owner finishes it by hand.
+OWNER_FINISHABLE = {"waiting_browser", "waiting_email", "waiting_answer", "needs_review", "timed_out", "paused"}
+
 
 class CompletionMixin:
     def authorize_validation_retry(self, run_id, rejection):
@@ -347,7 +350,7 @@ class CompletionMixin:
         except Exception:
             return
 
-    def reconcile(self, run_id, submitted, evidence):
+    def reconcile(self, run_id, submitted, evidence, *, submitted_by_owner=False):
         if not evidence.strip():
             raise ValueError("Provide confirmation evidence or an explanation of non-submission")
         with self.db.exclusive() as s:
@@ -361,10 +364,19 @@ class CompletionMixin:
                     select(Event.id).where(Event.run_id == run_id, Event.kind == "submitting").limit(1)
                 )
             )
-            if not run or (run.state not in {"submission_unknown", "already_applied"} and not committed):
+            if submitted_by_owner:
+                # The owner finished a parked application in the browser (Schwab 2026-10-21: the run parked on its
+                # profile page; the owner submitted and saw "Your application was submitted successfully"). That is the
+                # owner's statement with its evidence, never inferred from the run; a run still active cannot take it.
+                if not run or run.state not in OWNER_FINISHABLE or not submitted:
+                    raise ValueError("Only a parked application the owner submitted can be recorded this way")
+                run.receipt = {"type": "owner_submitted", "evidence": evidence[:4000], "at": now()}
+                run.reason = "Submitted by the applicant in the browser"
+            elif not run or (run.state not in {"submission_unknown", "already_applied"} and not committed):
                 raise ValueError("Only uncertain submissions or already-applied notices can be reconciled")
+            else:
+                run.receipt = {"type": "user_reconciled", "evidence": evidence[:4000], "at": now()}
+                run.reason = "Submission reconciled by the applicant"
             run.state = "confirmed" if submitted else "needs_review"
-            run.receipt = {"type": "user_reconciled", "evidence": evidence[:4000], "at": now()}
-            run.reason = "Submission reconciled by the applicant"
             s.get(Job, run.job_id).status = run.state
         self.db.event(run_id, "reconciled", "Applicant reconciled submission", {"submitted": submitted})
