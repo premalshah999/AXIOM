@@ -44,6 +44,9 @@ class Service:
         self.mail = MailService(db, config)
         self.inbox = Inbox(self)
         self.migrate_reviewed_answers()
+        from .grandfather import grandfather_preferences
+
+        grandfather_preferences(db)
         self.migrate_legacy()
         self.relabel_custom_ats()
         from .features._store import create_tables
