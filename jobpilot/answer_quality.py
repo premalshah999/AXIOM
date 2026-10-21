@@ -130,7 +130,7 @@ def context(resolver):
         facts["fact:application_consent_policy"] = "Accept application terms and privacy notices."
     if profile.accept_required_marketing:
         facts["fact:required_marketing_policy"] = "Accept required marketing only."
-    facts.update(delegated_facts(resolver.answer_rules, profile.autonomous))
+    facts.update(delegated_facts(resolver.answer_rules, profile.autonomous, profile.work))
     evidence = {"evidence:" + e.id: e.text for e in profile.evidence}
     if resolver.resume_text:
         evidence["resume:selected"] = resolver.resume_text[:12000]

@@ -54,6 +54,15 @@ class AnswerRules(BaseModel):
     # and a question that needs one goes to the applicant. Used only when the profile applies autonomously.
     salary_stance: str = Field(default="", max_length=60)  # desired pay, free text (for example "Negotiable")
     travel_willingness: str = Field(default="", max_length=100)  # for example "open to travel"
+    # Travel the applicant states: "role" chooses an offered percentage consistent with the role's stated travel;
+    # "maximum" chooses the highest offered amount or frequency.
+    travel_choice: Literal["role", "maximum"] = "role"
+    # A month-only employment or education date on a form that needs a day: "" asks; "first" uses the first day of
+    # the recorded month for every employer and school.
+    history_day: Literal["", "first"] = ""
+    # Each employer's country, in the profile's work order (for example ["United States", "India"]). Empty: a row's
+    # country comes from its location.
+    employment_countries: list[str] = Field(default_factory=list, max_length=30)
     employment_type_sought: str = Field(default="", max_length=100)  # for example "full-time early-career employment"
     # Opt in to talent communities and "keep my data on file for other roles" asks. False (the default) declines.
     join_talent_communities: bool = False
@@ -71,16 +80,35 @@ def major_patterns(name) -> tuple:
     return (re.compile(rf"^{re.escape(name)}$", re.I), re.compile(rf"\b{re.escape(name)}\b", re.I))
 
 
-def delegated_facts(rules, autonomous) -> dict:
+def delegated_facts(rules, autonomous, work=()) -> dict:
     """The delegated-preference facts a model answer may cite; one per stated preference, none for a blank one."""
     facts = {}
+    if rules.history_day == "first":
+        facts["fact:history_date_day_policy"] = (
+            "Employment and education dates are recorded to the month. Where a form requires a day, the applicant "
+            "states the first day of that month (2025-07 is 07/01/2025), for every employer and school."
+        )
+    countries = [c.strip() for c in rules.employment_countries]
+    if any(countries):
+        facts["fact:employment_countries"] = "; ".join(
+            f"{getattr(entry, 'company', '') or f'Employer {i + 1}'}: {country}"
+            for i, (entry, country) in enumerate(zip(work, countries))
+            if country
+        ) or "; ".join(c for c in countries if c)
     if not autonomous:
         return facts
     if travel := rules.travel_willingness.strip():
         facts["fact:travel_percentage_choice_policy"] = (
-            f"Applicant is {travel} and delegates willingness preferences. For a travel percentage question, choose "
-            "an offered percentage consistent with the role, using its stated travel requirement where available. "
-            "This is willingness, not prior travel history."
+            (
+                f"Applicant is {travel} and states the maximum: for a travel percentage or frequency question, choose "
+                "the highest offered amount (all of the time). This is willingness, not prior travel history."
+            )
+            if rules.travel_choice == "maximum"
+            else (
+                f"Applicant is {travel} and delegates willingness preferences. For a travel percentage question, "
+                "choose an offered percentage consistent with the role, using its stated travel requirement where "
+                "available. This is willingness, not prior travel history."
+            )
         )
     if salary := rules.salary_stance.strip():
         facts["fact:compensation_choice_policy"] = (

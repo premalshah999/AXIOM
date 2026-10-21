@@ -403,7 +403,11 @@ class HistoryRulesMixin:
             # A history row's State/Country come only from that row's own location ("Ann Arbor, MI" ->
             # Michigan, United States; "Pune, India" -> India, no state), never from the home address.
             value = history_region(getattr(entry, "location", "") or "", region[1].startswith("country"))
-            answer = self._ans(f, value, [f"profile:{kind}.{index}.location"]) if value else None
+            evidence = [f"profile:{kind}.{index}.location"]
+            stated = list(getattr(self.answer_rules, "employment_countries", []) or [])
+            if kind == "work" and region[1].startswith("country") and index < len(stated) and stated[index].strip():
+                value, evidence = stated[index].strip(), ["fact:employment_countries"]  # The applicant's own list.
+            answer = self._ans(f, value, evidence) if value else None
             return answer or Answer(
                 field_id=f["id"],
                 disposition="review" if f.get("required") else "skip",

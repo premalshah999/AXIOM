@@ -571,7 +571,7 @@ class Resolver(
             )
         if self.profile.application_source:
             facts["fact:application_source_policy"] = self.profile.application_source
-        facts.update(delegated_facts(self.answer_rules, self.profile.autonomous))
+        facts.update(delegated_facts(self.answer_rules, self.profile.autonomous, self.profile.work))
         evidence = {"evidence:" + e.id: e.text for e in self.profile.evidence}
         if self.resume_text:
             evidence["resume:selected"] = self.resume_text[:12000]

@@ -60,3 +60,28 @@ def test_region_parsing():
     assert history_region("Pune, Maharashtra, India", False) == "Maharashtra"
     assert history_region("Pune, India", False) == ""
     assert history_region("Remote", True) == ""
+
+
+def test_the_applicants_stated_employer_countries_come_first(service):
+    """Owner 2026-10-21: "Country for all employment: USA, USA, USA, India, India" (in the profile's work order)."""
+    stated = profile()
+    stated.work[1].location = "Remote"  # A location that names no country.
+    stated.answer_rules = {"employment_countries": ["United States", "India"]}
+    answer = Resolver(stated, service.db, service.config).local(row("Country", 2, "combobox", ["United States", "India"]))
+    assert answer.value == "India" and answer.evidence_ids == ["fact:employment_countries"]
+
+
+def test_travel_maximum_and_first_of_month_are_stated_facts():
+    """Owner 2026-10-21: "Willingness to travel: maximum, all the time"; "Company start end date: first day of the
+    month mentioned, for all employers". Lear's From/End Date went to the applicant without the second."""
+    from jobpilot.answer_rules import AnswerRules, delegated_facts
+
+    rules = AnswerRules(travel_willingness="willing to travel", travel_choice="maximum", history_day="first",
+                        employment_countries=["United States", "India"])
+    facts = delegated_facts(rules, True, profile().work)
+    assert "highest offered" in facts["fact:travel_percentage_choice_policy"]
+    assert "first day of that month" in facts["fact:history_date_day_policy"]
+    assert facts["fact:employment_countries"] == "Example Research Lab: United States; Example AI: India"
+    assert "role" in delegated_facts(AnswerRules(travel_willingness="open to travel"), True)[
+        "fact:travel_percentage_choice_policy"]
+    assert delegated_facts(AnswerRules(), True) == {}

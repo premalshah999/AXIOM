@@ -25,8 +25,9 @@ from .senders import ORACLE_SENDERS
 from .senders import SHARED_SENDER_ATS
 from .senders import sender_domains_overlap
 
-# Seconds an iCIMS Central password-reset window stays open (see begin()).
+# Seconds a password-reset window stays open on a platform that mails every employer from one sender (see begin()).
 CENTRAL_RESET_WAIT = 180
+SHARED_RESET_SENDERS = {"icims.com", "successfactors.com", "successfactors.eu", "sapsf.com"}
 
 
 class ChallengesMixin:
@@ -290,10 +291,11 @@ class ChallengesMixin:
             )
             generation = len(previous_requests) + 1
             wait = self.config.mail_wait_seconds
-            if kind == "password_reset" and origin(rule["employer_origin"]) == "https://login.icims.com":
-                # Central mails a reset within seconds when the account exists and never when it does not, and an open
-                # reset holds iCIMS's one sender for every employer: Atlassian and Mass Markets each stopped all iCIMS
-                # applications for 20 minutes waiting for a reset that never came (2026-10-21).
+            if kind == "password_reset" and set(rule["sender_domains"]) & SHARED_RESET_SENDERS:
+                # A reset mails within seconds when the account exists and never when it does not, and an open reset
+                # holds the platform's one sender for every employer: Atlassian and Mass Markets (iCIMS Central) and
+                # Westinghouse (SuccessFactors) each stopped all of their platform's sign-ups for 20 minutes waiting for
+                # a reset that never came (2026-10-21).
                 wait = min(wait, CENTRAL_RESET_WAIT)
             c = MailChallenge(
                 run_id=run_id,

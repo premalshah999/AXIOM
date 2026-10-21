@@ -94,3 +94,20 @@ async def test_a_central_reset_window_closes_after_three_minutes(service):
     rule = service.mail.rule_for("https://login.icims.com")
     reset = service.mail.begin(run["id"], rule, "alex@example.test", "password_reset")
     assert reset["expires"] - time.time() <= CENTRAL_RESET_WAIT + 2
+
+
+async def test_a_successfactors_reset_window_closes_after_three_minutes(service):
+    """Westinghouse (SuccessFactors, 2026-10-21) held the one SuccessFactors sender for 20 minutes waiting for a reset;
+    both SAP sign-ups behind it gave up as "sender busy"."""
+    import time
+
+    from jobpilot.mail.challenges import CENTRAL_RESET_WAIT
+
+    _, run, rule = await configured(service)
+    with service.db.exclusive() as session:
+        row = session.get(MailRule, rule["id"])
+        row.sender_domains = ["successfactors.com", "successfactors.eu", "sapsf.com"]
+        row.employer_origin = "https://careers.westinghousenuclear.com"
+    rule = service.mail.rule_for("https://careers.westinghousenuclear.com")
+    reset = service.mail.begin(run["id"], rule, "alex@example.test", "password_reset")
+    assert reset["expires"] - time.time() <= CENTRAL_RESET_WAIT + 2
