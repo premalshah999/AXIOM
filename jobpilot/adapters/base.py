@@ -23,7 +23,9 @@ from ..mail_errors import MailPending, code_inline_wait
 APPLY = re.compile(
     r"^(?:apply|apply now|apply here|apply for (?:this )?(?:job|position|role|opportunity)|apply online|"
     r"apply for this job online|start (?:your |my )?application|apply to (?:this )?(?:job|position)|"
-    r"i'?m interested|begin (?:your )?application|easy apply|apply on company (?:site|website)|apply today)$",
+    # XPO's SuccessFactors site (2026-10-21): "Apply now »" was no way forward and the guided agent took the run.
+    r"i'?m interested|begin (?:your )?application|easy apply|apply on company (?:site|website)|apply today)"
+    r"(?:\s*[>›→»])?$",
     re.I,
 )
 NOT_APPLY = re.compile(r"linkedin|indeed|seek\b|glassdoor|google|facebook|refer|share|save job|alert", re.I)

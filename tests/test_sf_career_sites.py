@@ -28,3 +28,19 @@ def test_saved_custom_jobs_take_the_recognized_ats(service):
         labels = {job.url: job.ats for job in s.scalars(select(Job))}
     assert labels[url] == "successfactors"
     assert labels["https://example.org/jobs/1"] == "custom"
+
+
+def test_an_apply_control_with_a_trailing_arrow_opens_the_application():
+    """XPO (jobs.xpo.com, 2026-10-21): "Apply now »" was read as no way forward and the guided agent took three runs."""
+    from types import SimpleNamespace
+
+    from jobpilot.adapters.base import Adapter
+
+    controls = [
+        {"id": "search", "label": "Search Jobs", "aria_label": "", "href": "/search/", "automation_id": ""},
+        {"id": "apply", "label": "Apply now »", "aria_label": "", "href": "/talentcommunity/apply/1419245900/",
+         "automation_id": ""},
+    ]
+    assert Adapter.find_apply(SimpleNamespace(apply_ids=()), {"controls": controls})["id"] == "apply"
+    controls[1]["label"] = "Apply nowhere"
+    assert Adapter.find_apply(SimpleNamespace(apply_ids=()), {"controls": controls}) is None
