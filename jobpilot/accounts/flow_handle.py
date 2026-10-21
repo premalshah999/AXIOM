@@ -205,7 +205,7 @@ class FlowHandleMixin:
             rejected = any(BAD_CREDENTIALS.search(error) for error in obs.get("errors", []))
             # Which switch condition held this run on Sign In (NetApp, Entergy, Farmers, L3Harris 2026-10-21 ended here
             # on a first application, with "Create an account" offered). Value-free.
-            e.emit("account_switch", "Sign-in refused; the switch to Create was not taken", {
+            getattr(e, "emit", lambda *args: None)("account_switch", "Sign-in refused; the switch to Create was not taken", {
                 "creating": creating, "known": known, "recorded": recorded, "configured": bool(configured),
                 "create_links": [b["label"][:40] for b in create_links], "page_refused": page_refused,
                 "switched": ("switch", "create") in self.attempts, "applied_before": self.applied_before(),
