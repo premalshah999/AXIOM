@@ -2,16 +2,16 @@
 
 from datetime import UTC, datetime, timedelta
 
-from fastapi import HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from .db import Job, Run, Source, now
-from .discovery import rank_batch
-from .jobboard import BoardSettings, board_snapshot, managed_ids, setup_sources, settings
-from .network import public_url
-from .schemas import SourceInput
-from .service import ACTIVE
+from ...db import Job, Run, Source, now
+from ...discovery import rank_batch
+from ...jobboard import BoardSettings, board_snapshot, managed_ids, setup_sources, settings
+from ...network import public_url
+from ...schemas import SourceInput
+from ...service import ACTIVE
 
 
 class ApplySelection(BaseModel):
@@ -22,18 +22,19 @@ class BatchStart(BaseModel):
     target: int = Field(default=100, ge=1, le=500)
 
 
-def install_routes(app, service):
+def router(service) -> APIRouter:
     db, config = service.db, service.config
+    r = APIRouter()
 
-    @app.post("/api/job-board/autopilot/start")
+    @r.post("/api/job-board/autopilot/start")
     async def start_autopilot(data: BatchStart):
-        from .autopilot import start_autonomous, batch_snapshot
+        from ...autopilot import start_autonomous, batch_snapshot
 
         if not service.dispatch:
             raise HTTPException(409, "Application workers are disabled")
         return {**await start_autonomous(service, data.target), "runtime": batch_snapshot(service)}
 
-    @app.get("/api/job-board")
+    @r.get("/api/job-board")
     def snapshot(include_sources: bool = True):
         board = board_snapshot(db)
         board["source_count"] = len(board["sources"])
@@ -49,16 +50,16 @@ def install_routes(app, service):
             },
         }
 
-    @app.put("/api/job-board/settings")
+    @r.put("/api/job-board/settings")
     async def update(data: BoardSettings):
         if data.auto_apply:
-            from .autopilot import start_batch
+            from ...autopilot import start_batch
 
             start_batch(db, data.batch_target)
         count = setup_sources(db, data)
         return {"saved": True, "sources": count}
 
-    @app.get("/api/job-board/search")
+    @r.get("/api/job-board/search")
     def search_status():
         return {
             "google_configured": bool(config.serper_api_key),
@@ -67,7 +68,7 @@ def install_routes(app, service):
             "queries_per_sweep": config.search_queries_per_sweep,
         }
 
-    @app.post("/api/job-board/sources")
+    @r.post("/api/job-board/sources")
     async def add_source(data: SourceInput):
         await public_url(data.url, config.allow_private_urls)
         ids = managed_ids(db)
@@ -95,7 +96,7 @@ def install_routes(app, service):
         db.set_setting("job_board_sources", {"ids": sorted(ids)})
         return {"added": True, "id": row.id}
 
-    @app.post("/api/job-board/scrape")
+    @r.post("/api/job-board/scrape")
     async def scrape_now():
         if not service.dispatch:
             raise HTTPException(409, "Start application workers before scraping")
@@ -105,7 +106,7 @@ def install_routes(app, service):
         ids = managed_ids(db)
         with db.session() as s:
             ids = list(s.scalars(select(Source.id).where(Source.id.in_(ids), Source.enabled.is_(True))))
-        from .workers import enqueue_source
+        from ...workers import enqueue_source
 
         started = now()
         queued = 0
@@ -126,7 +127,7 @@ def install_routes(app, service):
         db.set_setting("job_board_requested", {"at": started})
         return {"queued_sources": queued, "total_sources": len(ids)}
 
-    @app.post("/api/job-board/apply")
+    @r.post("/api/job-board/apply")
     async def apply_selection(data: ApplySelection):
         if not service.dispatch:
             raise HTTPException(409, "Application workers are disabled")
@@ -175,3 +176,5 @@ def install_routes(app, service):
             except (ValueError, RuntimeError) as exc:
                 skipped.append({"job_id": jid, "reason": str(exc)[:250]})
         return {"queued": queued, "skipped": skipped}
+
+    return r
