@@ -53,10 +53,10 @@ def history_region(location, country):
 
 EDUCATION = {
     "school": re.compile(r"school|university|institution|college", re.I),
-    "degree": re.compile(r"degree|qualification|level of education", re.I),
+    "degree": re.compile(r"degree|qualification|level of education|education level", re.I),
     "field_of_study": re.compile(r"field of study|major|discipline|area of study|concentration", re.I),
     "gpa": re.compile(r"\bgpa\b|grade", re.I),
-    "start": re.compile(r"^from$|start|first year|from year", re.I),
+    "start": re.compile(r"^from(?: date)?$|start|first year|from year", re.I),
     "end": re.compile(r"^to\b|\bend\b|last year|graduat|to year|completion|expected", re.I),
 }
 

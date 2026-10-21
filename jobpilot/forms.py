@@ -48,8 +48,16 @@ CONTROL_RECOVERY_SECONDS = 30
 HISTORY_ROW_LABELS = {
     "company": re.compile(r"(?:employer|company)(?: name)?", re.I),
     "title": re.compile(r"(?:position|job) title|title", re.I),
-    "start": re.compile(r"start date|from", re.I),
-    "end": re.compile(r"end date|to", re.I),
+    "start": re.compile(r"start date|from(?: date)?", re.I),
+    "end": re.compile(r"end date|to(?: date)?", re.I),
+}
+# Classic SuccessFactors (Syncreon, Lear 2026-10-21) repeats education rows above the work rows: Education Level, Major
+# or Subject, * School, From Date, End Date. They reuse the work rows' End Date, so no work End Date was ever placed,
+# and every education row was answered from the first degree.
+EDUCATION_ROW_LABELS = {
+    "school": re.compile(r"school(?: name)?|university|college|institution", re.I),
+    "degree": re.compile(r"degree|education level|level of education", re.I),
+    "field_of_study": re.compile(r"major(?: or subject)?|field of study|discipline", re.I),
 }
 
 
@@ -155,6 +163,31 @@ def mark_history_rows(fields):
         attr: [f for f in fields if f.get("type") in {"text", "date"} and pattern.fullmatch(clean(f))]
         for attr, pattern in HISTORY_ROW_LABELS.items()
     }
+    schools = {
+        attr: [f for f in fields if f.get("type") in {"text", "combobox", "select"} and pattern.fullmatch(clean(f))]
+        for attr, pattern in EDUCATION_ROW_LABELS.items()
+    }
+    position = {id(f): i for i, f in enumerate(fields)}
+    work_anchors = [position[id(f)] for f in matched["company"] + matched["title"]]
+    school_anchors = [position[id(f)] for row_fields in schools.values() for f in row_fields]
+
+    def block(f):
+        """Which block a date belongs to: the nearer of the work and education anchors ("" when tied or none)."""
+        work = min((abs(position[id(f)] - a) for a in work_anchors), default=None)
+        school = min((abs(position[id(f)] - a) for a in school_anchors), default=None)
+        if work is not None and (school is None or work < school):
+            return "work"
+        return "education" if school is not None and (work is None or school < work) else ""
+
+    dates = {attr: matched.pop(attr) for attr in ("start", "end")}
+    if len(schools["school"]) > 1:
+        # One education row is answered as a whole from the highest degree; only repeated rows are placed.
+        education = {**schools, **{attr: [f for f in v if block(f) == "education"] for attr, v in dates.items()}}
+        for attr, row_fields in education.items():
+            if len(row_fields) == len(schools["school"]):
+                for index, f in enumerate(row_fields):
+                    f["history_row"] = {"kind": "education", "index": index}
+    matched.update({attr: [f for f in v if block(f) == "work"] for attr, v in dates.items()})
     rows = len(matched["company"])
     if not rows or len(matched["title"]) != rows:
         return
