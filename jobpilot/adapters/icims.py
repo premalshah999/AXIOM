@@ -20,6 +20,8 @@ from .base import Adapter, Step, KNOWN_ACCOUNT
 
 # Schwab labels it "Apply for this job" (no "online"); unmatched, every Schwab run left the iCIMS flow at the job page
 # and the generic navigator clicked an email step it cannot pass (2026-10-21). The link target still has to be this job's.
+# The application steps after the profile, by their own path (the forms packet is /form?form=...&isPacket=1).
+PROTOCOL_STEP = re.compile(r"/jobs/\d+/[^/]+/(?:questions|eeo|form)/?$")
 APPLY_ICIMS = re.compile(r"apply for this job(?: online)?|^apply(?: now)?$|apply online", re.I)
 PROFILE_CREATE = re.compile(r"^(?:create|submit)(?: (?:my|your|a))? profile$", re.I)
 PROFILE_SAVE = re.compile(r"^(?:create|submit|update|save)(?: (?:my|your|a))? profile$", re.I)
@@ -465,11 +467,15 @@ class ICIMS(Adapter):
 
     def find_apply(self, obs):
         accounts = getattr(self, "accounts", None)
+        record = accounts.record(self.job["url"]) if accounts else {}
         if (
             accounts
             and accounts.may_create
             and not self.employer_session(obs)
-            and self.central_unverified(accounts.record(self.job["url"]))
+            # Only an employer whose Central sign-in is stuck unverified. With no record at all, VTG's "Join our
+            # talent network" was taken for Apply and the run filled the talent community instead (2026-10-21).
+            and record
+            and self.central_unverified(record)
         ):
             # Some employers offer candidate registration separately from the
             # primary Apply link. Follow only the actual owned signup href,
@@ -664,8 +670,12 @@ class ICIMS(Adapter):
             and all(f["type"] in {"email", "checkbox"} for f in scope)
         ):
             return Step.EMAIL_ENTRY
-        if self.application_step(obs) and fields and not any(f["type"] == "password" for f in fields):
-            # EEO, Job Specific Questions and the forms packet: application steps, filled before their Submit.
+        protocol_step = PROTOCOL_STEP.search(path) or any(
+            PROTOCOL_STEP.search(urlsplit(f.get("frame_url") or "").path) for f in fields
+        )
+        if (self.application_step(obs) or protocol_step) and fields and not any(f["type"] == "password" for f in fields):
+            # EEO, Job Specific Questions and the forms packet: application steps, filled before their Submit. Their
+            # URL names the step; Prime's packet page has no progress caption and was read as unknown (2026-10-21).
             return Step.FORM
         return super().classify_page(obs)
 

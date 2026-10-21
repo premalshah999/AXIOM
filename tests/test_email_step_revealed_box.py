@@ -39,3 +39,23 @@ async def test_a_box_revealed_by_the_first_one_is_ticked_before_next(service):
     a.e.form.page = SimpleNamespace(url=URL)
     await a.on_email_entry(first)
     assert ("accept", "true") in filled and ("notice", "true") in filled
+
+
+async def test_only_agreement_menus_are_consents(service):
+    """Schwab, run 5798715c3947414d99adecf5464d4136, 2026-10-21: phone country is not consent."""
+    country = {"id": "country", "type": "combobox", "label": "Country Code — Make a Selection —",
+               "required": True, "value": "", "options": ["United States"]}
+    consent = {"id": "consent", "type": "select", "label": "I acknowledge the privacy notice",
+               "required": True, "value": "", "options": ["Continue"]}
+    obs = observation([EMAIL, country, consent], True)
+    a = adapter(service, obs)
+    a.form.fill = AsyncMock()
+    a.form.resolver = SimpleNamespace(resolve=AsyncMock(return_value=[
+        Answer(field_id="consent", value="Continue", disposition="answer")]))
+    a.form.scan = AsyncMock(return_value=obs)
+    a.challenge = None
+    a.after_auth_dialogs = AsyncMock()
+    await a.on_email_entry(obs)
+    a.form.resolver.resolve.assert_awaited_once_with([consent])
+    assert [call.args[0]["id"] for call in a.form.fill.await_args_list] == ["email", "consent"]
+    a.click.assert_awaited_once()

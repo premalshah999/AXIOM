@@ -107,6 +107,7 @@ passes before each production deploy.
 
 | Date | Item | State |
 |---|---|---|
+| 2026-10-21 | iCIMS handoff: restrict consent menus, classify packet/question/EEO paths, keep replaced controls unverified, and prevent new candidates entering talent networks. Behavior regressions added. REA isolated Schwab's pre-CAPTCHA phone validation. | 1,340 fast tests and 21 targeted browser tests passed; deploy and live validation pending |
 | 2026-10-20 | Legacy branches pushed (redacted), AXIOM `main` seeded from the October 20 snapshot | done |
 | 2026-10-20 | REA maps, tools and findings copied to `docs/rea/` (redacted) | done |
 | 2026-10-20 | Agent worktrees created; five agents started | done |

@@ -523,3 +523,21 @@ owner's standing 10-12 rule (decline when offered) applied. This is not a defect
     - Received, and this run walked the steps → receipt.
     - Received otherwise → already applied.
 - **State/Province failing its first commit is fixed.** `icims_rows` took a "No Results" status already shown before the search as the search's answer. An empty answer now counts only after the status changes or 1.6 s pass. A list that is empty at first is searched once more after Country's change.
+
+
+## 2026-10-21: handoff regression review and Schwab entry observation
+
+- Schwab run `5798715c3947414d99adecf5464d4136`: the required country-code menu is not a consent.
+  Consent-menu handling must require agreement wording; phone inputs belong to the email protocol.
+- Prime run `f9754403943d439d85501c8065ffae5d`: `/jobs/<id>/<slug>/form?form=Employment_Application&isPacket=1`
+  is an application step even without a progress caption. The same applies to `/questions` and `/eeo`, including
+  when only the content frame has that URL. A control replaced after scanning remains unverified until rescanned.
+- VTG: an empty employer account record is not evidence of a failed Central account. The job's own Apply must
+  precede the offered `/connect/interests` talent-network link for a new candidate.
+- Dedicated headless REA Chrome, port 9339, fresh temporary profile; no worker/twin attachment. REA evidence
+  `ev_33f0c2bba3c48cba3084a4c45fe5a00d39f55ec5aa15cfbcc2745b76edff5cc9` captured Schwab's nested email form
+  and its hCaptcha source. Throwaway email and synthetic phone only; employer POSTs were blocked.
+  Email alone yields `Country Code: required. Phone Number: required.` before `hcaptcha.execute`, although the
+  inputs have no native `required` attribute. Selecting `#dropdownResults li[value=US]` and filling
+  `css_phoneNumber` clears the error and produces a pending hCaptcha execution in the content frame.
+  This is a missing phone-input path, not evidence that nested-frame CAPTCHA observation is broken.

@@ -11,6 +11,8 @@ from collections import Counter
 from enum import StrEnum
 from urllib.parse import urlsplit
 
+from playwright.async_api import Error as PlaywrightError
+
 from ..service import Service
 from ..accounts import Accounts
 from ..captcha_observation import ARM_JS
@@ -119,6 +121,7 @@ FORGOT = re.compile(
     r"forgot (?:your )?password|reset (?:your )?password|can'?t sign in|trouble signing in", re.I
 )
 CONSENT_MENUS = {"select", "combobox", "dropdown", "radio"}
+CONSENT_LABEL = re.compile(r"acknowledg|agree|consent|accept|privacy|terms", re.I)
 AUTH_BUTTON = re.compile(
     r"^(?:sign in|log ?in|create (?:an? )?account|register|sign up|submit|continue|next|verify|confirm|"
     r"send|reset(?: password)?|save|create profile|set password|change password)$",
@@ -620,15 +623,26 @@ class Adapter:
                 if f["id"] in seen:
                     continue
                 if f["type"] != "checkbox":
-                    if f.get("required") and f.get("options") and not f.get("value") and f["type"] in CONSENT_MENUS:
-                        # A consent asked as a menu (Atlassian's "By selecting continue ... you acknowledge").
+                    if (
+                        f.get("required")
+                        and f.get("options")
+                        and not f.get("value")
+                        and f["type"] in CONSENT_MENUS
+                        and CONSENT_LABEL.search(f["label"])
+                    ):
+                        # A consent asked as a menu (Atlassian's "By selecting continue ... you acknowledge"). Other
+                        # menus on the step, such as Schwab's phone country code, are not agreements.
                         seen.add(f["id"])
                         answer = (await self.form.resolver.resolve([f]))[0]
-                        if answer.disposition == "answer":
-                            await self.form.fill(f, answer.value)
-                        else:
+                        if answer.disposition != "answer":
                             return self.defer(
                                 "A required agreement on the email step needs your approval", [self.review_for(f)]
+                            )
+                        try:
+                            await self.form.fill(f, answer.value)
+                        except (PlaywrightError, ValueError):
+                            return self.defer(
+                                "A required agreement on the email step could not be selected", [self.review_for(f)]
                             )
                     continue
                 if f["value"] == "true":

@@ -74,3 +74,17 @@ def test_rejected_credentials_do_not_hide_offered_registration(service):
     assert value.find_apply(obs)==signup
     value.accounts.mark(value.job["url"],"authenticated")
     assert value.find_apply(obs)["id"]=="apply"
+
+
+def test_new_candidate_enters_job_instead_of_talent_network(service):
+    """VTG, run d499dd84 (handoff prefix), 2026-10-21: no account must not select Connect."""
+    from support_icims import observation
+
+    obs = observation("https://careers-acme.icims.com/jobs/42/engineer/job", password=False, email=False)
+    signup = {"id": "connect", "label": "Join our talent network",
+              "href": "https://careers-acme.icims.com/connect/interests"}
+    apply = {"id": "apply", "label": "Apply for this job", "href": "/jobs/42/engineer/login"}
+    obs["controls"] = [signup, apply]
+    value = adapter(service, obs)
+    assert not value.accounts.record(value.job["url"])
+    assert value.find_apply(obs) is apply

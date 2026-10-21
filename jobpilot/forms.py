@@ -4147,13 +4147,18 @@ class FormSession:
             if phone_fields.is_phone_extension(f) and not f.get("value"):
                 continue  # Optional phone extension: blank is correct and never blocks submit.
             if expected is not None:
-                if (
-                    f["type"] == "combobox"
-                    and await self.locator(f["id"]).get_attribute("aria-invalid") == "true"
-                ):
-                    # UI5 pickers clear aria-invalid only on blur; re-read validity after leaving the control.
-                    await self.locator(f["id"]).evaluate("e => e.blur()")
-                    f["valid"] = await self.locator(f["id"]).get_attribute("aria-invalid") != "true"
+                try:
+                    if (
+                        f["type"] == "combobox"
+                        and await self.locator(f["id"]).get_attribute("aria-invalid", timeout=2000) == "true"
+                    ):
+                        # UI5 pickers clear aria-invalid only on blur; re-read validity after leaving the control.
+                        await self.locator(f["id"]).evaluate("e => e.blur()", timeout=2000)
+                        f["valid"] = await self.locator(f["id"]).get_attribute("aria-invalid", timeout=2000) != "true"
+                except PlaywrightError:
+                    # A control the page replaced since the scan (Prime's packet step waited 30 s here and raised,
+                    # 2026-10-21) is read again by the next scan, not here.
+                    f["valid"] = False
                 if (
                     not f["value"]
                     and f["type"] in {"dropdown", "select", "combobox"}
@@ -4170,8 +4175,11 @@ class FormSession:
                         f["value"] = str(expected)
                 same = widgets.same_value(f, f["value"], expected) and f["valid"] and not f.get("error")
                 # Custom comboboxes must close after committing a choice.
-                if f["type"] == "combobox" and not self.workday:
-                    same = same and await self.locator(f["id"]).get_attribute("aria-expanded") != "true"
+                if f["type"] == "combobox" and not self.workday and same:
+                    try:
+                        same = await self.locator(f["id"]).get_attribute("aria-expanded", timeout=2000) != "true"
+                    except PlaywrightError:
+                        same = False  # Replaced since the scan: unverified until the next scan reads it.
                 ledger = self.ledger.get(f["id"])
                 if ledger is None:
                     ledger = next(

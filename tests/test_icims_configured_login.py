@@ -165,3 +165,18 @@ def test_the_email_step_is_known_by_its_protocol_name_and_submit_id(service):
     value = adapter(service, obs)
     assert value.classify(obs) == Step.EMAIL_ENTRY
     assert value.email_submit(obs) is submit
+
+
+@pytest.mark.parametrize("step", ["form?form=Employment_Application&isPacket=1", "questions?global=1", "questions", "eeo"])
+@pytest.mark.parametrize("framed", [False, True])
+def test_the_forms_packet_is_an_application_step_by_its_path(service, step, framed):
+    """Prime, run f9754403943d439d85501c8065ffae5d, 2026-10-21: packet has no progress caption."""
+    from jobpilot.adapters.base import Step
+
+    url = "https://careers-primeinc.icims.com/jobs/5263/junior-rpgle-developer/" + step
+    obs = observation("https://careers-primeinc.icims.com/jobs/5263/job" if framed else url,
+                      password=False, email=False)
+    obs["fields"] = [{"id": "q", "type": "select", "label": "Are you at least 18?", "required": True, "value": "",
+                      "options": ["Yes", "No"], "frame_url": url, "automation_id": "", "icims_name": "rcf1"}]
+    obs["controls"] = [{"id": "n", "label": "Submit", "href": "", "automation_id": "", "aria_label": ""}]
+    assert adapter(service, obs).classify(obs) == Step.FORM
