@@ -2091,16 +2091,16 @@ class BrowserEngine:
                 # .jsonl: step-record readers glob *.json and expect one step summary per file.
                 (folder / f"{name}.catalog.jsonl").write_text("".join(json.dumps(entry) + "\n" for entry in catalog))
             (folder / f"{name}.json").write_text(json.dumps(summary, indent=1))
-            if not metadata_only:
-                # The form's structure in every application frame, without any value. Password steps keep no HTML, and
-                # iCIMS renders its form inside an iframe the page HTML omits: 389 of ~700 iCIMS step records held only
-                # the outer careers page, and none showed a candidate profile (2026-10-21).
-                frames = []
-                for frame in await self.form.application_frames():
-                    frames.append(
-                        {"url": redacted_url(frame.url), "controls": await frame.evaluate(FORM_STRUCTURE_JS)}
-                    )
-                (folder / f"{name}.form.json").write_text(json.dumps(frames, indent=1))
+            # The form's structure in every application frame, without any value, on every step: password steps keep
+            # no HTML, and iCIMS renders its form inside an iframe the page HTML omits (389 of ~700 iCIMS step records
+            # held only the outer careers page). Recovery steps too: VTG's false commit happened in the recovery agent,
+            # whose steps recorded no form (2026-10-21).
+            # One frame per line, .jsonl like the catalog: step-record readers glob *.json.
+            lines = []
+            for frame in await self.form.application_frames():
+                controls = await frame.evaluate(FORM_STRUCTURE_JS)
+                lines.append(json.dumps({"url": redacted_url(frame.url), "controls": controls}) + "\n")
+            (folder / f"{name}.form.jsonl").write_text("".join(lines))
             if sensitive or metadata_only:
                 return
             page = self.form.page

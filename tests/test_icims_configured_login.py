@@ -202,3 +202,22 @@ def test_schwab_wrapper_login_does_not_turn_signed_in_profile_into_account_creat
     assert a.find_next(obs)["id"] == "update"
     obs["controls"].append({"id": "real-login", "label": "Log in", "href": "/login", "frame_url": frame_url})
     assert not a.employer_session(obs)
+
+
+@pytest.mark.parametrize(
+    "path,intermediate",
+    [
+        ("/jobs/9316/associate-software-engineer/candidate?in_iframe=1", True),
+        ("/jobs/9316/associate-software-engineer/questions?global=1&in_iframe=1", True),
+        ("/jobs/9316/associate-software-engineer/questions?in_iframe=1", False),  # may be the last step
+        ("/jobs/9316/associate-software-engineer/eeo?in_iframe=1", False),
+    ],
+)
+def test_early_protocol_steps_are_never_the_final_submit(service, path, intermediate):
+    """VTG 2026-10-21 (run 153ca3d84d6645c487578111845d7430): an intermediate Submit was committed with no readable
+    progress caption, and the run parked at step 3 of 4 as submission_unknown."""
+    url = "https://careers-vtgdefense.icims.com" + path
+    obs = observation(url, password=False, email=False)
+    obs["text"] = ""
+    obs["fields"] = [{"id": "q", "type": "select", "label": "Question", "frame_url": url}]
+    assert adapter(service, obs).step_before_last(obs) is intermediate

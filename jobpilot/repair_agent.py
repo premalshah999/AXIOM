@@ -166,6 +166,7 @@ def evidence(db, data_dir, run_id, profile):
         pass
     page = {}
     steps = sorted((folder / "steps").glob("*.json")) if (folder / "steps").exists() else []
+    steps = [path for path in steps if not path.name.endswith(".form.json")]  # Frame records, not step summaries.
     if steps:
         try:
             last = json.loads(steps[-1].read_text())

@@ -72,6 +72,8 @@ def print_trace(config, run_id):
         return
     for path in sorted(folder.glob("*.json")):
         step = json.loads(path.read_text())
+        if not isinstance(step, dict):
+            continue  # A frame-structure record (*.form.json, 2026-10-21 runs), not a step summary.
         print(f"\n[{step['n']:02d}] {step['step']}  {step['url']}")
         if step["headings"]:
             print("     headings: " + " | ".join(step["headings"][:4]))

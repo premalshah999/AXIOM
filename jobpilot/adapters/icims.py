@@ -22,6 +22,7 @@ from .base import Adapter, Step, KNOWN_ACCOUNT
 # Schwab labels it "Apply for this job" (no "online"); unmatched, every Schwab run left the iCIMS flow at the job page
 # and the generic navigator clicked an email step it cannot pass (2026-10-21). The link target still has to be this job's.
 # The application steps after the profile, by their own path (the forms packet is /form?form=...&isPacket=1).
+EARLY_STEP = re.compile(r"/jobs/\d+/[^/]+/(?:candidate|questions)/?$")
 PROTOCOL_STEP = re.compile(r"/jobs/\d+/[^/]+/(?:questions|eeo|form)/?$")
 APPLY_ICIMS = re.compile(r"apply for this job(?: online)?|^apply(?: now)?$|apply online", re.I)
 PROFILE_CREATE = re.compile(r"^(?:create|submit)(?: (?:my|your|a))? profile$", re.I)
@@ -205,7 +206,14 @@ class ICIMS(Adapter):
     def step_before_last(self, obs):
         step = self.application_step(obs)
         if not step:
-            return False
+            # Without a readable progress caption, the protocol still knows two steps that always precede another:
+            # the candidate profile and the global questions. The recovery agent committed VTG's application on an
+            # intermediate Submit and parked it at step 3 of 4 (EEO) as submission_unknown (2026-10-21).
+            return any(
+                EARLY_STEP.search(urlsplit(u).path) and (not urlsplit(u).path.endswith("/questions")
+                                                         or "global=1" in urlsplit(u).query)
+                for u in {obs.get("url", "")} | {f.get("frame_url") or "" for f in obs.get("fields", [])}
+            )
         if step[0] < step[1]:
             return True
         # The last step's own counter, in its screen-reader name or its visible caption ("Portal Specific Forms (1/2)").
