@@ -1657,8 +1657,9 @@ class BrowserEngine:
                 b
                 for b in obs["controls"]
                 if b["id"] in owned
+                # NetApp's SuccessFactors notice (2026-10-21): Acknowledge, Decline, Print, Close.
                 and re.fullmatch(
-                    r"(?:i )?(?:accept|agree)(?: (?:and continue|all))?", b["label"].strip(), re.I
+                    r"(?:i )?(?:accept|agree|acknowledge)(?: (?:and continue|all))?", b["label"].strip(), re.I
                 )
             ]
             agreement = []

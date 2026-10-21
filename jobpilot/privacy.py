@@ -1,6 +1,7 @@
 """Shared browser privacy actions, authorized by the saved applicant policy."""
 
 import asyncio
+import re
 
 from playwright.async_api import Error as PlaywrightError
 
@@ -65,6 +66,39 @@ async def dismiss_cookies(page, *, authorized):
         except (PlaywrightError, TimeoutError):
             continue
     return clicked
+
+
+# SuccessFactors account pages: "Data Privacy Acknowledgement *" is a link that opens the employer's privacy notice;
+# its Acknowledge button stores the accepted statement's id in a hidden field the server requires.
+PRIVACY_NOTICE_LINK = "#dataPrivacyId"
+PRIVACY_NOTICE_RECEIPT = "#fbclc_dpcsId"
+PRIVACY_NOTICE_ACTION = re.compile(r"^\s*(?:acknowledge|accept|i agree|agree)\s*$", re.I)
+
+
+async def acknowledge_privacy_notice(page, *, authorized):
+    """Open and acknowledge a required SuccessFactors privacy notice whose receipt is still empty.
+
+    NetApp, Entergy, L3Harris and Farmers (2026-10-21): Create Account answered "Please open the data privacy
+    agreement to accept the terms" until the notice was opened and acknowledged, and 30 jobs ended "Could not sign
+    in". The link checks the country first, so this runs after the identity fields are filled.
+    """
+    if not authorized or page is None:
+        return False
+    for frame in page.frames[:12]:
+        try:
+            link, receipt = frame.locator(PRIVACY_NOTICE_LINK), frame.locator(PRIVACY_NOTICE_RECEIPT)
+            if not await link.count() or not await receipt.count() or await receipt.first.input_value():
+                continue
+            await link.first.click(timeout=5000)
+            dialog = frame.locator(".fd-dialog--active, [role=dialog]:visible")
+            await dialog.locator("button").filter(has_text=PRIVACY_NOTICE_ACTION).first.click(timeout=8000)
+            await frame.wait_for_function(
+                "s => !!document.querySelector(s)?.value", arg=PRIVACY_NOTICE_RECEIPT, timeout=8000
+            )
+            return True
+        except PlaywrightError:
+            return False
+    return False
 
 
 LOCATION_DENIED = """(() => {

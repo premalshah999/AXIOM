@@ -17,7 +17,7 @@ from ..service import Service
 from ..accounts import Accounts
 from ..captcha_observation import ARM_JS
 from ..forms import AUTH, FINAL
-from ..privacy import dismiss_cookies
+from ..privacy import acknowledge_privacy_notice, dismiss_cookies
 from ..mail_errors import MailPending, code_inline_wait
 
 APPLY = re.compile(
@@ -1608,6 +1608,11 @@ class Adapter:
         for f in passwords:
             await self.form.locator(f["id"]).fill(credentials["password"], timeout=4000)
             await self.form.locator(f["id"]).blur()
+        profile = getattr(getattr(self.form, "resolver", None), "profile", None)
+        if mode == "create" and await acknowledge_privacy_notice(
+            getattr(self.form, "page", None), authorized=bool(getattr(profile, "accept_all_application_terms", False))
+        ):
+            self.emit("policy_accepted", "Acknowledged the employer's privacy notice (applicant pre-approved terms)")
         button = self.auth_button(obs, mode)
         if not button:
             return {"fallback": True, "reason": "No sign-in control found"}
