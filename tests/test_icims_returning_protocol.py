@@ -138,3 +138,15 @@ def test_the_profile_resume_belongs_to_the_employer_portal_not_one_job(service, 
     value.job = {**value.job, "id": current_id}
     value.form.resume_fields = lambda: []
     assert value.employer_holds_resume(obs) is holds
+
+
+@pytest.mark.parametrize("minutes_ago,route", [(1, "return"), (20, "apply")])
+def test_an_unanswered_central_reset_sends_the_next_run_through_apply(service, minutes_ago, route):
+    """Emory, runs ecea351ee9f94c0490faa797f55142e2 .. dd5c6ee4c331494384df9d92baf7db0b, 2026-10-21: Central showed the
+    password step and "Check Your Email", no reset email came, and every run took the returning route and reset
+    again. A reset still in flight keeps the returning route; an unanswered one lets the portal decide."""
+    import time
+
+    value, obs = returning_page(service)
+    value.accounts.mark(value.job["url"], "reset_requested", None, reset_requested_at=time.time() - minutes_ago * 60)
+    assert value.find_apply(obs)["id"] == route

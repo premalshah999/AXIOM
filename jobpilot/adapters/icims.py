@@ -481,10 +481,21 @@ class ICIMS(Adapter):
         query.setdefault("in_iframe", "1")
         return urlunsplit((p.scheme, p.netloc, p.path, urlencode(query), p.fragment))
 
+    @staticmethod
+    def unanswered_reset(record):
+        """A Central reset that never produced its email. Central shows the password step and "Check Your Email"
+        whether or not an account exists, so an unanswered reset is the only evidence there is none: Emory
+        (2026-10-21) took the returning route five times, reset each time, and no email ever came."""
+        return record.get("state") == "reset_requested" and time.time() - record.get("reset_requested_at", 0) > 600
+
     def find_apply(self, obs):
         accounts = getattr(self, "accounts", None)
         record = accounts.record(self.job["url"]) if accounts else {}
-        if record.get("state") in KNOWN_ACCOUNT | {"created_locally"} and not self.employer_session(obs):
+        if (
+            record.get("state") in KNOWN_ACCOUNT | {"created_locally"}
+            and not self.unanswered_reset(record)
+            and not self.employer_session(obs)
+        ):
             # Atlassian offers a requisition-owned returning route; use it for the saved employer account.
             for button in obs["controls"]:
                 target = urlsplit(urljoin(obs["url"], button.get("href", "")))
