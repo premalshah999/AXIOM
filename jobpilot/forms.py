@@ -3865,6 +3865,21 @@ class FormSession:
             return controls
         if len(live) == 1:
             return [live[0][0]]
+        identities = [
+            (self.frames.get(control["id"]), *(await handle.evaluate("b=>[b.name||'',(b.value||b.innerText||'').trim()]")))
+            for control, handle in live
+        ]
+        if identities[0][1] and len(set(identities)) == 1:
+            # One action repeated: iCIMS packet forms put "Save & Return Later | Submit" above and below the form, both
+            # <input type=submit name=icims_submit> outside one shared <form>; SAS's final Submit was refused as "not
+            # unique" three times (2026-10-21). Same frame, same name, same label: the last in document order.
+            last = live[0]
+            for item in live[1:]:
+                if await last[1].evaluate(
+                    "(a,b)=>Boolean(a.compareDocumentPosition(b)&Node.DOCUMENT_POSITION_FOLLOWING)", item[1]
+                ):
+                    last = item
+            return [last[0]]
         forms = []
         for _, handle in live:
             has_form = await handle.evaluate("b=>Boolean(b.form||b.closest('form'))")

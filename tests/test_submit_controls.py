@@ -157,3 +157,18 @@ async def test_two_native_submits_in_different_forms_stay_ambiguous(page, tmp_pa
     form = _session(page, tmp_path)
     await form.scan()
     assert len(await form.application_submit_controls()) == 2
+
+
+async def test_an_icims_packet_bar_repeated_above_and_below_is_one_submit(page, tmp_path):
+    """SAS 2026-10-21: "Save & Return Later | Submit" above and below the packet form, both name=icims_submit, outside
+    one shared form; the final Submit was refused as "not unique" three times."""
+    await page.set_content("""<div><input type=submit name=icims_save value="Save &amp; Return Later">
+      <input type=submit name=icims_submit value=Submit id=top></div>
+      <form id=packet><label>Name <input name=name></label></form>
+      <div><input type=submit name=icims_save value="Save &amp; Return Later">
+      <input type=submit name=icims_submit value=Submit id=bottom></div>""")
+    form = _session(page, tmp_path)
+    await form.scan()
+    final = await form.application_submit_controls()
+    assert len(final) == 1
+    assert await form.locator(final[0]["id"]).evaluate("b=>b.id") == "bottom"
