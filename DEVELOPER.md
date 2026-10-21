@@ -18,6 +18,8 @@ First run and sign-in (`owner_account.py`, `frontend/src/onboarding.tsx`): an in
 ## Repository layout
 
 - `jobpilot/`: queue, owners, shared browser/form controls, answers, accounts and mail.
+- `jobpilot/api/`: the FastAPI application. `app.py` builds it, `middleware.py` holds the sign-in and Origin rules, and `routes/<resource>.py` holds one router per resource (`def router(service) -> APIRouter`). Add a route to its resource's router, register a new router in `app.py` before `frontend`, and add a test in `tests/test_http_<resource>.py`.
+- `jobpilot/service/`: `Service` (queue, execute, complete, review), one mixin per concern. `jobpilot/answers/`: the question patterns and the `Resolver`, one mixin per rule family.
 - `jobpilot/adapters/`: ATS-specific steps using those shared services.
 - `jobpilot/features/`: knowledge, discovery, resume and other feature modules.
 - `jobpilot/operations/`: data-preserving installation maintenance.
