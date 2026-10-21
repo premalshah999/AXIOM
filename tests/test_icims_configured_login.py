@@ -26,6 +26,22 @@ def test_observed_job_apply_is_distinct_from_returning_user_login(service):
     assert value.find_apply(obs) is None
 
 
+def test_schwabs_apply_for_this_job_enters_the_jobs_own_login_step(service):
+    # Schwab 2026-10-21: "Apply for this job" (no "online") led to /jobs/<id>/<slug>/login and was never recognized.
+    obs = observation(
+        "https://career-schwab.icims.com/jobs/127949/associate-software-engineer/job?in_iframe=1",
+        password=False,
+        email=False,
+    )
+    login = {"id": "login", "label": "Log in", "href": "https://career-schwab.icims.com/jobs/login?loginOnly=1"}
+    apply = {"id": "apply", "label": "Apply for this job",
+             "href": "https://career-schwab.icims.com/jobs/127949/associate-software-engineer/login"}
+    other = {"id": "other", "label": "Apply for this job",
+             "href": "https://career-schwab.icims.com/jobs/999/other-role/login"}
+    obs["controls"] = [login, other, apply]
+    assert adapter(service, obs).find_apply(obs) is apply
+
+
 def test_icims_login_env_is_loaded_without_appearing_in_settings_repr(monkeypatch):
     monkeypatch.setenv("ICIMS_LOGIN", "SyntheticWorking9!")
     config = Settings(_env_file=None)

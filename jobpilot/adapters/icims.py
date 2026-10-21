@@ -18,7 +18,9 @@ from ..accounts import account_tenant
 
 from .base import Adapter, Step, KNOWN_ACCOUNT
 
-APPLY_ICIMS = re.compile(r"apply for this job online|^apply(?: now)?$|apply online", re.I)
+# Schwab labels it "Apply for this job" (no "online"); unmatched, every Schwab run left the iCIMS flow at the job page
+# and the generic navigator clicked an email step it cannot pass (2026-10-21). The link target still has to be this job's.
+APPLY_ICIMS = re.compile(r"apply for this job(?: online)?|^apply(?: now)?$|apply online", re.I)
 PROFILE_CREATE = re.compile(r"^(?:create|submit)(?: (?:my|your|a))? profile$", re.I)
 PROFILE_SAVE = re.compile(r"^(?:create|submit|update|save)(?: (?:my|your|a))? profile$", re.I)
 # Central (Auth0) offers optional passkey/MFA enrollment after a sign-in: /u/mfa-webauthn-platform-enrollment, then
