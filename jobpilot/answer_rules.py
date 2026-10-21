@@ -55,6 +55,8 @@ class AnswerRules(BaseModel):
     salary_stance: str = Field(default="", max_length=60)  # desired pay, free text (for example "Negotiable")
     travel_willingness: str = Field(default="", max_length=100)  # for example "open to travel"
     employment_type_sought: str = Field(default="", max_length=100)  # for example "full-time early-career employment"
+    # Opt in to talent communities and "keep my data on file for other roles" asks. False (the default) declines.
+    join_talent_communities: bool = False
     source_any_channel: bool = False  # After the list, accept any offered channel that claims no relationship.
     demographics: dict[str, DemographicRule] = Field(default_factory=dict)
     guest_apply_first: bool = True  # "Apply without an account" before sign-in or sign-up.

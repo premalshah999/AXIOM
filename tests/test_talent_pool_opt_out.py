@@ -1,4 +1,4 @@
-"""AVEVA 2026-10-15: an opt-in/opt-out talent-pool data retention question is answered NO (owner policy)."""
+"""AVEVA 2026-10-15: an opt-in/opt-out talent-pool data retention question is answered NO (the default)."""
 
 from jobpilot.answers import Resolver
 from jobpilot.schemas import Profile
@@ -11,8 +11,8 @@ LABEL = (
 )
 
 
-def ask(kind="text", options=()):
-    return Resolver(Profile(), None, None).talent_pool_opt_out(
+def ask(kind="text", options=(), **profile):
+    return Resolver(Profile(**profile), None, None).talent_pool_opt_out(
         {
             "id": "t",
             "label": LABEL,
@@ -51,3 +51,11 @@ def test_unrelated_question_is_ignored():
         )
         is None
     )
+
+
+def test_profile_may_join_talent_communities():
+    join = {"answer_rules": {"join_talent_communities": True}}
+    assert ask(**join).value in {"YES", "Yes"}
+    assert ask("select", ["Yes", "No"], **join).value == "Yes"
+    assert ask("checkbox", **join).value == "true"
+    assert ask("checkbox").value == "false"

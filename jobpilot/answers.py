@@ -1655,7 +1655,8 @@ class Resolver:
     def talent_pool_opt_out(self, f):
         """AVEVA 2026-10-15: "Yes, I agree that AVEVA may keep my data on file to be considered for other
         roles ... Indicate 'YES' to Opt In OR 'NO' to Opt Out" was scoped as work authorization and every
-        answer was rejected. It is optional data retention/marketing; the owner policy opts out."""
+        answer was rejected. It is optional data retention/marketing; opted out unless the profile's
+        answer_rules.join_talent_communities says otherwise."""
         label = str(f.get("label", ""))
         if not re.search(
             r"\bopt[ -]?in\b.{0,60}\bopt[ -]?out\b|keep my (?:data|information|details|profile|cv|resume) on file|"
@@ -1664,16 +1665,21 @@ class Resolver:
             re.I,
         ):
             return None
+        join = self.answer_rules.join_talent_communities
         options = [str(o) for o in f.get("options") or []]
         if options:
-            no = [o for o in options if re.match(r"\s*(?:no\b|i do not|i don.t|opt[ -]?out)", o, re.I)]
-            if len(no) != 1:
+            wanted = r"\s*(?:yes\b|i agree|i do|opt[ -]?in)" if join else r"\s*(?:no\b|i do not|i don.t|opt[ -]?out)"
+            picked = [o for o in options if re.match(wanted, o, re.I)]
+            if len(picked) != 1:
                 return None
-            value = no[0]
+            value = picked[0]
         elif f.get("type") in {"text", "textarea"}:
-            value = "NO" if re.search(r"'?\bNO\b'?\s+to opt", label) else "No"
+            if join:
+                value = "YES" if re.search(r"'?\bYES\b'?\s+to opt", label) else "Yes"
+            else:
+                value = "NO" if re.search(r"'?\bNO\b'?\s+to opt", label) else "No"
         elif f.get("type") == "checkbox":
-            value = "false"
+            value = "true" if join else "false"
         else:
             return None
         return Answer(
@@ -1681,7 +1687,7 @@ class Resolver:
             value=value,
             disposition="answer",
             evidence_ids=["policy:marketing"],
-            reason="Optional talent-pool data retention declined under the owner policy",
+            reason="Optional talent-pool data retention " + ("accepted" if join else "declined") + " under the profile's rule",
         )
 
     def repair_override(self, f):
@@ -3058,14 +3064,14 @@ class Resolver:
             sharing,
             re.I,
         ):
-            # Owner policy: no optional marketing or data sharing. Qualcomm (Eightfold) 2026-10-14:
+            # No optional marketing or data sharing unless the profile joins talent communities. Qualcomm (Eightfold) 2026-10-14:
             # "ANY ROLES GLOBALLY ... Talent Community" vs "ONLY THE ROLE I AM APPLYING FOR".
             narrow = [
                 o
                 for o in options
                 if re.search(r"\bonly\b.{0,40}(?:role|position|job|requisition)", str(o), re.I)
             ]
-            if len(narrow) == 1:
+            if len(narrow) == 1 and not self.answer_rules.join_talent_communities:
                 return narrow[0]
         p = self.profile
         from . import phone_fields
