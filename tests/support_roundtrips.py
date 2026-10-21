@@ -35,7 +35,7 @@ def roundtrips():
     def counting(self, object, method, params, no_reply=False):  # noqa: A002 - mirrors Playwright's signature
         counts[method] += 1
         for frame in reversed(traceback.extract_stack(limit=40)):
-            if "/jobpilot/" in frame.filename:
+            if "/jobpilot/" in frame.filename and not frame.filename.endswith("playwright_fast.py"):
                 counts.sites[(method, f"{os.path.basename(frame.filename)}:{frame.lineno}:{frame.name}")] += 1
                 break
         return original(self, object, method, params, no_reply)
