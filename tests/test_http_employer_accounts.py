@@ -102,6 +102,24 @@ def test_i_reset_it_myself_saves_a_sealed_password_the_engine_prefers(client, se
     assert NEW not in client.get("/api/accounts").text
 
 
+def test_a_password_unknown_account_is_settled_by_the_owner_saved_password(client, service):
+    """The engine stops on an account whose reset never arrives (state password_unknown, 2026-10-22) and asks the
+    owner to save the password under Setup > Accounts; saving it clears the marker so the next run signs in."""
+    store, key = record(
+        service,
+        state="password_unknown",
+        password_unknown_at="2026-10-22T09:00:00+00:00",
+        reset_requested_at=1.0,
+    )
+    assert listed(client)[key]["label"] == "Password unknown"
+    assert client.put(f"/api/accounts/{key}/password", json={"password": NEW}).status_code == 200
+    saved = service.db.get_setting(key)
+    assert saved["state"] == "password_reset" and not {"password_unknown_at", "reset_requested_at"} & set(
+        saved
+    )
+    assert store.get(JOB) == {"email": EMAIL, "password": NEW}
+
+
 def test_saving_an_employer_password_is_refused_plainly(client, service):
     _, key = record(service)
     empty = client.put(f"/api/accounts/{key}/password", json={"password": "   "})
