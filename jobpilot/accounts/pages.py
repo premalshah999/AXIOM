@@ -4,7 +4,9 @@ import re
 
 
 # States that prove the employer holds an account for this email. "signing_in" and "created_locally" prove nothing.
-CONFIRMED_ACCOUNT = {"authenticated", "password_reset", "exists", "locked", "verification_pending"}
+CONFIRMED_ACCOUNT = {
+    "authenticated", "password_reset", "exists", "locked", "verification_pending", "password_unknown"
+}
 
 
 # A Create refused because the email is registered (AMETEK 2026-10-18: "Account Already Exists"). Prompts such as

@@ -166,6 +166,14 @@ NOT_APPLICATION = re.compile(
 SEARCH_RADIUS = re.compile(r"\s*(?:distance|radius|within)\s*:?\s*", re.I)
 
 
+# A reset whose email has not come within this time is unanswered: the employer mails within seconds when it can.
+UNANSWERED_RESET_SECONDS = 600
+PASSWORD_UNKNOWN = (
+    "This employer has an account for your email but refuses the saved password, and its password reset email never "
+    "arrives. Reset the password in your own browser, then save it under Setup > Accounts"
+)
+
+
 # Account states meaning "an account exists here": sign in rather than create.
 KNOWN_ACCOUNT = {
     "authenticated",
@@ -175,6 +183,7 @@ KNOWN_ACCOUNT = {
     "exists",
     "locked",
     "credentials_rejected",
+    "password_unknown",
 }
 
 
@@ -1788,6 +1797,24 @@ class Adapter:
                 "reason": detail[:200],
             }
         ]
+        unanswered = (
+            record.get("state") == "reset_requested"
+            and record.get("reset_requested_at")
+            and time.time() - float(record["reset_requested_at"]) > UNANSWERED_RESET_SECONDS
+        )
+        if unanswered or record.get("state") == "password_unknown":
+            # The employer holds an account for this email, refuses the saved password, and mails nothing for a reset
+            # (SuccessFactors: "If you do not receive an email then no matching account was found"). L3Harris, Entergy,
+            # Farmers and Westinghouse (2026-10-21/22) repeated sign-in and reset on every run. Only the owner can
+            # recover it; a password saved under Setup > Accounts (state password_reset) is used from then on.
+            if unanswered:
+                self.accounts.mark(url, "password_unknown", self.accounts.saved(url), password_unknown_at=now())
+            return self.defer(
+                PASSWORD_UNKNOWN,
+                [{"question": PASSWORD_UNKNOWN, "options": [], "key": "manual", "reason": detail[:200]}],
+                state="waiting_browser",
+                blocker_type="account",
+            )
         if not self.config.account_password_reset or self.attempts["reset"]:
             return self.defer(
                 f"Could not sign in to this employer ({detail})",

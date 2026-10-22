@@ -361,7 +361,7 @@ PERSIST_ATS = {
 PERSIST_SKIP = re.compile(
     r"captcha|security check|\bsms\b|employer already has|closed|no longer available|identity conflict|"
     r"person not found|archiv|social security|already applied|clearance|polygraph|model budget|"
-    r"verification email",
+    r"verification email|refuses the saved password",
     re.I,
 )
 # Local repairs wait 30/60 seconds, within the shared eight-minute lifetime.
