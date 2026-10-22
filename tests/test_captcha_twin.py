@@ -154,3 +154,28 @@ async def test_oracle_cloud_hcaptcha_goes_to_the_twin_first(config, page, monkey
     monkeypatch.setattr("jobpilot.captcha.twin_mint", twin)
     assert await CaptchaSolver(config, lambda *a: None).solve(page)
     twin.assert_awaited_once_with("http://127.0.0.1:9", url, "fixture-sitekey")
+
+
+async def test_an_email_step_that_ignores_the_twin_token_gets_its_own_button_once(monkeypatch):
+    """JPMorgan, Oracle email step (2026-10-22): the twin's token reached the callback, the form stayed with its
+    never-ticked hCaptcha box, and the run parked as an unsolved challenge."""
+    import time
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from jobpilot import browser
+    from jobpilot.adapters.base import Step
+    from jobpilot.browser import BrowserEngine
+
+    monkeypatch.setattr(browser, "challenge_frame", AsyncMock(return_value=None))
+    monkeypatch.setattr(browser, "checkbox_frame", AsyncMock(return_value=None))
+    url = "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/1/apply/email"
+    obs = {"url": url, "fields": [{"id": "e", "type": "email", "label": "Email"}],
+           "controls": [{"id": "next", "label": "Next"}]}
+    form = SimpleNamespace(scan=AsyncMock(return_value=obs), click=AsyncMock(), page=SimpleNamespace(url=url))
+    engine = SimpleNamespace(captcha=SimpleNamespace(twin_delivered_at=time.monotonic()), form=form, page=form.page,
+                             emit=lambda *a, **k: None)
+    adapter = SimpleNamespace(classify_page=lambda o: Step.EMAIL_ENTRY, email_submit=lambda o: o["controls"][0])
+    assert await BrowserEngine.continue_after_twin_token(engine, adapter, url)
+    form.click.assert_awaited_once_with("next", auth_control=True)
+    assert not await BrowserEngine.continue_after_twin_token(engine, adapter, url)  # once per run

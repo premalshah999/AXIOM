@@ -2501,6 +2501,39 @@ class BrowserEngine:
         self.emit("bot_wall", "A platform bot check answered before the form", {"provider": "datadome", "kind": kind})
         return pause_platform(self.db, self.job["ats"], kind)
 
+    async def continue_after_twin_token(self, adapter, before_url):
+        """Press the email step's own button once after the clean twin's token, when the page did not act on the token
+        itself. JPMorgan's Oracle email step (2026-10-22) kept its form and its never-ticked hCaptcha box after the
+        token reached the callback, and the run parked as an unsolved challenge."""
+        delivered_at = getattr(self.captcha, "twin_delivered_at", None)
+        if (
+            adapter is None
+            or not delivered_at
+            or time.monotonic() - delivered_at > 30
+            or self.page.url != before_url
+            or getattr(self, "twin_continued", False)
+        ):
+            return False
+        from .adapters.base import Step
+
+        obs = await self.form.scan()
+        control = adapter.email_submit(obs) if adapter.classify_page(obs) == Step.EMAIL_ENTRY else None
+        if not control:
+            return False
+        self.twin_continued = True
+        self.emit(
+            "captcha", "Pressed the email step's own button after the twin browser's token", {"control": control["label"]}
+        )
+        await self.form.click(control["id"], auth_control=True)
+        self.page = self.form.page
+        try:
+            async with asyncio.timeout(10):
+                while self.page.url == before_url and (await challenge_frame(self.page) or await checkbox_frame(self.page)):
+                    await asyncio.sleep(0.2)
+        except TimeoutError:
+            pass
+        return True
+
     async def browser_challenge(self, *, adapter=None, pre_submit=False):
         if wall := await self.platform_wall():
             return wall
@@ -2537,6 +2570,7 @@ class BrowserEngine:
                         await asyncio.sleep(0.1)
             except TimeoutError:
                 pass
+            await self.continue_after_twin_token(adapter, before_url)
         if getattr(self.captcha, "challenge_unverified", False) and not await self.captcha.token_present(
             self.page
         ):
