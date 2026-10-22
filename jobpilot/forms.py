@@ -993,6 +993,7 @@ class FormSession:
     async def scan(self):
         if self.page.is_closed() and getattr(self, "openers", None):
             await self.return_to_opener()
+        await widgets.open_collapsed_sections(self.page)
         # Keep the prior controls so a click on an id replaced by a re-render can rebind by label.
         self.last_buttons = (
             {**getattr(self, "last_buttons", {}), **self.buttons}
@@ -3318,7 +3319,11 @@ class FormSession:
             if address_parents:
                 ask = address_parents
             for field in ask:
-                if field["type"] in {"combobox", "dropdown", "prompt"} and not field["options"]:
+                # A list holding only its placeholder is unread, not empty: Emory's server-searched iCIMS degree menu
+                # showed "— Make a Selection —", was taken as its whole catalog, and Master of Science as not offered.
+                if field["type"] in {"combobox", "dropdown", "prompt"} and not [
+                    o for o in field["options"] if not widgets.placeholder_option(str(o))
+                ]:
                     await self.discover_options(field)
             local = [
                 (

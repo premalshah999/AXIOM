@@ -62,18 +62,9 @@ class SuccessFactors(Adapter):
         """Open the application's collapsed sections. XPO's classic form (2026-10-22) shows "Profile Information" and
         "Job-Specific Information" closed: their required pickers were scanned but hidden, every write timed out, and
         the guided agent took the run."""
-        opened = 0
-        for frame in self.page.frames:
-            for _ in range(12):
-                bar = frame.locator('button.rcmFormSectionTopBar[aria-expanded="false"]').first
-                try:
-                    if not await bar.count() or not await bar.is_visible():
-                        break
-                    await bar.click(timeout=3000)
-                except PlaywrightError:
-                    break
-                opened += 1
-        return opened
+        from ..widgets import open_collapsed_sections
+
+        return await open_collapsed_sections(self.page)
 
     async def on_form(self, obs):
         if await self.expand_sections():

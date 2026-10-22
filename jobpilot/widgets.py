@@ -2117,6 +2117,30 @@ async def icims_dropdown_commit(
     raise ValueError("The website did not commit the observed choice")
 
 
+# SuccessFactors' classic application keeps sections closed (XPO 2026-10-22: Profile Information, Job-Specific
+# Information); their required pickers were scanned but hidden and every write timed out, in the deterministic flow
+# and the guided agent alike.
+OPEN_RCM_SECTIONS = """() => {
+  const bars = [...document.querySelectorAll('button.rcmFormSectionTopBar[aria-expanded="false"]')]
+    .filter(b => b.getClientRects().length);
+  bars.forEach(b => b.click());
+  return bars.length;
+}"""
+
+
+async def open_collapsed_sections(page):
+    """Open closed SuccessFactors form sections in every frame; the number opened."""
+    opened = 0
+    for frame in page.frames[:12]:
+        try:
+            opened += int(await asyncio.wait_for(frame.evaluate(OPEN_RCM_SECTIONS), 2) or 0)
+        except Exception:
+            continue
+    if opened:
+        await asyncio.sleep(0.5)
+    return opened
+
+
 # iCIMS's email step asks a phone country code with the same dropdown look but no <select> (Emory, Stifel
 # 2026-10-21/22): <a class="dropdown-select" role=combobox aria-controls="dropdownOptions">, whose container holds
 # input.dropdown-search (filtered on input) and ul.dropdown-results of li[role=option] labelled "(+1) United States".
