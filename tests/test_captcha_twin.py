@@ -172,10 +172,36 @@ async def test_an_email_step_that_ignores_the_twin_token_gets_its_own_button_onc
     url = "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/1/apply/email"
     obs = {"url": url, "fields": [{"id": "e", "type": "email", "label": "Email"}],
            "controls": [{"id": "next", "label": "Next"}]}
-    form = SimpleNamespace(scan=AsyncMock(return_value=obs), click=AsyncMock(), page=SimpleNamespace(url=url))
+    form = SimpleNamespace(scan=AsyncMock(return_value=obs), click=AsyncMock(),
+                           page=SimpleNamespace(url=url, keyboard=SimpleNamespace(press=AsyncMock())))
     engine = SimpleNamespace(captcha=SimpleNamespace(twin_delivered_at=time.monotonic()), form=form, page=form.page,
                              emit=lambda *a, **k: None)
     adapter = SimpleNamespace(classify_page=lambda o: Step.EMAIL_ENTRY, email_submit=lambda o: o["controls"][0])
     assert await BrowserEngine.continue_after_twin_token(engine, adapter, url)
     form.click.assert_awaited_once_with("next", auth_control=True)
     assert not await BrowserEngine.continue_after_twin_token(engine, adapter, url)  # once per run
+
+
+
+async def test_a_blocked_email_button_falls_back_instead_of_failing_the_run(monkeypatch):
+    """JPMorgan (2026-10-22): the Next click timed out under the answered challenge's overlay and the run crashed."""
+    import time
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from playwright.async_api import TimeoutError as PlaywrightTimeout
+
+    from jobpilot import browser
+    from jobpilot.adapters.base import Step
+    from jobpilot.browser import BrowserEngine
+
+    monkeypatch.setattr(browser, "challenge_frame", AsyncMock(return_value=None))
+    monkeypatch.setattr(browser, "checkbox_frame", AsyncMock(return_value=None))
+    url = "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/1/apply/email"
+    obs = {"url": url, "fields": [], "controls": [{"id": "next", "label": "Next"}]}
+    page = SimpleNamespace(url=url, keyboard=SimpleNamespace(press=AsyncMock()))
+    form = SimpleNamespace(scan=AsyncMock(return_value=obs), click=AsyncMock(side_effect=PlaywrightTimeout("6000ms")), page=page)
+    engine = SimpleNamespace(captcha=SimpleNamespace(twin_delivered_at=time.monotonic()), form=form, page=page,
+                             emit=lambda *a, **k: None)
+    adapter = SimpleNamespace(classify_page=lambda o: Step.EMAIL_ENTRY, email_submit=lambda o: o["controls"][0])
+    assert await BrowserEngine.continue_after_twin_token(engine, adapter, url) is False

@@ -2521,10 +2521,15 @@ class BrowserEngine:
         if not control:
             return False
         self.twin_continued = True
+        try:
+            # The answered challenge's overlay can still cover the button (JPMorgan: the click timed out after 6 s).
+            await self.page.keyboard.press("Escape")
+            await self.form.click(control["id"], auth_control=True)
+        except (PlaywrightError, TimeoutError, ValueError):
+            return False
         self.emit(
             "captcha", "Pressed the email step's own button after the twin browser's token", {"control": control["label"]}
         )
-        await self.form.click(control["id"], auth_control=True)
         self.page = self.form.page
         try:
             async with asyncio.timeout(10):
