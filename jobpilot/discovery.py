@@ -541,7 +541,7 @@ async def rank(db, config, job_id):
         and (not result.uncertainties or profile.autonomous)
         and result.resume_id
     )
-    by_title = not ready and title_admits(profile, job["title"], result.reason)
+    by_title = not ready and title_admits_job(db, profile, job, result.reason)
     with db.exclusive() as s:
         item = s.get(Job, job_id)
         if item.status in {"queued", "running", "submitting", "confirmed", "submission_unknown", "archived"}:
@@ -559,6 +559,19 @@ async def rank(db, config, job_id):
 
 
 TITLE_ADMITTED = "Admitted by title (admit_by_title setting): "
+
+
+def title_admits_job(db, profile, job, reason=""):
+    """title_admits, inside the deterministic gate (US-only, seniority, closed). Ranking admitted Quest's
+    "AI Software Engineer - Identity Recovery (Canada)" by title although its reason read "The role is a Canada-based
+    ..." and the gate refuses it; it was applied to (2026-10-21)."""
+    from .features.discovery import gate, policy_for
+
+    get = job.get if isinstance(job, dict) else lambda key, default=None: getattr(job, key, default)
+    if not title_admits(profile, get("title", ""), reason):
+        return False
+    posting = {key: get(key, "") or "" for key in ("title", "url", "description", "location")}
+    return not gate(posting, policy_for(db))
 
 
 def title_admits(profile, title, reason=""):
@@ -739,7 +752,7 @@ async def rank_batch(db, config, job_ids):
                 and r.resume_id
                 and (profile.autonomous or not r.uncertainties)
             )
-            if not ready and not excluded and title_admits(profile, j.title, r.reason):
+            if not ready and not excluded and title_admits_job(db, profile, j, r.reason):
                 j.resume_id = j.resume_id or (resumes[0]["id"] if resumes else None)
                 j.reason = TITLE_ADMITTED + (j.reason or "")
                 ready = bool(j.resume_id)

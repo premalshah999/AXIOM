@@ -93,7 +93,12 @@ LEVEL = re.compile(r"\b(?:engineer|scientist|developer|analyst)\s*(?:[3-9]|v)\b"
 # Requirements the applicant's facts cannot meet; a title never overrides them.
 HARD_BLOCKER = re.compile(
     r"clearance|polygraph|\bcitizen(?:ship)?\b|green card|permanent resident|export.control|\bitar\b|bilingual|"
-    r"fluen(?:t|cy) in (?!english)[a-z]+",
+    r"fluen(?:t|cy) in (?!english)[a-z]+|"
+    # A ranking that places the role outside the US (Quest's Canada role, MCI's Canada/Philippines/South Africa roles,
+    # 2026-10-21): the title never overrides where the job is.
+    r"\b(?:canada|canadian|mexico|united kingdom|\buk\b|ireland|germany|france|netherlands|poland|spain|portugal|"
+    r"india|philippines|south africa|singapore|australia|brazil|argentina|colombia|costa rica|israel|japan|china)\b|"
+    r"outside (?:of )?the (?:us|u\.s\.|united states)|non-us\b|not (?:located )?in the (?:us|united states)",
     re.I,
 )
 

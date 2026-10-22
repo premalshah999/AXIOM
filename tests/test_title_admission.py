@@ -220,3 +220,25 @@ async def test_a_deferred_click_also_starts_while_a_batch_runs(service, monkeypa
     autopilot.start_batch(service.db, 10)
     await autopilot.tick(service)
     assert calls, "the owner's deferred clicks were not offered the batch's free slots"
+
+
+@pytest.mark.parametrize(
+    "location,reason,admitted",
+    [
+        ("Austin, TX", "Strong ML match; preferred Rust experience missing", True),
+        ("Toronto, Ontario, Canada", "Strong ML match", False),  # the gate's US-only rule
+        ("AI coding agents, AI", "The role is a Canada-based, senior C++ position", False),  # junk location, reason
+        ("Austin, TX", "Requires 6+ years of experience", True),  # the description, not this reason, decides years
+    ],
+)
+def test_ranking_admits_by_title_only_inside_the_gate(service, location, reason, admitted):
+    """Quest, 2026-10-21: "AI Software Engineer - Identity Recovery (Canada)" was ranked ineligible as Canada-based,
+    admitted by title anyway, and applied to."""
+    from types import SimpleNamespace
+
+    from jobpilot.discovery import title_admits_job
+
+    profile = SimpleNamespace(admit_by_title=True, target_roles=ROLES)
+    job = {"title": "AI Engineer", "url": "https://careers-acme.icims.com/jobs/1/ai-engineer/job",
+           "description": "Build AI agents. " * 40, "location": location}
+    assert title_admits_job(service.db, profile, job, reason) is admitted
