@@ -186,8 +186,9 @@ class Settings(BaseSettings):
     # Owner decision 2026-10-19: a second local Chrome that Playwright never attaches to mints hCaptcha tokens
     # (`python -m jobpilot.cli twin-browser`), e.g. http://host.docker.internal:9225. Empty disables it.
     browser_twin_cdp_url: str = ""
-    # Host suffixes whose hCaptcha goes to the twin first. iCIMS routes a distrusted browser to its login-only page.
-    captcha_twin_hosts: str = "icims.com"
+    # Host suffixes whose hCaptcha goes to the twin first. iCIMS routes a distrusted browser to its login-only page;
+    # JPMorgan's Oracle email step (2026-10-22) asked more image rounds than the same-IP solver allows, three runs.
+    captcha_twin_hosts: str = "icims.com,oraclecloud.com"
     headless: bool = True
     # Skip images, media and fonts on employer pages. Captcha providers are never blocked.
     block_assets: bool = True

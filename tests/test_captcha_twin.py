@@ -143,3 +143,14 @@ async def test_an_unreachable_or_remote_twin_is_an_error_not_a_crash():
     assert await captcha_twin.mint("http://203.0.113.5:9225", "https://a.icims.com/x", "k", timeout=2) == {
         "error": "the twin browser must use a local HTTP debugging address"
     }
+
+
+async def test_oracle_cloud_hcaptcha_goes_to_the_twin_first(config, page, monkeypatch):
+    """JPMorgan, Oracle Recruiting email step (2026-10-22): the same-IP solver ran out of image rounds three times."""
+    config.browser_twin_cdp_url, config.twocaptcha_api_key = "http://127.0.0.1:9", ""
+    url = "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210800894/apply/email"
+    await open_step(page, url)
+    twin = AsyncMock(return_value={"token": "twin-token"})
+    monkeypatch.setattr("jobpilot.captcha.twin_mint", twin)
+    assert await CaptchaSolver(config, lambda *a: None).solve(page)
+    twin.assert_awaited_once_with("http://127.0.0.1:9", url, "fixture-sitekey")
