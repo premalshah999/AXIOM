@@ -165,3 +165,22 @@ async def test_a_confirmed_smartrecruiters_application_blocks_its_slug_twin(serv
     with pytest.raises(QueueBlocked) as caught:
         await service._queue("slug-sr", "submit")
     assert caught.value.code == "submitted_or_uncertain"
+
+
+def test_a_reposted_workday_requisition_is_one_job():
+    """HPE and KLA (2026-10-22): _1214365-1 after _1214365-3, and _2641706-2 on another career site after _2641706-1,
+    were each applied to again and answered "already applied"."""
+    from jobpilot.ats import canonicalize, identity_variants
+
+    first = "https://hpe.wd5.myworkdayjobs.com/en-US/jobsathpe/job/Spring-Texas/Test-Engineer_1214365-3"
+    repost = "https://hpe.wd5.myworkdayjobs.com/en-US/jobsathpe/job/Spring-Texas-United-States/Test-Engineer_1214365-1"
+    other_site = "https://kla.wd1.myworkdayjobs.com/en-US/ur/job/Ann-Arbor-MI/AI-ML-Software-Engineer_2641706-1"
+    kla = "https://kla.wd1.myworkdayjobs.com/en-US/search/job/Ann-Arbor-MI/AI-ML-Software-Engineer_2641706-2"
+    assert canonicalize(first)[1] == canonicalize(repost)[1]
+    assert canonicalize(other_site)[1] == canonicalize(kla)[1]
+    assert canonicalize(first)[1] != canonicalize(kla)[1]
+    # Guards written under the old site-and-suffix identity still protect the job.
+    assert canonicalize(first, requisition_ids=False)[1] in identity_variants(first)
+    # A requisition id that only ends in digits after a dash is not a repost suffix.
+    assert canonicalize("https://acme.wd1.myworkdayjobs.com/en-US/c/job/X/E_JR-2024-001")[1] != canonicalize(
+        "https://acme.wd1.myworkdayjobs.com/en-US/c/job/X/E_JR-2024")[1]

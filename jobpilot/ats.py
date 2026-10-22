@@ -347,7 +347,12 @@ def canonicalize(url: str, *, keep_platform_hint=False, requisition_ids=True):
     elif ats == "workday":
         identity_path = re.sub(r"/apply(?:/[^/?#]*)?$", "", path)
         match = re.search(r"/([^/]+)/job/.+_([^/]+)$", identity_path)
-        if match:
+        if match and requisition_ids:
+            # One requisition posted for several locations or career sites carries a -N suffix (_1214365,
+            # _1214365-1, _1214365-3) and sometimes another site path; Workday counts one application for all.
+            # HPE and KLA (2026-10-22) answered four reposts "already applied".
+            identity = f"workday:{p.hostname}:{re.sub(r'(?<=[0-9])-[0-9]{1,2}$', '', match[2])}"
+        elif match:
             identity = f"workday:{p.hostname}:{match[1].casefold()}:{match[2]}"
     elif ats == "icims":
         match = re.search(r"/jobs/(\d+)(?:/|$)", path)
