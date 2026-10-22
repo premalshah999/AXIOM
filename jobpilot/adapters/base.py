@@ -161,6 +161,9 @@ PASSWORD_RULES = re.compile(
 NOT_APPLICATION = re.compile(
     r"search|keyword|filter|sort by|language|cookie|subscribe|job alert|newsletter", re.I
 )
+# A job search's radius picker beside its postal-code box. XPO's job page (2026-10-21) showed only "Search by Postal
+# Code" and "Distance", was read as a form with no way forward, and the guided agent took every run.
+SEARCH_RADIUS = re.compile(r"\s*(?:distance|radius|within)\s*:?\s*", re.I)
 
 
 # Account states meaning "an account exists here": sign in rather than create.
@@ -292,7 +295,11 @@ class Adapter:
             f
             for f in obs["fields"]
             if f["type"] == "file"
-            or (not NOT_APPLICATION.search(f["label"]) and f["label"] != "Unlabelled field")
+            or (
+                not NOT_APPLICATION.search(f["label"])
+                and not SEARCH_RADIUS.fullmatch(f["label"])
+                and f["label"] != "Unlabelled field"
+            )
         ]
 
     def buttons(self, obs, pattern, ids=()):
