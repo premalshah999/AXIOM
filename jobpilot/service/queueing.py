@@ -158,7 +158,7 @@ class QueueingMixin:
                 raise QueueBlocked(
                     "This application is archived and is outside the active pipeline", code="archived"
                 )
-            from ..ats import canonicalize, icims_requisition_alias, identity_variants
+            from ..ats import canonicalize, icims_requisition_alias, identity_variants, url_identity
 
             identity = canonicalize(job.url)[1]
             from ..operations.reset import guard_key
@@ -169,10 +169,11 @@ class QueueingMixin:
                     outcome="protected",
                     code="archived_submission",
                 )
+            # Columns only: whole rows (descriptions included) for every job on the platform were read per attempt.
             aliases = [
                 candidate.id
-                for candidate in s.scalars(select(Job).where(Job.ats == job.ats))
-                if canonicalize(candidate.url)[1] == identity or icims_requisition_alias(job, candidate)
+                for candidate in s.execute(select(Job.id, Job.url, Job.ats, Job.company).where(Job.ats == job.ats))
+                if url_identity(candidate.url) == identity or icims_requisition_alias(job, candidate)
             ]
             previous = list(s.scalars(select(Run).where(Run.job_id.in_(aliases))))
             clearance = s.get(Setting, "failed_application_clearance_gate")

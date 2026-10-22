@@ -1,4 +1,5 @@
 import hashlib
+import functools
 import re
 from dataclasses import asdict, dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -303,6 +304,13 @@ def identity_variants(url: str):
         canonicalize(url, requisition_ids=False)[1],
     ]
     return tuple(dict.fromkeys(variants))
+
+
+@functools.lru_cache(maxsize=65536)
+def url_identity(url: str) -> str:
+    """canonicalize(url)[1], cached. Admission compares one job with every job on its platform, once per waiting
+    click per tick, on the event loop the browsers share (2026-10-21)."""
+    return canonicalize(url)[1]
 
 
 def canonicalize(url: str, *, keep_platform_hint=False, requisition_ids=True):
