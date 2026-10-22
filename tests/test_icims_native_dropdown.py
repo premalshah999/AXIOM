@@ -147,3 +147,23 @@ async def test_a_dependent_list_that_answers_late_is_searched_again(form):
         setTimeout(() => { window.country = 'United States'; }, 1200); } }, true);
     }""")
     assert await widgets.combobox(form.main_frame, form.locator(STATE), "Maryland") == "Maryland"
+
+
+async def test_a_major_the_catalog_lacks_is_searched_as_the_fallback_and_picked_by_name(form):
+    """SAS's server-searched "Field of Study" (2026-10-21) had no Data Science; a model guess among the search results
+    outran the 12 s write budget on every attempt. The fallback major is searched and picked by name."""
+    majors = ["Accounting", "Biology", "Computer Engineering", "Computer Science", "Criminal Justice", "Economics"]
+    await form.evaluate(f"makeDropdown('15384612_PersonProfileFields.rcf2035', () => {json.dumps(majors)})")
+    field = form.locator('[id="15384612_PersonProfileFields.rcf2035_icimsDropdown"]')
+
+    def by_name(texts):
+        return next((t for t in texts if t == "Computer Science"), None)
+
+    async def no_guess(texts):
+        return None
+
+    picked = await widgets.combobox(
+        form.main_frame, field, "Data Science", choose=no_guess, resolve=by_name, search_queries=["Computer Science"]
+    )
+    assert picked == "Computer Science"
+    assert await field.inner_text() == "Computer Science"

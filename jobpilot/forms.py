@@ -1185,7 +1185,7 @@ class FormSession:
         name_phone_numbers(list(self.fields.values()))
         link_companion_text(self.fields.values())
         label_signature_date(list(self.fields.values()), "\n".join(texts))
-        icims_protocol.apply(list(self.fields.values()), list(self.buttons.values()))
+        icims_protocol.apply(list(self.fields.values()), list(self.buttons.values()), "\n".join(texts))
         obs = {
             "fields": list(self.fields.values()),
             "controls": list(self.buttons.values()),
@@ -2139,6 +2139,8 @@ class FormSession:
             )
             committed = await widgets.combobox(frame, el, country, choose=choose)
         elif kind == "combobox":
+            from .answers import EDUCATION
+
             school_picker = bool(SCHOOL_LABEL.search(field["label"]))
             search_queries = []
             if school_picker and "," in str(value):
@@ -2146,6 +2148,26 @@ class FormSession:
                     re.sub(r"[,\s]+", " ", str(value)).strip(),
                     str(value).split(",", 1)[0].strip(),
                 ]
+            rules = getattr(self.resolver, "answer_rules", None)
+            fallback = (getattr(rules, "major_fallback", "") or "").strip()
+            major_pick = None
+            if fallback and EDUCATION["field_of_study"].search(field["label"]) and normalize(fallback) != normalize(value):
+                # A searched catalog without the recorded major is searched for the profile's fallback major and
+                # picked by name, never by a model guess: SAS's iCIMS "Field of Study" lacked Data Science, the guess
+                # outran the 12 s write budget on every attempt, and the run stalled (2026-10-21).
+                search_queries = [*search_queries, fallback]
+
+                def major_pick(texts):
+                    for wanted in (value, fallback):
+                        named = [t for t in texts if normalize(t) == normalize(wanted)]
+                        if len(named) == 1:
+                            return named[0]
+                    return None
+
+                async def no_guess(texts):
+                    return None
+
+                choose = no_guess
             try:
                 committed = await widgets.combobox(
                     frame,
@@ -2157,7 +2179,7 @@ class FormSession:
                     or field.get("widget") == "oracle-multiselect",
                     search_queries=search_queries,
                     school_scope=school_picker,
-                    resolve=self.location_resolver(field),
+                    resolve=self.location_resolver(field) or major_pick,
                     employer_scope=bool(EMPLOYER_PICKER.search(field["label"])) and not school_picker,
                     # Optional pickers get one search, no paging: each is a request to the employer's servers.
                     thorough=bool(field.get("required")),

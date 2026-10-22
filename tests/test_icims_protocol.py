@@ -99,3 +99,40 @@ async def test_the_saved_login_needs_no_verified_answer(page, tmp_path):
     report = await form.verify()
     assert not any("Login" in problem for problem in report["problems"])
     assert report["auth_required"] is False
+
+
+async def test_acknowledgement_signature_boxes_are_named_as_signatures(service):
+    """SAS, run 23585c8e6a9d452d8ff92c6986eefeb0, 2026-10-21: the acknowledgement packet's required "xSignature" and
+    "Signature 1" boxes stayed empty, the browser held Submit, and nothing was sent."""
+    from jobpilot.answers import Resolver
+    from jobpilot.schemas import Profile
+
+    packet = "https://sas.icims.com/forms?isPacket=1&selected=candidate_ack_form_person_"
+    fields = [
+        {**field("xSignature", name="icims_f_signature", type_="checkbox", frame_url=packet), "id": "s0", "required": True},
+        {**field("Signature 1", name="icims_f_Signature_1", type_="checkbox", frame_url=packet), "id": "s1", "required": True},
+        {**field("Veteran", name="icims_f_Veteran", type_="checkbox", frame_url=packet), "id": "v"},
+    ]
+    apply(fields, [])
+    assert [f["label"] for f in fields[:2]] == ["I acknowledge and sign this form electronically"] * 2
+    assert fields[2]["label"] == "Veteran"
+    resolver = Resolver(Profile(accept_all_application_terms=True), service.db, service.config,
+                        job={"ats": "icims", "url": "https://careers-sas.icims.com/jobs/1/x/job"})
+    for f in fields[:2]:
+        f.update({"options": [], "value": "", "valid": True, "group": "", "section": ""})
+    answers = await resolver.resolve(fields[:2])
+    assert [(a.disposition, str(a.value).lower()) for a in answers] == [("answer", "true")] * 2
+
+
+def test_a_length_the_server_refused_becomes_the_fields_limit():
+    """Quest, run 362bd634a1d44f58a4c76854f90a5b27, 2026-10-21: no maxlength attribute; the server refused the answer
+    three times with "Your answer is over the maximum length of 100 characters"."""
+    question = "Will you now or in the future require employer sponsorship or support to obtain or maintain authorization to work in Canada?"
+    fields = [
+        {**field(question, name="Q1234", type_="textarea"), "maxlength": -1},
+        {**field("Do you have experience with Microsoft Azure?", name="Q1235", type_="textarea"), "maxlength": -1},
+    ]
+    text = ("Error: Invalid Data Error. Please check all information before trying again. " + question
+            + ": Your answer is over the maximum length of 100 characters. Do you have experience with Microsoft A")
+    apply(fields, [], text)
+    assert fields[0]["maxlength"] == 100 and fields[1]["maxlength"] == -1

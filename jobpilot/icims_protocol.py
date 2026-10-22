@@ -17,6 +17,11 @@ DATE_PART = re.compile(r"^(?P<base>(?:[A-Za-z]+Fields\.)?(?:rcf\d+)|[A-Za-z]+Fie
 PART_WORD = {"Month": "Month", "Date": "Day", "Year": "Year"}
 ACCOUNT = {"PersonProfileFields.Login", "PersonProfileFields.Password", "PersonProfileFields.Password_Confirm"}
 SIGNED_IN = re.compile(r"log ?out|sign out", re.I)
+# The candidate acknowledgement packet form signs with required checkboxes named icims_f_signature and
+# icims_f_Signature_<n>, printed only as "xSignature" and "Signature 1" (SAS 2026-10-21): nobody checked them, the
+# browser held the final Submit, and the run ended submission_unknown with nothing sent.
+SIGNATURE = re.compile(r"^icims_f_signature(?:_\d+)?$", re.I)
+SIGNATURE_LABEL = "I acknowledge and sign this form electronically"
 
 
 def protocol_name(field):
@@ -34,12 +39,32 @@ def words(identifier):
     return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", identifier)
 
 
-def apply(fields, controls):
+def server_limits(own, text):
+    """iCIMS checks some answer lengths only on the server and names the question in its refusal ("...authorization
+    to work in Canada?: Your answer is over the maximum length of 100 characters", Quest 2026-10-21, no maxlength
+    attribute). The named field takes that limit, so the answer is rewritten within it instead of resent."""
+    if "maximum length" not in (text or ""):
+        return
+    for f in own:
+        label = re.sub(r"[\s?:*]+$", "", str(f.get("label") or "")).strip()
+        if f.get("type") not in {"text", "textarea"} or len(label) < 3:
+            continue
+        found = re.search(
+            re.escape(label) + r"\s*\??\s*:\s*your answer is over the maximum length of (\d+) characters", text, re.I
+        )
+        if found and not 0 < f.get("maxlength", -1) <= int(found[1]):
+            f["maxlength"] = int(found[1])
+
+
+def apply(fields, controls, text=""):
     """Name standard iCIMS fields by protocol, in place. Other platforms' fields are untouched."""
     own = [f for f in fields if ICIMS_FRAME.search(f.get("frame_url") or "")]
+    server_limits(own, text)
     dates = {}
     for f in own:
         f["icims_name"] = name = protocol_name(f)
+        if f.get("type") == "checkbox" and SIGNATURE.match(name):
+            f["label"] = SIGNATURE_LABEL
         if match := DATE_PART.match(name):
             raw = (f.get("name") or f.get("html_id") or name).removesuffix("_icimsDropdown")
             key = (f.get("frame_url"), f.get("group"), raw.rsplit("_", 1)[0], match["base"])
