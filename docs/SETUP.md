@@ -41,7 +41,9 @@ The database tables are created by the app the first time it starts; there is no
 
 1. Open the address. A fresh install lets you create the one account for this computer (name, email, password). After
    that, only that account, or the access token, can sign in. The dashboard is called ApplyPilot on screen; AXIOM is
-   the name of the project.
+   the name of the project. Sign-up shows ten recovery codes once: save them. AXIOM cannot email you, so if you forget
+   the password, choose Forgot password and use one code (each works once), the access token (`make token`), or run
+   `docker compose exec app jobpilot reset-password` here.
 2. Follow the setup guide: resume upload, contact details, work authorization, the roles you want, screening
    questions, self-identification, permissions and a final review. Answers are stored once and reused. Reading the
    resume to prefill the guide needs the model key (next section); if there is none yet, the guide says so and you
@@ -138,6 +140,7 @@ in `.env.example`.
 | Container status and health | `make ps` |
 | Update to the latest version | `make update` (pause applications first; the app restarts) |
 | Print the access token | `make token` (treat it like a password) |
+| Set a new dashboard password (signs every browser out) | `docker compose exec app jobpilot reset-password` |
 
 **Self-test (optional, new installations only).** `make verify` runs two synthetic applications against a demo form built into the app, in the
 image's own browser, and prints PASS or FAIL. It is meant for a brand-new installation, before you create your account:

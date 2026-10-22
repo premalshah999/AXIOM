@@ -22,13 +22,23 @@ and the dashboard (`GET /{path}` returns `index.html`, `/assets/*` the build).
 
 - `Authorization: Bearer <access token>` (`APP_TOKEN`, or the generated `DATA_DIR/access-token`; print it with
   `jobpilot token`). Constant-time comparison. Used by scripts and the MCP server.
-- the `jp_session` cookie: HttpOnly, `SameSite=Strict`, `Secure` when `SECURE_COOKIES`, 24 hours, issued by
-  `POST /api/login` (token) or `POST /api/account/login` (e-mail and password). The payload is a signed constant
-  (`"applicant"`); the signing key is the access token.
+- the `jp_session` cookie (`api/sessions.py`): HttpOnly, `SameSite=Strict`, `Secure` when `SECURE_COOKIES`, issued by
+  `POST /api/login` (token), `POST /api/account/login` (e-mail and password), sign-up and a password reset. The signed
+  payload is `{s: "applicant", v: <session version>, k: <keep>}`; the signing key is the access token. A session ends
+  after 24 hours without use, or 30 days with "Keep me signed in" (`keep: true`); a cookie in use is re-signed at most
+  every ten minutes (sliding expiry). Raising the session version (`owner_sessions` setting) ends every older cookie:
+  a password change (except the browser that changed it), a reset, `DELETE /api/account/sessions` and
+  `jobpilot reset-password`. Cookies signed before 2026-10-22 hold the bare constant and work until the first version
+  change. A cookie that no longer opens the API is answered "Your session ended. Sign in again."
 
-Public (no credential): `POST /api/login`, `GET /api/account`, `POST /api/account/signup` (only on a fresh installation),
-`POST /api/account/login`, and outside `/api/`: `/healthz`, `/oauth/gmail/callback` (bound to a state value and a
-cookie), `/demo/form/{nonce}` (only with `ENABLE_DEMO`, and only for a valid demo nonce), the dashboard files.
+Public (no credential): `POST /api/login`, `POST /api/logout`, `GET /api/account`, `POST /api/account/signup` (only on a
+fresh installation), `POST /api/account/login`, `POST /api/account/reset`, and outside `/api/`: `/healthz`,
+`/oauth/gmail/callback` (bound to a state value and a cookie), `/demo/form/{nonce}` (only with `ENABLE_DEMO`, and only
+for a valid demo nonce), the dashboard files.
+
+**Sign-in throttle.** One limiter (`api/sessions.Throttle`) counts failed credential checks per client address: the
+token, the password, a recovery code, a reset, the current password in Setup. After ten in a minute every one of them is
+429 with `Retry-After`; refusals say how many tries are left once five or fewer remain.
 
 **Browser safety.** A request with an `Origin` header must equal `BASE_URL` or it is answered 403. `POST`, `PUT` and `PATCH`
 must send `application/json` or `multipart/form-data` (415 otherwise). Responses under `/api/` carry
@@ -53,12 +63,15 @@ exercised through the HTTP test client; every router now has an HTTP test module
 | Method | Path | Auth | Purpose | Request | Response | UI |
 |---|---|---|---|---|---|---|
 | GET | `/healthz` | public | Liveness; fails if the database does not answer | – | `{status:"ok", version}` | Docker |
-| POST | `/api/login` | public, throttled | Exchange the access token for a session cookie | `{token}` | `{ok:true}` + cookie; 401 wrong token; 429 after 10 tries a minute | ✔ |
-| POST | `/api/logout` | session | Clear the cookie (client side only) | – | `{ok:true}` | ✔ |
-| GET | `/api/account` | public | Does an owner account exist; may one be created; am I signed in | – | `{exists, signup_allowed, signed_in, [name, email, onboarding]}` | ✔ |
-| POST | `/api/account/signup` | public if the installation is fresh (no account, no profile identity, no jobs), else session | Create the owner account, seed the profile name and e-mail | `{name, email, password}` | `{ok, onboarding}` + cookie; 409 exists; 403 not fresh | ✔ |
-| POST | `/api/account/login` | public, throttled | E-mail and password sign-in | `{email, password}` | `{ok, onboarding}` + cookie; 401 | ✔ |
-| POST | `/api/account/password` | session, throttled | Change the owner password | `{current, new}` | `{ok:true}`; 400 wrong current password | ✔ |
+| POST | `/api/login` | public, throttled | Exchange the access token for a session cookie | `{token, keep?}` | `{ok:true}` + cookie; 401 wrong token; 429 after 10 failures a minute | ✔ |
+| POST | `/api/logout` | public | Clear this browser's cookie | – | `{ok:true}` | ✔ |
+| GET | `/api/account` | public | Does an owner account exist; may one be created, and why not (`installation`: `fresh`, `has_data`, `has_account`); am I signed in | – | `{exists, signup_allowed, signed_in, installation, password_rules, [name, email, onboarding, password_changed_at, recovery_codes:{left,total,created_at}, session:{via,keep,idle_hours}]}` | ✔ |
+| POST | `/api/account/signup` | public if the installation is fresh (no account, no profile identity, no jobs), else session | Create the owner account, seed the profile name and e-mail, generate ten recovery codes | `{name, email, password, keep?}` | `{ok, onboarding, recovery_codes}` (shown once; only hashes are stored) + cookie; 400 one sentence per problem; 409 exists; 403 not fresh | ✔ |
+| POST | `/api/account/login` | public, throttled | E-mail and password sign-in | `{email, password, keep?}` | `{ok, onboarding}` + cookie; 401 unknown e-mail or wrong password; 409 no password set | ✔ |
+| POST | `/api/account/reset` | public, throttled | Forgot password: a recovery code (each works once, never spent on a refused password) or the access token proves ownership; ends every session | `{method: recovery_code or access_token, secret, password, keep?}` | `{ok, email, onboarding, recovery_codes_left}` + cookie; 401 used or invalid code, wrong token; 409 no password set | ✔ |
+| POST | `/api/account/password` | session, throttled | Change the owner password; ends every other session | `{current, new}` | `{ok, other_sessions_ended}` + a new cookie for this browser; 400 wrong current password | ✔ |
+| POST | `/api/account/recovery-codes` | session, throttled | Replace the recovery codes (asks the password again) | `{password}` | `{codes, created_at, total}`; 400 wrong password | ✔ |
+| DELETE | `/api/account/sessions` | session | Sign out everywhere: raise the session version (the access token keeps working) | – | `{ok:true}`, cookie cleared | ✔ |
 | GET | `/api/onboarding` | session | Setup-guide progress | – | `{completed, step, ...}` | – |
 | PUT | `/api/onboarding` | session | Save progress | `{step, completed}` | state | ✔ |
 
@@ -175,7 +188,9 @@ exercised through the HTTP test client; every router now has an HTTP test module
 | DELETE | `/api/mail-rules/{id}` | Remove (cancels its live challenges) | – | `{removed:true}` | ✔ |
 | POST | `/api/mail-challenges/{id}/cancel` | Cancel a waiting code or link | – | `{cancelled:true}` | ✔ |
 | POST | `/api/inbox/check` | Test the `.env`-configured IMAP login | – | `{connected, folder, host}` | ✔ |
-| GET | `/api/accounts` | Employer account records (no credentials) and the shared-password policy problems | – | summary | ✔ |
+| GET | `/api/accounts` | Employer account records in plain words (`accounts/overview.py`: `status` active, verification, password_unknown, reset_pending, locked, created, signing_in, registered or unknown, with `label`, `detail`, `attention`, `login_email`, `can_retry_verification`), needs-you first, and the shared-password policy problems; never a password or sealed value | – | `{accounts, password_problems}` | ✔ |
+| PUT | `/api/accounts/{id}/password` | "I reset it myself": seal the owner's new password for that employer as state `password_reset` with `owner_set_at`; reset and rejection markers are cleared | `{password}` | `{ok, account}`; 404 unknown record | ✔ |
+| POST | `/api/accounts/{id}/verify` | Restart the employer's retained verification draft (`Service.resume_mail_wait(restart_verification=True)`) | – | `{ok, run_id, state}`; 409 not waiting or nothing to restart | ✔ |
 | DELETE | `/api/accounts/{id}` | Forget one record (`employer_account:*` only) | – | `{deleted:true}` | ✔ |
 | POST | `/api/sessions` | Import a Playwright storage state for one employer host | multipart `url, file ≤ 2 MB` | `{saved, host}` | ✔ |
 | POST | `/api/demo` | Queue the synthetic application (needs `ENABLE_DEMO` and workers) | `QueueInput` | run record | – (`jobpilot verify`) |
@@ -231,7 +246,7 @@ exercised through the HTTP test client; every router now has an HTTP test module
 | I3 | Status codes: 400, 404, 409, 422 are used for the same class of problem. `HTTPException(404)` has no detail while `ValueError("Job not found")` is a 400; `DELETE /api/sources/{id}` answers 200 for a missing id while `DELETE /api/resumes/{id}` and `/api/accounts/{id}` answer 404; `QueueBlocked` loses `code`, `outcome` and `not_before`, so `frontend/src/api.ts: isPreparing` recognizes "preparing a tailored resume" by **regular expression on the message** | `api.py`, `admission.py` | `{detail, code, retry_at?}` with a stable `code`; the client switches on `code` |
 | I4 | **GET with writes:** `GET /api/v2/knowledge/facts` and `/summary` call `migration.sync`, which writes `kn_facts` and recategorizes; `GET /api/snapshot` starts a refresh thread | `features/knowledge/router.py` | Sync on profile save or in a background task; GETs read only |
 | I5 | Seven acknowledgement shapes: `{saved:true}`, `{deleted:true}`, `{removed:true}`, `{cancelled:true}`, `{queued:true}`, `{ok:true}`, `{reconciled:true}` | many | Return the resource, or `204` |
-| I6 | The set of public account paths (`owner_account.PUBLIC_PATHS`) lives in a different module from the middleware that uses it; `POST /api/logout` needs a valid session, so a client with an expired one gets 401 | `api.py`, `owner_account.py` | One route table with an `auth` attribute |
+| I6 | The set of public account paths (`owner_account.PUBLIC_PATHS`) lives in a different module from the middleware that uses it; `POST /api/logout` needs a valid session, so a client with an expired one gets 401 | `api.py`, `owner_account.py` | One route table with an `auth` attribute. **2026-10-22:** sign-out is public |
 | I7 | Lists: only v2 pages. `GET /api/knowledge` returns up to 500; the snapshot silently shows only the **newest 1,000 jobs and runs** (a long-running installation has about 6,000 jobs and 5,000 runs), so older rows are invisible to the dashboard | `api.py` `build_snapshot` | `GET /api/jobs` and `GET /api/runs` with filters and paging; the snapshot keeps counters and settings |
 | I8 | `features/discovery/router.py` assumes `min(6, workers)` application owners instead of the configured `NORMAL_WORKERS`, so readiness and backpressure ignore a different topology; it also defines its own `policy_for` | `owners = min(6, …)` | Use `config.topology` |
 | I9 | `POST /api/v2/discovery/feeds/refresh` runs the sweep as an in-process task, while the scheduled sweep goes through the durable `discovery` queue; a restart drops the manual one | `router.py` versus `workers.enqueue_feed_if_due` | Enqueue on the durable queue |
@@ -244,8 +259,8 @@ with friends and family behind a reverse proxy.
 | # | Severity | Finding | Recommendation |
 |---|---|---|---|
 | S1 | Medium | `POST /api/account/signup` is **unauthenticated on a fresh installation**: whoever reaches a new instance first can claim it. Safe with the default bind (`127.0.0.1`), unsafe with `APP_BIND=0.0.0.0` | Require the access token for sign-up whenever the bind is not loopback; show the first-run page only after the token step |
-| S2 | Medium | The session is a signed constant with no identifier: no server-side revocation, `POST /api/logout` clears the browser only, a changed password does not end other sessions, and the signing key is the bearer token itself | Random session ids stored server-side (revoked on logout and password change); a separate signing secret |
-| S3 | Low–Medium | Two independent in-memory rate limiters (token login and account routes), per client address, reset on restart; behind a reverse proxy every visitor shares one address, so one attacker can lock the owner out | One shared limiter; use the forwarded address only from a configured trusted proxy; back-off |
+| S2 | Medium | The session is a signed constant with no identifier: no server-side revocation, `POST /api/logout` clears the browser only, a changed password does not end other sessions, and the signing key is the bearer token itself | Random session ids stored server-side (revoked on logout and password change); a separate signing secret. **2026-10-22:** cookies carry a session version; a password change, a reset and "Sign out everywhere" end older cookies. Revoking one browser and a separate signing secret remain |
+| S3 | Low–Medium | Two independent in-memory rate limiters (token login and account routes), per client address, reset on restart; behind a reverse proxy every visitor shares one address, so one attacker can lock the owner out | One shared limiter; use the forwarded address only from a configured trusted proxy; back-off. **2026-10-22:** one shared limiter of failures; the trusted-proxy address and back-off remain |
 | S4 | Low | `POST /api/sessions` stores employer session cookies as **plaintext JSON files** (mode 0600) while account passwords are encrypted in the vault | Encrypt with the vault key |
 | S5 | Low | Raw exception text reaches clients: `ValueError`/`RuntimeError` messages (≤ 1,000 characters) are returned verbatim | Typed errors with fixed messages; log the rest |
 | S6 | Low | No CSRF token. Protection is `SameSite=Strict`, the `Origin` check (only when the header is present) and JSON-only content types | Acceptable; add a header check for non-browser clients if they are ever allowed cookies |
@@ -351,7 +366,7 @@ tests finds 94 of the 105 remaining routes called over HTTP. Not yet called over
 |---|---|
 | `health.py` | `/healthz`, `/api/runtime-health` |
 | `session.py` | `/api/login`, `/api/logout` |
-| `owner.py` | `/api/account`, `/api/account/{signup,login,password}`, `/api/onboarding` (logic and models in `owner_account.py`) |
+| `owner.py` | `/api/account`, `/api/account/{signup,login,reset,password,recovery-codes,sessions}`, `/api/onboarding` (logic and models in `owner_account.py`; cookie and throttle in `api/sessions.py`) |
 | `state.py` | `/api/snapshot` (builder and cache in `api/snapshot.py`), `/api/successful-applications` |
 | `archive.py` | `/api/archive`, `/api/archive/failed`, `/api/archive/{job_id}/log` |
 | `profile.py` | `/api/profile` (GET, PUT), `/api/profile/{organize,extract}` |
@@ -363,7 +378,7 @@ tests finds 94 of the 105 remaining routes called over HTTP. Not yet called over
 | `sources.py` | `/api/sources`, `/api/sources/{id}`, `/api/sources/{id}/discover` |
 | `job_board.py` | `/api/job-board` and `/settings`, `/sources`, `/scrape`, `/apply`, `/autopilot/start` |
 | `mail.py` | `/api/mail…`, `/oauth/gmail/callback`, `/api/mail-rules…`, `/api/mail-challenges/{id}/cancel`, `/api/inbox/check` |
-| `accounts.py` | `/api/accounts`, `/api/accounts/{id}`, `/api/sessions` (employer browser sessions) |
+| `accounts.py` | `/api/accounts`, `/api/accounts/{id}`, `/api/accounts/{id}/{password,verify}`, `/api/sessions` (employer browser sessions) |
 | `demo.py` | `/api/demo`, `/demo/form/{nonce}` |
 | `frontend.py` | `GET /{path}` and the `/assets` mount. Registered last |
 | `features/{knowledge,resumes,discovery}/router.py` | the 31 `/api/v2` routes (unchanged) |
