@@ -150,3 +150,41 @@ def test_an_unanswered_central_reset_sends_the_next_run_through_apply(service, m
     value, obs = returning_page(service)
     value.accounts.mark(value.job["url"], "reset_requested", None, reset_requested_at=time.time() - minutes_ago * 60)
     assert value.find_apply(obs)["id"] == route
+
+
+@pytest.mark.parametrize(
+    "status,confirmation,credited",
+    [
+        (302, "https://careers-acme.icims.com/jobs/42/engineer/job?mode=submit_apply&from=assessment", True),
+        (200, "https://careers-acme.icims.com/jobs/42/engineer/job?mode=submit_apply", False),  # step refused
+        (302, "https://careers-acme.icims.com/jobs/43/analyst/job?mode=submit_apply", False),  # another job
+    ],
+)
+async def test_the_last_step_submitted_as_a_step_is_this_runs_application(service, status, confirmation, credited):
+    """MCI, runs 685fafc4c93847b4a5e3bfdf75689f6c, cbf0d8b1e29e4f6ab4fd6f4080897b37, 45fcf37699134d3eaac47d7d580c6589,
+    2026-10-21: the job questions page was the last step, its form named a successor, its Submit went as a step, and
+    iCIMS's "Your application was submitted successfully" was parked as "this run did not submit"."""
+    from unittest.mock import AsyncMock
+
+    from jobpilot.db import Event, Job, Run
+
+    with service.db.exclusive() as s:
+        job = Job(identity="mci-" + str(status) + confirmation[-12:], url="https://careers-acme.icims.com/jobs/42/engineer/job",
+                  company="Acme", title="Engineer")
+        s.add(job)
+        s.flush()
+        run = Run(job_id=job.id, state="running", mode="submit", packet={"resume_sha": "abc"})
+        s.add(run)
+        s.flush()
+        s.add(Event(run_id=run.id, kind="form_post", message="post",
+                    data={"path": "/jobs/42/engineer/questions", "status": status, "shape": []}))
+        run_id, job_id = run.id, job.id
+    value, _ = returning_page(service)
+    value.job = {**value.job, "id": job_id}
+    value.run_record = {"id": run_id, "mode": "submit", "packet": {"resume_sha": "abc"}}
+    value.committed = False
+    value.emit = lambda *args: None
+    value.form.proof = AsyncMock(return_value={"text": "Your application was submitted successfully."})
+    value.defer = lambda reason, *args, **kwargs: {"state": "waiting_browser", "reason": reason}
+    result = await value.on_confirmation({"url": confirmation, "fields": [], "controls": []})
+    assert (result["state"] == "confirmed") is credited

@@ -1373,6 +1373,41 @@ class ICIMS(Adapter):
                     return True
         return False
 
+    def own_step_confirmed(self, obs):
+        """This job's confirmation (job?mode=submit_apply) right after this run posted one of the job's application
+        steps (questions, EEO, forms packet) and iCIMS accepted it (302).
+
+        MCI's job questions page is its last step, but its form names a successor in the hidden "next" input, so its
+        Submit was taken as an intermediate step. iCIMS answered "Your application was submitted successfully" for
+        three jobs, and each run was parked as "this run did not submit" (2026-10-21)."""
+        job = re.search(r"/jobs/(\d+)(?:/|$)", urlsplit(self.job["url"]).path)
+        here = urlsplit(obs.get("url", ""))
+        if not (
+            job
+            and here.netloc == urlsplit(self.job["url"]).netloc
+            and re.match(rf"/jobs/{job[1]}(?:/|$)", here.path)
+            and parse_qs(here.query).get("mode") == ["submit_apply"]
+        ):
+            return False
+        step = re.compile(rf"/jobs/{job[1]}/[^/]+/(?:questions|eeo|form)/?$")
+        with self.service.db.session() as session:
+            posts = session.scalars(
+                select(Event.data).where(Event.run_id == self.run_record["id"], Event.kind == "form_post")
+            )
+            return any(
+                (data or {}).get("status") == 302 and step.search(str((data or {}).get("path", ""))) for data in posts
+            )
+
+    async def on_confirmation(self, obs):
+        if not self.committed and self.own_step_confirmed(obs):
+            receipt = await self.form.proof()
+            if receipt:
+                receipt["resume_sha256"] = self.run_record["packet"]["resume_sha"]
+                receipt["submitted_by"] = "application_step"
+                self.emit("submission", "iCIMS confirmed the application this run submitted on its last step")
+                return {"state": "confirmed", "reason": "Website confirmation captured", "receipt": receipt}
+        return await super().on_confirmation(obs)
+
     def adopt_employer_resume(self, obs):
         if getattr(self.form, "upload_verified", True) or not hasattr(self.form, "resume_fields"):
             return  # Already attached in this run, or a form without upload tracking.
