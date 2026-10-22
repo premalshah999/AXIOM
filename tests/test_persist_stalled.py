@@ -110,3 +110,28 @@ async def test_runs_that_sent_nothing_do_not_use_the_days_retries(service, monke
         job_id = row.id
     await persist_stalled(service, 10, ROLES, {})
     assert resumed == [job_id]
+
+
+async def test_a_paused_job_is_never_resumed_automatically(service, monkeypatch):
+    """Emory, 2026-10-22: the stalled-run retry resumed a job 40 s after it was paused and spent another run on the
+    failure the pause was for. Only the owner lifts a pause."""
+    from jobpilot.db import Setting
+    from jobpilot.job_control import manage
+
+    monkeypatch.setattr("jobpilot.autopilot.datetime", type("D", (), {"now": staticmethod(lambda tz=None: datetime(2026, 10, 17, 5, tzinfo=UTC))}))
+    paused, _ = seed(service, "Emory", "Data Engineer", "icims", "waiting_browser", "did not advance", 11)
+    with service.db.exclusive() as s:
+        s.add(Setting(key="job_control:" + paused, value={"state": "paused", "at": "2026-10-17T04:00:00+00:00"}))
+    resumed = []
+
+    async def fake_manage(service, job_id, action, **kwargs):
+        resumed.append(job_id)
+
+    monkeypatch.setattr("jobpilot.job_control.manage", fake_manage)
+    assert await persist_stalled(service, 10, ["Data Engineer"], {}) == 0 and resumed == []
+    monkeypatch.undo()
+    import pytest
+
+    with pytest.raises(ValueError, match="only the owner"):
+        await manage(service, paused, "resume", actor="autopilot")
+    assert service.db.get_setting("job_control:" + paused)["state"] == "paused"

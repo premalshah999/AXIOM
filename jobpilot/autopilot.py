@@ -477,9 +477,11 @@ async def persist_stalled(service, slots, roles, batch):
             ):
                 continue
             job = s.get(Job, job_id)
+            control = s.get(Setting, "job_control:" + job_id)
             if (
                 not job
                 or job.demo
+                or (control and (control.value or {}).get("state") in {"paused", "deleted"})
                 or job.ats not in PERSIST_ATS
                 or job.ats in exclude
                 or job.status in {"archived", "closed", "confirmed", "already_applied", "skipped"}

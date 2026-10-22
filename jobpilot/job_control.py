@@ -47,6 +47,10 @@ async def manage(service, job_id, action, *, controller_policy=None, reopen_clos
             raise ValueError("Pause is saving the draft; resume when its state is Paused")
         if action == "resume" and control and control.value.get("state") == "deleted":
             raise ValueError("This job was removed; its application history is preserved")
+        if action == "resume" and actor != "owner" and control and control.value.get("state") == "paused":
+            # Only the owner lifts a pause. The stalled-run retry resumed Emory 40 s after it was paused
+            # (2026-10-22) and spent another run on the failure the pause was for.
+            raise ValueError("This job is paused; only the owner resumes it")
         if action == "resume" and job.status == "closed" and not reopen_closed:
             # The employer's posting was found missing twice; retrying it wastes runs and owner attention.
             raise ValueError(
