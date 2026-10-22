@@ -1,13 +1,21 @@
-"""Employer account records and imported browser sessions."""
+"""Employer account records (Setup → Accounts) and imported browser sessions. No response carries a password."""
 
 import hashlib
 import json
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel, Field
 
+from ...admission import QueueBlocked
 from ...db import Setting
 from ...network import public_url
+
+
+class EmployerPassword(BaseModel):
+    """The password the owner set on the employer's own site. Stored sealed; never echoed."""
+
+    password: str = Field(default="", max_length=200)
 
 
 def router(service) -> APIRouter:
@@ -16,14 +24,59 @@ def router(service) -> APIRouter:
 
     @r.get("/api/accounts")
     def accounts():
-        from ...accounts import summary
+        from ...accounts.overview import overview
         from ...config import password_problems
 
-        result = summary(service)
-        result["password_problems"] = (
-            password_problems(config.application_password) if config.application_password else []
-        )
-        return result
+        return {
+            "accounts": overview(service),
+            "password_problems": (
+                password_problems(config.application_password) if config.application_password else []
+            ),
+        }
+
+    @r.put("/api/accounts/{account_id}/password")
+    def account_password(account_id: str, data: EmployerPassword):
+        """ "I reset it myself": the next application signs in with this password instead of asking for a reset."""
+        from ...accounts.overview import one
+        from ...accounts.store import save_owner_password
+
+        if not data.password.strip():
+            raise ValueError("Enter the new password you set on the employer's site")
+        if not save_owner_password(service, account_id, data.password):
+            raise HTTPException(404, "This account record no longer exists")
+        return {"ok": True, "account": one(service, account_id)}
+
+    @r.post("/api/accounts/{account_id}/verify")
+    async def account_verify(account_id: str):
+        """Restart the paused application that is waiting on this employer's verification email."""
+        from ...accounts.overview import draft_for
+
+        record = db.get_setting(account_id) if account_id.startswith("employer_account:") else None
+        if not record:
+            raise HTTPException(404, "This account record no longer exists")
+        if record.get("state") != "verification_pending":
+            raise HTTPException(409, "Only an account waiting for email verification can retry it")
+        draft = draft_for(service, account_id)
+        if not draft:
+            raise HTTPException(
+                409,
+                "No paused application is waiting on this employer's verification email. The next application "
+                "to this employer signs in and asks for a new one.",
+            )
+        run_id, challenge_id = draft
+        try:
+            result = await service.resume_mail_wait(run_id, challenge_id, restart_verification=True)
+        except QueueBlocked as blocked:
+            raise HTTPException(409, str(blocked)) from None
+        except ValueError:
+            result = None
+        if not result:
+            raise HTTPException(
+                409,
+                "The paused application can no longer retry verification. The next application to this "
+                "employer signs in and asks for a new email.",
+            )
+        return {"ok": True, "run_id": result.get("run_id", run_id), "state": result.get("state", "queued")}
 
     @r.delete("/api/accounts/{account_id}")
     async def account_forget(account_id: str):

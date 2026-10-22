@@ -8,6 +8,7 @@ from ..db import Database
 from ..service import Service
 from . import middleware
 from .lifespan import lifespan
+from .sessions import Sessions, Throttle
 from .routes import (
     accounts,
     archive,
@@ -36,6 +37,9 @@ def create_app(config: Settings | None = None):
     db = Database(config.database_url)
     service = Service(db, config)
     signer = URLSafeTimedSerializer(config.app_token, salt="applypilot-session-v1")
+    sessions = Sessions(db, signer, config.secure_cookies)
+    # One limiter for every credential check: token, password, recovery code and reset.
+    throttle = Throttle()
     cache = SnapshotCache(service)
 
     app = FastAPI(
@@ -47,7 +51,7 @@ def create_app(config: Settings | None = None):
         openapi_url=None,
     )
     app.state.service = service
-    middleware.install(app, config, signer, cache)
+    middleware.install(app, config, sessions, cache)
 
     app.include_router(mail.router(service))
     app.include_router(job_board.router(service))
@@ -55,10 +59,10 @@ def create_app(config: Settings | None = None):
 
     install_features(app, service)
     # Owner sign-up/sign-in and onboarding (2026-10-15); routes before the frontend catch-all.
-    app.include_router(owner.router(service, signer, config.secure_cookies))
+    app.include_router(owner.router(service, sessions, throttle))
 
     app.include_router(health.router(service))
-    app.include_router(session.router(service, signer))
+    app.include_router(session.router(service, sessions, throttle))
     app.include_router(state.router(service, cache))
     app.include_router(archive.router(service))
     app.include_router(profile.router(service))

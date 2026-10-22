@@ -210,3 +210,51 @@ class AccountStore:
         """The login a not-yet-confirmed Create replaced, to restore when the employer refuses that Create."""
         sealed = self.record(url).get("previous_credentials")
         return self.service.mail.vault.open(sealed) if sealed else None
+
+
+# Markers of a refused login or an unanswered reset. A password the owner saved settles them, so the next run signs
+# in with it instead of requesting another reset. Markers the engine adds under these prefixes are cleared too.
+OWNER_SETTLED = ("error", "previous_credentials")
+OWNER_SETTLED_PREFIXES = ("reset_requested", "rejected_", "password_unknown", "unanswered")
+
+
+def save_owner_password(service, key, password):
+    """The owner reset this employer's password on the employer's site and typed the new one into Setup → Accounts.
+
+    The record gets what AccountStore.save writes for state "password_reset" (sealed login, state, updated_at,
+    confirmed_at), which Accounts.credentials prefers over the shared password. It is written under its own key,
+    because the key already holds the employer origin, the account email and the tenant; a page URL rebuilt from
+    the record could resolve to another tenant. Sealed extras (Dayforce security answers) are kept. True when saved,
+    False when the record is gone.
+    """
+    if not key.startswith("employer_account:"):
+        return False
+    vault = service.mail.vault
+    with service.db.exclusive() as s:
+        row = s.get(Setting, key)
+        if not row:
+            return False
+        current = dict(row.value)
+        try:
+            email = vault.open(current["credentials"]).get("email", "") if current.get("credentials") else ""
+        except Exception:  # an unreadable seal: never guess which email the employer knows
+            email = ""
+        if not email:
+            raise AccountActionError(
+                "This record has no readable sign-in email, so a password can't be attached to it. "
+                "Forget it instead; the next application signs in again.",
+                "account",
+            )
+        for name in list(current):
+            if name in OWNER_SETTLED or name.startswith(OWNER_SETTLED_PREFIXES):
+                current.pop(name)
+        stamp = now()
+        row.value = {
+            **current,
+            "credentials": vault.seal({"email": email, "password": password}),
+            "state": "password_reset",
+            "updated_at": stamp,
+            "owner_set_at": stamp,
+            "confirmed_at": current.get("confirmed_at") or stamp,
+        }
+    return True

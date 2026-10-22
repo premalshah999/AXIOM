@@ -90,6 +90,44 @@ def print_trace(config, run_id):
     print(f"\nSnapshots (HTML + screenshots): {folder}")
 
 
+def reset_password(config, ask=None, say=print) -> int:
+    """Set the owner's dashboard password from the host, without echoing it, and sign every browser out.
+
+    The last of three ways back in for an owner who forgot the password (2026-10-22): this installation cannot send
+    email, so whoever can run commands on the host is the owner. Returns the process exit code.
+    """
+    import getpass
+
+    from .db import Database
+    from .owner_account import account, password_problem, set_password
+
+    ask = ask or getpass.getpass
+    db = Database(config.prepare().database_url)
+    stored = account(db)
+    if not stored.get("password_hash"):
+        say("No email and password are set on this installation yet.")
+        say(
+            "Sign in to the dashboard with the access token (`jobpilot token`), then add them in Setup → System."
+        )
+        return 1
+    say(f"Setting a new dashboard password for {stored.get('email') or 'the owner account'}.")
+    for _ in range(3):
+        password = ask("New password: ")
+        if problem := password_problem(password):
+            say(problem + ".")
+            continue
+        if ask("Type it again: ") != password:
+            say("The two passwords differ. Try again.")
+            continue
+        set_password(db, password, reason="reset_cli")
+        say(
+            "Password changed. Every browser that was signed in must sign in again; recovery codes still work."
+        )
+        return 0
+    say("Password not changed.")
+    return 1
+
+
 def main():
     parser = argparse.ArgumentParser(description="ApplyPilot Studio")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -97,6 +135,10 @@ def main():
     server.add_argument("--host", default="127.0.0.1")
     server.add_argument("--port", type=int, default=8080)
     sub.add_parser("token", help="Print this installation's dashboard access token")
+    sub.add_parser(
+        "reset-password",
+        help="Set a new dashboard password (asks without echoing) and sign every browser out",
+    )
     doctor = sub.add_parser("doctor", help="Check local configuration")
     doctor.add_argument("--check-mail", action="store_true", help="Log in to Gmail over IMAP once")
     probe = sub.add_parser("probe", help="Dry-run one job URL and print the step trace (never submits)")
@@ -126,6 +168,8 @@ def main():
     config = settings()
     if args.command == "token":
         print(config.app_token)
+    elif args.command == "reset-password":
+        raise SystemExit(reset_password(config))
     elif args.command == "mcp":
         from .mcp_server import create_server
 
@@ -137,7 +181,11 @@ def main():
 
         # A hung request must not hold the stop up: the drain runs in the lifespan shutdown, after this wait.
         uvicorn.run(
-            create_app(config), host=args.host, port=args.port, log_level="warning", timeout_graceful_shutdown=15
+            create_app(config),
+            host=args.host,
+            port=args.port,
+            log_level="warning",
+            timeout_graceful_shutdown=15,
         )
     elif args.command == "login":
         asyncio.run(capture_session(config, args.url))
