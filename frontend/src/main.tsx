@@ -66,11 +66,11 @@ function App() {
 
   useEffect(() => {
     const out = (event: Event) => {
-      const reason = (event as CustomEvent<string>).detail;
-      // A first visit without a session needs no explanation; a session that ended does.
-      setSignOutReason(
-        typeof reason === "string" && reason && !/local access token/i.test(reason) ? reason : "",
-      );
+      const detail = (event as CustomEvent<string>).detail;
+      // A first visit without a session needs no explanation; a session that ended does. A poll that was in flight
+      // when the owner signed out answers 401 afterwards and must not replace "You signed out."
+      const reason = typeof detail === "string" && !/local access token/i.test(detail) ? detail : "";
+      setSignOutReason((current) => reason || current);
       setAuth("out");
     };
     const pop = () => setRoute(parseRoute());
