@@ -87,8 +87,18 @@ NDA_INSTRUCTION = re.compile(r"\bif\b[^.?;]{0,60}\bunder (?:an? )?(?:nda|non.?di
 def _topic(text):
     for name, pattern in [
         (
+            # BNY (2026-10-22): "regulatory charges ... fined ... license revoked ... sanction arising out of any
+            # banking, securities or investment activities" was filed as export control, and the applicant's no
+            # FINRA licence and no conviction facts were refused as out of scope.
+            "financial_regulatory",
+            r"regulatory (?:charges|proceedings|actions?|agenc\w*)|(?:banking|securities|investment)(?: or \w+)? activit|"
+            r"\bfinra\b|licen[cs]e (?:was |been |had been )?(?:revoked|suspended)|\bbeen fined\b",
+        ),
+        (
             "export_control",
-            r"export.?control|export.{0,20}regulat|sanction|embargo|restricted countr|import/export|"
+            r"export.?control|export.{0,20}regulat|(?:economic|trade|government|ofac|u\.?s\.?|international) sanctions?|"
+            r"sanctioned (?:countr|entit|part|person|region)|sanctions? (?:list|program|law|regulation)|"
+            r"embargo|restricted countr|import/export|"
             r"\b(?:nationals?|citizens?|residents?)\b.{0,80}\b(?:cuba|iran|north korea|syria|crimea)\b|"
             r"foreign countr(?:y|ies) of (?:risk|concern)|foreign talent",
         ),
@@ -277,6 +287,7 @@ def relevant_fact(label, key):
         )
     patterns = {
         "export_control": r"export_control|sanction|restricted_country",
+        "financial_regulatory": r"finra|securities|regulatory|licen[cs]e|convict|criminal",
         "sponsorship": r"sponsor|visa|work_authorization|immigration_status|work_permit|(?:^|[_ :.-])(?:opt|ead|f[ -]?1)(?:$|[_ :.-])",
         "authorization": r"work_authoriz|right_to_work|eligib|visa|immigration_status|work_permit|(?:^|[_ :.-])(?:opt|ead|f[ -]?1)(?:$|[_ :.-])",
         "age": r"over_?18|age_?18|18_or_older|legal_age",

@@ -12,7 +12,9 @@ from .consent import AGREEMENT_TEXT
 from .consent import CHECK_WILLINGNESS
 from .consent import CONTACT_CONSENT
 from .consent import EMBEDDED_DISCLOSURE
+from .consent import READ_ACKNOWLEDGEMENT
 from .consent import RECORD_STATEMENT
+from .consent import SELF_ASSERTION
 from .consent import SIGNATURE_REQUEST
 from .consent import SIGNED_CERTIFICATION
 from .text import normalize
@@ -129,7 +131,8 @@ class ConsentRulesMixin:
         label = str(field.get("label", ""))
         if field.get("options") or not self.profile.accept_all_application_terms:
             return False
-        if not SIGNED_CERTIFICATION.search(label) or EMBEDDED_DISCLOSURE.search(label):
+        read_only = bool(READ_ACKNOWLEDGEMENT.search(label)) and not SELF_ASSERTION.search(label)
+        if not SIGNED_CERTIFICATION.search(label) or (EMBEDDED_DISCLOSURE.search(label) and not read_only):
             return False
         p = self.profile
         parts = [normalize(p.first_name or ""), normalize(p.last_name or "")]

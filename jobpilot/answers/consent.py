@@ -78,6 +78,15 @@ RECORD_STATEMENT = re.compile(
 
 # Applicant disclosures an acknowledgement could embed. Phrase-level, so legal boilerplate
 # ("no representative is authorized to ...", "terminate my employment") does not count.
+# A signature that only acknowledges reading a notice asserts nothing about the applicant. CDW (2026-10-22): "If your
+# role requires it, you will be asked after hire ... your status as a U.S. Person ... By typing my name below, I
+# acknowledge that I have read the following statement" went to the owner as an export-control disclosure.
+READ_ACKNOWLEDGEMENT = re.compile(r"\bI (?:acknowledge|confirm|understand)(?: that)? I (?:have )?read\b", re.I)
+SELF_ASSERTION = re.compile(
+    r"\bI (?:am|was|have been|have never|do not|don't|will not|certify that|attest that|declare that)\b", re.I
+)
+
+
 EMBEDDED_DISCLOSURE = re.compile(
     r"authori[sz]ed to work|work authori[sz]ation|eligib\w* to work|sponsor|\bvisa\b|citizen|"
     r"convict|felon|misdemeanor|\b(?:no|any|never)\b.{0,20}criminal|non[\s-]?(?:compet|solicit)|restrictive covenant|"
@@ -100,7 +109,7 @@ SELECTION_CONSENT = re.compile(
 # application is truthful and complete").
 SIGNED_CERTIFICATION = re.compile(
     r"\b(?:sign(?:ature|ed|ing)?|e-?signature|initials)\b|"
-    r"\b(?:enter|entering|type|typing|input|provide)\s+(?:in\s+)?(?:your\s+)?(?:full\s+|legal\s+)?name\b|"
+    r"\b(?:enter|entering|type|typing|input|provide)\s+(?:in\s+)?(?:your\s+|my\s+)?(?:full\s+|legal\s+)?name\b|"
     r"\b(?:certify|attest)\b",
     re.I,
 )
