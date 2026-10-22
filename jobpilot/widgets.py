@@ -2117,6 +2117,64 @@ async def icims_dropdown_commit(
     raise ValueError("The website did not commit the observed choice")
 
 
+# iCIMS's email step asks a phone country code with the same dropdown look but no <select> (Emory, Stifel
+# 2026-10-21/22): <a class="dropdown-select" role=combobox aria-controls="dropdownOptions">, whose container holds
+# input.dropdown-search (filtered on input) and ul.dropdown-results of li[role=option] labelled "(+1) United States".
+# The scan labels the hidden search box "Phone Country Code"; clicking it timed out and typing into the anchor was
+# "Value not accepted".
+ICIMS_CODE_DROPDOWN = """e => {
+  let ctnr = null, anchor = null;
+  if (e.tagName === 'A' && e.classList.contains('dropdown-select')) {
+    anchor = e; ctnr = document.getElementById(e.getAttribute('aria-controls') || '');
+  } else if (e.classList.contains('dropdown-search')) {
+    ctnr = e.closest('.dropdown-container');
+    anchor = ctnr && ctnr.id ? document.querySelector('a.dropdown-select[aria-controls="' + ctnr.id + '"]') : null;
+  }
+  if (!ctnr || !anchor || !anchor.id || /_icimsDropdown$/.test(anchor.id) || !ctnr.querySelector('ul.dropdown-results'))
+    return null;
+  return [anchor.id, ctnr.id];
+}"""
+DIAL_PREFIX = re.compile(r"^\s*\(\+?\d+\)\s*")
+
+
+async def icims_code_dropdown_commit(frame, el, value):
+    """Pick a row of iCIMS's select-less dropdown by its name; None when the control is not one."""
+    try:
+        ids = await el.evaluate(ICIMS_CODE_DROPDOWN)
+    except PlaywrightError:
+        return None
+    if not ids:
+        return None
+    anchor, container = frame.locator(f'[id="{ids[0]}"]'), frame.locator(f'[id="{ids[1]}"]')
+    wanted = DIAL_PREFIX.sub("", str(value)).strip()
+    digits = re.sub(r"\D", "", str(value)) if re.fullmatch(r"\s*\+?\d{1,4}\s*", str(value)) else ""
+    if not await container.is_visible():
+        await anchor.click(timeout=3000)
+        await asyncio.sleep(0.3)
+    box = container.locator("input.dropdown-search")
+    if await box.count() and await box.is_visible() and not digits:
+        await box.fill(wanted[:30], timeout=2000)
+        await asyncio.sleep(0.6)
+    rows = await container.locator("ul.dropdown-results li[role=option]").evaluate_all(
+        "els=>els.filter(e=>e.getClientRects().length).map(e=>[e.id,"
+        "(e.getAttribute('aria-label')||e.innerText||'').replace(/\\s+/g,' ').trim()])"
+    )
+    named = [r for r in rows if r[0] and norm(DIAL_PREFIX.sub("", r[1])) == norm(wanted)]
+    if digits:
+        coded = [r for r in rows if r[0] and re.match(rf"\(\+{digits}\)", r[1])]
+        # +1 is shared by the North American plan; the code alone means the United States.
+        named = coded if len(coded) == 1 else [r for r in coded if norm(DIAL_PREFIX.sub("", r[1])) == "united states"]
+    if len(named) != 1:
+        await anchor.press("Escape")
+        raise ValueError("No matching option is offered")
+    await frame.locator(f'[id="{named[0][0]}"]').click(timeout=3000)
+    await asyncio.sleep(0.3)
+    shown = norm(await anchor.inner_text())
+    if norm(DIAL_PREFIX.sub("", named[0][1])) in shown:
+        return named[0][1]
+    raise ValueError("The website did not commit the observed choice")
+
+
 async def combobox(
     frame,
     el,
@@ -2148,6 +2206,9 @@ async def combobox(
         search_queries=search_queries,
         thorough=thorough,
     )
+    if picked is not None:
+        return picked
+    picked = await icims_code_dropdown_commit(frame, el, value)
     if picked is not None:
         return picked
     # Greenhouse "mark all that apply" questions are react-select multi
