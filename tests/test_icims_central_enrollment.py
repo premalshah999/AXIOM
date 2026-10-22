@@ -64,3 +64,13 @@ async def test_the_guided_flow_lets_the_adapter_decline_the_prompt(service):
     assert value.click.await_args.args[0]["label"] == "Remind me later"
     other = prompt("/u/login/password", ["Continue"])
     assert await adapter(service, other).guided_step(other) is False
+
+
+def test_the_two_step_verification_prompt_is_skipped(service):
+    """Planview, 2026-10-22: "You haven't enabled two-step verification" on login-page.icims.com went to the guided
+    agent, which clicked the site's Careers link until the run stalled."""
+    value = adapter(service, prompt("/u/login/password", ["Continue"]))
+    labels = ["Back", "Enable two-step verification", "No, just a password", "Skip for now"]
+    page = prompt("/ui/login-continue", labels, host="login-page.icims.com")
+    assert value.central_enrollment(page)["label"] == "Skip for now"
+    assert value.central_enrollment(prompt("/ui/login-continue", labels, host="careers-acme.icims.com")) is None

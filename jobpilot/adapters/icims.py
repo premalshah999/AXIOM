@@ -29,7 +29,10 @@ PROFILE_CREATE = re.compile(r"^(?:create|submit)(?: (?:my|your|a))? profile$", r
 PROFILE_SAVE = re.compile(r"^(?:create|submit|update|save)(?: (?:my|your|a))? profile$", re.I)
 # Central (Auth0) offers optional passkey/MFA enrollment after a sign-in: /u/mfa-webauthn-platform-enrollment, then
 # /u/mfa-webauthn-platform-error-enrollment when the device cannot register (Rovisys 2026-10-19).
-CENTRAL_ENROLLMENT = re.compile(r"^/u/(?:mfa-[a-z-]*enrollment|passkey-enrollment[a-z-]*)$", re.I)
+# Central's optional prompts after sign-in. Planview (2026-10-22) showed "You haven't enabled two-step verification"
+# on login-page.icims.com/ui/login-continue (Enable / No, just a password / Skip for now); read as unknown, the run
+# went to the guided agent, which clicked the site's "Careers" link until it stalled.
+CENTRAL_ENROLLMENT = re.compile(r"^/(?:u/(?:mfa-[a-z-]*enrollment|passkey-enrollment[a-z-]*)|ui/login-continue)$", re.I)
 ENROLLMENT_DECLINES = ("remind me later", "not now", "maybe later", "skip for now", "skip", "no thanks", "not on this device")
 # iCIMS writes its progress bar for screen readers: "Step 2 of 4. Voluntary Self-Identification(Current Step)" (ICE
 # 2026-10-19: Candidate Profile, Voluntary Self-Identification, Job Specific Questions, Portal Specific Forms). Only
@@ -962,7 +965,7 @@ class ICIMS(Adapter):
         location = urlsplit(obs.get("url", ""))
         if (
             location.scheme != "https"
-            or location.hostname not in {"login.icims.com", "login.icims.eu"}
+            or location.hostname not in {"login.icims.com", "login.icims.eu", "login-page.icims.com"}
             or not CENTRAL_ENROLLMENT.match(location.path)
         ):
             return None
