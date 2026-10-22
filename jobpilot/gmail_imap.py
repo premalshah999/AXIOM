@@ -86,14 +86,34 @@ class _Pool:
         self.conns.clear()
 
 
+# Gmail's own words for a rejected address or app password. Any other refusal of LOGIN ("Too many simultaneous
+# connections", "[UNAVAILABLE] Temporary System Problem") is transient: read as a bad password, one refusal after the
+# Mac woke on battery disabled the mailbox for five hours and every email verification failed (2026-10-22).
+CREDENTIALS_REJECTED = re.compile(
+    r"AUTHENTICATIONFAILED|invalid credentials|application-specific password|web login required|username and password",
+    re.I,
+)
+
+
 def _connect(address, password):
     client = imaplib.IMAP4_SSL("imap.gmail.com", 993, ssl_context=ssl.create_default_context(), timeout=30)
     try:
         client.login(address, password)
-    except imaplib.IMAP4.error:
+    except imaplib.IMAP4.error as exc:
         _close(client)
-        raise MailAuthenticationError("Gmail authentication failed; check the saved app password") from None
+        if CREDENTIALS_REJECTED.search(str(exc)):
+            raise MailAuthenticationError("Gmail authentication failed; check the saved app password") from None
+        raise MailTransportError("Gmail refused the login for now; retry later") from None
     return client
+
+
+def login_ok(address, password):
+    """Whether Gmail accepts this login right now (one short connection, no mailbox access)."""
+    try:
+        _close(_connect(address, password))
+        return True
+    except (MailAuthenticationError, MailTransportError, OSError, imaplib.IMAP4.abort):
+        return False
 
 
 def _close(client):

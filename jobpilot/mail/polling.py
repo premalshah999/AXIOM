@@ -1,5 +1,6 @@
 """The background poll that matches incoming messages to waiting challenges."""
 
+from datetime import UTC, datetime
 from email.utils import getaddresses
 from sqlalchemy import select
 from urllib.parse import urlsplit
@@ -367,12 +368,36 @@ class PollingMixin:
                             if not box or box.state != "connected":
                                 row.state, row.payload = "failed", ""
 
+    async def heal_mailbox(self):
+        """Reconnect a .env Gmail mailbox marked reconnect_required once Gmail accepts its login again (checked at
+        most every five minutes). A transient refusal at wake-up left verification off for five hours (2026-10-22)."""
+        from ..db import Mailbox
+        from ..gmail_imap import login_ok
+
+        address = (self.config.gmail_address or "").strip().lower()
+        password = "".join((self.config.gmail_app_password or "").split())
+        if not address or not password:
+            return False
+        with self.db.session() as s:
+            box = s.scalar(select(Mailbox).where(Mailbox.email == address, Mailbox.state == "reconnect_required"))
+            if box is None or (box.checked_at or "") > datetime.fromtimestamp(time.time() - 300, UTC).isoformat():
+                return False
+            box_id = box.id
+        healed = await asyncio.to_thread(login_ok, address, password)
+        with self.db.exclusive() as s:
+            if box := s.get(Mailbox, box_id):
+                box.checked_at = datetime.now(UTC).isoformat()
+                if healed:
+                    box.state, box.error = "connected", ""
+        return healed
+
     async def poll(self):
         last_receipts = last_drafts = 0
         receipt_task = draft_task = None
         try:
             while True:
                 try:
+                    await self.heal_mailbox()
                     await self.poll_once()
                     from ..agent_settings import enabled
 
