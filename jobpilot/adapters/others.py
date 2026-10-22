@@ -1,6 +1,9 @@
 """Taleo, SuccessFactors, Eightfold, and other multi-page portals that differ mostly in labels."""
 
+import asyncio
 import re
+
+from playwright.async_api import Error as PlaywrightError
 
 from ..forms import FINAL
 from .base import Adapter, Step
@@ -54,6 +57,29 @@ class SuccessFactors(Adapter):
         with self.service.db.session() as session:
             source = session.get(Run, handle["source_run_id"])
             return bool(source and source.job_id == self.job["id"])
+
+    async def expand_sections(self):
+        """Open the application's collapsed sections. XPO's classic form (2026-10-22) shows "Profile Information" and
+        "Job-Specific Information" closed: their required pickers were scanned but hidden, every write timed out, and
+        the guided agent took the run."""
+        opened = 0
+        for frame in self.page.frames:
+            for _ in range(12):
+                bar = frame.locator('button.rcmFormSectionTopBar[aria-expanded="false"]').first
+                try:
+                    if not await bar.count() or not await bar.is_visible():
+                        break
+                    await bar.click(timeout=3000)
+                except PlaywrightError:
+                    break
+                opened += 1
+        return opened
+
+    async def on_form(self, obs):
+        if await self.expand_sections():
+            await asyncio.sleep(0.5)
+            obs = await self.form.scan()
+        return await super().on_form(obs)
 
     async def _drive(self):
         if self.reset_continuation():

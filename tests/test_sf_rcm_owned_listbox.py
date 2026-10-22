@@ -85,3 +85,55 @@ async def test_an_answer_the_list_does_not_offer_is_not_committed(page):
     with pytest.raises(ValueError):
         await widgets.combobox(page.main_frame, page.locator("[id='9:_input']"), "Atlantis")
     assert await page.locator("#tor__fcustcountry").input_value() == ""
+
+
+CARRIERS = ["A. Duie Pyle", "ABF Freight", "Amazon", "FedEx Freight", "Other", "Saia Inc.", "UPS", "Walmart"]
+
+
+@pytest.mark.parametrize("employer,picked", [("Acme Labs", "Other"), ("UPS", "UPS")])
+async def test_an_employer_picker_takes_the_listed_employer_else_other(page, employer, picked):
+    """XPO (2026-10-22): "Current/Most Recent Employer" lists freight carriers and Other, then asks the name of an
+    employer listed as Other. An unlisted employer timed out on every run."""
+    import json
+
+    await page.set_content(PICKLIST.replace("%s", json.dumps(CARRIERS)).replace("CLICKS", "true"))
+    el = page.locator("[id='9:_input']")
+    assert await widgets.combobox(page.main_frame, el, employer, employer_scope=True) == picked
+
+
+async def test_collapsed_application_sections_are_opened(page):
+    """XPO (2026-10-22): "Profile Information" and "Job-Specific Information" were closed; their required pickers were
+    scanned but hidden and every write timed out."""
+    from jobpilot.adapters.others import SuccessFactors
+
+    await page.set_content("""
+      <div class=rcmFormSection><button class="rcmFormSectionTopBar" aria-expanded="true">My Documents</button></div>
+      <div class=rcmFormSection><button class="rcmFormSectionTopBar" aria-expanded="false"
+        onclick="this.setAttribute('aria-expanded','true')">Profile Information</button></div>
+      <div class=rcmFormSection><button class="rcmFormSectionTopBar" aria-expanded="false"
+        onclick="this.setAttribute('aria-expanded','true')">Job-Specific Information</button></div>""")
+    adapter = SuccessFactors.__new__(SuccessFactors)
+    from types import SimpleNamespace
+
+    adapter.e = SimpleNamespace(form=SimpleNamespace(page=page))
+    assert await adapter.expand_sections() == 2
+    assert await page.locator('button[aria-expanded="false"]').count() == 0
+    assert await adapter.expand_sections() == 0
+
+
+async def test_an_unlisted_wording_is_chosen_among_the_lists_own_entries(page):
+    """NetApp (2026-10-22): Veteran Status offered its own phrasings, the answer's wording matched none, and ten agent
+    attempts never committed one. The resolver chooses among the entries the full list shows."""
+    import json
+
+    entries = ["I identify as one or more protected veterans", "I am not a protected veteran", "I do not wish to answer"]
+    await page.set_content(PICKLIST.replace("%s", json.dumps(entries)).replace("CLICKS", "true"))
+    seen = []
+
+    async def choose(texts):
+        seen.append(texts)
+        return "I am not a protected veteran" if "I am not a protected veteran" in texts else None
+
+    el = page.locator("[id='9:_input']")
+    assert await widgets.combobox(page.main_frame, el, "No", choose=choose) == "I am not a protected veteran"
+    assert seen and seen[-1] == entries

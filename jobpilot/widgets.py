@@ -1385,7 +1385,7 @@ RCM_LIST = """() => {
 }"""
 
 
-async def _rcm_paginated(frame, el, value):
+async def _rcm_paginated(frame, el, value, full_list_only=False, choose=None):
     """SuccessFactors RCM paginated picklist (ASSA ABLOY State/Ethnicity, 2026-10-14).
 
     An input plus a ``<id>_selectButton``; its list renders outside the field without
@@ -1409,7 +1409,7 @@ async def _rcm_paginated(frame, el, value):
         if len(longest) <= 12
         else [longest[:40], max(re.findall(r"[A-Za-z]{4,}", longest) or [longest[:4]], key=len)]
     )
-    for attempt in [*queries, "button"]:
+    for attempt in ["button"] if full_list_only else [*queries, "button"]:
         await frame.evaluate(RCM_MARK)
         if attempt != "button":
             await el.click(timeout=3000)
@@ -1418,7 +1418,7 @@ async def _rcm_paginated(frame, el, value):
         else:
             await el.fill("", timeout=3000)
             await frame.locator(f"[id='{base}_selectButton']").click(timeout=3000)
-        owned = await _rcm_owned_choice(el, text, targets, typed=attempt != "button")
+        owned = await _rcm_owned_choice(el, text, targets, typed=attempt != "button", choose=choose)
         if owned is not None:
             # The listbox the input owns (aria-owns, Capgemini 2026-10-18): its real options, once the
             # employer's search has answered. Click the one chosen; Enter on it if the click did not commit.
@@ -1443,6 +1443,8 @@ async def _rcm_paginated(frame, el, value):
                 pick = next((t for t in listed if school_option_matches(text, t)), None) or best_option(
                     listed, text
                 )
+                if not pick and choose and listed and attempt == "button":
+                    pick = await choose(listed)
                 if pick:
                     found = await frame.evaluate(RCM_FIND, [pick])
                     targets = [*targets, pick]
@@ -1467,7 +1469,7 @@ RCM_OWNED = """e => {
 }"""
 
 
-async def _rcm_owned_choice(el, text, targets, typed):
+async def _rcm_owned_choice(el, text, targets, typed, choose=None):
     """The option to pick from the input's own listbox: None when it owns none, {} when nothing matches.
 
     Options load 100 at a time and the employer searches about 1.4 s after typing starts, so the
@@ -1489,6 +1491,10 @@ async def _rcm_owned_choice(el, text, targets, typed):
             break
     texts = [o["text"] for o in options or []]
     pick = next((t for t in texts if school_option_matches(text, t)), None) or best_option(texts, text)
+    if not pick and choose and texts and not typed:
+        # The full list's own entries, chosen by the resolver when the answer's wording is not among them (NetApp
+        # 2026-10-22: Veteran Status offered its own phrasings; ten agent attempts never committed one).
+        pick = await choose(texts)
     return next((o for o in options or [] if o["text"] == pick), {})
 
 
@@ -2150,7 +2156,15 @@ async def combobox(
         "e => !!e.closest('.select__control')?.querySelector('.select__value-container--is-multi')"
     )
     if await el.evaluate("e => e.classList.contains('rcmpaginatedselectinput')"):
-        return await _rcm_paginated(frame, el, value)
+        if employer_scope:
+            # XPO (2026-10-22) lists freight carriers and "Other", then asks the name of an employer listed as Other.
+            # The applicant's employer is taken when the full list offers it, else Other; two typed searches and
+            # the full list for an unlisted employer outran the 12 s field budget on every run.
+            try:
+                return await _rcm_paginated(frame, el, value, full_list_only=True)
+            except ValueError:
+                return await _rcm_paginated(frame, el, "Other")
+        return await _rcm_paginated(frame, el, value, choose=choose)
     await open_combobox(el)
     if await _is_ui5_picker(frame, el):
         return await _ui5_combobox(frame, el, value)
