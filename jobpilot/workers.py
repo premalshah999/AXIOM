@@ -334,6 +334,9 @@ async def start(service):
             "name": "applypilot-studio",
             "system_database_url": service.config.dbos_database_url,
             "application_version": engine_version(),
+            # DBOS's executor is unbounded by default: after a night of source sweeps the process held 2,942 idle
+            # executor threads (2026-10-22), and a sampling profiler could not keep up with them.
+            "max_executor_threads": 128,
         }
     )
     DBOS.launch()

@@ -50,8 +50,9 @@ def capacity(db, owners_total=7) -> Capacity:
     return Capacity(owners_total=owners_total, owners_busy=busy or 0)
 
 
-def _candidates(db, policy: DiscoveryPolicy, at) -> tuple[list[dict], dict]:
-    """Never-attempted, non-archived jobs that are fresh (listed) or manually imported."""
+def _candidates(db, policy: DiscoveryPolicy, at, manual_only=False) -> tuple[list[dict], dict]:
+    """Never-attempted, non-archived jobs that are fresh (listed) or manually imported. `manual_only` reads only
+    the applicant's pasted links: the master-resume path wanted those few and read all 7,000 postings each tick."""
     from ...db import Job, JobListing, Run, Setting
 
     stats = {"stale_or_undated": 0, "protected": 0, "controlled": 0, "attempted": 0, "out_of_scope": 0}
@@ -79,11 +80,12 @@ def _candidates(db, policy: DiscoveryPolicy, at) -> tuple[list[dict], dict]:
             for row in s.scalars(select(Setting).where(Setting.key.like("job_origin:%")))
             if (row.value or {}).get("kind") == "manual"
         }
-        rows = s.execute(
+        query = (
             select(Job, JobListing)
             .outerjoin(JobListing, JobListing.job_id == Job.id)
             .where(Job.demo.is_(False), Job.status != "archived")
-        ).all()
+        )
+        rows = s.execute(query.where(Job.id.in_(manual)) if manual_only else query).all()
         guards = guard_keys(s)
         out = []
         for job, listing in rows:
@@ -145,13 +147,28 @@ def _deferred(db, at) -> set:
         return set(s.scalars(select(DcDeferral.job_id).where(DcDeferral.not_before > at.isoformat())))
 
 
+_GATES: dict = {}
+
+
+def gated(job, policy):
+    """gate(), remembered per posting and policy. Each autopilot tick (every 15 s) gated about 2,000 postings by
+    scanning their full descriptions, on threads that hold the interpreter the browsers' event loop needs."""
+    key = (policy.model_dump_json(), job.get("id"), job.get("title"), job.get("url"), job.get("location"),
+           job.get("country"), len(job.get("description") or ""))
+    if key not in _GATES:
+        if len(_GATES) > 50_000:
+            _GATES.clear()
+        _GATES[key] = gate(job, policy)
+    return _GATES[key]
+
+
 def _eligible(db, jobs, profile, policy):
     from .roles import matching_role
 
     # Backpressure must count jobs dispatch can actually use. Old high scores
     # cannot make off-role, senior or otherwise gated jobs block new ranking.
     roles = profile.get("target_roles") or []
-    jobs = [j for j in jobs if not gate(j, policy)
+    jobs = [j for j in jobs if not gated(j, policy)
             and (not roles or matching_role(j["title"], roles))]
     mine = classified_eligible(db, jobs, profile, policy)
     # Jobs the application's ranker already marked ready count as eligible too,
@@ -174,13 +191,13 @@ def ready_manual_job_ids(db, policy=None, at=None):
     tailored applications. Queue admission still validates the selected resume.
     """
     policy, at = policy or DiscoveryPolicy(), at or datetime.now(UTC)
-    jobs, _ = _candidates(db, policy, at)
+    jobs, _ = _candidates(db, policy, at, manual_only=True)
     deferred = _deferred(db, at)
     jobs = [j for j in jobs if j["posted_basis"] == "manual" and j["id"] not in deferred]
     good = _eligible(db, jobs, db.get_setting("profile", {}) or {}, policy)
     return {
         j["id"] for j in jobs
-        if j["id"] in good and j["status"] == "ready" and not gate(j, policy)
+        if j["id"] in good and j["status"] == "ready" and not gated(j, policy)
         and db.get_setting("job_origin:" + j["id"], {}).get("kind") == "manual"
     }
 
@@ -269,7 +286,7 @@ def discover_due(
             )
         )
         and j["status"] not in {"skipped", "review"}
-        and not gate(j, policy)
+        and not gated(j, policy)
     ]
     if pipeline < policy.owners * policy.classify_lookahead:
         ids = unclassified[: policy.owners * policy.classify_lookahead * 2]
@@ -357,7 +374,7 @@ def status(db, policy: DiscoveryPolicy | None = None, cap: Capacity | None = Non
     good = _eligible(db, jobs, profile, policy)
     gated = {}
     for j in jobs:
-        reason = (outcomes.get(j["id"], {}).get("result") or {}).get("gate") or gate(j, policy)
+        reason = (outcomes.get(j["id"], {}).get("result") or {}).get("gate") or gated(j, policy)
         if reason:
             gated[reason] = gated.get(reason, 0) + 1
     with db.session() as s:
