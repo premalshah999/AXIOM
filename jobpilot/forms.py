@@ -90,6 +90,14 @@ def label_signature_date(fields, text):
     if {f["label"].strip() for f in parts} == {"Month", "Day", "Year"}:
         for f in parts:
             f["label"] = f"Today's date ({f['label'].strip()})"
+    # Micron's Eightfold form (2026-10-22) dates it with one bare "Date" box behind a calendar (role=combobox): read as
+    # a picker with no options it stayed empty, and the run stalled on it. Typed as MM/DD/YYYY it takes today.
+    dates = [f for f in fields if f["label"].strip() == "Date" and not f.get("section") and not f.get("group")]
+    if len(dates) == 1 and dates[0]["type"] in {"text", "date", "combobox"} and not dates[0].get("options"):
+        f = dates[0]
+        f["label"] = "Today's date"
+        if f["type"] == "combobox":
+            f["type"], f["widget"], f["date_format"] = "text", "date-text", f.get("date_format") or "mdy"
 
 
 ICIMS_HOST = re.compile(r"^https://[^/]*\.icims\.com/", re.I)

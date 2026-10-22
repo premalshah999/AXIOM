@@ -39,3 +39,23 @@ def test_date_parts_elsewhere_keep_their_labels():
     grouped = [{**f, "group": "Work Experience 1"} for f in parts()]
     label_signature_date(grouped, "Voluntary Self-Identification of Disability")
     assert [f["label"] for f in grouped] == ["Month", "Day", "Year"]
+
+
+def test_one_bare_date_picker_on_a_self_identification_form_is_typed_as_today(service):
+    """Micron (Eightfold, 2026-10-22): the form's single "Date" box sits behind a calendar (role=combobox) with no
+    options; it stayed empty and the run stalled."""
+    fields = [
+        {"id": "n", "label": "Name", "type": "text", "section": "", "group": "", "options": []},
+        {"id": "dt", "label": "Date", "type": "combobox", "section": "", "group": "", "options": [], "widget": ""},
+    ]
+    label_signature_date(fields, "Voluntary Self-Identification of Disability Form CC-305 Name Date")
+    date = fields[1]
+    assert (date["label"], date["type"], date["widget"]) == ("Today's date", "text", "date-text")
+    r = Resolver(Profile(name="Alex Doe"), service.db, service.config)
+    today = datetime.now(ZoneInfo(service.config.timezone)).date()
+    answer = r.local({**date, "required": True, "value": "", "valid": True})
+    assert answer.value == f"{today.month:02d}/{today.day:02d}/{today.year}"
+    # A bare Date elsewhere (a work row) is not today.
+    other = [{"id": "x", "label": "Date", "type": "combobox", "section": "", "group": "", "options": []}]
+    label_signature_date(other, "Work Experience 1")
+    assert other[0]["label"] == "Date"
