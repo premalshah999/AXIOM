@@ -6,7 +6,7 @@ import { useAction, useDraft, usePoll } from "./hooks";
 import { AccountSettings, ProfileSettings } from "./autonomy";
 import { DiscoverySettings } from "./jobboard";
 import { MailSettings } from "./mail";
-import { SignInSettings } from "./onboarding";
+import { SignInSettings } from "./account";
 import { KnowledgeSection, TailoredResumes } from "./features";
 import { Pagination, usePagination } from "./pagination";
 import type {
@@ -552,27 +552,6 @@ function SystemSettings() {
           ))}
         </ul>
       </details>
-      <section className="panel">
-        <div className="switch-row">
-          <span>
-            <strong>Sign out of this browser</strong>
-            <small className="muted">
-              Applications keep running on the server.
-            </small>
-          </span>
-          <button
-            className="btn"
-            onClick={() =>
-              run("logout", async () => {
-                await api("/logout", "POST");
-                window.dispatchEvent(new Event("applypilot:signed-out"));
-              })
-            }
-          >
-            Sign out
-          </button>
-        </div>
-      </section>
     </>
   );
 }

@@ -5,7 +5,7 @@ import json
 from types import SimpleNamespace
 
 from jobpilot.accounts import Accounts, AccountStore
-from jobpilot.db import Job, Run
+from jobpilot.db import Job, MailChallenge, Run
 
 from support_http import seed_job
 
@@ -116,10 +116,23 @@ def test_saving_an_employer_password_is_refused_plainly(client, service):
     assert sealless.status_code == 400 and "Forget it instead" in sealless.json()["detail"]
 
 
-def held_verification(service, url=JOB, *, challenge="challenge-1"):
+def held_verification(service, url=JOB, *, challenge="challenge-1", mail_state="expired"):
     job_id = seed_job(service)
     with service.db.exclusive() as s:
         s.get(Job, job_id).url = url
+        s.add(
+            MailChallenge(
+                id=challenge,
+                run_id="original-run",
+                rule_id="rule",
+                mailbox_id="mailbox",
+                recipient=EMAIL,
+                kind="link",
+                state=mail_state,
+                since=0,
+                expires=0,
+            )
+        )
         run = Run(
             job_id=job_id,
             state="submission_unknown",
@@ -173,6 +186,12 @@ def test_a_draft_the_service_no_longer_accepts_is_explained(client, service, mon
     monkeypatch.setattr(service, "resume_mail_wait", refuse)
     answer = client.post(f"/api/accounts/{key}/verify", json={})
     assert answer.status_code == 409 and "can no longer retry" in answer.json()["detail"]
+
+
+def test_a_verification_still_waiting_for_its_email_is_not_offered_for_retry(client, service):
+    _, key = record(service, state="verification_pending")
+    held_verification(service, mail_state="pending")
+    assert listed(client)[key]["can_retry_verification"] is False
 
 
 def test_a_newer_run_of_the_same_job_is_not_offered_for_retry(client, service):

@@ -84,11 +84,14 @@ export function Dot({ tone }: { tone: string }) {
 export function Field({
   label,
   hint,
+  error,
   children,
   wide,
 }: {
   label: string;
   hint?: React.ReactNode;
+  /** A refusal for this field; shown in place of the hint. Set aria-invalid on the control as well. */
+  error?: string;
   children: React.ReactNode;
   wide?: boolean;
 }) {
@@ -96,8 +99,26 @@ export function Field({
     <label className={"field" + (wide ? " wide" : "")}>
       <span className="field-label">{label}</span>
       {children}
-      {hint && <small className="field-hint">{hint}</small>}
+      {error ? (
+        <small className="field-error">{error}</small>
+      ) : (
+        hint && <small className="field-hint">{hint}</small>
+      )}
     </label>
+  );
+}
+
+// The product mark and name, for screens without the workspace bar (sign-in, setup guide).
+export function Brand() {
+  return (
+    <div className="brand">
+      <svg className="mark" viewBox="0 0 20 20" aria-hidden="true">
+        <rect x="2" y="3" width="4" height="14" rx="1" className="mark-on" />
+        <rect x="8" y="3" width="4" height="14" rx="1" className="mark-on" />
+        <rect x="14" y="3" width="4" height="14" rx="1" className="mark-off" />
+      </svg>
+      <span>ApplyPilot</span>
+    </div>
   );
 }
 

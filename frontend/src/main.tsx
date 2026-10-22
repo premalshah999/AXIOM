@@ -23,7 +23,8 @@ import { SetupView } from "./setup";
 import { JobPanel } from "./jobdetail";
 import { JobLinkIntake } from "./jobintake";
 import { ResumeEditor } from "./editor";
-import { AuthScreen, guideLater, Onboarding, type AccountStatus } from "./onboarding";
+import { AuthScreen, type AccountStatus } from "./account";
+import { guideLater, Onboarding } from "./onboarding";
 
 const NAV: { view: View; label: string }[] = [
   { view: "batch", label: "Batch" },
@@ -47,6 +48,8 @@ const unfinished = () => (guideLater() ? "later" : "needed");
 
 function App() {
   const [auth, setAuth] = useState<"unknown" | "in" | "out">("unknown");
+  // Why the sign-in screen is showing: "Your session ended. Sign in again.", "You signed out." ...
+  const [signOutReason, setSignOutReason] = useState("");
   const [setupGuide, setSetupGuide] = useState<"unknown" | "needed" | "done" | "later">("unknown");
   const [route, setRoute] = useState<Route>(() => parseRoute());
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -62,7 +65,14 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const out = () => setAuth("out");
+    const out = (event: Event) => {
+      const reason = (event as CustomEvent<string>).detail;
+      // A first visit without a session needs no explanation; a session that ended does.
+      setSignOutReason(
+        typeof reason === "string" && reason && !/local access token/i.test(reason) ? reason : "",
+      );
+      setAuth("out");
+    };
     const pop = () => setRoute(parseRoute());
     window.addEventListener(SIGNED_OUT, out);
     window.addEventListener("popstate", pop);
@@ -147,7 +157,9 @@ function App() {
   if (auth === "out")
     return (
       <AuthScreen
+        notice={signOutReason}
         onSignedIn={async () => {
+          setSignOutReason("");
           setAuth("unknown");
           setSetupGuide("unknown");
           await snap.refresh();

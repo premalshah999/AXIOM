@@ -12,7 +12,7 @@ import {
   RotateCcw,
   Trash2,
 } from "lucide-react";
-import { api, ApiError, SIGNED_OUT } from "./api";
+import { api, ApiError, signedOut } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useDraft, useNotify, usePoll } from "./hooks";
 import { Confirm, ErrorLine, Loading } from "./ui";
@@ -255,7 +255,7 @@ function Workbench({
           body: JSON.stringify(payload),
           signal: controller.signal,
         });
-        if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT));
+        if (res.status === 401) signedOut("Your session ended. Sign in again.");
         if (res.ok) {
           const blob = await res.blob();
           const bytes = await blob.arrayBuffer();

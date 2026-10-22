@@ -2,12 +2,13 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Plus, Search } from "lucide-react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
-import { dropDraft, useAction, useDraft, usePoll } from "./hooks";
+import { dropDraft, useAction, useDraft, useNotify, usePoll } from "./hooks";
 import { Pagination, usePagination } from "./pagination";
 import type {
   AccountRow,
   AccountSummary,
   AnswerRules,
+  EmployerAccountStatus,
   DemographicRule,
   EducationEntry,
   EducationStep,
@@ -15,7 +16,7 @@ import type {
   ReviewedAnswer,
   WorkEntry,
 } from "./types";
-import { ago, Confirm, Empty, ErrorLine, Field, KeyValues, Loading, plural } from "./ui";
+import { ago, Confirm, Empty, ErrorLine, External, Field, KeyValues, Loading, plural, stamp } from "./ui";
 
 // ---------- Profile ----------
 type ProfileDraft = { value: Profile; base: string; dirty: boolean };
@@ -1034,31 +1035,59 @@ export function LearnedAnswers() {
 }
 
 // ---------- Accounts ----------
-const ACCOUNT_STATES: Record<string, string> = {
-  created_locally: "Created, not signed in yet",
-  signing_in: "Signing in",
-  authenticated: "Signed in",
-  verification_pending: "Waiting for email verification",
-  reset_requested: "Password reset requested",
-  password_reset: "Password reset",
-  exists: "Already registered",
-  locked: "Locked",
+// What the owner sees for each recorded engine state comes from the server (accounts/overview.py); the tone here
+// only colours it.
+const ACCOUNT_TONE: Record<EmployerAccountStatus, string> = {
+  active: "ok",
+  verification: "ask",
+  password_unknown: "fix",
+  reset_pending: "hold",
+  locked: "bad",
+  created: "run",
+  signing_in: "run",
+  registered: "idle",
+  unknown: "idle",
 };
-const accountHost = (a: AccountRow) =>
-  a.origin.replace(/^https?:\/\//, "") || a.id.replace(/^employer_account:/, "");
+const ACCOUNT_FILTERS: { id: string; label: string; match: (a: AccountRow) => boolean }[] = [
+  { id: "all", label: "All accounts", match: () => true },
+  { id: "attention", label: "Needs you", match: (a) => a.attention },
+  { id: "active", label: "Active", match: (a) => a.status === "active" },
+  { id: "password_unknown", label: "Password unknown", match: (a) => a.status === "password_unknown" },
+  { id: "verification", label: "Needs email verification", match: (a) => a.status === "verification" },
+  { id: "reset_pending", label: "Reset pending", match: (a) => a.status === "reset_pending" },
+  { id: "locked", label: "Locked", match: (a) => a.status === "locked" },
+  {
+    id: "other",
+    label: "Created or not signed in yet",
+    match: (a) => ["created", "signing_in", "registered", "unknown"].includes(a.status),
+  },
+];
 
 export function AccountSettings() {
   const { snapshot } = useWorkspace();
   const summary = usePoll<AccountSummary>((signal) => api("/accounts", "GET", undefined, signal), 60000);
   const { pending, run } = useAction();
   const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("all");
   const q = query.trim().toLowerCase();
-  const accounts = useMemo(
-    () => (summary.data?.accounts || []).filter((a) => !q || accountHost(a).toLowerCase().includes(q)),
-    [summary.data, q],
+  const all = useMemo(() => summary.data?.accounts || [], [summary.data]);
+  const counts = useMemo(
+    () => Object.fromEntries(ACCOUNT_FILTERS.map((f) => [f.id, all.filter(f.match).length])),
+    [all],
   );
-  const paging = usePagination(accounts, q, 25);
+  const chosen = ACCOUNT_FILTERS.find((f) => f.id === filter) || ACCOUNT_FILTERS[0];
+  const accounts = useMemo(
+    () =>
+      all.filter(
+        (a) =>
+          chosen.match(a) &&
+          (!q || `${a.host} ${a.employer} ${a.login_email} ${a.label}`.toLowerCase().includes(q)),
+      ),
+    [all, chosen, q],
+  );
+  const paging = usePagination(accounts, q + filter, 25);
   const cfg = snapshot.config;
+  const attention = counts.attention || 0;
   return (
     <>
       <section className="panel">
@@ -1096,12 +1125,24 @@ export function AccountSettings() {
         <header className="panel-head row">
           <div>
             <h2>Employer accounts</h2>
-            <p className="muted">{summary.data ? plural(summary.data.accounts.length, "account") : "…"}</p>
+            <p className="muted">
+              {summary.data ? plural(all.length, "account") : "…"}
+              {attention > 0 && <span className="warn-text"> · {attention} need{attention === 1 ? "s" : ""} you</span>}
+            </p>
           </div>
-          <label className="search">
-            <Search size={15} aria-hidden="true" />
-            <input type="search" aria-label="Search employer accounts" placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} />
-          </label>
+          <div className="account-tools">
+            <select aria-label="Show accounts" value={filter} onChange={(e) => setFilter(e.target.value)}>
+              {ACCOUNT_FILTERS.map((f) => (
+                <option key={f.id} value={f.id} disabled={f.id !== "all" && !counts[f.id] && filter !== f.id}>
+                  {f.label} ({counts[f.id] || 0})
+                </option>
+              ))}
+            </select>
+            <label className="search">
+              <Search size={15} aria-hidden="true" />
+              <input type="search" aria-label="Search employer accounts" placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} />
+            </label>
+          </div>
         </header>
         <ErrorLine error={summary.error} retry={summary.refresh} />
         {!summary.data && !summary.error ? (
@@ -1109,11 +1150,11 @@ export function AccountSettings() {
         ) : accounts.length ? (
           <>
             <div className="table-wrap">
-              <table className="table">
+              <table className="table accounts-table">
                 <thead>
                   <tr>
                     <th scope="col">Employer site</th>
-                    <th scope="col">State</th>
+                    <th scope="col">Status</th>
                     <th scope="col">Updated</th>
                     <th scope="col">
                       <span className="sr-only">Actions</span>
@@ -1122,32 +1163,7 @@ export function AccountSettings() {
                 </thead>
                 <tbody>
                   {paging.items.map((a) => (
-                    <tr key={a.id}>
-                      <td className="mono-ish">{accountHost(a)}</td>
-                      <td data-label="State">
-                        {ACCOUNT_STATES[a.state] || a.state.replaceAll("_", " ") || "Unknown"}
-                        {a.reset_requested_at ? <small className="muted"> · reset {ago(a.reset_requested_at * 1000)}</small> : null}
-                      </td>
-                      <td data-label="Updated">{ago(a.updated_at)}</td>
-                      <td className="cell-actions">
-                        <Confirm
-                          label="Forget"
-                          confirm="Forget record"
-                          note="The next application signs in again or creates the account."
-                          pending={pending === a.id}
-                          onConfirm={() =>
-                            run(
-                              a.id,
-                              async () => {
-                                await api("/accounts/" + encodeURIComponent(a.id), "DELETE");
-                                await summary.refresh();
-                              },
-                              "Account record forgotten.",
-                            )
-                          }
-                        />
-                      </td>
-                    </tr>
+                    <EmployerAccount key={a.id} account={a} refresh={summary.refresh} />
                   ))}
                 </tbody>
               </table>
@@ -1155,13 +1171,188 @@ export function AccountSettings() {
             <Pagination paging={paging} label="Account pages" />
           </>
         ) : (
-          <Empty title={q ? "No accounts match" : "No employer accounts yet"}>
-            {q ? null : "They appear after the first application that needs one."}
+          <Empty title={q || filter !== "all" ? "No accounts match" : "No employer accounts yet"}>
+            {q || filter !== "all" ? null : "They appear after the first application that needs one."}
           </Empty>
         )}
       </section>
       <SessionImport />
     </>
+  );
+}
+
+function EmployerAccount({ account: a, refresh }: { account: AccountRow; refresh: () => Promise<void> }) {
+  const { pending, run } = useAction();
+  const [editing, setEditing] = useState(false);
+  const meta = [a.employer && "for " + a.employer, a.login_email].filter(Boolean).join(" · ");
+  return (
+    <>
+      <tr>
+        <td className="cell-account">
+          {a.origin ? <External href={a.origin}>{a.host}</External> : a.host}
+          {meta && <small className="muted">{meta}</small>}
+        </td>
+        <td data-label="Status" className="cell-account-status">
+          <span className={"pill tone-" + (ACCOUNT_TONE[a.status] || "idle")}>
+            <i aria-hidden="true" />
+            {a.label}
+          </span>
+          <small className="muted">{a.detail}</small>
+        </td>
+        <td data-label="Updated" className="cell-time" title={stamp(a.updated_at)}>
+          {ago(a.updated_at)}
+        </td>
+        <td className="cell-actions">
+          <span className="row-actions">
+            {a.can_retry_verification && (
+              <button
+                type="button"
+                className="btn sm"
+                disabled={pending !== null}
+                onClick={() =>
+                  run(
+                    "verify",
+                    async () => {
+                      await api(`/accounts/${encodeURIComponent(a.id)}/verify`, "POST");
+                      await refresh();
+                    },
+                    "Verification restarted. The paused application asks the employer for a new email.",
+                  )
+                }
+              >
+                {pending === "verify" ? "Restarting…" : "Retry verification"}
+              </button>
+            )}
+            <button
+              type="button"
+              className={"btn sm" + (a.attention ? " ask" : "")}
+              aria-expanded={editing}
+              onClick={() => setEditing((open) => !open)}
+            >
+              I reset it myself
+            </button>
+            <Confirm
+              label="Forget"
+              confirm="Forget account"
+              note="The next application signs in again or creates the account."
+              pending={pending === "forget"}
+              onConfirm={() =>
+                run(
+                  "forget",
+                  async () => {
+                    await api("/accounts/" + encodeURIComponent(a.id), "DELETE");
+                    await refresh();
+                  },
+                  "Account record forgotten.",
+                )
+              }
+            />
+          </span>
+        </td>
+      </tr>
+      {editing && (
+        <tr className="row-form">
+          <td colSpan={4}>
+            <EmployerPassword
+              account={a}
+              close={() => setEditing(false)}
+              saved={async () => {
+                setEditing(false);
+                await refresh();
+              }}
+            />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/** "I reset it myself": the password the owner set on the employer's site, sealed on the server. */
+function EmployerPassword({
+  account: a,
+  close,
+  saved,
+}: {
+  account: AccountRow;
+  close: () => void;
+  saved: () => Promise<void>;
+}) {
+  const notify = useNotify();
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [show, setShow] = useState(false);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  return (
+    <form
+      className="employer-password"
+      noValidate
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (!password.trim()) return setError(`Enter the new password you set on ${a.host}.`);
+        if (confirm !== password) return setError("The two passwords don't match.");
+        setBusy(true);
+        setError("");
+        try {
+          await api(`/accounts/${encodeURIComponent(a.id)}/password`, "PUT", { password });
+          notify("ok", `Password saved. The next application to ${a.host} signs in with it.`);
+          await saved();
+        } catch (err) {
+          setError((err as Error).message);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <p className="muted sm">
+        Reset the password on {a.origin ? <External href={a.origin}>{a.host}</External> : a.host} yourself
+        {a.login_email ? (
+          <>
+            {" "}
+            (sign-in email <strong>{a.login_email}</strong>)
+          </>
+        ) : null}
+        , then enter it here. It's encrypted on the server and never shown again; ApplyPilot stops asking this
+        employer for resets.
+      </p>
+      <Field label="New password">
+        <input
+          type={show ? "text" : "password"}
+          autoFocus
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="new-password"
+          maxLength={200}
+        />
+      </Field>
+      <Field label="Confirm password">
+        <input
+          type={show ? "text" : "password"}
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          autoComplete="new-password"
+          maxLength={200}
+        />
+      </Field>
+      <label className="check">
+        <input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} />
+        <span>Show passwords</span>
+      </label>
+      {error && (
+        <p className="error-text" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="form-actions start">
+        <button className="btn primary sm" disabled={busy}>
+          {busy ? "Saving…" : "Save password"}
+        </button>
+        <button type="button" className="btn quiet sm" onClick={close}>
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
 

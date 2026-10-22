@@ -3169,3 +3169,203 @@ details:not(.fold) summary {
   color: var(--text-2);
   font-weight: 500;
 }
+
+/* ---------- owner sign-in, recovery and sessions (2026-10-22, account.tsx) ---------- */
+.field-error {
+  color: var(--bad);
+  font-size: 12px;
+}
+.auth-notice {
+  padding: 10px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  color: var(--text-2);
+  font-size: 13.5px;
+}
+.login-help .link {
+  font-size: inherit;
+  color: var(--text-2);
+}
+.field-aside {
+  margin-top: -10px;
+  text-align: right;
+}
+/* Recovery code / Access token / Command line: one row of equal choices. */
+.auth-methods {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.auth-methods .ob-choice {
+  padding: 8px 6px;
+  font-size: 13.5px;
+  text-align: center;
+}
+/* The password rules, listed before the owner types and ticked as each is met. */
+.pw-rules {
+  list-style: none;
+  margin: -6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.pw-rules li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pw-rules svg {
+  opacity: 0.3;
+}
+.pw-rules li.met {
+  color: var(--text-2);
+}
+.pw-rules li.met svg {
+  color: var(--ok);
+  opacity: 1;
+}
+.codes-box {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+}
+.codes {
+  list-style: none;
+  margin: 0;
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  gap: 8px 36px;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  font: 14px/1.4 var(--mono);
+  letter-spacing: 0.04em;
+}
+.codes-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.login-card .codes-box > .btn.primary {
+  width: 100%;
+}
+/* A form opened in place under its Setup row (change password, new recovery codes). */
+.inline-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 460px;
+  padding: 4px 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+.inline-panel .form-actions {
+  margin-top: 0;
+}
+.stack-tight {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 460px;
+}
+.ob-grid > .stack-tight,
+.ob-grid > .error-text {
+  grid-column: 1 / -1;
+}
+.ob-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.ob-bar {
+  width: 160px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-2);
+  overflow: hidden;
+}
+.ob-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--ok);
+  transition: width 0.2s;
+}
+@media (max-width: 560px) {
+  .ob-bar {
+    width: 64px;
+  }
+}
+
+/* ---------- Setup → Accounts: employer accounts (2026-10-22) ---------- */
+.account-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.account-tools select {
+  width: auto;
+  min-width: 190px;
+}
+.account-tools .search {
+  flex: 0 1 240px;
+  min-width: 160px;
+}
+@media (max-width: 720px) {
+  .account-tools {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .account-tools .search {
+    flex: 1 1 200px;
+  }
+}
+.cell-account small,
+.cell-account-status small {
+  display: block;
+  margin-top: 4px;
+}
+.cell-account-status {
+  min-width: 240px;
+  max-width: 440px;
+}
+.accounts-table .row-form td {
+  position: static;
+  background: var(--raised-2);
+}
+.accounts-table .row-form td::after {
+  display: none;
+}
+.accounts-table .row-form:hover td {
+  background: var(--raised-2);
+}
+.employer-password {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 240px));
+  align-items: end;
+  gap: 12px 16px;
+  padding: 6px 0;
+}
+.employer-password > p,
+.employer-password > .check,
+.employer-password > .error-text,
+.employer-password > .form-actions {
+  grid-column: 1 / -1;
+}
+.employer-password .form-actions {
+  margin-top: 0;
+}
+@media (max-width: 640px) {
+  .employer-password {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

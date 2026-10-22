@@ -1,170 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "./api";
-import { useAction } from "./hooks";
-import { Field, KeyValues, Loading } from "./ui";
+import { Brand, Field, Loading } from "./ui";
 import type { EducationEntry, Profile, WorkEntry } from "./types";
 
-// ---------------------------------------------------------------------------
-// Account: first-run sign-up, email/password sign-in, access-token fallback.
-// ---------------------------------------------------------------------------
-
-export type AccountStatus = {
-  exists: boolean;
-  signup_allowed: boolean;
-  signed_in: boolean;
-  name?: string;
-  email?: string;
-  onboarding?: { completed: boolean; step: string };
-};
-
-function Brand() {
-  return (
-    <div className="brand">
-      <svg className="mark" viewBox="0 0 20 20" aria-hidden="true">
-        <rect x="2" y="3" width="4" height="14" rx="1" className="mark-on" />
-        <rect x="8" y="3" width="4" height="14" rx="1" className="mark-on" />
-        <rect x="14" y="3" width="4" height="14" rx="1" className="mark-off" />
-      </svg>
-      <span>ApplyPilot</span>
-    </div>
-  );
-}
-
-export function AuthScreen({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
-  const [status, setStatus] = useState<AccountStatus | null>(null);
-  const [mode, setMode] = useState<"signup" | "password" | "token">("password");
-  const [form, setForm] = useState({ name: "", email: "", password: "", token: "" });
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    api<AccountStatus>("/account")
-      .then((s) => {
-        setStatus(s);
-        setMode(s.signup_allowed && !s.exists ? "signup" : s.exists ? "password" : "token");
-      })
-      .catch(() => {
-        setStatus({ exists: false, signup_allowed: false, signed_in: false });
-        setMode("token");
-      });
-  }, []);
-
-  if (!status)
-    return (
-      <main className="login">
-        <Loading label="Opening ApplyPilot…" />
-      </main>
-    );
-
-  const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm((f) => ({ ...f, [key]: e.target.value }));
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      if (mode === "signup")
-        await api("/account/signup", "POST", { name: form.name, email: form.email, password: form.password });
-      else if (mode === "password")
-        await api("/account/login", "POST", { email: form.email, password: form.password });
-      else await api("/login", "POST", { token: form.token });
-      setForm({ name: "", email: "", password: "", token: "" });
-      await onSignedIn();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const title = mode === "signup" ? "Create your account" : "Sign in";
-  const lead =
-    mode === "signup"
-      ? "ApplyPilot applies to jobs for you, answering every form from facts you confirm once."
-      : mode === "password"
-        ? "Welcome back."
-        : "Sign in with this installation's access token.";
-
-  return (
-    <main className="login">
-      <form className="login-card" onSubmit={submit}>
-        <Brand />
-        <h1>{title}</h1>
-        <p className="muted">{lead}</p>
-        {mode === "signup" && (
-          <Field label="Full name">
-            <input autoFocus value={form.name} onChange={set("name")} required autoComplete="name" />
-          </Field>
-        )}
-        {mode !== "token" && (
-          <Field label="Email">
-            <input
-              type="email"
-              autoFocus={mode === "password"}
-              value={form.email}
-              onChange={set("email")}
-              required
-              autoComplete="email"
-            />
-          </Field>
-        )}
-        {mode !== "token" && (
-          <Field
-            label="Password"
-            hint={mode === "signup" ? "At least 10 characters, upper and lower case, and a number." : undefined}
-          >
-            <input
-              type="password"
-              value={form.password}
-              onChange={set("password")}
-              required
-              autoComplete={mode === "signup" ? "new-password" : "current-password"}
-            />
-          </Field>
-        )}
-        {mode === "token" && (
-          <Field label="Access token">
-            <input
-              type="password"
-              autoFocus
-              value={form.token}
-              onChange={set("token")}
-              required
-              autoComplete="current-password"
-            />
-          </Field>
-        )}
-        {error && (
-          <p className="error-text" role="alert">
-            {error}
-          </p>
-        )}
-        <button className="btn primary block" disabled={busy}>
-          {busy ? "Please wait…" : mode === "signup" ? "Create account" : "Sign in"}
-        </button>
-        <p className="login-help">
-          {mode === "token" && status.exists && (
-            <button type="button" className="link" onClick={() => setMode("password")}>
-              Sign in with email and password
-            </button>
-          )}
-          {mode !== "token" && (
-            <button type="button" className="link" onClick={() => setMode("token")}>
-              Use an access token instead
-            </button>
-          )}
-          {mode === "token" && !status.exists && (
-            <>
-              Print the token with <code>jobpilot token</code>. After signing in you can set an email and password in
-              Setup → System.
-            </>
-          )}
-        </p>
-      </form>
-    </main>
-  );
-}
+// The sign-in screens and Setup → System › Your sign-in live in account.tsx.
 
 // "Finish later" holds for this browser: the app opens with a Continue setup banner instead of the guide.
 const GUIDE_LATER = "applypilot:guide-later";
@@ -176,136 +15,6 @@ export function guideLater(value?: boolean) {
   } catch {
     return false;
   }
-}
-/** Setup → System: add an email/password to a token-only installation, or reopen the setup guide. */
-export function SignInSettings() {
-  const { pending, run } = useAction();
-  const [status, setStatus] = useState<AccountStatus | null>(null);
-  const [form, setForm] = useState({ name: "", email: "", password: "" });
-  const [change, setChange] = useState({ current: "", new: "" });
-  const load = () =>
-    api<AccountStatus>("/account")
-      .then(setStatus)
-      .catch(() => setStatus(null));
-  useEffect(() => {
-    load();
-    api<Partial<Profile>>("/profile")
-      .then((p) => setForm((f) => ({ ...f, name: p.name || "", email: p.email || "" })))
-      .catch(() => undefined);
-  }, []);
-  const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm((f) => ({ ...f, [key]: e.target.value }));
-  return (
-    <section className="panel">
-      <header className="panel-head">
-        <h2>Your sign-in</h2>
-        <p className="muted">
-          {status?.exists
-            ? "Sign in with this email and password. The access token keeps working for scripts."
-            : "Add an email and password so you can sign in without the access token."}
-        </p>
-      </header>
-      {status?.exists ? (
-        <>
-          <KeyValues
-            items={[
-              ["Name", status.name || "—"],
-              ["Email", status.email || "—"],
-            ]}
-          />
-          <form
-            className="ob-grid"
-            onSubmit={(e) => {
-              e.preventDefault();
-              run(
-                "password",
-                async () => {
-                  await api("/account/password", "POST", change);
-                  setChange({ current: "", new: "" });
-                },
-                "Password changed.",
-              );
-            }}
-          >
-            <Field label="Current password">
-              <input
-                type="password"
-                value={change.current}
-                onChange={(e) => setChange((c) => ({ ...c, current: e.target.value }))}
-                required
-                autoComplete="current-password"
-              />
-            </Field>
-            <Field label="New password" hint="At least 10 characters, upper and lower case, and a number.">
-              <input
-                type="password"
-                value={change.new}
-                onChange={(e) => setChange((c) => ({ ...c, new: e.target.value }))}
-                required
-                autoComplete="new-password"
-              />
-            </Field>
-            <div className="ob-form-end">
-              <button className="btn" disabled={pending !== null}>
-                {pending === "password" ? "Saving…" : "Change password"}
-              </button>
-            </div>
-          </form>
-        </>
-      ) : (
-        <form
-          className="ob-grid"
-          onSubmit={(e) => {
-            e.preventDefault();
-            run(
-              "signin",
-              async () => {
-                await api("/account/signup", "POST", form);
-                setForm((f) => ({ ...f, password: "" }));
-                await load();
-              },
-              "Email and password saved.",
-            );
-          }}
-        >
-          <Field label="Full name">
-            <input value={form.name} onChange={set("name")} required autoComplete="name" />
-          </Field>
-          <Field label="Email">
-            <input type="email" value={form.email} onChange={set("email")} required autoComplete="email" />
-          </Field>
-          <Field label="Password" hint="At least 10 characters, upper and lower case, and a number.">
-            <input type="password" value={form.password} onChange={set("password")} required autoComplete="new-password" />
-          </Field>
-          <div className="ob-form-end">
-            <button className="btn primary" disabled={pending !== null}>
-              {pending === "signin" ? "Saving…" : "Set email and password"}
-            </button>
-          </div>
-        </form>
-      )}
-      <div className="switch-row">
-        <span>
-          <strong>Setup guide</strong>
-          <small className="muted">Walk through your resume, contact details and the screening questions again.</small>
-        </span>
-        <button
-          type="button"
-          className="btn"
-          disabled={pending !== null}
-          onClick={() =>
-            run("guide", async () => {
-              await api("/onboarding", "PUT", { step: "contact", completed: false });
-              guideLater(false);
-              window.location.assign("/");
-            })
-          }
-        >
-          Open setup guide
-        </button>
-      </div>
-    </section>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -642,7 +351,28 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
     <main className="ob">
       <header className="ob-head">
         <Brand />
-        <button type="button" className="btn quiet sm" onClick={onExit}>
+        <div
+          className="ob-progress"
+          role="progressbar"
+          aria-label="Setup progress"
+          aria-valuemin={1}
+          aria-valuemax={STEPS.length}
+          aria-valuenow={step + 1}
+          aria-valuetext={`Step ${step + 1} of ${STEPS.length}: ${current.title}`}
+        >
+          <span>
+            Step {step + 1} of {STEPS.length}
+          </span>
+          <span className="ob-bar" aria-hidden="true">
+            <i style={{ width: `${((step + 1) / STEPS.length) * 100}%` }} />
+          </span>
+        </div>
+        <button
+          type="button"
+          className="btn quiet sm"
+          onClick={onExit}
+          title="Steps you saved are kept. Continue any time from the banner or Setup → System."
+        >
           Finish later
         </button>
       </header>

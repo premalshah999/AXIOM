@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 from sqlalchemy import func, select
 
-from ..db import Job, Run, Setting
+from ..db import Job, MailChallenge, Run, Setting
 from ..mail import origin
 
 PREFIX = "employer_account:"
@@ -42,6 +42,8 @@ LABEL = {
 # Statuses only the owner can settle, or that are worth a look.
 ATTENTION = {"verification", "password_unknown", "reset_pending", "locked"}
 FIX_IT = "Reset it on the employer's site, then save the new password here."
+# A verification request that ended without its email; a matched or pending one is still in progress.
+RESTARTABLE = {"cancelled", "expired", "failed"}
 
 
 def detail(status: str, record: dict, retry: bool) -> str:
@@ -110,8 +112,9 @@ def _origin(url: str) -> str:
 
 
 def retained_verifications(s) -> list[tuple[str, str, str]]:
-    """(job origin, run id, challenge id) for each latest-of-its-job submission_unknown run that holds an email
-    verification draft, newest first: the drafts POST /api/runs/{id}/verify can restart."""
+    """(job origin, run id, challenge id) for each latest-of-its-job submission_unknown run whose email verification
+    request ended unanswered, newest first: the drafts Service.resume_mail_wait(restart_verification=True) restarts.
+    That method still checks every guard; this only keeps the button off rows it would certainly refuse."""
     rows = s.execute(
         select(Run.id, Run.job_id, Run.packet, Run.created_at, Job.url)
         .join(Job, Job.id == Run.job_id)
@@ -137,7 +140,8 @@ def retained_verifications(s) -> list[tuple[str, str, str]]:
             original = s.get(Run, packet["reservation_run_id"])
             if original and original.job_id == row.job_id:
                 challenge = ((original.packet or {}).get("wait_handle") or {}).get("challenge_id", "")
-        if challenge:
+        mail = s.get(MailChallenge, challenge) if challenge else None
+        if mail and mail.state in RESTARTABLE:
             found.append((_origin(row.url), row.id, challenge))
     return found
 

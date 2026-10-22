@@ -114,14 +114,38 @@ export type AccountState =
   | "verification_pending"
   | "reset_requested"
   | "password_reset"
+  | "password_unknown"
+  | "credentials_rejected"
   | "exists"
   | "locked";
+/** What the owner sees for an employer account (server: accounts/overview.py). */
+export type EmployerAccountStatus =
+  | "active"
+  | "verification"
+  | "password_unknown"
+  | "reset_pending"
+  | "locked"
+  | "created"
+  | "signing_in"
+  | "registered"
+  | "unknown";
 export type AccountRow = {
   id: string;
   origin: string;
+  host: string;
+  tenant: string;
+  employer: string;
   state: AccountState | string;
+  status: EmployerAccountStatus;
+  label: string;
+  detail: string;
+  attention: boolean;
+  login_email: string;
   updated_at: string;
+  confirmed_at: string | null;
+  owner_set_at: string | null;
   reset_requested_at: number | null;
+  can_retry_verification: boolean;
 };
 export type AccountSummary = {
   accounts: AccountRow[];

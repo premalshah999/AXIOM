@@ -11,6 +11,12 @@ export class ApiError extends Error {
 }
 
 export const SIGNED_OUT = "applypilot:signed-out";
+/** Announce that this browser is signed out; the sign-in screen shows `reason` (CustomEvent detail). */
+export function signedOut(reason = "") {
+  window.dispatchEvent(new CustomEvent(SIGNED_OUT, { detail: reason }));
+}
+// A 401 from these is a refused credential on the sign-in screen, not a session that ended.
+const CREDENTIAL_PATHS = new Set(["/login", "/logout", "/account", "/account/login", "/account/reset"]);
 
 function detail(data: unknown, status: number): string {
   const value = (data as { detail?: unknown } | null)?.detail;
@@ -61,9 +67,9 @@ export async function api<T = any>(
   }
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    if (response.status === 401 && path !== "/login")
-      window.dispatchEvent(new Event(SIGNED_OUT));
-    throw new ApiError(detail(data, response.status), response.status);
+    const message = detail(data, response.status);
+    if (response.status === 401 && !CREDENTIAL_PATHS.has(path)) signedOut(message);
+    throw new ApiError(message, response.status);
   }
   return data as T;
 }
