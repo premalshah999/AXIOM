@@ -16,6 +16,13 @@ class Limits(BaseModel):
     company_limit: int = Field(ge=1, le=25)
 
 
+class Platforms(BaseModel):
+    """The platforms the autopilot applies on; every other platform is excluded (the owner's own Apply still works)."""
+
+    include: list[str] = Field(min_length=1, max_length=60)
+    reason: str = Field(default="", max_length=300)
+
+
 def router(service) -> APIRouter:
     db, config = service.db, service.config
     r = APIRouter()
@@ -52,6 +59,60 @@ def router(service) -> APIRouter:
         pacing.update(limit=data.company_limit, reason="Set by the owner in Setup › System")
         db.set_setting(LIMIT_KEY, pacing)
         return get_limits()
+
+    def platform_view():
+        from sqlalchemy import func, select
+
+        from ...db import Job
+
+        focus = db.get_setting("ats_focus", {}) or {}
+        exclude = set(focus.get("exclude") or [])
+        with db.session() as s:
+            counts = {
+                (ats, status): n
+                for ats, status, n in s.execute(
+                    select(Job.ats, Job.status, func.count()).where(Job.demo.is_(False)).group_by(Job.ats, Job.status)
+                )
+            }
+        names = sorted({ats for ats, _ in counts if ats} | exclude)
+        return {
+            "platforms": [
+                {
+                    "ats": ats,
+                    "included": ats not in exclude,
+                    "ready": counts.get((ats, "ready"), 0),
+                    "confirmed": counts.get((ats, "confirmed"), 0),
+                }
+                for ats in names
+            ],
+            "reason": focus.get("reason", ""),
+            "updated_at": focus.get("updated_at", ""),
+        }
+
+    @r.get("/api/platforms")
+    def get_platforms():
+        """Which application platforms the autopilot uses (Setup › System)."""
+        return platform_view()
+
+    @r.put("/api/platforms")
+    def put_platforms(data: Platforms):
+        from ...db import now
+
+        include = {name.strip().lower() for name in data.include if name.strip()}
+        known = {p["ats"] for p in platform_view()["platforms"]}
+        unknown = sorted(include - known)
+        if unknown:
+            raise HTTPException(422, "Unknown platform: " + ", ".join(unknown))
+        focus = dict(db.get_setting("ats_focus", {}) or {})
+        before = set(focus.get("exclude") or [])
+        exclude = sorted(known - include)
+        change = {"at": now()[:10], "included": ", ".join(sorted(include & before)) or None,
+                  "excluded": ", ".join(sorted(set(exclude) - before)) or None,
+                  "why": data.reason or "Set by the owner"}
+        focus.update(exclude=exclude, reason=data.reason or "Set by the owner", updated_at=now(),
+                     changes=[*(focus.get("changes") or [])[-30:], {k: v for k, v in change.items() if v}])
+        db.set_setting("ats_focus", focus)
+        return platform_view()
 
     @r.get("/api/agents")
     def get_agents():

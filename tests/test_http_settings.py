@@ -27,3 +27,23 @@ def test_agents_summary_never_contains_keys(client):
     body = client.get("/api/agents")
     assert body.status_code == 200
     assert "unit-test" not in body.text and "api_key" not in body.text.lower().replace("_configured", "")
+
+
+def test_platform_focus_round_trip(client, service):
+    """Owner, 2026-10-23: "while testing applications, just do oracle, icims, sap, dayforce, taleo, workable, and
+    fix lever". The autopilot's platform scope is set from the web app, not by editing the database."""
+    from jobpilot.db import Job
+
+    with service.db.exclusive() as s:
+        for i, ats in enumerate(["oracle", "icims", "greenhouse", "lever", "workday"]):
+            s.add(Job(id=f"p{i}", identity=f"p{i}", url=f"https://example.test/{i}", ats=ats, status="ready"))
+    service.db.set_setting("ats_focus", {"exclude": ["lever", "jazzhr"]})
+    view = client.get("/api/platforms").json()
+    assert {p["ats"]: p["included"] for p in view["platforms"]} == {
+        "greenhouse": True, "icims": True, "jazzhr": False, "lever": False, "oracle": True, "workday": True}
+    answer = client.put("/api/platforms", json={"include": ["Oracle", "icims", "lever"], "reason": "Focus test"})
+    assert answer.status_code == 200
+    assert service.db.get_setting("ats_focus")["exclude"] == ["greenhouse", "jazzhr", "workday"]
+    assert service.db.get_setting("ats_focus")["changes"][-1]["included"] == "lever"
+    assert client.put("/api/platforms", json={"include": ["nonsense"]}).status_code == 422
+    assert client.put("/api/platforms", json={"include": []}).status_code == 422
