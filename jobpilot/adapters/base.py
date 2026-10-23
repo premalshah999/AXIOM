@@ -596,7 +596,17 @@ class Adapter:
         self.attempts["apply"] += 1
         if self.attempts["apply"] > 3:
             return self.defer("The apply button did not open an application")
-        await self.click(button)
+        try:
+            await self.click(button)
+        except ValueError as exc:
+            if "stale" not in str(exc).lower():
+                raise
+            # Oracle re-renders its job page after the first scan (Verisk, Dallas County 2026-10-23: "Control is
+            # stale" 7 s in, then a retry after backoff). The Apply control is found again and clicked once.
+            button = self.find_apply(await self.form.scan())
+            if not button:
+                return {"fallback": True, "reason": "No apply control found"}
+            await self.click(button)
         self.apply_url = self.page.url
 
     async def on_apply_method(self, obs):
