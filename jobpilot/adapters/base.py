@@ -1680,9 +1680,12 @@ class Adapter:
                 return None
             return await self.recover(obs, detail)
         if outcome == "bad_credentials" and mode == "sign_in":
+            # An unanswered reset stays settled: overwriting it with "credentials_rejected" requested another reset on
+            # every run (L3Harris, 2026-10-21..23: four resets, none delivered).
+            unknown = record.get("state") == "password_unknown"
             self.accounts.mark(
                 url,
-                "credentials_rejected",
+                "password_unknown" if unknown else "credentials_rejected",
                 self.accounts.saved(url) or credentials,
                 rejected_credentials=self.accounts.credential_fingerprint(url, credentials),
                 rejected_at=now(),
@@ -1694,7 +1697,20 @@ class Adapter:
             # "No account / couldn't find an account" means create one, even when an
             # earlier rejection stored this tenant as known (a reset cannot help).
             not_found = bool(NOT_FOUND.search(str(detail or "")))
-            if (not known or not_found) and self.accounts.may_create and self.attempts["create"] == 0:
+            # SuccessFactors' reset page: "If you do not receive an email then no matching account was found." A reset
+            # that went unanswered means this email has no account on the tenant (a saved login from a registration
+            # that never finished): create one, once. "Account already exists" restores the saved login.
+            absent = (
+                self.id == "successfactors"
+                and unknown
+                and not record.get("absent_create_at")
+            )
+            if (not known or not_found or absent) and self.accounts.may_create and self.attempts["create"] == 0:
+                if absent:
+                    self.accounts.mark(url, "password_unknown", self.accounts.saved(url) or credentials,
+                                       absent_create_at=now())
+                    self.emit("account", "No reset email ever came, so this employer has no account for this email; "
+                              "creating one")
                 if await self.switch(obs, CREATE_LINK):
                     return None
             return await self.recover(obs, detail)
