@@ -79,7 +79,7 @@ exercised through the HTTP test client; every router now has an HTTP test module
 
 | Method | Path | Purpose | Request | Response | UI |
 |---|---|---|---|---|---|
-| GET | `/api/snapshot` | Everything the dashboard shows, in one poll (answered from a cache for `SNAPSHOT_CACHE_SECONDS`, refreshed by a background thread) | `?include_sources=true\|false` | `jobs` (newest 1,000, no description), `job_controls`, `runs` (newest 1,000, no packet, with slot, pool, pipeline, policy), `resumes`, `reviews` (open questions), `sources`, `profile` (without the server-owned answer stores), `control`, `application_resume_policy`, `telegram_health`, `telegram_workers`, `autopilot`, `autopilot_runtime`, `discovery_settings`, `scheduler_health`, `scheduler_heartbeat`, `engine_version`, `ats`, `stats`, `config` | ✔ every 6 s |
+| GET | `/api/snapshot` | Everything the dashboard shows, in one poll (answered from a cache for `SNAPSHOT_CACHE_SECONDS`, refreshed by a background thread) | `?include_sources=true\|false` | `counts` (exact, over every job's latest run: Pipeline `groups`, latest-run `states` incl. `pending:waiting`, `pipeline`, `jobs`, `discovered`), `jobs` and `runs` (only the live rows: queued, applying, waiting for an email or an answer, open questions, the 20 latest outcomes; no description or packet), `job_controls`, `resumes`, `reviews` (open questions), `sources`, `profile` (without the server-owned answer stores), `control`, `application_resume_policy`, `telegram_health`, `telegram_workers`, `autopilot`, `autopilot_runtime`, `discovery_settings`, `scheduler_health`, `scheduler_heartbeat`, `engine_version`, `ats`, `stats`, `config` | ✔ every 6 s |
 | GET | `/api/runtime-health` | Engine version, scheduler health, outbox backlog, worker capacity, model health, production target | – | `{engine_version, scheduler, heartbeat, outbox_pending, workers, application_workers, models, production_target}` | ✔ |
 | GET | `/api/control` | Global pause and automatic-submission switches | – | `{paused, auto_submit}` | – (read from the snapshot) |
 | PUT | `/api/control` | Set them; resumes queued runs when unpaused | `{paused, auto_submit}` | same | ✔ |
@@ -137,13 +137,16 @@ exercised through the HTTP test client; every router now has an HTTP test module
 | Method | Path | Purpose | Request | Response | UI |
 |---|---|---|---|---|---|
 | POST | `/api/jobs` | Import a job by URL; rank and queue it if autonomous mode is on | `JobInput {url, title?, company?, location?, description?}` | `{job, created, [run \| notice, preparation]}` | ✔ |
-| GET | `/api/jobs/{id}` | One job, its latest run and its control state | – | `{job, latest_run, job_control}` | ✔ |
+| GET | `/api/jobs` | Jobs › Pipeline, one page: started or waiting applications, attention first (`pipeline.py`) | `?group=all\|active\|needs\|repair\|unconfirmed\|paused\|done\|stopped\|new&q&page&size≤100` | `{rows: [{job, run, attempts, control, request, reviews}], total, page, size, pages}` | ✔ |
+| POST | `/api/jobs/apply-many` | The owner's Apply for up to 50 jobs, each through `owner_apply.apply` (fit filters skipped, every duplicate guard kept) | `{job_ids}` | `{results: [{job_id, outcome: queued\|waiting\|preparing\|already\|refused, state, message, code?, company, title}], summary}` | ✔ |
+| GET | `/api/jobs/{id}` | One job, its latest run, its control state and a waiting Apply | – | `{job, latest_run, job_control, request}` | ✔ |
 | POST | `/api/jobs/{id}/rank` | Rank one job against the profile | – | `{score, eligible, resume_id, reason, uncertainties}` | ✔ |
 | POST | `/api/jobs/{id}/apply` | **One click**: approve if needed, queue, or remember a deferred start | – | `{job_id, state, message, [run_id, deferred, preparing]}` | ✔ |
 | POST | `/api/jobs/{id}/queue` | Queue with explicit options (dry run or submit) | `QueueInput {mode, resume_id?, resume_artifact_id?, controller_policy?}` | run record; 202 `{preparation, message}` while a resume is prepared; 202 deferred start | ✔ |
 | POST | `/api/jobs/{id}/pause` | Pause (saves the draft) | – | `{job_id, state, message}` | ✔ |
 | POST | `/api/jobs/{id}/resume` | Resume or retry; a deferral becomes 202 | `QueueInput?` | same | ✔ |
 | DELETE | `/api/jobs/{id}` | Remove from the active pipeline (history and submission guards are kept) | – | same | ✔ |
+| GET | `/api/runs` | Every attempt of one job, newest first, without packets | `?job_id` | `{runs}` | ✔ |
 | GET | `/api/runs/{id}` | A run, its events, the answers it used, whether a screenshot exists, the failure report | – | `{run, events, answers, screenshot, demo_receipt, failure_report}` | ✔ |
 | GET | `/api/runs/{id}/screenshot` | The final page | – | `image/png` | ✔ |
 | POST | `/api/runs/{id}/reconcile` | The applicant states whether an uncertain submission went through | `{submitted, evidence ≥ 5 chars}` | `{reconciled:true}` | ✔ |
@@ -160,13 +163,13 @@ exercised through the HTTP test client; every router now has an HTTP test module
 | PUT | `/api/sources/{id}` | Edit | `SourceInput` | `{saved:true}` | ✔ |
 | DELETE | `/api/sources/{id}` | Delete (200 even when missing) | – | `{deleted:true}` | ✔ |
 | POST | `/api/sources/{id}/discover` | Scan now | – | `{queued:true}` | ✔ |
-| GET | `/api/job-board` | Board settings, managed sources, fresh jobs, search provider | `?include_sources` | board snapshot | ✔ |
+| GET | `/api/job-board` | Board settings, managed sources, fresh jobs, search provider. With `page`: Jobs › Discovered, only jobs not applied to yet, filtered and paged here | `?include_sources&page&size&q&ats&level&fit=all\|eligible\|uncertain\|unranked\|below` | board snapshot (+ `total`, `fresh_total`, `fits`, `platforms`, `pages`, `selectable_ids` ≤500, `selectable_total` when paged) | ✔ |
 | PUT | `/api/job-board/settings` | Board settings; turning on auto-apply starts a batch | `BoardSettings {enabled, interval_hours, early_career_only, web_search, auto_apply, batch_target, minimum_auto_fit, max_age_hours}` | `{saved, sources}` | ✔ |
 | POST | `/api/job-board/sources` | Add a **managed** source | `SourceInput` | `{added, id}`; 409 if already a plain source | ✔ |
 | POST | `/api/job-board/scrape` | Scan all managed sources now | – | `{queued_sources, total_sources}` | ✔ |
-| POST | `/api/job-board/apply` | Rank and queue up to 50 listed jobs | `{job_ids}` | `{queued, skipped}` | ✔ |
+| POST | `/api/job-board/apply` | Rank and queue up to 50 listed jobs (the dashboard uses `POST /api/jobs/apply-many`) | `{job_ids}` | `{queued, skipped}` | – |
 | POST | `/api/job-board/autopilot/start` | Start an unattended batch | `{target 1–500}` | start result and runtime | ✔ |
-| GET | `/api/v2/discovery/status` | Pipeline readiness and the bottleneck | – | status | ✔ |
+| GET | `/api/v2/discovery/status` | Pipeline readiness and the bottleneck (one answer per 20 s) | – | status | – |
 | GET | `/api/v2/discovery/feeds` | Last public-feed sweep | – | state | ✔ |
 | POST | `/api/v2/discovery/feeds/refresh` | Start a sweep (an in-process task) | – | `{state}` | ✔ |
 | GET | `/api/v2/discovery/due` | Sources due now | – | list | – |
@@ -247,7 +250,7 @@ exercised through the HTTP test client; every router now has an HTTP test module
 | I4 | **GET with writes:** `GET /api/v2/knowledge/facts` and `/summary` call `migration.sync`, which writes `kn_facts` and recategorizes; `GET /api/snapshot` starts a refresh thread | `features/knowledge/router.py` | Sync on profile save or in a background task; GETs read only |
 | I5 | Seven acknowledgement shapes: `{saved:true}`, `{deleted:true}`, `{removed:true}`, `{cancelled:true}`, `{queued:true}`, `{ok:true}`, `{reconciled:true}` | many | Return the resource, or `204` |
 | I6 | The set of public account paths (`owner_account.PUBLIC_PATHS`) lives in a different module from the middleware that uses it; `POST /api/logout` needs a valid session, so a client with an expired one gets 401 | `api.py`, `owner_account.py` | One route table with an `auth` attribute. **2026-10-22:** sign-out is public |
-| I7 | Lists: only v2 pages. `GET /api/knowledge` returns up to 500; the snapshot silently shows only the **newest 1,000 jobs and runs** (a long-running installation has about 6,000 jobs and 5,000 runs), so older rows are invisible to the dashboard | `api.py` `build_snapshot` | `GET /api/jobs` and `GET /api/runs` with filters and paging; the snapshot keeps counters and settings |
+| I7 | Lists: only v2 pages. `GET /api/knowledge` returns up to 500; the snapshot silently showed only the **newest 1,000 jobs and runs** | `api.py` `build_snapshot` | Done 2026-10-22: `GET /api/jobs` (paged Pipeline), `GET /api/runs?job_id`, paged `GET /api/job-board`; the snapshot keeps exact counters, live rows and settings |
 | I8 | `features/discovery/router.py` assumes `min(6, workers)` application owners instead of the configured `NORMAL_WORKERS`, so readiness and backpressure ignore a different topology; it also defines its own `policy_for` | `owners = min(6, …)` | Use `config.topology` |
 | I9 | `POST /api/v2/discovery/feeds/refresh` runs the sweep as an in-process task, while the scheduled sweep goes through the durable `discovery` queue; a restart drops the manual one | `router.py` versus `workers.enqueue_feed_if_due` | Enqueue on the durable queue |
 
