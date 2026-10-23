@@ -411,6 +411,11 @@ class HistoryRulesMixin:
                 blocker_type="missing_fact",
             )
         index = int(m[2]) - 1 if m else row["index"]
+        if index == "highest":
+            ranks = ["doctor", "master", "bachelor", "associate", "high school"]
+            levels = [next((i for i, r in enumerate(ranks) if r in normalize(e.degree)), len(ranks))
+                      for e in self.profile.education]
+            index = levels.index(min(levels)) if levels else 0
         if (m[1].lower() if m else row["kind"]) == "education":
             entries, patterns, kind = self.profile.education, EDUCATION, "education"
         else:

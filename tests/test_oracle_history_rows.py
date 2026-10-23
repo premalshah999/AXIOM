@@ -94,3 +94,17 @@ def test_successfactors_rows_with_a_final_job_title_are_history_rows():
     mark_history_rows(fields)
     assert [f.get("history_row") for f in fields[:4]] == [{"kind": "work", "index": 0}] * 4
     assert [f.get("history_row") for f in fields[4:]] == [{"kind": "work", "index": 1}] * 4
+
+
+def test_rows_that_open_with_their_dates_are_placed():
+    """Sonepar (SuccessFactors 2026-10-23): "From Date, End Date, * Company, * Title" then "From Date, End Date,
+    * School, Major, Degree"; the education dates went to the work row and nothing was placed."""
+    from jobpilot.forms import mark_history_rows
+
+    labels = ["From Date", "End Date", "* Company", "* Title", "From Date", "End Date", "* School"]
+    fields = [{"label": label, "type": "text"} for label in labels]
+    fields += [{"label": "Major", "type": "combobox"}, {"label": "Degree", "type": "combobox"}]
+    mark_history_rows(fields)
+    rows = [f.get("history_row") for f in fields]
+    assert rows[:4] == [{"kind": "work", "index": 0}] * 4
+    assert rows[4:6] == [{"kind": "education", "index": "highest"}] * 2

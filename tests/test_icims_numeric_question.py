@@ -5,7 +5,9 @@ from jobpilot.forms import FormSession
 from jobpilot.schemas import Profile
 
 
-@pytest.mark.parametrize("host,expected_type", [("careers-example.icims.com", "number"), ("example.test", "text")])
+# A box that asks for a number of years takes a number on any site (forms.numeric_year_counts, Oracle's
+# "Total Experience In Years" 2026-10-23); iCIMS's NumberField class makes any question numeric there.
+@pytest.mark.parametrize("host,expected_type", [("careers-example.icims.com", "number"), ("example.test", "number")])
 async def test_hamilton_numeric_widget_is_not_a_prose_question(page, tmp_path, host, expected_type):
     """Hamilton, run 495c533051ae4ff492598936213d1400, 2026-10-21: Q1768 posted 679 characters instead of digits."""
     url = f"https://{host}/jobs/1/engineer/questions"

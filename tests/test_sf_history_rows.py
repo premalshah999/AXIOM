@@ -159,6 +159,8 @@ def test_classic_rows_answer_from_their_own_entries(service):
 def test_a_single_school_is_still_answered_as_a_whole():
     fields = classic_rows(education=1)
     mark_history_rows(fields)
-    assert not any(f["history_row"]["kind"] == "education" for f in fields if "history_row" in f)
+    # Only the school's own dates are placed, as the highest degree's (Sonepar 2026-10-23); its other fields are not.
+    assert all(f["history_row"]["index"] == "highest" for f in fields
+               if "history_row" in f and f["history_row"]["kind"] == "education")
     assert all(by["history_row"]["kind"] == "work" for by in fields if by["id"].startswith(("e", "s")) and "history_row" in by)
     assert {f["id"] for f in fields if "history_row" in f} >= {"e0", "e1", "e2", "s0", "c2"}

@@ -216,15 +216,33 @@ def mark_history_rows(fields):
     work_anchors = [position[id(f)] for f in matched["company"] + matched["title"]]
     school_anchors = [position[id(f)] for row_fields in schools.values() for f in row_fields]
 
+    date_positions = [position[id(f)] for attr in ("start", "end") for f in matched[attr]]
+    # Classic SuccessFactors rows can open with their dates ("From Date, End Date, * Company, * Title", then "From Date,
+    # End Date, * School", Sonepar 2026-10-23): nearest-anchor placement gave the education dates to the work row and
+    # placed nothing. When the first date comes before every anchor, a date belongs to the anchor after it.
+    dates_first = bool(date_positions) and min(date_positions) < min(work_anchors + school_anchors, default=10**9)
+
     def block(f):
         """Which block a date belongs to: the nearer of the work and education anchors ("" when tied or none)."""
-        work = min((abs(position[id(f)] - a) for a in work_anchors), default=None)
-        school = min((abs(position[id(f)] - a) for a in school_anchors), default=None)
+        here = position[id(f)]
+        if dates_first:
+            work = min((a - here for a in work_anchors if a > here), default=None)
+            school = min((a - here for a in school_anchors if a > here), default=None)
+        else:
+            work = min((abs(here - a) for a in work_anchors), default=None)
+            school = min((abs(here - a) for a in school_anchors), default=None)
         if work is not None and (school is None or work < school):
             return "work"
         return "education" if school is not None and (work is None or school < work) else ""
 
     dates = {attr: matched.pop(attr) for attr in ("start", "end")}
+    if len(schools["school"]) == 1:
+        # A single school is answered as a whole from the highest degree; its own dates are that degree's. Left
+        # unplaced, Sonepar's "From Date" went to the owner as a question.
+        for attr, row_fields in dates.items():
+            own = [f for f in row_fields if block(f) == "education"]
+            if len(own) == 1:
+                own[0]["history_row"] = {"kind": "education", "index": "highest"}
     if len(schools["school"]) > 1:
         # One education row is answered as a whole from the highest degree; only repeated rows are placed.
         education = {**schools, **{attr: [f for f in v if block(f) == "education"] for attr, v in dates.items()}}
@@ -232,7 +250,9 @@ def mark_history_rows(fields):
             if len(row_fields) == len(schools["school"]):
                 for index, f in enumerate(row_fields):
                     f["history_row"] = {"kind": "education", "index": index}
-    matched.update({attr: [f for f in v if block(f) == "work"] for attr, v in dates.items()})
+    # A date no row claims (another block's "Start Date") makes that label ambiguous: it is not placed at all.
+    matched.update({attr: ([f for f in v if block(f) == "work"] if all(block(f) for f in v) else [])
+                    for attr, v in dates.items()})
     rows = len(matched["company"])
     if not rows or len(matched["title"]) != rows:
         return
