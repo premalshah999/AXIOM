@@ -3369,3 +3369,34 @@ details:not(.fold) summary {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ---------- queue (Jobs › Pipeline) ---------- */
+.queue {
+  margin-bottom: 28px;
+}
+.queue-drop {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 12px;
+  align-items: end;
+  margin-bottom: 8px;
+}
+.queue-drop .btn {
+  margin-bottom: 22px;
+}
+.queue-results li .muted,
+.queue-list li .muted {
+  font-size: 13px;
+}
+.queue-list li > span:first-child .link {
+  text-align: left;
+  padding: 0;
+}
+@media (max-width: 640px) {
+  .queue-drop {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .queue-drop .btn {
+    margin-bottom: 0;
+  }
+}

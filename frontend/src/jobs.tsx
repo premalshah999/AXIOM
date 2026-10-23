@@ -14,6 +14,7 @@ import {
   type JobRow,
 } from "./model";
 import { Pagination, usePagination } from "./pagination";
+import { QueuePanel } from "./queue";
 import type { Archived, ControlResult } from "./types";
 import {
   ago,
@@ -110,6 +111,7 @@ function Pipeline() {
   const chips = [...GROUPS, { id: "new" as const, label: "Not started" }];
   return (
     <section aria-label="Application pipeline">
+      <QueuePanel />
       <div className="toolbar">
         <label className="search">
           <Search size={15} aria-hidden="true" />
