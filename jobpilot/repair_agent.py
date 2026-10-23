@@ -37,6 +37,13 @@ NOT_REPAIRABLE = re.compile(
 CONTACT_QUESTION = re.compile(
     r"\b(?:what|which)\b[^?]{0,80}\b(?:e-?mail(?: address)?|phone(?: number)?|mobile(?: number)?)\b", re.I
 )
+# Account creation, sign-in and the account password are the app's (owner, 2026-10-12: "any account creation OK"):
+# the agent asked which password to use for Dayforce and whether to create a TikTok account (2026-10-23).
+ACCOUNT_QUESTION = re.compile(
+    r"\b(?:create|creating|register|registering|sign(?:ing)? up)\b[^?]{0,60}\baccount\b|\bpassword\b|"
+    r"\bexisting account\b|\bsign(?:ing)? in\b[^?]{0,40}\baccount\b",
+    re.I,
+)
 # The evidence's masks for the applicant's email and numbers; never an answer. mask() shows a phone number or long id
 # with every digit as 9 and the format kept, so a run of seven or more nines is the mask too: the agent saved
 # "9999999999" as a Greenhouse Phone override (Stripe, 2026-10-18).
@@ -66,6 +73,7 @@ saved profile values. Find the concrete cause and the smallest fix.
   disclosures, demographics, passwords or identity numbers.
 - owner_question: only when a personal fact is genuinely missing; give the field's offered options. The
   applicant's email address and phone number are always saved (shown masked as [email] and 9s); never ask for them.
+  Never ask about accounts: the app creates employer accounts and manages their passwords itself.
 - navigator_instruction: one or two sentences for the browser agent's next attempt (what to fill or click,
   what to stop repeating).
 - submission: for an uncertain submission, "confirmed" only when the final page outline shows an explicit
@@ -360,6 +368,12 @@ async def _repair_run(service, run_id):
     question = plan.owner_question
     if question and CONTACT_QUESTION.search(question.question):
         applied["rejected"] = [*applied["rejected"], (question.question[:200], "the applicant's contact details are saved")]
+        question = None
+    if question and ACCOUNT_QUESTION.search(question.question):
+        applied["rejected"] = [
+            *applied["rejected"],
+            (question.question[:200], "accounts and their passwords are created and managed by the app"),
+        ]
         question = None
     if question and question.question.strip() and outcome == "unchanged":
         key = "repair:" + hashlib.sha256(question.question.strip().casefold().encode()).hexdigest()[:24]

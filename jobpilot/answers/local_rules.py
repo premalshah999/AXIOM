@@ -674,6 +674,31 @@ class LocalRulesMixin:
         entry = self._entry_answer(f, label)
         if entry is not None:
             return entry
+        numbered = re.fullmatch(
+            r"(?:link|url|website|web site|web link|online profile|social (?:media )?(?:link|profile)|other link)\s*#?\s*(\d)",
+            label,
+        )
+        if numbered and not options and f.get("type") in {"text", "url"}:
+            # Oracle's "Link 1" / "Link 2" (Citizens, Verisk 2026-10-23: "Link 2" went to the owner as a question while
+            # the website was saved). The saved links in order: LinkedIn, website, GitHub.
+            links = [(attr, getattr(p, attr)) for attr in ("linkedin", "website", "github") if getattr(p, attr)]
+            index = int(numbered[1]) - 1
+            if 0 <= index < len(links):
+                attr, value = links[index]
+                if a := self._ans(f, value, ["profile:" + attr]):
+                    return a
+        if (
+            re.fullmatch(r"(?:title|salutation|prefix|name prefix|honorific|courtesy title)", label)
+            and options
+            and not (f.get("group") or f.get("history_row"))
+            and any(re.fullmatch(r"mr\.?|mister", str(o).strip(), re.I) for o in options)
+        ):
+            # A salutation menu (Mr./Ms./Mx./Dr.), never a job title: the applicant's saved gender answers it.
+            gender = str(p.facts.get("gender") or "").strip().casefold()
+            wanted = "mr" if gender in {"male", "man"} else "ms" if gender in {"female", "woman"} else ""
+            choice = next((o for o in options if re.sub(r"[^a-z]", "", str(o).casefold()) == wanted), None) if wanted else None
+            if choice:
+                return Answer(field_id=f["id"], value=choice, disposition="answer", evidence_ids=["fact:gender"])
         if f.get("type") == "url" and f.get("value"):
             for attr in ("website", "linkedin", "github"):
                 saved = getattr(p, attr)
@@ -812,6 +837,11 @@ class LocalRulesMixin:
                 country = "United States"
             if country and (a := self._ans(f, str(country), ["profile:location"])):
                 return a
+        if re.fullmatch(r"address type", label) and options:
+            # The applicant's own address is their home address (iCIMS "Type": Home / Other).
+            home = next((o for o in options if normalize(o) == "home"), None)
+            if home and p.address.line1:
+                return Answer(field_id=f["id"], value=home, disposition="answer", evidence_ids=["profile:address"])
         if re.search(r"phone.*(?:device|type)|type of phone|phone type", label) and p.phone_type:
             if a := self._ans(f, p.phone_type, ["profile:phone_type"]):
                 return a

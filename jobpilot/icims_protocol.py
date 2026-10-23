@@ -115,7 +115,18 @@ def squash(text):
     return re.sub(r"[^a-z0-9]", "", str(text or "").lower())
 
 
+# Profile sub-fields printed only as "Type" beside the phone number and the address (Berkley 2026-10-23: two "Type"
+# menus went to the owner as questions).
+PROFILE_LABELS = {
+    "PersonProfileFields.PhoneType": "Phone Type",
+    "PersonProfileFields.AddressType": "Address Type",
+}
+
+
 def name_form_field(f, name):
+    if name in PROFILE_LABELS and squash(f.get("label")) in {"", "type"}:
+        f["label"] = PROFILE_LABELS[name]
+        return
     """Name one Forms-module field whose printed label is only its own name."""
     if f.get("type") == "checkbox" and SIGNATURE.match(name):
         f["label"] = SIGNATURE_LABEL

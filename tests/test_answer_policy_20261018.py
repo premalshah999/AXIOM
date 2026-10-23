@@ -208,3 +208,31 @@ def test_a_page_language_picker_takes_english(service):
     assert local(service, field("What language do you speak at home?", ["English", "Español"])) is None or \
         local(service, field("What language do you speak at home?", ["English", "Español"])).reason != \
         "The application is completed in English"
+
+
+def test_numbered_links_and_salutation_come_from_the_profile(service):
+    """Oracle asked the owner for "Link 2" and a salutation (2026-10-23) while both were saved."""
+    from jobpilot.answers import Resolver
+    from jobpilot.schemas import Address, Profile
+
+    saved = Profile(linkedin="https://www.linkedin.com/in/alex-example", website="https://alex.example.test",
+                    address=Address(line1="1 Main St"), facts={"gender": "Male"})
+    resolver = Resolver(saved, service.db, service.config)
+    assert resolver.local({"id": "l1", "label": "Link 1", "type": "text", "options": []}).value.endswith("alex-example")
+    assert resolver.local({"id": "l2", "label": "Link 2", "type": "text", "options": []}).value == "https://alex.example.test"
+    assert resolver.local({"id": "l3", "label": "Link 3", "type": "text", "options": []}) is None or \
+        resolver.local({"id": "l3", "label": "Link 3", "type": "text", "options": []}).disposition != "answer"
+    title = {"id": "t", "label": "Title", "type": "select", "options": ["Dr.", "Mr.", "Mrs.", "Ms.", "Mx."]}
+    assert resolver.local(title).value == "Mr."
+    job_title = {"id": "j", "label": "Title", "type": "text", "options": [], "group": "Work Experience 1"}
+    assert getattr(resolver.local(job_title), "evidence_ids", None) != ["fact:gender"]
+    address_type = {"id": "a", "label": "Address Type", "type": "select", "options": ["Home", "Other"]}
+    assert resolver.local(address_type).value == "Home"
+
+
+def test_the_repair_agent_never_asks_about_accounts():
+    from jobpilot.repair_agent import ACCOUNT_QUESTION
+
+    assert ACCOUNT_QUESTION.search("Dayforce requires creating an account to apply. What password should be used?")
+    assert ACCOUNT_QUESTION.search("TikTok requires an account to apply. Should the applicant create a new account?")
+    assert not ACCOUNT_QUESTION.search("What is your desired annual salary?")
