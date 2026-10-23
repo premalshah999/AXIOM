@@ -15,7 +15,7 @@ from urllib.parse import parse_qsl, urlsplit, urlunsplit
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
-from . import icims_protocol, phone_fields, widgets
+from . import icims_protocol, phone_fields, taleo_protocol, widgets
 from .answers import HISTORY_UNKNOWN, answer_key, job_catalog_search_box, normalize
 from .knowledge import topic
 from .browser_contracts import ActionResult, action_result, field_identity, fingerprint
@@ -1195,6 +1195,12 @@ class FormSession:
         link_companion_text(self.fields.values())
         label_signature_date(list(self.fields.values()), "\n".join(texts))
         icims_protocol.apply(list(self.fields.values()), list(self.buttons.values()), "\n".join(texts))
+        profile = getattr(getattr(self, "resolver", None), "profile", None)
+        taleo_protocol.apply(
+            list(self.fields.values()),
+            [w.company for w in getattr(profile, "work", None) or []],
+            [e.school for e in getattr(profile, "education", None) or []],
+        )
         obs = {
             "fields": list(self.fields.values()),
             "controls": list(self.buttons.values()),
