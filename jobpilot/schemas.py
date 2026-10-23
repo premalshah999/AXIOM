@@ -1,3 +1,4 @@
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -160,12 +161,29 @@ class Profile(BaseModel):
         return first, last
 
 
+# Career-portal page titles are not employer names: iCIMS portals call themselves "Job Listings at PepsiCo", and 669
+# jobs carried that as their company (2026-10-23), which no receipt email names and no employer cap groups.
+PORTAL_TITLE = re.compile(
+    r"^\s*(?:job listings|jobs|careers|career opportunities|current (?:job )?openings|job openings|open positions) at\s+",
+    re.I,
+)
+
+
+def employer_from_title(name):
+    return PORTAL_TITLE.sub("", name or "").strip() or (name or "")
+
+
 class JobInput(BaseModel):
     url: str = Field(min_length=8, max_length=2048)
     title: str = Field(default="", max_length=500)
     company: str = Field(default="", max_length=300)
     location: str = Field(default="", max_length=500)
     description: str = Field(default="", max_length=50000)
+
+    @field_validator("company")
+    @classmethod
+    def employer_name(cls, value):
+        return employer_from_title(value)
 
 
 class QueueInput(BaseModel):

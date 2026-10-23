@@ -32,6 +32,7 @@ class Service(QueueingMixin, ExecutionMixin, CompletionMixin, ReviewsMixin, Migr
         revert_unfinished_receipts(db)
         self.migrate_legacy()
         self.relabel_custom_ats()
+        self.employer_names_from_titles()
         from ..features._store import create_tables
 
         create_tables(db.engine)
