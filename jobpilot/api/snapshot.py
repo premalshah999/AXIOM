@@ -98,10 +98,14 @@ def build_snapshot(service, include_sources: bool):
         jobs = list({row["job"]["id"]: row["job"] for row in live}.values())
         runs = [row["run"] for row in live if row["run"]]
         counts = pipeline_counts(s)
+        # Only the controls of the jobs sent here (the UI reads them per row): all 1,058 were 144 KB of a 373 KB poll
+        # (2026-10-23); pages of other jobs come from GET /api/jobs with their own state.
         job_controls = {
             row.key.removeprefix("job_control:"): row.value
-            for row in s.scalars(select(Setting).where(Setting.key.like("job_control:%")))
-        }
+            for row in s.scalars(
+                select(Setting).where(Setting.key.in_(["job_control:" + job["id"] for job in jobs]))
+            )
+        } if jobs else {}
         resumes = [
             dict(x._mapping)
             for x in s.execute(
