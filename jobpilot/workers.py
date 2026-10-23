@@ -395,6 +395,11 @@ async def start(service):
         pending = list(s.scalars(select(Run.id).where(Run.state == "queued")))
     for run_id in pending:
         await dispatch(run_id)
+    try:
+        # Open questions the owner has meanwhile answered for another job, worded the same (no model call).
+        await service.settle_open_questions()
+    except Exception:
+        pass  # They stay asked; nothing else depends on this.
 
 
 async def retire_obsolete_deliveries(service):

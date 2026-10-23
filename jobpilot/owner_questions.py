@@ -130,6 +130,29 @@ def knowledge_question(question, context=None):
     return text
 
 
+def reusable_answer(kb, question, options=(), context=None, reason="", employer=""):
+    """The owner's own answer to this same question (asked by another form), or None. No model call.
+
+    Two forms asking "What is your country of birth?" both waited for the owner; answering one left the other
+    asked. A bare label ("End Date", "C"), a history row, an upload and a repair question are never reused this way:
+    the engine's knowledge inference reads those answers with the field's own context."""
+    context = context or {}
+    if (
+        kind(question, options, context, reason) == "upload"
+        or context.get("history_kind")
+        or context.get("source") == "repair"
+        or context.get("type") in {"checkbox", "password"}
+        or bare_label(question)
+    ):
+        return None
+    listed = [text for _, text in choices(options)]
+    found = kb.lookup(tidy(question), listed, employer or "", context.get("type", ""))
+    if not found:
+        return None
+    value = found[1]
+    return value if not listed or value in listed else None
+
+
 def placeholder(option):
     from .widgets import placeholder_option
 

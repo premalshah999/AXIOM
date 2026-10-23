@@ -229,6 +229,35 @@ def test_a_file_for_a_typed_question_is_refused(client, service):
     assert refused.status_code == 400 and "typed answer" in refused.json()["detail"]
 
 
+def test_answering_a_question_answers_the_same_question_waiting_on_other_jobs(client, service):
+    """Three open "racial/ethnic background" questions waited although the owner had answered that exact question for
+    another form: answers were shared only between reviews with the same field key (2026-10-23)."""
+    options = ["Asian", "Black or African American", "White", "I prefer not to say"]
+    first, second = add_job(service, "form-a"), add_job(service, "form-b", company="Initech")
+    add_review(service, "a-q", first, "How would you describe your racial/ethnic background?", options)
+    add_review(service, "b-q", second, "How would you describe your racial/ethnic background? *",
+               ["Select...", *options])
+    add_review(service, "b-row", second, "End Date",
+               context={"history_kind": "work", "history_identity": {"company": "Globex"}})
+    assert client.post("/api/reviews/a-q", json={"answer": "Asian"}).status_code == 200
+    with service.db.session() as s:
+        assert s.get(Review, "b-q").answer == "Asian"
+        assert s.get(Review, "b-row").answer is None
+
+
+async def test_open_questions_already_answered_elsewhere_are_settled_without_asking(service):
+    from jobpilot.knowledge import save
+
+    run = add_job(service, "sweep")
+    save(service.db, "Graduation Date or Anticipated Graduation Date", "05/2026")
+    add_review(service, "grad", run, "Graduation Date or Anticipated Graduation Date")
+    add_review(service, "bare", run, "Date of Birth")
+    service.db.set_setting("telegram_question_sent:grad", {"message_id": 1})  # Asked long ago.
+    assert await service.settle_open_questions() == 1
+    with service.db.session() as s:
+        assert s.get(Review, "grad").answer == "05/2026" and s.get(Review, "bare").answer is None
+
+
 def test_an_existing_reviews_table_gains_the_context_column(tmp_path):
     path = tmp_path / "old.db"
     connection = sqlite3.connect(path)

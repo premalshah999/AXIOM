@@ -3,6 +3,7 @@
 import re
 
 from sqlalchemy import and_, or_, select
+from sqlalchemy.orm import aliased
 
 from ..db import Job, MailChallenge, Review, Run, Setting, now
 from ..knowledge import learned_answer
@@ -251,8 +252,72 @@ class ReviewsMixin:
         )
         return {"resolved": True, "message": message}
 
-    async def resolve_review(self, review_id, answer, *, document=False):
-        return await self.resume_review(review_id, self.answer_review(review_id, answer, document=document))
+    async def resolve_review(self, review_id, answer, *, document=False, settle=True):
+        result = await self.resume_review(review_id, self.answer_review(review_id, answer, document=document))
+        if settle and not document:
+            # The same question waiting on other jobs (other forms, other keys) takes this answer too.
+            with self.db.session() as s:
+                review = s.get(Review, review_id)
+                run = s.get(Run, review.run_id) if review else None
+                job = s.get(Job, run.job_id) if run else None
+                question, employer = (review.question, (job.company or "") if job else "") if review else ("", "")
+            if question:
+                try:
+                    await self.settle_open_questions(only=(question, employer))
+                except Exception:
+                    pass  # The owner's answer is saved; the others are still asked as before.
+        return result
+
+    async def settle_open_questions(self, only=None):
+        """Answer open questions the owner already answered for another job, worded the same. No model call.
+
+        Owner 2026-10-23: "it cannot infer details or answers from my telegram answers". Three open "racial/ethnic
+        background" questions and a "Graduation Date or Anticipated Graduation Date" had the owner's own answer to
+        the identical question saved, yet waited: reuse went only to reviews with the same field key. `only` limits
+        this to one question's wording (question, employer); otherwise every open question is checked."""
+        import asyncio
+
+        from .. import owner_questions as oq
+        from ..knowledge import KnowledgeBase, kb_norm
+
+        def candidates():
+            newer = aliased(Run)
+            with self.db.session() as s:
+                rows = s.execute(
+                    select(Review.id, Review.run_id, Review.question, Review.options, Review.context, Review.reason,
+                           Review.key, Job.company)
+                    .join(Run, Review.run_id == Run.id)
+                    .join(Job, Run.job_id == Job.id)
+                    .where(
+                        Review.answer.is_(None),
+                        Run.state.in_(["waiting_answer", "needs_review"]),
+                        Job.status != "archived",
+                        ~select(newer.id).where(newer.job_id == Run.job_id, newer.created_at > Run.created_at).exists(),
+                    )
+                ).all()
+            target = kb_norm(oq.tidy(only[0]), only[1]) if only else None
+            kb = KnowledgeBase(self.db)
+            found = []
+            for rid, run_id, question, options, context, reason, key, company in rows:
+                if key in {"manual", "session"}:
+                    continue
+                if target is not None and kb_norm(oq.tidy(question), company or "") != target:
+                    continue
+                value = oq.reusable_answer(kb, question, options or [], context or {}, reason or "", company or "")
+                if value is not None:
+                    found.append((rid, run_id, question, value))
+            return found
+
+        settled = 0
+        for rid, run_id, question, value in await asyncio.to_thread(candidates):
+            try:
+                await self.resolve_review(rid, value, settle=False)
+            except ValueError:
+                continue  # Answered meanwhile.
+            self.db.event(run_id, "answer_reused", "Used the answer you already gave to this question",
+                          {"question": question[:200]})
+            settled += 1
+        return settled
 
     async def resolve_review_file(self, review_id, filename, content):
         """Answer an upload question with the owner's file (Telegram document or photo, or the web app).

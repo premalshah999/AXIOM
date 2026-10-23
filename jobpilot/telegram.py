@@ -789,30 +789,11 @@ async def answer_from_file(service, message):
 
 
 def saved_answer(service, question, options, context, reason, company):
-    """An answer the owner already gave to this same question, so it is never asked twice. No model call.
-
-    Two forms asking "What is your country of birth?" both waited for the owner; answering one left the other
-    asked. A bare label ("End Date", "C"), a history row, an upload and a repair question are never reused this way:
-    the engine's knowledge inference reads those answers with the field's own context."""
-    from . import owner_questions as oq
+    """An answer the owner already gave to this same question, so it is never asked twice (no model call)."""
     from .knowledge import KnowledgeBase
+    from .owner_questions import reusable_answer
 
-    context = context or {}
-    kind = oq.kind(question, options, context, reason)
-    if (
-        kind == "upload"
-        or context.get("history_kind")
-        or context.get("source") == "repair"
-        or context.get("type") in {"checkbox", "password"}
-        or oq.bare_label(question)
-    ):
-        return None
-    listed = [text for _, text in oq.choices(options)]
-    found = KnowledgeBase(service.db).lookup(oq.tidy(question), listed, company or "", context.get("type", ""))
-    if not found:
-        return None
-    value = found[1]
-    return value if not listed or value in listed else None
+    return reusable_answer(KnowledgeBase(service.db), question, options, context, reason, company)
 
 
 async def ask_next_question(service, allow_live=False):
@@ -911,7 +892,7 @@ async def _ask_one_question(service, allow_live):
     if reuse is not None:
         service.db.set_setting("telegram_question_sent:" + rid, {"reused": True, "sent_at": now()})
         try:
-            await service.resolve_review(rid, reuse, document=document)
+            await service.resolve_review(rid, reuse, document=document, settle=False)
         except ValueError:
             return True  # Answered or no longer valid meanwhile; the next question follows.
         service.db.event(
