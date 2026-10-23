@@ -81,7 +81,14 @@ class IntentRulesMixin:
                 r"family member|relative|spouse", f["label"], re.I
             ):
                 continue  # A family employment question must use the family fact.
-            if "availability" in keys and NOT_AVAILABILITY.search(f["label"]):
+            if "availability" in keys and (
+                NOT_AVAILABILITY.search(f["label"])
+                # A history row's "Start Date Month" is not the applicant's availability: Oracle education rows got
+                # "Immediately" in their month menus and the section was refused (Verisk, Dallas County 2026-10-23).
+                or re.fullmatch(r"\s*(?:start|end|from|to) date (?:month|year|day)\s*", f["label"], re.I)
+                or f.get("group")
+                or f.get("history_row")
+            ):
                 return None
             key = next((k for k in keys if k in facts and facts[k] not in ("", None)), None)
             value = facts.get(key) if key else None

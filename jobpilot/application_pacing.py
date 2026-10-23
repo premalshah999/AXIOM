@@ -22,7 +22,27 @@ ASHBY_GAP = 150
 # "Something went wrong. We are working on this, please try again later." once a candidate has applied a few times:
 # 3 accepted on 10-07, then 412s on 10-12/14; 4 accepted in one minute on 10-23 after nine quiet days, then every
 # apply refused for hours, five minutes apart too (no CAPTCHA involved). At most four starts a day.
-START_GAPS = {"ashby": ASHBY_GAP, "workable": 6 * 3600}
+START_GAPS = {"ashby": ASHBY_GAP, "workable": 600}
+# A refusal of that kind pauses the platform instead (owner 2026-10-23: "why did you cap workable"): applications go
+# at the normal pace while Workable accepts them, and wait THROTTLE_SECONDS after it refuses one.
+THROTTLE_SECONDS = {"workable": 3 * 3600}
+
+
+def throttle_key(ats):
+    return "application_pacing:throttled:" + ats
+
+
+def throttle(db, ats):
+    """The platform refused an application as too many: no new starts on it for a while."""
+    if ats in THROTTLE_SECONDS:
+        until = datetime.fromtimestamp(time.time() + THROTTLE_SECONDS[ats], UTC).isoformat()
+        db.set_setting(throttle_key(ats), {"until": until, "at": datetime.now(UTC).isoformat()})
+
+
+def throttled_until(session, ats):
+    row = session.get(Setting, throttle_key(ats)) if ats in THROTTLE_SECONDS else None
+    until = (row.value or {}).get("until", "") if row else ""
+    return until if until and until > datetime.now(UTC).isoformat() else ""
 
 
 def gap_key(ats):
@@ -85,6 +105,8 @@ def may_start(session, job, run, at=None):
     ats = _get(job, "ats")
     if ats not in START_GAPS:
         return True
+    if throttled_until(session, ats):
+        return False
     for other, employer in session.execute(
         select(Run, Job)
         .join(Job, Job.id == Run.job_id)
@@ -146,6 +168,13 @@ def require_ats_admission(session, job, run_id=None, owner_pick=False):
         return
     name = ats.title()
     at = _stamp(None)
+    if until := throttled_until(session, ats):
+        raise QueueBlocked(
+            f"{name} refused the last application as too many; new ones wait until it accepts again",
+            outcome="deferred",
+            code="ats_pacing",
+            not_before=until,
+        )
     for other, employer in session.execute(
         select(Run, Job)
         .join(Job, Job.id == Run.job_id)

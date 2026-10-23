@@ -69,3 +69,22 @@ async def test_the_throttle_banner_is_a_temporary_refusal(page, tmp_path):
     form = FormSession(page, Resolver(Profile(), None, None), resume, lambda *a, **k: None)
     rejection = await form.rejection()
     assert rejection and rejection["category"] == "temporary"
+
+
+def test_a_refusal_pauses_workable_and_other_platforms_continue(service):
+    """Owner 2026-10-23: no fixed daily cap. Workable goes at the normal pace until it refuses one, then waits."""
+    from jobpilot.application_pacing import throttle, throttled_until
+
+    job_id, run_id = add(service, "queued", 1)
+    with service.db.session() as s:
+        require_ats_admission(s, s.get(Job, job_id), run_id=run_id)  # accepting: no wait
+    throttle(service.db, "workable")
+    with service.db.session() as s:
+        assert throttled_until(s, "workable")
+        with pytest.raises(QueueBlocked) as blocked:
+            require_ats_admission(s, s.get(Job, job_id), run_id=run_id)
+        assert blocked.value.outcome == "deferred" and blocked.value.not_before
+        assert not may_start(s, s.get(Job, job_id), s.get(Run, run_id))
+    other, other_run = add(service, "queued", 2, ats="greenhouse")
+    with service.db.session() as s:
+        require_ats_admission(s, s.get(Job, other))

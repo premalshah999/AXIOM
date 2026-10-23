@@ -3201,6 +3201,10 @@ class BrowserEngine:
                 if rejection.get("category") == "temporary":
                     # SmartRecruiters: "Cannot submit your application. Please try again in a while."
                     self.armed = False
+                    from .application_pacing import throttle
+
+                    if getattr(self, "service", None) is not None:
+                        throttle(self.service.db, self.job.get("ats", ""))  # Workable's per-candidate refusal
                     return {
                         "state": "waiting_browser",
                         "reason": "The employer could not accept the submission and asked to try again later; "

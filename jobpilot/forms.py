@@ -85,6 +85,25 @@ YEAR_COUNT = re.compile(r"\bin years\b|\b(?:number|no\.?) of years\b|^how many y
                         re.I)
 
 
+ORACLE_EDUCATION = re.compile(
+    r"^(?:school(?: name)?|institution|degree|major|field of study|(?:start|end|graduation) date(?: month| year)?|"
+    r"graduated|did you graduate\??)$",
+    re.I,
+)
+
+
+def oracle_education_block(fields):
+    """Oracle CX can render one education block without a row caption (Dallas County 2026-10-23): its "Start Date
+    Month" then read as availability. A single ungrouped block with a school field is Education 1."""
+    fields = list(fields)
+    loose = [f for f in fields if "oraclecloud.com" in str(f.get("frame_url") or "") and not f.get("group")
+             and ORACLE_EDUCATION.match(str(f.get("label") or "").strip())]
+    if sum(re.match(r"^(?:school(?: name)?|institution)$", f["label"].strip(), re.I) is not None for f in loose) != 1:
+        return
+    for f in loose:
+        f["group"] = "Education 1"
+
+
 def numeric_year_counts(fields):
     for f in fields:
         if f.get("type") == "text" and not f.get("options") and YEAR_COUNT.search(str(f.get("label") or "")):
@@ -1208,6 +1227,7 @@ class FormSession:
         label_signature_date(list(self.fields.values()), "\n".join(texts))
         icims_protocol.apply(list(self.fields.values()), list(self.buttons.values()), "\n".join(texts))
         numeric_year_counts(self.fields.values())
+        oracle_education_block(self.fields.values())
         profile = getattr(getattr(self, "resolver", None), "profile", None)
         taleo_protocol.apply(
             list(self.fields.values()),

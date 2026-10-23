@@ -374,8 +374,31 @@ class HistoryRulesMixin:
         )
         # An unnumbered repeated row is placed by its occurrence (forms.mark_history_rows).
         row = f.get("history_row") or {}
+        named = None if m else re.fullmatch(
+            r"\s*(education|experience|work experience|employment)\s+at\s+(.+?)\s*", group, re.I
+        )
+        if named and not row:
+            # Oracle names a row by its school or employer ("Education at University of Maryland", 2026-10-23).
+            education = named[1].lower() == "education"
+            entries = self.profile.education if education else self.profile.work
+            names = [normalize(getattr(e, "school" if education else "company", "") or "") for e in entries]
+            wanted = normalize(named[2])
+            matches = [i for i, n in enumerate(names) if n and (n == wanted or n in wanted or wanted in n)]
+            if len(matches) == 1:
+                row = {"kind": "education" if education else "work", "index": matches[0]}
         if not m and not row:
             return self._single_entry(f, label)
+        # "Employer Country" / "Employer City" / "School State" are the row's location, not its name: Oracle's
+        # Sherwin-Williams row (2026-10-23) put the employer name into both and the page refused the section.
+        part = re.sub(
+            r"^(?:employer|company|organi[sz]ation|school|institution|university|college)\s+"
+            r"(?=(?:city|town|state|province|country|region|location)$)",
+            "",
+            normalize(f["label"]),
+        )
+        if part != normalize(f["label"]):
+            f = {**f, "label": part}
+            label = part
         if HISTORY_CONTACT.search(f["label"]):
             # The profile holds no street address, postal code or phone for an employer or school, and the
             # applicant's own contact facts never fill them (Atlassian 2026-10-19: iCIMS's parser put the company
