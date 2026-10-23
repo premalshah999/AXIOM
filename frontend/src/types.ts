@@ -57,6 +57,13 @@ export type Review = {
   reason: string;
   key: string;
   created_at?: string;
+  // Owner-facing form (jobpilot/owner_questions.present): the full question with its section or history row,
+  // what kind of answer it takes, why it is asked in plain words, and whether a choice list takes typed text.
+  display_question?: string;
+  kind?: "choice" | "upload" | "text";
+  why?: string;
+  allow_other?: boolean;
+  accept?: string;
 };
 export type Source = {
   id: string;

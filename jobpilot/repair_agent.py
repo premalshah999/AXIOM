@@ -44,6 +44,19 @@ ACCOUNT_QUESTION = re.compile(
     r"\bexisting account\b|\bsign(?:ing)? in\b[^?]{0,40}\baccount\b",
     re.I,
 )
+# Owner 2026-10-23: "a lot of error and debugging texts from telegram". Ten of the twenty questions this agent sent in
+# three days asked for an employer-account password (8 for one SuccessFactors tenant, each worded differently, so
+# none was ever recognised as already asked); Telegram itself refuses to keep a password. Others described the app
+# ("The dropdown options couldn't be read, so I can't map your saved answers to exact choices"). An owner question is
+# one plain question about the applicant. Credentials in the question or its options belong to the account flow.
+CREDENTIAL_QUESTION = re.compile(
+    r"password|passcode|credential|sign[ -]?in details|login details|user ?name for|security answer", re.I
+)
+INTERNAL_QUESTION = re.compile(
+    r"dropdown|combobox|option text|couldn.?t be read|could not be read|selector|the (?:agent|browser|app|engine)\b|"
+    r"\bfield (?:label|id)\b|validation|stalled|\bretry\b|\bthe run\b|saved answers? to exact",
+    re.I,
+)
 # The evidence's masks for the applicant's email and numbers; never an answer. mask() shows a phone number or long id
 # with every digit as 9 and the format kept, so a run of seven or more nines is the mask too: the agent saved
 # "9999999999" as a Greenhouse Phone override (Stripe, 2026-10-18).
@@ -71,9 +84,10 @@ saved profile values. Find the concrete cause and the smallest fix.
   Values must come from the applicant's saved answers or profile values given here; reformatting them is fine
   (3.9 from 3.9/4.0, a phone number written in the format the page shows). Never invent personal facts, legal
   disclosures, demographics, passwords or identity numbers.
-- owner_question: only when a personal fact is genuinely missing; give the field's offered options. The
-  applicant's email address and phone number are always saved (shown masked as [email] and 9s); never ask for them.
-  Never ask about accounts: the app creates employer accounts and manages their passwords itself.
+- owner_question: only when a personal fact is genuinely missing; ask it as the form asks it, in one plain
+  sentence, and give the field's offered options. The applicant's email address and phone number are always saved
+  (shown masked as [email] and 9s); never ask for them. Never ask about accounts: the app creates employer accounts
+  and manages their passwords itself. Never describe the app, the browser or the page's controls to the applicant.
 - navigator_instruction: one or two sentences for the browser agent's next attempt (what to fill or click,
   what to stop repeating).
 - submission: for an uncertain submission, "confirmed" only when the final page outline shows an explicit
@@ -107,6 +121,30 @@ class RepairPlan(BaseModel):
     owner_question: OwnerQuestion | None = None
     retry: bool = False
     confidence: float = Field(default=0.5, ge=0, le=1)
+
+
+def already_asked(db, job_id, question):
+    """True when this job already has an open or answered owner question that says the same thing in other words."""
+    from difflib import SequenceMatcher
+
+    from .answers import normalize
+
+    want = normalize(question)
+    with db.session() as s:
+        asked = list(
+            s.scalars(
+                select(Review.question)
+                .join(Run, Review.run_id == Run.id)
+                .where(Run.job_id == job_id, Review.key.like("repair:%"))
+            )
+        )
+    for other in asked:
+        theirs = normalize(other)
+        mine, words = set(want.split()), set(theirs.split())
+        overlap = len(mine & words) / max(1, len(mine | words))
+        if overlap >= 0.6 or SequenceMatcher(None, want, theirs).ratio() >= 0.75:
+            return True
+    return False
 
 
 def mask(text):
@@ -375,6 +413,15 @@ async def _repair_run(service, run_id):
             (question.question[:200], "accounts and their passwords are created and managed by the app"),
         ]
         question = None
+    if question and CREDENTIAL_QUESTION.search(question.question + " " + " ".join(question.options)):
+        applied["rejected"] = [*applied["rejected"], (question.question[:200], "credentials belong to the account flow")]
+        question = None
+    if question and INTERNAL_QUESTION.search(question.question):
+        applied["rejected"] = [*applied["rejected"], (question.question[:200], "describes the app, not the applicant")]
+        question = None
+    if question and already_asked(db, job_id, question.question):
+        applied["rejected"] = [*applied["rejected"], (question.question[:200], "the owner was already asked this")]
+        question = None
     if question and question.question.strip() and outcome == "unchanged":
         key = "repair:" + hashlib.sha256(question.question.strip().casefold().encode()).hexdigest()[:24]
         with db.exclusive() as s:
@@ -388,6 +435,7 @@ async def _repair_run(service, run_id):
                         options=[o for o in question.options if o.strip()][:80],
                         key=key,
                         reason="Repair agent: " + plan.diagnosis[:300],
+                        context={"source": "repair"},
                     )
                 )
                 run.state = "needs_review"

@@ -3,7 +3,7 @@
 import json
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -126,5 +126,32 @@ def router(service) -> APIRouter:
     @r.post("/api/reviews/{review_id}")
     async def review(review_id: str, data: AnswerInput):
         return await service.resolve_review(review_id, data.answer)
+
+    @r.get("/api/reviews/{review_id}/screenshot")
+    def review_screenshot(review_id: str):
+        """The redacted capture made for this question (its field, centred and outlined), as Telegram sends it."""
+        from fastapi.responses import Response
+
+        from ...db import Review
+        from ...diagnostics import current_help_bytes
+
+        with db.session() as s:
+            review = s.get(Review, review_id)
+            if not review:
+                raise HTTPException(404)
+            run_id, question, key = review.run_id, review.question, review.key
+            field_id = (review.context or {}).get("field_id")
+        picture = current_help_bytes(service, run_id, question=question, review_key=key, field_id=field_id)
+        if picture is None:
+            raise HTTPException(404)
+        return Response(picture, media_type="image/jpeg")
+
+    @r.post("/api/reviews/{review_id}/file")
+    async def review_file(review_id: str, file: UploadFile = File(...)):
+        """An upload question is answered with a file, kept for later forms asking for the same document."""
+        from ...owner_questions import MAX_DOCUMENT_BYTES
+
+        content = await file.read(MAX_DOCUMENT_BYTES + 1)
+        return await service.resolve_review_file(review_id, file.filename or "document", content)
 
     return r

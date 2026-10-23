@@ -2720,8 +2720,51 @@ class FormSession:
                 "field_id": field["id"],
                 "slot": field.get("slot", 0),
                 "scope": {k: field.get(k, "") for k in ("section", "group", "name", "automation_id")},
+                # What the owner needs to answer it (owner_questions.context_from): which history row, the form's
+                # hint, accepted file types, and whether the options were only partly read.
+                "context": {
+                    "hint": str(field.get("hint") or "")[:600],
+                    "accept": field.get("accept", ""),
+                    "history_kind": field.get("history_kind", ""),
+                    "history_identity": field.get("history_identity") or {},
+                    "options_partial": bool(field.get("options_partial")),
+                },
             }
         )
+
+    async def attach_owner_documents(self):
+        """Attach a document the owner sent for an upload question (a transcript, a work sample) to each required,
+        empty file field asking for that kind of document. True when a file was attached.
+
+        Owner 2026-10-23: "cannot even get the intent of the field, i.e. if it is uploading something". A required
+        transcript was asked as a text question; the answer could never be typed into a file input."""
+        resolver = getattr(self, "resolver", None)
+        if resolver is None or not getattr(resolver, "config", None) or not getattr(resolver, "db", None):
+            return False
+        from .owner_questions import document_for
+
+        attached = False
+        for field in list(self.fields.values()):
+            if (
+                field["type"] != "file"
+                or not field["required"]
+                or field["value"]
+                or self.field_key(field) in self.document_uploads
+                or (RESUME.search(field["label"]) and not NOT_RESUME.search(field["label"]))
+            ):
+                continue
+            path = document_for(resolver.db, resolver.config.data_dir, field["label"], resolver.employer)
+            if path is None:
+                continue
+            try:
+                await self.locator(field["id"]).set_input_files(str(path), timeout=15000)
+                await self.wait_upload()
+            except (PlaywrightError, ValueError):
+                continue  # The required-document check still reports the field.
+            self.document_uploads[self.field_key(field)] = path.name
+            attached = True
+            self.emit("document_upload", "Attached the document you sent for this question", {"field": field["label"]})
+        return attached
 
     @property
     def workday(self):
@@ -3307,6 +3350,7 @@ class FormSession:
             self.document_uploads[self.field_key(field)] = letter.name
             wrote_letter = True
             self.emit("document_upload", "Attached the required role-specific cover letter")
+        wrote_letter = await self.attach_owner_documents() or wrote_letter
         handled, rounds = {}, 0
         unavailable_fields = []
         # The scan above is current unless a cover letter was attached or a phone extension blanked since.

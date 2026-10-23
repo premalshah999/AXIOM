@@ -552,12 +552,15 @@ async def ask(service, run_id, pending, wait_seconds):
                 continue
             row = existing.get(q["key"])
             if row is None:
+                from .owner_questions import context_from
+
                 row = Review(
                     run_id=run_id,
                     question=q["question"][:8000],
                     options=list(q.get("options", []))[:250],
                     key=q["key"],
                     reason=q.get("reason", "")[:500],
+                    context=context_from(q),
                 )
                 s.add(row)
                 s.flush()

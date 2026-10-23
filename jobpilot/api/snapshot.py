@@ -13,9 +13,10 @@ from zoneinfo import ZoneInfo
 
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import func, select
+from sqlalchemy.orm import aliased
 
 from ..ats import catalog
-from ..db import Budget, Job, Resume, Review, Run, Setting, Source, latest_runs, record
+from ..db import Budget, Job, Resume, Review, Run, Setting, Source, record
 from ..schemas import Profile
 from .pipeline import counts as pipeline_counts, live_rows
 
@@ -118,8 +119,14 @@ def build_snapshot(service, include_sources: bool):
                 ).where(Resume.demo.is_(False))
             )
         ]
-        asked = [
-            record(x)
+        # Owner 2026-10-23: "the webpage has stopped taking answers". The 100 oldest open reviews were read and only
+        # then narrowed to each job's newest run: 225 were open, the oldest 100 all sat on superseded runs, and the
+        # page showed "Nothing waiting" while 37 questions were pending. Superseded runs are excluded in the query.
+        newer = aliased(Run)
+        from ..owner_questions import present
+
+        reviews = [
+            present(record(x))
             for x in s.scalars(
                 select(Review)
                 .join(Run, Review.run_id == Run.id)
@@ -128,18 +135,14 @@ def build_snapshot(service, include_sources: bool):
                     Review.answer.is_(None),
                     Job.status != "archived",
                     Run.state.in_(["waiting_answer", "needs_review", "running"]),
+                    ~select(newer.id)
+                    .where(newer.job_id == Run.job_id, newer.created_at > Run.created_at)
+                    .exists(),
                 )
                 .order_by(Review.created_at)
                 .limit(100)
             )
         ]
-        # Only questions of each job's newest run are open; an older attempt's question was superseded.
-        current = set()
-        if asked:
-            question_runs = {q["run_id"] for q in asked}
-            newest = latest_runs(Run.job_id.in_(select(Run.job_id).where(Run.id.in_(question_runs))))
-            current = set(s.scalars(select(newest.c.id).where(newest.c.id.in_(question_runs))))
-        reviews = [q for q in asked if q["run_id"] in current]
         today = finished_today(s, tz)
         confirmed_total = s.scalar(
             select(func.count(func.distinct(Run.job_id)))

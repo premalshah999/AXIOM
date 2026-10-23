@@ -1,11 +1,18 @@
 """Questions a run is waiting on: classification, answering, and resuming a parked run."""
 
+import re
+
 from sqlalchemy import and_, or_, select
 
 from ..db import Job, MailChallenge, Review, Run, Setting, now
 from ..knowledge import learned_answer
 from ..admission import QueueBlocked, temporary_time, require_intake
 from ..runtime import engine_version
+
+
+# The repair agent's account questions ("TikTok requires an account. Create one with the saved email, or …?") answer
+# that job's sign-in step; they are not a fact to reuse for every employer.
+REPAIR_ACCOUNT = re.compile(r"\baccount\b|sign[ -]?in|log ?in", re.I)
 
 
 class ReviewsMixin:
@@ -135,17 +142,31 @@ class ReviewsMixin:
             {"challenge_id": challenge_id},
         )
 
-    def answer_review(self, review_id, answer):
+    def answer_review(self, review_id, answer, *, document=False):
+        """Save the owner's answer. `document` is True only when an uploaded file answers an upload question."""
+        from .. import owner_questions as oq
+
         if not answer.strip() or len(answer) > 8000:
             raise ValueError("Provide an answer of 1–8000 characters")
         with self.db.exclusive() as s:
             review = s.get(Review, review_id)
             if not review:
-                raise ValueError("Review not found")
+                raise ValueError("That question no longer exists.")
             if review.answer is not None:
-                raise ValueError("This review has already been resolved")
-            if review.options and answer not in review.options:
-                raise ValueError("Choose an offered option")
+                raise ValueError("That question is already answered.")
+            context = review.context or {}
+            question_kind = oq.kind(review.question, review.options, context, review.reason)
+            offered = [text for _, text in oq.choices(review.options)]
+            if (
+                question_kind == "choice"
+                and answer not in offered
+                and answer not in review.options
+                and not oq.free_text_allowed(review.options, context)
+            ):
+                raise ValueError("Choose one of the offered answers")
+            if question_kind == "upload" and not document:
+                # Typed text cannot go into a file field; the next attempt would stop on it again.
+                raise ValueError("This question needs a file. Attach the document instead of typing an answer.")
             review.answer = answer
             from ..outbox import enqueue
 
@@ -155,28 +176,51 @@ class ReviewsMixin:
             if review.key not in {"manual", "session"}:
                 enqueue(s, "fact_resume", review.id, {"review_id": review.id}, run_id=review.run_id)
             if review.key not in {"manual", "session"}:
-                item = s.get(Setting, "profile")
-                value = dict(item.value if item else {})
-                value["approved_answers"] = {**value.get("approved_answers", {}), review.key: answer}
                 run = s.get(Run, review.run_id)
                 job = s.get(Job, run.job_id) if run else None
-                if job:
-                    value["reviewed_answers"] = [
-                        *value.get("reviewed_answers", []),
-                        learned_answer(
-                            review.id, review.question, answer, review.options, job.company or job.url
-                        ),
-                    ]
+                if review.key.startswith("repair:") and job:
+                    # The repair agent's question is not a form field: no later field has its key. The navigator
+                    # reads the owner's answer as this job's instruction on its next attempt.
+                    directive = s.get(Setting, "application_directive:" + job.id)
+                    instruction = {
+                        "text": f"The applicant answered “{review.question[:600]}”: {answer[:600]}",
+                        "at": now(),
+                    }
+                    if directive:
+                        directive.value = instruction
+                    else:
+                        s.add(Setting(key="application_directive:" + job.id, value=instruction))
+                # A file is kept in the owner's documents (owner_questions.save_document), never as a text answer;
+                # an account choice answers this job's sign-in step only.
+                learn = question_kind != "upload" and not (
+                    review.key.startswith("repair:") and REPAIR_ACCOUNT.search(review.question)
+                )
+                row_scoped = bool(context.get("history_kind"))
+                item = s.get(Setting, "profile")
+                value = dict(item.value if item else {})
+                if learn and not row_scoped:
+                    # One answer per field identity. A history row's "End Date" shares its identity with every
+                    # other row's, so a row's answer is kept only with its row, in the reviewed answers.
+                    value["approved_answers"] = {**value.get("approved_answers", {}), review.key: answer}
+                saved = (
+                    learned_answer(
+                        review.id,
+                        oq.knowledge_question(review.question, context),
+                        answer,
+                        offered or review.options,
+                        job.company or job.url,
+                    )
+                    if job
+                    else None
+                )
+                if learn and saved:
+                    value["reviewed_answers"] = [*value.get("reviewed_answers", []), saved]
                 if item:
                     item.value = value
                 else:
                     s.add(Setting(key="profile", value=value))
-                if job:
-                    scope = learned_answer(
-                        review.id, review.question, answer, review.options, job.company or job.url
-                    )["scope"]
-                    from ..outbox import enqueue
-
+                if job and saved:
+                    scope = saved["scope"]
                     for other, owner, employer in s.execute(
                         select(Review, Run, Job)
                         .join(Run, Review.run_id == Run.id)
@@ -189,15 +233,47 @@ class ReviewsMixin:
                             Job.status != "archived",
                         )
                     ):
-                        if (not other.options or answer in other.options) and (
+                        if row_scoped and (
+                            other.run_id == review.run_id
+                            or (other.context or {}).get("history_identity") != context.get("history_identity")
+                        ):
+                            continue  # Another row's "End Date" is a different question.
+                        fits = answer in other.options or oq.free_text_allowed(other.options, other.context)
+                        if fits and (
                             scope == "personal" or employer.company.casefold() == job.company.casefold()
                         ):
                             other.answer = answer
                             enqueue(s, "fact_resume", other.id, {"review_id": other.id}, run_id=owner.id)
-        return {"resolved": True, "message": "Answer saved to your knowledge base."}
+        message = (
+            "Saved. I'll attach this file whenever an application asks for it."
+            if question_kind == "upload"
+            else "Saved. I'll reuse this answer when another application asks."
+        )
+        return {"resolved": True, "message": message}
 
-    async def resolve_review(self, review_id, answer):
-        return await self.resume_review(review_id, self.answer_review(review_id, answer))
+    async def resolve_review(self, review_id, answer, *, document=False):
+        return await self.resume_review(review_id, self.answer_review(review_id, answer, document=document))
+
+    async def resolve_review_file(self, review_id, filename, content):
+        """Answer an upload question with the owner's file (Telegram document or photo, or the web app).
+
+        Owner 2026-10-23: "cannot even get the intent of the field, i.e. if it is uploading something". The file is
+        kept in the owner's documents; the next attempt, and later forms asking for that document, attach it."""
+        from .. import owner_questions as oq
+
+        with self.db.session() as s:
+            review = s.get(Review, review_id)
+            if not review:
+                raise ValueError("That question no longer exists.")
+            if review.answer is not None:
+                raise ValueError("That question is already answered.")
+            if oq.kind(review.question, review.options, review.context or {}, review.reason) != "upload":
+                raise ValueError("This question needs a typed answer, not a file.")
+            run = s.get(Run, review.run_id)
+            job = s.get(Job, run.job_id) if run else None
+            question, employer = review.question, (job.company or "") if job else ""
+        entry = oq.save_document(self.db, self.config.data_dir, question, filename, content, employer)
+        return await self.resolve_review(review_id, "File: " + entry["name"], document=True)
 
     async def resume_review(self, review_id, result=None):
         durable_delivery = result is None
@@ -253,20 +329,23 @@ class ReviewsMixin:
                 if batch and batch.value.get("state") == "active" and run.id in batch.value.get("run_ids", [])
                 else None
             )
+        # Owner 2026-10-23: "a lot of error and debugging texts from telegram". These sentences reach the owner;
+        # "Application remains protected by its queue guard" and raw queue errors did too.
+        saved = result["message"].split(". ")[0] + "."
         try:
             resumed = await self.queue(job_id, mode, resume_id, retry=True, batch_id=batch_id)
         except QueueBlocked as exc:
             if durable_delivery and exc.outcome == "deferred":
                 raise  # Keep the correlated outbox event until its temporary gate clears.
-            result["message"] += (
-                " Application resumption is temporarily deferred."
+            result["message"] = saved + (
+                " The application continues on its own as soon as it can."
                 if exc.outcome == "deferred"
-                else " Application remains protected by its queue guard."
+                else " This application is on hold, so it won't restart right now."
             )
-        except ValueError as exc:
+        except ValueError:
             if durable_delivery:
                 raise
-            result["message"] += " " + str(exc)
+            result["message"] = saved + " The application will continue on its own when it can."
         else:
-            result.update(run_id=resumed["id"], message="Answer saved. Application resumed automatically.")
+            result.update(run_id=resumed["id"], message="Saved. The application is continuing.")
         return result

@@ -6,8 +6,9 @@ import type { Job, Review } from "./types";
 
 export type QuestionGroup = { review: Review; job?: Job; others: Job[] };
 
-// Identical questions (same key and options) across jobs share one answer:
+// Identical questions (same key, options and row) across jobs share one answer:
 // the backend resolves compatible sibling reviews when a reusable answer is saved.
+// Two history rows' "End Date" share a key but are different questions.
 export function groupQuestions(
   reviews: Review[],
   jobFor: (runId: string) => Job | undefined,
@@ -17,7 +18,11 @@ export function groupQuestions(
     const key =
       review.key in { manual: 1, session: 1 }
         ? review.id
-        : review.key + "\u0000" + JSON.stringify(review.options);
+        : [
+            review.key,
+            JSON.stringify(review.options),
+            review.display_question || review.question,
+          ].join("\u0000");
     const job = jobFor(review.run_id);
     const group = groups.get(key);
     if (group) {
@@ -38,10 +43,14 @@ export function QuestionCard({
   const { refresh, openJob } = useWorkspace();
   const { pending, run } = useAction();
   const [answer, setAnswer, clear] = useDraft("review:" + q.id, "");
+  const [file, setFile] = useState<File | null>(null);
   const [showPage, setShowPage] = useState(false);
-  const [noShot, setNoShot] = useState(false);
+  const [shot, setShot] = useState<"question" | "run" | "none">("question");
   const note = q.key === "session" || q.key === "manual";
+  const kind = q.kind || (q.options.length ? "choice" : "text");
   const id = "q-" + q.id;
+  const listId = "q-options-" + q.id;
+  const ready = kind === "upload" ? !!file : !!answer.trim();
   return (
     <form
       className={"question" + (compact ? " compact" : "")}
@@ -51,12 +60,24 @@ export function QuestionCard({
         run(
           "save",
           async () => {
-            const result = await api<{ message?: string }>(
-              "/reviews/" + q.id,
-              "POST",
-              { answer: answer.trim() },
-            );
-            clear();
+            let result: { message?: string };
+            if (kind === "upload" && file) {
+              const body = new FormData();
+              body.append("file", file);
+              result = await api<{ message?: string }>(
+                "/reviews/" + q.id + "/file",
+                "POST",
+                body,
+              );
+              setFile(null);
+            } else {
+              result = await api<{ message?: string }>(
+                "/reviews/" + q.id,
+                "POST",
+                { answer: answer.trim() },
+              );
+              clear();
+            }
             await refresh();
             return result;
           },
@@ -75,9 +96,11 @@ export function QuestionCard({
         </button>
       )}
       <p className="question-text" id={id}>
-        {q.question}
+        {q.display_question || q.question}
       </p>
-      {q.reason && <p className="question-why">{q.reason}</p>}
+      {(q.why || q.reason) && (
+        <p className="question-why">{q.why || q.reason}</p>
+      )}
       {others.length > 0 && (
         <p className="question-also">
           Also waiting on this question:{" "}
@@ -90,7 +113,32 @@ export function QuestionCard({
         </p>
       )}
       <div className="question-answer">
-        {q.options.length ? (
+        {kind === "upload" ? (
+          <input
+            type="file"
+            aria-label="File to attach"
+            accept={q.accept || ".pdf,.doc,.docx,.txt,.rtf,.odt,.png,.jpg,.jpeg"}
+            required
+            onChange={(e) => setFile(e.target.files?.[0] || null)}
+          />
+        ) : kind === "choice" && q.allow_other ? (
+          <>
+            <input
+              aria-label="Your answer"
+              list={listId}
+              required
+              maxLength={8000}
+              value={answer}
+              onChange={(e) => setAnswer(e.target.value)}
+              placeholder="Choose or type your answer"
+            />
+            <datalist id={listId}>
+              {q.options.map((x) => (
+                <option key={x} value={x} />
+              ))}
+            </datalist>
+          </>
+        ) : kind === "choice" ? (
           <select
             aria-label={note ? "Resolution note" : "Your answer"}
             value={answer}
@@ -117,9 +165,9 @@ export function QuestionCard({
         )}
         <button
           className="btn primary sm"
-          disabled={pending !== null || !answer.trim()}
+          disabled={pending !== null || !ready}
         >
-          {pending ? "Saving…" : "Save answer"}
+          {pending ? "Saving…" : kind === "upload" ? "Attach file" : "Save answer"}
         </button>
       </div>
       <div className="question-foot">
@@ -132,11 +180,13 @@ export function QuestionCard({
           {showPage ? "Hide page" : "Show the application page"}
         </button>
         <span className="muted sm">
-          Saved to your profile, and this application continues once answered.
+          {kind === "upload"
+            ? "Kept with your documents, and attached when another application asks for it."
+            : "Saved to your profile, and this application continues once answered."}
         </span>
       </div>
       {showPage &&
-        (noShot ? (
+        (shot === "none" ? (
           <p className="muted sm">
             No screenshot was captured for this attempt. Its activity is in the
             job details.
@@ -144,15 +194,23 @@ export function QuestionCard({
         ) : (
           <a
             className="shot"
-            href={`/api/runs/${q.run_id}/screenshot`}
+            href={
+              shot === "question"
+                ? `/api/reviews/${q.id}/screenshot`
+                : `/api/runs/${q.run_id}/screenshot`
+            }
             target="_blank"
             rel="noreferrer"
           >
             <img
               alt={`Application page where ${job?.company || "the employer"} asked this question`}
               loading="lazy"
-              src={`/api/runs/${q.run_id}/screenshot`}
-              onError={() => setNoShot(true)}
+              src={
+                shot === "question"
+                  ? `/api/reviews/${q.id}/screenshot`
+                  : `/api/runs/${q.run_id}/screenshot`
+              }
+              onError={() => setShot(shot === "question" ? "run" : "none")}
             />
           </a>
         ))}

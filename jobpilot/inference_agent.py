@@ -152,6 +152,12 @@ async def infer(resolver, field):
             "employer": resolver.employer,
             "role": resolver.job.get("title", ""),
             "question": field.get("label", ""),
+            # A bare "End Date" or "C" is answerable only with its section or history row; the owner's saved
+            # answers name them ("Work history: Acme · Analyst › End Date", owner_questions.knowledge_question).
+            "section": field.get("section", ""),
+            "history_row": {"kind": field.get("history_kind", ""), **(field.get("history_identity") or {})}
+            if field.get("history_kind")
+            else None,
             "type": field.get("type", ""),
             "required": bool(field.get("required")),
             "options": options,

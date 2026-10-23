@@ -138,6 +138,13 @@ class Review(Base):
     reason: Mapped[str] = mapped_column(Text, default="")
     answer: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[str] = mapped_column(String, default=now)
+    # The field facts the owner needs to answer: type (an upload is a file, not text), section or history row,
+    # hint, accepted file types, whether the options were only partly read (owner_questions.context_from).
+    context: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=dict)
+
+
+# create_all() never adds a column to an existing table. Nullable columns a model gained since a table was created.
+ADDED_COLUMNS = {"reviews": {"context": "JSON"}}
 
 
 class Source(Base):
@@ -281,9 +288,25 @@ class Database:
 
         self.Session = sessionmaker(self.engine, expire_on_commit=False)
         Base.metadata.create_all(self.engine)
+        self.add_missing_columns()
         with self.session() as s:
             if not s.get(Setting, "control"):
                 s.add(Setting(key="control", value={"paused": False, "auto_submit": False}))
+
+    def add_missing_columns(self):
+        """Add ADDED_COLUMNS an existing table lacks; idempotent, and safe when two processes start together."""
+        from sqlalchemy import inspect
+
+        for table, columns in ADDED_COLUMNS.items():
+            for name, kind in columns.items():
+                if name in {c["name"] for c in inspect(self.engine).get_columns(table)}:
+                    continue
+                try:
+                    with self.engine.begin() as connection:
+                        connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+                except Exception:
+                    if name not in {c["name"] for c in inspect(self.engine).get_columns(table)}:
+                        raise
 
     @contextmanager
     def session(self):

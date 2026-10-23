@@ -258,6 +258,8 @@ class CompletionMixin:
                     continue
                 if q.get("key", "manual") in known:
                     continue
+                from ..owner_questions import context_from
+
                 s.add(
                     Review(
                         run_id=run_id,
@@ -265,6 +267,7 @@ class CompletionMixin:
                         options=q.get("options", []),
                         key=q.get("key", "manual"),
                         reason=q.get("reason", ""),
+                        context=context_from(q),
                     )
                 )
             from ..outbox import enqueue
