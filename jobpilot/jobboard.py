@@ -54,7 +54,9 @@ US_PLACE = re.compile(
 )
 FOREIGN = re.compile(
     r"\b(?:India|Canada|Canadian|United Kingdom|London|UK|Germany|Berlin|France|Paris|"
-    r"Australia|Singapore|Mexico|Brazil|Ireland|Dublin|Netherlands|Amsterdam|"
+    # "New Mexico" is a US state and Dublin a city in Ohio, California and Georgia too (CVS, AIG 2026-10-23).
+    r"Australia|Singapore|(?<!New )Mexico|Brazil|Ireland|Dublin(?!,?\s*(?:OH|CA|GA|Ohio|California|Georgia)\b)|"
+    r"Netherlands|Amsterdam|"
     r"Bengaluru|Bangalore|Pune|Hyderabad|Toronto|Vancouver|Poland|Warsaw|Krakow|"
     r"Japan|Tokyo|China|Beijing|Shanghai|Taiwan|Taipei|South Korea|Seoul|Hong Kong|"
     r"Spain|Portugal|Italy|Sweden|Norway|Finland|Denmark|Belgium|Switzerland|Austria|"
@@ -122,6 +124,10 @@ def fresh(value, at, max_age_hours=48):
 
 
 def us_location(location, country=""):
+    # A listing of several locations qualifies when one of them is in the US ("Los Angeles, CA; Toronto, Canada").
+    parts = [x for x in re.split(r"\s*(?:;|\||\s/\s)\s*", str(location or "")) if x.strip()]
+    if len(parts) > 1:
+        return any(us_location(x, country) for x in parts)
     country = str(country or "").strip().casefold()
     if FOREIGN.search(location or ""):
         return False  # A feed's US/HQ descriptor cannot override an explicit foreign job location.
