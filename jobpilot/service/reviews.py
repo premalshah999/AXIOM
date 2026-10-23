@@ -268,13 +268,14 @@ class ReviewsMixin:
                     pass  # The owner's answer is saved; the others are still asked as before.
         return result
 
-    async def settle_open_questions(self, only=None):
+    async def settle_open_questions(self, only=None, documents_only=False):
         """Answer open questions the owner already answered for another job, worded the same. No model call.
 
         Owner 2026-10-23: "it cannot infer details or answers from my telegram answers". Three open "racial/ethnic
         background" questions and a "Graduation Date or Anticipated Graduation Date" had the owner's own answer to
         the identical question saved, yet waited: reuse went only to reviews with the same field key. `only` limits
-        this to one question's wording (question, employer); otherwise every open question is checked."""
+        this to one question's wording (question, employer); `documents_only` to upload questions whose kind of
+        document the owner has sent. Otherwise every open question is checked."""
         import asyncio
 
         from .. import owner_questions as oq
@@ -301,17 +302,23 @@ class ReviewsMixin:
             for rid, run_id, question, options, context, reason, key, company in rows:
                 if key in {"manual", "session"}:
                     continue
-                if target is not None and kb_norm(oq.tidy(question), company or "") != target:
+                if oq.kind(question, options or [], context or {}, reason or "") == "upload":
+                    # A document the owner sent answers every open question asking for that kind of document.
+                    path = oq.document_for(self.db, self.config.data_dir, question, company or "")
+                    if path is not None and only is None:
+                        found.append((rid, run_id, question, "File: " + path.name, True))
+                    continue
+                if documents_only or (target is not None and kb_norm(oq.tidy(question), company or "") != target):
                     continue
                 value = oq.reusable_answer(kb, question, options or [], context or {}, reason or "", company or "")
                 if value is not None:
-                    found.append((rid, run_id, question, value))
+                    found.append((rid, run_id, question, value, False))
             return found
 
         settled = 0
-        for rid, run_id, question, value in await asyncio.to_thread(candidates):
+        for rid, run_id, question, value, document in await asyncio.to_thread(candidates):
             try:
-                await self.resolve_review(rid, value, settle=False)
+                await self.resolve_review(rid, value, document=document, settle=False)
             except ValueError:
                 continue  # Answered meanwhile.
             self.db.event(run_id, "answer_reused", "Used the answer you already gave to this question",
@@ -338,7 +345,13 @@ class ReviewsMixin:
             job = s.get(Job, run.job_id) if run else None
             question, employer = review.question, (job.company or "") if job else ""
         entry = oq.save_document(self.db, self.config.data_dir, question, filename, content, employer)
-        return await self.resolve_review(review_id, "File: " + entry["name"], document=True)
+        result = await self.resolve_review(review_id, "File: " + entry["name"], document=True)
+        try:
+            # Other open questions asking for this kind of document (eight transcript questions for one employer).
+            await self.settle_open_questions(documents_only=True)
+        except Exception:
+            pass
+        return result
 
     async def resume_review(self, review_id, result=None):
         durable_delivery = result is None
