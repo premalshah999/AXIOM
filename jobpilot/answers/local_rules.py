@@ -44,6 +44,11 @@ from .text import normalize
 from .text import option_value
 from .text import yes_no
 
+PAGE_LANGUAGE = re.compile(r"(?:select|choose|change) (?:a |your |the )?language|\b(?:rb|ddl|cbo|lst)language\b|"
+                           r"(?:display|site|page) language")
+ENDONYMS = {"español", "espanol", "français", "francais", "deutsch", "português", "portugues", "italiano", "中文",
+            "简体中文", "繁體中文", "日本語", "한국어", "tiếng việt", "polski", "русский", "العربية", "हिन्दी",
+            "kreyòl ayisyen"}
 # A page-language picker offers only language names (normalized: "español" keeps its letters).
 LANGUAGE_NAME = re.compile(
     r"english|espa\w*ol|spanish|fran\w*ais|french|deutsch|german|portugu\w*s|portuguese|italiano|italian|"
@@ -83,11 +88,18 @@ class LocalRulesMixin:
                 )
         if (
             "language" in label
-            and not re.search(r"\b(?:speak|spoken|fluen\w*|proficien\w*|read|write|written|native|know|languages)\b", label)
+            and not re.search(
+                r"\b(?:speak|spoken|fluen\w*|proficien\w*|read|write|written|native|know|languages|instruction|"
+                r"second|other|additional)\b",
+                label,
+            )
+            and not (f.get("group") or f.get("section") or f.get("history_row"))
             and f.get("type") in {"radio", "radiogroup", "pills", "select", "dropdown", "combobox"}
             and options
             and any(normalize(o) == "english" for o in options)
             and all(LANGUAGE_NAME.fullmatch(normalize(o)) for o in options)
+            # A picker names itself ("Select a Language", ASP.NET's rbLanguage) or offers languages in their own words.
+            and (PAGE_LANGUAGE.search(label) or any(normalize(o) in ENDONYMS for o in options))
         ):
             # The page's own display language ("Select a Language: English / Español", Maximus tax-credit
             # screening after PepsiCo's iCIMS form, 2026-10-22). The application is completed in English.
