@@ -48,7 +48,9 @@ CONTROL_RECOVERY_SECONDS = 30
 # times with no row heading; the decision model then mixed rows and a date read as availability.
 HISTORY_ROW_LABELS = {
     "company": re.compile(r"(?:employer|company)(?: name)?", re.I),
-    "title": re.compile(r"(?:position|job) title|title", re.I),
+    # HF Sinclair (SuccessFactors 2026-10-23): "* Final Job Title"; the rows were not placed and the bare Start Date
+    # took the availability answer (today), "Start date must be before End date".
+    "title": re.compile(r"(?:(?:final|current|most recent|last) )?(?:(?:position|job) )?title", re.I),
     "start": re.compile(r"start date|from(?: date)?", re.I),
     "end": re.compile(r"end date|to(?: date)?", re.I),
 }

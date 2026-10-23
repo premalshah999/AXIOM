@@ -80,3 +80,17 @@ def test_a_gpa_box_takes_the_number(service):
     resolver = Resolver(saved, service.db, service.config)
     gpa = resolver.local({"id": "g", "label": "GPA", "type": "text", "group": "Education 1", "options": []})
     assert gpa.value == "3.9"
+
+
+def test_successfactors_rows_with_a_final_job_title_are_history_rows():
+    """HF Sinclair (2026-10-23): "* Employer Name / Start Date / End Date / * Final Job Title" rows had no caption;
+    the bare Start Date took the availability answer (today) and the page refused every row."""
+    from jobpilot.forms import mark_history_rows
+
+    fields = []
+    for _ in range(2):
+        fields += [{"label": "* Employer Name", "type": "text"}, {"label": "Start Date", "type": "text"},
+                   {"label": "End Date", "type": "text"}, {"label": "* Final Job Title", "type": "text"}]
+    mark_history_rows(fields)
+    assert [f.get("history_row") for f in fields[:4]] == [{"kind": "work", "index": 0}] * 4
+    assert [f.get("history_row") for f in fields[4:]] == [{"kind": "work", "index": 1}] * 4
