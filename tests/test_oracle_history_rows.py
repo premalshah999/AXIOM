@@ -108,3 +108,13 @@ def test_rows_that_open_with_their_dates_are_placed():
     rows = [f.get("history_row") for f in fields]
     assert rows[:4] == [{"kind": "work", "index": 0}] * 4
     assert rows[4:6] == [{"kind": "education", "index": "highest"}] * 2
+
+
+def test_any_dates_month_part_is_a_month():
+    """DTCC (Oracle 2026-10-23, REA): "Projected Completion Date Month" got "5" typed into its search; every month was
+    filtered out and the date refused."""
+    from jobpilot.widgets_ats import component_value, month_component
+
+    assert component_value("Projected Completion Date Month", "5") == "May"
+    assert month_component("Date Available Month") and month_component("Month")
+    assert not month_component("Number of months") and not month_component("Months of experience")

@@ -93,12 +93,14 @@ def component_value(label, value):
 
 
 def month_component(label):
-    return bool(
-        re.fullmatch(
-            r"(?:(?:start|end|graduation|completion|birth)\s+(?:date\s+)?)?month",
-            label.strip(),
-            re.I,
-        )
+    # Any date's month part: "Projected Completion Date Month" (DTCC, Oracle 2026-10-23, REA) did not match the list
+    # of known prefixes, so "5" was typed into the month search, every month was filtered out and the date refused.
+    # "Months" (plural) asks for a count, not a month.
+    label = label.strip()
+    return bool(re.search(r"\bmonth\s*$", label, re.I)) and (
+        bool(re.fullmatch(r"month", label, re.I))
+        or bool(re.search(r"\b(?:date|start|end|graduat\w*|completion|birth|expected|available|anticipated)\b",
+                          label, re.I))
     )
 
 
@@ -239,6 +241,28 @@ async def select_combo(frame, el, field, value, choose=None, *, rematch=None, ap
                 options = await _wait_owned_options(el, family, 2, previous=previous)
                 choice = widgets.best_option(eligible(options), wanted)
                 if choice:
+                    break
+    if (
+        not choice
+        and family == "oracle"
+        and re.search(r"degree|education level|level of education|highest education", field["label"], re.I)
+        and await el.is_editable()
+    ):
+        # A searchable degree catalog (DTCC 2026-10-23, REA): "Master of Science" finds nothing and "MSc" lists fifteen
+        # subjects, while the catalog holds a plain "Master's degree". Search the degree level and take the one entry
+        # the resolver's own equivalents accept.
+        from .answers.history import DEGREE_FALLBACK, degree_level
+
+        level = degree_level(str(value))
+        if level in DEGREE_FALLBACK:
+            previous = options
+            await el.fill("", timeout=1000)
+            await el.press_sequentially(level, delay=12, timeout=4000)
+            options = await _wait_owned_options(el, family, 3, previous=previous)
+            for pattern in DEGREE_FALLBACK[level]:
+                hits = [o for o in options if pattern.search(o["text"])]
+                if len(hits) == 1:
+                    choice = hits[0]
                     break
     if not choice and school:
         others = [o for o in options if widgets.school_other_option(o["text"])]
