@@ -445,6 +445,9 @@ class HistoryRulesMixin:
             value = getattr(entry, attr)
             if attr == "location" and value and re.fullmatch(r"(?:city|town)", normalize(f["label"])):
                 value = str(value).split(",")[0].strip()  # "Pune, India" -> "Pune" in a City box
+            if attr == "gpa" and value and not f.get("options") and (number := re.match(r"\s*(\d+(?:\.\d+)?)", str(value))):
+                # A GPA box takes the number: Oracle refused "3.9/4.0" ("Enter a valid number", INTEGRIS 2026-10-23).
+                value = number[1]
             if attr == "current":
                 value = "true" if value else "false"
                 if f.get("type") != "checkbox":

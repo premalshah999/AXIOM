@@ -86,7 +86,7 @@ class IntentRulesMixin:
                 # A history row's "Start Date Month" is not the applicant's availability: Oracle education rows got
                 # "Immediately" in their month menus and the section was refused (Verisk, Dallas County 2026-10-23).
                 or re.fullmatch(r"\s*(?:start|end|from|to) date (?:month|year|day)\s*", f["label"], re.I)
-                or f.get("group")
+                or re.search(r"experience|education|employment|work history", f.get("group") or "", re.I)
                 or f.get("history_row")
             ):
                 return None
@@ -126,6 +126,16 @@ class IntentRulesMixin:
                     f, f"{int(str(value).strip()):,} USD", [f"fact:{key}" if key else "fact:desired_salary"]
                 )
             if "availability" in keys and str(value).casefold() == "immediately":
+                part = re.search(r"\b(month|day|year)\s*$", f["label"], re.I)
+                if part and f.get("type") in {"select", "combobox", "text", "number"}:
+                    # A start date split into Month / Day / Year menus (Oracle's "earliest possible start date",
+                    # Legrand 2026-10-23: "0 days" went into Day and the date was refused): today's part.
+                    today = datetime.now(ZoneInfo(self.config.timezone)).date()
+                    piece = {"month": f"{today.month:02d}", "day": str(today.day), "year": str(today.year)}[
+                        part[1].lower()
+                    ]
+                    if answer := self._ans(f, piece, ["fact:availability"]):
+                        return answer
                 if f.get("type") in {"date", "date_parts", "month"} or f.get("widget") == "date-text":
                     today = datetime.now(ZoneInfo(self.config.timezone)).date()
                     return self._ans(f, today.strftime("%m/%d/%Y"), ["fact:availability"])

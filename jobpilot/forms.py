@@ -82,8 +82,11 @@ SELF_ID_FORM = re.compile(r"self-identification|\bCC-305\b|\bVEVRAA\b", re.I)
 
 # A text box that asks for a number of years takes a number. Oracle's "Total Experience In Years"
 # (totalExperienceInYears, HEXAWARE 2026-10-23) got a paragraph and answered "Enter a valid number" until the run stalled.
-YEAR_COUNT = re.compile(r"\bin years\b|\b(?:number|no\.?) of years\b|^how many years\b|\byears of (?:total |relevant )?experience\b",
-                        re.I)
+YEAR_COUNT = re.compile(
+    r"\bin (?:years|months|days)\b|\b(?:number|no\.?) of (?:years|months|days)\b|^how many (?:years|months|days)\b|"
+    r"\byears of (?:total |relevant )?experience\b",
+    re.I,
+)  # Oracle's "Notice Period in Days" (HEXAWARE 2026-10-23): "0 days" was refused as not a number.
 
 
 ORACLE_EDUCATION = re.compile(

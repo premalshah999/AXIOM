@@ -48,3 +48,35 @@ def test_one_uncaptioned_oracle_education_block_is_education_1():
     fields.append({"label": "Start Date Month", "frame_url": frame, "group": "Work Experience 1"})
     oracle_education_block(fields)
     assert [f["group"] for f in fields] == ["Education 1"] * 4 + ["Work Experience 1"]
+
+
+def test_a_start_date_in_month_day_year_menus_is_today(service):
+    """Legrand (Oracle, 2026-10-23): "earliest possible start date" as three menus; "0 days" went into Day."""
+    from datetime import date
+
+    today = date.today()
+    months = ["", *[f"{m:02d}" for m in range(1, 13)]]
+    days = ["", *[str(d) for d in range(1, 32)]]
+    years = ["", str(today.year), str(today.year + 1)]
+    caption = "What is your earliest possible start date?"
+    assert ask(service, caption + " Month", caption, type="select", options=months).value == f"{today.month:02d}"
+    assert ask(service, caption + " Day", caption, type="select", options=days).value == str(today.day)
+    assert ask(service, caption + " Year", caption, type="select", options=years).value == str(today.year)
+
+
+def test_a_notice_period_in_days_is_a_number():
+    from jobpilot.forms import numeric_year_counts
+
+    fields = [{"label": "Notice Period in Days", "type": "text"}]
+    numeric_year_counts(fields)
+    assert fields[0]["type"] == "number"
+
+
+def test_a_gpa_box_takes_the_number(service):
+    """INTEGRIS (Oracle, 2026-10-23, REA): "3.9/4.0" was refused with "Enter a valid number"."""
+    from jobpilot.schemas import EducationEntry, Profile
+
+    saved = Profile(education=[EducationEntry(school="University of Maryland", degree="Master of Science", gpa="3.9/4.0")])
+    resolver = Resolver(saved, service.db, service.config)
+    gpa = resolver.local({"id": "g", "label": "GPA", "type": "text", "group": "Education 1", "options": []})
+    assert gpa.value == "3.9"
