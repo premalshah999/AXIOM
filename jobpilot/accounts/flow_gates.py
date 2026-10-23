@@ -163,6 +163,19 @@ class FlowGatesMixin:
             re.fullmatch(r"(?:sign|log) ?out", x, re.I) for x in labels
         )
 
+    def reset_unanswered(self, url, recorded):
+        """This tenant never answered a password reset: the record says so, or its reset is older than ten minutes."""
+        if recorded == "password_unknown":
+            return True
+        if recorded != "reset_requested":
+            return False
+        import time
+
+        from ..adapters.base import UNANSWERED_RESET_SECONDS
+
+        record = getattr(self.store, "record", lambda url: {})(url)
+        return time.time() - float(record.get("reset_requested_at") or 0) > UNANSWERED_RESET_SECONDS
+
     def applied_before(self):
         """SuccessFactors takes applications only from signed-in candidates: an earlier confirmed or already-applied
         run on this employer's career site proves the account. Westinghouse confirmed on 10-16 04:06, its record later

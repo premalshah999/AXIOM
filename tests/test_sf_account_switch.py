@@ -249,3 +249,70 @@ async def test_a_create_link_that_did_not_navigate_is_followed(service):
     assert await flow.handle()
     assert form.clicked == ["create"]
     assert visited == ["https://career5.successfactors.eu/career?company=EYHRISPRD1&create=1"]
+
+
+SIGN_IN = {
+    "fields": _fields("Password:"),
+    "controls": [{"id": "signin", "label": "Sign In"}, {"id": "create", "label": "Create an account"}],
+    "errors": [],
+    "text": "",
+}
+
+
+def _sf_flow(service, obs):
+    flow, form, scope = _flow(service, obs)
+    flow.e.job["ats"] = "successfactors"
+    flow.e.emit = lambda *a, **k: None
+    return flow, form, scope
+
+
+async def test_an_unanswered_reset_creates_the_account_once(service):
+    """L3Harris (2026-10-21..23): the saved login was refused and four resets never arrived. SuccessFactors says no
+    email means no matching account: Create is tried once, and the create page does not bounce back to Sign In."""
+    flow, form, scope = _sf_flow(service, SIGN_IN)
+    flow.store.save(URL, flow.store.shared(), "password_unknown")
+    assert flow.store.known(URL)  # the record claims an account
+    assert await flow.handle()
+    assert form.clicked == ["create"]
+    assert flow.store.record(URL).get("absent_create_at")
+    # The create form in the same run registers instead of switching to Sign In for a "known" account.
+    create = {
+        "fields": _fields("Choose Password", "Retype Password"),
+        "controls": [{"id": "signin", "label": "Please sign in"}, {"id": "submit", "label": "Create Account"}],
+        "errors": [],
+        "text": "",
+    }
+    from unittest.mock import AsyncMock
+
+    form.obs, form.clicked = create, []
+    form.fill_current = AsyncMock(return_value=None)
+    form.frames.update({item["id"]: next(iter(form.frames.values())) for item in [*create["fields"], *create["controls"]]})
+    try:
+        await flow.handle()
+    except (AttributeError, TypeError):
+        pass  # the fake form stops inside registration, past the point that matters here
+    assert "signin" not in form.clicked
+    form.fill_current.assert_awaited()  # it went on to fill the registration form
+
+
+async def test_the_absent_create_is_tried_only_once(service):
+    flow, form, scope = _sf_flow(service, SIGN_IN)
+    flow.store.save(URL, flow.store.shared(), "password_unknown", absent_create_at="2026-10-23T00:00:00+00:00")
+    from unittest.mock import AsyncMock
+
+    form.fill_current = AsyncMock(return_value={"pending": [], "filled": []})
+    try:
+        await flow.handle()
+    except (AttributeError, TypeError, KeyError):
+        pass  # the fake form stops inside sign-in, past the point that matters here
+    assert "create" not in form.clicked
+
+
+async def test_a_recent_reset_still_waits_for_its_email(service):
+    import time
+
+    flow, form, scope = _sf_flow(service, SIGN_IN)
+    flow.store.save(URL, flow.store.shared(), "reset_requested", reset_requested_at=time.time() - 60)
+    assert not flow.reset_unanswered(URL, "reset_requested")
+    flow.store.save(URL, flow.store.shared(), "reset_requested", reset_requested_at=time.time() - 3600)
+    assert flow.reset_unanswered(URL, "reset_requested")

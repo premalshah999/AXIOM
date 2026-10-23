@@ -2,6 +2,7 @@
 
 from urllib.parse import urlsplit, urljoin
 import re
+from ..db import now
 from ..mail import origin
 from .dayforce import DAYFORCE_ID_ACCOUNT
 from .dayforce import dayforce_id_page
@@ -90,6 +91,12 @@ class FlowHandleMixin:
         tenant = account_tenant(canonical, getattr(self.store, "job_url", ""))
         scope = origin(canonical) + (":" + tenant if tenant != "unresolved_shared_tenant" and tenant else "")
         known = bool(getattr(self.store, "known", lambda url: False)(account_url)) or self.applied_before()
+        # SuccessFactors: "If you do not receive an email then no matching account was found." A reset that went
+        # unanswered means this email has no account on the tenant (L3Harris 2026-10-21..23: four resets, none came;
+        # the saved login was from a registration that never finished). One Create is tried, never again after.
+        absent = ("absent", scope) in self.attempts
+        if absent:
+            known = False
         errors = [str(x) for x in obs.get("errors", [])]
         page_refused = any(REQUIRED_INPUT.search(x) for x in [*errors, obs.get("text", "")])
         create_links = [
@@ -99,6 +106,26 @@ class FlowHandleMixin:
                 r"create (?:an? )?(?:account|profile)|register|sign up|new user", b["label"], re.I
             )
         ]
+        if (
+            not creating
+            and not configured
+            and known
+            and create_links
+            and (getattr(e, "job", None) or {}).get("ats") == "successfactors"
+            and self.reset_unanswered(account_url, recorded)
+        ):
+            record = getattr(self.store, "record", lambda url: {})(account_url)
+            if not record.get("absent_create_at"):
+                self.store.save(account_url, saved or self.store.shared(), "password_unknown", absent_create_at=now())
+                self.attempts.add(("absent", scope))
+                e.emit("account", "No password reset email ever arrived, so this employer has no account for this "
+                       "email; creating one")
+                await e.form.click(create_links[0]["id"], auth_control=True)
+                settle = getattr(e.form, "settle", None)
+                if settle:
+                    await settle(timeout=8)
+                e.page = e.form.page
+                return True
         if not creating and not configured and known and recorded != "authenticated":
             # Westinghouse (SuccessFactors) 2026-10-16/17 and AMETEK 10-18: the employer already holds this
             # email's account, yet a refused or unanswered sign-in led to Create, whose password then replaced the
@@ -405,6 +432,8 @@ class FlowHandleMixin:
             state = "registering"
         elif dfid and recorded in DAYFORCE_ID_ACCOUNT:
             state = recorded  # a sign-in attempt never erases that the account exists
+        elif not creating and recorded in {"password_unknown", "reset_requested"}:
+            state = recorded  # a sign-in attempt never erases an unanswered reset (it requested one on every run)
         else:
             state = "created_locally" if creating else "signing_in"
         # A Create that replaced a saved login keeps it, so "Account Already Exists" can restore it.
