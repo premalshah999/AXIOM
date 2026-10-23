@@ -9,6 +9,7 @@ import traceback
 import uuid
 from copy import deepcopy
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
@@ -2363,6 +2364,11 @@ class FormSession:
             await el.blur()
         else:
             if kind == "text" and await widgets.is_ui5wc_date(el):
+                if re.fullmatch(r"\s*(?:immediately|asap|as soon as possible|right away|now)\s*", str(value), re.I):
+                    # SuccessFactors' "When are you available to start?" is a UI5 date picker the scan reads as text:
+                    # "Immediately" could not be parsed and Optimum stalled three times (2026-10-23). It means today.
+                    zone = getattr(getattr(getattr(self, "resolver", None), "config", None), "timezone", "") or "UTC"
+                    value = datetime.now(ZoneInfo(zone)).strftime("%m/%d/%Y")
                 committed = await widgets.ui5wc_date(el, value)
             elif (
                 kind == "text"

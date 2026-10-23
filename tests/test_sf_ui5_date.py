@@ -101,3 +101,18 @@ def test_picker_display_matches_the_month_only_fact():
     assert widgets.same_value(field, "June 2, 2001", "06/02/2001")
     assert not widgets.same_value(field, "Dec 1, 2025", "11/2025")
     assert not widgets.same_value(field, "June 3, 2001", "06/02/2001")
+
+
+async def test_immediately_in_a_date_picker_is_today(page, tmp_path):
+    """Optimum (SuccessFactors, 2026-10-23): "When are you available to start?" is a UI5 date picker the scan reads
+    as text; "Immediately" could not be parsed and the run stalled three times."""
+    from jobpilot.forms import FormSession
+
+    await page.set_content(PICKER.replace("Start Date", "When are you available to start?"))
+    form = FormSession(page, Resolver(Profile(), None, None), tmp_path / "r.pdf", lambda *a, **k: None)
+    obs = await form.scan()
+    field = obs["fields"][0]  # the fixture label does not reach the shadow input; the fill is what matters
+    await form.fill(field, "Immediately")
+    today = date.today()
+    expected = f"{['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][today.month - 1]} {today.day}, {today.year}"
+    assert await page.locator("ui5-date-picker").get_attribute("value") == expected
