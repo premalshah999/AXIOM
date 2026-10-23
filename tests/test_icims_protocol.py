@@ -136,3 +136,45 @@ def test_a_length_the_server_refused_becomes_the_fields_limit():
             + ": Your answer is over the maximum length of 100 characters. Do you have experience with Microsoft A")
     apply(fields, [], text)
     assert fields[0]["maxlength"] == 100 and fields[1]["maxlength"] == -1
+
+
+FORM = "https://cooperhealth.icims.com/forms?module=Forms&action=showForm&form=OFCCP_Pre&portalid=17"
+
+
+def test_the_forms_module_application_is_named_by_protocol():
+    """Cooper Health's employment application (2026-10-22): every caption read as the bare field name, the employer
+    rows were not history rows, and the run stopped on "ICertify; Month; Day; Emp1SupName"."""
+    fields = [
+        field("ICertify", "icims_f_ICertify", type_="checkbox", frame_url=FORM),
+        field("Work In US status", "icims_f_Work_In_US", type_="radio", frame_url=FORM),
+        field("Are you age 18 or over?", "icims_f_Over_18", type_="radio", frame_url=FORM),
+        field("LastName", "icims_f_LastName", frame_url=FORM),
+        field("EmpName1", "icims_f_EmpName1", frame_url=FORM),
+        field("EmpCity1", "icims_f_EmpCity1", frame_url=FORM),
+        field("Emp1SupName", "icims_f_Emp1SupName", frame_url=FORM),
+        field("JobTitle2", "icims_f_JobTitle2", frame_url=FORM),
+        field("MayWeContact", "icims_f_mayWeContact", type_="select", frame_url=FORM),
+        field("SchoolMajor", "icims_f_SchoolMajor", frame_url=FORM),
+        field("Month", "icims_f_Emp1From_Month", type_="select", frame_url=FORM),
+        field("Day", "icims_f_Emp1From_Date", type_="select", frame_url=FORM),
+        field("Year", "icims_f_Emp1From_Year", frame_url=FORM),
+        field("Month", "icims_f_DateAvailableToStart_Month", type_="select", frame_url=FORM),
+        field("Veteran status", "icims_f_Veteran", type_="radio", frame_url=FORM),
+    ]
+    apply(fields, [])
+    named = {f["name"]: (f["label"], f.get("group", "")) for f in fields}
+    assert named["icims_f_ICertify"][0].startswith("I certify")
+    assert named["icims_f_Work_In_US"][0] == "Are you legally authorized to work in the United States?"
+    assert named["icims_f_Over_18"][0] == "Are you age 18 or over?"  # the employer's caption is kept
+    assert named["icims_f_LastName"] == ("Last Name", "")
+    assert named["icims_f_EmpName1"] == ("Employer Name", "Work Experience 1")
+    assert named["icims_f_EmpCity1"] == ("City", "Work Experience 1")
+    assert named["icims_f_Emp1SupName"] == ("Supervisor Name", "Work Experience 1")
+    assert named["icims_f_JobTitle2"] == ("Job Title", "Work Experience 2")
+    assert named["icims_f_mayWeContact"] == ("May we contact this reference?", "Work Experience 1")
+    assert named["icims_f_SchoolMajor"] == ("Major", "Education 1")
+    assert [named[f"icims_f_Emp1From_{p}"] for p in ("Month", "Date", "Year")] == [
+        ("Start Date Month", "Work Experience 1"), ("Start Date Day", "Work Experience 1"),
+        ("Start Date Year", "Work Experience 1")]
+    assert named["icims_f_DateAvailableToStart_Month"][0] == "Date Available To Start Month"
+    assert named["icims_f_Veteran"][0] == "Veteran status"

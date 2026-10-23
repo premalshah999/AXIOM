@@ -44,3 +44,26 @@ async def test_an_unlabelled_self_id_radio_is_selected_by_its_value(page, tmp_pa
     assert await page.evaluate(
         "document.querySelector('input[name=icims_f_Veteran]:checked')?.value"
     ) == "NotProtectedVeteran"  # ICE's own code, as a person submitted it at REI Systems
+
+
+FORMS_MODULE = """<form><table>
+<tr><td>Are you age 18 or over? <input type="radio" name="icims_f_Over_18" id="icims_f_Over_18_Yes" value="Yes"> Yes
+<input type="radio" name="icims_f_Over_18" id="icims_f_Over_18_No" value="No"> No</td></tr>
+<tr><td>Yes <input type="radio" name="icims_f_Work_In_US" id="icims_f_Work_In_US_Yes" value="Yes">
+Yes <input type="radio" name="icims_f_Work_In_US" id="icims_f_Work_In_US_No" value="No"></td></tr>
+</table></form>"""
+
+
+async def test_forms_module_radios_read_their_values_when_captions_repeat(page, tmp_path):
+    """Cooper Health's employment application (2026-10-22) read [question, "Yes"] and ["Yes", "Yes"]."""
+    resume = tmp_path / "r.pdf"
+    resume.write_bytes(b"%PDF")
+    await page.set_content(FORMS_MODULE)
+    form = FormSession(page, Resolver(Profile(), None, None), resume, lambda *a, **k: None)
+    obs = await form.scan()
+    for name in ("icims_f_Over_18", "icims_f_Work_In_US"):
+        radio = next(f for f in obs["fields"] if f.get("name") == name)
+        assert radio["options"] == ["Yes", "No"], (name, radio["options"])
+    work = next(f for f in obs["fields"] if f.get("name") == "icims_f_Work_In_US")
+    await form.fill(work, "No")
+    assert await page.evaluate("document.querySelector('input[name=icims_f_Work_In_US]:checked')?.value") == "No"

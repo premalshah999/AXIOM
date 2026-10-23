@@ -742,7 +742,15 @@
       if (question === el.name && /^icims_f_[a-z]/i.test(el.name || '')) {
         question = el.name.replace(/^icims_f_/i, '').replace(/_/g, ' ') + ' status';
       }
-      options = group.map(radioText); value = group.find(x => x.checked); value = value ? radioText(value) : '';
+      options = group.map(radioText);
+      // iCIMS's Forms module (Cooper Health's employment application, 2026-10-22) prints "(o) Yes (o) No" after the
+      // question in one cell: each radio read its neighbour's caption, giving [question, "Yes"] or ["Yes", "Yes"],
+      // and no choice matched. Readable values ("Yes"/"No") are the choices then.
+      if (/^icims_f_/i.test(el.name || '') && group.every(x => x.value && x.value !== 'on' && /[a-z]{2}/i.test(x.value))
+          && (new Set(options).size < options.length || options.some(o => o === question || o.length > 60))) {
+        options = group.map(x => clean(SELF_ID[x.value] || x.value));
+      }
+      value = group.find(x => x.checked); value = value ? options[group.indexOf(value)] : '';
       // A phone field can contain a separate SMS-consent radio group. Its
       // question title belongs to the phone input, not these consent choices.
       if (!parent && /(?:text messages?|sms|marketing|newsletter)/i.test(options.join(' '))) {

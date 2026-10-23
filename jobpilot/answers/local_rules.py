@@ -44,6 +44,12 @@ from .text import normalize
 from .text import option_value
 from .text import yes_no
 
+# A page-language picker offers only language names (normalized: "español" keeps its letters).
+LANGUAGE_NAME = re.compile(
+    r"english|espa\w*ol|spanish|fran\w*ais|french|deutsch|german|portugu\w*s|portuguese|italiano|italian|"
+    r"chinese|中文|简体中文|繁體中文|日本語|japanese|한국어|korean|tiếng việt|vietnamese|polski|polish|русский|russian|"
+    r"العربية|arabic|हिन्दी|hindi|tagalog|kreyòl ayisyen|haitian creole"
+)
 
 class LocalRulesMixin:
     def _local(self, f):
@@ -75,6 +81,19 @@ class LocalRulesMixin:
                     supporting_facts=["fact:country_of_residence"],
                     reason="Applicant does not reside in the region this box applies to",
                 )
+        if (
+            "language" in label
+            and not re.search(r"\b(?:speak|spoken|fluen\w*|proficien\w*|read|write|written|native|know|languages)\b", label)
+            and f.get("type") in {"radio", "radiogroup", "pills", "select", "dropdown", "combobox"}
+            and options
+            and any(normalize(o) == "english" for o in options)
+            and all(LANGUAGE_NAME.fullmatch(normalize(o)) for o in options)
+        ):
+            # The page's own display language ("Select a Language: English / Español", Maximus tax-credit
+            # screening after PepsiCo's iCIMS form, 2026-10-22). The application is completed in English.
+            english = next(o for o in options if normalize(o) == "english")
+            return Answer(field_id=f["id"], value=english, disposition="answer", evidence_ids=["policy:language"],
+                          reason="The application is completed in English")
         if re.fullmatch(
             r"(?:are you (?:a |still a |still )?)?(?:still student|current student|currently (?:a )?student|still (?:in school|studying)|currently enrolled)(?: at .+)?",
             label,

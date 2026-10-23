@@ -2036,10 +2036,17 @@ class FormSession:
             for member in members:
                 radio = frame.locator(f'[data-jp-id="{member}"]')
                 # iCIMS's self-identification radios have no label; the scan offers their value (ICE 2026-10-19).
-                labels = await radio.evaluate(
-                    "e => [...e.labels].map(x=>x.innerText).join(' ').trim() || (e.value === 'on' ? '' : e.value || '')"
+                labels, own = await radio.evaluate(
+                    "e => [[...e.labels].map(x=>x.innerText).join(' ').trim() || (e.value === 'on' ? '' : e.value || ''),"
+                    " e.value === 'on' ? '' : e.value || '']"
                 )
-                candidates.append((radio, SELF_ID_CODES.get(labels, labels)))
+                candidates.append((radio, SELF_ID_CODES.get(labels, labels), SELF_ID_CODES.get(own, own)))
+            texts = [text for _, text, _ in candidates]
+            values = [own for _, _, own in candidates]
+            if len(set(texts)) < len(texts) and all(values) and len(set(values)) == len(values):
+                # Captions read from a neighbour repeat ("Yes", "Yes"); the scan offered the values (js/scan.js).
+                candidates = [(radio, own, own) for radio, _, own in candidates]
+            candidates = [(radio, text) for radio, text, _ in candidates]
             exact = [r for r, text in candidates if normalize(text) == normalize(value)]
             chosen = exact[0] if exact else None
             if chosen is None:

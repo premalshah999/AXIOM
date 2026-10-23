@@ -194,3 +194,17 @@ def test_a_province_only_work_location_is_outside_the_applicants_state():
     assert residence_outside("What province in Canada will you be working from?", provinces, FACTS) == "Maryland"
     states = ["Maryland", "Virginia", "New York"]
     assert residence_outside("What state will you be working from?", states, FACTS) is None
+
+
+def test_a_page_language_picker_takes_english(service):
+    """Maximus tax-credit screening after PepsiCo's iCIMS form (2026-10-22): an ASP.NET radio named
+    ctl00$MainContent$rbLanguage with English / Español stalled the run; the application is completed in English."""
+    picker = field("ctl00$MainContent$rbLanguage", ["English", "Español"], kind="radio")
+    assert local(service, picker).value == "English"
+    assert local(service, field("Select a Language", ["Español", "English", "Français"], kind="select")).value == "English"
+    # A question about the applicant's languages is not the page's language.
+    assert getattr(local(service, field("Which languages do you speak fluently?", ["English", "Spanish", "Other"])),
+                   "reason", "") != "The application is completed in English"
+    assert local(service, field("What language do you speak at home?", ["English", "Español"])) is None or \
+        local(service, field("What language do you speak at home?", ["English", "Español"])).reason != \
+        "The application is completed in English"
