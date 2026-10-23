@@ -273,7 +273,19 @@ def discover_due(
         attempted = (
             set(s.scalars(select(Run.job_id).where(Run.job_id.in_(list(good))).distinct())) if good else set()
         )
-    pipeline = len([j for j in good if j not in attempted])
+    # Only jobs the autopilot can still start fill the pipeline. Internships it excludes and jobs its active batch
+    # already skipped (employer cap, guards) counted as 37 waiting jobs while none could start; classification
+    # paused and 3,137 fresh postings stayed unranked with five of six workers idle (2026-10-23).
+    from .feeds import INTERN
+
+    batch = db.get_setting("job_board_autopilot", {}) or {}
+    decided = set(batch.get("considered_ids") or []) if batch.get("state") == "active" else set()
+    titles = {j["id"]: j.get("title") or "" for j in jobs}
+    interns_ok = bool(profile.get("include_internships"))
+    pipeline = len([
+        j for j in good
+        if j not in attempted and j not in decided and (interns_ok or not INTERN.search(titles.get(j, "")))
+    ])
     outcomes = classified_outcomes(db, jobs, profile)
     unclassified = [
         j["id"]
