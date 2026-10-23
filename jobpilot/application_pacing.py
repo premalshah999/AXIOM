@@ -18,10 +18,11 @@ from .features.knowledge.tables import KnAlias
 
 ASHBY_KEY = "application_pacing:ashby"
 ASHBY_GAP = 150
-# Platforms that take one application at a time with a gap between starts (seconds). Workable answered HTTP 412
-# "Something went wrong. We are working on this, please try again later." to every application after the third in
-# one minute (2026-10-23: 3 accepted, then 22 refused while the batch started ~25 Workable runs in four minutes).
-START_GAPS = {"ashby": ASHBY_GAP, "workable": 300}
+# Platforms that take one application at a time with a gap between starts (seconds). Workable answers HTTP 412
+# "Something went wrong. We are working on this, please try again later." once a candidate has applied a few times:
+# 3 accepted on 10-07, then 412s on 10-12/14; 4 accepted in one minute on 10-23 after nine quiet days, then every
+# apply refused for hours, five minutes apart too (no CAPTCHA involved). At most four starts a day.
+START_GAPS = {"ashby": ASHBY_GAP, "workable": 6 * 3600}
 
 
 def gap_key(ats):

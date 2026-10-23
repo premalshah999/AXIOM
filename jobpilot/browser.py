@@ -1607,7 +1607,9 @@ class BrowserEngine:
         if self.armed or result.get("waiting_kind") == "email" or result.get("recoverable") is False:
             return False
         receipt = result.get("receipt", {})
-        if receipt.get("type") == "explicit_rejection_page" and receipt.get("category") == "security":
+        if receipt.get("type") == "explicit_rejection_page" and receipt.get("category") in {"security", "temporary"}:
+            # "temporary": the employer asked to try again later and accepted nothing (Workable's HTTP 412 banner,
+            # 2026-10-23). Re-entering resubmitted at once, the reservation refused it, and the run ended "unknown".
             # A fresh GET belongs to a new, guarded attempt. Re-entering the
             # controller here loses the original submit reservation and its
             # explicit rejection evidence while refilling the failed form.
