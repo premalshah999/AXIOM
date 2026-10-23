@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { NewGradSweep } from "./features";
 import { RefreshCw, Search } from "lucide-react";
 import { api } from "./api";
+import { ApplyOutcomes, BulkBar, useApplyMany, useSelection } from "./bulk";
 import { useWorkspace } from "./context";
 import { useAction, useDraft, useNow, usePoll } from "./hooks";
-import { Pagination, usePagination } from "./pagination";
+import { Pagination, usePagination, type Paging } from "./pagination";
 import type { Board, BoardSettings, Listing } from "./types";
 import {
   ago,
@@ -36,55 +36,62 @@ function fitClass(score: number | null, minimum: number) {
   return score >= minimum ? "fit good" : "fit low";
 }
 
+// Jobs › Discovered pages, filters and counts come from the server (GET /api/job-board?page=): the dashboard used to
+// receive 500 listings (577 KB) every 20 s and filter them itself, so larger boards showed wrong totals and missed
+// rows (2026-10-22). Below-fit jobs can be ticked, a page or every match selected, and applied to in one request.
 export function DiscoveredJobs() {
-  const {
-    snapshot,
-    route,
-    go,
-    refresh: refreshSnapshot,
-    openJob,
-  } = useWorkspace();
-  const board = usePoll<Board>(
-    (signal) =>
-      api("/job-board?include_sources=false", "GET", undefined, signal),
-    20000,
-  );
+  const { snapshot, route, go, openJob, version, marks } = useWorkspace();
   const { pending, run } = useAction();
   const now = useNow(30000);
   const [query, setQuery] = useDraft("board-query", "");
   const [ats, setAts] = useDraft("board-ats", "all");
   const [level, setLevel] = useDraft("board-level", "all");
-  const [selected, setSelected] = useState<string[]>([]);
+  const [q, setQ] = useState(query.trim());
+  const [page, setPage] = useState(1);
+  const [size, setSize] = useState(25);
   const fit = route.filter || "all";
+  useEffect(() => {
+    const timer = window.setTimeout(() => setQ(query.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+  useEffect(() => setPage(1), [q, ats, level, fit, size]);
+  const key = new URLSearchParams({
+    include_sources: "false",
+    q,
+    ats,
+    level,
+    fit,
+    page: String(page),
+    size: String(size),
+  }).toString();
+  const board = usePoll<Board>(
+    (signal) => api(`/job-board?${key}`, "GET", undefined, signal),
+    20000,
+    [key, version],
+  );
+  const selection = useSelection();
+  const bulk = useApplyMany();
   const settings = board.data?.settings;
   const minimum = settings?.minimum_auto_fit ?? 70;
-  const q = query.trim().toLowerCase();
   const jobs = useMemo(
     () =>
-      (board.data?.jobs || []).filter((j) => {
-        if (
-          q &&
-          !`${j.title} ${j.company} ${j.location}`.toLowerCase().includes(q)
-        )
-          return false;
-        if (ats !== "all" && j.ats !== ats) return false;
-        if (level !== "all" && j.career_level !== level) return false;
-        if (fit === "eligible")
-          return j.status === "ready" && (j.score ?? 0) >= minimum;
-        if (fit === "unranked") return j.score == null;
-        if (fit === "below")
-          return (
-            j.status === "skipped" || (j.score != null && j.score < minimum)
-          );
-        return true;
+      (board.data?.jobs || []).map((j) => {
+        const mark = marks[j.id];
+        return mark && mark.at > board.requestedAt ? { ...j, status: mark.state } : j;
       }),
-    [board.data, q, ats, level, fit, minimum],
+    [board.data, marks, board.requestedAt],
   );
-  const paging = usePagination(jobs, [q, ats, level, fit].join("|"), 25);
-  const selectable = paging.items.filter((j) => !LOCKED.has(j.status));
-  const chosen = selected.filter((id) =>
-    (board.data?.jobs || []).some((j) => j.id === id && !LOCKED.has(j.status)),
-  );
+  const paging: Paging = {
+    items: jobs,
+    total: board.data?.total ?? jobs.length,
+    page: board.data?.page ?? page,
+    pages: board.data?.pages ?? 1,
+    size,
+    initialSize: 25,
+    setPage,
+    setSize,
+  };
+  const pageIds = jobs.filter((j) => !locked(j.status)).map((j) => j.id);
   const blockers = [
     !snapshot.config.workers_enabled && "application workers are disabled",
     !snapshot.control.auto_submit &&
@@ -94,26 +101,18 @@ export function DiscoveredJobs() {
   ].filter(Boolean) as string[];
   const canApply = blockers.length === 0;
 
-  const apply = (ids: string[]) =>
-    run(
-      "apply",
-      async () => {
-        const result = await api<{
-          queued: { job_id: string }[];
-          skipped: { job_id: string; reason: string }[];
-        }>("/job-board/apply", "POST", { job_ids: ids.slice(0, 50) });
-        setSelected([]);
-        await Promise.all([board.refresh(), refreshSnapshot()]);
-        return result;
-      },
-      (r) =>
-        r &&
-        `${plural(r.queued.length, "application")} queued.` +
-          (r.skipped.length
-            ? ` ${r.skipped.length} skipped: ${r.skipped[0].reason}${r.skipped.length > 1 ? " (and others)" : ""}.`
-            : ""),
-    );
+  const applySelected = async () => {
+    if (await bulk.apply(selection.ids)) selection.clear();
+  };
 
+  // One search: the employer boards and the internet-wide new-grad lists together. Two buttons and a second
+  // status panel (polled every 10 s) did the same job with different words (2026-10-23).
+  const sweep = usePoll<{ state?: string }>(
+    (signal) => api("/v2/discovery/feeds", "GET", undefined, signal),
+    30000,
+    [version],
+  );
+  const searching = (board.data?.scanning ?? 0) > 0 || sweep.data?.state === "running";
   const scan = () =>
     run(
       "scan",
@@ -122,12 +121,13 @@ export function DiscoveredJobs() {
           "/job-board/scrape",
           "POST",
         );
-        await board.refresh();
+        await api("/v2/discovery/feeds/refresh", "POST").catch(() => undefined);
+        await Promise.all([board.refresh(), sweep.refresh()]);
         return r;
       },
       (r) =>
         r &&
-        `Checking ${plural(r.queued_sources, "board")}. New listings appear here automatically.`,
+        `Searching ${plural(r.queued_sources, "employer board")} and the new-grad lists. New jobs appear here as they arrive.`,
     );
 
   if (!board.data)
@@ -137,42 +137,44 @@ export function DiscoveredJobs() {
       <Loading label="Loading fresh listings…" />
     );
   const b = board.data;
-  const platforms = [...new Set(b.jobs.map((j) => j.ats))].sort();
+  const fresh = b.fresh_total ?? b.jobs.length;
+  const span = b.max_age_hours === 720 ? "30 days" : b.max_age_hours === 168 ? "7 days" : "48 hours";
+  const platforms = b.platforms || [...new Set(b.jobs.map((j) => j.ats))].sort();
   const fits = [
     ["all", "Any fit"],
     ["eligible", "Eligible"],
+    ["uncertain", "Uncertain"],
     ["unranked", "Not ranked"],
     ["below", "Below fit"],
-  ];
+  ] as const;
   return (
     <section aria-label="Discovered jobs">
       <div className="board-status">
         <p>
-          <strong>{plural(b.jobs.length, "fresh US listing")}</strong> posted in
-          the last {b.max_age_hours === 720 ? "30 days" : b.max_age_hours === 168 ? "7 days" : "48 hours"}
-          {b.scanning > 0 ? (
-            <> · checking {plural(b.scanning, "board")} now</>
+          <strong>{plural(fresh, "job")} not applied to yet</strong>, US roles posted in the last {span}
+          {searching ? (
+            <> · searching now</>
           ) : (
             b.last_requested_at && (
               <> · last search {ago(b.last_requested_at, now)}</>
             )
           )}
           {settings?.auto_apply
-            ? ". The batch applies to eligible matches automatically."
-            : ". Automatic applications are off; apply manually or start a batch."}
+            ? ". The batch applies to eligible ones automatically; pick any others below."
+            : ". Automatic applications are off; pick jobs below or start a batch."}
         </p>
         <div className="board-actions">
           <button
             className="btn sm"
-            disabled={pending !== null || b.scanning > 0 || !settings?.enabled}
+            disabled={pending !== null || searching || !settings?.enabled}
             onClick={scan}
           >
             <RefreshCw
               size={14}
               aria-hidden="true"
-              className={b.scanning ? "spin" : ""}
+              className={searching ? "spin" : ""}
             />
-            {b.scanning ? "Discovery running" : "Search now"}
+            {searching ? "Searching…" : "Search now"}
           </button>
           <button
             className="link sm"
@@ -182,7 +184,6 @@ export function DiscoveredJobs() {
           </button>
         </div>
       </div>
-      <NewGradSweep onFinished={board.refresh} />
       {!settings?.enabled && (
         <p className="inline-warn">
           Discovery is off, so no new listings arrive.{" "}
@@ -199,7 +200,7 @@ export function DiscoveredJobs() {
           <Search size={15} aria-hidden="true" />
           <input
             type="search"
-            aria-label="Search fresh jobs"
+            aria-label="Search discovered jobs"
             placeholder="Role, company or city"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -228,36 +229,44 @@ export function DiscoveredJobs() {
           <option>Experience unspecified</option>
         </select>
         <div className="chips" role="group" aria-label="Filter by fit">
-          {fits.map(([id, label]) => (
-            <button
-              key={id}
-              className="chip"
-              aria-pressed={fit === id}
-              onClick={() =>
-                go({
-                  view: "jobs",
-                  tab: "discovered",
-                  filter: id === "all" ? undefined : id,
-                })
-              }
-            >
-              {label}
-            </button>
-          ))}
+          {fits.map(([id, label]) => {
+            const n = b.fits?.[id];
+            if (id !== "all" && n === 0 && fit !== id) return null;
+            return (
+              <button
+                key={id}
+                className="chip"
+                aria-pressed={fit === id}
+                onClick={() =>
+                  go({
+                    view: "jobs",
+                    tab: "discovered",
+                    filter: id === "all" ? undefined : id,
+                  })
+                }
+              >
+                {label}
+                {n !== undefined && <span className="chip-n">{n}</span>}
+              </button>
+            );
+          })}
         </div>
-        <button
-          className="btn primary sm toolbar-end"
-          disabled={!chosen.length || !canApply || pending !== null}
-          onClick={() => apply(chosen)}
-        >
-          {pending === "apply"
-            ? "Queuing…"
-            : `Apply to selected (${chosen.length})`}
-        </button>
       </div>
+      {bulk.last && <ApplyOutcomes result={bulk.last} onClose={bulk.dismiss} />}
+      {jobs.length > 0 && (
+        <BulkBar
+          selection={selection}
+          pageIds={pageIds}
+          matchingIds={b.selectable_ids}
+          matchingTotal={b.selectable_total}
+          disabled={!canApply}
+          applying={bulk.applying}
+          onApply={applySelected}
+        />
+      )}
       {!canApply && (
         <p className="muted sm apply-why">
-          Manual apply is unavailable: {blockers.join("; ")}.
+          Applying from this list is unavailable: {blockers.join("; ")}.
         </p>
       )}
       {jobs.length ? (
@@ -269,26 +278,13 @@ export function DiscoveredJobs() {
                   <th scope="col" className="cell-check">
                     <input
                       type="checkbox"
-                      aria-label="Select eligible jobs on this page"
-                      disabled={!selectable.length}
+                      aria-label="Select the open jobs on this page"
+                      disabled={!pageIds.length}
                       checked={
-                        !!selectable.length &&
-                        selectable.every((j) => selected.includes(j.id))
+                        !!pageIds.length &&
+                        pageIds.every((id) => selection.has(id))
                       }
-                      onChange={(e) =>
-                        setSelected(
-                          e.target.checked
-                            ? [
-                                ...new Set([
-                                  ...selected,
-                                  ...selectable.map((j) => j.id),
-                                ]),
-                              ].slice(0, 50)
-                            : selected.filter(
-                                (id) => !selectable.some((j) => j.id === id),
-                              ),
-                        )
-                      }
+                      onChange={(e) => selection.setMany(pageIds, e.target.checked)}
                     />
                   </th>
                   <th scope="col">Job</th>
@@ -303,24 +299,18 @@ export function DiscoveredJobs() {
                 </tr>
               </thead>
               <tbody>
-                {paging.items.map((j) => (
+                {jobs.map((j) => (
                   <BoardRow
                     key={j.id}
                     job={j}
                     minimum={minimum}
                     now={now}
-                    checked={chosen.includes(j.id)}
-                    limitReached={chosen.length >= 50}
-                    toggle={(on) =>
-                      setSelected(
-                        on
-                          ? [...selected, j.id]
-                          : selected.filter((id) => id !== j.id),
-                      )
-                    }
+                    checked={selection.has(j.id)}
+                    limitReached={selection.full}
+                    toggle={(on) => selection.toggle(j.id, on)}
                     canApply={canApply}
-                    applying={pending === "apply"}
-                    apply={() => apply([j.id])}
+                    applying={bulk.applying}
+                    apply={() => bulk.apply([j.id])}
                     open={() => openJob(j.id)}
                   />
                 ))}
@@ -332,23 +322,26 @@ export function DiscoveredJobs() {
       ) : (
         <Empty
           title={
-            b.jobs.length
-              ? "No listings match these filters"
-              : b.scanning
-                ? "Looking for fresh listings"
-                : "No fresh listings right now"
+            fresh
+              ? "No jobs match these filters"
+              : searching
+                ? "Searching for new jobs"
+                : "Nothing new to apply to right now"
           }
         >
-          {b.jobs.length
+          {fresh
             ? "Clear a filter to see more."
-            : b.scanning
-              ? "Employer boards are being checked. Listings appear as they arrive."
-              : `Only US roles posted in the last ${b.max_age_hours === 720 ? "30 days" : b.max_age_hours === 168 ? "7 days" : "48 hours"} with a known date qualify. The next scheduled search checks again.`}
+            : searching
+              ? "Employer boards and new-grad lists are being checked. Jobs appear as they arrive."
+              : `Jobs you applied to are in Pipeline. Only US roles posted in the last ${span} with a known date are listed; the next scheduled search checks again.`}
         </Empty>
       )}
     </section>
   );
 }
+
+// A listing in one of these states is already owned or protected; "pending:" is an Apply just made.
+const locked = (status: string) => LOCKED.has(status) || status.startsWith("pending:");
 
 function BoardRow({
   job: j,
@@ -373,7 +366,7 @@ function BoardRow({
   apply: () => void;
   open: () => void;
 }) {
-  const locked = LOCKED.has(j.status);
+  const closed = locked(j.status);
   const runState = [
     "queued",
     "running",
@@ -381,15 +374,15 @@ function BoardRow({
     "confirmed",
     "submission_unknown",
     "already_applied",
-  ].includes(j.status);
+  ].includes(j.status) || j.status.startsWith("pending:");
   return (
     <tr>
       <td className="cell-check">
         <input
           type="checkbox"
           aria-label={`Select ${j.title} at ${j.company}`}
-          disabled={locked || (!checked && limitReached)}
-          checked={checked}
+          disabled={closed || (!checked && limitReached)}
+          checked={checked && !closed}
           onChange={(e) => toggle(e.target.checked)}
         />
       </td>
@@ -424,7 +417,7 @@ function BoardRow({
         <StatePill state={runState ? j.status : "job:" + j.status} />
       </td>
       <td className="cell-actions">
-        {!locked && (
+        {!closed && (
           <div className="row-actions">
             <button
               className="btn sm"

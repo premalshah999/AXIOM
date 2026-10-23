@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { X } from "lucide-react";
 import "@fontsource-variable/dm-sans/opsz.css";
 import "./style.css";
 import { api, ApiError, SIGNED_OUT } from "./api";
 import {
+  NO_COUNTS,
   parseRoute,
   routeUrl,
   WorkspaceContext,
@@ -13,18 +14,23 @@ import {
   type Workspace,
 } from "./context";
 import { ToastContext, usePoll, type Toast } from "./hooks";
-import { deriveRows } from "./model";
+import { deriveRows, withMarks, type Marks } from "./model";
 import type { Snapshot } from "./types";
 import { ago, Loading } from "./ui";
 import { BatchView } from "./batch";
 import { JobsView } from "./jobs";
 import { LedgerView } from "./ledger";
-import { SetupView } from "./setup";
 import { JobPanel } from "./jobdetail";
 import { JobLinkIntake } from "./jobintake";
-import { ResumeEditor } from "./editor";
-import { AuthScreen, type AccountStatus } from "./account";
-import { guideLater, Onboarding } from "./onboarding";
+import type { AccountStatus } from "./account";
+import { guideLater } from "./guide";
+
+// Setup, the resume editor, sign-in and the setup guide are most of the dashboard's code and are rarely open: they
+// load when shown, so Batch and Jobs paint from a smaller bundle (2026-10-23).
+const SetupView = lazy(() => import("./setup").then((m) => ({ default: m.SetupView })));
+const ResumeEditor = lazy(() => import("./editor").then((m) => ({ default: m.ResumeEditor })));
+const AuthScreen = lazy(() => import("./account").then((m) => ({ default: m.AuthScreen })));
+const Onboarding = lazy(() => import("./onboarding").then((m) => ({ default: m.Onboarding })));
 
 const NAV: { view: View; label: string }[] = [
   { view: "batch", label: "Batch" },
@@ -128,21 +134,48 @@ function App() {
       .catch(() => setSetupGuide("done"));
   }, [auth, setupGuide]);
 
-  const rows = useMemo(
+  // Bumped by every refresh, so paged lists (Pipeline, Discovered, a job's attempts) re-read after an action.
+  const [version, setVersion] = useState(0);
+  const snapRefresh = snap.refresh;
+  const refresh = useCallback(async () => {
+    setVersion((v) => v + 1);
+    await snapRefresh();
+  }, [snapRefresh]);
+  const [marks, setMarks] = useState<Marks>({});
+  const markJobs = useCallback((ids: string[], state: string) => {
+    const at = Date.now();
+    setMarks((current) => {
+      // Marks older than a few minutes were confirmed long ago; drop them as new ones arrive.
+      const kept = Object.fromEntries(
+        Object.entries(current).filter(([, mark]) => at - mark.at < 300_000),
+      );
+      for (const id of ids) kept[id] = { state, at };
+      return kept;
+    });
+  }, []);
+  const derived = useMemo(
     () => (snap.data ? deriveRows(snap.data) : []),
     [snap.data],
+  );
+  const rows = useMemo(
+    () => withMarks(derived, marks, snap.requestedAt),
+    [derived, marks, snap.requestedAt],
   );
   const workspace = useMemo<Workspace | null>(
     () =>
       snap.data && {
         snapshot: snap.data,
         rows,
-        refresh: snap.refresh,
+        counts: snap.data.counts || NO_COUNTS,
+        refresh,
+        version,
+        marks,
+        markJobs,
         route,
         go,
         openJob: (job, run) => go({ ...route, job, run }),
       },
-    [snap.data, rows, snap.refresh, route, go],
+    [snap.data, rows, refresh, version, marks, markJobs, route, go],
   );
 
   useEffect(() => {
@@ -156,34 +189,38 @@ function App() {
 
   if (auth === "out")
     return (
-      <AuthScreen
-        notice={signOutReason}
-        onSignedIn={async () => {
-          setSignOutReason("");
-          setAuth("unknown");
-          setSetupGuide("unknown");
-          await snap.refresh();
-        }}
-      />
+      <Suspense fallback={<Loading label="Opening sign-in…" />}>
+        <AuthScreen
+          notice={signOutReason}
+          onSignedIn={async () => {
+            setSignOutReason("");
+            setAuth("unknown");
+            setSetupGuide("unknown");
+            await snap.refresh();
+          }}
+        />
+      </Suspense>
     );
 
   if (setupGuide === "needed")
     return (
-      <Onboarding
-        onDone={() => {
-          guideLater(false);
-          setSetupGuide("done");
-          snap.refresh();
-          go({ view: "batch" });
-          // go() keeps the scroll position within a view; the guide's long review page is not Batch.
-          window.scrollTo({ top: 0 });
-        }}
-        onExit={() => {
-          guideLater(true);
-          setSetupGuide("later");
-          window.scrollTo({ top: 0 });
-        }}
-      />
+      <Suspense fallback={<Loading label="Opening the setup guide…" />}>
+        <Onboarding
+          onDone={() => {
+            guideLater(false);
+            setSetupGuide("done");
+            snap.refresh();
+            go({ view: "batch" });
+            // go() keeps the scroll position within a view; the guide's long review page is not Batch.
+            window.scrollTo({ top: 0 });
+          }}
+          onExit={() => {
+            guideLater(true);
+            setSetupGuide("later");
+            window.scrollTo({ top: 0 });
+          }}
+        />
+      </Suspense>
     );
 
   if (!workspace)
@@ -277,15 +314,15 @@ function App() {
             <div className="intake-slot">
               <JobLinkIntake
                 request={api}
-                refresh={snap.refresh}
+                refresh={refresh}
                 autoApply={
                   snapshot.profile.autonomous &&
                   snapshot.control.auto_submit &&
                   !snapshot.control.paused
                 }
-                onImported={(job, message) => {
+                onImported={(jobId, message) => {
                   notify("ok", message);
-                  go({ ...route, job: job.id, run: undefined });
+                  go({ ...route, job: jobId, run: undefined });
                 }}
               />
             </div>
@@ -317,8 +354,10 @@ function App() {
           {route.view === "batch" && <BatchView />}
           {route.view === "jobs" && <JobsView />}
           {route.view === "ledger" && <LedgerView />}
-          {route.view === "setup" && <SetupView />}
-          {route.view === "editor" && <ResumeEditor />}
+          <Suspense fallback={<Loading />}>
+            {route.view === "setup" && <SetupView />}
+            {route.view === "editor" && <ResumeEditor />}
+          </Suspense>
         </main>
         {route.job && (
           <JobPanel

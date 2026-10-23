@@ -1,24 +1,10 @@
 import { useState } from "react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
-import { useAction, useNow, usePoll } from "./hooks";
-import { ago, ErrorLine, linkHost, plural, StatePill } from "./ui";
+import { useAction } from "./hooks";
+import { appliedState } from "./model";
+import { linkHost, plural, StatePill } from "./ui";
 
-type QueueItem = {
-  job_id: string;
-  title: string;
-  company: string;
-  url: string;
-  ats: string;
-};
-type ActiveItem = QueueItem & { run_id: string; state: string; since: string };
-type WaitingItem = QueueItem & {
-  requested_at: string;
-  code: string;
-  reason: string;
-  not_before: string;
-};
-type QueueView = { active: ActiveItem[]; waiting: WaitingItem[] };
 type LinkResult = {
   url: string;
   job_id?: string;
@@ -34,22 +20,23 @@ export function linksIn(text: string) {
   return [...new Set((text.match(LINKS) || []).map((u) => u.replace(/[.,;)]+$/, "")))];
 }
 
-function name(item: QueueItem) {
-  if (item.title) return item.company ? `${item.company} · ${item.title}` : item.title;
-  return linkHost(item.url) || item.url;
-}
-
 // Owner, 2026-10-22: queued applications in one place, and a pasted link goes straight into the queue.
+// The queue itself is the Pipeline list's "In progress" rows (applying, queued, waiting to start, waiting for an
+// email), counted by the server like every other figure. A second list of the same jobs here, polled every 5 s with
+// its own numbers, disagreed with the chips below it (owner, 2026-10-23: "so confusing for the job pipeline part").
 export function QueuePanel() {
-  const { refresh, openJob } = useWorkspace();
-  const queue = usePoll<QueueView>((signal) => api("/queue", "GET", undefined, signal), 5000);
+  const { refresh, counts, go, openJob, markJobs } = useWorkspace();
   const action = useAction();
-  const now = useNow(30000);
   const [text, setText] = useState("");
   const [results, setResults] = useState<LinkResult[]>([]);
   const links = linksIn(text);
-  const active = queue.data?.active || [];
-  const waiting = queue.data?.waiting || [];
+  const n = (state: string) => counts.states[state] ?? 0;
+  const parts = [
+    [n("running") + n("submitting"), "applying"],
+    [n("queued"), "queued"],
+    [n("pending:waiting"), "waiting to start"],
+    [n("waiting_email"), "waiting for an email"],
+  ] as const;
 
   const submit = async () => {
     if (!links.length) return;
@@ -64,7 +51,9 @@ export function QueuePanel() {
     if (answer) {
       setResults(answer.results);
       setText("");
-      await Promise.all([queue.refresh(), refresh()]);
+      for (const r of answer.results)
+        if (r.job_id && r.state !== "refused") markJobs([r.job_id], appliedState(r.state));
+      void refresh();
     }
   };
 
@@ -72,9 +61,12 @@ export function QueuePanel() {
     <section className="block queue" aria-labelledby="queue-title">
       <header className="block-head">
         <h2 id="queue-title">Queue</h2>
-        <span className="muted">
-          {active.length} applying · {waiting.length} waiting
-        </span>
+        <button
+          className="link sm"
+          onClick={() => go({ view: "jobs", tab: "pipeline", filter: "active" })}
+        >
+          {parts.map(([count, label]) => `${count} ${label}`).join(" · ")}
+        </button>
       </header>
       <form
         className="queue-drop"
@@ -112,74 +104,22 @@ export function QueuePanel() {
           {results.map((r) => (
             <li key={r.url}>
               <span>
-                <strong>{linkHost(r.url) || r.url}</strong>
+                {r.job_id ? (
+                  <button className="link job-open" onClick={() => openJob(r.job_id!)}>
+                    <strong>{linkHost(r.url) || r.url}</strong>
+                  </button>
+                ) : (
+                  <strong>{linkHost(r.url) || r.url}</strong>
+                )}
                 <span className="muted">{r.message || ""}</span>
               </span>
               <StatePill
-                state={r.state === "refused" ? "failed" : r.state === "waiting" ? "queued" : r.state}
-                label={
-                  r.state === "refused"
-                    ? "Not added"
-                    : r.state === "waiting"
-                      ? "Waiting"
-                      : r.state === "preparing"
-                        ? "Preparing resume"
-                        : r.state === "queued"
-                          ? "Queued"
-                          : undefined
-                }
+                state={r.state === "refused" ? "failed" : appliedState(r.state)}
+                label={r.state === "refused" ? "Not added" : undefined}
               />
             </li>
           ))}
         </ul>
-      )}
-      <ErrorLine error={queue.error} retry={queue.refresh} />
-      {active.length + waiting.length > 0 ? (
-        <ol className="list queue-list">
-          {active.map((item) => (
-            <li key={item.run_id}>
-              <span>
-                <button className="link" onClick={() => openJob(item.job_id, item.run_id)}>
-                  <strong>{name(item)}</strong>
-                </button>
-                <span className="muted">
-                  {item.ats} · started {ago(item.since, now)}
-                </span>
-              </span>
-              <StatePill state={item.state} />
-            </li>
-          ))}
-          {waiting.map((item, i) => (
-            <li key={item.job_id}>
-              <span>
-                <button className="link" onClick={() => openJob(item.job_id)}>
-                  <strong>
-                    {i + 1}. {name(item)}
-                  </strong>
-                </button>
-                <span className="muted">
-                  {item.reason || "Waiting for a free worker"} · asked {ago(item.requested_at, now)}
-                </span>
-              </span>
-              <button
-                className="btn sm quiet"
-                disabled={action.pending === "remove-" + item.job_id}
-                onClick={async () => {
-                  await action.run(
-                    "remove-" + item.job_id,
-                    () => api(`/queue/${item.job_id}`, "DELETE"),
-                    "Removed from the queue",
-                  );
-                  await queue.refresh();
-                }}
-              >
-                Remove
-              </button>
-            </li>
-          ))}
-        </ol>
-      ) : (
-        queue.data && <p className="block-note">Nothing is queued. Paste a job link above to start one.</p>
       )}
     </section>
   );

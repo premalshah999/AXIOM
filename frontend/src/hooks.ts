@@ -9,6 +9,11 @@ import {
 
 // Abortable, non-overlapping polling that pauses while the tab is hidden and
 // keeps the last good data on transient errors.
+//
+// A background poll whose answer is unchanged keeps the same data object, so nothing re-renders, and the next poll
+// waits longer (up to 3× the interval) until something changes. The dashboard re-rendered every view each poll
+// whether or not anything had changed (2026-10-22). `refresh()` and changed deps always fetch now and commit.
+// `requestedAt` is when the request behind the shown data started: optimistic marks made after it still apply.
 export function usePoll<T>(
   load: (signal: AbortSignal) => Promise<T>,
   interval: number,
@@ -19,46 +24,79 @@ export function usePoll<T>(
   const [error, setError] = useState<Error | null>(null);
   const [failures, setFailures] = useState(0);
   const [updatedAt, setUpdatedAt] = useState(0);
+  const [requestedAt, setRequestedAt] = useState(0);
   const inflight = useRef<AbortController | null>(null);
   const loader = useRef(load);
+  const last = useRef("");
+  const lastGood = useRef(0);
+  const delay = useRef(interval);
   loader.current = load;
 
-  const run = useCallback(async (force: boolean) => {
-    if (inflight.current) {
-      if (!force) return;
-      inflight.current.abort();
-    }
-    const controller = new AbortController();
-    inflight.current = controller;
-    try {
-      const result = await loader.current(controller.signal);
-      if (controller.signal.aborted) return;
-      setData(result);
-      setError(null);
-      setFailures(0);
-      setUpdatedAt(Date.now());
-    } catch (e) {
-      if (controller.signal.aborted || (e as Error).name === "AbortError")
-        return;
-      setError(e as Error);
-      setFailures((n) => n + 1);
-    } finally {
-      if (inflight.current === controller) inflight.current = null;
-    }
-  }, []);
+  const run = useCallback(
+    async (force: boolean) => {
+      if (inflight.current) {
+        if (!force) return;
+        inflight.current.abort();
+      }
+      const controller = new AbortController();
+      inflight.current = controller;
+      const started = Date.now();
+      try {
+        const result = await loader.current(controller.signal);
+        if (controller.signal.aborted) return;
+        let text = "";
+        try {
+          text = JSON.stringify(result);
+        } catch {
+          text = "";
+        }
+        const same = text !== "" && text === last.current;
+        last.current = text;
+        lastGood.current = Date.now();
+        delay.current = same && !force ? Math.min(delay.current * 1.5, interval * 3) : interval;
+        if (!same || force) {
+          setData(result);
+          setUpdatedAt(lastGood.current);
+          setRequestedAt(started);
+        }
+        setError(null);
+        setFailures(0);
+      } catch (e) {
+        if (controller.signal.aborted || (e as Error).name === "AbortError")
+          return;
+        delay.current = interval;
+        setError(e as Error);
+        setUpdatedAt(lastGood.current);
+        setFailures((n) => n + 1);
+      } finally {
+        if (inflight.current === controller) inflight.current = null;
+      }
+    },
+    [interval],
+  );
 
   useEffect(() => {
     if (!enabled) return;
-    run(true);
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") run(false);
-    }, interval);
+    let stopped = false;
+    let timer = 0;
+    const schedule = () => {
+      if (!stopped) timer = window.setTimeout(tick, delay.current);
+    };
+    const tick = () => {
+      if (document.visibilityState === "visible") run(false).finally(schedule);
+      else schedule();
+    };
+    delay.current = interval;
+    run(true).finally(schedule);
     const visible = () => {
-      if (document.visibilityState === "visible") run(false);
+      if (document.visibilityState !== "visible") return;
+      delay.current = interval;
+      run(false);
     };
     document.addEventListener("visibilitychange", visible);
     return () => {
-      window.clearInterval(timer);
+      stopped = true;
+      window.clearTimeout(timer);
       document.removeEventListener("visibilitychange", visible);
       inflight.current?.abort();
       inflight.current = null;
@@ -67,7 +105,7 @@ export function usePoll<T>(
   }, [enabled, interval, ...deps]);
 
   const refresh = useCallback(() => run(true), [run]);
-  return { data, error, failures, updatedAt, refresh, setData };
+  return { data, error, failures, updatedAt, requestedAt, refresh, setData };
 }
 
 // In-memory drafts survive polling re-renders and view switches within the
