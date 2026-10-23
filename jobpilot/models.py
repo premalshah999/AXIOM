@@ -10,6 +10,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import httpx
+from sqlalchemy import case, select, update
 
 from .db import Budget, Event, Run
 from .model_admission import admission, priority
@@ -269,19 +270,29 @@ class MeteredTransport(httpx.AsyncBaseTransport):
             if not budget:
                 budget = Budget(day=day, spent=0, submissions=0)
                 s.add(budget)
-            run = s.get(Run, self.run_id) if self.run_id else None
+            # Columns only: s.get(Run) decoded the whole packet on the shared loop before every model call.
+            run = (
+                s.execute(
+                    select(Run.model_calls, Run.packet["worker_pool"].as_string().label("pool")).where(
+                        Run.id == self.run_id
+                    )
+                ).first()
+                if self.run_id
+                else None
+            )
             if budget.spent + reserve > self.config.daily_budget_usd:
                 raise BudgetExceeded("Daily model budget reached")
             from .tiers import call_limit
 
-            if run and run.model_calls >= call_limit(
-                self.config, self.tier, (run.packet or {}).get("worker_pool")
-            ):
+            if run and run.model_calls >= call_limit(self.config, self.tier, run.pool):
                 raise BudgetExceeded("Application model-call limit reached")
             budget.spent += reserve
             if run:
-                run.cost += reserve
-                run.model_calls += 1
+                s.execute(
+                    update(Run)
+                    .where(Run.id == self.run_id)
+                    .values(cost=Run.cost + reserve, model_calls=Run.model_calls + 1)
+                )
         # On transport failure retain the reservation conservatively: billing outcome is unknown.
         started = time.monotonic()
         try:
@@ -351,8 +362,13 @@ class MeteredTransport(httpx.AsyncBaseTransport):
         with self.db.exclusive() as s:
             budget = s.get(Budget, day)
             budget.spent = max(0, budget.spent + actual - reserve)
-            if self.run_id and (run := s.get(Run, self.run_id)):
-                run.cost = max(0, run.cost + actual - reserve)
+            # An UPDATE, not s.get(Run): loading the row decoded its whole packet on the shared loop per model call.
+            delta = actual - reserve
+            if self.run_id and s.execute(
+                update(Run)
+                .where(Run.id == self.run_id)
+                .values(cost=case((Run.cost + delta < 0, 0), else_=Run.cost + delta))
+            ).rowcount:
                 s.add(
                     Event(
                         run_id=self.run_id,

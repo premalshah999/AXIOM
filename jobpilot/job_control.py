@@ -131,10 +131,11 @@ async def manage(service, job_id, action, *, controller_policy=None, reopen_clos
 def _run_and_control(db, run_id):
     """Synchronous DB read; watch() runs it in a thread so the shared event loop never blocks on it."""
     with db.session() as s:
-        run = s.get(Run, run_id)
-        if not run:
+        # Columns only: the whole row decodes the run's packet (resume text, checkpoints) every second per run.
+        row = s.execute(select(Run.state, Run.job_id).where(Run.id == run_id)).first()
+        if not row:
             return None, {}
-        return run.state, state(db, run.job_id)
+        return row.state, state(db, row.job_id)
 
 
 async def watch(service, engine, execution, run_id):

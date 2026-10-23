@@ -20,7 +20,9 @@ class SlowDB:
     def session(self):
         self.threads.append(threading.current_thread() is threading.main_thread())
         time.sleep(self.read_seconds)
-        yield SimpleNamespace(get=lambda model, key: SimpleNamespace(state=self.run_state, job_id="job-1"))
+        row = SimpleNamespace(state=self.run_state, job_id="job-1")
+        # watch() reads columns only (select(Run.state, Run.job_id)), never the whole row with its packet.
+        yield SimpleNamespace(get=lambda model, key: row, execute=lambda statement: SimpleNamespace(first=lambda: row))
 
     def get_setting(self, key, default=None):
         return {"state": self.control_state} if self.control_state else default
