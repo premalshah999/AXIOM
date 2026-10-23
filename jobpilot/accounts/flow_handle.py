@@ -215,7 +215,14 @@ class FlowHandleMixin:
                 # Keep the employer's own login; a Create this run pressed may have replaced it.
                 previous = getattr(self.store, "previous", lambda url: None)(account_url)
                 login = previous or saved or self.store.shared()
-                self.store.save(account_url, login, "exists" if exists_refused or known else "signing_in")
+                record = getattr(self.store, "record", lambda url: {})(account_url)
+                if record.get("absent_create_at"):
+                    # The one Create after unanswered resets found the account (L3Harris 2026-10-23: "Account Already
+                    # Exists"): its resets do not reach the mailbox, so only the owner can recover it. No more resets.
+                    settled = "password_unknown"
+                else:
+                    settled = "exists" if exists_refused or known else "signing_in"
+                self.store.save(account_url, login, settled)
                 await e.form.click(signin_links[0]["id"], auth_control=True)
                 e.page = e.form.page
                 return True

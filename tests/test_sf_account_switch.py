@@ -316,3 +316,19 @@ async def test_a_recent_reset_still_waits_for_its_email(service):
     assert not flow.reset_unanswered(URL, "reset_requested")
     flow.store.save(URL, flow.store.shared(), "reset_requested", reset_requested_at=time.time() - 3600)
     assert flow.reset_unanswered(URL, "reset_requested")
+
+
+async def test_an_existing_account_found_by_the_one_create_stays_password_unknown(service):
+    """L3Harris (2026-10-23): the one Create answered "Account Already Exists"; its resets never reach the mailbox."""
+    exists = {
+        "fields": _fields("Choose Password", "Retype Password"),
+        "controls": [{"id": "signin", "label": "Please sign in"}, {"id": "create", "label": "Create Account"}],
+        "errors": ["Account Already Exists"],
+        "text": "",
+    }
+    flow, form, scope = _sf_flow(service, exists)
+    flow.store.save(URL, flow.store.shared(), "password_unknown", absent_create_at="2026-10-23T16:55:00+00:00")
+    flow.attempts.add(("absent", scope))
+    assert await flow.handle()
+    assert form.clicked == ["signin"]
+    assert flow.store.state(URL) == "password_unknown"
