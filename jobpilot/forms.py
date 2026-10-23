@@ -79,6 +79,18 @@ def name_phone_numbers(fields):
 SELF_ID_FORM = re.compile(r"self-identification|\bCC-305\b|\bVEVRAA\b", re.I)
 
 
+# A text box that asks for a number of years takes a number. Oracle's "Total Experience In Years"
+# (totalExperienceInYears, HEXAWARE 2026-10-23) got a paragraph and answered "Enter a valid number" until the run stalled.
+YEAR_COUNT = re.compile(r"\bin years\b|\b(?:number|no\.?) of years\b|^how many years\b|\byears of (?:total |relevant )?experience\b",
+                        re.I)
+
+
+def numeric_year_counts(fields):
+    for f in fields:
+        if f.get("type") == "text" and not f.get("options") and YEAR_COUNT.search(str(f.get("label") or "")):
+            f["type"] = "number"
+
+
 def label_signature_date(fields, text):
     """The federal self-identification forms (CC-305 "Voluntary Self-Identification of Disability") date the form with
     three controls under a "Date" caption the scanner does not attach: bare Month, Day and Year (DecisionPoint, iCIMS,
@@ -1195,6 +1207,7 @@ class FormSession:
         link_companion_text(self.fields.values())
         label_signature_date(list(self.fields.values()), "\n".join(texts))
         icims_protocol.apply(list(self.fields.values()), list(self.buttons.values()), "\n".join(texts))
+        numeric_year_counts(self.fields.values())
         profile = getattr(getattr(self, "resolver", None), "profile", None)
         taleo_protocol.apply(
             list(self.fields.values()),
