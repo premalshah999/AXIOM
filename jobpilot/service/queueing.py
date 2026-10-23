@@ -111,8 +111,8 @@ class QueueingMixin:
     ):
         """`owner_pick`: the owner applied or pasted this job themselves. Owner, 2026-10-22: "if I say apply, then it
         should apply no questions asked." Fit and policy filters (target roles, internships, career level, the
-        per-employer cap, eligibility conflicts) are the autopilot's, not the owner's; duplicate-submission guards,
-        pauses, budgets and pacing still apply."""
+        per-employer cap, platform focus, eligibility conflicts) are the autopilot's, not the owner's;
+        duplicate-submission guards, pauses, budgets and pacing still apply."""
         from ..controller_policy import validate_policy
         from ..tiers import job_tier
 
@@ -136,6 +136,12 @@ class QueueingMixin:
             from ..job_control import require_running
 
             require_running(s, job_id)
+            from ..owner_apply import PICK, picked
+
+            if owner_pick and not job.demo and not picked(s, job_id):
+                s.add(Setting(key=PICK + job_id, value={"at": now()}))  # Kept only if this queue succeeds.
+            # Automatic retries of the owner's pick (stalls, repair, tiers) keep the owner's say.
+            owner_pick = owner_pick or picked(s, job_id)
             if mode == "submit" and not job.demo and not owner_pick:
                 from ..features.discovery.roles import matching_role
                 from ..features.discovery.policy import SENIOR
@@ -217,7 +223,7 @@ class QueueingMixin:
 
                 if not owner_pick:
                     require_company_limit(s, job)
-                require_ats_admission(s, job)
+                require_ats_admission(s, job, owner_pick=owner_pick)
                 if not self.mail.shared_sender_free(s, job):
                     raise QueueBlocked(
                         "Another application is verifying with this platform's email sender; this one waits its turn",

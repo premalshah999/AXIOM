@@ -58,3 +58,24 @@ async def test_the_owners_pick_still_never_resubmits(service):
     with pytest.raises(QueueBlocked) as err:
         await service.queue("done", "submit", owner_pick=True)
     assert err.value.code == "submitted_or_uncertain"
+
+
+async def test_retries_of_the_owners_pick_keep_the_owners_say(service):
+    """A stalled or repaired run of the owner's pick is retried without owner_pick; the saved pick still counts."""
+    from jobpilot.db import Setting
+
+    service.db.set_setting("profile", {"target_roles": ["Software Development Engineer"]})
+    with service.db.exclusive() as s:
+        s.add(Job(id="kept", identity="kept", url="https://example.test/job/11", title="", status="ready"))
+        s.add(Setting(key="owner_pick:kept", value={"at": "2026-10-22T00:00:00"}))
+    try:
+        await service.queue("kept", "submit", retry=True)
+    except QueueBlocked as err:
+        assert err.code != "target_role"
+    except ValueError:
+        pass
+    with service.db.exclusive() as s:
+        s.add(Job(id="auto", identity="auto", url="https://example.test/job/12", title="", status="ready"))
+    with pytest.raises(QueueBlocked) as err:
+        await service.queue("auto", "submit")
+    assert err.value.code == "target_role"

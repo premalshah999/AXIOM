@@ -37,9 +37,11 @@ class ExecutionMixin:
                 if not control.get("auto_submit"):
                     raise ValueError("Automatic submission was disabled")
                 from ..application_pacing import require_company_limit, require_ats_focus
+                from ..owner_apply import picked
 
-                require_ats_focus(s, job, run)
-                require_company_limit(s, job, run_id)
+                if not picked(s, job.id):  # The owner's own pick passed these at the queue on purpose.
+                    require_ats_focus(s, job, run)
+                    require_company_limit(s, job, run_id)
                 budget = s.get(Budget, day)
                 if not budget:
                     budget = Budget(day=day, spent=0, submissions=0)

@@ -14,8 +14,14 @@ from .admission import QueueBlocked
 from .db import Job, Resume, Setting, now
 
 KEY = "owner_apply:"
+# A job the owner applied to or pasted. Its retries keep the owner's say over the autopilot's fit filters.
+PICK = "owner_pick:"
 OWNER_APPROVED = "Owner approved: "
 PREPARING = "Preparing a tailored resume first. The application starts on its own when it's ready."
+
+
+def picked(session, job_id):
+    return session.get(Setting, PICK + job_id) is not None
 
 
 def _later(not_before):

@@ -34,3 +34,27 @@ def test_final_reservation_rechecks_scope_before_spending_submission(service):
     assert caught.value.code == "ats_focus"
     with service.db.session() as session:
         assert session.get(Run, "run").state == "running"
+
+
+async def test_the_owners_pick_skips_the_focus_at_the_queue_and_the_final_reservation(service):
+    """Owner, 2026-10-22: a pasted JobDiva link was refused "excluded by the saved platform focus"."""
+    from jobpilot.db import Setting
+
+    service.db.set_setting("ats_focus", {"exclude": ["greenhouse"]})
+    service.db.set_setting("control", {"auto_submit": True})
+    with service.db.exclusive() as session:
+        session.add(Job(id="focus", identity="focus", url="https://example.test/job/123", ats="greenhouse",
+                        title="Software Engineer", status="ready"))
+        require_ats_admission(session, session.get(Job, "focus"), owner_pick=True)
+    try:
+        await service.queue("focus", "submit", owner_pick=True)
+    except QueueBlocked as err:
+        assert err.code != "ats_focus"
+    except ValueError:  # Past the focus: no resume is uploaded in this synthetic database.
+        pass
+    with service.db.exclusive() as session:
+        session.merge(Setting(key="owner_pick:focus", value={"at": "2026-10-22T00:00:00"}))
+        session.add(Run(id="run", job_id="focus", mode="submit", state="running", packet={}))
+    service.reserve_submission("run")
+    with service.db.session() as session:
+        assert session.get(Run, "run").state == "submitting"

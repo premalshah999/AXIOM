@@ -115,10 +115,11 @@ def require_ats_focus(session, job, run=None):
         raise QueueBlocked("This ATS is excluded by the saved platform focus", code="ats_focus")
 
 
-def require_ats_admission(session, job, run_id=None):
-    """Defer additional Ashby jobs before they occupy DBOS application tasks."""
+def require_ats_admission(session, job, run_id=None, owner_pick=False):
+    """Defer additional Ashby jobs before they occupy DBOS application tasks. The owner's own pick skips the focus."""
     current = session.get(Run, run_id) if run_id else None
-    require_ats_focus(session, job, current)
+    if not owner_pick:
+        require_ats_focus(session, job, current)
     if _exempt(job, current):
         return
     limit = ats_limit(session, _get(job, "ats"))
