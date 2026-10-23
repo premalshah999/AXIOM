@@ -1490,10 +1490,19 @@ class FormSession:
                             "unsupported", "Answer validation rejected this choice: " + supported.reason
                         )
                     if supported.value != option["text"]:
-                        raise ChoiceRejected(
-                            "unsupported",
-                            f"Applicant evidence supports the offered option {supported.value[:80]!r} instead",
+                        # The evidence names a sibling option: choose it rather than refuse. BNY's salary menu offers
+                        # 70000, 80000, ... for a saved "70,001 - 100,000"; every choose was refused with "supports
+                        # '80000' instead" and the run stalled (2026-10-23).
+                        alternative = next(
+                            (o for o in options if o["text"] == supported.value and o["leaf"] and not o["disabled"]),
+                            None,
                         )
+                        if alternative is None:
+                            raise ChoiceRejected(
+                                "unsupported",
+                                f"Applicant evidence supports the offered option {supported.value[:80]!r} instead",
+                            )
+                        option = alternative
                 if inline or field["type"] == "select":
                     await self.fill(field, option["text"])
                     # SuccessFactors (Corning, live probe) keeps aria-invalid/"…is required" from an

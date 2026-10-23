@@ -83,3 +83,30 @@ async def test_greenhouse_phone_country_commits_short_display_through_form(page,
         "choose", observed["id"], obs["revision"], owner_id=obs["owner_id"], option_id=options[0]["id"]
     )
     assert chosen.executed and not chosen.failure_category
+
+
+async def test_a_choice_the_evidence_does_not_support_takes_the_supported_sibling(page, service, tmp_path):
+    """BNY (2026-10-23): every choose on its salary menu was refused with "evidence supports '80000' instead" and the
+    run stalled. The supported offered option is chosen instead."""
+    from jobpilot.forms import FormSession
+    from jobpilot.answers import Resolver
+    from jobpilot.schemas import Address, Profile
+
+    await page.set_content("""<label for=c>Country of residence</label>
+      <select id=c><option value="">Select</option><option>Canada</option><option>United States</option></select>""")
+    form = FormSession(
+        page,
+        Resolver(Profile(address=Address(country="United States")), service.db, service.config),
+        tmp_path / "resume.pdf",
+        lambda *a: None,
+    )
+    obs = await form.scan()
+    field = next(f for f in form.fields.values() if f["label"] == "Country of residence")
+    options = await form.native_options(field)
+    canada = next(o for o in options if o["text"] == "Canada")
+    obs = await form.scan()
+    chosen = await form.control_action(
+        "choose", field["id"], obs["revision"], owner_id=obs["owner_id"], option_id=canada["id"]
+    )
+    assert chosen.executed and not chosen.failure_category
+    assert await page.evaluate("document.querySelector('#c').value") == "United States"
