@@ -1566,6 +1566,42 @@ select {
   margin: -6px 0 12px;
   color: var(--text-3);
 }
+/* Apply to selected (bulk.tsx): one line above the list, then what happened to each job. */
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.bulk-count {
+  color: var(--text);
+  font-weight: 560;
+}
+.bulk-outcomes {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+}
+.bulk-outcomes .block-links {
+  align-items: center;
+}
+.bulk-outcomes .list li .muted {
+  font-size: 13px;
+}
+.bulk-outcomes .block-note {
+  margin-bottom: 6px;
+}
+.bulk-each summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 13px;
+  padding: 4px 0;
+}
 .ledger-summary {
   margin: -4px 0 16px;
   color: var(--text-2);

@@ -9,6 +9,7 @@ calls.
 from datetime import UTC, datetime, timedelta
 from typing import Awaitable, Callable
 
+from sqlalchemy import select
 
 from .._store import digest, now
 from .graduation import graduation_gate
@@ -145,36 +146,41 @@ async def classify(db, jobs: list[dict], fn: ClassifyFn, policy: DiscoveryPolicy
     return report
 
 
+def _rows(db, jobs: list[dict], pversion: str) -> dict:
+    """job_id -> its current-version classification row, read a thousand keys per query.
+
+    One primary-key read per posting was ~2,700 queries per call, made by every autopilot tick and the Batch page's
+    readiness block (2026-10-22)."""
+    keys = {job["id"]: cache_key(job, pversion) for job in jobs}
+    wanted = list(dict.fromkeys(keys.values()))
+    found = {}
+    with db.session() as s:
+        for start in range(0, len(wanted), 1000):
+            query = select(DcClassification).where(DcClassification.id.in_(wanted[start : start + 1000]))
+            found.update((row.id, row) for row in s.scalars(query))
+    return {job_id: found[key] for job_id, key in keys.items() if key in found}
+
+
 def eligible(db, jobs: list[dict], profile: dict, policy: DiscoveryPolicy) -> dict:
     """job_id -> outcome, only for the current description/profile/policy version."""
-    pversion = profile_version(profile)
+    rows = _rows(db, jobs, profile_version(profile))
     out = {}
-    with db.session() as s:
-        for job in jobs:
-            row = s.get(DcClassification, cache_key(job, pversion))
-            r = (row.result or {}) if row and row.status == "ok" else {}
-            # Rankings made before the graduation check still respect it, without a re-rank.
-            if (
-                r.get("eligible")
-                and (r.get("score") or 0) >= policy.minimum_fit
-                and not graduation_gate(job, profile)
-            ):
-                out[job["id"]] = r
+    for job in jobs:
+        row = rows.get(job["id"])
+        r = (row.result or {}) if row and row.status == "ok" else {}
+        # Rankings made before the graduation check still respect it, without a re-rank.
+        if (
+            r.get("eligible")
+            and (r.get("score") or 0) >= policy.minimum_fit
+            and not graduation_gate(job, profile)
+        ):
+            out[job["id"]] = r
     return out
 
 
 def outcomes(db, jobs: list[dict], profile: dict) -> dict:
     """job_id -> current-version classification row summary (any status)."""
-    pversion = profile_version(profile)
-    out = {}
-    with db.session() as s:
-        for job in jobs:
-            row = s.get(DcClassification, cache_key(job, pversion))
-            if row:
-                out[job["id"]] = {
-                    "status": row.status,
-                    "result": row.result or {},
-                    "retry_at": row.retry_at,
-                    "error": row.error,
-                }
-    return out
+    return {
+        job_id: {"status": row.status, "result": row.result or {}, "retry_at": row.retry_at, "error": row.error}
+        for job_id, row in _rows(db, jobs, profile_version(profile)).items()
+    }

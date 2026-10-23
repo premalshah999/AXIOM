@@ -1,9 +1,8 @@
 import { useMemo, useState } from "react";
-import { PipelineReadiness } from "./features";
 import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useDraft, useNow, usePoll } from "./hooks";
-import { stateInfo, type JobRow } from "./model";
+import { appliedState, STATES } from "./model";
 import { Pagination, usePagination } from "./pagination";
 import { OPEN_JOB_LINK } from "./jobintake";
 import { groupQuestions, QuestionCard } from "./questions";
@@ -39,7 +38,6 @@ export function BatchView() {
       <div className="batch-grid">
         <div className="batch-main">
           <FirstRun mail={mail.data} />
-          <PipelineReadiness />
           <Owners mail={mail.data} workers={health.data?.application_workers} />
           <Outcomes />
         </div>
@@ -65,9 +63,9 @@ const KEY_NAMES: Record<string, string> = {
 
 /** Until the first job exists: the few things that decide whether the first application works. */
 function FirstRun({ mail }: { mail: MailStatus | null }) {
-  const { snapshot, go, refresh } = useWorkspace();
+  const { snapshot, counts, go, refresh } = useWorkspace();
   const { pending, run } = useAction();
-  if (snapshot.jobs.length > 0) return null;
+  if (counts.jobs > 0 || snapshot.jobs.length > 0) return null;
   const submitting = snapshot.control.auto_submit;
   const p = snapshot.profile;
   const boxes = mail?.mailboxes.filter((m) => m.state === "connected").length ?? 0;
@@ -140,7 +138,7 @@ function FirstRun({ mail }: { mail: MailStatus | null }) {
     {
       done: false,
       title: "First application",
-      detail: "Paste a job posting link, then choose Rank and apply in its panel. Or start a batch above.",
+      detail: "Paste a job link in Jobs › Pipeline (it goes straight into the queue), pick jobs in Discovered, or start a batch above.",
       action: "Add job link",
       onClick: () => window.dispatchEvent(new Event(OPEN_JOB_LINK)),
     },
@@ -172,7 +170,7 @@ function FirstRun({ mail }: { mail: MailStatus | null }) {
 }
 
 function BatchStatus() {
-  const { snapshot, refresh, go } = useWorkspace();
+  const { snapshot, counts, refresh, go } = useWorkspace();
   const { pending, run } = useAction();
   const now = useNow();
   const rt = snapshot.autopilot_runtime || {};
@@ -181,7 +179,7 @@ function BatchStatus() {
   const active = state === "active";
   const target = rt.target || batch.target || 100;
   const confirmed = rt.confirmed ?? 0;
-  const [goal, setGoal] = useDraft("batch-target", snapshot.jobs.length ? 100 : 25);
+  const [goal, setGoal] = useDraft("batch-target", counts.jobs || snapshot.jobs.length ? 100 : 25);
   const workers = snapshot.config.workers_enabled;
   const noResume = snapshot.resumes.length === 0;
   const paused = snapshot.control.paused;
@@ -354,9 +352,12 @@ function BatchStatus() {
 }
 
 function Tallies() {
-  const { snapshot, go } = useWorkspace();
+  const { snapshot, counts, go } = useWorkspace();
   const rt = snapshot.autopilot_runtime || {};
   const inv = rt.inventory || {};
+  // The Discovered tab's own numbers (the same jobs and fit filters), so each link opens a list of that size.
+  // The Batch page showed three different "fresh" figures from three computations (2026-10-23).
+  const fits = inv.fits || {};
   const link = (filter: string, n: number, label: string, tone: string) => (
     <button
       className={"tally" + (n ? "" : " zero")}
@@ -392,7 +393,7 @@ function Tallies() {
                 go({ view: "jobs", tab: "discovered", filter: "eligible" })
               }
             >
-              <b>{inv.ready ?? 0}</b> ranked and ready
+              <b>{fits.eligible ?? 0}</b> eligible
             </button>
             <button
               className="tally"
@@ -400,7 +401,7 @@ function Tallies() {
                 go({ view: "jobs", tab: "discovered", filter: "unranked" })
               }
             >
-              <b>{inv.unranked ?? 0}</b> awaiting ranking
+              <b>{fits.unranked ?? 0}</b> awaiting ranking
             </button>
           </>
         )}
@@ -408,7 +409,7 @@ function Tallies() {
           className="tally"
           onClick={() => go({ view: "jobs", tab: "discovered" })}
         >
-          <b>{inv.fresh ?? 0}</b> fresh listings
+          <b>{counts.discovered ?? inv.discovered ?? 0}</b> discovered, not applied to
         </button>
         {!!inv.sources_due && (
           <span className="tally-text">
@@ -421,7 +422,7 @@ function Tallies() {
 }
 
 function Owners({ mail, workers }: { mail: MailStatus | null; workers?: ApplicationWorkers }) {
-  const { snapshot, rows, openJob, go, refresh } = useWorkspace();
+  const { snapshot, rows, counts, openJob, go, refresh, markJobs } = useWorkspace();
   const { pending, run } = useAction();
   const now = useNow(1000);
   const runtimeWorkers = snapshot.autopilot_runtime?.application_workers || workers;
@@ -437,17 +438,14 @@ function Owners({ mail, workers }: { mail: MailStatus | null; workers?: Applicat
     );
   const assignments = runtimeWorkers?.assignments || [];
   const assignedRuns = new Set(assignments.map((assignment) => assignment.run_id).filter(Boolean));
-  const activeCount = runtimeWorkers ? assignedRuns.size : owners.length;
-  const count = (pred: (r: JobRow) => boolean) => rows.filter(pred).length;
-  const queued = count(
-    (r) => r.run?.state === "queued" && r.control !== "paused",
-  );
-  const repairing = count(
-    (r) =>
-      stateInfo(r.state).group === "repair" &&
-      r.run?.state === "waiting_browser",
-  );
-  const answers = count((r) => stateInfo(r.state).group === "needs");
+  // The snapshot carries every running and submitting application, so this is exact; a run without a slot still
+  // counts as in progress.
+  const activeCount = Math.max(runtimeWorkers ? assignedRuns.size : 0, owners.length);
+  // Exact counts over every job from the server (these were counted from the newest 1,000 jobs).
+  const queued = counts.states.queued ?? 0;
+  const repairing = counts.states.waiting_browser ?? 0;
+  const answers = counts.groups.needs ?? 0;
+  const starting = counts.states["pending:waiting"] ?? 0;
   const runJob = new Map(snapshot.runs.map((r) => [r.id, r.job_id]));
   const jobs = new Map(snapshot.jobs.map((j) => [j.id, j]));
   const emailWaits = (mail?.challenges || [])
@@ -540,11 +538,14 @@ function Owners({ mail, workers }: { mail: MailStatus | null; workers?: Applicat
                       run(
                         r.id,
                         async () => {
-                          const res = await api<{ message: string }>(
+                          const res = await api<{ message: string; state?: string }>(
                             `/jobs/${row.job.id}/pause`,
                             "POST",
                           );
-                          await refresh();
+                          // Reads as pausing at once; the next poll confirms.
+                          const shown = appliedState(res.state || "");
+                          if (shown in STATES) markJobs([row.job.id], shown);
+                          void refresh();
                           return res;
                         },
                         (res) => res?.message,
@@ -581,7 +582,7 @@ function Owners({ mail, workers }: { mail: MailStatus | null; workers?: Applicat
             go({ view: "jobs", tab: "pipeline", filter: "active" })
           }
         >
-          {queued} queued
+          {queued} queued{starting ? ` · ${starting} waiting to start` : ""}
         </button>{" "}
         ·{" "}
         <button
@@ -599,7 +600,9 @@ function Owners({ mail, workers }: { mail: MailStatus | null; workers?: Applicat
         >
           {answers} waiting for your answer
         </button>
-        {mail && <> · {emailWaits.length} waiting for email</>}
+        {/* Runs parked on an emailed code or link (server count, as in the Queue line); the list below names them. */}
+        {" · "}
+        {counts.states.waiting_email ?? emailWaits.length} waiting for email
       </p>
       {emailWaits.length > 0 && (
         <ul className="waits" aria-label="Waiting for email">

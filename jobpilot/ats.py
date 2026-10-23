@@ -318,10 +318,14 @@ def platform_hint(key, value):
     return key.lower() == "ats" and value.strip().casefold() in PLATFORM_HINTS
 
 
+@functools.lru_cache(maxsize=65536)
 def identity_variants(url: str):
     """Every identity a job at this URL may be stored or guarded under: today's, then the ones from before the platform
     hint was dropped and before SmartRecruiters/SuccessFactors requisition ids. Rows and `submission_guard:` settings
-    written earlier still carry the older hashes."""
+    written earlier still carry the older hashes.
+
+    Cached like url_identity: the readiness overview and every autopilot tick parse each fresh posting's URL three
+    times to check its submission guard (0.5 s of a 2.3 s Batch-page read with 7,600 jobs, 2026-10-22)."""
     variants = [
         canonicalize(url)[1],
         canonicalize(url, keep_platform_hint=True)[1],

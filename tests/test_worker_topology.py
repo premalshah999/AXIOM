@@ -131,3 +131,22 @@ def test_a_specialist_run_cannot_start_when_there_are_no_specialists(service):
     add_run(service, "f", SPECIALIST, None, state="queued")
     with service.db.exclusive() as s, pytest.raises(RuntimeError, match="No application-owner slot"):
         claim_slot(s, s.get(Run, "f-run"), Topology(6, 0))
+
+
+def test_capacity_reads_only_the_packet_keys_it_decides_on(service):
+    """Every poll, autopilot tick and Apply click decoded each active run's whole ~320 KB packet (2026-10-22)."""
+    from jobpilot.admission import active_runs, capacity
+
+    add_run(service, "g", SPECIALIST, 7)
+    add_run(service, "h", NORMAL, None, state="queued")
+    with service.db.exclusive() as s:
+        run = s.get(Run, "g-run")
+        run.packet = {**run.packet, "verification_only": True, "browser_trace": "x" * 300_000}
+    with service.db.session() as s:
+        rows = {run.id: (run, job) for run, job in active_runs(s)}
+        assert rows["g-run"][0].packet == {"worker_pool": SPECIALIST, "worker_slot": 7, "verification_only": True}
+        assert rows["h-run"][0].packet == {"worker_pool": NORMAL}
+        assert rows["g-run"][1].ats == "workday" and not hasattr(rows["g-run"][1], "description")
+        assert (capacity(s, 8).running, pool_capacity(s, SPECIALIST, Topology(6, 2)).available) == (1, 1)
+    workers = snapshot(service.db, Topology(6, 2))
+    assert [w["run_id"] for w in workers["assignments"] if w["run_id"]] == ["g-run"]

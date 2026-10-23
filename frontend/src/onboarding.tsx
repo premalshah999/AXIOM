@@ -5,17 +5,8 @@ import type { EducationEntry, Profile, WorkEntry } from "./types";
 
 // The sign-in screens and Setup → System › Your sign-in live in account.tsx.
 
-// "Finish later" holds for this browser: the app opens with a Continue setup banner instead of the guide.
-const GUIDE_LATER = "applypilot:guide-later";
-export function guideLater(value?: boolean) {
-  try {
-    if (value === true) localStorage.setItem(GUIDE_LATER, "1");
-    else if (value === false) localStorage.removeItem(GUIDE_LATER);
-    return localStorage.getItem(GUIDE_LATER) === "1";
-  } catch {
-    return false;
-  }
-}
+// "Finish later" (guide.ts, so the shell reads it without loading this module).
+export { guideLater } from "./guide";
 
 // ---------------------------------------------------------------------------
 // Onboarding: the facts employers actually ask for, in the order a person thinks about them.

@@ -1,6 +1,6 @@
 // Product semantics for run/job states. One place decides how a state reads,
 // which group it belongs to and which controls are honest for it.
-import type { Job, Review, Run, Snapshot } from "./types";
+import type { Job, JobRequest, PipelineRow, Review, Run, Snapshot } from "./types";
 
 export type Tone = "ok" | "run" | "ask" | "hold" | "fix" | "bad" | "idle";
 export type Group =
@@ -183,6 +183,21 @@ export const STATES: Record<string, StateInfo> = {
     group: "paused",
     explain: "Paused by you. It is held out of automatic intake.",
   },
+  // Shown right after an Apply click until the next poll confirms what the server did (optimistic marks).
+  "pending:waiting": {
+    label: "Waiting to start",
+    tone: "hold",
+    group: "active",
+    explain:
+      "Your request is kept. It starts on its own as soon as a worker, the platform's pacing or a shared email sender allows it.",
+  },
+  "pending:preparing": {
+    label: "Preparing resume",
+    tone: "hold",
+    group: "active",
+    explain:
+      "A tailored resume is being prepared. The application starts on its own when it's ready.",
+  },
 };
 
 export const GROUPS: { id: Group | "all"; label: string }[] = [
@@ -231,10 +246,16 @@ export type JobRow = {
   attempts: number;
   state: string;
   control?: string;
+  // The owner's Apply waiting for a worker, pacing or a shared sender (why, and when it is tried again).
+  request?: JobRequest | null;
   reviews: Review[];
   updated: string;
 };
 
+// A run of these states means a waiting Apply has started or must not start (pipeline.py STARTED).
+const STARTED = new Set(["queued", "running", "confirmed", "submission_unknown", "already_applied", "submitting"]);
+
+// The server orders Jobs › Pipeline by this (jobpilot/api/pipeline.py PRIORITY; a test keeps them equal).
 const PRIORITY: Record<Group, number> = {
   active: 0,
   needs: 1,
@@ -250,14 +271,55 @@ export function displayState(
   job: Job,
   run: Run | undefined,
   control: string | undefined,
+  request?: JobRequest | null,
 ) {
   if (control === "paused" && (!run || !COMMITTED.has(run.state)))
     return run?.state === "running" ? "pausing" : "paused";
+  if (request && (!run || !STARTED.has(run.state))) return "pending:waiting";
   if (run?.state === "paused") return "resumed";
   return run ? run.state : "job:" + job.status;
 }
 
-// Snapshot collections are bounded; derive per-job rows from what is present.
+// A Jobs › Pipeline row from GET /api/jobs (server-paged, exact).
+export function rowFromServer(r: PipelineRow): JobRow {
+  const run = r.run ?? undefined;
+  const control = r.control?.state;
+  return {
+    job: r.job,
+    run,
+    attempts: r.attempts,
+    state: displayState(r.job, run, control, r.request),
+    control,
+    request: r.request,
+    reviews: r.reviews,
+    updated:
+      run?.finished_at || run?.started_at || run?.created_at || r.job.created_at,
+  };
+}
+
+// Optimistic marks: what an action just did to a job, shown until a list fetched after the action arrives.
+export type Marks = Record<string, { state: string; at: number }>;
+
+// The state an Apply result should read as until the next poll.
+export function appliedState(serverState: string) {
+  if (serverState === "waiting" || serverState === "preparing")
+    return "pending:" + serverState;
+  return serverState;
+}
+
+export function withMarks<T extends { job: Job; state: string }>(
+  rows: T[],
+  marks: Marks,
+  requestedAt: number,
+): T[] {
+  if (!Object.keys(marks).length) return rows;
+  return rows.map((row) => {
+    const mark = marks[row.job.id];
+    return mark && mark.at > requestedAt ? { ...row, state: mark.state } : row;
+  });
+}
+
+// The snapshot carries only live rows; derive per-job rows from what is present.
 export function deriveRows(s: Snapshot): JobRow[] {
   const runsByJob = new Map<string, Run[]>();
   for (const run of s.runs) {
@@ -293,14 +355,6 @@ export function deriveRows(s: Snapshot): JobRow[] {
     });
   }
   return rows;
-}
-
-export function sortRows(rows: JobRow[]) {
-  return [...rows].sort(
-    (a, b) =>
-      PRIORITY[stateInfo(a.state).group] - PRIORITY[stateInfo(b.state).group] ||
-      b.updated.localeCompare(a.updated),
-  );
 }
 
 export function evidenceLabel(r: {

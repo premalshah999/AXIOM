@@ -12,9 +12,12 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
     event,
+    func,
     select,
 )
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+from sqlalchemy.sql.functions import FunctionElement
 
 
 def now():
@@ -215,6 +218,44 @@ class MailOAuth(Base):
 
 def record(obj):
     return {c.name: getattr(obj, c.name) for c in obj.__table__.columns}
+
+
+class bytewise(FunctionElement):
+    """A text column compared byte by byte: COLLATE "C" on PostgreSQL, unchanged elsewhere (SQLite already compares
+    bytes). Ids are hex and times are ISO 8601, so byte order is their real order. Ranking every run by job and time
+    under the database's en_US collation spent 26 of a 33 ms count query sorting (2026-10-22); bytewise, 3 ms."""
+
+    inherit_cache = True
+    type = String()
+
+
+@compiles(bytewise)
+def _bytewise(element, compiler, **kw):
+    return compiler.process(element.clauses, **kw)
+
+
+@compiles(bytewise, "postgresql")
+def _bytewise_postgresql(element, compiler, **kw):
+    return compiler.process(element.clauses, **kw) + ' COLLATE "C"'
+
+
+def latest_runs(*where):
+    """Each job's newest run (ties broken by id) among runs matching `where`, as a subquery of light columns.
+
+    Never the packet: the dashboard and the batch read the newest run of every job, and whole rows carry ~320 KB
+    packets (2026-10-22).
+    """
+    rank = (
+        func.row_number()
+        .over(
+            partition_by=bytewise(Run.job_id),
+            order_by=(bytewise(Run.created_at).desc(), bytewise(Run.id).desc()),
+        )
+        .label("rank")
+    )
+    ranked = select(Run.id, Run.job_id, Run.state, Run.created_at, Run.started_at, Run.finished_at, rank)
+    ranked = ranked.where(*where).subquery("ranked")
+    return select(ranked).where(ranked.c.rank == 1).subquery("latest")
 
 
 # Connections for one app process: eight application workers, the discovery, matching, classification and tailoring

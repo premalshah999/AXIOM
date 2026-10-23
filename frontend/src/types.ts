@@ -250,6 +250,8 @@ export type AutopilotRuntime = {
   intake_reason?: string;
   intake_enabled?: boolean;
   inventory?: {
+    discovered?: number;
+    fits?: Partial<Record<"eligible" | "uncertain" | "unranked" | "below", number>>;
     fresh?: number;
     unattempted?: number;
     ready?: number;
@@ -285,6 +287,10 @@ export type Snapshot = {
   };
   discovery_settings?: Partial<BoardSettings>;
   telegram_health?: { state?: string; checked_at?: string; error?: string };
+  // Exact counts over every job's latest run (jobpilot/api/pipeline.py counts).
+  counts?: Counts;
+  // Only the live rows the Batch page shows: applying, waiting, questions and recent outcomes. Lists page
+  // through GET /api/jobs.
   jobs: Job[];
   runs: Run[];
   resumes: Resume[];
@@ -326,6 +332,48 @@ export type Snapshot = {
     telegram_wait: number;
   };
   ats: { id: string; name: string; tier: string; guidance: string }[];
+};
+export type Counts = {
+  // Pipeline groups (model.ts GROUPS plus "new"); "all" is every started or paused job.
+  groups: Record<string, number>;
+  // Each job's latest run by state, unless the owner's pause overrides how it reads.
+  states: Record<string, number>;
+  pipeline: number;
+  jobs: number;
+  // Jobs › Discovered: fresh listings not applied to yet (the same number its page shows).
+  discovered?: number;
+};
+// GET /api/jobs: one page of Jobs › Pipeline.
+export type JobRequest = { at?: string; code?: string; reason?: string; not_before?: string };
+export type PipelineRow = {
+  job: Job;
+  run: Run | null;
+  attempts: number;
+  control: JobControl | null;
+  request?: JobRequest | null;
+  reviews: Review[];
+};
+export type PipelinePage = {
+  rows: PipelineRow[];
+  total: number;
+  page: number;
+  size: number;
+  pages: number;
+};
+// POST /api/jobs/apply-many: one result per job.
+export type ApplyOutcome = "queued" | "waiting" | "preparing" | "already" | "refused";
+export type ApplyManyResult = {
+  results: {
+    job_id: string;
+    state: string;
+    outcome: ApplyOutcome;
+    message: string;
+    code?: string;
+    run_id?: string;
+    company?: string;
+    title?: string;
+  }[];
+  summary: Partial<Record<ApplyOutcome, number>>;
 };
 export type FailureReport = {
   summary: string;
@@ -403,6 +451,17 @@ export type Board = {
   max_age_hours: number;
   search: { google_configured: boolean; provider: string };
   autopilot: Snapshot["autopilot"];
+  // Paged requests (?page=): the filtered page, exact totals and every selectable match.
+  total?: number;
+  fresh_total?: number;
+  platforms?: string[];
+  page?: number;
+  pages?: number;
+  size?: number;
+  selectable_ids?: string[];
+  selectable_total?: number;
+  // Matching jobs per fit filter, under the other filters.
+  fits?: Record<"all" | "eligible" | "unranked" | "below" | "uncertain", number>;
 };
 
 export type Success = {

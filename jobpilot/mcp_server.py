@@ -41,10 +41,11 @@ def create_server(config, transport=None):
     @server.tool(annotations=annotations)
     async def list_applications(limit: int = 20) -> list[dict]:
         """List recent application IDs, companies, titles, and states; never submit or modify them."""
-        data = await get("/snapshot")
+        # The snapshot carries only live rows since 2026-10-22; the pipeline list pages through every job.
+        data = await get(f"/jobs?size={max(1, min(limit, 100))}")
         return [
-            {k: j[k] for k in ("id", "company", "title", "ats", "status", "score")}
-            for j in data["jobs"][: max(1, min(limit, 100))]
+            {k: row["job"][k] for k in ("id", "company", "title", "ats", "status", "score")}
+            for row in data["rows"]
         ]
 
     @server.tool(annotations=annotations)

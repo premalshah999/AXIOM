@@ -203,14 +203,15 @@ def ready_manual_job_ids(db, policy=None, at=None):
 
 
 def ready_applications(
-    db, policy: DiscoveryPolicy | None = None, limit: int = 6, at=None, data_dir=None
+    db, policy: DiscoveryPolicy | None = None, limit: int = 6, at=None, data_dir=None, candidates=None
 ) -> list[ReadyApplication]:
-    """Eligible, guarded, undeferred jobs with a `ready` tailored resume, best first."""
+    """Eligible, guarded, undeferred jobs with a `ready` tailored resume, best first. `candidates`: the
+    `_candidates` jobs a caller already read at `at` (status() reads them once, not twice)."""
     from ..resumes import current_artifact
 
     policy, at = policy or DiscoveryPolicy(), at or datetime.now(UTC)
     profile = db.get_setting("profile", {}) or {}
-    jobs, _ = _candidates(db, policy, at)
+    jobs = candidates if candidates is not None else _candidates(db, policy, at)[0]
     deferred = _deferred(db, at)
     good = _eligible(db, [j for j in jobs if j["id"] not in deferred], profile, policy)
     out = []
@@ -372,14 +373,16 @@ def status(db, policy: DiscoveryPolicy | None = None, cap: Capacity | None = Non
     jobs, excluded = _candidates(db, policy, at)
     outcomes = classified_outcomes(db, jobs, profile)
     good = _eligible(db, jobs, profile, policy)
-    gated = {}
+    # Not named `gated`: that shadowed the gated() helper, so the Batch page's Pipeline block answered 500 whenever
+    # a fresh listing had no classification gate (2026-10-22).
+    gates = {}
     for j in jobs:
         reason = (outcomes.get(j["id"], {}).get("result") or {}).get("gate") or gated(j, policy)
         if reason:
-            gated[reason] = gated.get(reason, 0) + 1
+            gates[reason] = gates.get(reason, 0) + 1
     with db.session() as s:
         tailoring = dict(s.execute(select(RsArtifact.status, func.count()).group_by(RsArtifact.status)).all())
-    ready = len(ready_applications(db, policy, limit=10_000, at=at))
+    ready = len(ready_applications(db, policy, limit=10_000, at=at, candidates=jobs))
     basis = {}
     for j in jobs:
         basis[j["posted_basis"]] = basis.get(j["posted_basis"], 0) + 1
@@ -407,7 +410,7 @@ def status(db, policy: DiscoveryPolicy | None = None, cap: Capacity | None = Non
         "fresh_jobs": len(jobs),
         "posting_basis": basis,
         "excluded": excluded,
-        "gated": gated,
+        "gated": gates,
         "classification": {
             "eligible": len(good),
             "ineligible": sum(1 for o in outcomes.values() if o["status"] in {"ok", "rejected"})

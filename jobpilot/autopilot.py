@@ -8,11 +8,11 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 from sqlalchemy import func, select, update
 
-from .db import Budget, Job, Run, Source, Setting, now
+from .db import Budget, Job, Run, Source, Setting, latest_runs, now
 from .discovery import rank_batch
-from .jobboard import board_snapshot, settings
+from .jobboard import FITS, LOCKED, board_snapshot, fit_of, settings
 from .service import ACTIVE
-from .admission import capacity, employer_partition, outcome_for
+from .admission import active_runs, capacity, employer_partition, outcome_for
 
 
 PRODUCTION_TARGET = "production:100_new_confirmed_20261012"
@@ -164,36 +164,49 @@ def batch_snapshot(service):
     gate = db.get_setting("failed_application_clearance_gate", {})
     at = datetime.now(UTC)
     with db.session() as s:
-        all_runs = list(
-            s.execute(
-                select(
-                    Run.id,
-                    Run.job_id,
-                    Run.state,
-                    Run.receipt["evidence_reconciliation"].as_string().label("reconciliation"),
-                ).order_by(Run.created_at.desc())
+        # Each batch job's newest run and its confirmation, in SQL: every run of the installation was read and
+        # sorted here on each 6-second dashboard poll (2026-10-22).
+        owned_ids = list(dict.fromkeys(batch.get("run_ids", [])))
+        latest, confirmed = {}, set()
+        if owned_ids:
+            owned_jobs = select(Run.job_id).where(Run.id.in_(owned_ids))
+            newest = latest_runs(Run.job_id.in_(owned_jobs))
+            latest = dict(s.execute(select(newest.c.job_id, newest.c.state)).all())
+            # Recovery owns a new run ID for the same job; its verified receipt
+            # belongs to this batch even when the original attempt failed. The same count as the tick's.
+            confirmed = set(
+                s.scalars(
+                    select(Run.job_id)
+                    .distinct()
+                    .where(
+                        Run.job_id.in_(owned_jobs),
+                        Run.state == "confirmed",
+                        Run.receipt["evidence_reconciliation"].as_string().is_distinct_from("pending"),
+                    )
+                )
             )
-        )
-        latest, batch_jobs, confirmed = {}, set(), set()
-        owned_ids = set(batch.get("run_ids", []))
-        for run in all_runs:
-            latest.setdefault(run.job_id, run)
-            if run.id in owned_ids:
-                batch_jobs.add(run.job_id)
-        # Recovery owns a new run ID for the same job; its verified receipt
-        # belongs to this batch even when the original attempt failed.
-        confirmed = {
-            r.job_id
-            for r in all_runs
-            if r.job_id in batch_jobs and r.state == "confirmed" and r.reconciliation != "pending"
-        }
+        batch_jobs = set(latest)
         controls = {
             row.key.removeprefix("job_control:"): row.value.get("state")
             for row in s.scalars(select(Setting).where(Setting.key.like("job_control:%")))
         }
+        requested = {
+            key.removeprefix("owner_apply:")
+            for key in s.scalars(select(Setting.key).where(Setting.key.like("owner_apply:%")))
+        }
+        # Columns only: whole Job rows carried every fresh posting's description into each poll.
         fresh = list(
             s.execute(
-                select(JobListing, Job)
+                select(
+                    Job.id,
+                    Job.status,
+                    Job.score,
+                    JobListing.location,
+                    JobListing.country,
+                    JobListing.career_level,
+                    Job.id.in_(select(Run.job_id)).label("attempted"),
+                )
+                .select_from(JobListing)
                 .join(Job, Job.id == JobListing.job_id)
                 .where(
                     JobListing.active.is_(True),
@@ -208,23 +221,34 @@ def batch_snapshot(service):
             )
         )
         fresh = [
-            (e, j)
-            for e, j in fresh
-            if us_location(e.location, e.country)
-            and (not cfg.early_career_only or e.career_level != "Experience unspecified")
+            j
+            for j in fresh
+            if us_location(j.location, j.country)
+            and (not cfg.early_career_only or j.career_level != "Experience unspecified")
         ]
         considered = set(batch.get("considered_ids", []))
         deferred = batch.get("deferred", {})
         eligible = [
             j
-            for _, j in fresh
-            if j.id not in latest
+            for j in fresh
+            if not j.attempted
             and j.id not in considered
             and controls.get(j.id) not in {"paused", "deleted"}
             and deferred.get(j.id, {}).get("not_before", "") <= at.isoformat()
             and (j.score is None or (j.status == "ready" and j.score >= cfg.minimum_auto_fit))
         ]
-        capacity_now = capacity(s, service.config.workers)
+        # Active runs once for both the capacity and the worker list (each read parses their packets).
+        active_rows = active_runs(s)
+        capacity_now = capacity(s, service.config.workers, rows=active_rows)
+        # Jobs › Discovered: fresh listings not applied to yet (routes/job_board.unapplied), the same jobs.
+        discovered = [
+            j
+            for j in fresh
+            if not j.attempted
+            and j.id not in requested
+            and j.status not in LOCKED
+            and controls.get(j.id) != "paused"
+        ]
         due_sources = s.scalar(
             select(func.count()).select_from(Source).where(Source.enabled.is_(True), Source.next_run <= now())
         )
@@ -238,13 +262,11 @@ def batch_snapshot(service):
         and not gate.get("enabled")
         and hold.get("stage") not in {"draining", "canary"}
     )
-    blocked = sum(
-        latest[j].state in {"waiting_browser", "submission_unknown", "timed_out"} for j in batch_jobs
-    )
-    awaiting = sum(latest[j].state in {"waiting_answer", "needs_review"} for j in batch_jobs)
+    blocked = sum(latest[j] in {"waiting_browser", "submission_unknown", "timed_out"} for j in batch_jobs)
+    awaiting = sum(latest[j] in {"waiting_answer", "needs_review"} for j in batch_jobs)
     # Parked on an emailed code or link; the matched email resumes it. Neither blocked nor failed.
-    waiting_email = sum(latest[j].state == "waiting_email" for j in batch_jobs)
-    failed = sum(latest[j].state in {"failed", "closed", "skipped", "cancelled"} for j in batch_jobs)
+    waiting_email = sum(latest[j] == "waiting_email" for j in batch_jobs)
+    failed = sum(latest[j] in {"failed", "closed", "skipped", "cancelled"} for j in batch_jobs)
     reason = "Complete" if state == "complete" else "Not started"
     action = "Start a batch to discover, rank and apply automatically."
     if state == "active":
@@ -275,11 +297,11 @@ def batch_snapshot(service):
         "state": state,
         "target": batch.get("target", cfg.batch_target),
         "confirmed": len(confirmed),
-        "queued": sum(latest[j].state == "queued" for j in batch_jobs),
+        "queued": sum(latest[j] == "queued" for j in batch_jobs),
         "dispatched": batch.get("queued", 0),
         "attempted_jobs": len(batch_jobs),
         "active": capacity_now.occupied,
-        "application_workers": worker_snapshot(db, service.config.topology),
+        "application_workers": worker_snapshot(db, service.config.topology, rows=active_rows),
         "awaiting_answer": awaiting,
         "waiting_email": waiting_email,
         "blocked": blocked,
@@ -292,6 +314,10 @@ def batch_snapshot(service):
         "scheduler": db.get_setting("scheduler_health", {}),
         "inventory": {
             "fresh": len(fresh),
+            # Jobs › Discovered: fresh listings not applied to yet (routes/job_board.unapplied), the same count.
+            "discovered": len(discovered),
+            # Its fit filters, so "N eligible" here opens a Discovered list of N.
+            "fits": {fit: sum(fit_of(j, cfg.minimum_auto_fit) == fit for j in discovered) for fit in FITS},
             "unattempted": len(eligible),
             "ready": sum(j.status == "ready" for j in eligible),
             "unranked": sum(j.score is None for j in eligible),
@@ -591,10 +617,13 @@ async def tick(service):
                     Run.receipt["evidence_reconciliation"].as_string().is_distinct_from("pending"),
                 )
             )
-            deliveries = list(
-                s.execute(select(Run, Job).join(Job, Run.job_id == Job.id).where(Run.state.in_(ACTIVE)))
+            # A count: the whole rows (packets and descriptions) were read here every 15 s only to be counted.
+            active = s.scalar(
+                select(func.count())
+                .select_from(Run)
+                .join(Job, Run.job_id == Job.id)
+                .where(Run.state.in_(ACTIVE))
             )
-            active = len(deliveries)
             slots = capacity(s, service.config.workers)
             occupied_slots = slots.occupied
             from .pipeline_comparison import NORMAL, pool_capacity

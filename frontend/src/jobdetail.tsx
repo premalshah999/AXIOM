@@ -1,5 +1,4 @@
-import { useMemo, useState } from "react";
-import { JobResume } from "./features";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { Copy, X } from "lucide-react";
 import { api, applyJob, PREPARING, queueJob } from "./api";
 import { useWorkspace } from "./context";
@@ -7,13 +6,15 @@ import { useAction, useDraft, usePoll } from "./hooks";
 import { JobControls } from "./jobs";
 import {
   ACTIVE,
-  deriveRows,
+  appliedState,
   displayState,
+  rowFromServer,
   stateInfo,
+  withMarks,
   type JobRow,
 } from "./model";
 import { groupQuestions, QuestionCard } from "./questions";
-import type { Detail, Job, Run, Snapshot } from "./types";
+import type { Detail, Job, JobRequest, Run } from "./types";
 import {
   Dialog,
   ErrorLine,
@@ -30,6 +31,9 @@ import {
   words,
 } from "./ui";
 
+// The tailored-resume section lives with Setup's resume features; it loads with the panel's first open.
+const JobResume = lazy(() => import("./features").then((m) => ({ default: m.JobResume })));
+
 export function JobPanel({
   jobId,
   runId,
@@ -39,38 +43,55 @@ export function JobPanel({
   runId?: string;
   close: () => void;
 }) {
-  const { snapshot, rows } = useWorkspace();
+  const { snapshot, rows, version, marks } = useWorkspace();
   const workspaceRow = rows.find((r) => r.job.id === jobId);
+  // A job that is not live (the snapshot carries only live rows) is read on its own, again after every action.
   const historical = usePoll<{
     job: Job;
     latest_run: Omit<Run, "receipt"> | null;
     job_control: { state?: string };
+    request?: JobRequest | null;
   }>(
     (signal) => api(`/jobs/${jobId}`, "GET", undefined, signal),
     60000,
-    [jobId],
+    [jobId, version],
     !workspaceRow,
   );
-  const row =
-    workspaceRow ||
-    (historical.data
-      ? deriveRows({
-          ...snapshot,
-          jobs: [historical.data.job],
-          runs: historical.data.latest_run
-            ? [{ ...historical.data.latest_run, receipt: {} }]
-            : [],
-          job_controls: {
-            [jobId]: historical.data.job_control,
-          } as Snapshot["job_controls"],
-        })[0]
-      : undefined);
+  // Every attempt of this job from the server (the snapshot no longer carries run history).
+  const attempts = usePoll<{ runs: Run[] }>(
+    (signal) => api(`/runs?job_id=${encodeURIComponent(jobId)}`, "GET", undefined, signal),
+    60000,
+    [jobId, version],
+  );
+  const historicalRow = useMemo(
+    () =>
+      historical.data
+        ? withMarks(
+            [
+              rowFromServer({
+                job: historical.data.job,
+                run: historical.data.latest_run ? { ...historical.data.latest_run, receipt: {} } : null,
+                attempts: attempts.data?.runs.length ?? (historical.data.latest_run ? 1 : 0),
+                control: historical.data.job_control,
+                // A waiting Apply reads as "Waiting to start", not "Eligible" with another Apply button.
+                request: historical.data.request,
+                reviews: [],
+              }),
+            ],
+            marks,
+            historical.requestedAt,
+          )[0]
+        : undefined,
+    [historical.data, historical.requestedAt, attempts.data, marks],
+  );
+  const row = workspaceRow || historicalRow;
   const runs = useMemo(
     () =>
+      attempts.data?.runs ||
       snapshot.runs
         .filter((r) => r.job_id === jobId)
         .sort((a, b) => b.created_at.localeCompare(a.created_at)),
-    [snapshot.runs, jobId],
+    [attempts.data, snapshot.runs, jobId],
   );
   const selectedRun = runId || row?.run?.id || runs[0]?.id;
   const job = row?.job;
@@ -115,7 +136,11 @@ export function JobPanel({
       ) : (
         row && <NotStarted row={row} />
       )}
-      {job && <JobResume jobId={job.id} eligible={job.status === "ready"} />}
+      {job && (
+        <Suspense fallback={null}>
+          <JobResume jobId={job.id} eligible={job.status === "ready"} />
+        </Suspense>
+      )}
     </Dialog>
   );
 }
@@ -535,7 +560,7 @@ function DetailBody({ detail }: { detail: Detail }) {
 }
 
 function NotStarted({ row }: { row: JobRow }) {
-  const { snapshot, refresh } = useWorkspace();
+  const { snapshot, refresh, markJobs } = useWorkspace();
   const { pending, run } = useAction();
   const job = row.job;
   const info = stateInfo(row.state);
@@ -547,7 +572,9 @@ function NotStarted({ row }: { row: JobRow }) {
       "submit",
       async () => {
         const r = await applyJob(job.id);
-        await refresh();
+        // Reads as queued (or waiting) at once; the lists confirm with their next read.
+        markJobs([job.id], appliedState(r.state));
+        void refresh();
         return r;
       },
       (r) => r?.message,
@@ -582,9 +609,13 @@ function NotStarted({ row }: { row: JobRow }) {
           <StatePill state={row.state} />
         </div>
         {info.explain && <p>{info.explain}</p>}
-        {job.reason && <p className="panel-reason">{job.reason}</p>}
+        {row.state === "pending:waiting" && row.request?.reason ? (
+          <p className="panel-reason">{row.request.reason}</p>
+        ) : (
+          job.reason && <p className="panel-reason">{job.reason}</p>
+        )}
         <div className="row-actions">
-          {row.state !== "job:paused" && snapshot.resumes.length > 0 && (
+          {row.state !== "job:paused" && row.state !== "pending:waiting" && snapshot.resumes.length > 0 && (
             <>
               <button className="btn primary sm" disabled={pending !== null} onClick={applyNow}>
                 {pending === "submit" ? "Applying…" : ready ? "Apply now" : "Apply"}

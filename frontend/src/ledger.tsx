@@ -4,6 +4,7 @@ import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useDraft, useNow, usePoll } from "./hooks";
 import { evidenceLabel } from "./model";
+import { usePipelinePage } from "./pipeline";
 import { Pagination, usePagination } from "./pagination";
 import type { Success } from "./types";
 import { ago, Empty, ErrorLine, External, Loading, plural, stamp, StatePill } from "./ui";
@@ -55,7 +56,7 @@ function csv(rows: Success[]) {
 }
 
 export function LedgerView() {
-  const { snapshot, rows, openJob } = useWorkspace();
+  const { snapshot, counts, openJob } = useWorkspace();
   const now = useNow(60000);
   const ledger = usePoll<{ applications: Success[] }>(
     (signal) => api("/successful-applications", "GET", undefined, signal),
@@ -76,7 +77,9 @@ export function LedgerView() {
   );
   const paging = usePagination(shown, filter + "|" + q, 25);
   const rt = snapshot.autopilot_runtime || {};
-  const unconfirmed = rows.filter((r) => r.run?.state === "submission_unknown");
+  // Every unconfirmed submission from the server (the browser only had the newest 1,000 jobs to look through).
+  const unconfirmed = usePipelinePage("unconfirmed", "", 100).rows;
+  const unconfirmedTotal = counts.groups.unconfirmed ?? unconfirmed.length;
   return (
     <div className="page">
       <header className="page-head">
@@ -182,7 +185,10 @@ export function LedgerView() {
         <section className="block unconfirmed" aria-labelledby="unconfirmed-title">
           <header className="block-head">
             <h2 id="unconfirmed-title">Unconfirmed submissions</h2>
-            <span className="muted">{plural(unconfirmed.length, "job")} · protected</span>
+            <span className="muted">
+              {plural(unconfirmedTotal, "job")} · protected
+              {unconfirmedTotal > unconfirmed.length && ` · newest ${unconfirmed.length} shown`}
+            </span>
           </header>
           <p className="block-note">
             Submit was attempted but no acknowledgement or receipt was captured.

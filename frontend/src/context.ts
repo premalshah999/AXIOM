@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
-import type { JobRow } from "./model";
-import type { Snapshot } from "./types";
+import type { JobRow, Marks } from "./model";
+import type { Counts, Snapshot } from "./types";
 
 export type View = "batch" | "jobs" | "ledger" | "setup" | "editor";
 export type Route = {
@@ -63,12 +63,22 @@ export function routeUrl(route: Route) {
 
 export type Workspace = {
   snapshot: Snapshot;
+  // Live rows only (applying, waiting, questions, recent outcomes); lists page through GET /api/jobs.
   rows: JobRow[];
+  // Exact counts over every job; zeros until the server sends them.
+  counts: Counts;
+  // Re-reads the snapshot; paged lists re-read too (they watch `version`).
   refresh: () => Promise<void>;
+  version: number;
+  // Optimistic: show these jobs in `state` until a list fetched after now arrives.
+  marks: Marks;
+  markJobs: (ids: string[], state: string) => void;
   route: Route;
   go: (route: Route) => void;
   openJob: (job: string, run?: string) => void;
 };
+
+export const NO_COUNTS: Counts = { groups: {}, states: {}, pipeline: 0, jobs: 0 };
 
 export const WorkspaceContext = createContext<Workspace | null>(null);
 export function useWorkspace() {

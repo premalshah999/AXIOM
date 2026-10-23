@@ -1,19 +1,21 @@
-import { useMemo } from "react";
+import { useEffect } from "react";
 import { Download, Search } from "lucide-react";
 import { api, applyJob } from "./api";
 import { routeUrl, useWorkspace } from "./context";
 import { useAction, useDraft, useNow, usePoll } from "./hooks";
 import { DiscoveredJobs } from "./jobboard";
 import {
+  appliedState,
   COMMITTED,
   GROUPS,
   RETRYABLE,
-  sortRows,
+  STATES,
   stateInfo,
   type Group,
   type JobRow,
 } from "./model";
 import { Pagination, usePagination } from "./pagination";
+import { usePipelinePage } from "./pipeline";
 import { QueuePanel } from "./queue";
 import type { Archived, ControlResult } from "./types";
 import {
@@ -36,12 +38,13 @@ const TABS = [
 ];
 
 export function JobsView() {
-  const { route, go, snapshot, rows } = useWorkspace();
+  const { route, go, counts: all } = useWorkspace();
   const tab = TABS.some((t) => t.id === route.tab) ? route.tab! : "pipeline";
-  const pipelineCount = rows.filter((r) => r.run || r.control === "paused").length;
+  // Server counts over every job (the browser used to count the newest 1,000 it was sent). Discovered is the jobs not
+  // applied to yet, the same number its page shows; Pipeline is everything started or waiting to start.
   const counts: Record<string, number | undefined> = {
-    pipeline: pipelineCount,
-    discovered: snapshot.autopilot_runtime?.inventory?.fresh,
+    pipeline: all.pipeline,
+    discovered: all.discovered,
   };
   return (
     <div className="page">
@@ -73,42 +76,23 @@ export function JobsView() {
   );
 }
 
+// Jobs › Pipeline: applications that have started or will start (the queue, applying, needs you, repairing, done,
+// stopped). Jobs found but never applied to are in Discovered, which is where they are selected and applied to
+// (owner, 2026-10-23: "so confusing for the job pipeline part, like the pipeline and the discovery").
 function Pipeline() {
-  const { rows, route, go } = useWorkspace();
+  const { route, go, counts: all } = useWorkspace();
   const [query, setQuery] = useDraft("pipeline-query", "");
   const filter = (route.filter || "all") as Group | "all";
-  const scoped = useMemo(
-    () => rows.filter((r) => r.run || r.control === "paused" || stateInfo(r.state).group === "new"),
-    [rows],
-  );
-  const counts = useMemo(() => {
-    const c: Record<string, number> = {};
-    for (const r of scoped) {
-      const g = stateInfo(r.state).group;
-      c[g] = (c[g] || 0) + 1;
-    }
-    c.all = scoped.filter((r) => stateInfo(r.state).group !== "new").length;
-    return c;
-  }, [scoped]);
-  const q = query.trim().toLowerCase();
-  const shown = useMemo(
-    () =>
-      sortRows(
-        scoped.filter((r) => {
-          const g = stateInfo(r.state).group;
-          if (filter === "all" ? g === "new" : g !== filter) return false;
-          return (
-            !q ||
-            `${r.job.company} ${r.job.title} ${r.job.location} ${r.job.ats}`
-              .toLowerCase()
-              .includes(q)
-          );
-        }),
-      ),
-    [scoped, filter, q],
-  );
-  const paging = usePagination(shown, filter + "|" + q, 25);
-  const chips = [...GROUPS, { id: "new" as const, label: "Not started" }];
+  // Old links to the Pipeline's "Not started" list now open Discovered.
+  useEffect(() => {
+    if (filter === "new") go({ view: "jobs", tab: "discovered" });
+  }, [filter, go]);
+  // Exact group counts from the server; the list is one server page of every matching job.
+  const counts = all.groups;
+  const list = usePipelinePage(filter === "new" ? "all" : filter, query);
+  const q = query.trim();
+  const shown = list.rows;
+  const label = GROUPS.find((g) => g.id === filter)?.label || "All";
   return (
     <section aria-label="Application pipeline">
       <QueuePanel />
@@ -124,7 +108,7 @@ function Pipeline() {
           />
         </label>
         <div className="chips" role="group" aria-label="Filter by status">
-          {chips.map((c) => {
+          {GROUPS.map((c) => {
             const n = counts[c.id] || 0;
             if (c.id !== "all" && !n && filter !== c.id) return null;
             return (
@@ -146,40 +130,37 @@ function Pipeline() {
           })}
         </div>
       </div>
+      <ErrorLine error={list.error} retry={list.refresh} />
       {shown.length ? (
         <>
-          <JobTable rows={paging.items} />
-          <Pagination paging={paging} label="Pipeline pages" />
+          <JobTable rows={shown} />
+          <Pagination paging={list.paging} label="Pipeline pages" />
         </>
-      ) : !q && filter === "all" && counts.new ? (
-        <Empty title="No applications have started yet">
-          {plural(counts.new, "saved job")} {counts.new === 1 ? "is" : "are"} waiting to be ranked and applied to.{" "}
-          <button
-            className="link"
-            onClick={() => go({ view: "jobs", tab: "pipeline", filter: "new" })}
-          >
-            Show saved jobs
-          </button>
-        </Empty>
+      ) : !list.loaded || !list.current ? (
+        <Loading label="Loading applications…" />
       ) : (
         <Empty
           title={
             q
-              ? "No jobs match this search"
+              ? "No applications match this search"
               : filter === "all"
                 ? "No applications yet"
-                : `Nothing is ${stateInfo(
-                    filter === "needs" ? "waiting_answer" : filter,
-                  ).label.toLowerCase()} right now`
+                : `Nothing in “${label}” right now`
           }
         >
-          {q
-            ? "Try a company name or clear the search."
-            : filter === "all"
-              ? "Applications appear here once the batch or a pasted link queues them."
-              : filter === "needs"
-                ? "No application is waiting for a personal fact."
-                : null}
+          {q ? (
+            "Try a company name or clear the search."
+          ) : filter === "all" ? (
+            <>
+              Paste a job link above, start a batch, or pick jobs in{" "}
+              <button className="link" onClick={() => go({ view: "jobs", tab: "discovered" })}>
+                Discovered
+              </button>
+              .
+            </>
+          ) : filter === "needs" ? (
+            "No application is waiting for a personal fact."
+          ) : null}
         </Empty>
       )}
     </section>
@@ -219,10 +200,17 @@ function JobTable({ rows }: { rows: JobRow[] }) {
               </td>
               <td className="cell-state">
                 <StatePill state={r.state} />
-                {r.run?.reason && r.state !== "confirmed" && (
-                  <small className="reason" title={r.run.reason}>
-                    {r.run.reason}
+                {r.state === "pending:waiting" && r.request?.reason ? (
+                  <small className="reason" title={r.request.reason}>
+                    {r.request.reason}
                   </small>
+                ) : (
+                  r.run?.reason &&
+                  r.state !== "confirmed" && (
+                    <small className="reason" title={r.run.reason}>
+                      {r.run.reason}
+                    </small>
+                  )
                 )}
               </td>
               <td className="num cell-tries" data-label="Tries">
@@ -253,11 +241,18 @@ export function JobControls({
   row: JobRow;
   detailed?: boolean;
 }) {
-  const { refresh, openJob } = useWorkspace();
+  const { refresh, openJob, markJobs } = useWorkspace();
   const { pending, run } = useAction();
   const run_ = row.run;
   const state = row.state;
   const committed = !!run_ && COMMITTED.has(run_.state);
+  // The row reads as what the server just answered (queued, paused, waiting…) at once; the lists re-read in the
+  // background and confirm it. The button no longer waits for that re-read.
+  const settle = (result?: { state?: string }) => {
+    const shown = result?.state ? appliedState(result.state) : "";
+    if (shown in STATES) markJobs([row.job.id], shown);
+    void refresh();
+  };
   const control = (action: "pause" | "resume" | "delete") =>
     run(
       action,
@@ -266,7 +261,7 @@ export function JobControls({
           action === "delete" ? `/jobs/${row.job.id}` : `/jobs/${row.job.id}/${action}`,
           action === "delete" ? "DELETE" : "POST",
         );
-        await refresh();
+        settle(result);
         return result;
       },
       (r) => r?.message,
@@ -276,14 +271,30 @@ export function JobControls({
       "apply",
       async () => {
         const r = await applyJob(row.job.id);
-        await refresh();
+        settle(r);
         return r;
       },
       (r) => r?.message,
     );
+  const withdraw = () =>
+    run(
+      "withdraw",
+      async () => {
+        const result = await api<{ removed: boolean }>(`/queue/${row.job.id}`, "DELETE");
+        void refresh();
+        return result;
+      },
+      "Removed from the queue.",
+    );
   const busy = pending !== null;
   const buttons: React.ReactNode[] = [];
-  if (state === "pausing")
+  if (state === "pending:waiting")
+    buttons.push(
+      <button key="w" className="btn sm" disabled={busy} onClick={withdraw}>
+        {pending === "withdraw" ? "Removing…" : "Remove from queue"}
+      </button>,
+    );
+  else if (state === "pausing")
     buttons.push(
       <button key="p" className="btn sm" disabled>
         Pausing…

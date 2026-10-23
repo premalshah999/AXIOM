@@ -2,7 +2,7 @@ import React, { useEffect, useId, useRef, useState } from "react";
 import { Check, Copy, Download } from "lucide-react";
 import { api, ApiError, signedOut } from "./api";
 import { useAction, useNotify } from "./hooks";
-import { guideLater } from "./onboarding";
+import { guideLater } from "./guide";
 import type { Profile } from "./types";
 import { Brand, Confirm, day, ErrorLine, Field, KeyValues, Loading } from "./ui";
 

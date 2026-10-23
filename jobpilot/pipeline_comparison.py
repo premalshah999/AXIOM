@@ -7,7 +7,7 @@ use the current ATS controller; the scheduler persists any specialist handoff.
 from sqlalchemy import select
 
 from .config import MAX_WORKERS, Topology, legacy_topology
-from .db import Job, Run
+from .db import Run
 
 LEGACY = "oct04-825c1b6"
 CURRENT = "current"
@@ -119,12 +119,12 @@ def pool_slot_ids(pool=NORMAL, limit=8):
 
 
 def slots(session, run, limit=8):
+    from .admission import active_runs
+
     pool = pool_for(run)
     available = pool_slot_ids(pool, limit)
     active = [
-        other
-        for other in session.scalars(select(Run).where(Run.state.in_(["running", "submitting"])))
-        if other.id != _get(run, "id")
+        other for other, _ in active_runs(session, ("running", "submitting")) if other.id != _get(run, "id")
     ]
     # Count owners without a valid slot too: an old process must not escape the cap.
     if sum(pool_for(other) == pool for other in active) >= len(available):
@@ -133,17 +133,13 @@ def slots(session, run, limit=8):
     return [slot for slot in available if slot not in occupied]
 
 
-def pool_capacity(session, pool=NORMAL, limit=8):
-    from .admission import Capacity, employer_partition
+def pool_capacity(session, pool=NORMAL, limit=8, rows=None):
+    """`rows`: admission.active_runs already read in this transaction, so one poll reads (and PostgreSQL parses the
+    ~320 KB json packets of) the active runs once, not once per pool."""
+    from .admission import Capacity, active_runs, employer_partition
 
     rows = [
-        (run, job)
-        for run, job in session.execute(
-            select(Run, Job)
-            .join(Job, Job.id == Run.job_id)
-            .where(Run.state.in_(["queued", "running", "submitting"]))
-        )
-        if pool_for(run) == pool
+        (run, job) for run, job in (active_runs(session) if rows is None else rows) if pool_for(run) == pool
     ]
     running = [(run, job) for run, job in rows if run.state in {"running", "submitting"}]
     return Capacity(
@@ -155,20 +151,20 @@ def pool_capacity(session, pool=NORMAL, limit=8):
     )
 
 
-def snapshot(db, limit=8):
-    """Public worker capacity: IDs and ATS names, never applicant data or URLs."""
+def snapshot(db, limit=8, rows=None):
+    """Public worker capacity: IDs and ATS names, never applicant data or URLs. `rows` as in pool_capacity."""
+    from .admission import active_runs
+
     with db.session() as session:
+        rows = active_runs(session) if rows is None else rows
         active = {
             _packet(run).get("worker_slot"): (run, job)
-            for run, job in session.execute(
-                select(Run, Job)
-                .join(Job, Job.id == Run.job_id)
-                .where(Run.state.in_(["running", "submitting"]))
-            )
+            for run, job in rows
+            if run.state in {"running", "submitting"}
         }
         capacities = {}
         for pool in POOLS:
-            value = pool_capacity(session, pool, limit)
+            value = pool_capacity(session, pool, limit, rows=rows)
             capacities[pool] = {
                 "limit": value.limit,
                 "running": value.running,

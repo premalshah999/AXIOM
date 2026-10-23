@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Job, Run } from "./types";
+import type { Job } from "./types";
 
 export const OPEN_JOB_LINK = "applypilot:add-job-link";
 
@@ -18,8 +18,8 @@ export function JobLinkIntake({
   request: Request;
   refresh: () => Promise<void>;
   autoApply: boolean;
-  // Optional: the shell opens the imported job and shows the message itself.
-  onImported?: (job: Job, message: string) => void;
+  // Optional: the shell opens the added job and shows the message itself.
+  onImported?: (jobId: string, message: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState("");
@@ -75,25 +75,32 @@ export function JobLinkIntake({
                 setError("");
                 setMessage("");
                 try {
-                  const result = await request<{
-                    job: Job;
-                    created: boolean;
-                    run?: Run;
-                    notice?: string;
-                  }>("/jobs", "POST", { url: url.trim() });
-                  const text = result.run
-                    ? "Application queued. Track it in Jobs."
-                    : result.notice ||
-                      (result.created
-                        ? "Job saved. Classification and queue status are available in Jobs."
-                        : "This job is already saved. Its existing progress was preserved.");
+                  // Owner, 2026-10-22: a pasted link goes straight into the queue as the owner's own pick, the same
+                  // as Jobs › Pipeline's box (this button only saved it, or ranked it first, before).
+                  let jobId = "";
+                  let text = "";
+                  try {
+                    const answer = await request<{
+                      results: { job_id?: string; state: string; message?: string }[];
+                    }>("/queue/links", "POST", { urls: [url.trim()] });
+                    const r = answer.results[0];
+                    if (r.state === "refused" || !r.job_id) throw new Error(r.message || "This link was not added");
+                    jobId = r.job_id;
+                    text = r.message || "Added to the queue.";
+                  } catch (e) {
+                    // Without application workers (a demo installation) the link is saved instead.
+                    if (!/workers are disabled/i.test((e as Error).message)) throw e;
+                    const saved = await request<{ job: Job; created: boolean }>("/jobs", "POST", { url: url.trim() });
+                    jobId = saved.job.id;
+                    text = saved.created ? "Job saved. Workers are off, so it was not queued." : "This job is already saved.";
+                  }
                   setMessage(text);
                   setUrl("");
                   await refresh();
                   if (onImported) {
                     setMessage("");
                     setOpen(false);
-                    onImported(result.job, text);
+                    onImported(jobId, text);
                   }
                 } catch (e) {
                   setError((e as Error).message);
@@ -116,19 +123,15 @@ export function JobLinkIntake({
               />
               <p className="muted">
                 {autoApply
-                  ? "The agent checks the role and applies if it matches your profile. Existing applications are protected from duplicates."
-                  : "Save a job now. Automatic application follows your current batch settings."}
+                  ? "It goes straight into the queue as your own pick, without the fit check. Duplicates and finished applications are protected."
+                  : "It goes into the queue and waits until automatic submission is on. Duplicates are protected."}
               </p>
               <button
                 className="button primary"
                 type="submit"
                 disabled={pending}
               >
-                {pending
-                  ? "Checking job…"
-                  : autoApply
-                    ? "Add and apply"
-                    : "Save job"}
+                {pending ? "Adding…" : "Add to queue"}
               </button>
               {message && <p role="status">{message}</p>}
               {error && (
