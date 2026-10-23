@@ -55,6 +55,12 @@ def context_from(item):
             k: str(v)[:120] for k, v in (extra.get("history_identity") or {}).items() if v and isinstance(k, str)
         },
         "options_partial": bool(extra.get("options_partial")),
+        "required": bool(item.get("required")),
+        "date_format": str(extra.get("date_format") or "")[:40],
+        "date_parts": [str(x)[:10] for x in (extra.get("date_parts") or [])][:3],
+        "maxlength": extra.get("maxlength") if isinstance(extra.get("maxlength"), int) and extra.get("maxlength") > 0
+        else 0,
+        "widget": str(extra.get("widget") or "")[:40],
         "field_id": str(item.get("field_id") or ""),
         "slot": item.get("slot") if isinstance(item.get("slot"), int) else 0,
         "source": extra.get("source") or "",
@@ -184,6 +190,58 @@ def kind(question, options=(), context=None, reason=""):
     return "text"
 
 
+DATE_SHAPES = {"mdy": "MM/DD/YYYY", "dmy": "DD/MM/YYYY", "ymd": "YYYY-MM-DD", "month-year": "MM/YYYY",
+               "year": "YYYY", "month": "MM"}
+
+
+def expected_format(context=None):
+    """The exact shape a text field takes ("MM/YYYY", "a number") or "" for free text."""
+    context = context or {}
+    field_type, widget = str(context.get("type") or ""), str(context.get("widget") or "")
+    shape = DATE_SHAPES.get(str(context.get("date_format") or ""))
+    if field_type in {"date", "date_parts", "month"} or "date" in widget or shape:
+        return shape or ("MM/YYYY" if field_type == "month" else "MM/DD/YYYY")
+    if field_type == "number":
+        return "a number"
+    if field_type == "url":
+        return "a web link (https://…)"
+    if field_type == "email":
+        return "an email address"
+    return ""
+
+
+def requirement(question, options=(), context=None, reason=""):
+    """One line telling the owner what kind of field this is and what to send."""
+    context = context or {}
+    question_kind = kind(question, options, context, reason)
+    listed = choices(options)
+    field_type = str(context.get("type") or "")
+    if question_kind == "upload":
+        accepted = str(context.get("accept") or "").replace(",", ", ").strip()
+        line = "File upload: send the document" + (f" ({accepted})" if accepted else " (PDF or Word)")
+    elif question_kind == "choice":
+        texts = [normalize(t) for _, t in listed]
+        if field_type in {"checkbox", "checkboxgroup", "select-multiple"} and len(listed) > 1:
+            line = f"Pick all that apply ({len(listed)} choices)"
+        elif sorted(texts) == ["no", "yes"]:
+            line = "Yes / No"
+        elif field_type == "checkbox":
+            line = "Checkbox: tick or leave it"
+        else:
+            line = f"Dropdown: pick one of {len(listed)}" + (" (or type yours: the list is searchable)"
+                                                            if free_text_allowed(options, context) else "")
+    else:
+        shape = expected_format(context)
+        limit = context.get("maxlength") or 0
+        if shape:
+            line = f"Type {shape}"
+        elif field_type == "textarea":
+            line = "Paragraph: a few sentences" + (f", at most {limit} characters" if limit else "")
+        else:
+            line = "Short text" + (f", at most {limit} characters" if limit else "")
+    return line + (" · required" if context.get("required") else "")
+
+
 def free_text_allowed(options, context=None):
     """A searchable or partly read list, or one whose only "option" was a placeholder, takes a typed answer."""
     return bool((context or {}).get("options_partial")) or not choices(options)
@@ -291,6 +349,7 @@ def present(review):
         "options": [text for _, text in choices(options)],
         "display_question": display(review.get("question", ""), context),
         "kind": question_kind,
+        "requirement": requirement(review.get("question", ""), options, context, review.get("reason", "")),
         "why": owner_reason(review.get("reason", ""), question_kind),
         "allow_other": question_kind == "choice" and free_text_allowed(options, context),
         "accept": context.get("accept", "") if question_kind == "upload" else "",

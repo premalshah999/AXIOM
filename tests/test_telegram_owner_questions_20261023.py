@@ -219,3 +219,51 @@ def test_internal_errors_are_not_forwarded_to_the_owner():
         QueueBlocked("Application intake is temporarily held", outcome="deferred")
     ) == "It will start on its own as soon as it can."
     assert telegram.owner_error(ValueError("That job was removed")) == "That job was removed."
+
+
+async def test_the_owners_words_are_mapped_to_an_option_by_the_model(service, monkeypatch):
+    """Owner, 2026-10-23: "from my answer, there should be an AI to infer that answer, to look up in dropdowns"."""
+    enable(service)
+    options = ["U.S. Citizen", "U.S. National", "Lawful Permanent Resident (Green Card Holder)", "Asylee", "Refugee",
+               "None of the above"]
+    seed(service, question="Are you a U.S. Citizen, U.S. National, Lawful Permanent Resident, Asylee, or Refugee?",
+         options=options)
+    service.db.set_setting("telegram_question_messages", {"77": "q"})
+    Calls(monkeypatch)
+    seen = {}
+
+    async def model(_service, question, kind, offered, context, text):
+        seen.update(kind=kind, offered=offered, text=text)
+        return telegram.FieldReply(option="None of the above", quote="Indian citizen")
+
+    monkeypatch.setattr(telegram, "interpret_reply", model)
+    reply = await telegram._handle_update(service, update("I'm an Indian citizen on OPT", reply_to=77))
+    assert reply == "Did you mean “None of the above”?"
+    assert seen == {"kind": "choice", "offered": options, "text": "I'm an Indian citizen on OPT"}
+    with service.db.session() as s:
+        assert s.get(Review, "q").answer is None  # confirmed with one tap, never saved on the model's word
+
+
+async def test_a_date_reply_is_saved_in_the_shape_the_field_wants(service, monkeypatch):
+    enable(service)
+    seed(service, question="Graduation Date", context={"type": "text", "widget": "date-text",
+                                                      "date_format": "month-year"})
+    service.db.set_setting("telegram_question_messages", {"77": "q"})
+    Calls(monkeypatch)
+
+    async def model(_service, question, kind, offered, context, text):
+        return telegram.FieldReply(value="05/2026", quote="may 2026")
+
+    monkeypatch.setattr(telegram, "interpret_reply", model)
+    reply = await telegram._handle_update(service, update("may 2026", reply_to=77))
+    assert "Saved as “05/2026” (the form wants MM/YYYY)" in reply
+    with service.db.session() as s:
+        assert s.get(Review, "q").answer == "05/2026"
+
+
+async def test_the_question_says_what_to_send(service, monkeypatch):
+    from jobpilot import telegram as tg
+
+    payload = tg.question_payload(service, "q", "Years of experience with Python", [], {"type": "number",
+                                  "required": True}, "", "Acme", "Engineer")
+    assert "🔹 Type a number · required" in payload["text"]

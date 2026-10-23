@@ -1490,6 +1490,11 @@ select {
   color: var(--text-2);
   font-size: 13px;
 }
+.question-requirement {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 560;
+}
 .question-answer {
   display: flex;
   flex-direction: column;

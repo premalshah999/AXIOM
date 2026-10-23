@@ -274,3 +274,17 @@ def test_an_existing_reviews_table_gains_the_context_column(tmp_path):
         review = s.get(Review, "r1")
         assert review.context is None and review.question == "Q?"
         assert s.get(Setting, "control") is not None
+
+
+def test_every_question_says_what_kind_of_field_it_is_and_what_to_send():
+    """Owner, 2026-10-23: "it does not tell the type of field, what input is required"."""
+    from jobpilot.owner_questions import requirement
+
+    assert requirement("Graduation date", [], {"type": "text", "widget": "date-text", "date_format": "month-year",
+                                               "required": True}) == "Type MM/YYYY · required"
+    assert requirement("Years of Python", [], {"type": "number"}) == "Type a number"
+    assert requirement("Why us?", [], {"type": "textarea", "maxlength": 500}) == "Paragraph: a few sentences, at most 500 characters"
+    assert requirement("Are you 18?", ["Yes", "No"], {"type": "radio"}) == "Yes / No"
+    assert requirement("Country", ["India", "United States", "Canada"], {"type": "select"}) == "Dropdown: pick one of 3"
+    assert requirement("Please upload your unofficial transcript.", [], {"type": "file", "accept": ".pdf,.docx"}) \
+        == "File upload: send the document (.pdf, .docx)"

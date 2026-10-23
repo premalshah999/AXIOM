@@ -98,6 +98,7 @@ export function QuestionCard({
       <p className="question-text" id={id}>
         {q.display_question || q.question}
       </p>
+      {q.requirement && <p className="question-requirement">{q.requirement}</p>}
       {(q.why || q.reason) && (
         <p className="question-why">{q.why || q.reason}</p>
       )}

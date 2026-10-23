@@ -2728,6 +2728,12 @@ class FormSession:
                     "history_kind": field.get("history_kind", ""),
                     "history_identity": field.get("history_identity") or {},
                     "options_partial": bool(field.get("options_partial")),
+                    # How the field takes its value, so the owner is told what to send (owner 2026-10-23: "it does
+                    # not tell the type of field, what input is required").
+                    "date_format": field.get("date_format", ""),
+                    "date_parts": field.get("date_parts") or [],
+                    "maxlength": field.get("maxlength", -1),
+                    "widget": field.get("widget", ""),
                 },
             }
         )

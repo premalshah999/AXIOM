@@ -237,6 +237,58 @@ class ReplyInterpretation(BaseModel):
     reply: str = ""
 
 
+class FieldReply(BaseModel):
+    """The owner's reply mapped onto one form field (owner 2026-10-23: "from my answer, there should be an AI to infer
+    that answer, to look up in dropdowns")."""
+
+    kind: Literal["answer", "question", "unrelated"] = "answer"
+    option: str | None = None  # exactly one offered option, for a choice field
+    value: str | None = None  # the reply rewritten into the field's required shape, for a text field
+    quote: str = ""  # the words of the reply it rests on
+
+
+INTERPRET = (
+    "You map an applicant's reply onto one job-application field. You get the question, the field type, the shape "
+    "the field requires and, for a choice field, the offered options. For a choice field return in `option` exactly "
+    "one offered option that the reply states or clearly implies: 'Indian citizen on OPT' answers a list of U.S. "
+    "citizen / national / permanent resident / asylee / refugee / none of the above with the none option; 'yes I "
+    "can' is Yes; 'masters' is the master's degree option. For a text field return in `value` the reply's own answer "
+    "rewritten into the required shape (a date in the given format, digits only for a number, a full https:// link), "
+    "never changing its facts. Put the words of the reply you relied on in `quote`. Never add a fact the reply does "
+    "not give. If the reply is a question back or unrelated, set kind to question or unrelated and leave option and "
+    "value empty."
+)
+
+
+async def interpret_reply(service, question, field_kind, options, context, text):
+    """FieldReply for the owner's words, or None without a model or on any model failure."""
+    from . import owner_questions as oq
+    from .models import structured
+
+    if not service.config.llm_api_key:
+        return None
+    try:
+        return await structured(
+            service.config,
+            service.db,
+            FieldReply,
+            INTERPRET,
+            json.dumps({
+                "question": oq.display(question, context),
+                "field_type": (context or {}).get("type") or field_kind,
+                "required_shape": oq.expected_format(context) or oq.requirement(question, options, context),
+                "options": options if field_kind == "choice" else [],
+                "applicant_reply": text,
+            }),
+            max_tokens=400,
+            thinking="disabled",
+            timeout=15,
+            retries=0,
+        )
+    except Exception:
+        return None
+
+
 class ChatReply(BaseModel):
     reply: str = Field(max_length=3500)
 
@@ -618,7 +670,7 @@ def question_payload(service, review_id, question, options, context, reason, com
     body = oq.display(question, context)
     if len(body) > 2500:
         body = body[:2500].rsplit(" ", 1)[0] + " …"
-    lines = [("📎 " if kind == "upload" else "❓ ") + header, "", body]
+    lines = [("📎 " if kind == "upload" else "❓ ") + header, "", body, "", "🔹 " + oq.requirement(question, options, context, reason)]
     hint = " ".join(str(context.get("hint") or "").split())
     if hint and len(hint) <= 300 and normalize(hint) not in normalize(body):
         lines += ["", "The form adds: " + hint]
@@ -989,42 +1041,26 @@ async def answer_from_text(service, message):
         return "This question needs a file. Reply to the question with the document (📎 → File, or a photo)."
     if DONT_KNOW.fullmatch(normalize(text)):
         return "I can only save your real answer. If the question doesn't apply to you, reply “N/A”."
-    answer = None
+    answer, note = None, ""
     if kind == "choice":
         listed = oq.choices(options)
         texts = [t for _, t in listed]
         hit = oq.match_option(texts, text)
         if hit and hit[1]:
             answer = texts[hit[0]]
-        elif hit:
-            return confirm_choice(rid, *listed[hit[0]])
-        elif oq.free_text_allowed(options, context):
-            answer = text  # A searchable or partly read list: the owner's own words are the answer.
-        elif service.config.llm_api_key:
-            from .models import structured
-
-            try:
-                parsed = await structured(
-                    service.config,
-                    service.db,
-                    ReplyInterpretation,
-                    "Interpret the applicant's reply to exactly one application question. Return an answer only "
-                    "when explicitly supported by this reply, as exactly one of the options. Include an exact "
-                    "supporting quote from the reply. If the reply is a question, unrelated, ambiguous, or asks "
-                    "you to guess a personal fact, set answer=null, classify kind as question or unrelated, and "
-                    "explain briefly. Do not infer eligibility or create facts.",
-                    json.dumps({"question": question, "options": texts, "applicant_reply": text}),
-                    max_tokens=400,
-                    thinking="disabled",
-                    timeout=15,
-                    retries=0,
-                )
-            except Exception:
-                parsed = ReplyInterpretation(kind="answer")
-            if parsed.answer in texts and parsed.quote and parsed.quote in text:
-                return confirm_choice(rid, *listed[texts.index(parsed.answer)])
-            if parsed.kind == "unrelated":
+        else:
+            # The model reads the owner's words against the offered options first; a near text match is the fallback.
+            parsed = await interpret_reply(service, question, kind, texts, context, text)
+            if parsed and parsed.kind == "unrelated":
                 return await chat(service, text)
+            if parsed and parsed.kind == "question":
+                return await chat(service, text) + "\n\nTo answer the form's question, reply to it with your answer."
+            if parsed and parsed.option in texts:
+                return confirm_choice(rid, *listed[texts.index(parsed.option)])
+            if hit:
+                return confirm_choice(rid, *listed[hit[0]])
+            if oq.free_text_allowed(options, context):
+                answer = text  # A searchable or partly read list: the owner's own words are the answer.
         if answer is None:
             return MarkupReply(
                 "I couldn't match that to one of the choices. Tap one below, or reply in other words.",
@@ -1035,10 +1071,16 @@ async def answer_from_text(service, message):
         return await chat(service, text) + "\n\nTo answer the form's question, reply to it with your answer."
     else:
         answer = text
+        shape = oq.expected_format(context)
+        if shape:
+            parsed = await interpret_reply(service, question, kind, [], context, text)
+            if parsed and parsed.kind == "answer" and parsed.value and parsed.value.strip() != text:
+                answer = parsed.value.strip()
+                note = f"\n\nSaved as “{answer}” (the form wants {shape}). Reply again to change it."
     result = await service.resolve_review(rid, answer)
     if active.get("review_id") == rid:
         service.db.set_setting("telegram_question", {})
-    return result["message"]
+    return result["message"] + note
 
 
 # "Guess" and "you decide" are not an applicant's answer; truthful answers only.
