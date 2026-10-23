@@ -69,7 +69,7 @@ async def test_a_twin_failure_falls_back_to_the_existing_solvers(config, page, m
 
 
 @pytest.mark.parametrize("endpoint,url", [
-    ("http://127.0.0.1:9", "https://jobs.lever.co/acme/1/apply"),
+    ("http://127.0.0.1:9", "https://jobs.ashbyhq.com/acme/1/application"),
     ("", "https://careers-acme.icims.com/jobs/7/engineer/login?in_iframe=1"),
 ])
 async def test_the_twin_serves_only_configured_hosts(config, page, monkeypatch, endpoint, url):
