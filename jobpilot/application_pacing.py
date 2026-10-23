@@ -18,6 +18,14 @@ from .features.knowledge.tables import KnAlias
 
 ASHBY_KEY = "application_pacing:ashby"
 ASHBY_GAP = 150
+# Platforms that take one application at a time with a gap between starts (seconds). Workable answered HTTP 412
+# "Something went wrong. We are working on this, please try again later." to every application after the third in
+# one minute (2026-10-23: 3 accepted, then 22 refused while the batch started ~25 Workable runs in four minutes).
+START_GAPS = {"ashby": ASHBY_GAP, "workable": 300}
+
+
+def gap_key(ats):
+    return "application_pacing:" + ats  # "application_pacing:ashby" is ASHBY_KEY
 HISTORICAL_PREFIX = "historical_company_submissions:"
 COMPANY_LIMIT = 3
 LIMIT_KEY = "application_pacing:company_limit"
@@ -73,36 +81,38 @@ def may_start(session, job, run, at=None):
     limit = ats_limit(session, _get(job, "ats"))
     if limit is not None and _ats_active(session, _get(job, "ats"), _get(run, "id"), ["running", "submitting"]) >= limit:
         return False
-    if _get(job, "ats") != "ashby":
+    ats = _get(job, "ats")
+    if ats not in START_GAPS:
         return True
     for other, employer in session.execute(
         select(Run, Job)
         .join(Job, Job.id == Run.job_id)
-        .where(Run.state.in_(["running", "submitting"]), Job.ats == "ashby")
+        .where(Run.state.in_(["running", "submitting"]), Job.ats == ats)
     ):
         if other.id != _get(run, "id") and not _exempt(employer, other):
             return False
-    saved = session.get(Setting, ASHBY_KEY)
+    saved = session.get(Setting, gap_key(ats))
     # A durable continuation is the same attempt, not another browser start.
     if saved and saved.value.get("run_id") == _get(run, "id"):
         return True
-    return not saved or _stamp(at) >= float(saved.value.get("started_at", 0)) + ASHBY_GAP
+    return not saved or _stamp(at) >= float(saved.value.get("started_at", 0)) + START_GAPS[ats]
 
 
 def record_start(session, job, run, at=None):
     """Persist successful queued -> running admission in the same transaction."""
-    if _exempt(job, run) or _get(job, "ats") != "ashby":
+    ats = _get(job, "ats")
+    if _exempt(job, run) or ats not in START_GAPS:
         return
-    saved = session.get(Setting, ASHBY_KEY)
+    saved = session.get(Setting, gap_key(ats))
     if saved and saved.value.get("run_id") == _get(run, "id"):
         return
     if not may_start(session, job, run, at):
-        raise QueueBlocked("Ashby application pacing is active", outcome="deferred", code="ats_pacing")
+        raise QueueBlocked(f"{ats.title()} application pacing is active", outcome="deferred", code="ats_pacing")
     value = {"run_id": _get(run, "id"), "started_at": _stamp(at)}
     if saved:
         saved.value = value
     else:
-        session.add(Setting(key=ASHBY_KEY, value=value))
+        session.add(Setting(key=gap_key(ats), value=value))
     session.flush()
 
 
@@ -116,7 +126,7 @@ def require_ats_focus(session, job, run=None):
 
 
 def require_ats_admission(session, job, run_id=None, owner_pick=False):
-    """Defer additional Ashby jobs before they occupy DBOS application tasks. The owner's own pick skips the focus."""
+    """Defer additional Ashby/Workable jobs before they occupy DBOS application tasks. The owner's own pick skips the focus."""
     current = session.get(Run, run_id) if run_id else None
     if not owner_pick:
         require_ats_focus(session, job, current)
@@ -130,27 +140,29 @@ def require_ats_admission(session, job, run_id=None, owner_pick=False):
             code="ats_pacing",
             not_before=datetime.fromtimestamp(_stamp(None) + 60, UTC).isoformat(),
         )
-    if _get(job, "ats") != "ashby":
+    ats = _get(job, "ats")
+    if ats not in START_GAPS:
         return
+    name = ats.title()
     at = _stamp(None)
     for other, employer in session.execute(
         select(Run, Job)
         .join(Job, Job.id == Run.job_id)
-        .where(Run.state.in_(["queued", "running", "submitting"]), Job.ats == "ashby")
+        .where(Run.state.in_(["queued", "running", "submitting"]), Job.ats == ats)
     ):
         if other.id != run_id and not _exempt(employer, other):
             raise QueueBlocked(
-                "Another Ashby application is queued or active",
+                f"Another {name} application is queued or active",
                 outcome="deferred",
                 code="ats_pacing",
                 not_before=datetime.fromtimestamp(at + 60, UTC).isoformat(),
             )
-    saved = session.get(Setting, ASHBY_KEY)
+    saved = session.get(Setting, gap_key(ats))
     if saved and saved.value.get("run_id") != run_id:
-        available = float(saved.value.get("started_at", 0)) + ASHBY_GAP
+        available = float(saved.value.get("started_at", 0)) + START_GAPS[ats]
         if at < available:
             raise QueueBlocked(
-                "Ashby application start interval has not elapsed",
+                f"{name} application start interval has not elapsed",
                 outcome="deferred",
                 code="ats_pacing",
                 not_before=datetime.fromtimestamp(available, UTC).isoformat(),

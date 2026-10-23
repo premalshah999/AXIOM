@@ -5247,7 +5247,10 @@ class FormSession:
             # ended "unknown" because "Cannot submit" matched none of the phrases above.
             r"cannot submit your application|problem saving answers to preliminary question|this job ad has expired|"
             # Its client-side check: a required preliminary question left empty never POSTs at all.
-            r"please make sure that you answered all questions marked as required",
+            r"please make sure that you answered all questions marked as required|"
+            # Workable's banner with HTTP 412 from /api/v1/jobs/<code>/apply when it throttles a candidate
+            # (2026-10-23): nothing was accepted, and the same application went through later.
+            r"something went wrong\. we are working on this,? please try again later",
             text,
             re.I,
         )
@@ -5283,7 +5286,7 @@ class FormSession:
                 return {"type": "explicit_rejection_page", "url": self.page.url, "category": "validation",
                         "evidence": text[max(0, match.start() - 20) : match.end() + 400],
                         "missing_fields": sections[:10]}
-            if "cannot submit" in phrase:
+            if "cannot submit" in phrase or "we are working on this" in phrase:
                 # "Cannot submit your application. Please try again in a while." Nothing was accepted.
                 return {"type": "explicit_rejection_page", "url": self.page.url, "category": "temporary",
                         "evidence": text[max(0, match.start() - 20) : match.end() + 200], "missing_fields": []}
