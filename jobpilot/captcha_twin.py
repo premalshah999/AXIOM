@@ -58,6 +58,34 @@ MINT = r"""(key, ms) => new Promise(resolve => {
 })"""
 
 
+# Cloudflare Turnstile, minted the same way (Workable 2026-10-23: its apply POST answered HTTP 412 to the token the
+# worker Chrome's own Turnstile produced; the twin mints one without a challenge).
+MINT_TURNSTILE = r"""(key, ms) => new Promise(resolve => {
+ let settled = false;
+ const done = value => { if (!settled) { settled = true; resolve(value); } };
+ setTimeout(() => done({error: 'timeout'}), ms);
+ const go = () => {
+  try {
+   const holder = document.createElement('div');
+   holder.style.cssText = 'position:fixed;left:0;bottom:0;';
+   document.body.appendChild(holder);
+   turnstile.render(holder, {sitekey: key, callback: token => done({token}),
+    'error-callback': e => done({error: 'error: ' + e}), 'unsupported-callback': () => done({error: 'unsupported'})});
+  } catch (e) { done({error: 'render: ' + e}); }
+ };
+ if (window.turnstile && turnstile.render) go();
+ else {
+  const script = document.createElement('script');
+  script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+  script.onload = go;
+  script.onerror = () => done({error: 'script'});
+  document.head.appendChild(script);
+ }
+})"""
+READY = {"hcaptcha": "!!(window.hcaptcha && hcaptcha.render)", "turnstile": "!!(window.turnstile && turnstile.render)"}
+SCRIPTS = {"hcaptcha": MINT, "turnstile": MINT_TURNSTILE}
+
+
 class TwinError(Exception):
     pass
 
@@ -93,7 +121,7 @@ class CDP:
                 return reply.get("result", {})
 
 
-async def _mint(endpoint, page_url, sitekey, timeout):
+async def _mint(endpoint, page_url, sitekey, timeout, kind="hcaptcha"):
     expected = urlsplit(page_url).hostname
     address = await socket_url(endpoint)
     async with websockets.connect(address, max_size=None, open_timeout=5, ping_interval=None) as ws:
@@ -128,12 +156,12 @@ async def _mint(endpoint, page_url, sitekey, timeout):
                     break
             # The site's own api.js loads asynchronously; reuse it rather than loading a second copy.
             for _ in range(12):
-                if await evaluate("!!(window.hcaptcha && hcaptcha.render)"):
+                if await evaluate(READY[kind]):
                     break
                 await asyncio.sleep(0.25)
             if await evaluate("location.hostname") != expected:
                 raise TwinError("the twin page left the employer host")
-            value = await evaluate(f"({MINT})({json.dumps(sitekey)}, {int(timeout * 1000)})", wait=True) or {}
+            value = await evaluate(f"({SCRIPTS[kind]})({json.dumps(sitekey)}, {int(timeout * 1000)})", wait=True) or {}
             if isinstance(value.get("token"), str) and value["token"]:
                 return {"token": value["token"]}
             return {"error": str(value.get("error") or "no token")[:120]}
@@ -149,13 +177,13 @@ async def _mint(endpoint, page_url, sitekey, timeout):
                 pass
 
 
-async def mint(endpoint, page_url, sitekey, *, timeout=25):
+async def mint(endpoint, page_url, sitekey, *, timeout=25, kind="hcaptcha"):
     """{'token': ...} minted by the twin, or {'error': reason}. Never raises: the caller keeps its own solvers."""
     slots = _slots.setdefault(asyncio.get_running_loop(), asyncio.Semaphore(2))
     try:
         async with slots:
             async with asyncio.timeout(timeout + 20):
-                return await _mint(endpoint, page_url, sitekey, timeout)
+                return await _mint(endpoint, page_url, sitekey, timeout, kind)
     except TwinError as exc:
         return {"error": str(exc)}
     except (OSError, httpx.HTTPError, websockets.WebSocketException, TimeoutError, KeyError, ValueError) as exc:

@@ -48,7 +48,7 @@ async def test_twin_token_reaches_the_sites_callback_before_any_paid_solver(conf
     assert await solver.solve(page)
     assert await page.evaluate("[window.siteToken, window.siteCalls]") == ["twin-token", 1]
     assert await page.locator("textarea").input_value() == "twin-token"
-    twin.assert_awaited_once_with("http://127.0.0.1:9", url, "fixture-sitekey")
+    twin.assert_awaited_once_with("http://127.0.0.1:9", url, "fixture-sitekey", kind="hcaptcha")
     paid.assert_not_awaited()
     assert any("twin browser's hCaptcha token delivered" in str(e) for e in events)
     assert "twin-token" not in str(events)
@@ -153,7 +153,7 @@ async def test_oracle_cloud_hcaptcha_goes_to_the_twin_first(config, page, monkey
     twin = AsyncMock(return_value={"token": "twin-token"})
     monkeypatch.setattr("jobpilot.captcha.twin_mint", twin)
     assert await CaptchaSolver(config, lambda *a: None).solve(page)
-    twin.assert_awaited_once_with("http://127.0.0.1:9", url, "fixture-sitekey")
+    twin.assert_awaited_once_with("http://127.0.0.1:9", url, "fixture-sitekey", kind="hcaptcha")
 
 
 async def test_an_email_step_that_ignores_the_twin_token_gets_its_own_button_once(monkeypatch):
@@ -205,3 +205,40 @@ async def test_a_blocked_email_button_falls_back_instead_of_failing_the_run(monk
                              emit=lambda *a, **k: None)
     adapter = SimpleNamespace(classify_page=lambda o: Step.EMAIL_ENTRY, email_submit=lambda o: o["controls"][0])
     assert await BrowserEngine.continue_after_twin_token(engine, adapter, url) is False
+
+
+WORKABLE_APPLY = """<form id=apply><div id=ts></div><input type=hidden name=cf-turnstile-response></form>
+<script>
+  // Cloudflare's widget in the worker browser solves on its own; Workable's server refuses that token (HTTP 412).
+  window.turnstile = {render: (el, opts) => { setTimeout(() => opts.callback('worker-token'), 30); return 'w1'; },
+                      getResponse: () => 'worker-token', reset: () => {}};
+  turnstile.render('#ts', {sitekey: '0xWORKABLE', callback: token => { window.siteToken = token; }});
+</script>"""
+
+
+async def test_workable_takes_the_twins_turnstile_token_never_the_worker_browsers(config, page, monkeypatch):
+    """Workable (2026-10-23): three applications, then every apply POST answered HTTP 412 to the token this browser's
+    own Turnstile produced. On twin hosts that token is held back and the site's callback gets the twin's."""
+    config.browser_twin_cdp_url, config.twocaptcha_api_key = "http://127.0.0.1:9", ""
+    url = "https://apply.workable.com/acme/j/ABC123/apply/"
+    solver = CaptchaSolver(config, lambda *a: None)
+    await solver.install(page)
+    await page.route("**/*", lambda route: route.fulfill(body=WORKABLE_APPLY, content_type="text/html"))
+    await page.goto(url)
+    await page.wait_for_timeout(120)
+    assert await page.evaluate("window.siteToken") is None  # the worker browser's token never reached the site
+    twin = AsyncMock(return_value={"token": "twin-turnstile"})
+    monkeypatch.setattr("jobpilot.captcha.twin_mint", twin)
+    assert await solver.solve(page)
+    assert await page.evaluate("[window.siteToken, turnstile.getResponse()]") == ["twin-turnstile", "twin-turnstile"]
+    twin.assert_awaited_once_with("http://127.0.0.1:9", url, "0xWORKABLE", kind="turnstile")
+
+
+async def test_turnstile_elsewhere_is_left_to_the_site(config, page, monkeypatch):
+    config.browser_twin_cdp_url, config.twocaptcha_api_key = "http://127.0.0.1:9", ""
+    solver = CaptchaSolver(config, lambda *a: None)
+    await solver.install(page)
+    await page.route("**/*", lambda route: route.fulfill(body=WORKABLE_APPLY, content_type="text/html"))
+    await page.goto("https://jobs.example.test/apply")
+    await page.wait_for_timeout(120)
+    assert await page.evaluate("window.siteToken") == "worker-token"

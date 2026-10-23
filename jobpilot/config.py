@@ -189,7 +189,8 @@ class Settings(BaseSettings):
     # Host suffixes whose hCaptcha goes to the twin first. iCIMS routes a distrusted browser to its login-only page;
     # JPMorgan's Oracle email step (2026-10-22) asked more image rounds than the same-IP solver allows, three runs.
     # Lever (19 jobs to 2026-10-23): a puzzle answered in the worker Chrome still got HTTP 400 "please try again".
-    captcha_twin_hosts: str = "icims.com,oraclecloud.com,lever.co"
+    # Workable (2026-10-23): its Turnstile token from the worker Chrome got HTTP 412 on every apply POST after the third.
+    captcha_twin_hosts: str = "icims.com,oraclecloud.com,lever.co,workable.com"
     headless: bool = True
     # Skip images, media and fonts on employer pages. Captcha providers are never blocked.
     block_assets: bool = True

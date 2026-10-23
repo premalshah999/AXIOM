@@ -5,6 +5,7 @@ submit bypass, global getResponse override or arbitrary callback traversal.
 """
 
 import asyncio
+import json
 import time
 from urllib.parse import urlsplit
 
@@ -26,6 +27,9 @@ HOOK = r"""(() => {
  if(state.methodHooks===3)return;
  state.methodHooks=3;
  const wrapped=new WeakSet(), watched=new WeakSet();
+ // Hosts whose Turnstile token must come from the clean twin browser (captcha_twin_hosts): the site's server refuses
+ // the one this browser's own Turnstile produces (Workable 2026-10-23: HTTP 412 on every apply POST).
+ const twinHost=()=>(window.__jpTwinHosts||[]).some(h=>location.hostname===h||location.hostname.endsWith('.'+h));
  const wrap=(api,kind,enterprise=false)=>{
   if(!api)return;
   // Providers populate an existing placeholder object after script loading.
@@ -41,7 +45,7 @@ HOOK = r"""(() => {
      wrap(value,kind,true);
     }
    }
-   for(const name of ['render','reset','execute']){
+   for(const name of ['render','reset','execute','getResponse']){
     const d=Object.getOwnPropertyDescriptor(api,name);
     if(d&&(!d.configurable||d.get||d.set))continue;
     let value=api[name];
@@ -59,7 +63,10 @@ HOOK = r"""(() => {
     callback:params.callback||node?.dataset.callback,node,action:params.action,
     cdata:params.cData,s:params.s,rqdata:params.rqdata,
     invisible:params.size==='invisible',generation:++state.sequence};
-   if(entry.callback){params.callback=function(...args){
+   const held=kind==='turnstile'&&twinHost();
+   if(held)entry.pending=true;  // nothing reaches the site until the twin's token is delivered
+   if(entry.callback||held){params.callback=function(...args){
+    if(held){entry.held=args[0];entry.pending=!entry.twinToken;return;}
     if(typeof args[0]==='string'&&args[0]){entry.delivered=true;entry.deliveredAt=Date.now();}
     let fn=entry.callback;
     if(typeof fn==='string'){fn=window;for(const part of entry.callback.split('.'))fn=fn?.[part];}
@@ -68,7 +75,9 @@ HOOK = r"""(() => {
    for(const name of ['expired-callback','error-callback']){
     const callback=params[name]||node?.getAttribute('data-'+name);
     params[name]=function(...args){
-     entry.delivered=false;entry.deliveredAt=null;entry.pending=false;entry.resolve=null;entry.generation=++state.sequence;
+     entry.delivered=false;entry.deliveredAt=null;entry.pending=held&&!entry.twinToken;entry.resolve=null;
+     entry.generation=++state.sequence;
+     if(held)return;  // the automated browser's own widget failing is expected here; the twin's token is what counts
      let fn=callback;
      if(typeof fn==='string'){fn=window;for(const part of callback.split('.'))fn=fn?.[part];}
      if(typeof fn==='function')return fn.apply(this,args);
@@ -84,6 +93,12 @@ HOOK = r"""(() => {
    for(const entry of targets){entry.delivered=false;entry.deliveredAt=null;entry.pending=false;entry.resolve=null;entry.generation=++state.sequence;}
    return original.apply(this,arguments);
   };wrapped.add(replacement);api.reset=replacement;}
+  if(kind==='turnstile'&&typeof api.getResponse==='function'&&!wrapped.has(api.getResponse)){const original=api.getResponse;
+   const replacement=function(id){
+    const entry=state.entries.find(e=>e.kind==='turnstile'&&(id===undefined||e.id===id));
+    if(twinHost()&&entry?.twinToken)return entry.twinToken;
+    return original.apply(this,arguments);
+   };wrapped.add(replacement);api.getResponse=replacement;}
   if(typeof api.execute==='function'&&!wrapped.has(api.execute)){const original=api.execute;const replacement=function(id,opts={}){
    const args=Array.from(arguments);
    if(kind==='hcaptcha'&&typeof id==='object'){opts=id;id=undefined;}
@@ -207,7 +222,9 @@ DELIVER = r"""({token,info,probe=false}) => {
   node&&!node.dataset.callback&&!!node.closest('form')&&
   node.querySelectorAll('textarea[name="g-recaptcha-response"]').length===1;
  // No callback/pending promise means we cannot demonstrate the site's handoff.
- if(typeof fn!=='function'&&!entry?.resolve&&!formField)return false;
+ // A held Turnstile (twin host) takes the token through its hidden field and getResponse when it has no callback.
+ const heldTurnstile=info.kind==='turnstile'&&!!entry&&('held' in entry||!!entry.pending);
+ if(typeof fn!=='function'&&!entry?.resolve&&!formField&&!heldTurnstile)return false;
  if(probe)return true;
  const form=node?.closest('form');
  const shared=!!form&&form.querySelectorAll('[data-sitekey]').length>1;
@@ -220,11 +237,15 @@ DELIVER = r"""({token,info,probe=false}) => {
   for(const field of new Set(fields)){
    field.value=token;field.dispatchEvent(new Event('input',{bubbles:true}));field.dispatchEvent(new Event('change',{bubbles:true}));
  }}
+ if(entry&&info.kind==='turnstile'){entry.twinToken=token;entry.pending=false;}
  if(entry?.resolve)entry.resolve(info.kind==='hcaptcha'&&entry.async?{response:token,key:''}:token);
  if(typeof fn==='function')fn(token);
  if(entry){entry.delivered=true;entry.deliveredAt=Date.now();}
  return true;
 }"""
+
+
+PROVIDER = {"hcaptcha": "hCaptcha", "turnstile": "Turnstile"}
 
 
 class CaptchaSolver:
@@ -243,6 +264,9 @@ class CaptchaSolver:
         self.active_challenge = None
 
     async def install(self, page):
+        hosts = [h.strip().lower().lstrip(".") for h in getattr(self.config, "captcha_twin_hosts", "").split(",") if h.strip()]
+        if getattr(self.config, "browser_twin_cdp_url", ""):
+            await page.add_init_script(f"window.__jpTwinHosts = {json.dumps(hosts)};")
         await page.add_init_script(HOOK)
         for frame in page.frames:
             try:
@@ -334,7 +358,7 @@ class CaptchaSolver:
         ]
         if (
             not endpoint
-            or info["kind"] != "hcaptcha"
+            or info["kind"] not in {"hcaptcha", "turnstile"}
             or info.get("rqdata")
             or signature in self.twin_tried
             or not any(host == h or host.endswith("." + h) for h in hosts)
@@ -348,12 +372,12 @@ class CaptchaSolver:
         except PlaywrightError:
             return False
         started = time.monotonic()
-        result = await twin_mint(endpoint, before, info["key"])
+        result = await twin_mint(endpoint, before, info["key"], kind=info["kind"])
         elapsed = round(time.monotonic() - started, 2)
         if not result.get("token"):
             self.emit(
                 "captcha",
-                "Clean twin browser did not mint the hCaptcha token",
+                f"Clean twin browser did not mint the {PROVIDER[info['kind']]} token",
                 {"reason": str(result.get("error", ""))[:120], "elapsed_seconds": elapsed},
             )
             return False
@@ -372,7 +396,7 @@ class CaptchaSolver:
         if not applied:
             self.emit("captcha", "CAPTCHA changed before the twin browser's token arrived", {"elapsed_seconds": elapsed})
             return False
-        self.last_reason = "Clean twin browser's hCaptcha token delivered to website callback"
+        self.last_reason = f"Clean twin browser's {PROVIDER[info['kind']]} token delivered to website callback"
         self.emit("captcha", self.last_reason, {"provider": "twin-browser", "elapsed_seconds": elapsed})
         self.token_delivered_at[signature] = self.twin_delivered_at = time.monotonic()
         self.token_refresh_required = self.challenge_unverified = False
