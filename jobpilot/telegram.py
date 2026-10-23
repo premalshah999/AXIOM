@@ -84,6 +84,28 @@ COMMANDS = [
 ]
 
 
+def owner_error(exc, fallback="I couldn't do that right now. Please try again in a minute."):
+    """An exception's message for the owner only when it is already plain words.
+
+    Owner 2026-10-23: "a lot of error and debugging texts from telegram". Raw queue and exception messages
+    ("Could not queue: ConnectTimeout", "Application intake is temporarily held for deployment or a bounded trial")
+    were sent as replies."""
+    from .admission import QueueBlocked
+    from .owner_questions import INTERNAL_WORDS
+
+    if isinstance(exc, QueueBlocked) and exc.outcome == "deferred":
+        return "It will start on its own as soon as it can."
+    text = " ".join(str(exc).split())
+    if (
+        text
+        and len(text) <= 200
+        and not INTERNAL_WORDS.search(text)
+        and not re.search(r"https?://|\b[A-Z]\w*(?:Error|Exception|Timeout)\b|deployment|intake|guard", text)
+    ):
+        return text if text.endswith((".", "!", "?")) else text + "."
+    return fallback
+
+
 def employer_name(job):
     if job.company:
         return job.company
@@ -334,7 +356,9 @@ async def worker_instruction(service, message):
     try:
         result = await resume_instruction(service, jid)
     except (ValueError, RuntimeError) as exc:
-        return f"Instruction saved for {company}. {str(exc)[:240]}"
+        return f"📝 Instruction saved for {company}. " + owner_error(
+            exc, "It will be used on this application's next attempt."
+        )
     if result.get("state") == "not_eligible":
         return f"📝 {company} · {title}\nInstruction saved. {result['message']}"
     return (
@@ -459,7 +483,7 @@ async def conversational_action(service, message):
     try:
         result = await resume_instruction(service, chosen["job_id"])
     except (ValueError, RuntimeError) as exc:
-        return f"Answer saved. Could not resume: {str(exc)[:240]}"
+        return "Answer saved. " + owner_error(exc, "The application will use it on its next attempt.")
     service.db.set_setting("telegram_context", {"job_id": chosen["job_id"], "at": now()})
     return f"▶️ {chosen['company']}: Saved {saved} answer(s). {result['message']}"
 
@@ -517,10 +541,10 @@ async def manage_reference(service, reference="", action="inspect"):
                 run = s.scalar(select(Run).where(Run.job_id == jid).order_by(Run.created_at.desc()).limit(1))
                 rid, reason = (run.id, run.reason) if run else ("", "")
             if rid and reason:
-                from .failure_reports import clean
+                from .owner_questions import owner_blocker
 
                 await send_help(
-                    service, rid, {"chat_id": service.config.telegram_user_id, "text": clean(reason)[:2000]}
+                    service, rid, {"chat_id": service.config.telegram_user_id, "text": owner_blocker(reason)}
                 )
         return (
             "Choose the exact job using its buttons."
@@ -535,24 +559,127 @@ async def manage_reference(service, reference="", action="inspect"):
         )
         return result["message"]
     except (ValueError, RuntimeError) as exc:
-        return str(exc)[:500]
+        return owner_error(exc)
 
 
-async def send_help(service, run_id, payload, *, question=None, review_key=None):
-    """Only the dedicated redacted viewport may be sent to the configured owner."""
+# ----- owner questions -------------------------------------------------------------------------------------------
+# Owner 2026-10-23: "a lot of questions it asks are almost always incomplete, does not have dropdowns". A question was
+# sent as its bare label with the first eight options as buttons cut at 50 characters (5 of 62 questions in three
+# days had more than eight options, 5 had longer option text), and an upload was asked as a text question. Now: the
+# full question with its section or history row, every option numbered in the text, buttons paged eight at a time,
+# a typed reply matched to the nearest option and confirmed, and a file accepted for an upload question.
+
+
+class MarkupReply(str):
+    """A reply with its own inline keyboard instead of the main menu."""
+
+    def __new__(cls, text, markup):
+        value = super().__new__(cls, text)
+        value.markup = markup
+        return value
+
+
+def button_label(prefix, text, limit=60):
+    label = f"{prefix} {text}"
+    return label if len(label) <= limit else label[: limit - 1].rstrip() + "…"
+
+
+def option_keyboard(review_id, listed, page=0):
+    """Every offered option as a button, eight per page with Back/More; callback data stays under 64 bytes."""
+    from .owner_questions import PAGE_SIZE
+
+    pages = max(1, -(-len(listed) // PAGE_SIZE))
+    page = min(max(int(page), 0), pages - 1)
+    start = page * PAGE_SIZE
+    rows = [
+        [{"text": button_label(f"{number}.", text), "callback_data": f"a:{review_id}:{index}"}]
+        for number, (index, text) in enumerate(listed[start : start + PAGE_SIZE], start + 1)
+    ]
+    if pages > 1:
+        nav = []
+        if page > 0:
+            nav.append({"text": "◀ Back", "callback_data": f"ap:{review_id}:{page - 1}"})
+        nav.append({"text": f"{page + 1} of {pages}", "callback_data": f"ap:{review_id}:{page}"})
+        if page < pages - 1:
+            nav.append({"text": "More ▶", "callback_data": f"ap:{review_id}:{page + 1}"})
+        rows.append(nav)
+    return {"inline_keyboard": rows}
+
+
+def question_payload(service, review_id, question, options, context, reason, company, title):
+    """The complete owner question: employer, section or history row, full wording, every option, how to answer."""
+    from . import owner_questions as oq
+    from .failure_reports import clean
+
+    context = context or {}
+    kind = oq.kind(question, options, context, reason)
+    listed = oq.choices(options)
+    header = " · ".join(x for x in (clean(company or "") or "Employer", clean(title or "")) if x)
+    body = oq.display(question, context)
+    if len(body) > 2500:
+        body = body[:2500].rsplit(" ", 1)[0] + " …"
+    lines = [("📎 " if kind == "upload" else "❓ ") + header, "", body]
+    hint = " ".join(str(context.get("hint") or "").split())
+    if hint and len(hint) <= 300 and normalize(hint) not in normalize(body):
+        lines += ["", "The form adds: " + hint]
+    listing = []
+    if kind == "choice":
+        if len(listed) <= 30:
+            listing = [""] + [f"{number}. {text}" for number, (_, text) in enumerate(listed, 1)]
+        tail = (
+            "These are the choices the form showed first. Tap one, or reply with yours if it isn't listed."
+            if oq.free_text_allowed(options, context)
+            else "Tap your answer, or reply with it in your own words."
+        )
+        markup = option_keyboard(review_id, listed, 0)
+    elif kind == "upload":
+        tail = (
+            "Reply to this message with the file (📎 → File, or a photo). I'll attach it to this application and "
+            "reuse it when another one asks for the same document."
+        )
+        markup = {"force_reply": True, "selective": True}
+    else:
+        tail = "Reply to this message with your answer. I'll remember it for future applications."
+        markup = {"force_reply": True, "selective": True}
+    text = "\n".join([*lines, *listing, "", tail])
+    if len(text) > 4000:
+        text = "\n".join([*lines, "", f"{len(listed)} choices: use the buttons below.", "", tail])
+    return {"chat_id": service.config.telegram_user_id, "text": text[:4000], "reply_markup": markup}
+
+
+def confirm_choice(review_id, index, text):
+    """A typed reply's nearest option, offered to confirm; it is not the owner's answer until they tap it."""
+    return MarkupReply(
+        f"Did you mean “{text}”?",
+        {
+            "inline_keyboard": [
+                [{"text": button_label("✅", text), "callback_data": f"a:{review_id}:{index}"}],
+                [{"text": "Show all choices", "callback_data": f"ap:{review_id}:0"}],
+            ]
+        },
+    )
+
+
+def short_caption(text, limit=1000):
+    return text if len(text) <= limit else text[: limit - 2].rsplit(" ", 1)[0] + " …"
+
+
+async def send_help(service, run_id, payload, *, question=None, review_key=None, field_id=None):
+    """Only the dedicated redacted capture may be sent to the configured owner.
+
+    A long question goes as its full text with the buttons, after the screenshot with a short caption; both stay
+    reply targets for that question."""
     from .diagnostics import current_help_bytes
 
-    picture = current_help_bytes(service, run_id, question=question, review_key=review_key)
+    picture = current_help_bytes(service, run_id, question=question, review_key=review_key, field_id=field_id)
     if picture is None:
         return await api(service.config, "sendMessage", payload)
     text = payload["text"]
-    companion = None
-    if len(text) > 1000:
-        # Both the full-text question and its screenshot remain valid reply targets.
-        companion = await api(service.config, "sendMessage", payload)
-    data = {"chat_id": service.config.telegram_user_id, "caption": text[:1000]}
-    if payload.get("reply_markup"):
+    fits = len(text) <= 1000
+    data = {"chat_id": service.config.telegram_user_id, "caption": short_caption(text)}
+    if fits and payload.get("reply_markup"):
         data["reply_markup"] = json.dumps(payload["reply_markup"])
+    photo = None
     try:
         async with httpx.AsyncClient(timeout=12) as client:
             response = await client.post(
@@ -564,121 +691,270 @@ async def send_help(service, run_id, payload, *, question=None, review_key=None)
             result = response.json()
             if not result.get("ok"):
                 raise RuntimeError("Telegram rejected screenshot delivery")
-            sent = result.get("result") or {}
-            if companion and companion.get("message_id"):
-                sent["related_message_ids"] = [companion["message_id"]]
-            return sent
+            photo = result.get("result") or {}
     except Exception:
-        return companion or await api(service.config, "sendMessage", payload)
+        photo = None
+    if fits and photo:
+        return photo
+    sent = await api(service.config, "sendMessage", payload)
+    if sent and photo and photo.get("message_id"):
+        sent["related_message_ids"] = [photo["message_id"]]
+    return sent
+
+
+async def download_file(config, file_id):
+    """A file the owner sent, read through the Bot API; errors never carry the token-bearing URL."""
+    from .owner_questions import MAX_DOCUMENT_BYTES
+
+    info = await api(config, "getFile", {"file_id": file_id})
+    path = (info or {}).get("file_path")
+    if not path:
+        raise RuntimeError("Telegram did not return the file")
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(f"https://api.telegram.org/file/bot{config.telegram_bot_token}/{path}")
+        if response.is_error:
+            raise RuntimeError(f"Telegram file download failed with HTTP {response.status_code}")
+        return response.content[: MAX_DOCUMENT_BYTES + 1]
+
+
+def live_review(service, review_id):
+    """(review, run, job) while the question still blocks the job's latest run, else None."""
+    with service.db.session() as s:
+        review = s.get(Review, review_id or "")
+        run = s.get(Run, review.run_id) if review else None
+        if (
+            not review
+            or not run
+            or run.state not in LIVE | {"waiting_answer", "needs_review"}
+            or s.scalar(select(Run.id).where(Run.job_id == run.job_id, Run.created_at > run.created_at).limit(1))
+        ):
+            return None
+        return review, run, s.get(Job, run.job_id)
+
+
+def question_for_reply(service, message, *, kind=None):
+    """The review a reply answers: the replied question, else the last question sent (of `kind`, if given)."""
+    from . import owner_questions as oq
+
+    reply_to = message.get("reply_to_message", {}).get("message_id")
+    if reply_to:
+        return service.db.get_setting("telegram_question_messages", {}).get(str(reply_to))
+    rid = service.db.get_setting("telegram_question", {}).get("review_id")
+    if rid and kind:
+        with service.db.session() as s:
+            review = s.get(Review, rid)
+            if not review or oq.kind(review.question, review.options, review.context, review.reason) != kind:
+                return None
+    return rid
+
+
+async def answer_from_file(service, message):
+    """A document or photo the owner sent for an upload question."""
+    from .owner_questions import MAX_DOCUMENT_BYTES
+
+    rid = question_for_reply(service, message, kind="upload")
+    if not rid:
+        return "Reply to the question that asks for this file, so I know which application it belongs to."
+    found = live_review(service, rid)
+    if not found:
+        return "That question is no longer needed, so I haven't used the file."
+    review = found[0]
+    if review.answer is not None:
+        return "That question is already answered."
+    from .owner_questions import kind
+
+    if kind(review.question, review.options, review.context, review.reason) != "upload":
+        return "That question needs a typed answer, not a file."
+    document, photos = message.get("document"), message.get("photo") or []
+    if document:
+        file_id, name, size = document.get("file_id"), document.get("file_name") or "document", document.get("file_size")
+    elif photos:
+        biggest = max(photos, key=lambda p: p.get("file_size") or p.get("width", 0) * p.get("height", 0))
+        file_id, name, size = biggest.get("file_id"), "photo.jpg", biggest.get("file_size")
+    else:
+        return "Please send the file as a document or a photo."
+    if (size or 0) > MAX_DOCUMENT_BYTES:
+        return "That file is larger than 10 MB. Please send a smaller file."
+    try:
+        content = await download_file(service.config, file_id)
+    except (RuntimeError, httpx.HTTPError):
+        return "I couldn't download that file from Telegram. Please send it again."
+    try:
+        result = await service.resolve_review_file(rid, name, content)
+    except ValueError as exc:
+        return str(exc)
+    if service.db.get_setting("telegram_question", {}).get("review_id") == rid:
+        service.db.set_setting("telegram_question", {})
+    return "📎 " + result["message"]
+
+
+def saved_answer(service, question, options, context, reason, company):
+    """An answer the owner already gave to this same question, so it is never asked twice. No model call.
+
+    Two forms asking "What is your country of birth?" both waited for the owner; answering one left the other
+    asked. A bare label ("End Date", "C"), a history row, an upload and a repair question are never reused this way:
+    the engine's knowledge inference reads those answers with the field's own context."""
+    from . import owner_questions as oq
+    from .knowledge import KnowledgeBase
+
+    context = context or {}
+    kind = oq.kind(question, options, context, reason)
+    if (
+        kind == "upload"
+        or context.get("history_kind")
+        or context.get("source") == "repair"
+        or context.get("type") in {"checkbox", "password"}
+        or oq.bare_label(question)
+    ):
+        return None
+    listed = [text for _, text in oq.choices(options)]
+    found = KnowledgeBase(service.db).lookup(oq.tidy(question), listed, company or "", context.get("type", ""))
+    if not found:
+        return None
+    value = found[1]
+    return value if not listed or value in listed else None
 
 
 async def ask_next_question(service, allow_live=False):
     """Deliver each durable question once; an unanswered question never blocks another."""
-    from .telegram_workers import accepts_run
-
     if not configured(service.config):
         return
     if not hasattr(service, "telegram_question_lock"):
         service.telegram_question_lock = asyncio.Lock()
     async with service.telegram_question_lock:
-        with service.db.session() as s:
-            active = service.db.get_setting("telegram_question", {})
-            old = s.get(Review, active.get("review_id", ""))
-            old_run = s.get(Run, old.run_id) if old else None
-            if active and (
-                not old
-                or old.answer is not None
-                or not old_run
-                or old_run.state not in LIVE | {"waiting_answer", "needs_review"}
-                or s.get(Job, old_run.job_id).status in {"archived", "paused"}
-                or s.scalar(
-                    select(Run.id)
-                    .where(Run.job_id == old_run.job_id, Run.created_at > old_run.created_at)
-                    .limit(1)
-                )
-            ):
-                service.db.set_setting("telegram_question", {})
-            # This runs on the loop every browser shares, every few seconds. Decoding each candidate run's packet
-            # (190 open questions, nearly all already sent) and reading one marker per question overloaded it
-            # (2026-10-21); the packet now loads only for a question still to send.
-            candidates = s.execute(
-                select(Review, Run, Job)
-                .join(Run, Review.run_id == Run.id)
-                .join(Job, Run.job_id == Job.id)
-                .where(
-                    Review.answer.is_(None),
-                    Job.status.notin_(["archived", "paused"]),
-                    Run.state.in_(["waiting_answer", "needs_review", *LIVE]),
-                )
-                .options(defer(Run.packet), defer(Run.receipt))
-                .order_by(Review.created_at)
-            ).all()
-            sent = {
-                key.removeprefix("telegram_question_sent:")
-                for key in s.scalars(select(Setting.key).where(Setting.key.like("telegram_question_sent:%")))
-            }
-            chosen = None
-            for review, run, job in candidates:
-                if review.key in {"manual", "session"} or review.id in sent:
-                    continue
-                if not accepts_run(service, run):
-                    continue
-                if s.scalar(
-                    select(Run.id).where(Run.job_id == run.job_id, Run.created_at > run.created_at).limit(1)
-                ):
-                    continue
-                # Wait until the worker has captured a screenshot and released its tab.
-                # Existing live wait mode remains available for explicitly configured deployments.
-                if run.state in LIVE and service.config.telegram_wait_seconds == 0 and not allow_live:
-                    continue
-                chosen = (
-                    review.id,
-                    run.id,
-                    review.question,
-                    review.options,
-                    job.company,
-                    job.title,
-                    review.key,
-                )
-                break
-        if not chosen:
-            return
-        rid, run_id, question, options, company, title, review_key = chosen
-        if re.search(r"social security|\bssn\b|date of birth|birth date|passport", question, re.I):
-            sent = await api(
-                service.config,
-                "sendMessage",
-                {
-                    "chat_id": service.config.telegram_user_id,
-                    "text": f"{company} requires a private profile fact. Please answer it in ApplyPilot's Needs help page. Keep sensitive values out of Telegram.",
-                    "reply_markup": MENU,
-                },
+        # A question the owner already answered elsewhere is answered from that, not asked; then the next one.
+        for _ in range(6):
+            if not await _ask_one_question(service, allow_live):
+                return
+
+
+def next_question(service, allow_live):
+    """The next question still to send, as a SimpleNamespace, or None. Clears a stale active question."""
+    from .telegram_workers import accepts_run
+
+    with service.db.session() as s:
+        active = service.db.get_setting("telegram_question", {})
+        old = s.get(Review, active.get("review_id", ""))
+        old_run = s.get(Run, old.run_id) if old else None
+        if active and (
+            not old
+            or old.answer is not None
+            or not old_run
+            or old_run.state not in LIVE | {"waiting_answer", "needs_review"}
+            or s.get(Job, old_run.job_id).status in {"archived", "paused"}
+            or s.scalar(
+                select(Run.id).where(Run.job_id == old_run.job_id, Run.created_at > old_run.created_at).limit(1)
             )
-            if sent:
-                service.db.set_setting("telegram_question_sent:" + rid, {"sent": True, "private": True})
-            return
-        payload = {
-            "chat_id": service.config.telegram_user_id,
-            "text": f"💬 Your answer will unblock this job\n{company} · {title}\n\n{question}\n\nReply to THIS message. I’ll remember the answer and retry this application. Other jobs keep moving.\nTip: /query lets you chat without answering a form question.",
+        ):
+            service.db.set_setting("telegram_question", {})
+        # This runs on the loop every browser shares, every few seconds. Decoding each candidate run's packet
+        # (190 open questions, nearly all already sent) and reading one marker per question overloaded it
+        # (2026-10-21); the packet now loads only for a question still to send.
+        candidates = s.execute(
+            select(Review, Run, Job)
+            .join(Run, Review.run_id == Run.id)
+            .join(Job, Run.job_id == Job.id)
+            .where(
+                Review.answer.is_(None),
+                Job.status.notin_(["archived", "paused"]),
+                Run.state.in_(["waiting_answer", "needs_review", *LIVE]),
+            )
+            .options(defer(Run.packet), defer(Run.receipt))
+            .order_by(Review.created_at)
+        ).all()
+        sent = {
+            key.removeprefix("telegram_question_sent:")
+            for key in s.scalars(select(Setting.key).where(Setting.key.like("telegram_question_sent:%")))
         }
-        payload["reply_markup"] = (
-            {
-                "inline_keyboard": [
-                    [{"text": o[:50], "callback_data": f"a:{rid}:{i}"}] for i, o in enumerate(options[:8])
-                ]
-            }
-            if options
-            else {"force_reply": True, "selective": True}
+        for review, run, job in candidates:
+            if review.key in {"manual", "session"} or review.id in sent:
+                continue
+            if not accepts_run(service, run):
+                continue
+            if s.scalar(select(Run.id).where(Run.job_id == run.job_id, Run.created_at > run.created_at).limit(1)):
+                continue
+            # Wait until the worker has captured a screenshot and released its tab.
+            # Existing live wait mode remains available for explicitly configured deployments.
+            if run.state in LIVE and service.config.telegram_wait_seconds == 0 and not allow_live:
+                continue
+            return SimpleNamespace(
+                id=review.id,
+                run_id=run.id,
+                question=review.question,
+                options=list(review.options or []),
+                context=dict(review.context or {}),
+                reason=review.reason or "",
+                key=review.key,
+                company=job.company,
+                title=job.title,
+            )
+    return None
+
+
+async def _ask_one_question(service, allow_live):
+    """Deliver or settle the next unsent question; True when another one may follow."""
+    chosen = next_question(service, allow_live)
+    if not chosen:
+        return False
+    rid = chosen.id
+    from . import owner_questions as oq
+
+    document = oq.kind(chosen.question, chosen.options, chosen.context, chosen.reason) == "upload"
+    if document:
+        # The owner already sent this kind of document; the next attempt attaches it (forms.attach_owner_documents).
+        path = oq.document_for(service.db, service.config.data_dir, chosen.question, chosen.company)
+        reuse = "File: " + path.name if path else None
+    else:
+        reuse = await asyncio.to_thread(
+            saved_answer, service, chosen.question, chosen.options, chosen.context, chosen.reason, chosen.company
         )
-        sent = await send_help(service, run_id, payload, question=question, review_key=review_key)
-        mid = (sent or {}).get("message_id")
-        if not mid:
-            raise RuntimeError("Telegram did not acknowledge question delivery")
-        service.db.set_setting("telegram_question_sent:" + rid, {"message_id": mid, "sent_at": now()})
-        service.db.set_setting("telegram_question", {"review_id": rid, "message_id": mid})
-        history = service.db.get_setting("telegram_question_messages", {})
-        links = {str(m): rid for m in [mid, *sent.get("related_message_ids", [])]}
-        service.db.set_setting("telegram_question_messages", dict(list({**history, **links}.items())[-1000:]))
+    if reuse is not None:
+        service.db.set_setting("telegram_question_sent:" + rid, {"reused": True, "sent_at": now()})
+        try:
+            await service.resolve_review(rid, reuse, document=document)
+        except ValueError:
+            return True  # Answered or no longer valid meanwhile; the next question follows.
+        service.db.event(
+            chosen.run_id,
+            "answer_reused",
+            "Used the answer you already gave to this question",
+            {"question": chosen.question[:200]},
+        )
+        return True
+    if re.search(r"social security|\bssn\b|date of birth|birth date|passport", chosen.question, re.I):
+        sent = await api(
+            service.config,
+            "sendMessage",
+            {
+                "chat_id": service.config.telegram_user_id,
+                "text": f"{chosen.company} asks for a private detail. Please answer it on the Needs you list in the "
+                "ApplyPilot app, not here in Telegram.",
+                "reply_markup": MENU,
+            },
+        )
+        if sent:
+            service.db.set_setting("telegram_question_sent:" + rid, {"sent": True, "private": True})
+        return False
+    payload = question_payload(
+        service, rid, chosen.question, chosen.options, chosen.context, chosen.reason, chosen.company, chosen.title
+    )
+    sent = await send_help(
+        service,
+        chosen.run_id,
+        payload,
+        question=chosen.question,
+        review_key=chosen.key,
+        field_id=chosen.context.get("field_id"),
+    )
+    mid = (sent or {}).get("message_id")
+    if not mid:
+        raise RuntimeError("Telegram did not acknowledge question delivery")
+    service.db.set_setting("telegram_question_sent:" + rid, {"message_id": mid, "sent_at": now()})
+    service.db.set_setting("telegram_question", {"review_id": rid, "message_id": mid})
+    history = service.db.get_setting("telegram_question_messages", {})
+    links = {str(m): rid for m in [mid, *sent.get("related_message_ids", [])]}
+    service.db.set_setting("telegram_question_messages", dict(list({**history, **links}.items())[-1000:]))
+    return False
 
 
 async def answer_from_text(service, message):
@@ -717,52 +993,75 @@ async def answer_from_text(service, message):
             )
     with service.db.session() as s:
         row = s.get(Review, rid)
-        if not row or row.answer is not None:
-            return "That answer is already saved."
-        run = s.get(Run, row.run_id)
-        if (
-            not run
-            or run.state not in LIVE | {"waiting_answer", "needs_review"}
-            or s.scalar(
-                select(Run.id).where(Run.job_id == run.job_id, Run.created_at > run.created_at).limit(1)
-            )
-        ):
-            return "That question is no longer needed. I haven’t changed your saved answers. Use Status for current progress."
-        question, options = row.question, row.options
-    text = message.get("text", "").strip()
-    answer = next((o for o in options if normalize(o) == normalize(text)), None)
-    if not options and not text.endswith("?") and not service.config.llm_api_key:
-        answer = text
-    if answer is None and service.config.llm_api_key:
-        from .models import structured
+        if row and row.answer is not None:
+            return "That question is already answered."
+    found = live_review(service, rid)
+    if not found:
+        return "That question is no longer needed, so I haven't changed anything."
+    row = found[0]
+    question, options, context, reason = row.question, list(row.options or []), row.context or {}, row.reason or ""
+    from . import owner_questions as oq
 
-        parsed = await structured(
-            service.config,
-            service.db,
-            ReplyInterpretation,
-            "Interpret the applicant's reply to exactly one application question. Return an answer only "
-            "when explicitly supported by this reply. If options exist, choose one exact option; otherwise "
-            "return the applicant's exact text. Include an exact supporting quote from the reply. "
-            "If the reply is a question, unrelated, ambiguous, or asks you to guess a personal fact, "
-            "set answer=null, classify kind as question or unrelated, and explain briefly. "
-            "Do not infer eligibility or create facts.",
-            json.dumps({"question": question, "options": options, "applicant_reply": text}),
-        )
-        if parsed.answer is not None and parsed.quote and parsed.quote in text:
-            if parsed.answer in options or (not options and parsed.answer == text):
-                answer = parsed.answer
-        if answer is None:
+    text = message.get("text", "").strip()
+    kind = oq.kind(question, options, context, reason)
+    if kind == "upload":
+        return "This question needs a file. Reply to the question with the document (📎 → File, or a photo)."
+    if DONT_KNOW.fullmatch(normalize(text)):
+        return "I can only save your real answer. If the question doesn't apply to you, reply “N/A”."
+    answer = None
+    if kind == "choice":
+        listed = oq.choices(options)
+        texts = [t for _, t in listed]
+        hit = oq.match_option(texts, text)
+        if hit and hit[1]:
+            answer = texts[hit[0]]
+        elif hit:
+            return confirm_choice(rid, *listed[hit[0]])
+        elif oq.free_text_allowed(options, context):
+            answer = text  # A searchable or partly read list: the owner's own words are the answer.
+        elif service.config.llm_api_key:
+            from .models import structured
+
+            try:
+                parsed = await structured(
+                    service.config,
+                    service.db,
+                    ReplyInterpretation,
+                    "Interpret the applicant's reply to exactly one application question. Return an answer only "
+                    "when explicitly supported by this reply, as exactly one of the options. Include an exact "
+                    "supporting quote from the reply. If the reply is a question, unrelated, ambiguous, or asks "
+                    "you to guess a personal fact, set answer=null, classify kind as question or unrelated, and "
+                    "explain briefly. Do not infer eligibility or create facts.",
+                    json.dumps({"question": question, "options": texts, "applicant_reply": text}),
+                    max_tokens=400,
+                    thinking="disabled",
+                    timeout=15,
+                    retries=0,
+                )
+            except Exception:
+                parsed = ReplyInterpretation(kind="answer")
+            if parsed.answer in texts and parsed.quote and parsed.quote in text:
+                return confirm_choice(rid, *listed[texts.index(parsed.answer)])
             if parsed.kind == "unrelated":
                 return await chat(service, text)
-            return (
-                parsed.reply or "Please answer the question directly so I can save the correct information."
+        if answer is None:
+            return MarkupReply(
+                "I couldn't match that to one of the choices. Tap one below, or reply in other words.",
+                option_keyboard(rid, listed, 0),
             )
-    if answer is None:
-        return "Please choose one of these answers: " + "; ".join(options)
+    elif text.endswith("?") and service.config.llm_api_key:
+        # A question back to the assistant, not the answer to the form's question.
+        return await chat(service, text) + "\n\nTo answer the form's question, reply to it with your answer."
+    else:
+        answer = text
     result = await service.resolve_review(rid, answer)
     if active.get("review_id") == rid:
         service.db.set_setting("telegram_question", {})
     return result["message"]
+
+
+# "Guess" and "you decide" are not an applicant's answer; truthful answers only.
+DONT_KNOW = re.compile(r"(?:i )?(?:don t|do not|dont) know|idk|not sure|no idea|guess|you (?:decide|choose|pick)")
 
 
 async def chat(service, text, job_id=None):
@@ -826,7 +1125,7 @@ async def chat(service, text, job_id=None):
         )
     except Exception:
         return (
-            "I couldn’t get an AI reply just now. Your workers are unaffected. Use Status or send a job link."
+            "I couldn’t reply just now. Your applications keep running; try again in a minute."
         )
     service.db.set_setting(
         "telegram_chat",
@@ -980,7 +1279,7 @@ async def ask_next_browser(service):
                 ]
                 chosen = next(
                     (
-                        (r.id, r.company, r.reason)
+                        (r.id, r.company, r.reason, r.packet.get("blocker_type") or "")
                         for r in rows
                         if accepts_run(service, r)
                         and fresh_run(service, r.created_at)
@@ -1005,13 +1304,19 @@ async def ask_next_browser(service):
         chosen = await asyncio.to_thread(pick)
         if not chosen:
             return
-        rid, company, reason = chosen
+        rid, company, reason, blocker = chosen
+        from .owner_questions import owner_blocker
+
+        # The run's reason is a diagnostic ("Clean twin browser's hCaptcha token delivered to website callback");
+        # the owner gets what happened in plain words and what they can do.
         sent = await send_help(
             service,
             rid,
             {
                 "chat_id": service.config.telegram_user_id,
-                "text": f"🔎 Browser step needs help\n{company}\n\n{reason[:600]}\n\nThis job is deferred; other jobs continue. Reply to this message with an answer or instruction. /query lets you discuss it. The next attempt will reopen the application.",
+                "text": f"🔎 {company or 'An application'} needs your help\n\n{owner_blocker(reason, blocker)}\n\n"
+                "Reply to this message with what to do, or reply “done” after you finish it in the browser. "
+                "Other applications keep running.",
                 "reply_markup": {"force_reply": True, "selective": True},
             },
         )
@@ -1126,9 +1431,9 @@ async def notify_outcome(service, run, job):
         "confirmed": "✅ Application confirmed by the employer.",
         "already_applied": "ℹ️ This application already exists; I haven't submitted a duplicate.",
         "dry_run_passed": "👀 Preview completed. Nothing was submitted.",
-        "waiting_answer": "💬 This application needs a saved personal fact. I'll send the question separately.",
+        # "waiting_answer" has no message: its question is the message (owner 2026-10-23, less chatter).
         "needs_review": "💬 This draft needs an answer or review before it can continue.",
-        "waiting_browser": "🔧 This draft is saved, but a browser step needs repair.",
+        "waiting_browser": "🔧 This application is saved, but it stopped at a step it couldn't finish yet.",
         # "waiting_email" has no message: a parked wait is not an outcome, and the continuation reports the result.
         "timed_out": "⏳ This attempt ran out of time; it is not a confirmed application.",
         "failed": "🔧 This attempt stopped without confirmation.",
@@ -1146,13 +1451,13 @@ async def notify_outcome(service, run, job):
     elif cause == "security_challenge":
         text = "🧩 The employer's security check hasn't been accepted yet. This application is saved but unconfirmed."
     elif cause == "provider_unavailable":
-        text = "🔌 The answer service couldn't complete its request. Your draft is saved; this isn't a missing personal fact."
+        text = "🔌 An outside service didn't respond, so this application paused. Its draft is saved; nothing is needed from you."
     elif run.packet.get("blocker_type") == "account":
-        text = "🔐 The employer hasn't accepted the account/login step. A reset acknowledgement alone doesn't prove an account exists."
+        text = "🔐 The employer's site didn't accept the sign-in or account step."
     elif cause in {"control_observation", "validation_controls", "navigation_stalled"} or run.packet.get(
         "blocker_type"
     ) in {"control_failure", "observation_failure", "validation"}:
-        text = "🔧 I couldn't verify that the employer accepted a field or the next step. I'll retain the draft rather than count it as submitted."
+        text = "🔧 The employer's form didn't accept a step, so this isn't submitted yet. The draft is kept."
     key = f"telegram_outcome:{job.id}:{run.state}:{run.packet.get('engine_version', '')}:{cause}"
     if cause == "posting_unavailable":
         key = f"telegram_outcome:{job.id}:posting_unavailable"  # One message per job, however many runs repeat it.
@@ -1163,7 +1468,7 @@ async def notify_outcome(service, run, job):
         "sendMessage",
         {
             "chat_id": service.config.telegram_user_id,
-            "text": f"{clean(job.company)} · {clean(job.title)}\n\n{text}\n\n/status shows all workers; /job {job.id[:8]} opens this application.",
+            "text": f"{clean(job.company)} · {clean(job.title)}\n\n{text}\n\n/job {job.id[:8]} opens this application.",
         },
     )
     if not sent or not sent.get("message_id"):
@@ -1271,33 +1576,73 @@ async def _handle_update(service, update):
         reply = await manage_reference(service, jid, action)
         await api(c, "sendMessage", {"chat_id": c.telegram_user_id, "text": reply, "reply_markup": MENU})
         return reply
+    if callback and callback.get("data", "").startswith("ap:"):
+        # Another page of a question's options, edited into the same message.
+        _, rid, page = (callback["data"].split(":") + ["", ""])[:3]
+        found = live_review(service, rid)
+        source = callback.get("message", {})
+        if found and found[0].answer is None and source.get("message_id"):
+            from .owner_questions import choices
+
+            await api(c, "answerCallbackQuery", {"callback_query_id": callback["id"]})
+            await api(
+                c,
+                "editMessageReplyMarkup",
+                {
+                    "chat_id": c.telegram_user_id,
+                    "message_id": source["message_id"],
+                    "reply_markup": option_keyboard(rid, choices(found[0].options), int(page or 0)),
+                },
+            )
+        else:
+            await api(
+                c,
+                "answerCallbackQuery",
+                {"callback_query_id": callback["id"], "text": "That question is already answered or no longer needed."},
+            )
+        return None
     if callback:
         parts = callback.get("data", "").split(":")
+        value, answered = None, False
         try:
             if len(parts) != 3 or parts[0] != "a":
                 raise ValueError("Invalid callback")
             with service.db.session() as s:
                 review = s.get(Review, parts[1])
-                idx = int(parts[2])
-                if not review or idx < 0 or idx >= len(review.options):
-                    raise ValueError("Expired or invalid review")
-                run = s.get(Run, review.run_id)
-                if (
-                    not run
-                    or run.state not in LIVE | {"waiting_answer", "needs_review"}
-                    or s.scalar(
-                        select(Run.id)
-                        .where(Run.job_id == run.job_id, Run.created_at > run.created_at)
-                        .limit(1)
-                    )
-                ):
-                    raise ValueError("Superseded question")
-                value = review.options[idx]
+                answered = bool(review and review.answer is not None)
+            found = live_review(service, parts[1])
+            idx = int(parts[2])
+            if answered or not found or idx < 0 or idx >= len(found[0].options):
+                raise ValueError("Expired, answered or superseded question")
+            value = found[0].options[idx]
             reply = (await service.resolve_review(parts[1], value))["message"]
         except (ValueError, IndexError):
-            reply = "This review is invalid or already resolved."
+            value = None
+            reply = "That question is already answered." if answered else "That question is no longer needed."
         await api(c, "answerCallbackQuery", {"callback_query_id": callback["id"], "text": reply[:180]})
-        await api(c, "sendMessage", {"chat_id": c.telegram_user_id, "text": reply})
+        source = callback.get("message", {})
+        if source.get("message_id"):
+            # Answered buttons go away, so a second tap cannot look like a new answer.
+            try:
+                await api(
+                    c,
+                    "editMessageReplyMarkup",
+                    {
+                        "chat_id": c.telegram_user_id,
+                        "message_id": source["message_id"],
+                        "reply_markup": {"inline_keyboard": []},
+                    },
+                )
+            except RuntimeError:
+                pass  # The message is too old to edit; the answer is saved either way.
+        if value is not None:
+            reply = f"✅ {value}\n{reply}"
+        await api(c, "sendMessage", {"chat_id": c.telegram_user_id, "text": reply[:4000]})
+        await ask_next_question(service)
+        return reply
+    if message.get("document") or message.get("photo"):
+        reply = await answer_from_file(service, message)
+        await api(c, "sendMessage", {"chat_id": c.telegram_user_id, "text": reply, "reply_markup": MENU})
         await ask_next_question(service)
         return reply
     text = message.get("text", "").strip()
@@ -1368,7 +1713,7 @@ async def _handle_update(service, update):
                 await start_autonomous(service, int(rest.strip() or "100"))
                 reply = batch_message(batch_snapshot(service))
             except (ValueError, RuntimeError) as exc:
-                reply = "Could not start autonomous applications: " + str(exc)[:300]
+                reply = "I couldn’t start the batch. " + owner_error(exc)
     elif cmd in {"/job", "/applications", "/delete"} or (cmd in {"/pause", "/resume"} and rest.strip()):
         reply = await manage_reference(
             service, rest.strip(), cmd[1:] if cmd in {"/pause", "/resume", "/delete"} else "inspect"
@@ -1398,7 +1743,7 @@ async def _handle_update(service, update):
         try:
             reply = (await service.resolve_review(review_id, answer))["message"]
         except ValueError as exc:
-            reply = str(exc)
+            reply = owner_error(exc)
     elif cmd == "/learn":
         from .knowledge import save
 
@@ -1441,6 +1786,7 @@ async def _handle_update(service, update):
     elif cmd in {"/status", "/queue", "/report", "/recent", "/failures"}:
         from collections import Counter
         from .failure_reports import clean
+        from .owner_questions import owner_blocker
 
         rows = current_rows(service)
         if cmd == "/recent":
@@ -1469,7 +1815,8 @@ async def _handle_update(service, update):
             for r in blocked:
                 report = service.db.get_setting("failure_report:" + r["id"], {})
                 lines.append(
-                    f"• {r['company']} — {r['state'].replace('_', ' ')}\n{clean(report.get('summary') or r['reason'])}"
+                    f"• {r['company']} — {r['state'].replace('_', ' ')}\n"
+                    + (clean(report["summary"]) if report.get("summary") else owner_blocker(r["reason"]))
                 )
             reply = "🔎 Recent blockers\n\n" + ("\n\n".join(lines) or "No recorded blockers.")
         else:
@@ -1525,7 +1872,7 @@ async def _handle_update(service, update):
                     service.db.set_setting("telegram_browser_question", {})
                 reply = "I’ve queued another attempt using your saved information."
             except (ValueError, RuntimeError) as exc:
-                reply = str(exc)
+                reply = owner_error(exc)
         else:
             reply = "That browser step is no longer waiting. Send status to see the latest result."
     elif cmd == "/apply":
@@ -1578,7 +1925,9 @@ async def _handle_update(service, update):
                         )
                     )
         except Exception as exc:
-            reply = f"Could not queue: {type(exc).__name__}. Check job details in the app."
+            reply = "I couldn’t add that job. " + owner_error(
+                exc, "Check that the link opens one job posting, then send it again."
+            )
     else:
         # A bare company reference opens that company's jobs instead of answering another form.
         from .job_control import choices
@@ -1604,7 +1953,8 @@ async def _handle_update(service, update):
             if not reply_job and re.search(r"\b(?:this|that|it|screenshot)\b", text, re.I):
                 reply_job = message_job(service, message, use_context=True)
             reply = await chat(service, text, reply_job)
-    await api(c, "sendMessage", {"chat_id": c.telegram_user_id, "text": reply[:4000], "reply_markup": MENU})
+    markup = getattr(reply, "markup", None) or MENU
+    await api(c, "sendMessage", {"chat_id": c.telegram_user_id, "text": reply[:4000], "reply_markup": markup})
     if conversational in {"done", "finished", "completed", "signed in", "captcha done"}:
         await ask_next_browser(service)
     await ask_next_question(service)
@@ -1705,7 +2055,7 @@ async def poll(service):
                                 "sendMessage",
                                 {
                                     "chat_id": c.telegram_user_id,
-                                    "text": "I couldn’t complete that instruction. It is recorded as an error in the app; your other applications keep running. Please retry the command.",
+                                    "text": "Something went wrong on my side. Please try that again in a minute. Your applications keep running.",
                                 },
                             )
                     except Exception:
