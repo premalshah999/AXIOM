@@ -9,9 +9,9 @@ import re
 import time
 from types import SimpleNamespace
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
-from .admission import QueueBlocked
+from .admission import QueueBlocked, active_runs
 from .db import Job, Run, Setting
 from .features.knowledge.employers import name_aliases, tenant_alias
 from .features.knowledge.tables import KnAlias
@@ -73,9 +73,7 @@ def ats_limit(session, ats):
 
 def _ats_active(session, ats, run_id, states):
     count = 0
-    for other, employer in session.execute(
-        select(Run, Job).join(Job, Job.id == Run.job_id).where(Run.state.in_(states), Job.ats == ats)
-    ):
+    for other, employer in active_runs(session, states, ats=ats):
         if other.id != run_id and not _exempt(employer, other):
             count += 1
     return count
@@ -107,11 +105,7 @@ def may_start(session, job, run, at=None):
         return True
     if throttled_until(session, ats):
         return False
-    for other, employer in session.execute(
-        select(Run, Job)
-        .join(Job, Job.id == Run.job_id)
-        .where(Run.state.in_(["running", "submitting"]), Job.ats == ats)
-    ):
+    for other, employer in active_runs(session, ("running", "submitting"), ats=ats):
         if other.id != _get(run, "id") and not _exempt(employer, other):
             return False
     saved = session.get(Setting, gap_key(ats))
@@ -175,11 +169,7 @@ def require_ats_admission(session, job, run_id=None, owner_pick=False):
             code="ats_pacing",
             not_before=until,
         )
-    for other, employer in session.execute(
-        select(Run, Job)
-        .join(Job, Job.id == Run.job_id)
-        .where(Run.state.in_(["queued", "running", "submitting"]), Job.ats == ats)
-    ):
+    for other, employer in active_runs(session, ("queued", "running", "submitting"), ats=ats):
         if other.id != run_id and not _exempt(employer, other):
             raise QueueBlocked(
                 f"Another {name} application is queued or active",
@@ -235,6 +225,31 @@ def employer_key(alias_rows, name, url=""):
     return "name:" + names[-1]
 
 
+# employer_key() per (alias table, company, url). The key of every job was recomputed at each queue admission: 165 ms
+# of a 240 ms Apply click with 7,600 jobs, under the app lock (2026-10-22). Keyed by the alias table's contents, so an
+# edited alias never reuses a key computed before the edit.
+_KEYS: dict = {}
+
+
+def employer_keys(alias_rows):
+    """employer_key bound to `alias_rows`, remembered across calls while the alias table is unchanged."""
+    version = hash(frozenset(alias_rows.items()))
+    if len(_KEYS) > 200_000:
+        _KEYS.clear()
+
+    def identity(name, url=""):
+        key = (version, name or "", url or "")
+        if key not in _KEYS:
+            _KEYS[key] = employer_key(alias_rows, name, url)
+        return _KEYS[key]
+
+    return identity
+
+
+# Only these states can occupy an employer's cap: a confirmation, or a submit admission still in flight.
+CAP_RUN_STATES = ("confirmed", "already_applied", "queued", "running", "submitting")
+
+
 def record_employer_cap(db, job, cap):
     """Remember an employer's stated limit so its other jobs wait instead of being refused one by one."""
     with db.exclusive() as s:
@@ -285,9 +300,7 @@ def require_company_limit(session, job, run_id=None):
     if current_run and _exempt(job, current_run):
         return
     alias_rows = {a.alias: (a.employer_id, a.kind) for a in session.scalars(select(KnAlias))}
-
-    def identity(name, url=""):
-        return employer_key(alias_rows, name, url)
+    identity = employer_keys(alias_rows)
 
     target = identity(_get(job, "company", ""), _get(job, "url", ""))
     if target is None:
@@ -296,8 +309,16 @@ def require_company_limit(session, job, run_id=None):
     current_identity = _get(job, "identity")
     # Columns only: full job descriptions and run packets (hundreds of MB) were
     # loaded here at every queue and final-submit reservation, under the app lock.
+    # Only a confirmed job or one with a run in CAP_RUN_STATES can count below, so the thousands of other postings
+    # are never read (2026-10-22).
     jobs = session.execute(
-        select(Job.id, Job.company, Job.url, Job.status, Job.identity).where(Job.demo.is_(False))
+        select(Job.id, Job.company, Job.url, Job.status, Job.identity).where(
+            Job.demo.is_(False),
+            or_(
+                Job.status.in_(("confirmed", "already_applied")),
+                Job.id.in_(select(Run.job_id).where(Run.state.in_(CAP_RUN_STATES))),
+            ),
+        )
     ).all()
     employers = {candidate.id: identity(candidate.company, candidate.url) for candidate in jobs}
     by_id = {candidate.id: candidate for candidate in jobs}
@@ -309,7 +330,7 @@ def require_company_limit(session, job, run_id=None):
         select(Run.id, Run.job_id, Run.state, Run.mode, Run.packet["verification_only"].as_boolean())
         .where(
             Run.job_id.in_(target_ids),
-            Run.state.in_({"confirmed", "already_applied", "queued", "running", "submitting"}),
+            Run.state.in_(CAP_RUN_STATES),
         )
     ).all()
     for run_row in runs:

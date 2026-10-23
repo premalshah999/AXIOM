@@ -1,6 +1,10 @@
 """Queueing a run: the admission guards run in order, then the run, its outbox row and its event are written."""
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import contextvars
 from datetime import UTC, datetime, timedelta
+import functools
 import hashlib
 
 from sqlalchemy import select
@@ -10,6 +14,19 @@ from ..schemas import Profile
 from ..admission import QueueBlocked, employer_partition, temporary_time, require_intake
 from ..runtime import engine_version, profile_version
 from .states import ACTIVE, RETRYABLE
+
+# Admission is synchronous database work: dozens of guard queries inside the app lock (a PostgreSQL advisory lock).
+# Run on the event loop, every Apply click and autopilot start stalled the browsers that share the loop, and waiting
+# for the lock held by a worker thread stalled them for as long as that thread kept it (2026-10-22). Its own two
+# threads, so a slow mailbox or provider call queued on the default executor never delays a click. The lock, not the
+# loop, keeps two admissions of one job from both writing a run.
+ADMISSION = ThreadPoolExecutor(max_workers=2, thread_name_prefix="admission")
+
+
+async def off_loop(fn, *args, **kwargs):
+    """`fn(*args, **kwargs)` on an admission thread, with the caller's context variables."""
+    call = functools.partial(contextvars.copy_context().run, fn, *args, **kwargs)
+    return await asyncio.get_running_loop().run_in_executor(ADMISSION, call)
 
 
 class QueueingMixin:
@@ -72,32 +89,74 @@ class QueueingMixin:
             )
         except QueueBlocked as exc:
             if exc.code == "tailoring_pending":
-                from ..outbox import enqueue
-
-                with self.db.exclusive() as session:
-                    job = session.get(Job, job_id)
-                    key = job_id + ":" + profile_version(self.db.get_setting("profile", {}))
-                    key += ":" + hashlib.sha256((job.description or "").encode()).hexdigest()[:16]
-                    enqueue(session, "tailor", key, {"job_id": job_id})
-                    request = session.get(Setting, "preparation_request:" + job_id)
-                    value = {
-                        "state": "pending",
-                        "request_id": key,
-                        "job_id": job_id,
-                        "at": now(),
-                        "mode": mode,
-                        "resume_id": resume_id,
-                        "retry": retry,
-                        "batch_id": batch_id,
-                        "controller_policy": controller_policy,
-                    }
-                    if request:
-                        request.value = value
-                    else:
-                        session.add(Setting(key="preparation_request:" + job_id, value=value))
+                await off_loop(
+                    self._request_preparation, job_id, mode, resume_id, retry, batch_id, controller_policy
+                )
             raise
 
+    def _request_preparation(self, job_id, mode, resume_id, retry, batch_id, controller_policy):
+        from ..outbox import enqueue
+
+        with self.db.exclusive() as session:
+            job = session.get(Job, job_id)
+            key = job_id + ":" + profile_version(self.db.get_setting("profile", {}))
+            key += ":" + hashlib.sha256((job.description or "").encode()).hexdigest()[:16]
+            enqueue(session, "tailor", key, {"job_id": job_id})
+            request = session.get(Setting, "preparation_request:" + job_id)
+            value = {
+                "state": "pending",
+                "request_id": key,
+                "job_id": job_id,
+                "at": now(),
+                "mode": mode,
+                "resume_id": resume_id,
+                "retry": retry,
+                "batch_id": batch_id,
+                "controller_policy": controller_policy,
+            }
+            if request:
+                request.value = value
+            else:
+                session.add(Setting(key="preparation_request:" + job_id, value=value))
+
     async def _queue(
+        self,
+        job_id,
+        mode="dry_run",
+        resume_id=None,
+        retry=False,
+        batch_id=None,
+        recovery_source_run=None,
+        controller_policy=None,
+        resume_artifact_id=None,
+        owner_pick=False,
+    ):
+        """Admit and write the run off the event loop (_admit), then hand it to the workers."""
+        result, run_id = await off_loop(
+            self._admit,
+            job_id,
+            mode,
+            resume_id,
+            retry,
+            batch_id,
+            recovery_source_run,
+            controller_policy,
+            resume_artifact_id,
+            owner_pick,
+        )
+        if self.dispatch:
+            try:
+                await self.dispatch(run_id)
+            except Exception:
+                # The run is already committed. Retry its delivery, never create another run.
+                from ..outbox import enqueue
+
+                with self.db.exclusive() as s:
+                    enqueue(s, "dispatch", run_id, {"run_id": run_id}, run_id=run_id)
+                self.kick_outbox()
+        return result
+
+    def _admit(
         self,
         job_id,
         mode="dry_run",
@@ -538,14 +597,4 @@ class QueueingMixin:
         self.db.event(
             run.id, "queued", "Application queued", {"mode": mode, "resume": chosen.name, **routing}
         )
-        if self.dispatch:
-            try:
-                await self.dispatch(run.id)
-            except Exception:
-                # The run is already committed. Retry its delivery, never create another run.
-                from ..outbox import enqueue
-
-                with self.db.exclusive() as s:
-                    enqueue(s, "dispatch", run.id, {"run_id": run.id}, run_id=run.id)
-                self.kick_outbox()
-        return result
+        return result, run.id

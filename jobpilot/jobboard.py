@@ -16,9 +16,9 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from .db import Job, JobListing, Setting, Source, now, record
+from .db import Job, JobListing, Run, Setting, Source, now, record
 from .network import fetch
 from .schemas import JobInput, Profile
 from .widgets import US_STATES
@@ -642,6 +642,31 @@ async def scrape_source(source, db, config):
         raise
 
 
+LISTED = "listing__"
+# A listing in one of these states is already owned or protected (frontend/src/jobboard.tsx LOCKED).
+LOCKED = frozenset(
+    {"paused", "queued", "running", "submitting", "confirmed", "submission_unknown", "already_applied", "archived"}
+)
+REQUESTED = "owner_apply:"  # owner_apply.KEY
+
+
+FITS = ("eligible", "uncertain", "unranked", "below")
+
+
+def fit_of(job, minimum):
+    """eligible | unranked | below | uncertain (ranked as eligible with open questions, or under review)."""
+    score = _field(job, "score")
+    if _field(job, "status") == "skipped" or (score is not None and score < minimum):
+        return "below"
+    if score is None:
+        return "unranked"
+    return "eligible" if _field(job, "status") == "ready" else "uncertain"
+
+
+def _field(job, name):
+    return job[name] if isinstance(job, dict) else getattr(job, name)
+
+
 def board_snapshot(db, limit=500):
     cfg = settings(db)
     at = datetime.now(UTC)
@@ -649,24 +674,36 @@ def board_snapshot(db, limit=500):
     seen_cutoff = (at - timedelta(hours=max(6, cfg.interval_hours * 2 + 1))).isoformat()
     ids = managed_ids(db)
     with db.session() as s:
-        jobs = [
-            {**{k: v for k, v in record(job).items() if k != "description"}, **record(entry), "id": job.id}
-            for entry, job in s.execute(
-                select(JobListing, Job)
-                .join(Job, Job.id == JobListing.job_id)
-                .where(
-                    JobListing.active.is_(True),
-                    JobListing.country == "US",
-                    JobListing.posted_at >= cutoff,
-                    JobListing.posted_at <= at.isoformat(),
-                    JobListing.last_seen >= seen_cutoff,
-                    Job.demo.is_(False),
-                    Job.status != "archived",
-                )
-                .order_by(JobListing.posted_at.desc())
-                .limit(limit)
+        # Columns, not whole rows: every fresh posting's description was read (and dropped) on each board poll and
+        # each autopilot tick (2026-10-22). Listing fields win over the job's, as before.
+        found = s.execute(
+            select(
+                *(column for column in Job.__table__.columns if column.name != "description"),
+                *(column.label(LISTED + column.name) for column in JobListing.__table__.columns),
+                # Already applied to (any run), or the owner's Apply is waiting: Jobs › Pipeline shows those.
+                Job.id.in_(select(Run.job_id)).label("attempted"),
+                Job.id.in_(
+                    select(func.substr(Setting.key, len(REQUESTED) + 1)).where(Setting.key.like(REQUESTED + "%"))
+                ).label("requested"),
             )
-        ]
+            .select_from(JobListing)
+            .join(Job, Job.id == JobListing.job_id)
+            .where(
+                JobListing.active.is_(True),
+                JobListing.country == "US",
+                JobListing.posted_at >= cutoff,
+                JobListing.posted_at <= at.isoformat(),
+                JobListing.last_seen >= seen_cutoff,
+                Job.demo.is_(False),
+                Job.status != "archived",
+            )
+            .order_by(JobListing.posted_at.desc())
+            .limit(limit)
+        )
+        # Listing columns come after the job's, so a listing field wins a shared name (location) as before; one zip
+        # per row instead of two key filters (116 ms of a 142 ms board read with 3,000 listings, 2026-10-23).
+        names = [key.removeprefix(LISTED) for key in found.keys()]
+        jobs = [dict(zip(names, row, strict=True)) for row in found]
         paused_jobs = {
             row.key.removeprefix("job_control:")
             for row in s.scalars(select(Setting).where(Setting.key.like("job_control:%")))

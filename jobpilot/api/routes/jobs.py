@@ -1,21 +1,46 @@
 """Jobs: import, inspect, rank and start, pause, resume or remove an application."""
 
 import asyncio
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from ...admission import QueueBlocked
 from ...db import Job, Run, record
 from ...discovery import add_job, rank_in_thread
 from ...network import public_url
+from ...owner_apply import MANY
 from ...schemas import JobInput, QueueInput
+from .. import pipeline
+
+Group = Literal["all", "active", "needs", "repair", "unconfirmed", "paused", "done", "stopped", "new"]
+
+
+class ApplyMany(BaseModel):
+    job_ids: list[str] = Field(min_length=1, max_length=MANY)
 
 
 def router(service) -> APIRouter:
     db, config = service.db, service.config
     r = APIRouter()
+
+    @r.get("/api/jobs")
+    def pipeline_page(group: Group = "all", q: str = "", page: int = 1, size: int = 25):
+        """One page of Jobs › Pipeline (pipeline.py); the group counts come with the snapshot."""
+        with db.session() as s:
+            return pipeline.page(s, group, q[:200], page, size)
+
+    @r.post("/api/jobs/apply-many")
+    async def apply_many(data: ApplyMany):
+        """The owner's Apply for up to 50 jobs at once, each through the one-click path; a result per job."""
+        if not service.dispatch:
+            raise ValueError("Workers are disabled")
+        from ...owner_apply import apply_many
+
+        return await apply_many(service, data.job_ids)
 
     @r.post("/api/jobs")
     async def import_job(data: JobInput):
@@ -64,12 +89,17 @@ def router(service) -> APIRouter:
                 .limit(1)
             ).first()
         control = db.get_setting("job_control:" + job_id, {})
+        # The owner's Apply waiting to start (owner_apply.start), so the job panel says so instead of "Eligible".
+        request = db.get_setting("owner_apply:" + job_id)
         return {
             "job": dict(row._mapping),
             "latest_run": dict(latest._mapping) if latest else None,
             "job_control": {
                 key: control[key] for key in ("state", "at", "previous_status") if key in control
             },
+            "request": {k: request[k] for k in ("at", "code", "reason", "not_before") if k in request}
+            if request
+            else None,
         }
 
     @r.post("/api/jobs/{job_id}/rank")

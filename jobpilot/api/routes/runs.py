@@ -38,21 +38,35 @@ def router(service) -> APIRouter:
             s.get(Job, row.job_id).status = "cancelled"
         return {"cancelled": True}
 
+    @r.get("/api/runs")
+    def job_runs(job_id: str):
+        """Every attempt of one job, newest first (the job panel's Attempts list), without packets."""
+        from ..pipeline import runs_of
+
+        with db.session() as s:
+            return {"runs": runs_of(s, job_id)}
+
     @r.get("/api/runs/{run_id}")
     def run_detail(run_id: str):
         with db.session() as s:
-            run = s.get(Run, run_id)
-            if not run:
+            # Five packet keys, not the whole ~320 KB packet: a live run's panel asks every 10 s (2026-10-22).
+            found = s.execute(
+                select(
+                    *(column for column in Run.__table__.columns if column.name != "packet"),
+                    Run.packet["worker_slot"].as_integer().label("worker_slot"),
+                    Run.packet["worker_pool"].as_string().label("worker_pool"),
+                    Run.packet["ats_specialist"].as_string().label("ats_specialist"),
+                    Run.packet["application_pipeline"].as_string().label("application_pipeline"),
+                    Run.packet["controller_policy"].as_string().label("controller_policy"),
+                ).where(Run.id == run_id)
+            ).first()
+            if not found:
                 raise HTTPException(404)
             events = [
                 record(x) for x in s.scalars(select(Event).where(Event.run_id == run_id).order_by(Event.id))
             ]
-            result = {k: v for k, v in record(run).items() if k != "packet"}
-            result["worker_slot"] = run.packet.get("worker_slot")
-            result["worker_pool"] = run.packet.get("worker_pool")
-            result["ats_specialist"] = run.packet.get("ats_specialist")
-            result["application_pipeline"] = run.packet.get("application_pipeline")
-            result["controller_policy"] = run.packet.get("controller_policy")
+            result = dict(found._mapping)
+            run = found
             job = s.get(Job, run.job_id)
             demo_receipt = None
             if job and job.demo:

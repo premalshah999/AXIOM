@@ -26,11 +26,11 @@ def test_job_detail_has_the_job_its_latest_run_and_its_control_state(client, ser
     older = seed_run(service, job_id, state="failed")
     newer = seed_run(service, job_id, state="queued")
     body = client.get(f"/api/jobs/{job_id}").json()
-    assert set(body) == {"job", "latest_run", "job_control"}
+    assert set(body) == {"job", "latest_run", "job_control", "request"}
     assert body["job"]["id"] == job_id and "description" not in body["job"]
     assert body["latest_run"]["id"] in {older, newer}
     assert "packet" not in body["latest_run"] and "receipt" not in body["latest_run"]
-    assert body["job_control"] == {}
+    assert body["job_control"] == {} and body["request"] is None
 
 
 def test_job_detail_of_an_unknown_id_is_404(client):
@@ -79,3 +79,12 @@ def test_remove_archives_the_job_and_keeps_its_history(client, service):
 
 def test_pause_of_an_unknown_job_is_a_400(client):
     assert client.post("/api/jobs/unknown/pause", json={}).status_code == 400
+
+
+def test_job_detail_shows_an_apply_waiting_to_start(client, service):
+    """The job panel said "Eligible" with an Apply button after the owner's Apply had been deferred (2026-10-23)."""
+    job_id = seed_job(service, status="ready")
+    waiting = {"at": "2026-10-23T10:00:00+00:00", "code": "worker_capacity", "reason": "This worker pool is busy"}
+    service.db.set_setting("owner_apply:" + job_id, waiting)
+    body = client.get(f"/api/jobs/{job_id}").json()
+    assert body["request"] == waiting

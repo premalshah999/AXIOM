@@ -1,5 +1,8 @@
 """/api/v2/discovery — readiness, bottleneck and policy (read-only views)."""
 
+import threading
+import time
+
 from fastapi import APIRouter
 from sqlalchemy import func, select
 
@@ -9,6 +12,7 @@ from .tables import DcRequisition, DcSourceHealth
 
 
 _TASKS: set = set()
+STATUS_SECONDS = 20
 
 
 def policy_for(db) -> DiscoveryPolicy:
@@ -25,10 +29,19 @@ def router(service) -> APIRouter:
     owners = min(6, getattr(service.config, "workers", 8))
     r = APIRouter(prefix="/api/v2/discovery", tags=["discovery"])
 
+    # The readiness overview reads every candidate posting twice; several open dashboards (and a fast reload) share
+    # one answer for STATUS_SECONDS instead of each repeating it (2026-10-22).
+    answered = {"at": -STATUS_SECONDS, "body": None}
+    once = threading.Lock()
+
     @r.get("/status")
     def pipeline_status():
-        p = policy_for(db).model_copy(update={"owners": owners})
-        return status(db, p)
+        with once:
+            if answered["body"] is not None and time.monotonic() - answered["at"] < STATUS_SECONDS:
+                return answered["body"]
+            p = policy_for(db).model_copy(update={"owners": owners})
+            answered.update(body=status(db, p), at=time.monotonic())
+            return answered["body"]
 
     @r.get("/due")
     def due():

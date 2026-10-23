@@ -12,12 +12,15 @@ from sqlalchemy import select
 
 from .admission import QueueBlocked
 from .db import Job, Resume, Setting, now
+from .service.queueing import off_loop
 
 KEY = "owner_apply:"
 # A job the owner applied to or pasted. Its retries keep the owner's say over the autopilot's fit filters.
 PICK = "owner_pick:"
 OWNER_APPROVED = "Owner approved: "
 PREPARING = "Preparing a tailored resume first. The application starts on its own when it's ready."
+# One request applies to at most this many jobs (Jobs › Discovered "Apply to selected", 2026-10-22).
+MANY = 50
 
 
 def picked(session, job_id):
@@ -30,6 +33,52 @@ def _later(not_before):
 
 async def apply(service, job_id):
     """Approve and start one job, or remember it until admission allows."""
+    answered = await off_loop(_approve, service, job_id)
+    return answered or await start(service, job_id)
+
+
+async def apply_many(service, job_ids):
+    """The owner's Apply for several jobs (owner, 2026-10-22: "for unfit applications there should be an option of
+    ticking it or select all, to apply to a few at once rather than opening every single one").
+
+    Each job goes through exactly the single-click path, one after another, so every duplicate-submission and
+    admission guard decides it as it would a click. The answer reports each job: queued, waiting (with the reason),
+    already running or applied, or refused (with the reason).
+    """
+    results = []
+    for job_id in list(dict.fromkeys(job_ids))[:MANY]:
+        try:
+            result = await apply(service, job_id)
+            # queued | waiting | preparing; a job that was already queued, running or applied needed no start.
+            started = result["state"] != "queued" or result.get("run_id")
+            outcome = "already" if result["state"] in ALREADY or not started else result["state"]
+        except QueueBlocked as exc:
+            result = {"job_id": job_id, "state": "refused", "code": exc.code, "message": str(exc)[:300]}
+            outcome = "refused"
+        except ValueError as exc:
+            result, outcome = {"job_id": job_id, "state": "refused", "message": str(exc)[:300]}, "refused"
+        results.append({**result, "outcome": outcome})
+    names = await off_loop(_names, service.db, [result["job_id"] for result in results])
+    results = [{**names.get(result["job_id"], {}), **result} for result in results]
+    summary = {}
+    for result in results:
+        summary[result["outcome"]] = summary.get(result["outcome"], 0) + 1
+    return {"results": results, "summary": summary}
+
+
+def _names(db, job_ids):
+    """Company and title per job, so the summary names each job without another request."""
+    with db.session() as s:
+        rows = s.execute(select(Job.id, Job.company, Job.title).where(Job.id.in_(job_ids))).all()
+    return {row.id: {"company": row.company, "title": row.title} for row in rows}
+
+
+# _approve's answers for a job that needs no start.
+ALREADY = {"running", "submitting", "confirmed", "submission_unknown", "already_applied"}
+
+
+def _approve(service, job_id):
+    """The click's approval, in one short transaction; an answer when the job needs no start."""
     with service.db.exclusive() as s:
         job = s.get(Job, job_id)
         if job is None:
@@ -58,7 +107,7 @@ async def apply(service, job_id):
                 row.value = value
             else:
                 s.add(Setting(key=key, value=value))
-    return await start(service, job_id)
+    return None
 
 
 async def start(service, job_id, mode="submit", **queue_options):
@@ -70,7 +119,8 @@ async def start(service, job_id, mode="submit", **queue_options):
             return {"job_id": job_id, "state": "preparing", "preparing": True, "message": PREPARING}
         if exc.outcome != "deferred" or mode != "submit":
             raise
-        service.db.set_setting(
+        await off_loop(
+            service.db.set_setting,
             KEY + job_id,
             {"at": now(), "code": exc.code, "reason": str(exc)[:300], "not_before": _later(exc.not_before)},
         )
@@ -78,9 +128,10 @@ async def start(service, job_id, mode="submit", **queue_options):
             "job_id": job_id,
             "state": "waiting",
             "deferred": True,
+            "code": exc.code,
             "message": f"{str(exc).rstrip('.')}. It starts on its own as soon as it can.",
         }
-    _forget(service.db, job_id)
+    await off_loop(_forget, service.db, job_id)
     return {"job_id": job_id, "run_id": run["id"], "state": "queued", "message": "Application queued."}
 
 

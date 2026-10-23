@@ -1,6 +1,7 @@
 """Authenticated job board routes; manual application clicks use normal queue protections."""
 
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -8,10 +9,58 @@ from sqlalchemy import select
 
 from ...db import Job, Run, Source, now
 from ...discovery import rank_batch
-from ...jobboard import BoardSettings, board_snapshot, managed_ids, setup_sources, settings
+from ...jobboard import LOCKED, BoardSettings, board_snapshot, fit_of, managed_ids, setup_sources, settings
 from ...network import public_url
 from ...schemas import SourceInput
 from ...service import ACTIVE
+from ..snapshot import BATCH_BOOKKEEPING
+
+
+Fit = Literal["all", "eligible", "unranked", "below", "uncertain"]
+SELECTABLE = 500
+
+
+def unapplied(job):
+    """Discovered lists jobs not applied to yet: no run, no waiting Apply, not owned, paused or protected. Those
+    are in Jobs › Pipeline (owner, 2026-10-23: one clear split between the pipeline and discovery)."""
+    return not job.get("attempted") and not job.get("requested") and job["status"] not in LOCKED
+
+
+def listing_page(jobs, minimum, q, ats, level, fit, page, size):
+    """Jobs › Discovered, filtered and paged here: the dashboard received 500 listings (577 KB) every 20 s and
+    filtered them itself, so a board with more fresh listings than that showed wrong totals and missed rows
+    (2026-10-22). `fits` counts each fit filter under the other filters; `selectable_ids` lets "select all" cover
+    every matching job, not only the page."""
+    text = (q or "").strip().lower()
+    jobs = [job for job in jobs if unapplied(job)]
+
+    def keep(job):
+        if text and text not in f"{job['title']} {job['company']} {job['location']}".lower():
+            return False
+        if ats != "all" and job["ats"] != ats:
+            return False
+        return level == "all" or job["career_level"] == level
+
+    shown = [job for job in jobs if keep(job)]
+    fits = {"all": len(shown), "eligible": 0, "unranked": 0, "below": 0, "uncertain": 0}
+    for job in shown:
+        fits[fit_of(job, minimum)] += 1
+    matching = shown if fit == "all" else [job for job in shown if fit_of(job, minimum) == fit]
+    size = max(1, min(100, size))
+    pages = max(1, -(-len(matching) // size))
+    page = max(1, min(page, pages))
+    return {
+        "jobs": matching[(page - 1) * size : page * size],
+        "total": len(matching),
+        "fresh_total": len(jobs),
+        "fits": fits,
+        "platforms": sorted({job["ats"] for job in jobs}),
+        "page": page,
+        "size": size,
+        "pages": pages,
+        "selectable_ids": [job["id"] for job in matching][:SELECTABLE],
+        "selectable_total": len(matching),
+    }
 
 
 class ApplySelection(BaseModel):
@@ -35,11 +84,28 @@ def router(service) -> APIRouter:
         return {**await start_autonomous(service, data.target), "runtime": batch_snapshot(service)}
 
     @r.get("/api/job-board")
-    def snapshot(include_sources: bool = True):
-        board = board_snapshot(db)
+    def snapshot(
+        include_sources: bool = True,
+        page: int | None = None,
+        size: int = 25,
+        q: str = "",
+        ats: str = "all",
+        level: str = "all",
+        fit: Fit = "all",
+    ):
+        """With `page`, one page of the fresh listings matching the filters and exact totals; without it, the newest
+        500 as before."""
+        board = board_snapshot(db, limit=None if page else 500)
         board["source_count"] = len(board["sources"])
         if not include_sources:
             board["sources"] = []
+        board["autopilot"] = {k: v for k, v in board["autopilot"].items() if k not in BATCH_BOOKKEEPING}
+        if page:
+            board.update(
+                listing_page(
+                    board["jobs"], board["settings"]["minimum_auto_fit"], q, ats, level, fit, page, size
+                )
+            )
         return {
             **board,
             "search": {

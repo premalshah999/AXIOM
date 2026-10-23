@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 from sqlalchemy import select
@@ -77,14 +78,74 @@ class Capacity:
         return self.running_partitions | self.queued_partitions
 
 
-def capacity(session, workers=8):
-    rows = list(
-        session.execute(
-            select(Run, Job)
-            .join(Job, Run.job_id == Job.id)
-            .where(Run.state.in_(["queued", "running", "submitting"]))
+def active_runs(session, states=("queued", "running", "submitting"), ats=None):
+    """(run, job) pairs for runs in `states`, with only what capacity and pacing decisions read.
+
+    Whole Run and Job rows carried ~320 KB packets and full descriptions; every snapshot, autopilot tick and queue
+    click decoded them for each queued and running application, under the app lock (2026-10-22). The packet keeps the
+    three keys these checks read (worker pool and slot, verification-only), absent when the run has none.
+    """
+    query = (
+        select(
+            Run.id,
+            Run.job_id,
+            Run.state,
+            Run.mode,
+            Run.created_at,
+            Run.started_at,
+            Run.packet["worker_pool"].as_string(),
+            Run.packet["worker_slot"].as_integer(),
+            Run.packet["verification_only"].as_boolean(),
+            Job.url,
+            Job.ats,
+            Job.company,
+            Job.demo,
         )
+        .join(Job, Job.id == Run.job_id)
+        .where(Run.state.in_(list(states)))
     )
+    if ats is not None:
+        query = query.where(Job.ats == ats)
+    rows = []
+    for (
+        rid,
+        job_id,
+        state,
+        mode,
+        created,
+        started,
+        pool,
+        slot,
+        verification,
+        url,
+        ats_,
+        company,
+        demo,
+    ) in session.execute(query):
+        packet = {
+            key: value
+            for key, value in (
+                ("worker_pool", pool),
+                ("worker_slot", slot),
+                ("verification_only", verification),
+            )
+            if value is not None
+        }
+        run = SimpleNamespace(
+            id=rid,
+            job_id=job_id,
+            state=state,
+            mode=mode,
+            created_at=created,
+            started_at=started,
+            packet=packet,
+        )
+        rows.append((run, SimpleNamespace(id=job_id, url=url, ats=ats_, company=company, demo=demo)))
+    return rows
+
+
+def capacity(session, workers=8, rows=None):
+    rows = active_runs(session) if rows is None else rows
     running = [(r, j) for r, j in rows if r.state in {"running", "submitting"}]
     return Capacity(
         running=len(running),

@@ -65,12 +65,14 @@ def allowance(session, job_id, *, exclude_run=None, at=None, aliases=None):
     at = at or datetime.now(UTC)
     job = session.get(Job, job_id)
     if aliases is None:
-        from .ats import canonicalize, icims_requisition_alias
+        from .ats import icims_requisition_alias, url_identity
 
-        identity = canonicalize(job.url)[1]
+        # url_identity is canonicalize(url)[1], cached: the uncached parse of every posting on the platform cost
+        # 23 ms of each Apply click with 7,600 jobs (2026-10-22).
+        identity = url_identity(job.url)
         aliases = [row.id for row in session.execute(
             select(Job.id, Job.url, Job.ats, Job.company).where(Job.ats == job.ats)
-        ) if canonicalize(row.url)[1] == identity or icims_requisition_alias(job, row)]
+        ) if url_identity(row.url) == identity or icims_requisition_alias(job, row)]
     rows = session.execute(select(Run.id, Run.started_at, Run.state, Run.reason).where(
         Run.job_id.in_(aliases), Run.mode == "submit", Run.started_at.is_not(None),
     )).all()
