@@ -76,17 +76,25 @@ def trusted_sender(domain, job):
     )
 
 
-def title_matches(title, body):
+def _words(text):
     # Ignore presentation punctuation and whitespace while preserving every word,
     # including level suffixes: Engineer I must never match Engineer II.
-    def words(text):
-        return re.sub(r"[\W_]+", " ", unicodedata.normalize("NFKC", text).casefold()).strip()
+    return re.sub(r"[\W_]+", " ", unicodedata.normalize("NFKC", text).casefold()).strip()
 
+
+def observed_words(body):
     # Corning's SuccessFactors subject runs the title into the next word:
     # "Application for Data Engineerrequisition number 74967."
-    body = re.sub(r"(?<=[a-z])(?=requisition\b)", " ", body, flags=re.I)
-    expected, observed = words(title), words(body)
-    return bool(expected and f" {expected} " in f" {observed} ")
+    return f" {_words(re.sub(r'(?<=[a-z])(?=requisition\b)', ' ', body, flags=re.I))} "
+
+
+def title_in(title, observed):
+    expected = _words(title)
+    return bool(expected and f" {expected} " in observed)
+
+
+def title_matches(title, body):
+    return title_in(title, observed_words(body))
 
 
 def receipt_employer_key(session, job):
@@ -159,7 +167,38 @@ def unfinished_receipt(receipt):
     return bool(UNFINISHED.search(str((receipt or {}).get("subject", ""))))
 
 
-def acknowledgement(message, job, run, allow_missing_title=False):
+# What a message says, whatever job it is compared with: parsed once per message. The receipt poller compares
+# every message with every run at the employer, and re-reading headers and the whole body for each pair held one
+# core at 100% with 1,900 confirmed runs (py-spy 2026-10-23: the host gate stopped every new application).
+_FACTS: dict = {}
+RECEIPT_WORDING = re.compile(
+    r"thank (?:you|you!) for (?:applying|your application)|thanks for applying|"
+    r"(?:received|reviewing) your application|application.{0,60}(?:received|submitted|landed successfully|is in good hands)|"
+    r"(?:confirms?|acknowledges?)\s+(?:our\s+)?receipt of your (?:application|resume)|"
+    r"\breceipt of your (?:application|resume)\b|we(?:'ve| have)? received your (?:application|resume)"
+)
+CHALLENGE = re.compile(
+    r"security code|verification code|email verification|email confirmation|verify your email|confirm your email|"
+    r"resubmit your application|(?:activate|verify|confirm) (?:your )?(?:account|profile)|"
+    r"reset (?:your )?password|password reset|one[ -]?time (?:password|passcode|code)|"
+    r"(?:login|sign[ -]?in|authentication) (?:code|link)|(?:your|the) (?:code|pin) is|\botp\b"
+)
+
+
+def message_facts(message):
+    """The job-independent reading of one message, or None when it can never be a receipt."""
+    key = (message.get("id"), message.get("internalDate")) if message.get("id") else None
+    if key is not None and key in _FACTS:
+        return _FACTS[key]
+    facts = _read_message(message)
+    if key is not None:
+        if len(_FACTS) >= _CONTENT_LIMIT:
+            _FACTS.pop(next(iter(_FACTS)))
+        _FACTS[key] = facts
+    return facts
+
+
+def _read_message(message):
     headers = {}
     for h in message.get("payload", {}).get("headers", []):
         headers.setdefault(h["name"].lower(), []).append(h["value"])
@@ -177,26 +216,12 @@ def acknowledgement(message, job, run, allow_missing_title=False):
     )
     if not authenticated_sender(auth, domain):
         return None
-    trusted = trusted_sender(domain, job)
-    recipient = run["packet"]["profile"]["email"].lower()
-    if recipient not in {
-        a.lower() for _, a in getaddresses(headers.get("to", []) + headers.get("delivered-to", []))
-    }:
-        return None
-    if int(message.get("internalDate", "0")) / 1000 < datetime.fromisoformat(run["created_at"]).timestamp():
-        return None
     text, links = (list(part) for part in message_content(message))
     subject = headers.get("subject", [""])[0]
     body = " ".join([subject, *text]).casefold()
     # Challenge messages stay exclusively in the verification flow. Inspect links
     # before stripping HTML; even a bland anchor label can carry a reset secret.
-    if re.search(
-        r"security code|verification code|email verification|email confirmation|verify your email|confirm your email|"
-        r"resubmit your application|(?:activate|verify|confirm) (?:your )?(?:account|profile)|"
-        r"reset (?:your )?password|password reset|one[ -]?time (?:password|passcode|code)|"
-        r"(?:login|sign[ -]?in|authentication) (?:code|link)|(?:your|the) (?:code|pin) is|\botp\b",
-        body,
-    ):
+    if CHALLENGE.search(body):
         return None
     for link in links:
         parts = urlsplit(link)
@@ -205,15 +230,41 @@ def acknowledgement(message, job, run, allow_missing_title=False):
             & {"token", "code", "ticket", "access_token", "verificationcode"}
         ):
             return None
+    if UNFINISHED.search(body):
+        return None  # Liberty Mutual's "You've started your ... application!" was taken as a receipt (2026-10-21).
+    if not RECEIPT_WORDING.search(body):
+        return None
+    return {
+        "domain": domain,
+        "address": sender[0][1],
+        "recipients": {a.lower() for _, a in getaddresses(headers.get("to", []) + headers.get("delivered-to", []))},
+        "received": int(message.get("internalDate", "0")) / 1000,
+        "subject": subject,
+        "compact_body": re.sub(r"[^a-z0-9]", "", body),
+        "observed": observed_words(body),
+        "links": {link.rstrip("/") for link in links},
+    }
+
+
+def acknowledgement(message, job, run, allow_missing_title=False):
+    facts = message_facts(message)
+    if facts is None:
+        return None
+    domain, subject = facts["domain"], facts["subject"]
+    trusted = trusted_sender(domain, job)
+    recipient = run["packet"]["profile"]["email"].lower()
+    if recipient not in facts["recipients"]:
+        return None
+    if facts["received"] < datetime.fromisoformat(run["created_at"]).timestamp():
+        return None
     company = re.sub(r"[^a-z0-9]", "", job["company"].casefold())
-    compact_body = re.sub(r"[^a-z0-9]", "", body)
     first = job["company"].split()[0].casefold() if job["company"].split() else ""
     # Workday can omit the employer name from the message text. Its authenticated
     # tenant sender (snapchat@myworkday.com for snapchat.wd1.myworkdayjobs.com)
     # is a precise match when the title and receipt wording also match.
     host = (urlsplit(job.get("url", "")).hostname or "").casefold()
     tenant = host.split(".")[0]
-    sender_local = sender[0][1].partition("@")[0].split("+")[0].casefold()
+    sender_local = facts["address"].partition("@")[0].split("+")[0].casefold()
     if domain == "myworkday.com" and host.endswith(".myworkdayjobs.com") and sender_local != tenant:
         return None
     workday_tenant_match = (
@@ -229,7 +280,7 @@ def acknowledgement(message, job, run, allow_missing_title=False):
     dayforce_notice = domain in {"dayforce.com", "dayforcehcm.com"} and job.get("ats") == "dayforce"
     company_match = (
         dayforce_notice
-        or company in compact_body
+        or (bool(company) and company in facts["compact_body"])
         or (len(first) >= 3 and bool(re.search(r"\bto\s+" + re.escape(first) + r"\s*[!.]?$", subject, re.I)))
         or workday_tenant_match
     )
@@ -237,26 +288,16 @@ def acknowledgement(message, job, run, allow_missing_title=False):
         from .features.knowledge.employers import name_aliases
 
         company_match = any(
-            len(re.sub(r"[^a-z0-9]", "", alias)) >= 4 and title_matches(alias, body)
+            len(re.sub(r"[^a-z0-9]", "", alias)) >= 4 and title_in(alias, facts["observed"])
             for alias in name_aliases(job["company"])
         )
-    job_url_match = bool(job.get("url") and job["url"].rstrip("/") in {link.rstrip("/") for link in links})
-    role_match = title_matches(job["title"], body)
+    job_url_match = bool(job.get("url") and job["url"].rstrip("/") in facts["links"])
+    role_match = title_in(job["title"], facts["observed"])
     if (
         not job["company"]
         or not job["title"]
         or not company_match
         or (not role_match and not job_url_match and not allow_missing_title)
-    ):
-        return None
-    if UNFINISHED.search(body):
-        return None  # Liberty Mutual's "You've started your ... application!" was taken as a receipt (2026-10-21).
-    if not re.search(
-        r"thank (?:you|you!) for (?:applying|your application)|thanks for applying|"
-        r"(?:received|reviewing) your application|application.{0,60}(?:received|submitted|landed successfully|is in good hands)|"
-        r"(?:confirms?|acknowledges?)\s+(?:our\s+)?receipt of your (?:application|resume)|"
-        r"\breceipt of your (?:application|resume)\b|we(?:'ve| have)? received your (?:application|resume)",
-        body,
     ):
         return None
     return {
@@ -268,7 +309,7 @@ def acknowledgement(message, job, run, allow_missing_title=False):
         "attribution_basis": "job_url" if job_url_match else "title" if role_match else "submit_window",
         "job_id": job.get("id", ""),
         "run_id": run.get("id", ""),
-        "from": sender[0][1],
+        "from": facts["address"],
         "subject": subject,
         "received_at": datetime.fromtimestamp(int(message["internalDate"]) / 1000, UTC).isoformat(),
     }
