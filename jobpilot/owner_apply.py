@@ -58,7 +58,7 @@ async def apply(service, job_id):
 async def start(service, job_id, mode="submit", **queue_options):
     """Queue now; a deferred admission is remembered instead of reported as a failure."""
     try:
-        run = await service.queue(job_id, mode, **queue_options)
+        run = await service.queue(job_id, mode, owner_pick=mode == "submit", **queue_options)
     except QueueBlocked as exc:
         if exc.code == "tailoring_pending":
             return {"job_id": job_id, "state": "preparing", "preparing": True, "message": PREPARING}
@@ -103,7 +103,7 @@ async def due(service, limit):
         if (value.get("not_before") or "") > now():
             continue
         try:
-            await service.queue(job_id, "submit")
+            await service.queue(job_id, "submit", owner_pick=True)
         except QueueBlocked as exc:
             if exc.outcome == "deferred":
                 service.db.set_setting(KEY + job_id, {**value, "code": exc.code, "reason": str(exc)[:300],

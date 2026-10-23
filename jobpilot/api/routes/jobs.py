@@ -96,6 +96,7 @@ def router(service) -> APIRouter:
                 data.resume_id,
                 controller_policy=data.controller_policy,
                 resume_artifact_id=data.resume_artifact_id,
+                owner_pick=data.mode == "submit",
             )
         except QueueBlocked as exc:
             if exc.code == "tailoring_pending":

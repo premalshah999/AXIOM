@@ -2,8 +2,9 @@
 
 Owner, 2026-10-22: "a new section of queued applications, and an option to drop links, so if I paste a link it gets
 in the pipeline, on the queue itself." A pasted link is the owner's own pick: it is approved and queued like a click
-on Apply, without the fit ranking that made the old "Add job link" slow and could leave the job unqueued. Duplicate
-submission protection, eligibility conflicts and the platform's pacing still apply at the queue.
+on Apply, without the fit ranking that made the old "Add job link" slow and could leave the job unqueued, and without
+the autopilot's fit filters (target roles, career level, employer cap, eligibility). Duplicate submission protection
+and the platform's pacing still apply at the queue.
 """
 
 import asyncio

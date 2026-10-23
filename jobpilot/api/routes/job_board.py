@@ -162,7 +162,7 @@ def router(service) -> APIRouter:
                 # Recheck expiry after classification, which may take several seconds.
                 if jid not in {j["id"] for j in board_snapshot(db)["jobs"]}:
                     raise ValueError("Posting aged out during classification")
-                run = await service.queue(jid, "submit")
+                run = await service.queue(jid, "submit", owner_pick=True)  # The owner's own selection.
                 queued.append({"job_id": jid, "run_id": run["id"]})
             except (ValueError, RuntimeError) as exc:
                 skipped.append({"job_id": jid, "reason": str(exc)[:250]})

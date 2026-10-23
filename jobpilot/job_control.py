@@ -103,7 +103,8 @@ async def manage(service, job_id, action, *, controller_policy=None, reopen_clos
                 "state": "new",
                 "message": "Resumed discovery; classify this job before applying",
             }
-        run = await service.queue(job_id, mode, resume_id, retry=True, controller_policy=controller_policy)
+        run = await service.queue(job_id, mode, resume_id, retry=True, controller_policy=controller_policy,
+                                  owner_pick=actor == "owner" and mode == "submit")
         if actor != "owner":
             # Automatic retries were logged as "Owner requested resume" on every attempt, also when the queue refused
             # them (3,230 events in one hour on 2026-10-17). Only a retry that queued is recorded, by its real actor.

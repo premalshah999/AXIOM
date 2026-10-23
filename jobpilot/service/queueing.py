@@ -56,6 +56,7 @@ class QueueingMixin:
         recovery_source_run=None,
         controller_policy=None,
         resume_artifact_id=None,
+        owner_pick=False,
     ):
         try:
             return await self._queue(
@@ -67,6 +68,7 @@ class QueueingMixin:
                 recovery_source_run,
                 controller_policy,
                 resume_artifact_id,
+                owner_pick,
             )
         except QueueBlocked as exc:
             if exc.code == "tailoring_pending":
@@ -105,7 +107,12 @@ class QueueingMixin:
         recovery_source_run=None,
         controller_policy=None,
         resume_artifact_id=None,
+        owner_pick=False,
     ):
+        """`owner_pick`: the owner applied or pasted this job themselves. Owner, 2026-10-22: "if I say apply, then it
+        should apply no questions asked." Fit and policy filters (target roles, internships, career level, the
+        per-employer cap, eligibility conflicts) are the autopilot's, not the owner's; duplicate-submission guards,
+        pauses, budgets and pacing still apply."""
         from ..controller_policy import validate_policy
         from ..tiers import job_tier
 
@@ -129,7 +136,7 @@ class QueueingMixin:
             from ..job_control import require_running
 
             require_running(s, job_id)
-            if mode == "submit" and not job.demo:
+            if mode == "submit" and not job.demo and not owner_pick:
                 from ..features.discovery.roles import matching_role
                 from ..features.discovery.policy import SENIOR
                 from ..features.discovery.feeds import INTERN
@@ -208,7 +215,8 @@ class QueueingMixin:
                 require_allowance(s, job_id, aliases=aliases)
                 from ..application_pacing import require_company_limit, require_ats_admission
 
-                require_company_limit(s, job)
+                if not owner_pick:
+                    require_company_limit(s, job)
                 require_ats_admission(s, job)
                 if not self.mail.shared_sender_free(s, job):
                     raise QueueBlocked(
@@ -219,7 +227,8 @@ class QueueingMixin:
                     )
             from ..eligibility import require_eligibility
 
-            require_eligibility(s, job, profile, self.config.data_dir)
+            if not owner_pick:
+                require_eligibility(s, job, profile, self.config.data_dir)
             self.check_cooldown(s, job)
             recovery_row = None
             if recovery_source_run:

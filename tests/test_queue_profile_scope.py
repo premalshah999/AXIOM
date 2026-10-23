@@ -30,3 +30,31 @@ async def test_internships_and_seniors_pass_when_the_profile_allows_them(service
             assert err.code not in {"internship", "seniority"}
         except ValueError:  # Past the scope checks: no resume is uploaded in this synthetic database.
             pass
+
+
+@pytest.mark.parametrize("title", ["", "Data Analyst", "Senior Software Engineer", "Software Engineer Intern"])
+async def test_the_owners_own_pick_skips_the_fit_filters(service, title):
+    """Owner, 2026-10-22: pasted links (no title yet) and Apply on unfit jobs were refused "Outside the profile's
+    target roles"; "if I say apply, then it should apply no questions asked"."""
+    service.db.set_setting("profile", {"target_roles": ["Software Development Engineer"]})
+    service.db.set_setting("job_board_settings", {"early_career_only": True})
+    with service.db.exclusive() as s:
+        s.add(Job(id="pick", identity="pick", url="https://example.test/job/9", title=title, status="ready"))
+    try:
+        await service.queue("pick", "submit", owner_pick=True)
+    except QueueBlocked as err:  # Later gates (provider, budget, pacing) may hold it; never the fit filters.
+        assert err.code not in {"target_role", "seniority", "internship", "company_limit", "eligibility_conflict"}
+    except ValueError:  # Past the filters: no resume is uploaded in this synthetic database.
+        pass
+
+
+async def test_the_owners_pick_still_never_resubmits(service):
+    from jobpilot.db import Run
+
+    service.db.set_setting("profile", {"target_roles": ["Software Development Engineer"]})
+    with service.db.exclusive() as s:
+        s.add(Job(id="done", identity="done", url="https://example.test/job/10", title="Data Analyst", status="ready"))
+        s.add(Run(job_id="done", state="confirmed", mode="submit", packet={}))
+    with pytest.raises(QueueBlocked) as err:
+        await service.queue("done", "submit", owner_pick=True)
+    assert err.value.code == "submitted_or_uncertain"
