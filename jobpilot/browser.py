@@ -1904,6 +1904,8 @@ class BrowserEngine:
 
         if self.armed or getattr(self, "navigator_handed_off", False) or not getattr(self, "page", None):
             return None
+        if getattr(getattr(self, "fallback_mail_adapter", None), "in_assessment", lambda: False)():
+            return None  # Workday's tax-credit questionnaire on adp.com is not an ADP application to commit.
         target = detect(self.page.url).id
         current = getattr(getattr(self, "fallback_mail_adapter", None), "id", "") or self.job.get("ats", "")
         if target not in ADAPTERS or target in {current, self.job.get("ats", "")}:

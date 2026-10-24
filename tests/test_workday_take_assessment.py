@@ -29,9 +29,9 @@ class Scripted(Workday):
         self.workday_page = Page(url=WORKDAY, closed=False)
         form = SimpleNamespace(page=self.workday_page, scan=self.scan, settle=self.settle, click=self.form_click,
                                return_to_opener=self.return_to_opener)
-        self.e = SimpleNamespace(quality_gate=None, form=form)
+        self.e = SimpleNamespace(quality_gate=None, form=form, result=None)
         self.attempts, self.committed, self.events = Counter(), False, []
-        self.clicked, self.form_clicks, self.filled, self.returned = [], [], 0, 0
+        self.clicked, self.form_clicks, self.filled, self.returned, self.launched = [], [], 0, 0, []
         self.controls, self.text, self.closes_on = [], STEP_TEXT, None
 
     def emit(self, kind, message, data=None):
@@ -44,8 +44,11 @@ class Scripted(Workday):
     async def settle(self, timeout=0):
         return None
 
-    async def form_click(self, control_id, auth_control=False, step_control=False):
-        self.form_clicks.append((control_id, auth_control))
+    async def form_click(self, control_id, auth_control=False, step_control=False, launch=False):
+        if launch:
+            self.launched.append(control_id)
+        else:
+            self.form_clicks.append((control_id, auth_control))
         if control_id == self.closes_on:
             self.page.closed = True
 
@@ -81,7 +84,8 @@ async def opened():
 
 async def test_the_tax_credit_assessment_is_taken_before_save_and_continue():
     adapter = await opened()
-    assert adapter.clicked == ["Take Assessment"] and adapter.assessment_from == "acme.wd1.myworkdayjobs.com"
+    # A launcher by its automation id, so the run returns here when a survey tab closes itself.
+    assert adapter.launched == ["take"] and adapter.assessment_from == "acme.wd1.myworkdayjobs.com"
 
 
 async def test_an_assessment_that_is_not_the_tax_credit_questionnaire_is_left_alone():
@@ -94,7 +98,7 @@ async def test_an_assessment_that_is_not_the_tax_credit_questionnaire_is_left_al
         await adapter.on_form(await adapter.scan())
     finally:
         base.Adapter.on_form = original
-    assert adapter.clicked == []
+    assert adapter.launched == []
 
 
 async def _none():
@@ -152,7 +156,7 @@ async def test_back_on_workday_the_assessment_is_not_reopened():
         await adapter.on_form(await adapter.scan())
     finally:
         base.Adapter.on_form = original
-    assert adapter.clicked == ["Take Assessment"] and calls == ["save and continue"]
+    assert adapter.launched == ["take"] and calls == ["save and continue"]
 
 
 async def test_a_questionnaire_that_never_returns_stops_after_twelve_pages():
@@ -162,3 +166,37 @@ async def test_a_questionnaire_that_never_returns_stops_after_twelve_pages():
         assert await adapter.on_form(await adapter.scan()) is None
     result = await adapter.on_form(await adapter.scan())
     assert result["state"] == "waiting_browser" and "did not return" in result["reason"]
+
+
+async def test_exits_are_never_taken_for_the_way_forward():
+    adapter = await opened()
+    adapter.open_questionnaire([{"id": "later", "label": "Finish later", "automation_id": ""},
+                                {"id": "back", "label": "Back to application", "automation_id": ""},
+                                {"id": "next", "label": "Next", "automation_id": ""}])
+    await adapter.on_form(await adapter.scan())
+    assert adapter.form_clicks == [("next", True)]
+
+
+async def test_another_workday_host_is_the_application_not_the_questionnaire():
+    adapter = await opened()
+    adapter.e.form.page = Page(url="https://acme.wd1.myworkdaysite.com/en-US/recruiting/acme/careers/job/R-1/apply",
+                               closed=False)
+    assert not adapter.in_assessment() and adapter.handoff(adapter.page.url) is None
+
+
+async def test_a_terminal_questionnaire_outcome_ends_the_guided_flow():
+    adapter = await opened()
+    adapter.open_questionnaire([{"id": "next", "label": "Next", "automation_id": ""}])
+    adapter.attempts["assessment_pages"] = 12
+    await adapter.intermediate_submit()
+    assert adapter.e.result["state"] == "waiting_browser"
+
+
+async def test_the_navigator_never_hands_the_questionnaire_to_another_ats():
+    adapter = await opened()
+    adapter.open_questionnaire([])
+    # A questionnaire served from a registered ATS's domain (ADP has no adapter, so iCIMS stands in).
+    adapter.e.form.page = Page(url="https://taxcredit.icims.com/survey", closed=False)
+    engine = SimpleNamespace(armed=False, navigator_handed_off=False, page=adapter.page, fallback_mail_adapter=adapter,
+                             job={"ats": "workday"})
+    assert await BrowserEngine.navigator_handoff(engine) is None and not engine.navigator_handed_off

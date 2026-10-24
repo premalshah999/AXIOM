@@ -74,17 +74,13 @@ def _site(job):
 
 
 def _site_active(session, job, run_id, states):
-    site, count = _site(job), 0
+    site = _site(job)
     if not site:
         return 0
-    for other, employer in session.execute(
-        select(Run, Job).join(Job, Job.id == Run.job_id).where(
-            Run.state.in_(states), Job.ats == _get(job, "ats"), Job.url.like(f"https://{site}/%")
-        )
-    ):
-        if other.id != run_id and _get(employer, "id") != _get(job, "id") and not _exempt(employer, other):
-            count += 1
-    return count
+    return sum(
+        other.id != run_id and employer.id != _get(job, "id") and _site(employer) == site and not _exempt(employer, other)
+        for other, employer in active_runs(session, states, ats=_get(job, "ats"))
+    )
 
 
 def ats_limit(session, ats):

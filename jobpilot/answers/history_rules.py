@@ -280,7 +280,7 @@ class HistoryRulesMixin:
         if p.education and re.search(
             # Axtria (JazzHR, 2026-10-23): "Completion date of your highest degree (mm/yyyy)" went to the owner.
             r"graduation date|anticipated graduation|graduation (?:month|year)|"
-            r"completion date of (?:your )?(?:highest )?degree|degree completion date|date of (?:degree )?completion",
+            r"completion date of (?:your )?(?:highest )?degree|degree completion date|date of degree completion",
             label,
         ):
             if any(re.match(r"^(?:yes|no)\b", o, re.I) for o in f.get("options", [])):
@@ -289,17 +289,24 @@ class HistoryRulesMixin:
                 # when that dropdown happens to have an editable search input.
                 return None
             entry = p.education[0]
+            if "highest" in label:
+                # "Completion date of your highest degree": the highest-ranked degree, wherever the profile lists it.
+                ranks = ["doctor", "master", "bachelor", "associate", "high school"]
+                entry = min(
+                    p.education, key=lambda e: next((i for i, r in enumerate(ranks) if r in normalize(e.degree)), len(ranks))
+                )
+            source = f"profile:education.{p.education.index(entry)}.end"
             if entry.end:
                 categories = [o for o in f.get("options", []) if self.graduation_choice_valid(f, o) is True]
                 if len(categories) == 1:
-                    return self._ans(f, categories[0], ["profile:education.0.end"])
+                    return self._ans(f, categories[0], [source])
                 # iCIMS asks "Graduation Date (Month / Day / Year)" as a Month menu, a Day menu and a 4-character
                 # Year box ("05/2026" became "05/2"), and refuses a date missing any part ("Please fill in all date
                 # fields", Schwab 2026-10-21). Each part gets its own component, all parts or none.
                 part = re.search(r"graduation (?:date )?(year|month|day)\b", label)
                 if part and part[1] == "month" and re.search(r"year", label):
                     part = None  # "Graduation month/year" asks for both.
-                evidence = ["profile:education.0.end"]
+                evidence = [source]
                 if part:
                     whole = self.graduation_parts(f, entry.end, part[1])
                     if not whole:

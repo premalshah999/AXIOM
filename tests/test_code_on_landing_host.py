@@ -51,3 +51,10 @@ async def test_a_code_box_on_any_other_host_is_refused(service):
     result = await Adapter.on_email_code(value, await value.e.form.scan())
     assert "unexpected website" in result["reason"]
     fill.assert_not_awaited()
+
+
+async def test_the_landing_host_over_plain_http_is_refused(service):
+    value, fill = adapter(service, LANDED.replace("https://", "http://") + "/apply/email")
+    result = await Adapter.on_email_code(value, await value.e.form.scan())
+    assert "unexpected website" in result["reason"]
+    fill.assert_not_awaited()

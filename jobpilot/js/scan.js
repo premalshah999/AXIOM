@@ -263,7 +263,8 @@
     let g = composedClosest(parentOf(el),'[role=group]');
     // An upload's own group names it: Jabil's Workday shows two "Upload a file (5MB max)" inputs, one under
     // "Resume/CV/Cover Letter/Supporting Documents" and one under "Additional Attachments" (2026-10-23).
-    while (g && el.type !== 'file' && deepQuery(g,'input,select,textarea,button[aria-haspopup]').length < 2) {
+    const named = n => n.getAttribute('aria-labelledby') || n.getAttribute('aria-label') || deepQuery(n,'h2,h3,h4,h5,legend')[0];
+    while (g && (el.type === 'file' ? !named(g) : deepQuery(g,'input,select,textarea,button[aria-haspopup]').length < 2)) {
       g = composedClosest(parentOf(g),'[role=group]');
     }
     if (g) {
@@ -661,7 +662,7 @@
         dateFormat = /^yyyy/i.test(placeholder) ? 'ymd' : /^dd/i.test(placeholder) ? 'dmy' : 'mdy';
         // Without a placeholder the question names the format: Axtria's JazzHR datepicker asks "Completion date of
         // your highest degree (mm/yyyy)" and a day-month-year answer went to the owner (2026-10-24).
-        if (!placeholder.trim() && /\bmm\s*[\/.-]\s*yyyy\b/i.test(clean(label(el)))) {
+        if (!placeholder.trim() && /(?:^|[^\w\/.-])mm\s*[\/.-]\s*yyyy\b/i.test(clean(label(el)))) {
           dateFormat = 'month-year';
           dateParts = [{kind:'month'},{kind:'year'}];
         }
@@ -737,7 +738,7 @@
       }
       // MAXIMUS's tax-credit survey (PepsiCo, 2026-10-24) prints "Are you a resident of the State of California?" as
       // plain text above an unlabelled Yes/No pair: the question read as "ctl00$MainContent$multipleChoice...".
-      if (question === el.name || question === 'Unlabelled field') {
+      if ((question === el.name || question === 'Unlabelled field') && !/^icims_f_/i.test(el.name || '')) {
         const captions = new Set(group.map(x => clean(label(x))));
         const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
         walker.currentNode = group[0];
@@ -745,7 +746,8 @@
           const t = clean(n.textContent);
           const host = n.parentElement;
           if (!t || !host || host.closest('script,style,noscript,button,a,option') || !visible(host) || captions.has(t)) continue;
-          if (t.length <= 300 && /[a-z]{3}/i.test(t)) question = t;
+          if (!/[a-z]{3}/i.test(t)) continue;  // "*" or "1." beside the question
+          if (t.length <= 300) question = t;
           break;
         }
       }

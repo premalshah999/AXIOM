@@ -837,6 +837,7 @@ class Adapter:
             # their code on enterpriseplatform.dell.com and Oracle locked verification).
             landed = (
                 landing.scheme == "https"
+                and urlsplit(frame_url).scheme == "https"  # never a code over plain HTTP
                 and bool(landing.hostname)
                 and (urlsplit(frame_url).hostname or "").lower() == landing.hostname.lower()
             )

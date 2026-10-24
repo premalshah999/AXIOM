@@ -27,12 +27,10 @@ REVIEW_NO_RESUME = re.compile(r"\bresume\b[\w/ ,&()-]{0,70}?\s+no response", re.
 BACK_IDS = ("pageFooterBackButton", "bottom-navigation-back-button", "wd-CommandButton_back")
 # A "Take Assessment" step opens the employer's tax-credit questionnaire (ADP WOTC for Rentokil/Terminix) in this tab;
 # its forward controls finish only that questionnaire, which then returns to Workday.
-# Tyson Foods' TaxCreditCo survey ends with "Submit form".
-ASSESSMENT_FORWARD = re.compile(
-    r"\s*(?:(?:next|continue|submit|finish|done|complete)\b.{0,30}|"
-    r"(?:return|back|go back) to (?:the |your )?(?:application|workday|job)\W*)",
-    re.I,
-)
+# Tyson Foods' TaxCreditCo survey ends with "Submit form". Exits ("Finish later", "Save and exit") never continue it.
+ASSESSMENT_FORWARD = re.compile(r"\s*(?:next|continue|submit|finish|done|complete)\b.{0,30}", re.I)
+ASSESSMENT_RETURN = re.compile(r"\s*(?:return|back|go back) to (?:the |your )?(?:application|workday|job)\W*", re.I)
+ASSESSMENT_EXIT = re.compile(r"\blater\b|\bexit\b|\bcancel\b|\bquit\b|\bclose\b|\bwithout\b", re.I)
 TAX_CREDIT = re.compile(r"tax credit|work opportunity|\bwotc\b", re.I)
 ADD = {
     "work": re.compile(r"^add(?: another)? work experience$|^add(?: another)? experience$", re.I),
@@ -72,9 +70,14 @@ class Workday(Adapter):
         return ""
 
     def in_assessment(self):
-        """The tab left Workday for the questionnaire its own Take Assessment button opened."""
-        host = getattr(self, "assessment_from", "")
-        return bool(host) and not self.committed and (urlsplit(self.page.url).hostname or "") != host
+        """The tab left Workday for the questionnaire its own Take Assessment button opened. Any Workday page is the
+        application itself, even under another Workday host (myworkdaysite.com)."""
+        from ..ats import detect
+
+        host, url = getattr(self, "assessment_from", ""), self.page.url
+        if not host or self.committed or (urlsplit(url).hostname or "") == host:
+            return False
+        return detect(url).id != "workday"
 
     def handoff(self, url):
         # The questionnaire is "Secured by ADP": an adp.com host is not a handoff to the ADP application adapter.
@@ -189,7 +192,10 @@ class Workday(Adapter):
             self.attempts["assessment"] += 1
             self.assessment_from = urlsplit(self.page.url).hostname or ""
             self.emit("assessment", "Opening the employer's tax-credit questionnaire (Take Assessment)")
-            await self.click(take)
+            # A launcher by its automation id, whatever its label says ("Take Assessment (Required)"): the run returns
+            # to this tab when a survey tab closes itself.
+            await self.dismiss_overlays()
+            await self.form.click(take["id"], step_control=True, launch=True)
             await self.form.settle(timeout=6)
             return None
         if self.page_name(obs) == "my experience":
@@ -210,7 +216,10 @@ class Workday(Adapter):
         if isinstance(report, dict) and report.get("state"):
             return report
         obs = await self.form.scan()
-        forward = next((c for c in obs["controls"] if ASSESSMENT_FORWARD.fullmatch(c["label"].strip())), None)
+        controls = [c for c in obs["controls"] if not ASSESSMENT_EXIT.search(c["label"])]
+        forward = next((c for c in controls if ASSESSMENT_FORWARD.fullmatch(c["label"].strip())), None) or next(
+            (c for c in controls if ASSESSMENT_RETURN.fullmatch(c["label"].strip())), None
+        )
         if not forward:
             return {"fallback": True, "reason": "No way forward in the tax-credit questionnaire"}
         self.emit("assessment", "Continuing the tax-credit questionnaire", {"control": forward["label"][:40]})
@@ -239,6 +248,10 @@ class Workday(Adapter):
         outcome = {"executed": result is None, "intermediate_step": True, "label": "tax-credit questionnaire"}
         if isinstance(result, dict):
             outcome["reason"] = str(result.get("reason", ""))[:200]
+            if result.get("state"):
+                # A terminal outcome (questions for the owner, the page limit) ends the run like any other; the guided
+                # flow stops on the engine's result at its next step.
+                self.e.result = result
         return json.dumps(outcome)
 
     async def on_review(self, obs, report=None):

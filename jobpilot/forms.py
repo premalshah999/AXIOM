@@ -269,7 +269,9 @@ ACKNOWLEDGE = re.compile(r"ok(?:ay)?|got it|i understand|understood|continue|dis
 # A dialog that asks to confirm something consequential is never acknowledged on the applicant's behalf.
 INFORMATIONAL_DIALOG_REFUSES = re.compile(
     r"withdraw|delete|remov|discard|cancel (?:your |this )?application|sign ?out|log ?out|submit|are you sure|"
-    r"lose (?:your )?(?:changes|progress)|terms|consent|agree|certif|attest",
+    r"lose (?:your )?(?:changes|progress)|terms|consent|agree|certif|attest|"
+    # A receipt is evidence to read, and a cookie notice follows the owner's cookie setting, not an acknowledgement.
+    r"thank|received|success|confirm|applied|cookie|accept",
     re.I,
 )
 
@@ -1210,7 +1212,14 @@ class FormSession:
         # An informational pop-up over the form ("Quick tip before you begin ... Okay", ADP's tax-credit questionnaire
         # from Workday, 2026-10-23): the page hides its questions behind it, the scan found no fields and the run
         # stalled twice. A dialog with no fields whose only action is an acknowledgement is acknowledged, then rescanned.
-        if (ack := self.acknowledgement_only(meta)) and getattr(self, "_acknowledged", 0) < 3:
+        ack = self.acknowledgement_only(meta) if getattr(self, "_acknowledged", 0) < 3 else None
+        if ack:
+            try:
+                armed = await self.page.evaluate("Boolean(window.__jpArmed)")  # after the submit it may be the receipt
+            except PlaywrightError:
+                armed = True
+            ack = None if armed else ack
+        if ack:
             self._acknowledged = getattr(self, "_acknowledged", 0) + 1
             try:
                 await self.locator(ack).click(timeout=4000)
@@ -1518,13 +1527,15 @@ class FormSession:
                     else await widgets.visible_options(frame, await widgets._popup_scope(el))
                 )
                 option = next((o for o in options if o["id"] == option_id and not o["disabled"]), None)
+                decided = None
                 if not option and (inline or field["type"] in {"select", "select-multiple"}):
                     # The controller named an option this control does not have (PepsiCo's tax-credit "Select a
                     # Language" radio, 2026-10-23: eight refused chooses). Take the option the evidence supports.
                     offered = [o for o in options if not o["disabled"]]
-                    supported = (await self.resolver.resolve([{**field, "options": [o["text"] for o in offered]}]))[0]
-                    if supported.disposition == "answer":
-                        option = next((o for o in offered if o["text"] == supported.value), None)
+                    decided = (await self.resolver.resolve([{**field, "options": [o["text"] for o in offered]}]))[0]
+                    AnswerModelUnavailable.raise_for(decided)
+                    if decided.disposition == "answer":
+                        option = next((o for o in offered if o["text"] == decided.value), None)
                 if not option:
                     raise ValueError("Choice is stale or outside this control")
                 supported = None
@@ -1535,7 +1546,7 @@ class FormSession:
 
                         if await combo_family(frame, el) == "oracle":
                             partial = field.get("options_partial", False) or await el.is_editable()
-                    supported = (
+                    supported = decided or (
                         await self.resolver.resolve(
                             [
                                 {
@@ -1882,7 +1893,8 @@ class FormSession:
                       // Greenhouse drops the file input once the resume is attached, and Braze's application asks
                       // "join Braze's Talent Community?" (2026-10-23): a resume or a long questionnaire is the job's.
                       if (/\b(?:resume|résumé|cv)\b/i.test(f.innerText || '')
-                        || f.querySelectorAll('input:not([type=hidden]),select,textarea').length > 12) return false;
+                        || f.querySelectorAll('input:not([type=hidden]):not([type=checkbox]):not([type=radio]),select,textarea')
+                          .length > 12) return false;
                       if (!/talent (?:community|network|pool)|join our (?:talent|community)|job alerts?|stay (?:connected|in touch)|career (?:updates|newsletter)|newsletter/i
                         .test((f.innerText || '').slice(0, 4000))) return false;
                       // Roku's sidebar sits beside the job's own Apply; a final application page
@@ -2441,7 +2453,8 @@ class FormSession:
             value = self.first_of_month(field, value)
             widgets.date_text(field, value)  # Require the precision a native date input needs.
             month, day, year = widgets.parse_date(value)
-            await el.fill(f"{year}-{month}-{day}", timeout=4000)
+            committed = f"{year}-{month}-{day}"
+            await el.fill(committed, timeout=4000)
         elif kind == "month":
             widgets.date_text({**field, "parts": [{"kind": "month"}, {"kind": "year"}]}, value)
             month, _, year = widgets.parse_date(value)
@@ -4663,7 +4676,9 @@ class FormSession:
         )
         return bool(account_form or consent_dialog)
 
-    async def click(self, control_id, auth_control=False, step_control=False, revision=None, owner_id=None):
+    async def click(
+        self, control_id, auth_control=False, step_control=False, revision=None, owner_id=None, launch=False
+    ):
         if await dismiss_cookies(self.page, authorized=self.resolver.profile.accept_all_application_terms):
             await self.settle(timeout=2)
         before = await self.assert_revision(revision, owner_id) if revision is not None else await self.scan()
@@ -4804,7 +4819,7 @@ class FormSession:
 
         opener.on("popup", on_popup)
         el = self.locator(control_id)
-        launcher = bool(re.fullmatch(LAUNCHER, button["label"], re.IGNORECASE))
+        launcher = launch or bool(re.fullmatch(LAUNCHER, button["label"], re.IGNORECASE))
         # A "Submit" that this guard allowed for a profile/account popup or a tax-credit
         # launcher must also pass the page's own click guard, or the click is silently
         # cancelled (Starbucks "Create your profile": the agent clicked Submit for minutes).
