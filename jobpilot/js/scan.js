@@ -735,6 +735,20 @@
       if (!question || question === 'Unlabelled field' || question === parent?.id) {
         question = wrapperLabel(el) || (parent && nearby(parent)) || nearby(el.parentElement || el) || el.name || label(el);
       }
+      // MAXIMUS's tax-credit survey (PepsiCo, 2026-10-24) prints "Are you a resident of the State of California?" as
+      // plain text above an unlabelled Yes/No pair: the question read as "ctl00$MainContent$multipleChoice...".
+      if (question === el.name || question === 'Unlabelled field') {
+        const captions = new Set(group.map(x => clean(label(x))));
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        walker.currentNode = group[0];
+        for (let n = walker.previousNode(), steps = 0; n && steps < 40; n = walker.previousNode(), steps++) {
+          const t = clean(n.textContent);
+          const host = n.parentElement;
+          if (!t || !host || host.closest('script,style,noscript,button,a,option') || !visible(host) || captions.has(t)) continue;
+          if (t.length <= 300 && /[a-z]{3}/i.test(t)) question = t;
+          break;
+        }
+      }
       // iCIMS's self-identification forms (icims2 servlet) give radios no label: every choice and the question read as
       // the field name "icims_f_Veteran" (ICE 2026-10-19). A readable value is the choice; the name names the topic.
       // Its veteran choices are codes (NotProtectedVeteran is what a person submitted at REI Systems); their wording is

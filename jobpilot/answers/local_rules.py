@@ -840,6 +840,15 @@ class LocalRulesMixin:
         if metro_question and addr.city:
             if a := self._ans(f, addr.city, ["profile:address.city"]):
                 return a
+        # MAXIMUS's tax-credit survey (PepsiCo on iCIMS, 2026-10-24) asks one page at a time "Are you a resident of the
+        # State of California?": residence in a named US state is the saved address's state.
+        named = re.search(r"\bresident of (?:the )?(?:state of )?([a-z ]+?)$", label)
+        states = {normalize(name): code for code, name in US_STATES.items()}
+        if addr.state and named and named[1].strip() in states:
+            saved = addr.state.strip()
+            home = saved.upper() if saved.upper() in US_STATES else states.get(normalize(saved), "")
+            if home and (a := self._ans(f, "Yes" if states[named[1].strip()] == home else "No", ["profile:address.state"])):
+                return a
         for part, labels in ADDRESS.items():
             if label in labels and getattr(addr, part):
                 if part == "city" and f.get("type") in {"combobox", "dropdown", "select"}:
