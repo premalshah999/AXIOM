@@ -877,8 +877,9 @@ SURVEY_DONE = re.compile(
     re.I,
 )
 LAUNCHER = (
-    r"\s*(?:take|start|complete|begin)(?: the)? (?:tax credit|wotc|work opportunity tax credit)"
-    r"(?: (?:assessment|screening|questionnaire|survey))?\s*"
+    r"\s*(?:take|start|complete|begin)(?: the)? (?:(?:tax credit|wotc|work opportunity tax credit)"
+    # Workday's step button says only "Take Assessment" (Tyson Foods' TaxCreditCo survey tab, 2026-10-24).
+    r"(?: (?:assessment|screening|questionnaire|survey))?|assessment)\s*"
 )
 
 

@@ -2994,6 +2994,14 @@ class BrowserEngine:
                 "recovery_cause": "control_observation",
                 "recoverable": True,
             }
+        if not self.armed and getattr(getattr(self, "fallback_mail_adapter", None), "in_assessment", lambda: False)():
+            return {
+                "state": "waiting_browser",
+                "reason": "The open page is the employer's tax-credit questionnaire, not the application",
+                "blocker_type": "control_failure",
+                "recovery_cause": "control_observation",
+                "recoverable": True,
+            }
         if adopt := getattr(getattr(self, "fallback_mail_adapter", None), "adopt_employer_resume", None):
             adopt(await self.form.scan())  # iCIMS: a later step of an application whose profile holds the resume.
         report = await self.form.verify()

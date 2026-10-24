@@ -5,6 +5,7 @@ autofillWithResume, email/password/verifyPassword, createAccountSubmitButton, si
 click_filter overlays, bottom-navigation-next-button, progressBar, multiselectInputContainer,
 dateInputWrapper, file-upload-input-ref), plus visible headings as a fallback."""
 
+import json
 import re
 from urllib.parse import urlsplit
 
@@ -26,11 +27,13 @@ REVIEW_NO_RESUME = re.compile(r"\bresume\b[\w/ ,&()-]{0,70}?\s+no response", re.
 BACK_IDS = ("pageFooterBackButton", "bottom-navigation-back-button", "wd-CommandButton_back")
 # A "Take Assessment" step opens the employer's tax-credit questionnaire (ADP WOTC for Rentokil/Terminix) in this tab;
 # its forward controls finish only that questionnaire, which then returns to Workday.
+# Tyson Foods' TaxCreditCo survey ends with "Submit form".
 ASSESSMENT_FORWARD = re.compile(
-    r"(?:next|continue|submit|finish|done|complete|(?:return|back|go back) to (?:the |your )?(?:application|workday|job))"
-    r"\W*",
+    r"\s*(?:(?:next|continue|submit|finish|done|complete)\b.{0,30}|"
+    r"(?:return|back|go back) to (?:the |your )?(?:application|workday|job)\W*)",
     re.I,
 )
+TAX_CREDIT = re.compile(r"tax credit|work opportunity|\bwotc\b", re.I)
 ADD = {
     "work": re.compile(r"^add(?: another)? work experience$|^add(?: another)? experience$", re.I),
     "education": re.compile(r"^add(?: another)? education$", re.I),
@@ -180,7 +183,7 @@ class Workday(Adapter):
         if self.in_assessment():
             return await self.on_assessment()
         take = next((c for c in obs["controls"] if c["automation_id"] == "inlineAssessmentButton"), None)
-        if take and self.attempts["assessment"] < 1:
+        if take and self.attempts["assessment"] < 1 and TAX_CREDIT.search(obs.get("text", "")):
             # Rentokil (2026-10-24): Save and Continue past an untaken "Take Assessment" step answered with a Workday
             # server error on every attempt; the questionnaire itself is answerable from the profile.
             self.attempts["assessment"] += 1
@@ -211,11 +214,32 @@ class Workday(Adapter):
         if not forward:
             return {"fallback": True, "reason": "No way forward in the tax-credit questionnaire"}
         self.emit("assessment", "Continuing the tax-credit questionnaire", {"control": forward["label"][:40]})
-        # Not the application's submit: the base click guards that, and the tab is on the questionnaire's own host.
+        # Not the application's submit: the tab is on the questionnaire's own host, which classify_page and commit
+        # never treat as the application. Its "Submit form" passes the page guard like an account control.
         await self.dismiss_overlays()
-        await self.form.click(forward["id"], step_control=True)
-        await self.form.settle(timeout=6)
+        try:
+            await self.form.click(forward["id"], auth_control=True, step_control=True)
+            await self.form.settle(timeout=6)
+        except PlaywrightError:
+            if not self.form.page.is_closed():
+                raise
+        if self.form.page.is_closed():
+            # TaxCreditCo closes its own tab after the final submit (Tyson Foods 2026-10-24).
+            await self.form.return_to_opener()
+            await self.form.settle(timeout=6)
         return None
+
+    async def intermediate_submit(self):
+        """The guided flow's submit while the questionnaire is open finishes the questionnaire, not the application.
+        Tyson Foods (2026-10-24): it committed on the questionnaire's "Submit form", the survey tab closed, and the
+        unsubmitted application was recorded as an unverifiable submission."""
+        if not self.in_assessment():
+            return None
+        result = await self.on_assessment()
+        outcome = {"executed": result is None, "intermediate_step": True, "label": "tax-credit questionnaire"}
+        if isinstance(result, dict):
+            outcome["reason"] = str(result.get("reason", ""))[:200]
+        return json.dumps(outcome)
 
     async def on_review(self, obs, report=None):
         """A resumed draft can reach Review without the resume (Jabil: "Resume/CV ... No Response").
