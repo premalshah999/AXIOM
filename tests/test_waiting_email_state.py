@@ -94,3 +94,32 @@ def test_a_parked_wait_is_not_a_failure_anywhere_failures_are_listed():
     from jobpilot.diagnostics import HELP_STATES
 
     assert "waiting_email" not in HELP_STATES  # no help screenshot for a wait
+
+
+async def test_a_matched_email_resumes_its_run_even_when_the_job_used_its_retries(service):
+    """By Light (iCIMS, 2026-10-24): the password-reset email matched six seconds after the run parked, but the job
+    had used its three starts, the resume was refused as a retry, and the run stayed in waiting_email for good. The
+    email continues the attempt that waited for it."""
+    from jobpilot.db import Setting
+
+    run_id = seed(service, "spent")
+    with service.db.exclusive() as s:
+        for n in range(3):
+            s.add(Run(id=f"spent-old{n}", job_id="spent", mode="submit", state="waiting_browser",
+                      reason="The page did not advance", started_at=f"2026-10-2{n}T10:00:00+00:00",
+                      created_at=f"2026-10-2{n}T10:00:00+00:00", packet={}))
+        run = s.get(Run, run_id)
+        run.started_at, run.created_at = "2026-10-24T10:00:00+00:00", "2026-10-24T10:00:00+00:00"
+    service.complete(run_id, dict(WAIT), 30.0)
+    service.db.set_setting("control", {"paused": False, "auto_submit": True})
+    with service.db.exclusive() as s:
+        s.add(MailChallenge(id="c1", run_id=run_id, rule_id="r", mailbox_id="m", recipient="alex@example.test",
+                            kind="code", state="matched", since=0.0, expires=1e12))
+    try:
+        await service.resume_mail_wait(run_id, "c1")
+    except QueueBlocked as exc:
+        assert exc.code != "application_retry_limit", exc
+    with service.db.session() as s:
+        recovery = s.get(Setting, "draft_recovery:spent")
+        assert recovery and recovery.value.get("cause") == "email_matched"
+        assert recovery.value.get("status") != "application_retry_limit"

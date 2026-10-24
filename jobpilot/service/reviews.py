@@ -78,7 +78,10 @@ class ReviewsMixin:
             require_intake(s, source.job_id)
             from ..application_budget import require_allowance
 
-            require_allowance(s, source.job_id)
+            # The arrival of the email this run waits for continues the same attempt; it is not a retry. By Light's
+            # iCIMS reset email matched six seconds after its run parked, and the job's spent retry count stranded it
+            # in waiting_email (2026-10-24). The application's time deadline still applies.
+            require_allowance(s, source.job_id, new_attempt=False)
             if source.state == "submission_unknown":
                 # One-use continuation: it inherits the reservation and can only verify the saved draft.
                 job = s.get(Job, source.job_id)

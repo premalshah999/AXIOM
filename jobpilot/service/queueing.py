@@ -277,7 +277,14 @@ class QueueingMixin:
             if mode == "submit":
                 from ..application_budget import require_allowance
 
-                require_allowance(s, job_id, aliases=aliases)
+                waited = s.get(Setting, "draft_recovery:" + job_id) if recovery_source_run else None
+                email_continuation = bool(
+                    waited
+                    and waited.value.get("cause") == "email_matched"
+                    and waited.value.get("source_run_id") == recovery_source_run
+                )
+                # A matched email continues the attempt that waited for it (service.reviews); it is not a retry.
+                require_allowance(s, job_id, aliases=aliases, new_attempt=not email_continuation)
                 from ..application_pacing import require_company_limit, require_ats_admission
 
                 if not owner_pick:
