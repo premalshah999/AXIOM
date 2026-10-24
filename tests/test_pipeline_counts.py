@@ -24,6 +24,12 @@ def at(minutes_ago):
     return (datetime.now(UTC) - timedelta(minutes=minutes_ago)).isoformat()
 
 
+def today(minutes_ago):
+    """Minutes ago, but never before today's UTC midnight (the test installation's time zone)."""
+    now = datetime.now(UTC)
+    return max(now - timedelta(minutes=minutes_ago), now.replace(hour=0, minute=0, second=0, microsecond=0)).isoformat()
+
+
 def job(n, *, status="ready", created=None, company="Acme Example"):
     return dict(
         id=f"job{n:05d}",
@@ -65,8 +71,8 @@ def seed_history(service):
     # The oldest job's newest run is applying right now: it was beyond the newest 1,000 jobs.
     runs.append(run(5000, "job00001", "queued", created=at(1)))
     # Two confirmed today, one waiting for an answer with a question, one unconfirmed.
-    runs.append(run(5001, "job01101", "confirmed", created=at(30), finished=at(20)))
-    runs.append(run(5002, "job01102", "confirmed", created=at(30), finished=at(20)))
+    runs.append(run(5001, "job01101", "confirmed", created=at(30), finished=today(20)))
+    runs.append(run(5002, "job01102", "confirmed", created=at(30), finished=today(20)))
     runs.append(run(5003, "job01103", "waiting_answer", created=at(5)))
     runs.append(run(5004, "job01104", "submission_unknown", created=at(40), finished=at(39)))
     with service.db.exclusive() as s:

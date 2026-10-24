@@ -674,6 +674,35 @@ class LocalRulesMixin:
         entry = self._entry_answer(f, label)
         if entry is not None:
             return entry
+        status = str(p.facts.get("current_immigration_status_US") or "")
+        if status and re.search(
+            r"non ?immigrant (?:category|status|visa)|(?:current )?(?:visa|immigration) (?:status|type|category)|"
+            r"type of (?:visa|work authori[sz]ation)|work authori[sz]ation (?:type|category)",
+            label,
+        ):
+            # Asked exactly what the owner's status fact is for (Cruise Planner 2026-10-23 asked the owner).
+            if re.search(r"\bOPT\b", status):
+                stated = "F-1 OPT"
+                if options:
+                    hits = [o for o in options if re.search(r"\bOPT\b|\bF-?1\b", str(o), re.I)]
+                    if len(hits) == 1:
+                        return Answer(field_id=f["id"], value=hits[0], disposition="answer",
+                                      evidence_ids=["fact:current_immigration_status_US"])
+                elif a := self._ans(f, stated, ["fact:current_immigration_status_US"]):
+                    return a
+        if (
+            re.search(r"(?:clearable|eligible (?:to obtain|for)|able to obtain|obtain and maintain|qualify for).{0,60}"
+                      r"(?:clearance|public trust)|(?:clearance|public trust).{0,60}(?:clearable|eligib|obtain)", label)
+            and str(p.facts.get("us_citizen")).casefold() in {"false", "no"}
+            and re.search(r"\bOPT\b|\bF-?1\b|\bH-?1B\b", status)
+            and options
+        ):
+            # Federal clearances and Public Trust positions require U.S. citizenship (some accept permanent residents);
+            # the owner is a foreign national on a student/work visa (Laansu 2026-10-23 asked the owner).
+            no = [o for o in options if re.fullmatch(r"\s*no\b.*", str(o), re.I)]
+            if len(no) == 1:
+                return Answer(field_id=f["id"], value=no[0], disposition="answer",
+                              evidence_ids=["fact:us_citizen", "fact:current_immigration_status_US"])
         numbered = re.fullmatch(
             r"(?:link|url|website|web site|web link|online profile|social (?:media )?(?:link|profile)|other link)\s*#?\s*(\d)",
             label,

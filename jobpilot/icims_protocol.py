@@ -189,8 +189,13 @@ def apply(fields, controls, text=""):
             if caption:
                 f["label"] = f"{caption} {PART_WORD[part]}"
             f["date_parts"] = present
-    for (*_, base), parts in form_dates.items():
+    # A bare "Date" beside the form's e-signature is the signing date (Schwab's self-identification packet,
+    # 2026-10-23: icims_f_Date_Month/Date/Year next to icims_f_signature went to the owner as "Date Year").
+    signed = {f.get("frame_url") for f in own if SIGNATURE.match(protocol_name(f))}
+    for (frame_url, _, base), parts in form_dates.items():
         caption, group = form_date_caption(base)
+        if base.lower() == "date" and frame_url in signed:
+            caption = "Today's Date"
         present = sorted(PART_WORD[part] for _, part in parts)
         for f, part in parts:
             f["label"] = f"{caption} {PART_WORD[part]}"

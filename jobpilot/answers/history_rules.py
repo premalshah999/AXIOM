@@ -278,7 +278,10 @@ class HistoryRulesMixin:
             school = p.education[index].school
             return self.school_answer(f, school, [f"profile:education.{index}.school"])
         if p.education and re.search(
-            r"graduation date|anticipated graduation|graduation (?:month|year)", label
+            # Axtria (JazzHR, 2026-10-23): "Completion date of your highest degree (mm/yyyy)" went to the owner.
+            r"graduation date|anticipated graduation|graduation (?:month|year)|"
+            r"completion date of (?:your )?(?:highest )?degree|degree completion date|date of (?:degree )?completion",
+            label,
         ):
             if any(re.match(r"^(?:yes|no)\b", o, re.I) for o in f.get("options", [])):
                 # A dated eligibility proposition needs interpretation. Never
@@ -321,6 +324,15 @@ class HistoryRulesMixin:
                         if f.get("type") in {"date", "date_parts", "month"} or f.get("widget") == "date-text"
                         else month_year(entry.end)
                     )
+                    if (
+                        f.get("type") in {"date", "date_parts"}
+                        and re.fullmatch(r"\d{4}-\d{2}", str(entry.end))
+                        and getattr(getattr(self, "answer_rules", None), "history_day", "") == "first"
+                    ):
+                        # The owner's rule: a day the profile does not record is the 1st (Quora's full-date picker,
+                        # 2026-10-23, went to the owner as "missing exact date").
+                        value = f"{entry.end}-01"
+                        evidence = [*evidence, "fact:history_date_day_policy"]
                 return self._ans(f, value, evidence)
         if p.education and re.search(
             r"highest (?:level of )?(?:education|(?:academic )?degree)|education level|level of education",

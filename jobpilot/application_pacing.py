@@ -7,6 +7,7 @@ no process-local lock and never sleep while occupying an application slot.
 from datetime import UTC, datetime, timedelta
 import re
 import time
+from urllib.parse import urlsplit
 from types import SimpleNamespace
 
 from sqlalchemy import or_, select
@@ -62,6 +63,28 @@ LIMIT_KEY = "application_pacing:company_limit"
 # Override with `application_pacing:ats_limits`.
 ATS_LIMITS = {"oracle": 4, "smartrecruiters": 2, "successfactors": 1, "icims": 1, "adp": 1}
 ATS_LIMITS_KEY = "application_pacing:ats_limits"
+# One application at a time per employer site: Oracle sends every verification code of a site from one sender to one
+# inbox. Four Dell runs started in the same second (2026-10-23) could not tell their codes apart, retried, and Oracle
+# locked verification for 30 minutes. Other employers' sites keep running in parallel.
+SITE_LIMITS = {"oracle": 1}
+
+
+def _site(job):
+    return (urlsplit(_get(job, "url", "") or "").hostname or "").lower()
+
+
+def _site_active(session, job, run_id, states):
+    site, count = _site(job), 0
+    if not site:
+        return 0
+    for other, employer in session.execute(
+        select(Run, Job).join(Job, Job.id == Run.job_id).where(
+            Run.state.in_(states), Job.ats == _get(job, "ats"), Job.url.like(f"https://{site}/%")
+        )
+    ):
+        if other.id != run_id and _get(employer, "id") != _get(job, "id") and not _exempt(employer, other):
+            count += 1
+    return count
 
 
 def ats_limit(session, ats):
@@ -99,6 +122,9 @@ def may_start(session, job, run, at=None):
         return True
     limit = ats_limit(session, _get(job, "ats"))
     if limit is not None and _ats_active(session, _get(job, "ats"), _get(run, "id"), ["running", "submitting"]) >= limit:
+        return False
+    site_limit = SITE_LIMITS.get(_get(job, "ats"))
+    if site_limit and _site_active(session, job, _get(run, "id"), ["running", "submitting"]) >= site_limit:
         return False
     ats = _get(job, "ats")
     if ats not in START_GAPS:
@@ -153,6 +179,14 @@ def require_ats_admission(session, job, run_id=None, owner_pick=False):
     if limit is not None and _ats_active(session, _get(job, "ats"), run_id, ["queued", "running", "submitting"]) >= limit:
         raise QueueBlocked(
             f"{limit} {_get(job, 'ats')} application(s) already queued or active; this one waits its turn",
+            outcome="deferred",
+            code="ats_pacing",
+            not_before=datetime.fromtimestamp(_stamp(None) + 60, UTC).isoformat(),
+        )
+    site_limit = SITE_LIMITS.get(_get(job, "ats"))
+    if site_limit and _site_active(session, job, run_id, ["queued", "running", "submitting"]) >= site_limit:
+        raise QueueBlocked(
+            "Another application on this employer's site is verifying its email; this one waits its turn",
             outcome="deferred",
             code="ats_pacing",
             not_before=datetime.fromtimestamp(_stamp(None) + 60, UTC).isoformat(),

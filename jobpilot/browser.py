@@ -992,6 +992,9 @@ class BrowserEngine:
                 boost=pool_boost(self.config, run["packet"].get("worker_pool")),
             )
             self.budget = budget
+            # Where the job link itself led (Dell's Oracle link redirects to enterpriseplatform.dell.com): the
+            # employer's own host, trusted for the verification code it sends (adapters.base.enter_code).
+            self.landing_url = page.url
             self.emit(
                 "browser",
                 "Opened application",

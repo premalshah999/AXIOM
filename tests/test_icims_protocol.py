@@ -178,3 +178,25 @@ def test_the_forms_module_application_is_named_by_protocol():
         ("Start Date Year", "Work Experience 1")]
     assert named["icims_f_DateAvailableToStart_Month"][0] == "Date Available To Start Month"
     assert named["icims_f_Veteran"][0] == "Veteran status"
+
+
+def test_a_bare_date_beside_the_signature_is_todays_date(service):
+    """Schwab (2026-10-23): the self-identification packet's Name, Date (Month/Day/Year) and Signature; "Date Year"
+    went to the owner as a question."""
+    from datetime import date
+
+    from jobpilot.answers import Resolver
+    from jobpilot.schemas import Profile
+
+    packet = "https://schwab.icims.com/forms?isPacket=1&selected=Voluntary_Self_Identification"
+    fields = [
+        field("Month", "icims_f_Date_Month", type_="select", frame_url=packet),
+        field("Day", "icims_f_Date_Date", type_="select", frame_url=packet),
+        field("Year", "icims_f_Date_Year", frame_url=packet),
+        field("Signature", "icims_f_signature", type_="checkbox", frame_url=packet),
+    ]
+    apply(fields, [])
+    assert [f["label"] for f in fields[:3]] == ["Today's Date Month", "Today's Date Day", "Today's Date Year"]
+    resolver = Resolver(Profile(), service.db, service.config)
+    year = resolver.local({**fields[2], "id": "y", "options": [], "required": True})
+    assert year.value == str(date.today().year)

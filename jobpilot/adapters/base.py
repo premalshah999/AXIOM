@@ -832,7 +832,15 @@ class Adapter:
             return self.defer("The code length does not match the website")
         for i, f in enumerate(fields):
             frame_url = self.form.frames[f["id"]].url
-            if not self.accounts.password_allowed(self.id, frame_url, self.job["url"]):
+            landing = urlsplit(getattr(self.e, "landing_url", "") or "")
+            # The job link's own redirect target is the employer's site (Dell, Oracle 2026-10-23: six runs refused
+            # their code on enterpriseplatform.dell.com and Oracle locked verification).
+            landed = (
+                landing.scheme == "https"
+                and bool(landing.hostname)
+                and (urlsplit(frame_url).hostname or "").lower() == landing.hostname.lower()
+            )
+            if not landed and not self.accounts.password_allowed(self.id, frame_url, self.job["url"]):
                 self.finish_mail("failed", "Code field on an unexpected website")
                 return self.defer("The code field is on an unexpected website; not entering the code")
             await self.form.locator(f["id"]).fill(code if len(fields) == 1 else code[i], timeout=4000)

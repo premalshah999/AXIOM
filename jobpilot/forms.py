@@ -265,6 +265,15 @@ def mark_history_rows(fields):
             f["history_row"] = {"kind": "work", "index": index}
 
 
+ACKNOWLEDGE = re.compile(r"ok(?:ay)?|got it|i understand|understood|continue|dismiss|close", re.I)
+# A dialog that asks to confirm something consequential is never acknowledged on the applicant's behalf.
+INFORMATIONAL_DIALOG_REFUSES = re.compile(
+    r"withdraw|delete|remov|discard|cancel (?:your |this )?application|sign ?out|log ?out|submit|are you sure|"
+    r"lose (?:your )?(?:changes|progress)|terms|consent|agree|certif|attest",
+    re.I,
+)
+
+
 class BrowserTabClosed(PlaywrightError):
     """The page under this owner is gone (closed tab or crashed renderer)."""
 
@@ -1197,6 +1206,17 @@ class FormSession:
             except PlaywrightError:
                 pass
         self.meta = meta
+        # An informational pop-up over the form ("Quick tip before you begin ... Okay", ADP's tax-credit questionnaire
+        # from Workday, 2026-10-23): the page hides its questions behind it, the scan found no fields and the run
+        # stalled twice. A dialog with no fields whose only action is an acknowledgement is acknowledged, then rescanned.
+        if (ack := self.acknowledgement_only(meta)) and getattr(self, "_acknowledged", 0) < 3:
+            self._acknowledged = getattr(self, "_acknowledged", 0) + 1
+            try:
+                await self.locator(ack).click(timeout=4000)
+                await self.settle(timeout=3)
+                return await self.scan()
+            except (PlaywrightError, ValueError):
+                pass
         # Every execution route sees the active dialog, never controls behind it.
         dialogs = [d for d in meta["dialogs"] if d.get("field_ids") or d.get("control_ids")]
         if dialogs:
@@ -1497,6 +1517,13 @@ class FormSession:
                     else await widgets.visible_options(frame, await widgets._popup_scope(el))
                 )
                 option = next((o for o in options if o["id"] == option_id and not o["disabled"]), None)
+                if not option and (inline or field["type"] in {"select", "select-multiple"}):
+                    # The controller named an option this control does not have (PepsiCo's tax-credit "Select a
+                    # Language" radio, 2026-10-23: eight refused chooses). Take the option the evidence supports.
+                    offered = [o for o in options if not o["disabled"]]
+                    supported = (await self.resolver.resolve([{**field, "options": [o["text"] for o in offered]}]))[0]
+                    if supported.disposition == "answer":
+                        option = next((o for o in offered if o["text"] == supported.value), None)
                 if not option:
                     raise ValueError("Choice is stale or outside this control")
                 supported = None
@@ -1656,6 +1683,22 @@ class FormSession:
         if narrative(field) and not supported_narrative(answer, facts, evidence, reviews):
             return None
         return answer if answer.disposition == "answer" else None
+
+    def acknowledgement_only(self, meta):
+        """The id of the one acknowledgement button of an informational dialog that holds no fields, else None."""
+        dialogs = [d for d in meta.get("dialogs", []) if d.get("control_ids")]
+        if not dialogs:
+            return None
+        active = dialogs[-1]
+        if active.get("field_ids") or INFORMATIONAL_DIALOG_REFUSES.search(active.get("text") or ""):
+            return None
+        actions = [
+            b for b in self.buttons.values()
+            if b["id"] in active["control_ids"] and not re.fullmatch(r"close(?: dialog)?|x|×|cancel", b["label"].strip(), re.I)
+        ]
+        if len(actions) == 1 and ACKNOWLEDGE.fullmatch(actions[0]["label"].strip()):
+            return actions[0]["id"]
+        return None
 
     def locator(self, field_id):
         item = self.fields.get(field_id) or self.buttons.get(field_id)

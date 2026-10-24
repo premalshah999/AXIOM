@@ -288,3 +288,43 @@ def test_every_question_says_what_kind_of_field_it_is_and_what_to_send():
     assert requirement("Country", ["India", "United States", "Canada"], {"type": "select"}) == "Dropdown: pick one of 3"
     assert requirement("Please upload your unofficial transcript.", [], {"type": "file", "accept": ".pdf,.docx"}) \
         == "File upload: send the document (.pdf, .docx)"
+
+
+def test_adp_tax_credit_follow_ups_are_screener_questions():
+    from jobpilot.answers.policy_rules import WOTC
+
+    for question in ("Have you or someone in your household received assistance at least 9 months in the past 18 months",
+                     "Have you received a conditional certification from the state workforce agency (SWA)?",
+                     "Have you served in the U.S. military?"):
+        assert WOTC.search(question), question
+
+
+def _owner(service, **extra):
+    from jobpilot.answers import Resolver
+    from jobpilot.schemas import EducationEntry, Profile
+
+    profile = Profile(
+        education=[EducationEntry(school="State University", degree="Master of Science", end="2026-05")],
+        facts={"us_citizen": False, "current_immigration_status_US": "OPT; expiration July 2029."},
+        answer_rules={"history_day": "first"},
+        **extra,
+    )
+    return Resolver(profile, service.db, service.config)
+
+
+def test_profile_facts_answer_what_went_to_the_owner(service):
+    """2026-10-23 questions the profile answers: Axtria's degree completion date, Quora's exact graduation date,
+    Cruise Planner's non-immigrant category, Laansu's Public Trust clearability."""
+    resolver = _owner(service)
+    completion = resolver.local({"id": "a", "label": "Completion date of your highest degree (mm/yyyy)", "type": "text",
+                                 "options": [], "required": True})
+    assert completion.value == "05/2026"
+    exact = resolver.local({"id": "b", "label": "Graduation Date or Anticipated Graduation Date", "type": "date",
+                            "options": [], "required": True})
+    assert exact.value == "2026-05-01"
+    category = resolver.local({"id": "c", "label": "What non-immigrant category are you in (e.g., H-1B, F-1 OPT, L-2, etc.)?",
+                               "type": "text", "options": [], "required": True})
+    assert category.value == "F-1 OPT"
+    clearance = resolver.local({"id": "d", "label": "Are you clearable for a Public Trust Clearance?", "type": "select",
+                                "options": ["-- No answer --", "Yes", "No"], "required": True})
+    assert clearance.value == "No"

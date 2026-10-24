@@ -52,9 +52,10 @@ def test_one_uncaptioned_oracle_education_block_is_education_1():
 
 def test_a_start_date_in_month_day_year_menus_is_today(service):
     """Legrand (Oracle, 2026-10-23): "earliest possible start date" as three menus; "0 days" went into Day."""
-    from datetime import date
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
 
-    today = date.today()
+    today = datetime.now(ZoneInfo(service.config.timezone)).date()  # the engine's day, not the test machine's
     months = ["", *[f"{m:02d}" for m in range(1, 13)]]
     days = ["", *[str(d) for d in range(1, 32)]]
     years = ["", str(today.year), str(today.year + 1)]
