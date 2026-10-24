@@ -583,6 +583,37 @@ async def owner_requests_only(service):
     return await due(service, room)
 
 
+def unlisted_ready(db, cfg, listed):
+    """Ranked-ready jobs with no live discovery listing: postings imported directly (job board APIs, pasted links)
+    and listings a sweep has not re-seen yet. 122 such jobs above the fit threshold sat unseen while six of eight
+    workers idled (2026-10-24). Each was added within the board's age window and has never been attempted; the
+    dispatch guards (roles, discovery gate, fit, employer limits) still decide."""
+    cutoff = (datetime.now(UTC) - timedelta(hours=cfg.max_age_hours)).isoformat()
+    with db.session() as s:
+        rows = s.execute(
+            select(Job.id, Job.title, Job.company, Job.location, Job.status, Job.score, Job.created_at).where(
+                Job.status == "ready",
+                Job.demo.is_(False),
+                Job.created_at >= cutoff,
+                Job.id.not_in(select(Run.job_id)),
+            )
+        ).all()
+    return [
+        {
+            "id": row.id,
+            "title": row.title,
+            "company": row.company,
+            "location": row.location,
+            "status": row.status,
+            "score": row.score,
+            "posted_at": row.created_at or "",
+            "career_level": "Imported",
+        }
+        for row in rows
+        if row.id not in listed
+    ]
+
+
 async def tick(service):
     from .discovery import title_admits
 
@@ -709,6 +740,7 @@ async def tick(service):
                             "career_level": "Manual link",
                         }
                     )
+        board["jobs"].extend(await asyncio.to_thread(unlisted_ready, db, cfg, {j["id"] for j in board["jobs"]}))
         considered_state = batch.setdefault("considered_state", {})
         policy_revision = admission_revision(db, cfg)
 

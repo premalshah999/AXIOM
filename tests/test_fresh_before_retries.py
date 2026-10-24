@@ -65,3 +65,17 @@ def test_two_jobs_or_job_local_blockers_never_pause_a_site(service):
         assert not circuit(service, f"r{n}")
     blocked(service, "r2", job(service, 2), blocker="control_failure")
     assert not circuit(service, "r2")
+
+
+def test_ranked_ready_jobs_without_a_live_listing_are_autopilot_candidates(service):
+    """122 imported, ranked-ready jobs had no discovery listing and never reached the autopilot (2026-10-24)."""
+    from jobpilot.autopilot import unlisted_ready
+    from jobpilot.jobboard import settings as board_settings
+
+    imported, attempted, stale, listed, unranked = (job(service, n) for n in range(5))
+    with service.db.exclusive() as s:
+        s.add(Run(id="done", job_id=attempted, state="confirmed", mode="submit", packet={}))
+        s.get(Job, stale).created_at = "2020-01-01T00:00:00+00:00"
+        s.get(Job, unranked).status = "new"
+    found = {j["id"] for j in unlisted_ready(service.db, board_settings(service.db), {listed})}
+    assert found == {imported}
