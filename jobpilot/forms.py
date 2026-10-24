@@ -1894,6 +1894,16 @@ class FormSession:
         except Exception:
             return False
 
+    def first_of_month(self, field, value):
+        """The owner's rule (answer_rules.history_day "first"): a full-date field gets the 1st for a month/year answer
+        from any source. Quora's Ashby box refused the owner's own "05/2026" reply as too imprecise (2026-10-24)."""
+        month, day, year = widgets.parse_date(value)
+        kinds = [p["kind"] for p in field.get("parts", [])] or ["month", "day", "year"]
+        rules = getattr(self.resolver, "answer_rules", None)
+        if month and year and not day and "day" in kinds and getattr(rules, "history_day", "") == "first":
+            return f"{year}-{month}-01"
+        return value
+
     def referral_route(self):
         """A referral form sends another person's information, not an application."""
         urls = {self.page.url, *(frame.url for frame in self.frames.values())}
@@ -2392,6 +2402,7 @@ class FormSession:
         elif kind == "pills":
             committed = await widgets.pills(el, value)
         elif field.get("widget") == "date-text":
+            value = self.first_of_month(field, value)
             widgets.date_text(field, value)
             month, day, year = widgets.parse_date(value)
             order = field.get("date_format", "mdy") or "mdy"
@@ -2426,6 +2437,7 @@ class FormSession:
                     raise ValueError("Date picker did not commit the selected month and year")
             committed = f"{year}-{month}" if order == "month-year" else f"{year}-{month}-{day}"
         elif kind == "date":
+            value = self.first_of_month(field, value)
             widgets.date_text(field, value)  # Require the precision a native date input needs.
             month, day, year = widgets.parse_date(value)
             await el.fill(f"{year}-{month}-{day}", timeout=4000)

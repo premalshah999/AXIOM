@@ -324,8 +324,12 @@ class HistoryRulesMixin:
                         if f.get("type") in {"date", "date_parts", "month"} or f.get("widget") == "date-text"
                         else month_year(entry.end)
                     )
+                    full_date = f.get("type") in {"date", "date_parts"} or (
+                        # Quora's Ashby date box is a text input that refuses a month alone (2026-10-24).
+                        f.get("widget") == "date-text" and f.get("date_format") != "month-year"
+                    )
                     if (
-                        f.get("type") in {"date", "date_parts"}
+                        full_date
                         and re.fullmatch(r"\d{4}-\d{2}", str(entry.end))
                         and getattr(getattr(self, "answer_rules", None), "history_day", "") == "first"
                     ):

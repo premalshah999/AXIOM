@@ -6,6 +6,7 @@ click_filter overlays, bottom-navigation-next-button, progressBar, multiselectIn
 dateInputWrapper, file-upload-input-ref), plus visible headings as a fallback."""
 
 import re
+from urllib.parse import urlsplit
 
 from playwright.async_api import Error as PlaywrightError
 
@@ -23,6 +24,13 @@ STEP_PAGES = {
 # Review lists every step's answers; an unattached resume reads "Resume/CV/... No Response".
 REVIEW_NO_RESUME = re.compile(r"\bresume\b[\w/ ,&()-]{0,70}?\s+no response", re.I)
 BACK_IDS = ("pageFooterBackButton", "bottom-navigation-back-button", "wd-CommandButton_back")
+# A "Take Assessment" step opens the employer's tax-credit questionnaire (ADP WOTC for Rentokil/Terminix) in this tab;
+# its forward controls finish only that questionnaire, which then returns to Workday.
+ASSESSMENT_FORWARD = re.compile(
+    r"(?:next|continue|submit|finish|done|complete|(?:return|back|go back) to (?:the |your )?(?:application|workday|job))"
+    r"\W*",
+    re.I,
+)
 ADD = {
     "work": re.compile(r"^add(?: another)? work experience$|^add(?: another)? experience$", re.I),
     "education": re.compile(r"^add(?: another)? education$", re.I),
@@ -60,7 +68,18 @@ class Workday(Adapter):
                 return name
         return ""
 
+    def in_assessment(self):
+        """The tab left Workday for the questionnaire its own Take Assessment button opened."""
+        host = getattr(self, "assessment_from", "")
+        return bool(host) and not self.committed and (urlsplit(self.page.url).hostname or "") != host
+
+    def handoff(self, url):
+        # The questionnaire is "Secured by ADP": an adp.com host is not a handoff to the ADP application adapter.
+        return None if self.in_assessment() else super().handoff(url)
+
     def classify_page(self, obs):
+        if self.in_assessment():
+            return Step.FORM  # Its Submit and thank-you page belong to the questionnaire, never the application.
         auto = set(obs["automation"])
         text = obs["text"]
         if self.committed and CONFIRM_TEXT.search(text):
@@ -158,9 +177,45 @@ class Workday(Adapter):
                     return None
             except ValueError as exc:
                 return {"state": "waiting_browser", "reason": str(exc), "recovery_cause": "site_temporary"}
+        if self.in_assessment():
+            return await self.on_assessment()
+        take = next((c for c in obs["controls"] if c["automation_id"] == "inlineAssessmentButton"), None)
+        if take and self.attempts["assessment"] < 1:
+            # Rentokil (2026-10-24): Save and Continue past an untaken "Take Assessment" step answered with a Workday
+            # server error on every attempt; the questionnaire itself is answerable from the profile.
+            self.attempts["assessment"] += 1
+            self.assessment_from = urlsplit(self.page.url).hostname or ""
+            self.emit("assessment", "Opening the employer's tax-credit questionnaire (Take Assessment)")
+            await self.click(take)
+            await self.form.settle(timeout=6)
+            return None
         if self.page_name(obs) == "my experience":
             await self.add_rows(obs)
         return await super().on_form(obs)
+
+    async def on_assessment(self):
+        """One page of the tax-credit questionnaire: fill it from the profile, then its own Next/Submit/Finish."""
+        self.attempts["assessment_pages"] += 1
+        if self.attempts["assessment_pages"] > 12:
+            return {
+                "state": "waiting_browser",
+                "reason": "The tax-credit questionnaire did not return to the Workday application",
+                "blocker_type": "control_failure",
+                "recovery_cause": "control_observation",
+            }
+        report = await self.fill_page()
+        if isinstance(report, dict) and report.get("state"):
+            return report
+        obs = await self.form.scan()
+        forward = next((c for c in obs["controls"] if ASSESSMENT_FORWARD.fullmatch(c["label"].strip())), None)
+        if not forward:
+            return {"fallback": True, "reason": "No way forward in the tax-credit questionnaire"}
+        self.emit("assessment", "Continuing the tax-credit questionnaire", {"control": forward["label"][:40]})
+        # Not the application's submit: the base click guards that, and the tab is on the questionnaire's own host.
+        await self.dismiss_overlays()
+        await self.form.click(forward["id"], step_control=True)
+        await self.form.settle(timeout=6)
+        return None
 
     async def on_review(self, obs, report=None):
         """A resumed draft can reach Review without the resume (Jabil: "Resume/CV ... No Response").

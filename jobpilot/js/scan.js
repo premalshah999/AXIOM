@@ -659,6 +659,12 @@
           || /^(?:mm[\/.-]dd[\/.-]yyyy|yyyy[\/.-]mm[\/.-]dd|dd[\/.-]mm[\/.-]yyyy)$/i.test(placeholder.trim())) {
         widget = 'date-text';
         dateFormat = /^yyyy/i.test(placeholder) ? 'ymd' : /^dd/i.test(placeholder) ? 'dmy' : 'mdy';
+        // Without a placeholder the question names the format: Axtria's JazzHR datepicker asks "Completion date of
+        // your highest degree (mm/yyyy)" and a day-month-year answer went to the owner (2026-10-24).
+        if (!placeholder.trim() && /\bmm\s*[\/.-]\s*yyyy\b/i.test(clean(label(el)))) {
+          dateFormat = 'month-year';
+          dateParts = [{kind:'month'},{kind:'year'}];
+        }
       }
     }
     // SuccessFactors pick lists (UI5 Web Components under scoped tag names, ASSA ABLOY 2026-10-15):

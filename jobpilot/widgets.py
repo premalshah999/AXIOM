@@ -43,7 +43,10 @@ VISIBLE_OPTIONS = r"""(args) => {
     // Nested matches (option inside menuitem) would duplicate the same choice.
     if ([...seen].some(p => p.contains(el))) continue;
     seen.add(el);
-    let text = content(el).replace(/\s+/g, ' ').trim();
+    // Ashby's school results add the country and web domain beside the name ("University of X / United States /
+    // x.edu"); the website commits the name alone, so a committed choice never matched its option (Quora 2026-10-24).
+    const named = el.querySelector('[class*="SchoolResultName"]');
+    let text = content(named || el).replace(/\s+/g, ' ').trim();
     // SmartRecruiters repeats a slotted label in its visual/accessibility wrappers.
     const words = text.split(' '), mid = words.length / 2;
     if (Number.isInteger(mid) && words.slice(0, mid).join(' ') === words.slice(mid).join(' ')) text = words.slice(0, mid).join(' ');
