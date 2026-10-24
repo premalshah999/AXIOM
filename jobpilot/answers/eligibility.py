@@ -152,10 +152,21 @@ WORK_FROM_QUESTION = re.compile(
 )
 
 
+# "Which province in South Africa do you currently live in?" (Mass Markets), "What province in Canada will you be
+# working from?" (NerdWallet): the job needs residence in another country.
+FOREIGN_RESIDENCE = re.compile(
+    r"\b(?:which|what) (?:province|state|region|territory|county|city)\b.{0,15}?\bin (?P<country>[a-z .]{2,30}?) "
+    r"(?:do|will|are|would) you\b.{0,30}?\b(?:live|reside|resid|based|work(?:ing)? from)",
+    re.I,
+)
+
+
 def residence_outside(question, options, facts, location=""):
     """The applicant's US state when a residence question limits hiring to listed places that exclude it, else None."""
     limited = RESIDENCE_QUESTION.search(question or "") and HIRING_LIMIT.search(question or "")
-    if not (limited or WORK_FROM_QUESTION.search(question or "")) or not options:
+    foreign = FOREIGN_RESIDENCE.search(question or "")
+    foreign = bool(foreign and OTHER_COUNTRY.search(foreign["country"]))
+    if not (limited or foreign or WORK_FROM_QUESTION.search(question or "")) or not (options or foreign):
         return None
     state = str((facts or {}).get("state_of_residence") or "").strip()
     code = next((c for c, name in US_STATES.items() if name.casefold() == state.casefold()), "")
@@ -163,6 +174,8 @@ def residence_outside(question, options, facts, location=""):
         code, state = match[1], US_STATES[match[1]]
     if not code:
         return None
+    if foreign:
+        return state  # Every offered place is in that other country.
     for option in map(str, options):
         if re.search(rf"\b(?:{re.escape(state)}|{code})\b", option, re.I) or re.search(
             r"\bother\b|\bnone of\b|not listed|\banywhere\b|\bremote\b", option, re.I

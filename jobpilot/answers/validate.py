@@ -302,7 +302,12 @@ class ValidateMixin:
                     re.match(r"^(?:yes|no)\b", value, re.I)
                     and bool(re.match(r"^yes\b", value, re.I)) != known[0]
                 )
-                or (not known[0] and US_PERSON_CLASS.search(value))
+                # True Anomaly's "Not currently a U.S. Person / Other status" names the class to deny it (2026-10-24).
+                or (
+                    not known[0]
+                    and US_PERSON_CLASS.search(value)
+                    and not re.match(r"^\s*(?:no|not|none|neither|other)\b", value, re.I)
+                )
             ):
                 cause = "question_polarity"
         if not cause and value is not None and self.graduation_choice_valid(field, value) is False:

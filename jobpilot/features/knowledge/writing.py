@@ -61,6 +61,7 @@ Hard rules
 - No clichés or filler: passionate, excited to apply, thrilled, dream job, perfect fit, team player, hit the ground running, fast-paced environment, leverage, utilize, synergy, robust, cutting-edge, wear many hats, think outside the box, "I believe I would be a great fit".
 - No em dashes or en dashes. No emoji. No bullet lists unless the question asks for a list.
 - Respect the length limit. If no limit is given, write 60-140 words for short-text questions and 120-220 words for essays.
+- A question about a kind of experience ("a time you worked with clinicians or scientists", "a project where you did X") is answered from the closest real example in the evidence: tell it as it happened. When nothing in the evidence matches exactly, say plainly what related work the applicant has done and how it carries over; never claim the exact experience. Experience questions never need needs_fact.
 - If answering truthfully requires a personal fact that is not in the evidence (a date, a status, a yes/no about the applicant), do not guess: set needs_fact to a short description of the missing fact and leave answer empty.
 
 Return JSON: {"answer": str, "evidence_ids": [ids you relied on], "proof_points": [brief proof points the answer supports], "needs_fact": str}."""
@@ -120,7 +121,10 @@ KINDS = [
     ),
     (
         "behavioral",
-        r"tell (?:us|me) about a time|describe a (?:time|situation)|give an example|share an example",
+        # Flexion (2026-10-23): "Tell us more about a project where you took human demonstration data ..." went to the
+        # owner as a missing fact; a project story is a narrative.
+        r"tell (?:us|me) (?:more )?about (?:a|one|the) (?:time|project|situation)|describe a (?:time|situation|project)|"
+        r"give an example|share an example|walk (?:us|me) through a project",
     ),
     ("challenge", r"challeng|fail|mistake|setback|difficult|conflict"),
     (

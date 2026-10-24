@@ -849,6 +849,58 @@ class LocalRulesMixin:
             home = saved.upper() if saved.upper() in US_STATES else states.get(normalize(saved), "")
             if home and (a := self._ans(f, "Yes" if states[named[1].strip()] == home else "No", ["profile:address.state"])):
                 return a
+        # "Please indicate all entities for which you are currently working or have worked" (the Federal Reserve,
+        # 2026-10-23): with none of the listed organizations in the work history, its none-choice is the answer.
+        none_choice = next(
+            (o for o in options if re.fullmatch(r"\s*(?:none(?: of (?:the|these)(?: above)?)?|not applicable|n/?a|never)\W*", o, re.I)),
+            None,
+        )
+        if (
+            none_choice
+            and p.work
+            and re.search(
+                r"\b(?:entities|companies|organi[sz]ations|agencies|subsidiaries|affiliates|employers)\b.{0,80}"
+                r"\b(?:work(?:ed|ing)?|employed)\b",
+                label,
+            )
+            and not any(
+                (company := normalize(entry.company)) and (company in normalize(o) or normalize(o) in company)
+                for entry in p.work
+                for o in options
+                if o != none_choice
+            )
+        ):
+            if a := self._ans(f, none_choice, ["profile:work"]):
+                return a
+        credit = re.search(r"\bcredit hours?\b.{0,80}\b(?:complet|earn|anticipat)", label)
+        internship = re.search(
+            r"\binternship\b.{0,40}\b(?:compulsory|mandatory|required)\b.{0,40}\b(?:validat|diploma|degree|year)", label
+        )
+        if p.education and (credit or internship):
+            # Questions about a degree still in progress (RTX's credit hours by the start date, Airbus' "internship
+            # compulsory to validate your diploma"), asked of an applicant whose degrees are all complete.
+            ranks = ["doctor", "master", "bachelor", "associate", "high school"]
+            index = min(
+                range(len(p.education)),
+                key=lambda i: next((k for k, r in enumerate(ranks) if r in normalize(p.education[i].degree)), len(ranks)),
+            )
+            highest = p.education[index]
+            month = datetime.now(ZoneInfo(self.config.timezone)).strftime("%Y-%m")
+            if all(e.end and e.end <= month for e in p.education):
+                if credit and f.get("type") in {"text", "textarea"}:
+                    from calendar import month_name
+
+                    year, number = highest.end.split("-")[:2]
+                    study = f" in {highest.field_of_study}" if highest.field_of_study else ""
+                    return Answer(
+                        field_id=f["id"],
+                        value=f"All credit hours required for my {highest.degree}{study}; I completed the degree in "
+                        f"{month_name[int(number)]} {year}.",
+                        disposition="answer",
+                        evidence_ids=[f"profile:education.{index}.degree", f"profile:education.{index}.end"],
+                    )
+                if internship and (a := self._ans(f, "No", [f"profile:education.{index}.end"])):
+                    return a
         for part, labels in ADDRESS.items():
             if label in labels and getattr(addr, part):
                 if part == "city" and f.get("type") in {"combobox", "dropdown", "select"}:

@@ -400,3 +400,30 @@ def test_an_option_asserting_the_status_is_not_a_decline(service):
     r = resolver(service, decline_demographics=True)
     answer = r.local(field(label, options))
     assert answer is None or not answer.value.startswith("I am a protected veteran")
+
+
+TRUE_ANOMALY = (
+    "The person hired will have access to information and items controlled by the International Traffic in Arms "
+    "Regulation (ITAR). To conform to U.S. Government space technology export regulations, including the ITAR, you "
+    "must be a U.S. citizen, lawful permanent resident of the U.S. (i.e., current Green Card holder), lawfully admitted "
+    "into the U.S. as a refugee or granted asylum, or be eligible to obtain the required authorizations from the U.S. "
+    "Department of State. Are you currently a U.S. Person as described above, or otherwise eligible to obtain the "
+    "required authorization?"
+)
+TRUE_ANOMALY_OPTIONS = (
+    "U.S. citizen or national of the United States",
+    "U.S. lawful permanent resident (Green Card holder)",
+    "Refugee admitted under 8 U.S.C. § 1157",
+    "Asylee granted asylum under 8 U.S.C. § 1158",
+    "Not currently a U.S. Person / Other status",
+)
+
+
+def test_an_option_that_denies_us_person_status_is_valid_for_a_non_us_person(service):
+    # True Anomaly 2026-10-24: "Not currently a U.S. Person / Other status" names the class to deny it, and validation
+    # refused it as a claim to be one; the question went to the owner three times.
+    r = resolver(service)
+    f = field(TRUE_ANOMALY, TRUE_ANOMALY_OPTIONS, kind="combobox")
+    evidence = ["fact:us_citizen", "fact:current_immigration_status_US"]
+    assert validate(r, f, "Not currently a U.S. Person / Other status", evidence).disposition == "answer"
+    assert validate(r, f, "U.S. citizen or national of the United States", evidence).disposition != "answer"
