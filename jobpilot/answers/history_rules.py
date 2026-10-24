@@ -443,7 +443,11 @@ class HistoryRulesMixin:
             entries, patterns, kind = self.profile.education, EDUCATION, "education"
         else:
             entries, patterns, kind = self.profile.work, WORK, "work"
-        region = HISTORY_REGION.fullmatch(normalize(f["label"]))
+        # The row's own "State", not its scoped label "State (Education at University of ...)", which also names a
+        # school: WTW's education State got the school name (Oracle, 2026-10-24).
+        region = HISTORY_REGION.fullmatch(normalize(f["label"])) or HISTORY_REGION.fullmatch(
+            normalize(re.sub(r"^(?:school|institution|university|college)\s+", "", f.get("own_label") or "", flags=re.I))
+        )
         if index >= len(entries):
             # Never fall through to the applicant's home State/Country for a row the profile does not have.
             return (
@@ -458,6 +462,27 @@ class HistoryRulesMixin:
             stated = list(getattr(self.answer_rules, "employment_countries", []) or [])
             if kind == "work" and region[1].startswith("country") and index < len(stated) and stated[index].strip():
                 value, evidence = stated[index].strip(), ["fact:employment_countries"]  # The applicant's own list.
+            if not value and kind == "education":
+                # Schools have no saved location; "University of Michigan, Ann Arbor" or "Ohio State University" is in
+                # that state (WTW's Oracle education row, 2026-10-24). "Washington University" (Missouri) is not read.
+                from .eligibility import US_STATES
+
+                school = str(entry.school or "")
+                code = next(
+                    (
+                        c for c, name in US_STATES.items()
+                        if re.search(rf"\buniversity of {re.escape(name)}\b|^{re.escape(name)} state university\b", school, re.I)
+                    ),
+                    "",
+                )
+                if code:
+                    evidence = [f"profile:{kind}.{index}.school"]
+                    if region[1].startswith("country"):
+                        value = "United States"
+                    else:
+                        answer = self._ans(f, US_STATES[code], evidence) or self._ans(f, code, evidence)
+                        if answer:
+                            return answer
             answer = self._ans(f, value, evidence) if value else None
             return answer or Answer(
                 field_id=f["id"],

@@ -81,3 +81,36 @@ def test_can_join_by_menus_take_todays_date_for_an_immediately_available_applica
         answer = ask(service, f"Can Join By {part}", kind="select", facts={"availability": "Immediately"},
                      options=[expected])
         assert answer.value == expected and answer.evidence_ids == ["fact:availability"], part
+
+
+def test_a_phone_that_includes_its_country_code_is_the_number(service):
+    answer = ask(service, "Phone Number (Please include Country Code in this format - example: +44 123 456 6789)",
+                 kind="text", phone="(240) 555-0100", phone_country_code="+1", address={"country": "United States"})
+    assert answer.value == "+1 2405550100"
+
+
+def test_a_salary_currency_menu_takes_the_jobs_currency(service):
+    menu = ["Euro", "Pound Sterling", "Indian Rupee", "US Dollar", "Canadian Dollar"]
+
+    def currency(location):
+        resolver = Resolver(Profile.model_validate({"address": {"country": "United States"}}), service.db,
+                            service.config, job={"ats": "oracle", "url": "https://x.test", "location": location})
+        return resolver.local({"id": "c", "label": "Salary Expectation in Local Currency", "type": "combobox",
+                               "required": True, "value": "", "valid": True, "group": "", "section": "",
+                               "options": menu})
+
+    assert currency("New York, NY, United States").value == "US Dollar"
+    assert currency("Bengaluru, Karnataka, India") is None  # never a guess for a job abroad
+
+
+def test_an_education_rows_state_comes_from_a_school_named_for_it(service):
+    def state(school):
+        resolver = Resolver(Profile.model_validate({"education": [{"school": school, "degree": "Master of Science",
+                                                                  "end": "2026-05"}]}), service.db, service.config)
+        return resolver.local({"id": "s", "label": "State", "type": "combobox", "required": True, "value": "",
+                               "valid": True, "group": f"Education at {school}", "section": "",
+                               "options": ["MI", "MO", "OH", "WA"], "name": "stateProvinceCode"})
+
+    assert state("University of Michigan, Ann Arbor").value == "MI"
+    assert state("Ohio State University").value == "OH"
+    assert state("Washington University in St. Louis").disposition != "answer"

@@ -496,7 +496,7 @@ class Resolver(
         if defined_screening(f["label"]):
             # The employer's definition names the applicant's recorded status, or a model reasons over it.
             return self.status_answer(f)
-        return self._local({**f, "label": self.context_labels[f["id"]]})
+        return self._local({**f, "label": self.context_labels[f["id"]], "own_label": f["label"]})
 
     async def resolve(self, fields, *, use_local=True):
         from ..agent_settings import require

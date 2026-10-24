@@ -34,6 +34,12 @@ from .eligibility import NOT_AVAILABILITY
 from .eligibility import NOT_DESIRED
 from .eligibility import OTHER_COUNTRY
 from .eligibility import US_STATES
+
+CURRENCY = re.compile(
+    r"\b(?:dollar|euro|pound|rupee|yen|dirham|real|zloty|franc|krona|krone|peso|yuan|renminbi|won|shekel|rand|ringgit|"
+    r"usd|eur|gbp|inr|cad|aud|sgd|jpy|chf|aed)\b",
+    re.I,
+)
 from .history import EDUCATION
 from .history import WORK
 from .intents import INTENTS
@@ -849,6 +855,21 @@ class LocalRulesMixin:
             home = saved.upper() if saved.upper() in US_STATES else states.get(normalize(saved), "")
             if home and (a := self._ans(f, "Yes" if states[named[1].strip()] == home else "No", ["profile:address.state"])):
                 return a
+        # BNY (Oracle, 2026-10-24): "Salary Expectation in Local Currency" is a currency menu (Euro, US Dollar, ...).
+        currencies = [o for o in options if CURRENCY.search(o)]
+        if len(currencies) >= 3 and len(currencies) >= len(options) - 1 and re.search(r"currenc|salary|compensation|pay", label):
+            # The job's own location decides; the applicant's residence only when the posting names none.
+            where = str(self.job.get("location") or "").strip()
+            us = (
+                re.search(r"united states|\busa?\b", where, re.I)
+                or re.search(r", [A-Z]{2}\b", where)
+                if where
+                else re.search(r"united states|\busa?\b", addr.country or "", re.I)
+            )
+            if us:
+                dollar = next((o for o in currencies if re.search(r"\bus(?:d| dollar)\b|united states dollar", o, re.I)), None)
+                if dollar and (a := self._ans(f, dollar, ["profile:address.country"])):
+                    return a
         # "Please indicate all entities for which you are currently working or have worked" (the Federal Reserve,
         # 2026-10-23): with none of the listed organizations in the work history, its none-choice is the answer.
         none_choice = next(
@@ -940,7 +961,9 @@ class LocalRulesMixin:
             and f.get("type") in {"text", "tel"}
             and not options
             and re.search(r"\b(?:phone|mobile|telephone)\b", label)
-            and re.search(r"(?:\+|incl(?:uding)?\.?|with)\s*(?:the\s*)?country\s*code", f["label"], re.I)
+            # Publicis (2026-10-24): "Phone Number (Please include Country Code in this format - example: +44 ...)"
+            # took the residence country name from the calling-code rule below.
+            and re.search(r"(?:\+|incl(?:ude|uding)?\.?|with)\s*(?:the\s*)?country\s*code", f["label"], re.I)
         ):
             # Boehringer (SuccessFactors) 2026-10-16: "Main Phone (+ Country Code)" is the number itself;
             # the calling-code rule below typed the residence country into it. The code comes only
