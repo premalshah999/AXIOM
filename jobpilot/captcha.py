@@ -257,6 +257,8 @@ class CaptchaSolver:
         self.same_ip_tried = set()
         self.twin_tried = set()
         self.twin_delivered_at = None  # monotonic time of the last twin token handed to a site
+        self.last_twin = None  # (host, kind, key) of the widget that last received a twin token
+        self.twin_rejected = set()
         # (kind, sitekey) of widgets the site executes itself; a token bought on the solver's IP is never theirs.
         self.site_executed = set()
         self.last_reason = ""
@@ -362,6 +364,8 @@ class CaptchaSolver:
             or info.get("rqdata")
             or signature in self.twin_tried
             or not any(host == h or host.endswith("." + h) for h in hosts)
+            or (host, info["kind"], info["key"]) in self.twin_rejected
+            or self.twin_refused_recently(host)
         ):
             return False
         self.twin_tried.add(signature)
@@ -399,8 +403,35 @@ class CaptchaSolver:
         self.last_reason = f"Clean twin browser's {PROVIDER[info['kind']]} token delivered to website callback"
         self.emit("captcha", self.last_reason, {"provider": "twin-browser", "elapsed_seconds": elapsed})
         self.token_delivered_at[signature] = self.twin_delivered_at = time.monotonic()
+        self.last_twin = (host, info["kind"], info["key"])
         self.token_refresh_required = self.challenge_unverified = False
         return True
+
+    TWIN_REFUSAL_DAYS = 7
+
+    def twin_refused(self):
+        """The site answered the twin's token with a new challenge (JPMorgan's Oracle email step, 2026-10-24: twin
+        tokens re-challenged on 11 runs, while this browser's own image answer had passed on 10-22). That widget, and its
+        host for a week, take this browser's own routes instead."""
+        if not self.last_twin:
+            return
+        self.twin_rejected.add(self.last_twin)
+        if self.db is not None:
+            from datetime import UTC, datetime
+
+            self.db.set_setting(
+                "captcha_twin_refused:" + self.last_twin[0],
+                {"at": datetime.now(UTC).isoformat(), "kind": self.last_twin[1]},
+            )
+        self.emit("captcha", "The website refused the twin browser's token; this browser answers instead")
+
+    def twin_refused_recently(self, host):
+        if self.db is None:
+            return False
+        from datetime import UTC, datetime, timedelta
+
+        at = (self.db.get_setting("captcha_twin_refused:" + host, {}) or {}).get("at", "")
+        return bool(at) and at > (datetime.now(UTC) - timedelta(days=self.TWIN_REFUSAL_DAYS)).isoformat()
 
     async def solve(self, page, *, pre_submit=False):
         self.token_refresh_required = False

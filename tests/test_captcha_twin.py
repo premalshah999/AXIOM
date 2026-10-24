@@ -242,3 +242,46 @@ async def test_turnstile_elsewhere_is_left_to_the_site(config, page, monkeypatch
     await page.goto("https://jobs.example.test/apply")
     await page.wait_for_timeout(120)
     assert await page.evaluate("window.siteToken") == "worker-token"
+
+
+async def test_a_site_that_refuses_the_twins_token_gets_this_browsers_answer_next(config, page, monkeypatch, service):
+    """JPMorgan's Oracle email step (2026-10-24): every twin token was answered with a new challenge (11 runs), and the
+    next challenge went to the twin again. After one refusal that host takes this browser's own routes, for a week."""
+    config.browser_twin_cdp_url, config.twocaptcha_api_key, config.captcha_same_ip = "http://127.0.0.1:9", "k", False
+    url = "https://acme.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/1/apply/email"
+    loads = []
+
+    async def serve(route):
+        loads.append(1)  # each load mounts a new widget, as the site's re-challenge does
+        await route.fulfill(body=EMAIL_STEP.replace("'w1'", f"'w{len(loads)}'"), content_type="text/html")
+
+    await page.add_init_script(HOOK)
+    await page.route("**/*", serve)
+    await page.goto(url)
+    twin = AsyncMock(return_value={"token": "twin-token"})
+    paid = AsyncMock(return_value={"token": "paid-token"})
+    monkeypatch.setattr("jobpilot.captcha.twin_mint", twin)
+    monkeypatch.setattr("jobpilot.captcha.solve_token", paid)
+    events = []
+    solver = CaptchaSolver(config, lambda *a: events.append(a), db=service.db)
+    assert await solver.solve(page)
+    solver.twin_refused()  # the browser engine saw a new widget after the handoff
+    await page.reload()  # the site's new challenge
+    assert await solver.solve(page)
+    assert twin.await_count == 1 and paid.await_count == 1
+    assert await page.evaluate("window.siteToken") == "paid-token"
+    # A later run on the same site goes straight to this browser's routes.
+    await page.reload()
+    assert await CaptchaSolver(config, lambda *a: None, db=service.db).solve(page)
+    assert twin.await_count == 1
+
+
+async def test_other_twin_hosts_are_unaffected_by_one_sites_refusal(config, page, monkeypatch, service):
+    config.browser_twin_cdp_url, config.twocaptcha_api_key = "http://127.0.0.1:9", ""
+    service.db.set_setting("captcha_twin_refused:acme.fa.oraclecloud.com", {"at": "2999-01-01T00:00:00+00:00"})
+    url = "https://other.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/1/apply/email"
+    await open_step(page, url)
+    twin = AsyncMock(return_value={"token": "twin-token"})
+    monkeypatch.setattr("jobpilot.captcha.twin_mint", twin)
+    assert await CaptchaSolver(config, lambda *a: None, db=service.db).solve(page)
+    twin.assert_awaited_once()

@@ -84,6 +84,8 @@ SENSITIVE_STEPS = {"sign_in", "create_account", "email_code", "verify_link", "re
 # Post-commit observation: 60 polls of the receipt/rejection/challenge checks, then a bounded
 # extra window for Greenhouse's emailed-code step, which can render after the receipt window.
 # Analytics and telemetry hosts are not part of an application's commit.
+# Paths of telemetry calls a page makes on its own site while a form is submitted (Oracle's recruitingCEUserTrackings).
+COMMIT_TRACKING = re.compile(r"track|analytic|telemetr|beacon|metric|collect|/log(?:s|ging)?\b|/events?\b", re.I)
 COMMIT_NOISE = re.compile(
     r"google-analytics|googletagmanager|doubleclick|analytics|(?:^|\.)rum\.|sentry|datadoghq|segment\.io|hotjar|"
     r"clarity\.ms|facebook|linkedin\.com/px|bat\.bing|cdn-cgi/rum|newrelic|nr-data",
@@ -2637,6 +2639,8 @@ class BrowserEngine:
         followup = getattr(self.captcha, "has_new_challenge", None)
         if visible_challenge and callable(followup) and await followup(self.page):
             self.emit("captcha", "Website presented a new widget after the previous token handoff")
+            if getattr(self.captcha, "twin_delivered_at", None) and callable(getattr(self.captcha, "twin_refused", None)):
+                self.captcha.twin_refused()  # The new challenge is this browser's to answer, not the twin's again.
             await self.captcha.solve(self.page)
             visible_challenge = await challenge_frame(self.page) or await checkbox_frame(self.page)
             if self.captcha.challenge_unverified and not await self.captcha.token_present(self.page):
@@ -3139,6 +3143,7 @@ class BrowserEngine:
             await frame.evaluate(ARM_JS)
         self.emit("submitting", "Commit step started; automatic retries are disabled")
         self.commit_requests = []
+        self.commit_url = getattr(self.page, "url", "")
         await self.form.locator(final[0]["id"]).click(timeout=10000)
         result = await self.watch_submission(before, before_rejection, validation_attempt)
         if getattr(self, "commit_requests", None):
@@ -3299,10 +3304,39 @@ class BrowserEngine:
                 "recovery_cause": "validation_controls",
                 "receipt": stale_rejection,
             }
+        if await self.commit_sent_nothing():
+            # Dallas County's Oracle form (2026-10-24, four runs): the click sent only Oracle's user-tracking call and
+            # LinkedIn pixels, the form and its Submit stayed, and each run ended as an uncertain submission that can
+            # never be retried. Nothing that could carry an application left the browser: the page is repaired instead.
+            self.armed = False
+            return {
+                "state": "waiting_browser",
+                "reason": "The submit sent nothing to the employer and the form is still open; nothing was submitted",
+                "blocker_type": "validation",
+                "recovery_cause": "validation_controls",
+            }
         return {
             "state": "submission_unknown",
             "reason": "Submission attempted, but no explicit receipt was captured",
         }
+
+    async def commit_sent_nothing(self):
+        """True only when the whole receipt window passed with the page on the URL it was submitted from, its final
+        submit control still offered, and no write anywhere other than tracking or analytics calls. Applications are
+        often posted to another host than the page (an ATS API), so any other write, a navigation or a missing control
+        keeps the submission uncertain."""
+        url = getattr(self, "commit_url", "")
+        if not url or getattr(self.page, "url", "") != url:
+            return False
+        writes = [
+            r for r in getattr(self, "commit_requests", None) or [] if not COMMIT_TRACKING.search(r.get("path", ""))
+        ]
+        if writes or len(getattr(self, "commit_requests", None) or []) >= 40:  # a full log may have dropped writes
+            return False
+        try:
+            return bool(await self.form.application_submit_controls())
+        except PlaywrightError:
+            return False
 
     def post_submit_code_pending(self):
         """A Greenhouse request armed before the click may still receive its emailed code."""
