@@ -302,11 +302,16 @@ def schedule_version_repairs(service):
     scheduled = []
     with service.db.exclusive() as s:
         latest, protected = {}, set()
-        for run in s.scalars(select(Run).order_by(Run.created_at.desc())):
-            latest.setdefault(run.job_id, run)
-            if run.state in {"confirmed", "submission_unknown", "already_applied", "submitting"}:
-                protected.add(run.job_id)
-        for job_id, run in latest.items():
+        # Metadata only: every run's saved packet (6,498 runs, 841 MB stored) grew startup past the 7.6 GB Docker VM
+        # and the server was OOM-killed every 40 s (2026-10-24). Only the few candidate drafts' packets are read.
+        for row in s.execute(select(Run.id, Run.job_id, Run.state, Run.mode).order_by(Run.created_at.desc())):
+            latest.setdefault(row.job_id, row)
+            if row.state in {"confirmed", "submission_unknown", "already_applied", "submitting"}:
+                protected.add(row.job_id)
+        for job_id, row in latest.items():
+            if job_id in protected or row.state not in {"waiting_browser", "timed_out"} or row.mode != "submit":
+                continue
+            run = s.get(Run, row.id)
             job = s.get(Job, job_id)
             control = s.get(Setting, "job_control:" + job_id)
             if (
