@@ -39,6 +39,31 @@ async def test_application_submit_wins_over_talent_community_sidebar(page, tmp_p
     assert await form.locator(final[0]["id"]).evaluate("b=>b.id") == "app-submit"
 
 
+async def test_talent_community_sidebar_beside_apply_is_a_signup(page, tmp_path):
+    await page.set_content("""<header><button type=button>Apply</button></header>
+      <aside><form><h3>Join our Talent Community</h3><input name=contact_email><input name=contact_phone>
+      <button type=submit id=talent-submit>Submit</button></form></aside>""")
+    form = _session(page, tmp_path)
+    await form.scan()
+    final = await form.application_submit_controls()
+    assert await form.signup_form(final[0]["id"]) is True
+
+
+async def test_application_with_attached_resume_and_community_question_is_not_a_signup(page, tmp_path):
+    # Braze (Greenhouse, 2026-10-23): the attached resume replaces the file input, a header Apply button stays, and
+    # the application itself asks about the talent community.
+    await page.set_content("""<header><button type=button>Apply</button></header>
+      <form><label>First Name <input name=first></label><label>Email <input name=email></label>
+      <div>Resume/CV <span>resume.pdf</span> <button type=button>Remove file</button></div>
+      <label>Select 'Yes' to join Braze's Talent Community and receive newsletters
+      <select name=community><option>Yes</option><option>No</option></select></label>
+      <button type=submit id=app-submit>Submit application</button></form>""")
+    form = _session(page, tmp_path)
+    await form.scan()
+    final = await form.application_submit_controls()
+    assert await form.signup_form(final[0]["id"]) is False
+
+
 async def test_two_visible_submits_in_different_forms_stay_ambiguous(page, tmp_path):
     await page.set_content("""<form id=one><input name=first><button type=submit>Submit</button></form>
       <form id=two><input name=second><button type=submit>Submit</button></form>""")

@@ -900,9 +900,11 @@ class LocalRulesMixin:
                     evidence_ids=["profile:phone", "profile:phone_country_code"],
                 )
         if re.search(
-            r"country(?: region| territory)? (?:phone )?code|phone (?:country|code)|dialing code|country calling",
+            r"country(?: region| territory)? (?:phone )?code|phone ?(?:country|code)|dialing code|country calling",
             label,
         ):
+            # ADP's react-phone-number-input select is unlabeled, named "phoneCountry"; the model chose
+            # Uzbekistan, then Vanuatu, and the mobile number was refused (St. Onge 2026-10-23).
             # +1 alone cannot distinguish US from Canada. Match the saved
             # residence first; a standalone dialing-code catalog can use +1.
             for candidate, ref in [

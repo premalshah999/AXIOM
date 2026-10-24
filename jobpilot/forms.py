@@ -1802,7 +1802,11 @@ class FormSession:
 
             return sorted(named, key=rank)[:1]
         unnamed = [f for f in files if not NOT_RESUME.search(f["label"])]
-        return unnamed[:1] if len(files) == 1 else []
+        if len(files) == 1:
+            return unnamed[:1]
+        # Generic "Upload a file" inputs named by their section (Jabil: Resume/CV/... beside Additional Attachments).
+        grouped = [f for f in unnamed if RESUME.search(f.get("group") or "")]
+        return grouped if len(grouped) == 1 else []
 
     async def control_structure(self, control_id):
         """Redacted DOM shape of a control that failed to commit: tags, roles, ids/classes and
@@ -1874,6 +1878,10 @@ class FormSession:
                     r"""b => {
                       const f = b.form || b.closest('form');
                       if (!f || f.querySelector('input[type=file]')) return false;
+                      // Greenhouse drops the file input once the resume is attached, and Braze's application asks
+                      // "join Braze's Talent Community?" (2026-10-23): a resume or a long questionnaire is the job's.
+                      if (/\b(?:resume|résumé|cv)\b/i.test(f.innerText || '')
+                        || f.querySelectorAll('input:not([type=hidden]),select,textarea').length > 12) return false;
                       if (!/talent (?:community|network|pool)|join our (?:talent|community)|job alerts?|stay (?:connected|in touch)|career (?:updates|newsletter)|newsletter/i
                         .test((f.innerText || '').slice(0, 4000))) return false;
                       // Roku's sidebar sits beside the job's own Apply; a final application page
@@ -2371,7 +2379,9 @@ class FormSession:
                         raise
                     # A major the employer's search catalog lacks falls back to the profile's fallback major
                     # (answer_rules.major_fallback; R1 RCM: "Data Science" was not offered).
-                    committed = await widgets.prompt(frame, el, fallback, choose=choose)
+                    # The fallback is policy-matched too: a model choosing among Jabil's alphabetical first page
+                    # committed "Actuarial Science" for Data Science (2026-10-23).
+                    committed = await widgets.prompt(frame, el, fallback, choose=major_policy)
                     self.emit(
                         "option_selected",
                         "Used the profile's fallback major for a catalog without the recorded one",

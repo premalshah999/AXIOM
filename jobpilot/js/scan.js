@@ -261,7 +261,9 @@
       return (row.kind==='work'?'Work Experience ':'Education ')+(anchors.indexOf(row.anchor)+1);
     }
     let g = composedClosest(parentOf(el),'[role=group]');
-    while (g && deepQuery(g,'input,select,textarea,button[aria-haspopup]').length < 2) {
+    // An upload's own group names it: Jabil's Workday shows two "Upload a file (5MB max)" inputs, one under
+    // "Resume/CV/Cover Letter/Supporting Documents" and one under "Additional Attachments" (2026-10-23).
+    while (g && el.type !== 'file' && deepQuery(g,'input,select,textarea,button[aria-haspopup]').length < 2) {
       g = composedClosest(parentOf(g),'[role=group]');
     }
     if (g) {

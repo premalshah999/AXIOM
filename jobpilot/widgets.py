@@ -1331,14 +1331,22 @@ def employer_other_option(offered):
     )
 
 
+# Catalogs abbreviate the institution: Jefferson Health's Workday offers "Univ of <State> <Campus>" (2026-10-23).
+SCHOOL_ABBREVIATIONS = {"univ": "university", "inst": "institute", "coll": "college"}
+
+
+def school_norm(text):
+    return " ".join(SCHOOL_ABBREVIATIONS.get(word, word) for word in norm(text).split())
+
+
 def school_option_matches(value, offered):
     """A shorter search query cannot silently select a different campus."""
     if school_other_option(offered):
         return True
     institution, separator, campus = str(value).partition(",")
     if not separator:
-        return norm(value) == norm(offered)
-    institution, campus, display = norm(institution), norm(campus), norm(offered)
+        return school_norm(value) == school_norm(offered)
+    institution, campus, display = school_norm(institution), school_norm(campus), school_norm(offered)
     if not display.startswith(institution):
         return False
     suffix = display[len(institution) :].strip()
@@ -2562,6 +2570,7 @@ def prompt_fallback_queries(value, school_scope=False):
     head = re.split(r"\s*[,\u2013\u2014]\s*|\s+-\s+", str(value))[0].strip()
     generic = {
         "university",
+        *SCHOOL_ABBREVIATIONS,
         "of",
         "the",
         "college",

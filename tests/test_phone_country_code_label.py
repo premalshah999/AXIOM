@@ -24,3 +24,12 @@ def test_international_number_and_us_residence_need_no_separate_code(service):
 def test_no_saved_code_outside_the_us_is_never_guessed(service):
     answer = phone(service, Profile(phone="2405550100", address={"country": "India"}))
     assert answer is None or not str(answer.value or "").startswith("+")
+
+
+def test_an_unlabeled_phone_country_select_is_the_residence(service):
+    # ADP (St. Onge 2026-10-23): react-phone-number-input's country select has only the name "phoneCountry".
+    resolver = Resolver(Profile(phone="+1 240-555-0100", address={"country": "United States"}), service.db,
+                        service.config, job={"ats": "adp", "url": "https://example.test/job"})
+    field = {"id": "c", "label": "phoneCountry", "type": "select", "required": False, "value": "Uzbekistan",
+             "valid": True, "group": "", "section": "", "options": ["Afghanistan", "United States", "Uzbekistan", "Vanuatu"]}
+    assert resolver.local(field).value == "United States"

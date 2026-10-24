@@ -52,6 +52,17 @@ def test_school_prompt_fallback_queries_keep_the_institution():
     assert prompt_fallback_queries("Information Systems") == ["Information"]
 
 
+def test_an_abbreviated_school_option_is_searched_by_its_distinctive_word_and_matches_the_profile():
+    from jobpilot.widgets import prompt_fallback_queries, school_option_matches
+
+    # Jefferson Health's Workday abbreviates "Univ of <State> <Campus>"; a resumed draft searched that, then "Univ",
+    # which lists the first 100 schools alphabetically, and never committed the field (2026-10-23).
+    assert prompt_fallback_queries("Univ of Michigan Ann Arbor", school_scope=True) == ["Michigan", "Other"]
+    assert school_option_matches("University of Michigan, Ann Arbor", "Univ of Michigan Ann Arbor")
+    assert school_option_matches("Univ of Michigan Ann Arbor", "Univ of Michigan Ann Arbor")
+    assert not school_option_matches("University of Michigan, Ann Arbor", "Univ of Michigan Dearborn")
+
+
 def test_numeric_salary_matches_only_the_exact_currency_option():
     from jobpilot.widgets import best_option
 
