@@ -1402,12 +1402,14 @@ class Adapter:
         # Navigations during the link visit may only reach the employer rule's origins.
         rule = (self.challenge or {}).get("rule") or {}
         allowed = set(rule.get("link_origins", []))
-        from ..mail import origin as link_origin, tracker_allowed
+        from ..mail import origin as link_origin, platform_link_allowed, tracker_allowed
 
         try:
             if allowed and tracker_allowed(link_origin(url), allowed):
                 # iCIMS's click tracker is only the first hop; it must redirect to the rule's own origin.
                 allowed.add(link_origin(url))
+            if allowed and platform_link_allowed(link_origin(url), (getattr(self, "job", None) or {}).get("ats")):
+                allowed.add(link_origin(url))  # SAP's career host serves this SuccessFactors employer's reset page
         except ValueError:
             pass
         self.e.verification_origins = allowed or None

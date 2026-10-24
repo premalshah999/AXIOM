@@ -138,3 +138,29 @@ async def test_receipt_for_another_role_confirms_nothing_and_is_not_fetched_agai
     assert fetched == ["/messages/other"]
     with service.db.session() as s:
         assert s.get(Run, rid).state == "waiting_browser"
+
+
+SF_RESET = (
+    '<p>Example Password Reset</p><a href="https://performancemanager.successfactors.eu/sf/home?company=exampleP">'
+    '<img alt="Example"></a><p>To reset your password, click the link below.</p>'
+    '<a href="https://career2.successfactors.eu/career?company=exampleP&career_ns=resetPassword&token=abc123">'
+    "Reset password</a>"
+)
+
+
+def reset_challenge(ats):
+    return {"recipient": "alex@example.test", "since": time.time() - 30, "expires": time.time() + 30,
+            "kind": "password_reset", "ats": ats}
+
+
+def test_a_successfactors_reset_mail_links_saps_career_host_and_its_reset_link_is_the_one():
+    """Nestle (2026-10-24): the employer's reset mail linked career2.successfactors.eu, outside the rule's branded
+    career-site origin, and every poll rejected it as token_format; the run stayed in waiting_email."""
+    rule = {"sender_domains": ["notify.example.test"], "link_origins": ["https://jobs.example.test"]}
+    result = extract_message(message(SF_RESET, html=True), rule, reset_challenge("successfactors"))
+    assert result == {
+        "kind": "link",
+        "value": "https://career2.successfactors.eu/career?company=exampleP&career_ns=resetPassword&token=abc123",
+    }
+    # Another platform's challenge never accepts SAP's hosts.
+    assert (extract_message(message(SF_RESET, html=True), rule, reset_challenge("workday")) or {}).get("kind") != "link"

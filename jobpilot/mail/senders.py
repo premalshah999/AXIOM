@@ -19,6 +19,23 @@ def tracker_allowed(link_origin, link_origins):
     )
 
 
+# SuccessFactors serves sign-in, reset and activation pages from SAP's own career hosts whatever the employer's branded
+# career site is: Nestle's reset mail linked career2.successfactors.eu and every poll rejected it (2026-10-24).
+SF_PLATFORM_HOST = re.compile(
+    r"^(?:career\d*|performancemanager\d*|hcm\d*)\.(?:successfactors\.(?:com|eu)|sapsf\.(?:com|eu|cn))$|"
+    r"^career-hcm\d*\.ns2cloud\.com$",
+    re.I,
+)
+
+
+def platform_link_allowed(link_origin, ats):
+    """A SuccessFactors employer's mail may link SAP's career hosts; the message itself already passed the employer's
+    sender, authentication, recipient and window checks."""
+    return ats == "successfactors" and link_origin.startswith("https://") and bool(
+        SF_PLATFORM_HOST.match(urlsplit(link_origin).hostname or "")
+    )
+
+
 # Multi-tenant ATS sender domains. Mail from them is attributed to one employer only by tenant
 # identity (Workday names the tenant in the sender, e.g. mimecast@myworkday.com) or, when the
 # message names no tenant, by the shared-sender lease that begin() holds for one run at a time.

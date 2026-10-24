@@ -40,6 +40,7 @@ from .senders import (
     tenant_conflict,
     tenant_tokens,
     tracker_allowed,
+    platform_link_allowed,
 )
 from .extraction import (
     CODE_CUE,
@@ -105,4 +106,5 @@ __all__ = [
     "tenant_conflict",
     "tenant_tokens",
     "tracker_allowed",
+    "platform_link_allowed",
 ]

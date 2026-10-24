@@ -10,6 +10,7 @@ from .senders import CLICK_TRACKERS
 from .senders import authenticated_sender
 from .senders import icims_attributed
 from .senders import oracle_attributed
+from .senders import platform_link_allowed
 from .senders import sender_allowed
 from .senders import tenant_conflict
 from .senders import tracker_allowed
@@ -68,6 +69,7 @@ def _origin_or_none(href):
 
 # A verification continuation in a link's own URL (iCIMS: ".../login?step=email&hashed=...&token=...").
 VERIFY_URL = re.compile(r"verif|confirm|token|activate|[?&](?:step|hashed|key|code)=|/login\b", re.I)
+RESET_URL = re.compile(r"reset|password|passwd|pwd|token|activat", re.I)
 
 
 def extract_message(message, rule, challenge, *, identity_only=False, diagnostics=None):
@@ -364,7 +366,9 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
     for link in links:
         try:
             link_origin = origin(link)
-            if urlsplit(link).scheme == "https" and link_origin in rule["link_origins"]:
+            if urlsplit(link).scheme == "https" and (
+                link_origin in rule["link_origins"] or platform_link_allowed(link_origin, challenge.get("ats"))
+            ):
                 valid_links.add(link)
             elif (
                 urlsplit(link).scheme == "https"
@@ -380,6 +384,12 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
             continue
     if diagnostics is not None and rejected_origins:
         diagnostics["rejected_link_origins"] = sorted(rejected_origins)[:20]
+    if len(valid_links) > 1:
+        # A reset or verification mail also links its logo and portal home: the one link whose URL is the reset or
+        # verification step is the link.
+        step = {link for link in valid_links if (RESET_URL if reset else VERIFY_URL).search(link)}
+        if len(step) == 1:
+            valid_links = step
     kind = challenge["kind"]
     if identity_only:
         return (
