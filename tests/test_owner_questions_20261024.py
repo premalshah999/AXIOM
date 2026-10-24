@@ -69,3 +69,15 @@ def test_a_project_story_is_written_not_asked():
     assert question_kind("Tell us more about a project where you took human demonstration data and trained a policy") \
         == "behavioral"
     assert question_kind("Describe a project you are proud of") == "behavioral"
+
+
+def test_can_join_by_menus_take_todays_date_for_an_immediately_available_applicant(service):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    today = datetime.now(ZoneInfo(service.config.timezone)).date()
+    parts = {"Month": f"{today.month:02d}", "Day": str(today.day), "Year": str(today.year)}
+    for part, expected in parts.items():
+        answer = ask(service, f"Can Join By {part}", kind="select", facts={"availability": "Immediately"},
+                     options=[expected])
+        assert answer.value == expected and answer.evidence_ids == ["fact:availability"], part

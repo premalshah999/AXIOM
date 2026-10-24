@@ -136,7 +136,9 @@ INTENTS = [
     ),
     (
         re.compile(
-            r"start date|date available to work|available to start|notice period|earliest (?:start|availability)|earliest.{0,35}start|when can you start|when.{0,45}(?:start|commence|begin) (?:a |your )?(?:new )?(?:role|employment|work)",
+            # HEXAWARE (Oracle, 2026-10-24): "Can Join By" Month/Day/Year was left to a model, which chose yesterday.
+            r"start date|date available to work|available to start|notice period|earliest (?:start|availability)|earliest.{0,35}start|when can you start|when.{0,45}(?:start|commence|begin) (?:a |your )?(?:new )?(?:role|employment|work)|"
+            r"can join(?: by| from| on)?\b|joining date|date of joining|available to join",
             re.I,
         ),
         ["availability", "notice_period", "start_date"],
