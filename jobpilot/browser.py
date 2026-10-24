@@ -1774,7 +1774,10 @@ class BrowserEngine:
             # Every write during the commit (any origin, no query string or body): SmartRecruiters' six
             # unknowns left no trace because only same-origin 4xx responses were recorded (2026-10-18).
             parts = urlsplit(response.url)
-            if not COMMIT_NOISE.search(parts.hostname or ""):
+            if COMMIT_TRACKING.search(parts.path):
+                # Counted, not listed: LinkedIn's pixel alone filled the 40-entry log on Dallas County's form.
+                self.commit_tracking = getattr(self, "commit_tracking", 0) + 1
+            elif not COMMIT_NOISE.search(parts.hostname or ""):
                 log = self.__dict__.setdefault("commit_requests", [])
                 if len(log) < 40:
                     log.append({"method": request.method, "host": parts.hostname, "path": parts.path[:120],
@@ -3142,12 +3145,16 @@ class BrowserEngine:
         for frame in self.page.frames:
             await frame.evaluate(ARM_JS)
         self.emit("submitting", "Commit step started; automatic retries are disabled")
-        self.commit_requests = []
+        self.commit_requests, self.commit_tracking = [], 0
         self.commit_url = getattr(self.page, "url", "")
         await self.form.locator(final[0]["id"]).click(timeout=10000)
         result = await self.watch_submission(before, before_rejection, validation_attempt)
-        if getattr(self, "commit_requests", None):
-            self.emit("submission_requests", "Write requests during the commit", {"requests": self.commit_requests})
+        if getattr(self, "commit_requests", None) or getattr(self, "commit_tracking", 0):
+            self.emit(
+                "submission_requests",
+                "Write requests during the commit",
+                {"requests": self.commit_requests, "tracking_calls": self.commit_tracking},
+            )
             self.commit_requests = []
         return result
 

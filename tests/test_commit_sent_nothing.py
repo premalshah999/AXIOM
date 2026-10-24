@@ -40,3 +40,18 @@ async def test_tracking_calls_alone_with_the_form_still_open_sent_nothing():
 ])
 async def test_any_other_write_a_navigation_or_a_vanished_submit_stays_uncertain(variant):
     assert await BrowserEngine.commit_sent_nothing(engine(**variant)) is False
+
+
+def test_tracking_calls_never_fill_the_commit_log():
+    engine = SimpleNamespace(armed=True, commit_requests=[], job={"url": FORM})
+
+    def response(host, path):
+        request = SimpleNamespace(method="POST", resource_type="fetch")
+        return SimpleNamespace(request=request, url=f"https://{host}{path}", status=200)
+
+    for _ in range(60):
+        BrowserEngine.submission_response(engine, response("www.linkedin.com", "/li/track"))
+    BrowserEngine.submission_response(engine, response("api.ats.example", "/v1/applications"))
+    assert engine.commit_tracking == 60
+    assert engine.commit_requests == [{"method": "POST", "host": "api.ats.example", "path": "/v1/applications",
+                                       "status": 200}]
