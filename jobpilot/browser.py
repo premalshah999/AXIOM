@@ -85,10 +85,16 @@ SENSITIVE_STEPS = {"sign_in", "create_account", "email_code", "verify_link", "re
 # extra window for Greenhouse's emailed-code step, which can render after the receipt window.
 # Analytics and telemetry hosts are not part of an application's commit.
 # Paths of telemetry calls a page makes on its own site while a form is submitted (Oracle's recruitingCEUserTrackings).
-COMMIT_TRACKING = re.compile(r"track|analytic|telemetr|beacon|metric|collect|/log(?:s|ging)?\b|/events?\b", re.I)
+COMMIT_TRACKING = re.compile(
+    r"track|analytic|telemetr|beacon|metric|collect|/log(?:s|ging)?\b|/events?\b|/report/?$|data-ingestion|"
+    # A CAPTCHA widget's own reloads and checks during the click are not the application.
+    r"/recaptcha/|getcaptcha|checksiteconfig",
+    re.I,
+)
 COMMIT_NOISE = re.compile(
     r"google-analytics|googletagmanager|doubleclick|analytics|(?:^|\.)rum\.|sentry|datadoghq|segment\.io|hotjar|"
-    r"clarity\.ms|facebook|linkedin\.com/px|bat\.bing|cdn-cgi/rum|newrelic|nr-data",
+    r"clarity\.ms|facebook|linkedin\.com/px|bat\.bing|cdn-cgi/rum|newrelic|nr-data|"
+    r"(?:^|\.)(?:px\.)?ads\.linkedin\.com$|(?:^|\.)sr\.qualtrics\.com$|fullstory|mouseflow|amplitude|mixpanel|heapanalytics",
     re.I,
 )
 FORM_PART = re.compile(rb'name="([^"]{1,160})"(?:; filename="([^"]{0,260})")?')
@@ -3318,7 +3324,7 @@ class BrowserEngine:
             self.armed = False
             return {
                 "state": "waiting_browser",
-                "reason": "The submit sent nothing to the employer and the form is still open; nothing was submitted",
+                "reason": "The employer accepted nothing from the submit and the form is still open; nothing was submitted",
                 "blocker_type": "validation",
                 "recovery_cause": "validation_controls",
             }
@@ -3335,8 +3341,11 @@ class BrowserEngine:
         url = getattr(self, "commit_url", "")
         if not url or getattr(self.page, "url", "") != url:
             return False
+        # A write the employer refused with a 4xx accepted nothing (Dallas County: its work-history item answered 400
+        # and the application was never posted). A 5xx may have been partly processed and stays uncertain.
         writes = [
-            r for r in getattr(self, "commit_requests", None) or [] if not COMMIT_TRACKING.search(r.get("path", ""))
+            r for r in getattr(self, "commit_requests", None) or []
+            if not COMMIT_TRACKING.search(r.get("path", "")) and not 400 <= int(r.get("status") or 0) < 500
         ]
         if writes or len(getattr(self, "commit_requests", None) or []) >= 40:  # a full log may have dropped writes
             return False

@@ -30,6 +30,13 @@ async def test_tracking_calls_alone_with_the_form_still_open_sent_nothing():
     assert await BrowserEngine.commit_sent_nothing(engine()) is True
 
 
+async def test_a_write_the_employer_refused_with_a_client_error_accepted_nothing():
+    refused = {"method": "POST", "host": "acme.fa.ocs.oraclecloud.com",
+               "path": "/hcmRestApi/resources/latest/recruitingCECandidatePreviousExpItems", "status": 400}
+    assert await BrowserEngine.commit_sent_nothing(engine(requests=[*TRACKING, refused])) is True
+    assert await BrowserEngine.commit_sent_nothing(engine(requests=[*TRACKING, {**refused, "status": 500}])) is False
+
+
 @pytest.mark.parametrize("variant", [
     {"requests": [*TRACKING, {"method": "POST", "host": "api.ats.example", "path": "/v1/applications", "status": 200}]},
     {"requests": [*TRACKING, {"method": "POST", "host": "acme.fa.ocs.oraclecloud.com",
