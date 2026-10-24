@@ -847,8 +847,11 @@ async def tick(service):
 
         from .owner_apply import due as owner_requests
 
-        # The owner's own Apply clicks go first; each one waits only for admission to allow it.
-        queued_now += await owner_requests(service, room - queued_now)
+        # The owner's own Apply clicks go first; each one waits only for admission to allow it. Retries of earlier
+        # attempts take at most half of the free slots while fresh ready postings are waiting (2026-10-24).
+        fresh = any(j.get("status") == "ready" for j in jobs)
+        free = room - queued_now
+        queued_now += await owner_requests(service, free, retries=max(1, free // 2) if fresh else None)
         await dispatch_ready(jobs)
         unranked = [j["id"] for j in candidates[:24] if j.get("score") is None and j["status"] != "ready"]
         if integrated:

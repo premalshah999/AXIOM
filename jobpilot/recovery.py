@@ -556,6 +556,51 @@ def schedule_recovery(session, config, run, result):
             session.add(Setting(key=key, value=data))
 
 
+# Blockers that belong to an employer's site rather than one job: its CAPTCHA refuses this browser's answers, or its
+# account for the applicant's email cannot be used.
+SITE_BLOCKERS = {"captcha", "account"}
+SITE_BLOCKER_JOBS, SITE_BLOCKER_HOURS = 3, 6
+
+
+def open_blocked_site_circuit(session, run, state):
+    """Three different jobs on one employer site stopped by the same site blocker within six hours: that site's other
+    jobs wait six hours and the workers go to other employers. JPMorgan's Oracle hCaptcha and L3Harris' unusable
+    account took most of 2026-10-24's Oracle and SuccessFactors starts, one failing job after another."""
+    blocker = (run.packet or {}).get("blocker_type")
+    if state != "waiting_browser" or blocker not in SITE_BLOCKERS:
+        return False
+    job = session.get(Job, run.job_id)
+    if not job:
+        return False
+    partition = employer_partition(job)
+    since = (datetime.now(UTC) - timedelta(hours=SITE_BLOCKER_HOURS)).isoformat()
+    rows = session.execute(
+        select(Run.job_id, Job.url, Job.ats, Run.packet["blocker_type"].as_string())
+        .join(Job, Job.id == Run.job_id)
+        .where(Run.state == "waiting_browser", Run.finished_at >= since, Job.ats == job.ats)
+    ).all()
+    jobs = {
+        job_id
+        for job_id, url, ats, kind in rows
+        if kind == blocker and employer_partition({"url": url, "ats": ats}) == partition
+    }
+    if len(jobs) < SITE_BLOCKER_JOBS:
+        return False
+    key = "site_circuit:" + hashlib.sha256(partition.encode()).hexdigest()
+    data = {
+        "until": (datetime.now(UTC) + timedelta(hours=SITE_BLOCKER_HOURS)).isoformat(),
+        "source_run_id": run.id,
+        "reason": f"{len(jobs)} applications on this employer's site stopped at the same {blocker} step; its other "
+        "jobs wait while other employers continue",
+    }
+    circuit = session.get(Setting, key)
+    if circuit:
+        circuit.value = data
+    else:
+        session.add(Setting(key=key, value=data))
+    return True
+
+
 async def retry_due(service):
     hold = service.db.get_setting("execution_v2_deployment_hold", {})
     if hold.get("stage") == "draining":

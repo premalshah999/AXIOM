@@ -57,7 +57,8 @@ class QueueingMixin:
         circuit = session.get(Setting, key)
         if circuit and datetime.fromisoformat(circuit.value["until"]) > datetime.now(UTC):
             raise QueueBlocked(
-                "This employer site repeated the same temporary failure. Other employers can continue.",
+                circuit.value.get("reason")
+                or "This employer site repeated the same temporary failure. Other employers can continue.",
                 outcome="deferred",
                 code="site_circuit",
                 not_before=circuit.value["until"],

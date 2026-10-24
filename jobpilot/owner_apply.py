@@ -142,21 +142,29 @@ def _forget(db, job_id):
             s.delete(row)
 
 
-async def due(service, limit):
-    """Start remembered owner requests whose wait is over, oldest first. Returns how many were queued."""
+async def due(service, limit, retries=None):
+    """Start remembered owner requests whose wait is over: jobs never attempted first, then retries of earlier
+    attempts, oldest first within each. `retries` caps how many retries start now. Returns how many were queued."""
     if limit <= 0:
         return 0
+    from .db import Run
+
     with service.db.session() as s:
-        rows = sorted(
-            ((row.key.removeprefix(KEY), dict(row.value or {})) for row in s.scalars(
-                select(Setting).where(Setting.key.like(KEY + "%"))
-            )),
-            key=lambda item: item[1].get("at", ""),
-        )
-    started = 0
+        waiting = [(row.key.removeprefix(KEY), dict(row.value or {})) for row in s.scalars(
+            select(Setting).where(Setting.key.like(KEY + "%"))
+        )]
+        attempted = set(s.scalars(
+            select(Run.job_id).where(Run.job_id.in_([job_id for job_id, _ in waiting])).distinct()
+        )) if waiting else set()
+    # 247 resumed repeat-failures queued ahead of fresh postings filled every worker on 2026-10-24; their retries
+    # succeed about one time in eight, first attempts far more often.
+    rows = sorted(waiting, key=lambda item: (item[0] in attempted, item[1].get("at", "")))
+    started = retried = 0
     for job_id, value in rows:
         if started >= limit:
             break
+        if job_id in attempted and retries is not None and retried >= retries:
+            break  # the rest are retries too
         if (value.get("not_before") or "") > now():
             continue
         try:
@@ -173,4 +181,5 @@ async def due(service, limit):
             continue
         _forget(service.db, job_id)
         started += 1
+        retried += job_id in attempted
     return started

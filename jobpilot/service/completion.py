@@ -247,6 +247,9 @@ class CompletionMixin:
 
             release_slot(s, run)
             schedule_recovery(s, self.config, run, result)
+            from ..recovery import open_blocked_site_circuit
+
+            open_blocked_site_circuit(s, run, state)
             # Questions already asked live during the run (Telegram) are persisted; never duplicate.
             known = {
                 r.key
