@@ -374,18 +374,18 @@ class ReviewsMixin:
                 continue
             options, context, profile = options or [], context or {}, (packet or {}).get("profile") or {}
             outside = residence_outside(question, options, profile.get("facts"), profile.get("location", ""))
-            if not outside and protected_status_missing(question, options, profile.get("facts")):
-                outside = "a status the role requires (U.S. citizen, permanent resident, refugee or asylee)"
-            problem = None if outside else oq.defect(question, options, context, reason or "")
-            if outside or problem:
+            closing = (
+                f"The employer hires only in its listed locations, and the applicant lives in {outside}"
+                if outside
+                else "The role is open only to U.S. citizens, permanent residents, refugees or asylees"
+                if protected_status_missing(question, options, profile.get("facts"))
+                else None
+            )
+            problem = None if closing else oq.defect(question, options, context, reason or "")
+            if closing or problem:
                 state, why = (
-                    (
-                        "closed",
-                        f"The role is open only to {outside[24:-1]}"
-                        if outside.startswith("a status the role requires")
-                        else f"The employer hires only in its listed locations, and the applicant lives in {outside}",
-                    )
-                    if outside
+                    ("closed", closing)
+                    if closing
                     else ("waiting_browser", f"The engine misread a field ({problem}): {oq.tidy(question)[:120]}")
                 )
                 with self.db.exclusive() as s:
@@ -393,7 +393,7 @@ class ReviewsMixin:
                     if run and run.state in {"waiting_answer", "needs_review"}:
                         run.state, run.reason = state, why
                         moved.add(run_id)
-                        outcome["closed" if outside else "recovered"] += 1
+                        outcome["closed" if closing else "recovered"] += 1
                 self.db.event(run_id, "question_revalidated", why[:300], {"question": oq.tidy(question)[:200]})
                 continue
             try:

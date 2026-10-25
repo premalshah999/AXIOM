@@ -98,6 +98,25 @@ def degree_level(text):
 MAJOR_STOP = {"and", "of", "in", "the", "for", "with", "studies", "study", "program", "general"}
 
 
+# Words a taxonomy may add to a major without changing it: Workday's default Field of Study catalog names Computer
+# Science "Computer and Information Science" and has no literal "Computer Science" (REA, 2026-10-25: 26 of 31 failing
+# tenants), so the owner's fallback major was never found there.
+MAJOR_SOFT = {"information"}
+
+
+def major_equivalent(target, options):
+    """The one offered major that is `target` in the catalog's own words; None when absent or ambiguous."""
+
+    def words(text):
+        return {w[:-1] if len(w) > 4 and w.endswith("s") else w for w in normalize(str(text)).split()} - MAJOR_STOP
+
+    want = words(target)
+    if not want:
+        return None
+    hits = [o for o in options if (have := words(o)) >= want and have - want <= MAJOR_SOFT]
+    return hits[0] if len(hits) == 1 else None
+
+
 def major_part(recorded, options):
     """An offered major named only with the recorded major's words (at least two): "Information Technology" for
     "Information & Communication Technology". Not "Data Processing" for "Data Science" (Slate Auto 2026-10-17)."""

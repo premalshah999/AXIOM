@@ -578,8 +578,16 @@ MENU_NOTICE_JS = r"""() => {
   const shown = n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden';
   const notices = [...document.querySelectorAll('[class*="menu-notice"]')].filter(shown);
   if (notices.some(n => /loading/i.test(n.className + ' ' + n.textContent))) return 'loading';
-  return notices.some(n => /\bno (options|results|matches|items)\b|\bnot found\b|\bnothing found\b/i.test(n.textContent))
-    ? 'none' : '';
+  if (notices.some(n => /\bno (options|results|matches|items)\b|\bnot found\b|\bnothing found\b/i.test(n.textContent)))
+    return 'none';
+  // Workday's prompt says "No matches found" in its list header and renders no option at all (REA, 2026-10-25):
+  // waiting the full timeout for an option that cannot come cost 4 s per empty search.
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (/^\s*no (?:matches|results|items)(?: found)?\.?\s*$/i.test(n.textContent) && n.parentElement && shown(n.parentElement))
+      return 'none';
+  }
+  return '';
 }"""
 
 
@@ -2646,8 +2654,97 @@ def prompt_fallback_queries(value, school_scope=False):
     return [q for q in dict.fromkeys([head, *distinctive[:1], "Other"]) if q and q != str(value)]
 
 
-async def prompt(frame, container, value, choose=None, school_scope=False):
-    """Workday multiselect prompt: search, then commit a leaf; categories are opened once."""
+PILLS_JS = """e=>{
+    const root=e.closest('[data-automation-id^="formField-"],[data-automation-id="multiSelectContainer"]') || e;
+    return [...root.querySelectorAll('[data-automation-id="selectedItem"]')].map(n=>n.innerText.trim()).filter(Boolean);
+}"""
+
+
+async def prompt_pills(container):
+    return await container.evaluate(PILLS_JS)
+
+
+async def remove_prompt_pill(container, text):
+    """Delete one selected item this call did not choose (its own DELETE_charm)."""
+    try:
+        await container.evaluate(
+            """(e,text)=>{
+              const root=e.closest('[data-automation-id^="formField-"],[data-automation-id="multiSelectContainer"]') || e;
+              const pill=[...root.querySelectorAll('[data-automation-id="selectedItem"]')]
+                .find(n=>n.innerText.trim()===text);
+              pill?.querySelector('[data-automation-id="DELETE_charm"]')?.click();
+            }""",
+            text,
+            timeout=1500,
+        )
+    except PlaywrightError:
+        pass
+
+
+async def commit_prompt_name(frame, container, target):
+    """Commit an exact catalog name: one search for it, then its pill. Workday selects a search's sole result by
+    itself, so any other pill this search added is removed again (REA, 2026-10-25)."""
+    before = await prompt_pills(container)
+    if any(norm(text) == norm(target) for text in before):
+        return next(text for text in before if norm(text) == norm(target))
+    await dismiss_pickers(frame)
+    inp = await open_prompt(container)
+    await inp.fill("", timeout=4000)
+    await inp.press_sequentially(target, delay=10)
+    await inp.press("Enter")
+    deadline = time.monotonic() + 4
+    while time.monotonic() < deadline:
+        now = await prompt_pills(container)
+        if any(norm(text) == norm(target) for text in now if text not in before):
+            break  # The sole result committed itself.
+        opts = await visible_options(
+            frame, await _popup_scope(container), "[data-automation-id=promptOption],[role=option]"
+        )
+        exact = [o for o in opts if o["leaf"] and not o["disabled"] and norm(o["text"]) == norm(target)]
+        if len(exact) == 1:
+            await click_option(frame, exact[0], owner=container)
+            break
+        if not opts and await menu_notice(frame) == "none":
+            break
+        await asyncio.sleep(0.08)
+    await asyncio.sleep(0.2)
+    now = await prompt_pills(container)
+    for stray in [text for text in now if text not in before and norm(text) != norm(target)]:
+        await remove_prompt_pill(container, stray)
+    try:
+        await inp.fill("", timeout=1000)  # Text left in the box is searched again on blur.
+    except PlaywrightError:
+        pass
+    await dismiss_pickers(frame)
+    committed = next((text for text in await prompt_pills(container) if norm(text) == norm(target)), None)
+    if not committed:
+        raise ValueError("No matching option is offered")
+    return committed
+
+
+async def prompt(frame, container, value, choose=None, school_scope=False, catalog=None):
+    """Workday multiselect prompt: search, then commit a leaf; categories are opened once.
+
+    `value` may list candidates in preference order (the recorded major, then the profile's fallback). With the page's
+    own full value list (`catalog`), the answer is chosen from it first and only its exact name is searched: probe
+    searches committed whatever single result they found ("Data" -> "Data Processing")."""
+    candidates = [str(v) for v in value] if isinstance(value, (list, tuple)) else [str(value)]
+    if catalog:
+        names = [name for name in dict.fromkeys(catalog) if name and not placeholder_option(name)]
+        target = None
+        for want in candidates:
+            pool = [name for name in names if not school_scope or school_option_matches(want, name)]
+            if target := best_option(pool, want):
+                break
+        if not target and choose:
+            picked = await choose(names)
+            target = picked if picked in names else None
+        if not target:
+            error = ValueError("No matching option is offered")
+            error.offered = {"catalog": names[:8], "candidates": candidates}
+            raise error
+        return await commit_prompt_name(frame, container, target)
+    value = candidates[0]
     interpretations = 0
     # What each search returned (the employer's own option labels), for the failure record.
     seen = {}
@@ -2685,14 +2782,17 @@ async def prompt(frame, container, value, choose=None, school_scope=False):
         fresh = [text for text in current if text not in selected]
         if not fresh:
             return None
+        match = None
         if school_scope:
-            return next((text for text in fresh if school_option_matches(value, text)), None)
-        if match := best_option(fresh, value):
-            return match
-        if choose:
+            match = next((text for text in fresh if school_option_matches(value, text)), None)
+        elif not (match := best_option(fresh, value)) and choose:
             match = await choose(fresh)
-            if match in fresh:
-                return match
+            match = match if match in fresh else None
+        if match:
+            return match
+        # Workday committed a search's sole result the policy rejects ("Data" -> "Data Processing"): never leave it.
+        for stray in fresh:
+            await remove_prompt_pill(container, stray)
         return None
 
     if school_scope:
@@ -2738,6 +2838,7 @@ async def prompt(frame, container, value, choose=None, school_scope=False):
         owner=container,
         require_query_match=True,
         changed_from=before,
+        empty_after=0.3,
     )
     seen[first] = [o["text"] for o in opts][:8]
     if committed := await committed_search_leaf():
@@ -2764,6 +2865,7 @@ async def prompt(frame, container, value, choose=None, school_scope=False):
             owner=container,
             require_query_match=True,
             changed_from=before,
+            empty_after=0.3,
         )
         seen[query] = [o["text"] for o in opts][:8]
         if committed := await committed_search_leaf():

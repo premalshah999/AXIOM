@@ -38,22 +38,44 @@ def combo_host_family(url):
     return family
 
 
+CX_PATH = "/hcmUI/CandidateExperience/"
+# Oracle's CX app as an employer's custom domain serves it (enterpriseplatform.dell.com, careers.oracle.com): its
+# bundle comes from Oracle's CDN. 20 runs on such domains took the generic picker path and failed (REA, 2026-10-25).
+ORACLE_APP_JS = """()=>[...document.scripts].some(s=>/^https:\\/\\/static\\.oracle\\.com\\/cdn\\/fa\\//.test(s.src||''))"""
+
+
+async def oracle_app(frame):
+    """A custom-domain page that runs Oracle's own candidate app (its route and Oracle's CDN bundle)."""
+    try:
+        location = urlsplit(frame.url)
+        if location.scheme != "https" or not location.path.startswith(CX_PATH):
+            return False
+        return bool(await frame.evaluate(ORACLE_APP_JS))
+    except (ValueError, PlaywrightError, AttributeError):
+        return False
+
+
 async def combo_family(frame, el):
     family = combo_host_family(frame.url)
+    if family is None and await oracle_app(frame):
+        family = "oracle"
     if family is None:
         # Unsupported portals cannot use this driver. In particular, do not
         # wait on an iCIMS locator from a document replaced during profile save.
         return None
-    try:
-        signature = await el.evaluate(
-            """e=>e.matches('input.cx-select-input[role=combobox]')?'oracle':
-            e.matches('input.ant-select-selection-search-input[role=combobox]') && e.closest('.ant-select')?'dayforce':null""",
-            timeout=500,
-        )
-    except PlaywrightError:
-        # A control the page replaced (Honeywell Oracle, 2026-10-14) takes the generic path
-        # instead of failing the run at this check.
-        return None
+    signature = None
+    for timeout in (500, 1500):
+        try:
+            signature = await el.evaluate(
+                """e=>e.matches('input.cx-select-input[role=combobox]')?'oracle':
+                e.matches('input.ant-select-selection-search-input[role=combobox]') && e.closest('.ant-select')?'dayforce':null""",
+                timeout=timeout,
+            )
+            break
+        except PlaywrightError:
+            # A control the page replaced (Honeywell Oracle, 2026-10-14) takes the generic path instead of failing the
+            # run at this check; a busy renderer gets one slower attempt first.
+            continue
     return family if signature == family else None
 
 
@@ -157,18 +179,73 @@ async def _options(el, family):
     )
 
 
-async def _wait_owned_options(el, family, timeout, *, previous=None):
-    previous_signature = tuple((o["id"], o["text"]) for o in previous) if previous is not None else None
+async def _wait_owned_options(el, family, timeout, *, previous=None, refresh=None):
+    """Poll to a deadline. One failed read (a busy renderer's evaluate timeout, a Knockout re-render) used to end the
+    whole wait with no options, and the typing fallback then damaged a complete list (REA, 2026-10-25)."""
+    previous_signature = tuple((o["text"],) for o in previous) if previous is not None else None
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if refresh and await el.count() != 1:
+                el = await refresh()
+            options = await _options(el, family)
+        except (PlaywrightError, ValueError):
+            await asyncio.sleep(0.1)
+            continue
+        signature = tuple((o["text"],) for o in options)
+        if options and signature != previous_signature:
+            return options
+        await asyncio.sleep(0.05)
+    return []
+
+
+# CX renders its popup grid through deferred effects (requestAnimationFrame with a timer fallback). In a throttled or
+# busy tab the grid appeared after the 2 s options wait: production read "0 options" for months, years and states that
+# were offered (53 runs; reproduced with the bundle's own component, REA 2026-10-25).
+ORACLE_OPEN_SECONDS = 8.0
+ORACLE_SEARCHABLE_OPEN_SECONDS = 3.0
+
+
+async def _open_oracle(el, family, refresh=None):
+    """Open a CX select and wait until its own list has rows. role=status / aria-busy is loading, not empty; a click
+    while open would close it, so only a closed list is clicked again. A read-only list waits the whole budget for
+    its rows; an editable one may be a remote search that starts empty, so it waits only past a throttled render."""
     try:
-        async with asyncio.timeout(timeout):
-            while True:
-                options = await _options(el, family)
-                signature = tuple((o["id"], o["text"]) for o in options)
-                if options and signature != previous_signature:
-                    return options
-                await asyncio.sleep(0.05)
-    except (TimeoutError, PlaywrightError):
-        return []
+        editable = await el.evaluate("e=>!e.readOnly && !e.disabled", timeout=1500)
+    except PlaywrightError:
+        editable = False
+    deadline = time.monotonic() + (ORACLE_SEARCHABLE_OPEN_SECONDS if editable else ORACLE_OPEN_SECONDS)
+    clicks, last_click = 0, 0.0
+    while time.monotonic() < deadline:
+        try:
+            if refresh and await el.count() != 1:
+                el = await refresh()
+            state = await el.evaluate(
+                """e=>{const l=document.getElementById(e.getAttribute('aria-controls')||'');
+                  return {open:e.getAttribute('aria-expanded')==='true', role:l?l.getAttribute('role'):null,
+                          busy:!!l&&l.getAttribute('aria-busy')==='true',
+                          rows:l?l.querySelectorAll('[role=gridcell],[role=option]').length:0}}""",
+                timeout=1500,
+            )
+        except PlaywrightError:
+            await asyncio.sleep(0.1)
+            continue
+        if state["open"] and state["role"] != "status" and not state["busy"] and state["rows"]:
+            return await _wait_owned_options(el, family, 2, refresh=refresh)
+        if not state["open"] and clicks < 3 and time.monotonic() - last_click > 1.5:
+            await widgets.field_click(el)
+            clicks, last_click = clicks + 1, time.monotonic()
+        await asyncio.sleep(0.05)
+    return []
+
+
+async def _close_if_open(el):
+    """Escape closes an open CX list and keeps its selection; on a closed select it clears the committed value."""
+    try:
+        if await el.get_attribute("aria-expanded", timeout=1000) == "true":
+            await el.press("Escape")
+    except PlaywrightError:
+        pass
 
 
 async def select_combo(frame, el, field, value, choose=None, *, rematch=None, applicant_state=""):
@@ -185,17 +262,17 @@ async def select_combo(frame, el, field, value, choose=None, *, rematch=None, ap
         return current
 
     refresh = refreshed_owner if rematch else None
+    wanted = component_value(field["label"], value) if family == "oracle" else value
+    autosuggest = family == "oracle" and await el.evaluate(
+        "e=>e.classList.contains('cx-select-input--auto-suggest')", timeout=1500
+    )
     if family == "dayforce":
         trigger = el.locator(
             "xpath=ancestor::*[contains(concat(' ',normalize-space(@class),' '),' ant-select-selector ')][1]"
         )
         await trigger.click(timeout=4000)
-    else:
+    elif autosuggest:
         await widgets.field_click(el)
-    wanted = component_value(field["label"], value) if family == "oracle" else value
-    autosuggest = family == "oracle" and await el.evaluate(
-        "e=>e.classList.contains('cx-select-input--auto-suggest')", timeout=500
-    )
     school = bool(re.search(r"\bschool\b|\buniversity\b|\binstitution\b|\bcollege\b", field["label"], re.I))
     # Goldman Sachs (Oracle) 2026-10-18: "Name of Latest Employer" lists 250+ firms; the applicant's employer is not
     # one, and only the generic combobox knew to commit the list's own "Other" (e4ffe71). Four runs stalled here.
@@ -208,15 +285,28 @@ async def select_combo(frame, el, field, value, choose=None, *, rematch=None, ap
     def eligible(rows):
         return [o for o in rows if not school or widgets.school_option_matches(value, o["text"])]
 
-    options = [] if autosuggest else await _wait_owned_options(el, family, 2)
+    if autosuggest:
+        options = []
+    elif family == "oracle":
+        options = await _open_oracle(el, family, refresh)
+    else:
+        options = await _wait_owned_options(el, family, 2, refresh=refresh)
     choice = widgets.best_option(eligible(options), wanted)
     if not choice and family == "oracle":
         choice = pick_qualified(eligible(options), wanted, applicant_state)
     # CX remote address controls do not necessarily offer anything on click.
     # Use the supported answer as a query, then select only this input's results.
     # Autosuggest is a distinct vendor capability: it accepts typed free text,
-    # while ordinary CX selects require an offered option.
-    if not choice and family == "oracle" and await el.evaluate("e=>!e.readOnly && !e.disabled", timeout=500):
+    # while ordinary CX selects require an offered option. A complete list that
+    # opened with its rows (months, years, states) is never typed into: typing
+    # filtered it and the blur then reset the field (REA, 2026-10-25).
+    searchable = autosuggest or not options or bool(field.get("options_partial"))
+    if (
+        not choice
+        and family == "oracle"
+        and searchable
+        and await el.evaluate("e=>!e.readOnly && !e.disabled", timeout=1500)
+    ):
         previous = options
         await el.fill("", timeout=1000)
         await el.press_sequentially(str(wanted), delay=12, timeout=4000)
@@ -292,14 +382,14 @@ async def select_combo(frame, el, field, value, choose=None, *, rematch=None, ap
         choice = matches[0] if len(matches) == 1 else None
     if not choice:
         offered = [o["text"][:60] for o in eligible(options)[:5]]
-        await el.press("Escape")
+        await _close_if_open(el)
         detail = f"; first offered: {offered}" if offered else "; no options were readable"
         raise ValueError("No unique supported option in this ATS field's owned popup" + detail)
-    # Reobserve after reasoning: a stale choice must not target a sibling popup.
-    fresh = await _options(el, family)
-    if not any(o == choice for o in fresh):
+    # Reobserve after reasoning: the component reuses option nodes by index, so the
+    # choice is found again by its exact text in this owner's popup at click time.
+    if not await _mark_option(el, family, choice["text"]):
         raise ValueError("ATS option became stale before selection")
-    await frame.locator(f'[data-jp-ats-option="{choice["id"]}"]').click(timeout=4000)
+    await frame.locator('[data-jp-ats-pick="1"]').click(timeout=4000)
     if autosuggest:
         # CX autosuggest may render a qualified address row yet retain exactly
         # the supported street query as its accepted free-text value. Verify
@@ -329,17 +419,48 @@ async def select_combo(frame, el, field, value, choose=None, *, rematch=None, ap
     return actual
 
 
+async def _mark_option(el, family, text):
+    """Tag the one option of this owner's popup whose text is exactly `text`; False when absent or ambiguous."""
+    try:
+        return await el.evaluate(
+            r"""(e,[family,text])=>{
+          for(const old of document.querySelectorAll('[data-jp-ats-pick]'))delete old.dataset.jpAtsPick;
+          const refs=(e.getAttribute('aria-controls')||e.getAttribute('aria-owns')||'').split(/\s+/).filter(Boolean);
+          if(refs.length!==1)return false;
+          const owned=document.getElementById(refs[0]);if(!owned)return false;
+          const root=family==='dayforce'?owned.closest('.ant-select-dropdown'):owned;if(!root)return false;
+          const selector=family==='dayforce'?'.ant-select-item-option':'[role=option],[role=gridcell],[role=row]';
+          const found=[...root.querySelectorAll(selector)];
+          const leaves=found.filter(o=>!found.some(p=>p!==o&&o.contains(p))&&o.getClientRects().length);
+          const norm=t=>(t||'').replace(/\s+/g,' ').trim();
+          const hits=leaves.filter(o=>norm((o.querySelector('.ant-select-item-option-content')||o).innerText)===norm(text));
+          if(hits.length!==1)return false;
+          hits[0].dataset.jpAtsPick='1';
+          return true;
+        }""",
+            [family, text],
+            timeout=1500,
+        )
+    except PlaywrightError:
+        return False
+
+
 async def _wait_committed(el, family, expected, field, *, refresh=None):
     """Bound all readback operations, including a disappeared/remounted input."""
     expected_values = expected if isinstance(expected, tuple) else (expected,)
+    blurred = False
     try:
-        async with asyncio.timeout(2):
-            if await el.count() != 1 and refresh:
-                el = await refresh()
-            await el.blur(timeout=500)
+        # The commit itself is synchronous; slow machines still needed more than 2 s to show it. Blur only once the
+        # value shows: blurring an input that still holds typed text resets it (REA, 2026-10-25).
+        async with asyncio.timeout(4):
             stable_since = None
             while True:
-                if await el.count() != 1 and refresh:
+                try:
+                    if await el.count() != 1 and refresh:
+                        el = await refresh()
+                except PlaywrightError:
+                    if not refresh:
+                        raise
                     el = await refresh()
                 # Value, expanded state and validity belong to one render. Four
                 # serial CDP calls per poll used most of this two-second budget
@@ -360,6 +481,10 @@ async def _wait_committed(el, family, expected, field, *, refresh=None):
                     widgets.same_value({**field, "provider_combo": family}, actual, candidate)
                     for candidate in expected_values
                 )
+                if accepted and not blurred:
+                    await el.blur(timeout=500)
+                    blurred, stable_since = True, None
+                    continue
                 if accepted:
                     stable_since = stable_since or time.monotonic()
                     # CX updates display, observable value and blur validation

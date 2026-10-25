@@ -468,7 +468,14 @@ class NetworkMonitor:
         self.journal, self.flushed = [], 0
         self.statuses, self.messages = {}, {}
         self.catalog = []  # Workday question definitions and value lists seen since the last step record
+        # Each full Workday value list by its endpoint's last segment ("fieldsOfStudy" -> option names). Unlike the
+        # step catalog it is not cleared at a step record: a prompt is filled after the step that loaded its list.
+        self.values = {}
         self.watch(target)
+
+    def value_list(self, kind):
+        """The latest full (unsearched) Workday value list for `kind`, as option names, or None."""
+        return self.values.get(kind)
 
     def take_catalog(self):
         entries, self.catalog = self.catalog, []
@@ -518,12 +525,21 @@ class NetworkMonitor:
             if len(body) > 400_000:
                 return
             parts = urlsplit(response.url)
+            query = sorted({key for key, _ in parse_qsl(parts.query, keep_blank_values=True)})[:8]
+            payload = json.loads(body)
             self.catalog.append({
                 "path": TOKEN_SEGMENT.sub("[token]", parts.path)[:200],
-                "query": sorted({key for key, _ in parse_qsl(parts.query, keep_blank_values=True)})[:8],
-                "payload": json.loads(body),
+                "query": query,
+                "payload": payload,
             })
             del self.catalog[:-40]
+            if (
+                "search" not in query
+                and isinstance(payload, list)
+                and payload
+                and all(isinstance(item, dict) and isinstance(item.get("descriptor"), str) for item in payload)
+            ):
+                self.values[parts.path.rstrip("/").rsplit("/", 1)[-1]] = [item["descriptor"] for item in payload]
         except Exception:
             return
 
@@ -2396,29 +2412,45 @@ class FormSession:
                     return self.resolver.policy_choice(field, options) if self.resolver else None
 
                 is_major = bool(EDUCATION["field_of_study"].search(field["label"]))
-                try:
-                    committed = await widgets.prompt(
-                        frame,
-                        el,
-                        value,
-                        choose=major_policy if is_major else choose,
-                        school_scope=bool(SCHOOL_LABEL.search(field["label"])),
-                    )
-                except ValueError:
+                network = getattr(self, "network", None)
+                catalog = network.value_list("fieldsOfStudy") if is_major and network is not None else None
+                if catalog:
+                    # The page's own Field of Study list decides first; only the chosen exact name is searched, so no
+                    # probe search can commit a sole result the policy rejects (REA, 2026-10-25).
                     rules = getattr(self.resolver, "answer_rules", None)
                     fallback = (getattr(rules, "major_fallback", "") or "").strip()
-                    if not is_major or not fallback or normalize(value) == normalize(fallback):
-                        raise
-                    # A major the employer's search catalog lacks falls back to the profile's fallback major
-                    # (answer_rules.major_fallback; R1 RCM: "Data Science" was not offered).
-                    # The fallback is policy-matched too: a model choosing among Jabil's alphabetical first page
-                    # committed "Actuarial Science" for Data Science (2026-10-23).
-                    committed = await widgets.prompt(frame, el, fallback, choose=major_policy)
-                    self.emit(
-                        "option_selected",
-                        "Used the profile's fallback major for a catalog without the recorded one",
-                        {"field": field["label"]},
-                    )
+                    wanted = [value] + ([fallback] if fallback and normalize(fallback) != normalize(value) else [])
+                    committed = await widgets.prompt(frame, el, wanted, choose=major_policy, catalog=catalog)
+                    if normalize(committed) != normalize(value):
+                        self.emit(
+                            "option_selected",
+                            "Used the profile's fallback major for a catalog without the recorded one",
+                            {"field": field["label"]},
+                        )
+                else:
+                    try:
+                        committed = await widgets.prompt(
+                            frame,
+                            el,
+                            value,
+                            choose=major_policy if is_major else choose,
+                            school_scope=bool(SCHOOL_LABEL.search(field["label"])),
+                        )
+                    except ValueError:
+                        rules = getattr(self.resolver, "answer_rules", None)
+                        fallback = (getattr(rules, "major_fallback", "") or "").strip()
+                        if not is_major or not fallback or normalize(value) == normalize(fallback):
+                            raise
+                        # A major the employer's search catalog lacks falls back to the profile's fallback major
+                        # (answer_rules.major_fallback; R1 RCM: "Data Science" was not offered).
+                        # The fallback is policy-matched too: a model choosing among Jabil's alphabetical first page
+                        # committed "Actuarial Science" for Data Science (2026-10-23).
+                        committed = await widgets.prompt(frame, el, fallback, choose=major_policy)
+                        self.emit(
+                            "option_selected",
+                            "Used the profile's fallback major for a catalog without the recorded one",
+                            {"field": field["label"]},
+                        )
         elif kind == "date_parts":
             committed = await widgets.date_parts(frame, field, value)
         elif kind == "pills":

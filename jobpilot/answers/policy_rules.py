@@ -23,6 +23,7 @@ from .history import DEGREE_FALLBACK
 from .history import EDUCATION
 from .history import degree_level
 from .history import degree_status_options
+from .history import major_equivalent
 from .history import major_part
 from .sources import INTENT_SOURCE
 from .sources import source_choice
@@ -227,7 +228,9 @@ class PolicyRulesMixin:
                 return hit
             if entry.field_of_study and (hit := major_part(entry.field_of_study, options)):
                 return hit
-            return first_matching(options, major_patterns(self.answer_rules.major_fallback))
+            return first_matching(options, major_patterns(self.answer_rules.major_fallback)) or major_equivalent(
+                self.answer_rules.major_fallback, options
+            )
         if EDUCATION["degree"].search(label):
             if entry is None:
                 ranks = ["doctor", "master", "bachelor"]

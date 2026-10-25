@@ -1,0 +1,35 @@
+<!doctype html><meta charset=utf-8>
+<!-- Mock of Workday's multiselect prompt, semantics decoded from candidate-experience-apply-flow.min.js:
+ typing does nothing (isSearchTypeAheadEnabled false); Enter with text -> GET values/educations/fieldsOfStudy?search=q
+ (tokens prefix-AND); 0 results -> header "No matches found", no options; exactly 1 result -> AUTO-SELECTED as a pill
+ (list stays open for multiselect); N>1 -> header "Search Results", options; Enter on empty -> full catalog. -->
+<div data-automation-id="formField-fieldOfStudy"><label for=fos>Field of Study</label>
+<div data-automation-id=multiSelectContainer id=msc>
+ <div data-automation-id=multiselectInputContainer><input id=fos placeholder=Search autocomplete=off>
+ <ul role=listbox data-automation-id=selectedItemList aria-label="items selected" id=pills></ul></div>
+ <div id=popup hidden><div id=hdr data-automation-id=multiSelectListHeader></div>
+  <ul role=listbox id=list></ul></div>
+</div></div>
+<script>
+window.CATALOG = window.CATALOG || ['Accounting','Actuarial Science','Computer and Information Science','Computer Engineering',
+ 'Computer Graphics','Computer Systems Analysis','Data Processing','Database Management','Information Technology',
+ 'Management Information Systems','Mathematics','Statistics'];
+window.DELAY = window.DELAY ?? 250;
+const $=id=>document.getElementById(id);
+function words(s){return s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)}
+function match(q){const t=words(q);return t.length? CATALOG.filter(n=>t.every(x=>words(n).some(w=>w.startsWith(x)))):CATALOG}
+function addPill(name){ if([...$('pills').children].some(li=>li.dataset.name===name))return;
+  $('pills').insertAdjacentHTML('beforeend','<li role=presentation data-name="'+name+'"><div role=option data-automation-id=selectedItem>'+
+   '<div data-automation-id=DELETE_charm onclick="this.parentElement.parentElement.remove()"></div><p data-automation-id=promptOption>'+name+'</p></div></li>');}
+function render(items,q){ $('popup').hidden=false;
+  $('hdr').textContent = !items.length ? 'No matches found' : q ? 'Search Results ('+items.length+')' : '';
+  $('list').innerHTML=items.map(n=>'<li role=option data-automation-id=menuItem><div data-automation-id=promptLeafNode>'+
+   '<p data-automation-id=promptOption>'+n+'</p></div></li>').join('');
+  $('list').querySelectorAll('[data-automation-id=promptLeafNode]').forEach(el=>el.onclick=()=>{addPill(el.textContent);$('popup').hidden=true});}
+$('fos').addEventListener('keydown',e=>{
+  if(e.key==='Escape'){$('popup').hidden=true;return}
+  if(e.key!=='Enter')return; e.preventDefault(); const q=e.target.value;
+  window.SEARCHES=(window.SEARCHES||[]).concat([q]);
+  setTimeout(()=>{const r=match(q); if(r.length===1&&q){addPill(r[0])} render(r,q)},DELAY)});
+document.addEventListener('click',e=>{if(!e.target.closest('#msc'))$('popup').hidden=true});
+</script>
