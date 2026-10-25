@@ -142,7 +142,12 @@ DEGREE_TYPES = [
     (1, {"mtech", "m tech", "master of technology"}),
 ]
 ALIASES = [
-    {"united states", "united states of america", "usa", "us", "u s", "u s a", "america"},
+    # Localized career sites name it in their own language (SmartRecruiters' German "Vereinigte Staaten + 1",
+    # Sopra Steria 2026-10-25).
+    {"united states", "united states of america", "usa", "us", "u s", "u s a", "america", "vereinigte staaten",
+     "vereinigte staaten von amerika", "etats unis", "états unis", "etats unis d amerique", "états unis d amérique",
+     "estados unidos", "estados unidos de america", "estados unidos de américa", "stati uniti",
+     "stati uniti d america", "verenigde staten"},
     {"united kingdom", "uk", "u k", "great britain", "england"},
     {"yes", "y", "true"},
     {"no", "n", "false"},
@@ -394,6 +399,17 @@ def checkbox_value(value):
     raise ValueError("Checkbox answer must specify checked or unchecked")
 
 
+# A plain amount as typed or as a field formats it: "80000", "80,000", "$80,000.00", "80 000".
+AMOUNT = re.compile(r"\$?\s*(\d{1,3}(?:[, \u00a0]\d{3})+|\d+)(?:\.(\d{1,2}))?")
+
+
+def same_amount(a, b):
+    """Two AMOUNT matches name the same number."""
+    whole = [re.sub(r"\D", "", m[1]) for m in (a, b)]
+    cents = [(m[2] or "").ljust(2, "0") for m in (a, b)]
+    return whole[0] == whole[1] and cents[0] == cents[1]
+
+
 def same_value(field, actual, expected):
     actual, expected = phone_value(field, actual), phone_value(field, expected)
     a, e = " ".join(str(actual).split()), " ".join(str(expected).split())
@@ -403,6 +419,9 @@ def same_value(field, actual, expected):
 
     if (shown := display_date(a)) and shown == display_date(e):
         return True  # "16 Oct 2026" (picker) is the date "10/16/2026" or "today".
+    if (number := AMOUNT.fullmatch(a)) and (typed := AMOUNT.fullmatch(e)) and same_amount(number, typed):
+        # Workable shows the typed salary "80000" as "80,000" (Funnel Leasing 2026-10-25: read back as refused).
+        return True
     kind, label = field.get("type", ""), field.get("label", "")
     if kind == "tel" or re.search(r"phone|mobile|telephone|\bcell(?:ular)?\b", str(label), re.I):
         # "+1 555-555-0100" (widget format after typing) is the same number as "(555) 555-0100".
@@ -431,7 +450,10 @@ def same_value(field, actual, expected):
     ):
         label = "Country phone code"
     if re.fullmatch(
-        r"(?:country(?:\s*(?:/|or)\s*(?:region|territory))?(?: phone)?|phone country) code", label, re.I
+        r"(?:country(?:\s*(?:/|or)\s*(?:region|territory))?(?: phone)?|phone country) code"
+        r"|l(?:ä|ae|a)ndercode|landesvorwahl|indicatif(?: du pays| pays)?|c[oó]digo de pa[ií]s|prefisso(?: internazionale)?",
+        label,
+        re.I,
     ):
         actual_code = re.search(r"\+\s*\d{1,4}\b", a)
         expected_code = re.search(r"\+\s*\d{1,4}\b", e)

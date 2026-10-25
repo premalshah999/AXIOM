@@ -1319,6 +1319,8 @@ class Adapter:
             except Exception:
                 pass
         self.emit("submitting", "Commit step started; automatic retries are disabled")
+        self.e.commit_requests, self.e.commit_tracking, self.e.commit_inflight = [], 0, set()
+        self.e.commit_url = getattr(self.page, "url", "")
         try:
             await self.form.click(final["id"], step_control=True)
         except ValueError as exc:
@@ -1361,6 +1363,9 @@ class Adapter:
                     self.e.armed = False
                     self.committed = False
                     self.e.validation_refusal = rejection
+                    # Refused, so nothing was accepted. A reservation kept "submitting" turned every later outcome
+                    # into an uncertain submission (Caesars' Oracle "This info is required" 2026-10-25).
+                    await self.e.release_reservation()
                     return {
                         "state": "waiting_browser",
                         "reason": "Employer requested field corrections; automatic repair could not complete them",
@@ -1376,6 +1381,7 @@ class Adapter:
                     # Lever: "There was an error verifying your application. Please try again."
                     # Nothing was accepted; a fresh form (restart_rejected_form) may try again.
                     self.e.armed = self.committed = False
+                    await self.e.release_reservation()
                     return {
                         "state": "waiting_browser",
                         "reason": "The website's security check refused the submission and asked to try again; "
@@ -1413,6 +1419,19 @@ class Adapter:
                 return None
             if obs["errors"] and step in {Step.FORM, Step.REVIEW}:
                 break
+        sent_nothing = await self.e.commit_sent_nothing()
+        self.e.emit_commit_requests()
+        if sent_nothing:
+            # Eightfold answered Submit with a 400 and kept the form (PayPal, Micron 2026-10-25): every such run
+            # read as an uncertain submission that can never be retried, though the employer accepted nothing.
+            self.e.armed = self.committed = False
+            await self.e.release_reservation()
+            return {
+                "state": "waiting_browser",
+                "reason": "The employer accepted nothing from the submit and the form is still open; nothing was submitted",
+                "blocker_type": "validation",
+                "recovery_cause": "validation_controls",
+            }
         # An authenticated acknowledgement email can still confirm it later (receipts.py).
         return {
             "state": "submission_unknown",

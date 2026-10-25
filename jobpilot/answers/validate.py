@@ -24,6 +24,10 @@ from .text import boolean_detail
 from .text import normalize
 from .text import option_value
 
+# A history row's date part ("Start Date Month", "To Date Year"), and the availability facts it must never take.
+HISTORY_DATE_PART = re.compile(r"\s*(?:start|end|from|to) date (?:month|year|day)\s*", re.I)
+AVAILABILITY_FACTS = {"fact:availability", "fact:notice_period", "fact:start_date"}
+
 
 
 def same_date(a, b):
@@ -159,6 +163,10 @@ class ValidateMixin:
         ):
             valid_evidence = False
         if "fact:compensation_choice_policy" in a.evidence_ids and NOT_DESIRED.search(field["label"]):
+            valid_evidence = False
+        if HISTORY_DATE_PART.fullmatch(field["label"]) and AVAILABILITY_FACTS & set(a.evidence_ids):
+            # A row's "Start Date Month" is that record's date, never the applicant's availability: an Oracle education
+            # row with no heading took October 2026 from availability and its End Date was refused (BNY 2026-10-25).
             valid_evidence = False
         subjects = required_topics(field["label"])
 

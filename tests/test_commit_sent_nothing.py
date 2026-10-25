@@ -76,3 +76,31 @@ def test_a_refused_commit_releases_its_reservation(service):
     with service.db.session() as s:
         assert s.get(Run, "r").state == "running"
     assert service.release_submission("r") is False  # Only a run still holding its reservation is released.
+
+
+async def test_a_write_still_in_flight_or_failed_without_an_answer_is_never_nothing_sent():
+    """Eightfold's Submit (PayPal, Micron 2026-10-25) ended in its adapter's own watch, which never asked whether the
+    employer accepted anything. Asking there too must not misread a slow application post as nothing sent."""
+    inflight = engine()
+    inflight.commit_inflight = {object()}
+    assert await BrowserEngine.commit_sent_nothing(inflight) is False
+    failed = object.__new__(BrowserEngine)
+    failed.armed, failed.commit_requests, failed.commit_inflight, failed.job = True, [], set(), {"url": FORM}
+    request = SimpleNamespace(method="POST", resource_type="fetch", url="https://api.ats.example/v1/applications")
+    BrowserEngine.commit_request(failed, request)
+    assert len(failed.commit_inflight) == 1
+    BrowserEngine.commit_request_failed(failed, request)
+    assert not failed.commit_inflight and failed.commit_requests[0]["status"] == 0
+    assert await BrowserEngine.commit_sent_nothing(engine(requests=failed.commit_requests)) is False
+
+
+@pytest.mark.parametrize("body,said", [
+    ('{"error": {"code": 400, "message": "Phone number 3015550100 is invalid for a@b.example"}}',
+     "Phone number ########## is invalid for <email>"),
+    ('{"errors": ["Answer required", "Answer required", "Resume missing"]}', "Answer required | Resume missing"),
+    ("<html><body><h1>Bad Request</h1><script>x()</script></body></html>", "Bad Request"),
+])
+def test_an_employer_refusal_is_recorded_without_applicant_values(body, said):
+    from jobpilot.browser import refusal_text
+
+    assert refusal_text(body) == said

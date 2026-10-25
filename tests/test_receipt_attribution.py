@@ -78,7 +78,7 @@ async def test_receipt_cursor_upgrade_restarts_search_without_reusing_uids(
 ):
     from jobpilot.gmail_imap import _request
     from jobpilot.mail import digest
-    from jobpilot.receipts import receipt_messages
+    from jobpilot.receipts import RECEIPT_SEARCH, receipt_messages
     from support_mail import FolderClient
 
     seed(service, 1)
@@ -86,7 +86,7 @@ async def test_receipt_cursor_upgrade_restarts_search_without_reusing_uids(
         box = s.scalar(select(Mailbox))
         box_id = box.id
     since = 1_791_201_600
-    query = f"after:{since // 3600 * 3600} to:{EMAIL}"
+    query = f"after:{since // 3600 * 3600} to:{EMAIL} {RECEIPT_SEARCH}"
     service.db.set_setting("receipt_mail_page:" + box_id, {"query_id": digest(query), **legacy_state})
     client = FolderClient()
 

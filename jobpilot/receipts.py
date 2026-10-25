@@ -177,6 +177,12 @@ RECEIPT_WORDING = re.compile(
     r"(?:confirms?|acknowledges?)\s+(?:our\s+)?receipt of your (?:application|resume)|"
     r"\breceipt of your (?:application|resume)\b|we(?:'ve| have)? received your (?:application|resume)"
 )
+# Every RECEIPT_WORDING phrase carries one of these words: the mailbox search asks Gmail for them only. Unfiltered,
+# the search from the oldest unconfirmed run (18 days of codes and alerts) paged through old mail while new receipts
+# waited for the sweep to wrap; Lyft's "Thank you for your application" was never read (2026-10-25).
+RECEIPT_SEARCH = "(application OR applying OR resume)"
+# An unconfirmed run is polled for its acknowledgement this long; employers send them within minutes or hours.
+UNKNOWN_RECEIPT_DAYS = 7
 CHALLENGE = re.compile(
     r"security code|verification code|email verification|email confirmation|verify your email|confirm your email|"
     r"resubmit your application|(?:activate|verify|confirm) (?:your )?(?:account|profile)|"
@@ -331,18 +337,19 @@ def verification_pending(mail, mailbox_id):
         )
 
 
-async def receipt_messages(mail, mailbox_id, recipient, since, *, max_pages=2, max_messages=100):
-    """One bounded mailbox search per cycle, with durable progress through older pages."""
+async def receipt_messages(mail, mailbox_id, recipient, since, *, max_pages=2, max_messages=100, durable=True):
+    """One bounded mailbox search per cycle, with durable progress through older pages. A one-run check
+    (durable=False) reads its own window from the newest message and leaves the shared cursor alone."""
     # Bucket only the search boundary. acknowledgement() independently enforces
     # each run's exact timestamp, so this cannot accept earlier mail for a run.
     since = int(since) // 3600 * 3600
     # One mailbox can receive a profile address and its per-platform plus-addresses (email_alias.py).
     recipients = sorted({recipient} if isinstance(recipient, str) else set(recipient))
     to = f"to:{recipients[0]}" if len(recipients) == 1 else "{" + " ".join(f"to:{r}" for r in recipients) + "}"
-    query = f"after:{since} {to}"
+    query = f"after:{since} {to} {RECEIPT_SEARCH}"
     key = "receipt_mail_page:" + mailbox_id
     query_id = digest(query)
-    saved = mail.db.get_setting(key, {})
+    saved = mail.db.get_setting(key, {}) if durable else {}
     state = dict(saved) if saved.get("query_id") == query_id else {"query_id": query_id}
     messages, seen = [], set()
     fetched_pages = 0
@@ -396,7 +403,8 @@ async def receipt_messages(mail, mailbox_id, recipient, since, *, max_pages=2, m
             else:
                 state = {"query_id": query_id}
                 break  # Start a new sweep next cycle, including newly arrived mail.
-    mail.db.set_setting(key, {**state, "updated_at": time.time()})
+    if durable:
+        mail.db.set_setting(key, {**state, "updated_at": time.time()})
     return messages
 
 
@@ -457,6 +465,7 @@ async def check_receipts(mail, run_id=None):
     if not enabled(mail.db, "email"):
         return
     cutoff = (datetime.now(UTC) - timedelta(days=2)).isoformat()
+    unknown_since = (datetime.now(UTC) - timedelta(days=UNKNOWN_RECEIPT_DAYS)).isoformat()
     with mail.db.session() as s:
         email = Run.receipt["email"].as_string()
         unmatched = or_(
@@ -472,7 +481,7 @@ async def check_receipts(mail, run_id=None):
             .where(
                 Run.state.in_(["confirmed", "submission_unknown"]),
                 or_(
-                    Run.state == "submission_unknown",
+                    and_(Run.state == "submission_unknown", Run.created_at > unknown_since),
                     Run.created_at > cutoff,
                     Run.receipt["evidence_reconciliation"].as_string() == "pending",
                 ),
@@ -527,15 +536,17 @@ async def check_receipts(mail, run_id=None):
                         Run.packet["profile"]["email"].as_string().in_(addresses),
                         unmatched,
                         or_(
-                            Run.state == "submission_unknown",
+                            and_(Run.state == "submission_unknown", Run.created_at > unknown_since),
                             Run.created_at > cutoff,
                             Run.receipt["evidence_reconciliation"].as_string() == "pending",
                         ),
                     )
                 )
+            if run_id:
+                earliest = min(r["created_at"] for r in owned)
             since = datetime.fromisoformat(earliest or min(r["created_at"] for r in owned)).timestamp()
             messages[mailbox_id] = await receipt_messages(
-                mail, mailbox_id, addresses if len(addresses) > 1 else recipient, since
+                mail, mailbox_id, addresses if len(addresses) > 1 else recipient, since, durable=not run_id
             )
 
     # All competing jobs matter, including those outside this rotating batch.

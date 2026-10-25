@@ -91,6 +91,63 @@ COMMIT_TRACKING = re.compile(
     r"/recaptcha/|getcaptcha|checksiteconfig",
     re.I,
 )
+# A page load the network refused once and may answer on a second try.
+NET_RETRY = re.compile(r"net::ERR_(?:CONNECTION_(?:CLOSED|RESET|TIMED_OUT)|NETWORK_CHANGED|TIMED_OUT|FAILED|EMPTY_RESPONSE)\b")
+NET_ERROR = re.compile(r"net::ERR_([A-Z_]+)")
+
+
+def net_failure(exc, diagnostics=None):
+    """The outcome of a page the employer's site would not serve, or None. West Monroe's career site served an
+    expired certificate and Amazon's dropped the connection (2026-10-25): each run read "Browser control failed at
+    browser.py:1408" and sat in repair as if the engine were broken."""
+    match = NET_ERROR.search(str(exc))
+    if not match or match[1] in {"ABORTED", "BLOCKED_BY_CLIENT", "BLOCKED_BY_RESPONSE"}:
+        return None  # An aborted navigation is the page's own redirect; blocked ones are this browser's guard.
+    code = "net::ERR_" + match[1]
+    extra = {"diagnostics": diagnostics} if diagnostics else {}
+    if match[1].startswith(("CERT_", "SSL_")) or "CERTIFICATE" in match[1]:
+        # Nothing an applicant enters may go to a site whose identity the browser cannot verify.
+        return {"state": "closed", "reason": f"The employer's site failed the browser's security check ({code}); "
+                "no application data was sent to it", **extra}
+    return {"state": "waiting_browser", "reason": f"The employer's site did not load ({code}); it will be tried "
+            "again later", "blocker_type": "site_transient", "recovery_cause": "site_temporary", **extra}
+
+
+# Keys an API error body names its complaint with.
+REFUSAL_KEYS = {"message", "error", "errors", "error_message", "errormessage", "detail", "details", "description",
+                "reason", "title", "msg"}
+
+
+def refusal_text(body, limit=300):
+    """What an employer's 4xx body says, without applicant values: its JSON message strings (or its visible text),
+    addresses and digits masked."""
+    try:
+        data = json.loads(body)
+    except ValueError:
+        data = None
+    found = []
+
+    def walk(node, depth=0, named=False):
+        if depth > 5 or len(found) >= 8:
+            return
+        if isinstance(node, str) and named:
+            found.append(node)
+        elif isinstance(node, dict):
+            for key, value in node.items():
+                walk(value, depth + 1, str(key).lower() in REFUSAL_KEYS)
+        elif isinstance(node, list):
+            for value in node[:12]:
+                walk(value, depth + 1, named)
+
+    if data is not None:
+        walk(data)
+    else:
+        found.append(re.sub(r"<(script|style)\b.*?</\1>|<[^>]+>", " ", str(body), flags=re.S | re.I))
+    text = re.sub(r"\s+", " ", " | ".join(dict.fromkeys(v.strip() for v in found if v.strip()))).strip()
+    text = re.sub(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", "<email>", text)
+    return re.sub(r"\d", "#", text)[:limit]
+
+
 COMMIT_NOISE = re.compile(
     r"google-analytics|googletagmanager|doubleclick|analytics|(?:^|\.)rum\.|sentry|datadoghq|segment\.io|hotjar|"
     r"clarity\.ms|facebook|linkedin\.com/px|bat\.bing|cdn-cgi/rum|newrelic|nr-data|"
@@ -872,7 +929,7 @@ class BrowserEngine:
                     await self.open_application_route(page, entry_url, saved_state)
                     break
                 except PlaywrightError as exc:
-                    if attempt or not re.search(r"net::ERR_CONNECTION_(?:CLOSED|RESET)", str(exc)):
+                    if attempt or not NET_RETRY.search(str(exc)):
                         raise
                     self.emit("browser_retry", "Retrying the job page after a connection interruption")
                     await asyncio.sleep(1)
@@ -1221,6 +1278,9 @@ class BrowserEngine:
             return self.result
         except (PlaywrightError, ValueError) as exc:
             page = getattr(self, "page", None)
+            if not self.armed and (failed := net_failure(exc, diagnostics=exception_diagnostics(exc))):
+                self.result = failed
+                return self.result
             if not self.armed and (
                 type(exc).__name__ in {"TargetClosedError", "BrowserTabClosed"}
                 or (page is not None and page.is_closed())
@@ -1737,6 +1797,8 @@ class BrowserEngine:
             self.focus_sessions.append(focus)
         await deny_location(self.context, page)
         await self.captcha.install(page)
+        page.on("request", self.commit_request)
+        page.on("requestfailed", self.commit_request_failed)
         page.on("response", self.submission_response)
         page.on("dialog", self.page_dialog)
         await page.add_init_script(GUARD)
@@ -1767,9 +1829,35 @@ class BrowserEngine:
 
         asyncio.ensure_future(answer())
 
+    def commit_write(self, request):
+        """A write during the commit that could carry the application: not tracking, analytics or noise."""
+        parts = urlsplit(request.url)
+        return (
+            self.armed
+            and request.method in {"POST", "PUT", "PATCH"}
+            and request.resource_type in {"document", "xhr", "fetch"}
+            and not COMMIT_TRACKING.search(parts.path)
+            and not COMMIT_NOISE.search(parts.hostname or "")
+        )
+
+    def commit_request(self, request):
+        """A commit write still in flight is never "nothing was sent" (commit_sent_nothing)."""
+        if self.commit_write(request):
+            self.__dict__.setdefault("commit_inflight", set()).add(id(request))
+
+    def commit_request_failed(self, request):
+        """A write that failed without a response may still have reached the employer: it counts as a write."""
+        getattr(self, "commit_inflight", set()).discard(id(request))
+        if self.commit_write(request):
+            parts = urlsplit(request.url)
+            log = self.__dict__.setdefault("commit_requests", [])
+            if len(log) < 40:
+                log.append({"method": request.method, "host": parts.hostname, "path": parts.path[:120], "status": 0})
+
     def submission_response(self, response):
         """Record employer HTTP failures during commit without bodies, headers or secrets."""
         request = response.request
+        getattr(self, "commit_inflight", set()).discard(id(request))
         if not self.armed and request.method == "POST" and request.resource_type == "document":
             self.form_post(response)
         if self.armed and request.method in {"POST", "PUT", "PATCH"} and request.resource_type in {
@@ -1795,11 +1883,39 @@ class BrowserEngine:
             and request.resource_type in {"document", "xhr", "fetch"}
             and origin(response.url) == origin(self.job["url"])
         ):
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:  # No running loop: the status alone.
+                self.refusal_event(response)
+            else:
+                asyncio.ensure_future(self.record_refusal(response))
+
+    async def record_refusal(self, response):
+        """The employer's HTTP refusal of a commit write, with what it said. Eightfold answered PayPal's and
+        Micron's Submit with a bare 400 on 9 runs and the form showed nothing, so no run could tell why."""
+        said = None
+        if 400 <= response.status < 500:
+            try:
+                said = refusal_text(await response.text())
+            except Exception:  # A closed page or a body Chrome no longer holds.
+                pass
+        self.refusal_event(response, said)
+
+    def refusal_event(self, response, said=None):
+        request = response.request
+        data = {"status": response.status, "method": request.method, "resource_type": request.resource_type,
+                "path": urlsplit(response.url).path[:120], **({"said": said} if said else {})}
+        self.emit("submission_http_error", f"Employer returned HTTP {response.status} during submission", data)
+
+    def emit_commit_requests(self):
+        """The writes this commit sent (submission_response), once."""
+        if getattr(self, "commit_requests", None) or getattr(self, "commit_tracking", 0):
             self.emit(
-                "submission_http_error",
-                f"Employer returned HTTP {response.status} during submission",
-                {"status": response.status, "method": request.method, "resource_type": request.resource_type},
+                "submission_requests",
+                "Write requests during the commit",
+                {"requests": self.commit_requests, "tracking_calls": self.commit_tracking},
             )
+            self.commit_requests, self.commit_tracking = [], 0
 
     def form_post(self, response):
         """A step's form submission before the commit: where it went, the status, and the form's field names and
@@ -3151,17 +3267,11 @@ class BrowserEngine:
         for frame in self.page.frames:
             await frame.evaluate(ARM_JS)
         self.emit("submitting", "Commit step started; automatic retries are disabled")
-        self.commit_requests, self.commit_tracking = [], 0
+        self.commit_requests, self.commit_tracking, self.commit_inflight = [], 0, set()
         self.commit_url = getattr(self.page, "url", "")
         await self.form.locator(final[0]["id"]).click(timeout=10000)
         result = await self.watch_submission(before, before_rejection, validation_attempt)
-        if getattr(self, "commit_requests", None) or getattr(self, "commit_tracking", 0):
-            self.emit(
-                "submission_requests",
-                "Write requests during the commit",
-                {"requests": self.commit_requests, "tracking_calls": self.commit_tracking},
-            )
-            self.commit_requests = []
+        self.emit_commit_requests()
         return result
 
     async def watch_submission(self, before, before_rejection, validation_attempt=0):
@@ -3211,6 +3321,7 @@ class BrowserEngine:
                         return await self.finish(reserved=True, validation_attempt=validation_attempt + 1)
                     self.armed = False  # The employer explicitly declined this incomplete form.
                     self.validation_refusal = rejection
+                    await self.release_reservation()
                     return {
                         "state": "waiting_browser",
                         "reason": "Employer requested field corrections; automatic repair could not complete them",
@@ -3221,6 +3332,7 @@ class BrowserEngine:
                     }
                 if rejection.get("category") == "closed":
                     self.armed = False
+                    await self.release_reservation()
                     return {
                         "state": "closed",
                         "reason": "The posting expired before submission; nothing was accepted",
@@ -3232,6 +3344,7 @@ class BrowserEngine:
                 if rejection.get("category") == "temporary":
                     # SmartRecruiters: "Cannot submit your application. Please try again in a while."
                     self.armed = False
+                    await self.release_reservation()
                     from .application_pacing import throttle
 
                     if getattr(self, "service", None) is not None:
@@ -3248,6 +3361,7 @@ class BrowserEngine:
                     # Lever: "There was an error verifying your application. Please try again."
                     # Nothing was accepted; a fresh form (restart_rejected_form) may try again.
                     self.armed = False
+                    await self.release_reservation()
                     return {
                         "state": "waiting_browser",
                         "reason": "The website's security check refused the submission and asked to try again; "
@@ -3347,7 +3461,7 @@ class BrowserEngine:
         often posted to another host than the page (an ATS API), so any other write, a navigation or a missing control
         keeps the submission uncertain."""
         url = getattr(self, "commit_url", "")
-        if not url or getattr(self.page, "url", "") != url:
+        if not url or getattr(self.page, "url", "") != url or getattr(self, "commit_inflight", None):
             return False
         # A write the employer refused with a 4xx accepted nothing (Dallas County: its work-history item answered 400
         # and the application was never posted). A 5xx may have been partly processed and stays uncertain.
