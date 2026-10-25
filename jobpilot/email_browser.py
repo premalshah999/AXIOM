@@ -644,13 +644,14 @@ class EmailBrowser:
                 button = await e.form.locator(buttons[0]["id"]).element_handle() if buttons else None
                 button_label = buttons[0]["label"] if buttons else ""
                 filled = 0
-                for i, f in enumerate(fields):
-                    el = e.form.locator(f["id"])
+                from .adapters.base import enter_code
+
+                boxes = [e.form.locator(f["id"]) for f in fields]
+                for el in boxes:
                     # Hold the original DOM node, never a locator that could match a new page.
-                    handle = await el.element_handle()
-                    self.secret_fields.append(handle)
-                    await el.fill(code if len(fields) == 1 else code[i], timeout=3000)
-                    filled += 1
+                    self.secret_fields.append(await el.element_handle())
+                await enter_code(boxes, code, timeout=3000)
+                filled = len(boxes)
                 e.emit(
                     "email_step",
                     "Verification code entered in employer form",

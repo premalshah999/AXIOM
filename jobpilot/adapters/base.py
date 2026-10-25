@@ -189,6 +189,19 @@ KNOWN_ACCOUNT = {
 }
 
 
+
+async def enter_code(boxes, code, *, timeout=4000):
+    """Put a one-time code into its field, or one digit per box of a split code. Split boxes are typed as key events:
+    Marriott's six-box Oracle code showed every filled digit, but its component registered none and Verify did nothing
+    (2026-10-25)."""
+    if len(boxes) == 1:
+        await boxes[0].fill(code, timeout=timeout)
+        return
+    for box, digit in zip(boxes, code):
+        await box.click(timeout=timeout)
+        await box.fill("", timeout=timeout)
+        await box.press_sequentially(digit, delay=60, timeout=timeout)
+
 class Step(StrEnum):
     JOB = "job_details"
     METHOD = "apply_method"
@@ -851,7 +864,7 @@ class Adapter:
             if not landed and not self.accounts.password_allowed(self.id, frame_url, self.job["url"]):
                 self.finish_mail("failed", "Code field on an unexpected website")
                 return self.defer("The code field is on an unexpected website; not entering the code")
-            await self.form.locator(f["id"]).fill(code if len(fields) == 1 else code[i], timeout=4000)
+        await enter_code([self.form.locator(f["id"]) for f in fields], code, timeout=4000)
         await asyncio.sleep(0.3)
         obs = await self.form.scan()
         if self.code_fields(obs):
