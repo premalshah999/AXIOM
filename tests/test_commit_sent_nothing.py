@@ -62,3 +62,17 @@ def test_tracking_calls_never_fill_the_commit_log():
     assert engine.commit_tracking == 60
     assert engine.commit_requests == [{"method": "POST", "host": "api.ats.example", "path": "/v1/applications",
                                        "status": 200}]
+
+
+def test_a_refused_commit_releases_its_reservation(service):
+    """Mattel, Loram, Versant and four more (2026-10-25): after the employer accepted nothing, the repaired page's
+    own submit was refused as "not authorized" because the run was still "submitting", and the run ended unconfirmed."""
+    from jobpilot.db import Budget, Job, Run
+
+    with service.db.exclusive() as s:
+        s.add(Job(id="j", identity="j", url="https://example.test/j", ats="workday", company="Acme", status="ready"))
+        s.add(Run(id="r", job_id="j", state="submitting", mode="submit", packet={}))
+    assert service.release_submission("r") is True
+    with service.db.session() as s:
+        assert s.get(Run, "r").state == "running"
+    assert service.release_submission("r") is False  # Only a run still holding its reservation is released.

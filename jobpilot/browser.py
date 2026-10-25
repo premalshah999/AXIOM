@@ -3310,6 +3310,7 @@ class BrowserEngine:
             # The commit is never retried from here.
             self.armed = False
             self.validation_refusal = stale_rejection
+            await self.release_reservation()
             return {
                 "state": "waiting_browser",
                 "reason": "Employer field errors stayed on the form after the commit and no acceptance was captured",
@@ -3322,6 +3323,7 @@ class BrowserEngine:
             # LinkedIn pixels, the form and its Submit stayed, and each run ended as an uncertain submission that can
             # never be retried. Nothing that could carry an application left the browser: the page is repaired instead.
             self.armed = False
+            await self.release_reservation()
             return {
                 "state": "waiting_browser",
                 "reason": "The employer accepted nothing from the submit and the form is still open; nothing was submitted",
@@ -3332,6 +3334,12 @@ class BrowserEngine:
             "state": "submission_unknown",
             "reason": "Submission attempted, but no explicit receipt was captured",
         }
+
+    async def release_reservation(self):
+        """The employer refused this commit: the run may submit again once its page is repaired."""
+        release = getattr(getattr(self, "service", None), "release_submission", None)
+        if release is not None:
+            await asyncio.to_thread(release, self.run_id)
 
     async def commit_sent_nothing(self):
         """True only when the whole receipt window passed with the page on the URL it was submitted from, its final

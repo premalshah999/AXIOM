@@ -51,6 +51,22 @@ class ExecutionMixin:
                 budget.submissions += 1
             run.state = "submitting"
 
+    def release_submission(self, run_id):
+        """Undo a reservation whose commit the employer provably refused (field errors stayed, or nothing but tracking
+        left the browser). The run was left "submitting": the repaired page's own submit was then refused as "not
+        authorized" and the run ended as an uncertain submission although nothing was sent (Mattel, Loram, Versant
+        and four more, 2026-10-25)."""
+        day = datetime.now(ZoneInfo(self.config.timezone)).date().isoformat()
+        with self.db.exclusive() as s:
+            run = s.get(Run, run_id)
+            if not run or run.state != "submitting":
+                return False
+            run.state = "running"
+            budget = s.get(Budget, day)
+            if budget and budget.submissions > 0:
+                budget.submissions -= 1
+            return True
+
     def committing(self):
         """Applications whose commit is in flight (or whose verification continuation is). Holds the reservation lock."""
         with self.db.exclusive() as s:
