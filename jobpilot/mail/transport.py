@@ -15,8 +15,11 @@ from .constants import TOKEN_URL
 from .helpers import digest
 
 
-# How long background mailbox work waits for live verification requests before it proceeds anyway.
-LIVE_PRECEDENCE_SECONDS = 30
+# How long background mailbox work waits for live verification requests before it proceeds anyway. Workers poll
+# codes almost continuously, so 30 s here let the receipt poller read about one message per 30 s: Lyft's two
+# acknowledgements sat unread for hours (2026-10-25). Background reads have their own connections; the search they
+# page is narrowed to acknowledgement wording (receipts.RECEIPT_SEARCH).
+LIVE_PRECEDENCE_SECONDS = 3
 
 
 class TransportMixin:
