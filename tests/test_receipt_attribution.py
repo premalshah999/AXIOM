@@ -571,3 +571,32 @@ async def test_the_acknowledgement_goes_to_the_run_that_submitted_not_a_later_dr
     assert (await check_receipts(service.mail))["emails_confirmed"] == 1
     with service.db.session() as s:
         assert s.get(Run, rid).state == "confirmed" and s.get(Run, "later-draft").state == "waiting_browser"
+
+
+def test_a_short_employer_name_is_matched_only_as_a_word():
+    """"EY" and "ING" were found inside "they" and "thinking" in every message (2026-10-25)."""
+    at = datetime.now(UTC) - timedelta(hours=1)
+    run = {"created_at": at.isoformat(), "packet": {"profile": {"email": EMAIL}}}
+    msg = receipt("short", at + timedelta(minutes=10), "Thank you for applying. They are reviewing your application.")
+    assert acknowledgement(msg, {"company": "EY", "title": "Analyst"}, run, allow_missing_title=True) is None
+    named = receipt("named", at + timedelta(minutes=10), "Thank you for applying to EY. We received your application.")
+    assert acknowledgement(named, {"company": "EY", "title": "Analyst"}, run, allow_missing_title=True)
+
+
+async def test_a_titled_acknowledgement_is_not_ambiguous_with_another_employers_time_window(service, monkeypatch):
+    """Lyft's "Thank you for your application for Data Scientist" also fit LinkedIn's jobs by time alone (the footer
+    says "Visit our LinkedIn page"), and every such message was left unassigned (2026-10-25)."""
+    at = datetime.now(UTC) - timedelta(hours=1)
+    ours, other = seed(service, 2, state="submission_unknown", start=at)
+    with service.db.session() as s:
+        s.get(Job, s.get(Run, other).job_id).company = "LinkedIn"
+        s.get(Job, s.get(Run, other).job_id).title = "Data Center Engineer"
+    msg = receipt("titled", at + timedelta(minutes=5),
+                  "Thank you for your application for Engineer at Example. Visit our LinkedIn page.")
+    # An ATS sender acknowledges for every employer it hosts, as Greenhouse's did.
+    msg["payload"]["headers"][0]["value"] = "Example <no-reply@us.greenhouse-mail.io>"
+    msg["payload"]["headers"][2]["value"] = "mx.google.com; dkim=pass; dmarc=pass header.from=us.greenhouse-mail.io"
+    mailbox_provider(monkeypatch, service, [msg])
+    assert (await check_receipts(service.mail))["emails_confirmed"] == 1
+    with service.db.session() as s:
+        assert s.get(Run, ours).state == "confirmed" and s.get(Run, other).state == "submission_unknown"

@@ -181,6 +181,8 @@ RECEIPT_WORDING = re.compile(
 # the search from the oldest unconfirmed run (18 days of codes and alerts) paged through old mail while new receipts
 # waited for the sweep to wrap; Lyft's "Thank you for your application" was never read (2026-10-25).
 RECEIPT_SEARCH = "(application OR applying OR resume)"
+# How firmly an acknowledgement names its job: by its link, by its title, or only by arriving after the submit.
+BASIS_STRENGTH = {"job_url": 3, "title": 2, "submit_window": 1}
 # Words of employer names too common to narrow a mailbox search.
 GENERIC_NAME_WORDS = {"the", "and", "inc", "llc", "ltd", "corp", "corporation", "company", "group", "holdings",
                       "university", "college", "health", "bank", "services", "solutions", "technologies", "systems"}
@@ -289,7 +291,10 @@ def acknowledgement(message, job, run, allow_missing_title=False):
     dayforce_notice = domain in {"dayforce.com", "dayforcehcm.com"} and job.get("ats") == "dayforce"
     company_match = (
         dayforce_notice
-        or (bool(company) and company in facts["compact_body"])
+        # A short name is found only as a word: "EY", "ING" and "Check" were inside every message ("they", "thinking")
+        # and made every acknowledgement ambiguous (2026-10-25).
+        or (len(company) >= 6 and company in facts["compact_body"])
+        or (bool(company) and title_in(job["company"], facts["observed"]))
         or (len(first) >= 3 and bool(re.search(r"\bto\s+" + re.escape(first) + r"\s*[!.]?$", subject, re.I)))
         or workday_tenant_match
     )
@@ -686,7 +691,10 @@ async def check_receipts(mail, run_id=None):
                 }
                 possible = urls or exact or matches
                 possible = {jid: rs for jid, rs in possible.items() if jid in committed_jobs}
-                possible_jobs.setdefault(msg["id"], set()).update(possible)
+                strength = possible_jobs.setdefault(msg["id"], {})
+                for jid, rs in possible.items():
+                    level = max(BASIS_STRENGTH.get(r[1]["attribution_basis"], 1) for r in rs)
+                    strength[jid] = max(strength.get(jid, 0), level)
                 if len(possible) == 1:
                     jid, options = next(iter(possible.items()))
                     # The run that submitted, not the job's newest run: Lyft's later retry drafts were credited with
@@ -705,7 +713,14 @@ async def check_receipts(mail, run_id=None):
                 # one possible job independently, including confirmed competitors.
         # Independent job identity is required. A fabricated time cutoff cannot rule
         # out a late receipt/follow-up from an earlier or already confirmed job.
-        assignments = [a for a in assignments if len(possible_jobs[a[2]["id"]]) == 1]
+        # Across employers the same order holds as within one: a job the message names by its link or title outranks
+        # jobs elsewhere it fits only by time (Lyft's titled acknowledgement was "ambiguous" with EY's window).
+        def sole(message_id, job_id):
+            strength = possible_jobs[message_id]
+            top = max(strength.values())
+            return [jid for jid, level in strength.items() if level == top] == [job_id]
+
+        assignments = [a for a in assignments if sole(a[2]["id"], a[0]["job_id"])]
         cohort_counts = {}
         for source, receipt, _, key in assignments:
             if source["state"] == "submission_unknown" and receipt["attribution_basis"] != "submit_window":
