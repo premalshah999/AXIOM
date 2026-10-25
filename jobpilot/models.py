@@ -47,7 +47,10 @@ def token_cost(config, input_tokens, output_tokens, cache_hit_tokens=0):
 def provider_rejection(response, content):
     """Retain categories and numeric retry guidance, never a provider message."""
     category = "http_error"
-    if response.status_code in {400, 429}:
+    if response.status_code == 402:
+        # Payment Required: the provider account is out of credit (DeepSeek "Insufficient Balance", 2026-10-25).
+        category = "quota_exhausted"
+    elif response.status_code in {400, 429}:
         try:
             error = json.loads(content).get("error", {})
             text = str(error).casefold()

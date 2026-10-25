@@ -10,6 +10,9 @@ from . import host_health
 from .db import Setting
 
 COOLDOWN_SECONDS = 300
+# An account out of credit stays out until someone tops it up: each 5-minute recovery start was a real application that
+# failed at its first model question and spent one of its attempts (2026-10-25).
+QUOTA_COOLDOWN_SECONDS = 1800
 
 
 def key(config):
@@ -52,10 +55,12 @@ def finish(db, config, ticket, *, failure=None, retry_after=None):
             return
         failures = value.get("failures", 0) + 1
         value = {"generation": generation, "failures": failures, "last_error": failure}
-        if failures >= 2 or lease or failure == "rate_limited":
+        if failures >= 2 or lease or failure in {"rate_limited", "quota_exhausted"}:
             seconds = (
                 (max(1, min(3600, retry_after)) if retry_after is not None else 60)
                 if failure == "rate_limited"
+                else QUOTA_COOLDOWN_SECONDS
+                if failure == "quota_exhausted"
                 else COOLDOWN_SECONDS
             )
             value.update(generation=generation + 1, retry_at=time.time() + seconds)

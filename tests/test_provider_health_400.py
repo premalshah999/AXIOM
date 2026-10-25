@@ -139,3 +139,25 @@ async def test_structured_call_rides_out_short_429_cooldown(service, monkeypatch
     result = await models.structured(service.config, service.db, Probe, "fixture", "fixture", retries=0)
     assert result.ok
     assert len(responses) == 2
+
+
+
+@pytest.mark.parametrize(
+    "status,body",
+    [
+        (402, b'{"error": {"message": "Insufficient Balance"}}'),
+        (429, b'{"error": {"message": "quota exhausted", "code": "insufficient_quota"}}'),
+    ],
+)
+def test_an_account_out_of_credit_is_quota_exhausted(status, body):
+    """DeepSeek answered 402 "Insufficient Balance" (2026-10-25); it was a generic http_error."""
+    assert models.provider_rejection(httpx.Response(status), body)["rejection_category"] == "quota_exhausted"
+
+
+def test_an_account_out_of_credit_holds_new_work_for_half_an_hour(service):
+    ticket = provider_health.acquire(service.db, service.config, 25)
+    started = time.time()
+    provider_health.finish(service.db, service.config, ticket, failure="quota_exhausted")
+    retry_at = service.db.get_setting(provider_health.key(service.config))["retry_at"]
+    assert retry_at - started >= provider_health.QUOTA_COOLDOWN_SECONDS - 5
+    assert provider_health.acquire(service.db, service.config, 25) is None
