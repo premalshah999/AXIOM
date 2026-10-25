@@ -111,11 +111,17 @@ async def test_a_list_without_search_scrolls_to_a_later_page(form):
 
 
 async def test_an_optional_picker_never_pages_the_employers_list(form):
-    # Every scrolled page is a server request; optional pickers preceded both CloudFront 403s (2026-10-19).
+    # Every scrolled page is a server request; optional pickers preceded both CloudFront 403s (2026-10-19). A static
+    # catalog is answered from its select (2026-10-24): the widget never opens, so nothing is paged or requested.
     state = form.locator('[id="-1_PersonProfileFields.rcf3217_icimsDropdown"]')
-    with pytest.raises(ValueError, match="No matching option is offered"):
-        await widgets.combobox(form.main_frame, state, "Maryland", thorough=False)
-    assert await form.evaluate("document.getElementById('-1_PersonProfileFields.rcf3217').selectedIndex") == 0
+    assert await widgets.combobox(form.main_frame, state, "Maryland", thorough=False) == "Maryland"
+    assert await form.evaluate("document.getElementById('-1_PersonProfileFields.rcf3217').selectedIndex") == STATES.index(
+        "Maryland"
+    )
+    hidden = await form.evaluate(
+        "document.getElementById('-1_PersonProfileFields.rcf3217_icimsDropdown_ctnr').classList.contains('dropdown-invisible')"
+    )
+    assert hidden  # never opened
 
 
 async def test_a_static_catalog_is_read_whole_and_picked(form):

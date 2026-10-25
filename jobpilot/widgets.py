@@ -1959,6 +1959,17 @@ ICIMS_DROPDOWN = (
     "document.getElementById(e.id.slice(0,-14))?.tagName==='SELECT'?e.id.slice(0,-14):null"
 )
 ICIMS_ROWS = "li.dropdown-result[role=option]"
+ICIMS_SELECT_DIRECT = """(e, text) => {
+  const s = document.getElementById(e.id.slice(0, -14));
+  const norm = t => (t || '').replace(/\\s+/g, ' ').trim();
+  const option = [...s.options].find(o => !o.disabled && norm(o.text) === text);
+  if (!option) return false;
+  s.value = option.value;
+  s.dispatchEvent(new Event('change', {bubbles: true}));
+  const shown = e.querySelector('.dropdown-text');
+  if (shown) shown.textContent = option.text;
+  return s.selectedIndex >= 0 && norm(s.options[s.selectedIndex].text) === text;
+}"""
 
 
 async def icims_dropdown(el):
@@ -2048,6 +2059,20 @@ async def icims_dropdown_commit(
     select_id = await icims_dropdown(el)
     if not select_id:
         return None
+    static = await icims_select_texts(el)
+    if len(static) > 1:
+        # A static catalog is all in the native select. Searching it through the widget ran out of the field budget at
+        # Emory ("highest level of education", three runs, 2026-10-24); the select takes the choice directly and its
+        # change event runs the field's onchange as a row click does.
+        eligible = [{"text": t, "disabled": False} for t in static if not school_scope or school_option_matches(value, t)]
+        picked = (best_option(eligible, value) or {}).get("text")
+        if not picked and resolve:
+            picked = resolve(static)
+        if not picked and choose and not employer_scope:
+            picked = await choose(static)
+        if picked in static and await el.evaluate(ICIMS_SELECT_DIRECT, picked):
+            await asyncio.sleep(0.3)  # Dependent fields (Country -> State) rebuild after the change.
+            return picked
     container = frame.locator(f'[id="{select_id}_icimsDropdown_ctnr"]')
     box = container.locator("input.dropdown-search")
     # Stay inside the form's 12 s field write budget: a deadline there leaves the field neither set nor omitted.
