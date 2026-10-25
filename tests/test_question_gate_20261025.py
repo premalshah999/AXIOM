@@ -120,3 +120,26 @@ def test_the_engines_own_missing_fact_questions_pass_the_gate(item, kind):
     from jobpilot.service.reviews import ReviewsMixin
 
     assert ReviewsMixin.review_kind(item) == kind
+
+
+def test_a_consent_for_employment_purposes_is_dated_today(service):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    label = ("In connection with my application for employment, I authorize the Company to obtain a Consumer Report "
+             "for employment purposes. I understand that the Consumer Report may contain information about my "
+             "background.")
+    resolver = Resolver(Profile(first_name="Alex", accept_all_application_terms=True), service.db, service.config,
+                        job={"ats": "workday", "url": "https://example.test/j"})
+    answer = resolver.local({"id": "d", "label": label, "type": "date_parts", "options": [], "required": True})
+    today = datetime.now(ZoneInfo(service.config.timezone)).date()
+    assert answer is not None and answer.value == f"{today.month:02d}/{today.day:02d}/{today.year}"
+    dated = resolver.local({"id": "s", "label": "Employment start date", "type": "date_parts", "options": [],
+                            "required": True})
+    assert dated is None or dated.evidence_ids != ["policy:today"]
+
+
+def test_two_spellings_of_one_date_are_one_answer():
+    from jobpilot.answers.validate import same_date
+
+    assert same_date("10/25/2026", "2026-10-25") and not same_date("10/25/2026", "2026-10-24")

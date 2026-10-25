@@ -25,6 +25,18 @@ from .text import normalize
 from .text import option_value
 
 
+
+def same_date(a, b):
+    """Two spellings of one date ("10/25/2026" and "2026-10-25"): a consent form's signing date was refused as out of
+    scope because the model and the policy wrote today differently (EPIC Retirement Plan Services, 2026-10-25)."""
+    from ..widgets import parse_date
+
+    try:
+        first, second = parse_date(str(a)), parse_date(str(b))
+    except ValueError:
+        return False
+    return all(first) and first == second
+
 class ValidateMixin:
     def _invalid(self, field, reason, blocker="model_output"):
         return Answer(
@@ -273,7 +285,7 @@ class ValidateMixin:
                 known is not None
                 and known.disposition == "answer"
                 and known.evidence_ids
-                and normalize(str(known.value)) == normalize(str(value))
+                and (normalize(str(known.value)) == normalize(str(value)) or same_date(known.value, value))
             ):
                 valid_evidence = critical_ok = True
                 a.evidence_ids = list(known.evidence_ids)

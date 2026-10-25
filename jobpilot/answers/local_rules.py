@@ -832,7 +832,12 @@ class LocalRulesMixin:
         # S&P Global / Kensho (Workday) 2026-10-16: the consent's own date input carries the whole consent text.
         consent_date = bool(
             (CONSENT_REQUEST.search(f["label"]) or ACKNOWLEDGEMENT.search(f["label"]))
-            and not re.search(r"birth|start|graduat|availab|expir|end date|employ", label)
+            # A date of employment is not the consent's own date; "for employment purposes" in the consent text is
+            # (EPIC's Consumer Report authorization dated itself, 2026-10-25).
+            and not re.search(
+                r"birth|start|graduat|availab|expir|end date|dates? of employment|employment (?:start|end|date)",
+                label,
+            )
         )
         if part := re.fullmatch(r"today s date (month|day|year)", label):
             # A self-identification form's date in three controls (forms.label_signature_date), in the options' format.
