@@ -97,3 +97,26 @@ async def test_open_questions_are_revalidated_against_the_current_engine(service
         assert s.get(Run, jobs["restricted"]).state == "closed"
         assert s.get(Review, "q-inferable").answer == "N/A"
         assert s.get(Review, "q-legit").answer is None and s.get(Run, jobs["legit"]).state == "waiting_answer"
+
+
+@pytest.mark.parametrize(
+    "item,kind",
+    [
+        ({"question": "Please upload a cover letter. cv.pdf successfully uploaded", "reason": "Required document upload",
+          "blocker_type": "missing_fact"}, "control_failure"),
+        ({"question": "Country", "reason": "The answer is not in the saved profile", "blocker_type": "missing_fact"},
+         "control_failure"),
+        ({"question": "End Date Month", "options": ["Jan"], "reason": "Current role has no end date",
+          "blocker_type": "missing_fact", "scope": {"group": "Work Experience 1"}}, "control_failure"),
+        ({"question": "City of Birth", "reason": "Not recorded", "blocker_type": "missing_fact"}, "missing_fact"),
+        ({"question": "Country", "reason": "x", "blocker_type": "missing_fact", "scope": {"group": "Citizenship"}},
+         "missing_fact"),
+        ({"question": "Month", "reason": "x", "blocker_type": "account"}, "account"),
+    ],
+)
+def test_the_engines_own_missing_fact_questions_pass_the_gate(item, kind):
+    """The engine tags its pending questions missing_fact; the gate ran only for untagged ones, so misreads from a run
+    (an upload the page shows as done, a bare Country) still reached the owner (2026-10-25)."""
+    from jobpilot.service.reviews import ReviewsMixin
+
+    assert ReviewsMixin.review_kind(item) == kind

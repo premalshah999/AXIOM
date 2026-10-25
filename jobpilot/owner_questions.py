@@ -184,7 +184,8 @@ def choices(options):
 FRAGMENT = re.compile(
     r"(?:(?:start|end|from|to|graduation|completion) )?(?:date|month|day|year)(?: (?:month|day|year))?|"
     r"(?:from|to|start|end) date(?: (?:month|day|year))?|division|department|type|c|search|search for|keywords?|"
-    r"dates? employed|employment dates?|job title|employer(?: name)?|company(?: name)?",
+    r"dates? employed|employment dates?|job title|employer(?: name)?|company(?: name)?|"
+    r"country|state|state province|province|city|postal code|zip(?: code)?|location",
 )
 # "Please indicate all entities for which you are currently working or have worked" (Federal Reserve): the follow-up to
 # a prior-employment question whose answer is No. It is shown required only when the engine misread that parent.

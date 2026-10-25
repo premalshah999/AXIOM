@@ -19,16 +19,19 @@ REPAIR_ACCOUNT = re.compile(r"\baccount\b|sign[ -]?in|log ?in", re.I)
 class ReviewsMixin:
     @staticmethod
     def review_kind(question):
-        kind = question.get("blocker_type")
-        if kind:
-            return kind
-        reason = question.get("reason", "")
         from .. import owner_questions as oq
 
-        if oq.defect(question.get("question", ""), question.get("options") or [], oq.context_from(question), reason):
+        reason = question.get("reason", "")
+        kind = question.get("blocker_type")
+        if kind in {None, "", "missing_fact"} and oq.defect(
+            question.get("question", ""), question.get("options") or [], oq.context_from(question), reason
+        ):
             # The engine misread the field (a bare label without its row, a list that never loaded): the owner
-            # cannot answer it, so it is recovered as a control failure, never asked.
+            # cannot answer it, so it is recovered as a control failure, never asked. The engine's own pending
+            # questions arrive tagged missing_fact, so the check comes before that tag.
             return "control_failure"
+        if kind:
+            return kind
         if reason.startswith("Could not commit the answer:"):
             return "control_failure"
         if reason.startswith(("Model omitted", "Unverifiable answer", "Model output", "Model unavailable")):
