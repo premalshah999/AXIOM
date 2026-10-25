@@ -194,3 +194,14 @@ def test_a_waiting_apply_reads_as_waiting_to_start_unless_its_job_already_starte
     assert counts["states"]["pending:waiting"] == 2 and counts["states"]["queued"] == 1
     assert counts["groups"]["active"] == 3 and counts["groups"]["paused"] == 1
     assert counts["groups"]["repair"] == 899 and counts["pipeline"] == 1106
+
+
+def test_a_confirmed_job_stays_done_when_a_later_attempt_fails(service):
+    """Dayforce (2026-10-25): a follow-up run of a confirmed application failed and the job read as Repairing."""
+    with service.db.exclusive() as s:
+        s.execute(insert(Job), [job(1)])
+        s.execute(insert(Run), [run(1, "job00001", "confirmed", created=at(60), finished=at(55)),
+                                run(2, "job00001", "waiting_browser", created=at(50), finished=at(45))])
+    with service.db.session() as s:
+        counts = pipeline.counts(s)
+    assert counts["groups"]["done"] == 1 and counts["groups"]["repair"] == 0

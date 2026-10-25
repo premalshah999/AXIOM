@@ -63,7 +63,11 @@ def classified(*where):
     waiting = and_(
         Job.id.in_(requested_jobs()), ~paused_by_owner, or_(state.is_(None), state.not_in(STARTED))
     )
+    # A job an earlier run confirmed is done, whatever a later attempt says: Dayforce's confirmed application read as
+    # "Repairing" after a follow-up run failed (2026-10-25).
+    succeeded = Job.id.in_(select(Run.job_id).where(Run.state.in_(("confirmed", "already_applied"))))
     group = case(
+        (succeeded, "done"),
         (paused_by_owner, "paused"),
         (waiting, "active"),
         (state == "paused", "paused"),

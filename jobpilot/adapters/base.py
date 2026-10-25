@@ -51,7 +51,9 @@ ALREADY = re.compile(
     r"you(?:'ve| have) already applied|you have previously applied|already submitted an application|"
     r"application for this (?:job|position|role) (?:has )?already been submitted|"
     # Workday posting page after an application (HPE 2026-10-15): "You applied for this job on October 15, 2026."
-    r"you applied for this (?:job|position|role) on\b",
+    r"you applied for this (?:job|position|role) on\b|"
+    # iCIMS's job page for an applicant already in its pipeline (MCI 2026-10-24).
+    r"you(?:'re| are) (?:currently )?submitted (?:to|for) this (?:job|position|role)",
     re.I,
 )
 CLOSED = re.compile(
@@ -1079,6 +1081,10 @@ class Adapter:
                 receipt["resume_sha256"] = self.run_record["packet"]["resume_sha"]
                 return {"state": "confirmed", "reason": "Website confirmation captured", "receipt": receipt}
             return None  # Wait for a confirmation that this submission produced.
+        if ALREADY.search(obs.get("text", "")):
+            # This job's own page states the applicant already applied (MCI's iCIMS page: "You are currently submitted to
+            # this job"): an earlier attempt went through, and nothing is resubmitted.
+            return await self.on_already_applied(obs)
         # A confirmation-looking page this run did not produce is never recorded as an application.
         return self.defer(
             "The employer shows a confirmation, but this run did not submit; check whether you already applied",
