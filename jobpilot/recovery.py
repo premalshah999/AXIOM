@@ -562,12 +562,30 @@ SITE_BLOCKERS = {"captcha", "account"}
 SITE_BLOCKER_JOBS, SITE_BLOCKER_HOURS = 3, 6
 
 
+STUCK_FIELD = re.compile(r"^(?:Required field incomplete|Needs an approved answer|Value not accepted): (.{1,200})$")
+
+
+def stuck_field(session, run_id):
+    """The field a run's last failed read-back named first, or ''."""
+    for data in session.scalars(
+        select(Event.data).where(Event.run_id == run_id, Event.kind == "verification").order_by(Event.created_at.desc()).limit(5)
+    ):
+        for problem in (data or {}).get("problems") or []:
+            if match := STUCK_FIELD.match(str(problem)):
+                return match[1].strip()
+    return ""
+
+
 def open_blocked_site_circuit(session, run, state):
-    """Three different jobs on one employer site stopped by the same site blocker within six hours: that site's other
-    jobs wait six hours and the workers go to other employers. JPMorgan's Oracle hCaptcha and L3Harris' unusable
-    account took most of 2026-10-24's Oracle and SuccessFactors starts, one failing job after another."""
+    """Three different jobs on one employer site stopped by the same site blocker, or stalled on the same required
+    field, within six hours: that site's other jobs wait six hours and the workers go to other employers. JPMorgan's
+    Oracle hCaptcha and L3Harris' unusable account took most of 2026-10-24's Oracle and SuccessFactors starts; Emory's
+    unreadable education menu held iCIMS's single slot through eight retries."""
+    if state != "waiting_browser":
+        return False
     blocker = (run.packet or {}).get("blocker_type")
-    if state != "waiting_browser" or blocker not in SITE_BLOCKERS:
+    field = "" if blocker in SITE_BLOCKERS else stuck_field(session, run.id)
+    if blocker not in SITE_BLOCKERS and not field:
         return False
     job = session.get(Job, run.job_id)
     if not job:
@@ -575,23 +593,25 @@ def open_blocked_site_circuit(session, run, state):
     partition = employer_partition(job)
     since = (datetime.now(UTC) - timedelta(hours=SITE_BLOCKER_HOURS)).isoformat()
     rows = session.execute(
-        select(Run.job_id, Job.url, Job.ats, Run.packet["blocker_type"].as_string())
+        select(Run.id, Run.job_id, Job.url, Job.ats, Run.packet["blocker_type"].as_string())
         .join(Job, Job.id == Run.job_id)
         .where(Run.state == "waiting_browser", Run.finished_at >= since, Job.ats == job.ats)
     ).all()
-    jobs = {
-        job_id
-        for job_id, url, ats, kind in rows
-        if kind == blocker and employer_partition({"url": url, "ats": ats}) == partition
-    }
+    same_site = [r for r in rows if employer_partition({"url": r[2], "ats": r[3]}) == partition]
+    if field:
+        jobs = {job_id for run_id, job_id, *_ in same_site if stuck_field(session, run_id) == field}
+        blocker = f"'{field[:80]}' field"
+    else:
+        jobs = {job_id for _, job_id, _, _, kind in same_site if kind == blocker}
+        blocker += " step"
     if len(jobs) < SITE_BLOCKER_JOBS:
         return False
     key = "site_circuit:" + hashlib.sha256(partition.encode()).hexdigest()
     data = {
         "until": (datetime.now(UTC) + timedelta(hours=SITE_BLOCKER_HOURS)).isoformat(),
         "source_run_id": run.id,
-        "reason": f"{len(jobs)} applications on this employer's site stopped at the same {blocker} step; its other "
-        "jobs wait while other employers continue",
+        "reason": f"{len(jobs)} applications on this employer's site stopped at the same {blocker}; its other jobs "
+        "wait while other employers continue",
     }
     circuit = session.get(Setting, key)
     if circuit:

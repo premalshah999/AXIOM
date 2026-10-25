@@ -79,3 +79,25 @@ def test_ranked_ready_jobs_without_a_live_listing_are_autopilot_candidates(servi
         s.get(Job, unranked).status = "new"
     found = {j["id"] for j in unlisted_ready(service.db, board_settings(service.db), {listed})}
     assert found == {imported}
+
+
+def test_three_jobs_stalled_on_the_same_required_field_pause_that_site(service):
+    """Emory (iCIMS, 2026-10-24): eight retries failed on one unreadable menu while holding iCIMS's single slot."""
+    menu = "What is the highest level of education you have completed?"
+    for n in range(3):
+        blocked(service, f"s{n}", job(service, 10 + n, ats="icims", url=f"https://careers-emoryx.icims.com/jobs/{n}"),
+                blocker="control_failure")
+        service.db.event(f"s{n}", "verification", "Read back", {"problems": [f"Required field incomplete: {menu}"]})
+        opened = circuit(service, f"s{n}")
+    assert opened
+    with service.db.session() as s:
+        reasons = [row.value.get("reason", "") for row in s.query(Setting).where(Setting.key.like("site_circuit:%"))]
+    assert len(reasons) == 1 and "highest level of education" in reasons[0]
+
+
+def test_different_stuck_fields_on_one_site_do_not_pause_it(service):
+    for n, label in enumerate(["Phone Type", "Degree", "Start Date"]):
+        blocked(service, f"d{n}", job(service, 20 + n, ats="icims", url=f"https://careers-acme.icims.com/jobs/{n}"),
+                blocker="control_failure")
+        service.db.event(f"d{n}", "verification", "Read back", {"problems": [f"Required field incomplete: {label}"]})
+        assert not circuit(service, f"d{n}")
