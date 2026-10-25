@@ -1,6 +1,7 @@
 """Drivers for the controls real ATS forms use. Each commits an observed option and reads it back."""
 
 import asyncio
+import calendar
 import re
 import time
 from datetime import date, datetime
@@ -241,6 +242,14 @@ def money_range(text):
     return None
 
 
+# "january" / "jan" / "sept" -> 1..12, for month menus that offer names.
+MONTH_NUMBERS = {
+    **{name.lower(): i for i, name in enumerate(calendar.month_name) if name},
+    **{name.lower(): i for i, name in enumerate(calendar.month_abbr) if name},
+    "sept": 9,
+}
+
+
 def best_option(options, value):
     """Choose one observed option for a desired value. Ambiguity returns None, never a guess."""
     options = [o for o in options if not placeholder_option(o["text"] if isinstance(o, dict) else o)]
@@ -253,6 +262,12 @@ def best_option(options, value):
     exact = [i for i, x in enumerate(labels) if norm(x) == want]
     if len(exact) >= 1:
         return options[exact[0]]
+    # A month number in a menu of month names: Oracle's Start Date Month grid offers "January" ... "December", and an
+    # education start of 2024-08 asked for "8" four times without a match (2026-10-25).
+    if re.fullmatch(r"0?[1-9]|1[0-2]", want) and sum(norm(x) in MONTH_NUMBERS for x in labels) >= 6:
+        named = [i for i, x in enumerate(labels) if MONTH_NUMBERS.get(norm(x)) == int(want)]
+        if len(named) == 1:
+            return options[named[0]]
     # "85000" is the offered "$85,000" (or "85K"). Only an exact single amount;
     # ranges and open-ended labels ("or higher") are left to interpretation.
     if (amount := money_amount(value)) is not None:

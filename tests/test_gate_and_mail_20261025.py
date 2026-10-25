@@ -284,3 +284,17 @@ def test_an_instruction_whose_only_option_acknowledges_it_takes_that_option(serv
         assert got not in {"Thank you", "OK"}
     else:
         assert got == expected
+
+
+def test_a_month_number_picks_that_month_in_a_menu_of_month_names():
+    from jobpilot.widgets import best_option
+
+    names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+             "November", "December"]
+    assert best_option(names, "8") == "August"
+    assert best_option(names, "08") == "August"
+    assert best_option([n[:3] for n in names], "9") == "Sep"
+    # Numeric menus and menus that are not months keep their own matching.
+    assert best_option(["1", "2", "8", "10"], "8") == "8"
+    assert best_option(["Small", "Medium", "Large"], "8") is None
+    assert best_option(names, "13") is None
