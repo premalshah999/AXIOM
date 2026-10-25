@@ -583,6 +583,16 @@ async def owner_requests_only(service):
     return await due(service, room)
 
 
+def classification_ids(due_work, attempted, limit=24):
+    """The planner's unclassified inventory to rank next, minus jobs already attempted.
+
+    It was also limited to postings re-seen in the last five hours. Discovery pauses while unclassified inventory is
+    high, so no posting was re-seen: 5 of 53 planned jobs passed, classification ran about 10 an hour, and Workday's
+    1,216 sources went unscanned for 41 hours (2026-10-25). The planner already excludes gated, skipped and cooling
+    jobs."""
+    return [jid for group in due_work.classify for jid in group if jid not in attempted][:limit]
+
+
 def unlisted_ready(db, cfg, listed):
     """Ranked-ready jobs with no live discovery listing: postings imported directly (job board APIs, pasted links)
     and listings a sweep has not re-seen yet. 122 such jobs above the fit threshold sat unseen while six of eight
@@ -887,10 +897,7 @@ async def tick(service):
         await dispatch_ready(jobs)
         unranked = [j["id"] for j in candidates[:24] if j.get("score") is None and j["status"] != "ready"]
         if integrated:
-            candidate_ids = {j["id"] for j in candidates}
-            # The planner excludes rejected/cooling classifications. Otherwise
-            # a fixed prefix of gated jobs can starve the remaining inventory.
-            unranked = [jid for group in due_work.classify for jid in group if jid in candidate_ids][:24]
+            unranked = classification_ids(due_work, attempted)
         if queued_now < room and unranked:
             try:
                 if integrated:

@@ -101,3 +101,13 @@ def test_different_stuck_fields_on_one_site_do_not_pause_it(service):
                 blocker="control_failure")
         service.db.event(f"d{n}", "verification", "Read back", {"problems": [f"Required field incomplete: {label}"]})
         assert not circuit(service, f"d{n}")
+
+
+def test_classification_takes_the_planners_inventory_not_only_recently_listed_jobs():
+    """Discovery waits while unclassified inventory is high, so nothing was re-seen and only 5 of 53 planned jobs were
+    ranked: inventory never fell and discovery never resumed (2026-10-25)."""
+    from jobpilot.autopilot import classification_ids
+
+    work = SimpleNamespace(classify=[["a", "b", "c"], ["d", "e"]])
+    assert classification_ids(work, attempted={"b"}) == ["a", "c", "d", "e"]
+    assert len(classification_ids(SimpleNamespace(classify=[[str(n) for n in range(30)]]), set())) == 24
