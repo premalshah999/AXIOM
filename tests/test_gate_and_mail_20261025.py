@@ -298,3 +298,17 @@ def test_a_month_number_picks_that_month_in_a_menu_of_month_names():
     assert best_option(["1", "2", "8", "10"], "8") == "8"
     assert best_option(["Small", "Medium", "Large"], "8") is None
     assert best_option(names, "13") is None
+
+
+@pytest.mark.parametrize(
+    "observed,expected,same",
+    [
+        ("College Town, ST", "College Town", True),
+        ("Springfield", "Springfield, Country", True),
+        ("Springfield, ST", "Rivertown", False),
+        ("", "Rivertown", False),
+    ],
+)
+def test_a_city_with_or_without_its_region_is_the_same_city(observed, expected, same):
+    field = {"id": "c", "label": "City", "type": "text", "options": []}
+    assert answer_quality.equivalent(field, observed, expected) is same

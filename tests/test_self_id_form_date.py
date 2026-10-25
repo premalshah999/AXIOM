@@ -59,3 +59,17 @@ def test_one_bare_date_picker_on_a_self_identification_form_is_typed_as_today(se
     other = [{"id": "x", "label": "Date", "type": "combobox", "section": "", "group": "", "options": []}]
     label_signature_date(other, "Work Experience 1")
     assert other[0]["label"] == "Date"
+
+
+def test_the_self_identification_date_inside_the_forms_own_section_is_today():
+    """Micron (Eightfold, 2026-10-25): the same box sat in an "Application questions" section and was skipped."""
+    fields = [
+        {"id": "n", "label": "Name", "type": "text", "section": "Application questions", "group": "", "options": []},
+        {"id": "dt", "label": "Date", "type": "combobox", "section": "Application questions", "group": "",
+         "options": [], "widget": ""},
+    ]
+    label_signature_date(fields, "Voluntary Self-Identification of Disability Form CC-305 Name Date")
+    assert fields[1]["label"] == "Today's date"
+    row = [{"id": "x", "label": "Date", "type": "combobox", "section": "Work Experience", "group": "", "options": []}]
+    label_signature_date(row, "Voluntary Self-Identification of Disability")
+    assert row[0]["label"] == "Date"

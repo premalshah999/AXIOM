@@ -80,6 +80,7 @@ def name_phone_numbers(fields):
 
 
 SELF_ID_FORM = re.compile(r"self-identification|\bCC-305\b|\bVEVRAA\b", re.I)
+HISTORY_SCOPE = re.compile(r"experience|employment|education|work history|school|degree", re.I)
 
 
 # A text box that asks for a number of years takes a number. Oracle's "Total Experience In Years"
@@ -129,7 +130,13 @@ def label_signature_date(fields, text):
             f["label"] = f"Today's date ({f['label'].strip()})"
     # Micron's Eightfold form (2026-10-22) dates it with one bare "Date" box behind a calendar (role=combobox): read as
     # a picker with no options it stayed empty, and the run stalled on it. Typed as MM/DD/YYYY it takes today.
-    dates = [f for f in fields if f["label"].strip() == "Date" and not f.get("section") and not f.get("group")]
+    # Its section may be the form's own ("Application questions", Micron 2026-10-25); a history row's date never is.
+    dates = [
+        f
+        for f in fields
+        if f["label"].strip() == "Date"
+        and not HISTORY_SCOPE.search(" ".join(str(f.get(k) or "") for k in ("section", "group")))
+    ]
     if len(dates) == 1 and dates[0]["type"] in {"text", "date", "combobox"} and not dates[0].get("options"):
         f = dates[0]
         f["label"] = "Today's date"

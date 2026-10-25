@@ -271,6 +271,12 @@ def equivalent(field, observed, expected):
     )
     if widgets.same_value(comparison, observed, expected):
         return True
+    if re.fullmatch(r"(?:current )?(?:city|town|city town|city or town)", normalize(field.get("label", ""))) and (
+        normalize(str(observed).split(",")[0]) == normalize(str(expected).split(",")[0]) != ""
+    ):
+        # The same city with or without its region: iCIMS work rows held "College Park, MD" against the row's city
+        # "College Park", and 31 such findings sent a finished application back to its profile page (2026-10-25).
+        return True
     if squash(observed) and squash(observed) == squash(expected):
         # Employer catalogs spell the same choice differently: "Linked-in", "E-mail".
         return True
