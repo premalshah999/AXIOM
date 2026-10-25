@@ -3703,6 +3703,8 @@ class FormSession:
                                 and (str(exc) in SAFE_CONTROL_ERRORS or str(exc).startswith(SAFE_CONTROL_PREFIXES))
                                 else "",
                                 "structure": structure,
+                                # What the employer's picker offered for each search (option labels only).
+                                "offered": getattr(exc, "offered", None),
                                 "field": {
                                     k: field.get(k)
                                     for k in (

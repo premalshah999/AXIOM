@@ -312,3 +312,22 @@ def test_a_month_number_picks_that_month_in_a_menu_of_month_names():
 def test_a_city_with_or_without_its_region_is_the_same_city(observed, expected, same):
     field = {"id": "c", "label": "City", "type": "text", "options": []}
     assert answer_quality.equivalent(field, observed, expected) is same
+
+
+SLASH_DEGREES = ["High School/GED", "AA/AS", "BA/BS", "MA/MS", "MBA", "PhD", "JD"]
+
+
+@pytest.mark.parametrize("degree,expected", [("Master of Science", "MA/MS"), ("BE", "BA/BS"), ("MS", "MA/MS")])
+def test_a_degree_takes_its_level_in_a_menu_of_combined_types_never_mba(service, degree, expected):
+    profile = Profile(first_name="Alex", education=[EducationEntry(school="State University", degree=degree)])
+    resolver = Resolver(profile, service.db, service.config, job={"ats": "workday", "url": "https://example.test/j"})
+    answer = resolver.local({"id": "d", "label": "Degree", "type": "dropdown", "options": SLASH_DEGREES,
+                             "required": True, "group": "Education 1", "section": "Education"})
+    assert answer is not None and answer.value == expected
+
+
+def test_degree_levels_read_bare_abbreviations():
+    from jobpilot.answers.history import degree_level
+
+    assert [degree_level(v) for v in ("MS", "MSc", "MA/MS", "BS", "BA/BS", "MBA")] == [
+        "master", "master", "master", "bachelor", "bachelor", None]

@@ -10,10 +10,27 @@ from .history import HISTORY_CONTACT
 from .history import HISTORY_REGION
 from .history import HISTORY_UNKNOWN
 from .history import WORK
+from .history import degree_level
 from .history import history_region
 from .history import month_year
 from .text import normalize
 
+
+
+# Degree types that are never another degree's equivalent (owner rule 2026-10-13: never Arts or MBA for a science or
+# engineering degree). Text similarity chose "MBA" for "Master of Science" (EPIC, 2026-10-25).
+DISTINCT_DEGREE = re.compile(r"\b(?:mba|business administration|arts?|fine|music|laws?|jd|juris|education|nursing|"
+                             r"medicine|md|phd|doctor\w*|associate\w*|high school|ged)\b", re.I)
+
+
+def same_degree_kind(field, value, pick):
+    """A degree question's fuzzy pick must be the recorded degree's level and must not name a distinct degree type the
+    record does not. Other questions are unaffected."""
+    if not re.search(r"\bdegree\b|education level|level of education", str(field.get("label", "")), re.I):
+        return True
+    if degree_level(pick) != degree_level(value):
+        return False
+    return not (DISTINCT_DEGREE.search(normalize(pick)) and not DISTINCT_DEGREE.search(normalize(value)))
 
 class HistoryRulesMixin:
     def reason_for_leaving(self, f):
@@ -58,6 +75,8 @@ class HistoryRulesMixin:
         for step in self.answer_rules.education:
             if step == "closest":
                 pick = self.policy_choice(f, options) or closest_option(value, options)
+                if pick and not same_degree_kind(f, value, pick):
+                    pick = None
                 if pick and (a := self._ans(f, pick, evidence, f"Closest offered option to {value}")):
                     return a
             elif step == "pick3":

@@ -70,6 +70,8 @@ DEGREE_FALLBACK = {
         re.compile(r"^b\.?\s?(?:s\.?c?|e|tech)\.?(?: degree)?$", re.I),
         re.compile(r"\bbachelor'?s?\b(?!.*\b(?:arts?|fine|music|laws?|education|business)\b)", re.I),
         re.compile(r"^undergraduate(?: degree)?$|4.year (?:college )?degree", re.I),
+        # One option for the level's common types: "BA/BS", "BS/BA" (EPIC Retirement Plan Services, 2026-10-25).
+        re.compile(r"^(?:b\.?\s?a\.?\s*/\s*)?b\.?\s?s\.?c?\.?(?:\s*/\s*b\.?\s?a\.?)?$", re.I),
     ),
     "master": (
         re.compile(r"^master'?s?(?: degree)?$", re.I),
@@ -77,15 +79,18 @@ DEGREE_FALLBACK = {
         re.compile(r"^m\.?\s?s\.?c?\.?(?: degree)?$", re.I),
         re.compile(r"\bmaster'?s?\b(?!.*\b(?:arts?|fine|music|laws?|education|business|mba)\b)", re.I),
         re.compile(r"^graduate degree$", re.I),
+        # "MA/MS": the plain master's level, never "MBA" (EPIC committed MBA for a Master of Science, 2026-10-25).
+        re.compile(r"^(?:m\.?\s?a\.?\s*/\s*)?m\.?\s?s\.?c?\.?(?:\s*/\s*m\.?\s?a\.?)?$", re.I),
     ),
 }
 
 
 def degree_level(text):
     t = normalize(str(text))
-    if re.search(r"\bmaster|\bm ?s c?\b|\bmeng\b|\bmtech\b", t):
+    # "ms", "m s", "msc", "m sc": the space before "c" is optional, not the one after "s" ("MA/MS" read as no level).
+    if re.search(r"\bmaster|\bm ?s ?c?\b|\bmeng\b|\bmtech\b", t):
         return "master"
-    if re.search(r"\bbachelor|\bb ?s c?\b|\bb ?e\b|\bb ?tech\b|\bundergraduate\b", t):
+    if re.search(r"\bbachelor|\bb ?s ?c?\b|\bb ?e\b|\bb ?tech\b|\bundergraduate\b", t):
         return "bachelor"
     return None
 

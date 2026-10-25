@@ -2649,6 +2649,8 @@ def prompt_fallback_queries(value, school_scope=False):
 async def prompt(frame, container, value, choose=None, school_scope=False):
     """Workday multiselect prompt: search, then commit a leaf; categories are opened once."""
     interpretations = 0
+    # What each search returned (the employer's own option labels), for the failure record.
+    seen = {}
 
     async def supported_leaf(options):
         nonlocal interpretations
@@ -2737,6 +2739,7 @@ async def prompt(frame, container, value, choose=None, school_scope=False):
         require_query_match=True,
         changed_from=before,
     )
+    seen[first] = [o["text"] for o in opts][:8]
     if committed := await committed_search_leaf():
         await dismiss_pickers(frame)
         return committed
@@ -2762,6 +2765,7 @@ async def prompt(frame, container, value, choose=None, school_scope=False):
             require_query_match=True,
             changed_from=before,
         )
+        seen[query] = [o["text"] for o in opts][:8]
         if committed := await committed_search_leaf():
             await dismiss_pickers(frame)
             return committed
@@ -2796,6 +2800,7 @@ async def prompt(frame, container, value, choose=None, school_scope=False):
             selector="[data-automation-id=promptOption],[role=option]",
             owner=container,
         )
+        seen[""] = [o["text"] for o in opts][:8]
         # Some taxonomies are a flat catalog. Exact search may return nothing
         # even though an evidence-supported broader category is offered here.
         choice = await supported_leaf(opts)
@@ -2836,7 +2841,9 @@ async def prompt(frame, container, value, choose=None, school_scope=False):
                 break
     if not choice:
         await inp.press("Escape")
-        raise ValueError("No matching option is offered")
+        error = ValueError("No matching option is offered")
+        error.offered = seen
+        raise error
     await click_option(frame, choice, owner=container)
     if not choice["leaf"]:
         inner = await wait_options(
