@@ -109,3 +109,19 @@ async def test_a_stale_inline_choice_asks_the_model_once(page, service, tmp_path
     form.resolver.resolve = AsyncMock(return_value=[Answer(field_id=field["id"], value="No", disposition="answer")])
     await form.control_action("choose", field["id"], form.revision, option_id="gone")
     assert form.resolver.resolve.await_count == 1
+
+
+async def test_a_control_rerendered_after_the_scan_is_stale_quickly_not_a_crash(page, service, tmp_path):
+    import time
+
+    import pytest
+
+    await page.set_content('<main><a href="#apply" id=apply role=button>Apply Now</a></main>')
+    form = session(page, service, tmp_path)
+    obs = await form.scan()
+    button = next(c for c in obs["controls"] if c["label"] == "Apply Now")
+    await page.evaluate("() => document.getElementById('apply').remove()")
+    started = time.monotonic()
+    with pytest.raises(ValueError, match="stale"):
+        await form.click(button["id"], step_control=True)
+    assert time.monotonic() - started < 10

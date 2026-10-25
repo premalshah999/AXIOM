@@ -4839,7 +4839,13 @@ class FormSession:
             )
         )
         if permitted:
-            el = await el.element_handle()
+            try:
+                # A re-rendered control is stale; waiting 30 s for its old element ended runs on Oracle job pages as
+                # browser-control failures (American Express, Uber 2026-10-24). The caller rescans and clicks again.
+                el = await el.element_handle(timeout=5000)
+            except PlaywrightTimeoutError:
+                opener.remove_listener("popup", on_popup)
+                raise ValueError("Control is stale; inspect again") from None
             marked = await el.evaluate(
                 r"""(el,auth) => {
                   const label=(el.innerText || el.value || el.getAttribute('aria-label') || '').trim();

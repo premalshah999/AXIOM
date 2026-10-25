@@ -134,6 +134,15 @@ class IntentRulesMixin:
                     piece = {"month": f"{today.month:02d}", "day": str(today.day), "year": str(today.year)}[
                         part[1].lower()
                     ]
+                    if part[1].lower() == "month":
+                        # A month menu offers names (HEXAWARE's "Can Join By Month": January ... December, 2026-10-24).
+                        from calendar import month_abbr, month_name
+
+                        spellings = {month_name[today.month], month_abbr[today.month], piece, str(today.month)}
+                        piece = next(
+                            (o for o in f.get("options") or [] if str(o).strip().casefold() in {x.casefold() for x in spellings}),
+                            piece,
+                        )
                     if answer := self._ans(f, piece, ["fact:availability"]):
                         return answer
                 if f.get("type") in {"date", "date_parts", "month"} or f.get("widget") == "date-text":

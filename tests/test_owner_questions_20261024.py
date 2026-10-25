@@ -114,3 +114,13 @@ def test_an_education_rows_state_comes_from_a_school_named_for_it(service):
     assert state("University of Michigan, Ann Arbor").value == "MI"
     assert state("Ohio State University").value == "OH"
     assert state("Washington University in St. Louis").disposition != "answer"
+
+
+def test_a_month_menu_of_names_takes_this_months_name(service):
+    from calendar import month_name
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    today = datetime.now(ZoneInfo(service.config.timezone)).date()
+    answer = ask(service, "Can Join By Month", list(month_name)[1:], facts={"availability": "Immediately"})
+    assert answer.value == month_name[today.month]
