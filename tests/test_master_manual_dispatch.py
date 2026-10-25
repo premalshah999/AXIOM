@@ -69,3 +69,21 @@ def test_jobs_the_batch_already_skipped_do_not_pause_classification(service):
     service.db.set_setting("job_board_autopilot", {"state": "active", "considered_ids": skipped})
     work = discover_due(service.db, DiscoveryPolicy(early_career_only=True))
     assert any(fresh_id in batch for batch in work.classify), work.reasons
+
+
+def test_jobs_already_scored_by_the_older_ranker_are_not_unclassified_inventory(service):
+    """2026-10-25: ready jobs scored 58-82 by the older ranking path had no classification row, counted as unclassified,
+    were skipped by the classifier (it ranks only new, unscored jobs), and kept discovery paused for 41 hours."""
+    from jobpilot.db import Source
+    from jobpilot.features.discovery.readiness import discover_due
+
+    service.db.set_setting("profile", {"target_roles": ["Software Engineer"]})
+    scored = [seed(service, f"scored{i}") for i in range(40)]
+    with service.db.exclusive() as session:
+        for jid in scored:
+            session.get(Job, jid).status = "new"  # Legacy rows: a score but still "new" or "ready".
+        session.add(Source(id="src", name="Board", kind="workday", url="https://example.test/board", cron="0 */2 * * *",
+                           enabled=True, next_run="2026-01-01T00:00:00+00:00", last_run="", error="", found=1))
+    work = discover_due(service.db, DiscoveryPolicy(early_career_only=True))
+    assert not any(jid in batch for batch in work.classify for jid in scored)
+    assert "src" in work.sources, work.reasons

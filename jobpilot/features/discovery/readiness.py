@@ -298,7 +298,11 @@ def discover_due(
                 and (outcomes[j["id"]]["retry_at"] or "") <= at.isoformat()
             )
         )
-        and j["status"] not in {"skipped", "review"}
+        # Exactly what the classification workflow ranks: unranked new postings. Jobs the older ranking path had
+        # already scored (status ready, score 58-82, no classification row) were counted as unclassified, the
+        # workflow skipped them, the count never fell, and discovery stayed paused for 41 hours (2026-10-25).
+        and j["status"] == "new"
+        and j.get("score") is None
         and not gated(j, policy)
     ]
     if pipeline < policy.owners * policy.classify_lookahead:
