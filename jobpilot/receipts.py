@@ -566,9 +566,9 @@ async def check_receipts(mail, run_id=None):
             named = []
             company = next((j["company"] for r, j in candidates if r["id"] == run_id), "")
             if run_id and (hint := employer_hint(company)):
-                # Reading a message takes about a second: the newest ten receipt-like messages of the window filled a
-                # one-run check, and Lyft's own acknowledgement, older than those, was never read (2026-10-25).
-                named = await receipt_messages(mail, mailbox_id, to, since, durable=False, narrow=hint, seconds=20)
+                # The search takes about 11 s and each read 1.5-4 s: the newest receipt-like messages of the window
+                # filled a one-run check, and Lyft's own acknowledgement, older than those, was never read (2026-10-25).
+                named = await receipt_messages(mail, mailbox_id, to, since, durable=False, narrow=hint, seconds=45)
             rest = await receipt_messages(mail, mailbox_id, to, since, durable=not run_id)
             known = {m.get("id") for m in named}
             messages[mailbox_id] = named + [m for m in rest if m.get("id") not in known]
