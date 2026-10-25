@@ -554,3 +554,20 @@ async def test_a_same_title_posting_that_never_committed_does_not_make_the_recei
     assert (await check_receipts(service.mail))["emails_confirmed"] == 1
     with service.db.session() as s:
         assert s.get(Run, ids[0]).state == "confirmed" and s.get(Run, ids[1]).state == "waiting_browser"
+
+
+async def test_the_acknowledgement_goes_to_the_run_that_submitted_not_a_later_draft(service, monkeypatch):
+    """Lyft's acknowledgement was credited to the job's newest run, a later retry draft that could not take it, so the
+    run that submitted stayed unconfirmed (2026-10-25)."""
+    at = datetime.now(UTC) - timedelta(hours=1)
+    (rid,) = seed(service, 1, state="submission_unknown", start=at)
+    with service.db.session() as s:
+        submitted_run = s.get(Run, rid)
+        s.add(Run(id="later-draft", job_id=submitted_run.job_id, state="waiting_browser",
+                  packet={"profile": {"email": EMAIL}, "match_approved": True},
+                  created_at=(at + timedelta(minutes=1)).isoformat()))
+    msg = receipt("ack", at + timedelta(minutes=5), "We received your application to Example for the Engineer position.")
+    mailbox_provider(monkeypatch, service, [msg])
+    assert (await check_receipts(service.mail))["emails_confirmed"] == 1
+    with service.db.session() as s:
+        assert s.get(Run, rid).state == "confirmed" and s.get(Run, "later-draft").state == "waiting_browser"

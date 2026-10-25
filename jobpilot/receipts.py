@@ -689,7 +689,10 @@ async def check_receipts(mail, run_id=None):
                 possible_jobs.setdefault(msg["id"], set()).update(possible)
                 if len(possible) == 1:
                     jid, options = next(iter(possible.items()))
-                    source, receipt = max(options, key=lambda item: item[0]["created_at"])
+                    # The run that submitted, not the job's newest run: Lyft's later retry drafts were credited with
+                    # its acknowledgement and none of them could take it (2026-10-25).
+                    committed = [o for o in options if o[0].get("submitted_at") or o[0]["state"] == "confirmed"]
+                    source, receipt = max(committed or options, key=lambda item: item[0]["created_at"])
                     if (
                         source["id"] in target_ids
                         and (source["state"] != "submission_unknown" or source.get("submitted_at"))
