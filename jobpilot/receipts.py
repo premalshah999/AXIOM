@@ -623,6 +623,12 @@ async def check_receipts(mail, run_id=None):
     # run, not only the 20-run batch: a receipt read while its own run sat
     # outside the batch was consumed and never matched again. The assignment
     # still requires one possible job per message and skips matched rows.
+    # Only a job some run committed (or that is recorded as submitted) can have been acknowledged. Lyft's two postings
+    # both titled "Data Scientist" made its acknowledgement ambiguous although only one was ever submitted (2026-10-25).
+    committed_jobs = {
+        job["id"] for run, job in competitors
+        if run["id"] in submit_times or run["state"] in {"confirmed", "submission_unknown"}
+    }
     target_ids = {r["id"] for r, _ in candidates} | {
         r["id"] for r, _ in competitors if r["state"] in {"confirmed", "submission_unknown"}
     }
@@ -679,6 +685,7 @@ async def check_receipts(mail, run_id=None):
                     if any(r[1]["attribution_basis"] == "job_url" for r in rs)
                 }
                 possible = urls or exact or matches
+                possible = {jid: rs for jid, rs in possible.items() if jid in committed_jobs}
                 possible_jobs.setdefault(msg["id"], set()).update(possible)
                 if len(possible) == 1:
                     jid, options = next(iter(possible.items()))

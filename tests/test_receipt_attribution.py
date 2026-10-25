@@ -538,3 +538,19 @@ def test_one_message_is_parsed_once_across_candidate_runs(monkeypatch):
     results = [acknowledgement(msg, {"company": "Example", "title": "Engineer"}, run) for run in runs]
     assert all(r is not None for r in results) and results[0] == results[1] == results[2]
     assert len(calls) == 1
+
+
+async def test_a_same_title_posting_that_never_committed_does_not_make_the_receipt_ambiguous(service, monkeypatch):
+    """Lyft had two postings titled "Data Scientist"; only one was ever submitted, and its acknowledgement waited as
+    ambiguous with the never-submitted draft (2026-10-25)."""
+    at = datetime.now(UTC) - timedelta(hours=1)
+    ids = seed(service, 2, state="submission_unknown", start=at)
+    with service.db.session() as s:
+        draft = s.get(Run, ids[1])
+        draft.state, draft.packet = "waiting_browser", {**draft.packet, "match_approved": True}
+        s.execute(delete(Event).where(Event.run_id == ids[1], Event.kind == "submitting"))
+    msg = receipt("only-one", at + timedelta(minutes=2), "We received your application to Example for the Engineer position.")
+    mailbox_provider(monkeypatch, service, [msg])
+    assert (await check_receipts(service.mail))["emails_confirmed"] == 1
+    with service.db.session() as s:
+        assert s.get(Run, ids[0]).state == "confirmed" and s.get(Run, ids[1]).state == "waiting_browser"
