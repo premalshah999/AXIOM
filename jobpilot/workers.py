@@ -400,6 +400,11 @@ async def start(service):
         await service.settle_open_questions()
     except Exception:
         pass  # They stay asked; nothing else depends on this.
+    try:
+        # Open questions this build closes, answers or recognizes as its own misreads (no model call).
+        await service.revalidate_open_questions()
+    except Exception:
+        pass  # They stay asked.
 
 
 async def retire_obsolete_deliveries(service):

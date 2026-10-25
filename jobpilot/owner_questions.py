@@ -36,7 +36,9 @@ UPLOAD_WORDING = re.compile(
     r"\bfile\b.{0,30}\b\d+\s*mb\b|\bdrop files? here\b",
     re.I,
 )
-NON_CHOICES = re.compile(r"no results?(?: found)?|loading\W*|no options?|searching\W*", re.I)
+NON_CHOICES = re.compile(
+    r"no (?:results?|match(?:es|ing)?(?: \w+)?)(?: found)?|loading\W*|no options?(?: available)?|searching\W*", re.I
+)
 PAGE_SIZE = 8
 
 
@@ -176,6 +178,51 @@ def choices(options):
         seen.add(normalize(text))
         result.append((index, text))
     return result
+
+
+# A field label that names no question without its row or section: a date part, a bare date, a one-word attribute.
+FRAGMENT = re.compile(
+    r"(?:(?:start|end|from|to|graduation|completion) )?(?:date|month|day|year)(?: (?:month|day|year))?|"
+    r"(?:from|to|start|end) date(?: (?:month|day|year))?|division|department|type|c|search|search for|keywords?|"
+    r"dates? employed|employment dates?|job title|employer(?: name)?|company(?: name)?",
+)
+# "Please indicate all entities for which you are currently working or have worked" (Federal Reserve): the follow-up to
+# a prior-employment question whose answer is No. It is shown required only when the engine misread that parent.
+EMPLOYER_ENTITY_FOLLOWUP = re.compile(
+    r"\b(?:indicate|select|list|check|choose)\b.{0,30}\b(?:entities|companies|affiliates|subsidiaries|banks|"
+    r"organizations|locations)\b.{0,60}\b(?:work(?:ed|ing)?|employed)\b",
+    re.I,
+)
+# What a site's own search box or chrome is labeled; never an application question.
+SITE_CHROME = re.compile(r"(?:search(?: for)?|keywords?|search jobs|job search)\W*", re.I)
+
+
+def defect(question, options=(), context=None, reason=""):
+    """Why a would-be owner question is the engine's failure to read the form, else None.
+
+    Owner 2026-10-25: "only few of them are truly legit, everything else is just chaos, incomplete fields with
+    incomplete questions and wrong questions". Open questions included a bare "Month" (Verisk), "From Date" and "End
+    Date" without their employment row (SuccessFactors), a site's "Search for:" box (Planview), a list read as "No
+    matches" (SmartRecruiters), an upload the page itself showed as done (Workday), and a current role's End Date
+    Month (Medpace). The owner cannot answer any of them; the engine must read the field again."""
+    context = context or {}
+    text = tidy(question)
+    if re.search(r"successfully uploaded", str(question or ""), re.I):
+        return "The page shows this upload as already done"
+    if SITE_CHROME.fullmatch(text):
+        return "This is the website's search box, not an application question"
+    located = any(
+        _human(context.get(k)) for k in ("section", "group")
+    ) or bool(context.get("history_identity"))
+    if FRAGMENT.fullmatch(normalize(text)) and not located:
+        return "The field was read without the question or history row it belongs to"
+    if options and not choices(options):
+        return "The list's options were never loaded"
+    if EMPLOYER_ENTITY_FOLLOWUP.search(text) and choices(options):
+        return "A follow-up to prior employment with this employer, which the applicant never had"
+    if re.search(r"\bcurrent (?:role|job|position)\b.{0,40}\bno end date\b", str(reason or ""), re.I):
+        return "A current role's end date: the form's current-role choice must be set instead"
+    return None
 
 
 def kind(question, options=(), context=None, reason=""):

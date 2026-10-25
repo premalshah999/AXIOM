@@ -30,6 +30,7 @@ from .contact import CONTACT
 from .contact import NAMES
 from .contact import address_location_option
 from .demographics import DECLINE
+from .eligibility import NO_OPTION
 from .demographics import DEMOGRAPHIC
 from .eligibility import NOT_AVAILABILITY
 from .eligibility import NOT_DESIRED
@@ -63,6 +64,15 @@ LANGUAGE_NAME = re.compile(
     r"chinese|中文|简体中文|繁體中文|日本語|japanese|한국어|korean|tiếng việt|vietnamese|polski|polish|русский|russian|"
     r"العربية|arabic|हिन्दी|hindi|tagalog|kreyòl ayisyen|haitian creole"
 )
+
+# A recruiter or staffing agency that presented this employer's opportunities ("Have you spoken to any
+# recruiters/agencies...", "Please list recruiter/agency you've spoken with").
+RECRUITER_AGENCY = re.compile(
+    r"recruiters?\s*/\s*agenc(?:y|ies)|recruit(?:er|ing) (?:firm|agenc(?:y|ies))|staffing (?:firm|agenc(?:y|ies))|"
+    r"(?:third.party|external|agency) recruiters?",
+    re.I,
+)
+
 
 class LocalRulesMixin:
     def _local(self, f):
@@ -319,6 +329,15 @@ class LocalRulesMixin:
             # proposed a job title for it and four applications stalled (2026-10-25).
             if answer := self._ans(f, options[0], ["policy:consent"], "The only option acknowledges an instruction"):
                 return answer
+        scope = " ".join(str(f.get(k) or "") for k in ("label", "group", "section"))
+        if p.application_source and RECRUITER_AGENCY.search(scope) and not re.search(r"\breferr", f["label"], re.I):
+            # The engine found this posting itself (the profile's application source); no recruiter or agency
+            # presented it. Meijer asked to list them and the owner was asked (2026-10-25).
+            no = [o for o in options if NO_OPTION.search(str(o)) and not DECLINE.search(str(o))]
+            if len(no) == 1:
+                return self._ans(f, no[0], ["policy:source"], "The applicant applied directly, not through an agency")
+            if not options and f.get("type") in {"text", "textarea"}:
+                return self._ans(f, "N/A", ["policy:source"], "The applicant applied directly, not through an agency")
         if (
             p.accept_all_application_terms
             and DATA_USE_CONSENT.search(f["label"])

@@ -63,6 +63,7 @@ from .eligibility import (
     WOTC,
     no_fact,
     residence_outside,
+    protected_status_missing,
 )
 from .demographics import (
     ASSERTED_STATUS,
@@ -191,6 +192,7 @@ __all__ = [
     "option_value",
     "policy_acknowledgement",
     "residence_outside",
+    "protected_status_missing",
     "semantic_text",
     "source_choice",
     "strip_fact_annotations",

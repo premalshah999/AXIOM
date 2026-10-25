@@ -93,7 +93,7 @@ class CompletionMixin:
                 if job:
                     job.status = "archived"
             if state in {"needs_review", "waiting_answer"} and result.get("reviews"):
-                from ..answers import residence_outside
+                from ..answers import protected_status_missing, residence_outside
 
                 profile = run.packet.get("profile") or {}
                 outside = next(
@@ -118,6 +118,16 @@ class CompletionMixin:
                     result = {
                         "state": "closed",
                         "reason": f"The employer hires only in its listed locations, and the applicant lives in {outside}",
+                        "blocker_type": "ineligible",
+                    }
+                elif any(
+                    protected_status_missing(q.get("question", ""), q.get("options") or [], profile.get("facts"))
+                    for q in result["reviews"]
+                ):
+                    state = "closed"
+                    result = {
+                        "state": "closed",
+                        "reason": "The role is open only to U.S. citizens, permanent residents, refugees or asylees",
                         "blocker_type": "ineligible",
                     }
             if state == "needs_review" and not result.get("reviews"):

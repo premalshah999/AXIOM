@@ -161,6 +161,27 @@ FOREIGN_RESIDENCE = re.compile(
 )
 
 
+# 8 U.S.C. 1324b "protected individual" (citizen or national, permanent resident, refugee, asylee): asked with only
+# those statuses offered, the role is limited to them (export control). CHAOS Industries 2026-10-25.
+PROTECTED_INDIVIDUAL = re.compile(r"protected individual|1324b", re.I)
+PROTECTED_NONE = re.compile(r"\bnone\b|\bneither\b|\bnot (?:a|any)\b|do(?:es)? not (?:apply|qualify)|\bother\b", re.I)
+
+
+def protected_status_missing(question, options, facts):
+    """True when a role open only to 1324b protected individuals asks an applicant whose facts hold none of them."""
+    facts = facts or {}
+    if not PROTECTED_INDIVIDUAL.search(question or "") or not options:
+        return False
+    if any(PROTECTED_NONE.search(str(o)) for o in options):
+        return False  # The applicant can truthfully answer; nothing to close.
+    held = [facts.get(k) for k in ("us_citizen", "permanent_resident", "green_card", "has_refugee_status",
+                                   "has_asylee_status")]
+    if facts.get("us_citizen") is None or any(v is True or str(v).casefold() == "true" for v in held):
+        return False
+    status = str(facts.get("current_immigration_status_US") or "")
+    return not re.search(r"permanent resident|green card|refugee|asylee|citizen", status, re.I)
+
+
 def residence_outside(question, options, facts, location=""):
     """The applicant's US state when a residence question limits hiring to listed places that exclude it, else None."""
     limited = RESIDENCE_QUESTION.search(question or "") and HIRING_LIMIT.search(question or "")

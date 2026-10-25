@@ -23,6 +23,12 @@ class ReviewsMixin:
         if kind:
             return kind
         reason = question.get("reason", "")
+        from .. import owner_questions as oq
+
+        if oq.defect(question.get("question", ""), question.get("options") or [], oq.context_from(question), reason):
+            # The engine misread the field (a bare label without its row, a list that never loaded): the owner
+            # cannot answer it, so it is recovered as a control failure, never asked.
+            return "control_failure"
         if reason.startswith("Could not commit the answer:"):
             return "control_failure"
         if reason.startswith(("Model omitted", "Unverifiable answer", "Model output", "Model unavailable")):
@@ -328,6 +334,95 @@ class ReviewsMixin:
                           {"question": question[:200]})
             settled += 1
         return settled
+
+    async def revalidate_open_questions(self):
+        """Ask the current engine every open question again.
+
+        Owner 2026-10-25: "only few of them are truly legit, everything else is just chaos". Questions were frozen when
+        asked: ones created before a rule existed (a province in another country, pronouns on file, a site's search
+        box) waited for days as if they still needed the owner. Each open question is now re-checked:
+        - a residence question that shows the job is outside the applicant's locations closes the job;
+        - a question the engine misread (owner_questions.defect) leaves the owner's list for browser recovery;
+        - a question the profile now answers (resolver.local, no model call) is answered and the run resumes."""
+        import asyncio
+
+        from .. import owner_questions as oq
+        from ..answers import Resolver, protected_status_missing, residence_outside
+        from ..db import record
+        from ..schemas import Profile
+
+        def candidates():
+            newer = aliased(Run)
+            with self.db.session() as s:
+                return s.execute(
+                    select(Review.id, Review.run_id, Review.question, Review.options, Review.context, Review.reason,
+                           Review.key, Run.packet, Job)
+                    .join(Run, Review.run_id == Run.id)
+                    .join(Job, Run.job_id == Job.id)
+                    .where(
+                        Review.answer.is_(None),
+                        Run.state.in_(["waiting_answer", "needs_review"]),
+                        Job.status != "archived",
+                        ~select(newer.id).where(newer.job_id == Run.job_id, newer.created_at > Run.created_at).exists(),
+                    )
+                ).all()
+
+        outcome = {"closed": 0, "recovered": 0, "answered": 0}
+        moved = set()
+        for rid, run_id, question, options, context, reason, key, packet, job in await asyncio.to_thread(candidates):
+            if run_id in moved or key in {"manual", "session"}:
+                continue
+            options, context, profile = options or [], context or {}, (packet or {}).get("profile") or {}
+            outside = residence_outside(question, options, profile.get("facts"), profile.get("location", ""))
+            if not outside and protected_status_missing(question, options, profile.get("facts")):
+                outside = "a status the role requires (U.S. citizen, permanent resident, refugee or asylee)"
+            problem = None if outside else oq.defect(question, options, context, reason or "")
+            if outside or problem:
+                state, why = (
+                    (
+                        "closed",
+                        f"The role is open only to {outside[24:-1]}"
+                        if outside.startswith("a status the role requires")
+                        else f"The employer hires only in its listed locations, and the applicant lives in {outside}",
+                    )
+                    if outside
+                    else ("waiting_browser", f"The engine misread a field ({problem}): {oq.tidy(question)[:120]}")
+                )
+                with self.db.exclusive() as s:
+                    run = s.get(Run, run_id)
+                    if run and run.state in {"waiting_answer", "needs_review"}:
+                        run.state, run.reason = state, why
+                        moved.add(run_id)
+                        outcome["closed" if outside else "recovered"] += 1
+                self.db.event(run_id, "question_revalidated", why[:300], {"question": oq.tidy(question)[:200]})
+                continue
+            try:
+                resolver = Resolver(
+                    Profile.model_validate(profile), self.db, self.config, run_id, job.company or job.url, record(job)
+                )
+                field = {
+                    "id": rid,
+                    "label": oq.tidy(question),
+                    "type": context.get("type") or ("select" if oq.choices(options) else "text"),
+                    "options": options,
+                    "required": True,
+                    "section": context.get("section", ""),
+                    "group": context.get("group", ""),
+                    "value": "",
+                    "valid": True,
+                }
+                answer = await asyncio.to_thread(resolver.local, field)
+            except Exception:
+                continue  # The question stays asked.
+            if answer is not None and answer.disposition == "answer" and str(answer.value or "").strip():
+                try:
+                    await self.resolve_review(rid, str(answer.value), settle=False)
+                except ValueError:
+                    continue
+                self.db.event(run_id, "answer_inferred", "Answered an open question from the saved profile",
+                              {"question": oq.tidy(question)[:200], "evidence": list(answer.evidence_ids or [])[:4]})
+                outcome["answered"] += 1
+        return outcome
 
     async def resolve_review_file(self, review_id, filename, content):
         """Answer an upload question with the owner's file (Telegram document or photo, or the web app).
