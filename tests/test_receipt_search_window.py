@@ -51,3 +51,18 @@ async def test_a_one_run_check_reads_its_own_window_and_leaves_the_shared_cursor
     await check_receipts(service.mail, second)
     assert after(queries[0]) == int(late.timestamp()) // 3600 * 3600
     assert service.db.get_setting("receipt_mail_page:" + box, {}) == cursor
+
+
+async def test_a_one_run_check_first_searches_with_the_employers_name(service, monkeypatch):
+    at = datetime.now(UTC) - timedelta(minutes=30)
+    (rid,) = receipt_seed(service, 1, state="submission_unknown", start=at)
+    queries = searches(monkeypatch, service)
+    await check_receipts(service.mail, rid)
+    assert '"Example"' in queries[0] and '"Example"' not in queries[-1]
+
+
+def test_the_employer_hint_skips_generic_words():
+    from jobpilot.receipts import employer_hint
+
+    assert employer_hint("The Walt Disney Company") == '"Walt"'
+    assert employer_hint("Inc.") == ""

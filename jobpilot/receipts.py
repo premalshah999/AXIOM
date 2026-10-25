@@ -181,6 +181,9 @@ RECEIPT_WORDING = re.compile(
 # the search from the oldest unconfirmed run (18 days of codes and alerts) paged through old mail while new receipts
 # waited for the sweep to wrap; Lyft's "Thank you for your application" was never read (2026-10-25).
 RECEIPT_SEARCH = "(application OR applying OR resume)"
+# Words of employer names too common to narrow a mailbox search.
+GENERIC_NAME_WORDS = {"the", "and", "inc", "llc", "ltd", "corp", "corporation", "company", "group", "holdings",
+                      "university", "college", "health", "bank", "services", "solutions", "technologies", "systems"}
 # An unconfirmed run is polled for its acknowledgement this long; employers send them within minutes or hours.
 UNKNOWN_RECEIPT_DAYS = 7
 CHALLENGE = re.compile(
@@ -337,16 +340,25 @@ def verification_pending(mail, mailbox_id):
         )
 
 
-async def receipt_messages(mail, mailbox_id, recipient, since, *, max_pages=2, max_messages=100, durable=True):
+def employer_hint(company):
+    """One distinctive word of the employer's name for narrowing a one-run search ("Lyft", "Caesars"), or ''."""
+    words = [w for w in re.findall(r"[A-Za-z0-9]{3,}", company or "") if w.casefold() not in GENERIC_NAME_WORDS]
+    return f'"{words[0]}"' if words else ""
+
+
+async def receipt_messages(
+    mail, mailbox_id, recipient, since, *, max_pages=2, max_messages=100, durable=True, narrow="", seconds=15
+):
     """One bounded mailbox search per cycle, with durable progress through older pages. A one-run check
-    (durable=False) reads its own window from the newest message and leaves the shared cursor alone."""
+    (durable=False) reads its own window from the newest message and leaves the shared cursor alone; `narrow` adds
+    search terms (the employer's name)."""
     # Bucket only the search boundary. acknowledgement() independently enforces
     # each run's exact timestamp, so this cannot accept earlier mail for a run.
     since = int(since) // 3600 * 3600
     # One mailbox can receive a profile address and its per-platform plus-addresses (email_alias.py).
     recipients = sorted({recipient} if isinstance(recipient, str) else set(recipient))
     to = f"to:{recipients[0]}" if len(recipients) == 1 else "{" + " ".join(f"to:{r}" for r in recipients) + "}"
-    query = f"after:{since} {to} {RECEIPT_SEARCH}"
+    query = f"after:{since} {to} {RECEIPT_SEARCH}" + (f" {narrow}" if narrow else "")
     key = "receipt_mail_page:" + mailbox_id
     query_id = digest(query)
     saved = mail.db.get_setting(key, {}) if durable else {}
@@ -354,7 +366,7 @@ async def receipt_messages(mail, mailbox_id, recipient, since, *, max_pages=2, m
     messages, seen = [], set()
     fetched_pages = 0
     upgraded = False
-    deadline = time.monotonic() + 15
+    deadline = time.monotonic() + seconds
     while len(seen) < max_messages and time.monotonic() < deadline:
         ids = list(state.get("remaining_ids", []))
         if not ids:
@@ -545,9 +557,16 @@ async def check_receipts(mail, run_id=None):
             if run_id:
                 earliest = min(r["created_at"] for r in owned)
             since = datetime.fromisoformat(earliest or min(r["created_at"] for r in owned)).timestamp()
-            messages[mailbox_id] = await receipt_messages(
-                mail, mailbox_id, addresses if len(addresses) > 1 else recipient, since, durable=not run_id
-            )
+            to = addresses if len(addresses) > 1 else recipient
+            named = []
+            company = next((j["company"] for r, j in candidates if r["id"] == run_id), "")
+            if run_id and (hint := employer_hint(company)):
+                # Reading a message takes about a second: the newest ten receipt-like messages of the window filled a
+                # one-run check, and Lyft's own acknowledgement, older than those, was never read (2026-10-25).
+                named = await receipt_messages(mail, mailbox_id, to, since, durable=False, narrow=hint, seconds=20)
+            rest = await receipt_messages(mail, mailbox_id, to, since, durable=not run_id)
+            known = {m.get("id") for m in named}
+            messages[mailbox_id] = named + [m for m in rest if m.get("id") not in known]
 
     # All competing jobs matter, including those outside this rotating batch.
     # Considering only the 20 selected runs can turn ambiguous mail into proof.
