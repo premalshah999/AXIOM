@@ -159,10 +159,10 @@ async def test_back_on_workday_the_assessment_is_not_reopened():
     assert adapter.launched == ["take"] and calls == ["save and continue"]
 
 
-async def test_a_questionnaire_that_never_returns_stops_after_twelve_pages():
+async def test_a_questionnaire_that_never_returns_stops_at_its_page_limit():
     adapter = await opened()
     adapter.open_questionnaire([{"id": "next", "label": "Next", "automation_id": ""}])
-    for _ in range(12):
+    for _ in range(40):
         assert await adapter.on_form(await adapter.scan()) is None
     result = await adapter.on_form(await adapter.scan())
     assert result["state"] == "waiting_browser" and "did not return" in result["reason"]
@@ -187,7 +187,7 @@ async def test_another_workday_host_is_the_application_not_the_questionnaire():
 async def test_a_terminal_questionnaire_outcome_ends_the_guided_flow():
     adapter = await opened()
     adapter.open_questionnaire([{"id": "next", "label": "Next", "automation_id": ""}])
-    adapter.attempts["assessment_pages"] = 12
+    adapter.attempts["assessment_pages"] = 40
     await adapter.intermediate_submit()
     assert adapter.e.result["state"] == "waiting_browser"
 
@@ -200,3 +200,27 @@ async def test_the_navigator_never_hands_the_questionnaire_to_another_ats():
     engine = SimpleNamespace(armed=False, navigator_handed_off=False, page=adapter.page, fallback_mail_adapter=adapter,
                              job={"ats": "workday"})
     assert await BrowserEngine.navigator_handoff(engine) is None and not engine.navigator_handed_off
+
+
+async def test_an_answer_that_posts_back_to_the_next_question_continues_the_questionnaire():
+    """MAXIMUS's survey (Allison Transmission, 2026-10-25) loads its next question when a radio is clicked and never
+    shows Next; the run gave up as "No way forward" after the first answer."""
+    adapter = await opened()
+    adapter.open_questionnaire([])
+    questions = iter(["Are you a resident of the State of California?", "Have you received government assistance?"])
+    current = {"label": next(questions)}
+
+    async def scan():
+        return {"url": adapter.page.url, "controls": [], "errors": [], "automation": [], "headings": [],
+                "text": "Work Opportunity Tax Credit", "dialogs": [],
+                "fields": [{"label": current["label"], "type": "radio", "options": ["Yes", "No"]}]}
+
+    async def answer():
+        adapter.filled += 1
+        current["label"] = next(questions, current["label"])  # The click posts the page back to the next question.
+        return {"ok": True}
+
+    adapter.e.form.scan, adapter.fill_page = scan, answer
+    assert await adapter.on_assessment() is None  # Moved on by itself.
+    # The last question no longer changes and offers no way forward: hand the page to the guided flow.
+    assert (await adapter.on_assessment())["fallback"] is True

@@ -291,6 +291,8 @@ ACCOUNT_CREATE = re.compile(
     r"(?:create|register) (?:a |an |my |your |new )?(?:candidate )?(?:account|profile)|register(?: now)?|sign up|join now",
     re.I,
 )
+# Widget messages that carry only the employer's own option labels (never an applicant value).
+SAFE_CONTROL_PREFIXES = ("No unique supported option in this ATS field's owned popup",)
 SAFE_CONTROL_ERRORS = {
     "No matching option is offered",
     "Native option is ambiguous or changed",
@@ -3696,8 +3698,9 @@ class FormSession:
                                     for frame in traceback.extract_tb(exc.__traceback__)
                                     if "/jobpilot/" in frame.filename
                                 ][-6:],
-                                "safe_detail": str(exc)
-                                if type(exc) is ValueError and str(exc) in SAFE_CONTROL_ERRORS
+                                "safe_detail": str(exc)[:400]
+                                if type(exc) is ValueError
+                                and (str(exc) in SAFE_CONTROL_ERRORS or str(exc).startswith(SAFE_CONTROL_PREFIXES))
                                 else "",
                                 "structure": structure,
                                 "field": {

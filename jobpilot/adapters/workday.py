@@ -38,6 +38,11 @@ ADD = {
 }
 
 
+def question_set(obs):
+    """What a questionnaire page asks: its address and its questions (labels with their options)."""
+    return (obs.get("url", ""), tuple((f["label"], tuple(f.get("options") or [])) for f in obs.get("fields", [])))
+
+
 class Workday(Adapter):
     id = "workday"
     name = "Workday"
@@ -205,13 +210,14 @@ class Workday(Adapter):
     async def on_assessment(self):
         """One page of the tax-credit questionnaire: fill it from the profile, then its own Next/Submit/Finish."""
         self.attempts["assessment_pages"] += 1
-        if self.attempts["assessment_pages"] > 12:
+        if self.attempts["assessment_pages"] > 40:
             return {
                 "state": "waiting_browser",
                 "reason": "The tax-credit questionnaire did not return to the Workday application",
                 "blocker_type": "control_failure",
                 "recovery_cause": "control_observation",
             }
+        before = await self.form.scan()
         report = await self.fill_page()
         if isinstance(report, dict) and report.get("state"):
             return report
@@ -220,6 +226,11 @@ class Workday(Adapter):
         forward = next((c for c in controls if ASSESSMENT_FORWARD.fullmatch(c["label"].strip())), None) or next(
             (c for c in controls if ASSESSMENT_RETURN.fullmatch(c["label"].strip())), None
         )
+        if not forward and question_set(obs) != question_set(before):
+            # An answer that posts the page back moves the questionnaire on by itself: MAXIMUS's survey loads its next
+            # question when a radio is clicked and never shows Next (Allison Transmission, PepsiCo 2026-10-25).
+            self.emit("assessment", "The questionnaire moved to its next question")
+            return None
         if not forward:
             return {"fallback": True, "reason": "No way forward in the tax-credit questionnaire"}
         self.emit("assessment", "Continuing the tax-credit questionnaire", {"control": forward["label"][:40]})
