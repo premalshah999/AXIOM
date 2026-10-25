@@ -357,7 +357,7 @@ async def receipt_messages(mail, mailbox_id, recipient, since, *, max_pages=2, m
             if state.get("page_token"):
                 params["pageToken"] = state["page_token"]
             try:
-                listed = await mail.request(mailbox_id, "/messages", params)
+                listed = await mail.request(mailbox_id, "/messages", params, background=True)
             except MailCursorUpgrade:
                 if upgraded:
                     break
@@ -374,7 +374,7 @@ async def receipt_messages(mail, mailbox_id, recipient, since, *, max_pages=2, m
                 break
         mid = ids[0]
         try:
-            message = await mail.read_message(mailbox_id, mid)
+            message = await mail.read_message(mailbox_id, mid, background=True)
         except MailCursorUpgrade:
             if upgraded:
                 break
@@ -836,7 +836,7 @@ async def reconcile_approved_drafts(mail, job_ids, max_pages=8):
             }
             if token:
                 params["pageToken"] = token
-            listed = await mail.request(mailbox_id, "/messages", params)
+            listed = await mail.request(mailbox_id, "/messages", params, background=True)
             for item in listed.get("messages", []):
                 if item["id"] in seen:
                     continue
@@ -844,7 +844,9 @@ async def reconcile_approved_drafts(mail, job_ids, max_pages=8):
                 compared = _DRAFT_COMPARED.get(item["id"], frozenset())
                 if owned_jobs <= compared:
                     continue  # Mail is immutable: it already matched none of these jobs.
-                msg = await mail.request(mailbox_id, "/messages/" + item["id"], {"format": "full"})
+                msg = await mail.request(
+                    mailbox_id, "/messages/" + item["id"], {"format": "full"}, background=True
+                )
                 scanned += 1
                 matches = []
                 for job, run, start in owned:

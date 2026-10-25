@@ -92,7 +92,7 @@ def unproven_run(service, *, state="waiting_browser", title="Engineer"):
 def mailbox(monkeypatch, service, messages):
     fetched = []
 
-    async def request(box, path, params):
+    async def request(box, path, params, background=False):
         if path == "/messages":
             return {"messages": [{"id": m["id"]} for m in messages]}
         fetched.append(path)

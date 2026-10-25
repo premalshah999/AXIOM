@@ -406,8 +406,10 @@ class KnowledgeBase:
 
     @staticmethod
     def _compatible(entry, options, kind):
-        from .widgets import best_option
+        from .widgets import best_option, foreign_fallback
 
+        if foreign_fallback(entry.answer, getattr(entry, "options", None), options):
+            return None
         if kind == "checkbox":
             return as_checkbox(entry.answer)
         if options:

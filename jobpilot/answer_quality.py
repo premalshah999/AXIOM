@@ -91,6 +91,51 @@ def money_range(text):
     return (min(nums), max(nums)) if len(nums) == 2 else None
 
 
+# A numbered or generic link slot names no particular link. Oracle's "Link 1" held the personal site while "Link 2"
+# held LinkedIn, and the audit demanded LinkedIn in Link 1 (Verisk, 2026-10-25).
+GENERIC_LINK = re.compile(
+    r"(?:(?:other|additional|another) )?(?:link|url|online profile|social (?:media )?(?:link|profile))(?: \d+)?"
+)
+
+
+def own_link(form, field):
+    """A generic link slot holding one of the applicant's own links is correct, whichever link it is."""
+    if not GENERIC_LINK.fullmatch(normalize(field.get("label", ""))):
+        return False
+    profile = form.resolver.profile
+
+    def bare(url):
+        return re.sub(r"^(?:https?://)?(?:www\.)?", "", str(url or "").strip().casefold()).rstrip("/")
+
+    own = {bare(getattr(profile, key, "")) for key in ("linkedin", "website", "github")} - {""}
+    return bare(field.get("value")) in own
+
+
+def incomparable_date(value, expected):
+    """A date the form holds is not disproved by a fact that is no date: availability "Immediately" held SAP forms'
+    work-history Start Dates as mismatches it could never repair (2026-10-25)."""
+    try:
+        widgets.parse_date(value)
+    except ValueError:
+        return False
+    try:
+        widgets.parse_date(expected)
+    except ValueError:
+        return True
+    return False
+
+
+ROW_FACT = re.compile(r"profile:(?:work|education)\.\d+\.")
+
+
+def displaces_row_fact(field, known):
+    """A value filled from a history row's own fact is not disproved by a fact about something else: availability
+    "Immediately" turned SAP's unlabeled work-history Start Dates into today's date (2026-10-25)."""
+    return any(ROW_FACT.match(e) for e in field.get("evidence_ids") or []) and not any(
+        ROW_FACT.match(e) for e in known.evidence_ids or []
+    )
+
+
 def ranges_touch(value, expected):
     """Two salary ranges that share any amount (a desired $80,000 sits in both '$60,000 - $80,000' and
     '$80,000 - $100,000'; Guidehouse 2026-10-14) are equally faithful choices, not a mismatch."""
@@ -369,17 +414,16 @@ def supported_local(form, field):
     decline = getattr(form.resolver, "demographic_decline", None)
     if decline and (declined := decline(field)):
         return declined
+    # The phone group's own facts precede remembered answers: a saved address "Type: Home" was read as the phone
+    # type and held eight iCIMS applications whose phone was correctly Mobile (2026-10-25).
+    if phone := confirmed_phone_country(form, field) or confirmed_phone_type(form, field):
+        return phone
     if hasattr(form.resolver, "question_context"):
         packet = form.resolver.question_context(field)
         known = form.resolver.structured_answer(field, packet)
         if known is not None:
             return known
-    return (
-        confirmed_phone_country(form, field)
-        or confirmed_phone_type(form, field)
-        or verified_address_country(form, field)
-        or form.resolver.local(field)
-    )
+    return verified_address_country(form, field) or form.resolver.local(field)
 
 
 def verified_address_country(form, field):
@@ -481,6 +525,9 @@ def local_corrections(form, fields):
                 not catalog_gap
                 and not equivalent(field, field["value"], known.value)
                 and not ranges_touch(field["value"], known.value)
+                and not incomparable_date(field["value"], known.value)
+                and not own_link(form, field)
+                and not displaces_row_fact(field, known)
             ):
                 result[field["id"]] = (known, "confirmed_fact_mismatch")
         if field["type"] in {"text", "textarea", "contenteditable"} and "\u2014" in str(field["value"]):

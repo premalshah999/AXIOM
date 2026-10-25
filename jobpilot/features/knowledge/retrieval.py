@@ -261,7 +261,11 @@ def retrieve_answer_context(
                 exact_option = option_for(value, options)
                 exact_answer = value if exact_option else None
             else:
-                exact_answer = value
+                from ...widgets import foreign_fallback
+
+                # A picker's "Other - Not Listed" choice never answers a free-text question.
+                saved = [o for f in (plain or tier) for o in (f.options or [])]
+                exact_answer = None if foreign_fallback(value, saved, options) else value
 
         items = [_item(f, "fact", "exact") for f in exact]
         # 2. History rows for education/experience questions (row identity kept).

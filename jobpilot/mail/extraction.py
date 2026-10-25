@@ -21,7 +21,15 @@ CODE_CUE = re.compile(r"verification code|security code|one.time|passcode|\bpin\
 
 # Oracle Recruiting's standard one-time-code mail. Each employer's site may send it
 # from its own domain (uthscsa.edu) rather than oraclecloud.com.
-ORACLE_OTP = re.compile(r"confirm your identity using the one[- ]time pass ?code", re.I)
+# Oracle Recruiting's identity-code template as tenants word it (mailbox audit, 2026-10-25): "confirm your identity
+# using the one-time pass code", "Confirm your identity using this code:", "confirm your identity for your job
+# application for using this code", "Your one-time verification code to confirm your identity is". Only the first was
+# recognized, so codes mailed from an employer's own domain in the others (Marriott, Uber, Ford, Akamai) expired.
+ORACLE_OTP = re.compile(
+    r"confirm\s+your\s+identity\b.{0,60}?\busing\s+(?:the\s+|this\s+)?(?:one[- ]time\s+)?(?:pass\s?)?code\b"
+    r"|\bone[- ]time\s+(?:verification\s+|pass\s?)?code\s+to\s+confirm\s+your\s+identity\b",
+    re.I | re.S,
+)
 
 
 # Unbranded codes: a verification-specific cue is required ("promo code" never qualifies).

@@ -55,9 +55,21 @@ def is_phone_country(field):
     return False
 
 
+# iCIMS lists a profile's phones in a "Phones (1)" section whose selector is labeled only "Type" (Bluehawk, 2026-10-25).
+PHONES_SCOPE = re.compile(r"\b(?:phones?|telephones?|mobile|cell)\b", re.I)
+
+
 def is_phone_type(field):
     label = _label(field)
-    return bool(PHONE_TYPE_LABEL.search(label)) and not is_phone_country(field)
+    if PHONE_TYPE_LABEL.search(label):
+        return not is_phone_country(field)
+    # A bare "Type" selector inside a phone section or group, like the bare Country rule above.
+    return (
+        field.get("type") in SELECTOR_TYPES
+        and re.fullmatch(r"\s*(?:number )?type\s*\*?\s*", label, re.I) is not None
+        and bool(PHONES_SCOPE.search(" ".join(str(field.get(k) or "") for k in ("section", "group"))))
+        and not NOT_PHONE_SCOPE.search(_scope(field))
+    )
 
 
 def is_phone_extension(field):

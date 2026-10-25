@@ -15,9 +15,31 @@ from .constants import TOKEN_URL
 from .helpers import digest
 
 
+# How long background mailbox work waits for live verification requests before it proceeds anyway.
+LIVE_PRECEDENCE_SECONDS = 30
+
+
 class TransportMixin:
-    async def request(self, mailbox_id, path, params=None):
-        async with self.locks.setdefault(mailbox_id, asyncio.Lock()):
+    async def request(self, mailbox_id, path, params=None, *, background=False):
+        """background: receipt reconciliation. It reads over its own connections and waits while a live verification
+        request for this mailbox is in flight, so a code's search never queues behind it."""
+        live = self.live_requests
+        if background:
+            waited = time.monotonic()
+            while live.get(mailbox_id) and time.monotonic() - waited < LIVE_PRECEDENCE_SECONDS:
+                await asyncio.sleep(0.1)
+            lock = self.locks.setdefault((mailbox_id, "background"), asyncio.Lock())
+        else:
+            lock = self.locks.setdefault(mailbox_id, asyncio.Lock())
+            live[mailbox_id] = live.get(mailbox_id, 0) + 1
+        try:
+            return await self._request(lock, mailbox_id, path, params, "background" if background else "live")
+        finally:
+            if not background:
+                live[mailbox_id] -= 1
+
+    async def _request(self, lock, mailbox_id, path, params, lane):
+        async with lock:
             with self.db.session() as s:
                 box = s.get(Mailbox, mailbox_id)
                 if not box or box.state != "connected":
@@ -60,6 +82,7 @@ class TransportMixin:
                         "".join(password.split()),
                         path,
                         params,
+                        lane,
                     )
                 except MailAuthenticationError:
                     self.connection_error(
@@ -157,12 +180,14 @@ class TransportMixin:
             {"reason": reason, "at": now(), "until": time.time() + 86400},
         )
 
-    async def read_message(self, mailbox_id, message_id):
+    async def read_message(self, mailbox_id, message_id, *, background=False):
         quarantined = self.db.get_setting("mail_quarantine:" + digest(mailbox_id + ":" + message_id), {})
         if quarantined.get("until", 0) > time.time():
             return None
         try:
-            return await self.request(mailbox_id, "/messages/" + message_id, {"format": "full"})
+            return await self.request(
+                mailbox_id, "/messages/" + message_id, {"format": "full"}, background=background
+            )
         except MailMessageError:
             return None
         except (TypeError, RecursionError):

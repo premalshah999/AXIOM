@@ -13,7 +13,7 @@ APP_PASSWORD = "abcd efgh ijkl mnop"
 def fake_gmail(monkeypatch, accept="abcdefghijklmnop"):
     calls = []
 
-    def request(address, password, path, params=None):
+    def request(address, password, path, params=None, lane="live"):
         calls.append((address, password, path))
         if password != accept:
             raise MailAuthenticationError("Gmail authentication failed; check the saved app password")

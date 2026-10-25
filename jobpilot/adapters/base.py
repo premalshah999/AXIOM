@@ -791,6 +791,11 @@ class Adapter:
         # Keep correlated continuations intact; only request a fresh code when
         # this owner has no live request and the page offers exactly one resend.
         resuming = getattr(self, "run_record", {}).get("packet", {}).get("email_wait_resume")
+        if not self.inbox.live(self.challenge):
+            # The guided controller armed this run's request when it clicked the control that sent the code. A resend
+            # mails a second code, which can void the first and trips Oracle's 30-minute verification lock: every
+            # Oracle code step sent two (2026-10-25).
+            self.challenge = self.inbox.live_request(self.e.run_id) or self.challenge
         if not resuming and not self.inbox.live(self.challenge) and not self.attempts["entry_resend"]:
             resend = [
                 b

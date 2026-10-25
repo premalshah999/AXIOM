@@ -182,6 +182,13 @@ CONSENT_REQUEST = re.compile(
 
 # Gas South (Greenhouse) 2026-10-15: "... Please select "Yes" in the dropdown to confirm that you have read this
 # statement." The label names the option that acknowledges the statement.
+# An option that only records reading an instruction.
+ACKNOWLEDGING_ONLY = re.compile(
+    r"(?:thank you|thanks|ok(?:ay)?|understood|i understand|acknowledged?|i acknowledge|noted|got it|done|"
+    r"i have read(?: this| the above)?|read and understood)"
+)
+
+
 INSTRUCTED_OPTION = re.compile(
     r"\b(?:select|choose|check|click|mark)\s+[\"'“‘](?P<option>[^\"'”’]{1,40})[\"'”’]"
     r"(?:\s+(?:in|from|on)\s+the\s+(?:dropdown|drop-down|list|menu|box|options?))?\s+to\s+"

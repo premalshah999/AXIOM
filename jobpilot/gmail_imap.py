@@ -43,8 +43,10 @@ def mime_payload(message, depth=0):
 # command took ~1.9 s here (2026-10-18), and re-SELECTing between Spam, Trash and All Mail on one connection made each
 # search 7+ commands; a verification code waited 46 s (median) per mailbox scan. MailService serializes requests per
 # mailbox; the lock also covers direct callers. A dropped connection is replaced once.
+# Receipt reconciliation reads its own connections ("background" lane): one receipt request can run several commands,
+# and a verification code search queued behind a receipt sweep for 248 s while its 120 s window expired (2026-10-25).
 _clients = {}
-_lock = threading.Lock()
+_locks = {"live": threading.Lock(), "background": threading.Lock()}
 # A folder refreshed this recently already reports new mail; its next search skips the NOOP (one sweep's searches).
 FRESH_SECONDS = 5.0
 # Spam is searched on every Nth listing (verification mail rarely lands there; each folder costs two commands).
@@ -123,9 +125,9 @@ def _close(client):
         pass
 
 
-def request(address, password, path, params=None):
-    key = (address, hashlib.sha256(password.encode()).hexdigest())
-    with _lock:
+def request(address, password, path, params=None, lane="live"):
+    key = (address, hashlib.sha256(password.encode()).hexdigest(), lane)
+    with _locks[lane]:
         for attempt in range(2):
             pool = _clients.pop(key, None) or _Pool(address, password)
             try:

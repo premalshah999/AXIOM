@@ -90,7 +90,7 @@ async def test_receipt_cursor_upgrade_restarts_search_without_reusing_uids(
     service.db.set_setting("receipt_mail_page:" + box_id, {"query_id": digest(query), **legacy_state})
     client = FolderClient()
 
-    async def request(mailbox_id, path, params):
+    async def request(mailbox_id, path, params, background=False):
         return _request(client, EMAIL, path, params)
 
     monkeypatch.setattr(service.mail, "request", request)
@@ -129,7 +129,7 @@ def receipt(mid, at, body="Thank you for applying to Example. We received your a
 
 
 def mailbox_provider(monkeypatch, service, messages):
-    async def request(box, path, params):
+    async def request(box, path, params, background=False):
         if path == "/messages":
             return {"messages": [{"id": m["id"]} for m in messages]}
         return next(m for m in messages if path == "/messages/" + m["id"])
@@ -429,7 +429,7 @@ async def test_pending_challenge_bounded_pages_resume_on_next_poll(service, monk
         )
     calls = []
 
-    async def request(box, path, params):
+    async def request(box, path, params, background=False):
         calls.append((path, params))
         if path == "/messages":
             offset = int(params.get("pageToken", "0"))

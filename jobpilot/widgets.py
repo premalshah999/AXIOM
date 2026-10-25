@@ -199,6 +199,22 @@ def placeholder_option(value):
     )
 
 
+# A picker's own fallback choice. Saved from one catalog ("Other - Field of Study Not Listed"), it answers only a picker
+# that offers it: typed into Oracle's free-text Major it replaced the applicant's field of study, and the pre-submit
+# audit then held seven applications on the mismatch (2026-10-25).
+CATALOG_FALLBACK = re.compile(r"^\W*(?:other|none of the above)\b|\bnot (?:listed|in (?:the |this )?list)\b", re.I)
+
+
+def foreign_fallback(answer, saved_options, options):
+    """A fallback chosen from a saved catalog, asked by a field whose options do not include it (or that has none)."""
+    return (
+        bool(saved_options)
+        and isinstance(answer, str)
+        and bool(CATALOG_FALLBACK.search(answer))
+        and not any(norm(o) == norm(answer) for o in options or [])
+    )
+
+
 def money_amount(text):
     """Exact amount of a single plain/currency number such as "$85,000" or "85K"; else None."""
     match = re.fullmatch(

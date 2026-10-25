@@ -17,6 +17,7 @@ class MailService(MailboxesMixin, TransportMixin, RulesMixin, ChallengesMixin, P
         self.vault = Vault(config)
         self.transport = None  # An injected transport is used only by owned fixtures.
         self.locks = {}
+        self.live_requests = {}  # Mailbox id -> live verification requests in flight (background work waits).
         self.poll_lock = asyncio.Lock()
         self.message_cache = {}  # Immutable messages; secrets stay in memory, never in traces.
         self.poll_diagnostics = {}  # Counts and origins only; never message text or tokens.

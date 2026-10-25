@@ -17,6 +17,7 @@ from .consent import ACCOMMODATION
 from .consent import ACKNOWLEDGEMENT
 from .consent import CONSENT_REQUEST
 from .consent import DATA_CONSENT
+from .consent import ACKNOWLEDGING_ONLY
 from .consent import INSTRUCTED_OPTION
 from .consent import MARKETING
 from .consent import NOT_IDENTITY
@@ -48,6 +49,7 @@ from .sources import source_choice
 from .text import answer_key
 from .text import normalize
 from .text import option_value
+from ..widgets import foreign_fallback
 from .text import yes_no
 
 PAGE_LANGUAGE = re.compile(r"(?:select|choose|change) (?:a |your |the )?language|\b(?:rb|ddl|cbo|lst)language\b|"
@@ -308,6 +310,17 @@ class LocalRulesMixin:
                 return answer
         if (
             p.accept_all_application_terms
+            and len(options) == 1
+            and ACKNOWLEDGING_ONLY.fullmatch(normalize(options[0]))
+            and not f["label"].rstrip().endswith("?")
+        ):
+            # An instruction whose one option only records reading it ("Please enter your employment above using the
+            # + Add Another Employment link." offering "Thank you"): it asks nothing about the applicant. The model
+            # proposed a job title for it and four applications stalled (2026-10-25).
+            if answer := self._ans(f, options[0], ["policy:consent"], "The only option acknowledges an instruction"):
+                return answer
+        if (
+            p.accept_all_application_terms
             and DATA_USE_CONSENT.search(f["label"])
             and topic(f["label"]) == "consent"
             and re.match(r"^(?:do you |i )authori[sz]e\b", f["label"], re.I)
@@ -454,6 +467,7 @@ class LocalRulesMixin:
                 topic(f["label"]) != "source"
                 and applicable(reviewed, employer)
                 and question_text(reviewed.question) == question_text(f["label"])
+                and not foreign_fallback(reviewed.answer, reviewed.options, options)
             ):
                 value = option_value(reviewed.answer, options)
                 if value is not None:

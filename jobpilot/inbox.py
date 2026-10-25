@@ -13,7 +13,7 @@ import time
 
 from sqlalchemy import select
 
-from .db import Mailbox, MailChallenge
+from .db import Mailbox, MailChallenge, MailRule, record
 from .mail_errors import MailPending
 
 LEASE_BUSY = "Another application is verifying"
@@ -91,6 +91,24 @@ class Inbox:
                         "email sender", {"cap_seconds": cap},
                     )
             await asyncio.sleep(1)
+
+    def live_request(self, run_id):
+        """This run's open request window, whichever controller armed it (the guided controller arms one when it
+        clicks the control that sends the mail), or None."""
+        with self.service.db.session() as s:
+            row = s.scalar(
+                select(MailChallenge)
+                .where(
+                    MailChallenge.run_id == run_id,
+                    MailChallenge.state.in_(["pending", "matched"]),
+                    MailChallenge.expires > time.time(),
+                )
+                .order_by(MailChallenge.created_at.desc())
+            )
+            if row is None:
+                return None
+            rule = s.get(MailRule, row.rule_id)
+            return {**record(row), "rule": record(rule) if rule else {}}
 
     def live(self, challenge):
         if not challenge:
