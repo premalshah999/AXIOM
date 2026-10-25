@@ -117,6 +117,29 @@ def numeric_year_counts(fields):
             f["type"] = "number"
 
 
+# "Please enter your first name using ALL CAPITAL LETTERS (Example: JOHN)": Dallas County's Oracle form refused
+# mixed-case names at submit with HTTP 400, twice, with no field error shown (2026-10-25).
+UPPERCASE_ONLY = re.compile(
+    r"\b(?:all\s+)?(?:capital|upper[- ]?case|block)\s+letters\b|\ball\s+caps\b|\bin\s+capitals\b|\buppercase\s+only\b",
+    re.I,
+)
+
+
+def mark_uppercase_fields(fields, text):
+    """A text field the form asks to be written in capital letters, in its own label or hint or in a page sentence
+    that names it."""
+    sentences = [s for s in re.split(r"(?<=[.!?])\s+|\n", text or "") if UPPERCASE_ONLY.search(s)]
+    for f in fields:
+        if f.get("type") not in {"text", "textarea"}:
+            continue
+        own = " ".join(str(f.get(k) or "") for k in ("label", "hint"))
+        name = normalize(f.get("label") or "")
+        if UPPERCASE_ONLY.search(own) or (
+            len(name) >= 4 and any(re.search(rf"\b{re.escape(name)}\b", normalize(s)) for s in sentences)
+        ):
+            f["letter_case"] = "upper"
+
+
 def label_signature_date(fields, text):
     """The federal self-identification forms (CC-305 "Voluntary Self-Identification of Disability") date the form with
     three controls under a "Date" caption the scanner does not attach: bare Month, Day and Year (DecisionPoint, iCIMS,
@@ -1306,6 +1329,7 @@ class FormSession:
         name_phone_numbers(list(self.fields.values()))
         link_companion_text(self.fields.values())
         label_signature_date(list(self.fields.values()), "\n".join(texts))
+        mark_uppercase_fields(list(self.fields.values()), "\n".join(texts))
         icims_protocol.apply(list(self.fields.values()), list(self.buttons.values()), "\n".join(texts))
         numeric_year_counts(self.fields.values())
         oracle_education_block(self.fields.values())
@@ -2094,6 +2118,8 @@ class FormSession:
         )
         # Driver boundary: local fast paths, recovery fills and quality repairs all pass here.
         value = display_name_case(field.get("label", ""), value)
+        if field.get("letter_case") == "upper" and isinstance(value, str):
+            value = value.upper()  # The form asks for this field in capital letters (mark_uppercase_fields).
         if field.get("type") in {"text", "textarea", "contenteditable"}:
             value = str(value).replace("\u2014", ", ")
             # Preserve prose/facts while honoring an explicit field validation
