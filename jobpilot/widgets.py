@@ -1435,6 +1435,112 @@ RCM_LIST = """() => {
 }"""
 
 
+# One read of an RCM input's own list: "{n}:_input" owns "{n+1}:_listSelect", but the scroll box div#"{n+1}:" exists
+# only after the first DWR answer (0.5-0.9 s after the click), and every fetched page renders its OWN <ul> with that
+# same id, so getElementById saw page 1 only (REA on career8.successfactors.com, 2026-10-25).
+RCM_CATALOG = """e => {
+  const own = e.getAttribute('aria-owns') || '';
+  const box = document.getElementById(own.replace(/_listSelect$/, ''));
+  const lis = [...document.querySelectorAll('ul[id="' + own + '"] li[role=option]')];
+  return {box: !!box, loading: !!(box && box.querySelector('.page-loading')),
+          none: !!(box && box.querySelector('.no-results')),
+          options: lis.filter(o => o.id && o.getClientRects().length)
+            .map(o => ({id: o.id, text: (o.textContent || '').replace(/\\s+/g, ' ').trim()}))};
+}"""
+RCM_SCROLL_END = """e => { const b = document.getElementById((e.getAttribute('aria-owns') || '').replace(/_listSelect$/, ''));
+  if (b) b.scrollTop = b.scrollHeight; return !!b; }"""
+RCM_PAGE = 100
+
+
+async def _rcm_catalog(el, settle=0.9, limit=3.0, until=None):
+    """Poll the owned list until it has answered (its box exists, no page is loading) and stopped changing."""
+    end = time.monotonic() + limit
+    last, stable = None, 0.0
+    state = {"box": False, "options": [], "none": False, "loading": False}
+    while time.monotonic() < end:
+        state = await el.evaluate(RCM_CATALOG)
+        key = [o["id"] for o in state["options"]]
+        if state["box"] and not state["loading"] and (key or state["none"]):
+            stable = stable + 0.1 if key == last else 0.0
+            # A page shorter than a full page is the whole catalog: nothing more can arrive.
+            if stable >= settle or len(key) % RCM_PAGE or (until and until(state)):
+                break
+        else:
+            stable = 0.0
+        last = key
+        await asyncio.sleep(0.1)
+    return state
+
+
+async def _rcm_all_pages(el, state):
+    """Scroll the list to its end until no further page arrives (a page at a time, fetched in order)."""
+    for _ in range(8):
+        if len(state["options"]) % RCM_PAGE or not state["options"]:
+            break
+        count = len(state["options"])
+        await el.evaluate(RCM_SCROLL_END)
+        await asyncio.sleep(0.25)
+        state = await _rcm_catalog(el, settle=0.3, limit=1.5, until=lambda s: len(s["options"]) > count)
+        if len(state["options"]) == count:
+            break
+    return state
+
+
+def _rcm_match(text, targets, options):
+    wanted = {norm(t) for t in targets}
+    exact = next((o for o in options if norm(o["text"]) in wanted), None)
+    if exact:
+        return exact
+    texts = [o["text"] for o in options if o["text"]]
+    pick = next((t for t in texts if school_option_matches(text, t)), None) or best_option(texts, text)
+    return next((o for o in options if o["text"] == pick), None)
+
+
+async def _rcm_owned_select(frame, el, text, targets, base, longest, full_list_only=False, choose=None):
+    """Open the whole list by its button (no typing), read every page, and decide on the real options; search the
+    employer's "contains" filter once only when the catalog is longer than the pages that loaded. Typed searches ran
+    first and waited 4 s each for an exact entry, so every answer spelled unlike its option burned the 12 s field
+    budget before the full list and the resolver were tried (139 deadlines in 36 runs, REA 2026-10-25)."""
+    await el.fill("", timeout=3000)
+    await frame.locator(f"[id='{base}_selectButton']").click(timeout=3000)
+    state = await _rcm_all_pages(el, await _rcm_catalog(el))
+    options = [o for o in state["options"] if o["text"] and norm(o["text"]) != "no selection"]
+    complete = len(state["options"]) % RCM_PAGE != 0
+    pick = _rcm_match(text, targets, options)
+    if not pick and choose and options and (complete or full_list_only):
+        chosen = await choose([o["text"] for o in options])
+        pick = next((o for o in options if o["text"] == chosen), None) if chosen else None
+    if not pick and not complete and not full_list_only:
+        word = max(re.findall(r"[A-Za-z]{4,}", longest) or [longest[:4]], key=len)
+        before = [o["id"] for o in state["options"]]
+        await el.fill("")
+        await el.press_sequentially(word, delay=30)
+        state = await _rcm_catalog(
+            el,
+            settle=0.4,
+            limit=3.5,
+            until=lambda s: s["none"] or ([o["id"] for o in s["options"]] != before and not s["loading"]),
+        )
+        options = [o for o in state["options"] if o["text"] and norm(o["text"]) != "no selection"]
+        pick = _rcm_match(text, targets, options)
+        if not pick and choose and options:
+            chosen = await choose([o["text"] for o in options])
+            pick = next((o for o in options if o["text"] == chosen), None) if chosen else None
+    if not pick:
+        try:
+            await el.press("Escape", timeout=1000)
+        except Exception:
+            pass
+        raise ValueError("No matching option is offered")
+    targets = [*targets, pick["text"]]
+    await frame.locator(f"[id='{pick['id']}']").click(timeout=3000)
+    if await _rcm_committed(el, targets, owned=True):
+        return await el.evaluate("e => e.value")
+    if await _rcm_enter(el, pick["id"]) and await _rcm_committed(el, targets, owned=True):
+        return await el.evaluate("e => e.value")
+    raise ValueError("The website did not commit the observed choice")
+
+
 async def _rcm_paginated(frame, el, value, full_list_only=False, choose=None):
     """SuccessFactors RCM paginated picklist (ASSA ABLOY State/Ethnicity, 2026-10-14).
 
@@ -1445,6 +1551,9 @@ async def _rcm_paginated(frame, el, value, full_list_only=False, choose=None):
     """
     from .answers import US_STATES
 
+    if await el.is_disabled():
+        # A dependent picklist waits for an earlier answer; filling it waited 3 s and then timed out.
+        raise ValueError("This list depends on an earlier answer")
     text = str(value).strip()
     targets = [text, US_STATES.get(text.upper(), "")] + [
         k for k, v in US_STATES.items() if v.lower() == text.lower()
@@ -1452,6 +1561,8 @@ async def _rcm_paginated(frame, el, value, full_list_only=False, choose=None):
     targets = [t for t in dict.fromkeys(targets) if t]
     base = (await el.get_attribute("id") or "").removesuffix("_input")
     longest = max(targets, key=len)
+    if await el.get_attribute("aria-owns"):
+        return await _rcm_owned_select(frame, el, text, targets, base, longest, full_list_only, choose)
     # A 4-letter prefix of a long catalog entry ("Univ" for a university) leaves hundreds of paged
     # entries (Cargill, 2026-10-16); type the whole answer, then its most distinctive word.
     queries = (

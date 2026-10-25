@@ -1,0 +1,66 @@
+<!doctype html><meta charset=utf-8><title>RCM paginated picklist (faithful emulation)</title>
+<style>#sfOverlayMgr{position:absolute;left:0;top:0;z-index:9}.sf-combo-listselect{height:200px;overflow:auto;background:#fff;border:1px solid #888;width:320px}
+ul{margin:0;padding:0;list-style:none}li{height:24px}</style>
+<!-- Emulates RCMPaginatedPicklistSingleSelect + SFComboListSelect (career8.successfactors.com, 2026-10-25):
+  * the list box div#"{n+1}:" and ul#"{n+1}:_listSelect" do not exist until the first (delayed) DWR answer;
+  * 100 options per page, pages fetched in order; EVERY page renders its own <ul> with the same id (getElementById -> page 1);
+  * page 2 is fetched as soon as page 1 is shorter than the box; later pages when the box is scrolled to its end;
+  * typing: keyup hides the popup, then a debounced (250 ms) server "contains" filter; aria-expanded stays "false" while
+    the filtered list shows; the filtered list REPLACES the box;
+  * only a click on an option (or Enter on the focused one) commits: label into the input, id into the hidden input;
+  * blur with the popup closed and input text != committed label reverts the text (or clears it);
+  * item 0 of an unfiltered list is the "No Selection" entry. -->
+<div class=RCMFormField>
+<label for="9:_input">Question</label>
+<span id="8:" class=sfCascadingPicklist><div id="9:_selectContainer" class=paginatedPicklistContainer>
+<input id="9:_input" role=combobox class="rcmpaginatedselectinput rcmpaginatedselectitem rcmpaginatedselect_accessible"
+  aria-owns="10:_listSelect" aria-expanded=false autocomplete=off placeholder="No Selection" type=text>
+<button id="9:_selectButton" type=button class=rcmpaginatedselectbutton>v</button>
+<input type=hidden id=tor__fcustq name=tor__fcustq></div></span></div>
+<div id=other><input id=other_input placeholder=other></div>
+<div id=sfOverlayMgr></div>
+<script>
+const CATALOG = window.CATALOG || __CATALOG__;          // [labels], replaced by the test
+const DWR_MS = window.DWR_MS || 600, PAGE = 100, DEBOUNCE = 250;
+const input = document.getElementById('9:_input'), hidden = document.getElementById('tor__fcustq');
+const OWN = '10:', mgr = document.getElementById('sfOverlayMgr');
+let committed = {label: '', value: ''}, box = null, pages = [], filter = null, shown = false, timer = null, seq = 0, lastIndex = -1;
+const matching = f => (f ? CATALOG.filter(s => s.toLowerCase().includes(f.toLowerCase())) : ['No Selection', ...CATALOG]);
+function dwr(pageIndex, f, done) {        // getPicklistByPageWithExcludeOption
+  window.__dwr = (window.__dwr || 0) + 1;
+  setTimeout(() => done(matching(f).slice(pageIndex * PAGE, (pageIndex + 1) * PAGE), matching(f).length), DWR_MS);
+}
+function renderPage(items, index) {
+  const ul = document.createElement('ul'); ul.id = OWN + '_listSelect'; ul.setAttribute('role', 'listbox');
+  items.forEach(label => { const li = document.createElement('li'); lastIndex++; li.id = OWN + 'item' + lastIndex;
+    li.setAttribute('role', 'option'); const a = document.createElement('a'); a.setAttribute('role', 'menuitem'); a.textContent = label;
+    li.appendChild(a); li.onclick = () => select(label, li.id); ul.appendChild(li); });
+  return ul;
+}
+function open(f) {
+  if (box) box.remove(); lastIndex = -1; pages = []; filter = f;
+  const mine = ++seq;
+  dwr(0, f, (items, total) => {
+    if (mine !== seq) return;                      // stale filter answer is dropped
+    box = document.createElement('div'); box.id = OWN; box.className = 'sf-combo-listselect';
+    const r = input.getBoundingClientRect(); mgr.style.top = (window.scrollY + r.bottom) + 'px'; mgr.style.left = r.left + 'px';
+    mgr.appendChild(box); box.appendChild(renderPage(items, 0)); pages[0] = true; shown = true;
+    const more = () => { const n = pages.length;
+      if (n * PAGE < total && box.scrollHeight - box.scrollTop - box.clientHeight < 20 && !pages[n]) { pages[n] = 'loading';
+        dwr(n, f, items2 => { pages[n] = true; if (box && mine === seq) { box.appendChild(renderPage(items2, n)); setTimeout(more, 50); } }); } };
+    box.onscroll = more; setTimeout(more, 50);
+  });
+}
+function close() { if (box) { box.remove(); box = null; } shown = false; }
+function select(label, id) { const value = id; close(); input.value = label; committed = {label, value};
+  hidden.value = label === 'No Selection' ? '' : String(CATALOG.indexOf(label)); input.setAttribute('aria-expanded', 'false'); }
+document.getElementById('9:_selectButton').onclick = () => { input.focus(); input.setAttribute('aria-expanded', 'true'); open(null); };
+input.onclick = () => { input.setAttribute('aria-expanded', 'true'); if (!shown && !box) open(null); };
+input.onkeyup = ev => { if (ev.key.length === 1 || ev.key === 'Backspace') { close(); input.setAttribute('aria-expanded', 'false');
+  clearTimeout(timer); timer = setTimeout(() => open(input.value || null), DEBOUNCE); }
+  if (ev.key === 'Escape') { close(); input.setAttribute('aria-expanded', 'false'); } };
+input.onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault();
+  const act = input.getAttribute('aria-activedescendant'); const li = act && document.getElementById(act); if (li) li.click(); } };
+input.onblur = () => setTimeout(() => { if (shown) return;
+  if (input.value !== committed.label) input.value = committed.label; }, 0);
+</script>
