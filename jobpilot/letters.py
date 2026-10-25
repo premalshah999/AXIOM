@@ -84,14 +84,19 @@ async def cover_letter(resolver):
             applicant=resolver.profile.name,
         )
         allowed = {x["id"] for x in evidence} | {r["unit_id"] for r in rows if r.get("unit_id")}
+        # Only a claim the evidence does not support (a number, tool or name) refuses the letter. Style findings left
+        # after the writer's repair pass ("too technical: names 10 technologies", length, a cliché) refused every
+        # required letter for Go Fish Digital and Anori, and the owner was asked to supply one (2026-10-25).
+        unsupported = [p for p in (letter.problems or []) if str(p).startswith("unsupported")]
         if (
-            letter.needs_review
+            unsupported
             or not letter.text
             or not letter.evidence_ids
             or any(ref not in allowed for ref in letter.evidence_ids)
         ):
             raise ValueError("Cover letter needs internal writing repair")
-        stored = {"text": letter.text, "signed": True, "evidence_ids": letter.evidence_ids}
+        stored = {"text": letter.text, "signed": True, "evidence_ids": letter.evidence_ids,
+                  "style_findings": list(letter.problems or [])[:6]}
         resolver.db.set_setting("cover_letter:" + key, stored)
     if not stored:
         letter = await structured(
