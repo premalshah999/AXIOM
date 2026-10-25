@@ -47,3 +47,36 @@ async def test_a_fixed_location_list_is_still_read(page, service, tmp_path):
     field = next(f for f in (await form.scan())["fields"] if f["label"] == "Preferred work location")
     await form.discover_options(field)
     assert field["options"] == ["Denver, CO", "Long Beach, CA"]
+
+
+GEOCODER = """<label id=l1 for=loc>Location (City)</label>
+<input id=loc role=combobox aria-autocomplete=list aria-expanded=false aria-labelledby=l1 aria-controls=m>
+<div id=m role=listbox hidden></div>
+<script>
+const box = document.getElementById('loc'), menu = document.getElementById('m');
+const places = ['Springfield, Illinois, United States', 'Springfield, Maryland, United States'];
+box.addEventListener('input', () => {
+  const q = box.value.trim().toLowerCase();
+  // A place search: the whole "City, State, Country" string finds nothing, the city name does.
+  const rows = q && !q.includes(',') ? places.filter(p => p.toLowerCase().startsWith(q)) : [];
+  menu.innerHTML = rows.map(p => `<div role=option>${p}</div>`).join('');
+  menu.hidden = !rows.length; box.setAttribute('aria-expanded', String(rows.length > 0));
+});
+menu.addEventListener('click', ev => {
+  const row = ev.target.closest('[role=option]'); if (!row) return;
+  box.value = row.textContent; menu.hidden = true; box.setAttribute('aria-expanded', 'false');
+});
+</script>"""
+
+
+async def test_a_location_typeahead_is_searched_by_city_and_takes_the_applicants_state(page, service, tmp_path):
+    """Lyft (Greenhouse) 2026-10-25: the whole "City, State, Country" found nothing, and the run stalled."""
+    from jobpilot.schemas import Address
+
+    await page.set_content(GEOCODER)
+    profile = Profile(address=Address(city="Springfield", state="MD", country="United States"))
+    form = FormSession(page, Resolver(profile, service.db, service.config), tmp_path / "r.pdf", lambda *a: None)
+    field = next(f for f in (await form.scan())["fields"] if f["label"] == "Location (City)")
+    committed = await form.fill(field, "Springfield, Maryland, United States")
+    assert committed == "Springfield, Maryland, United States"
+    assert await page.locator("#loc").input_value() == "Springfield, Maryland, United States"

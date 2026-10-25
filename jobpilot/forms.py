@@ -2337,6 +2337,12 @@ class FormSession:
                     re.sub(r"[,\s]+", " ", str(value)).strip(),
                     str(value).split(",", 1)[0].strip(),
                 ]
+            city = getattr(getattr(getattr(self.resolver, "profile", None), "address", None), "city", "") or ""
+            if city and self.location_resolver(field) and normalize(city) != normalize(value):
+                # A location typeahead finds places by name: "Germantown, Maryland, United States" typed whole found
+                # nothing on Lyft's Greenhouse form, and the refill cleared a choice already made (2026-10-25). The city
+                # is searched too, and the address picks its own state's result.
+                search_queries = [*search_queries, city]
             rules = getattr(self.resolver, "answer_rules", None)
             fallback = (getattr(rules, "major_fallback", "") or "").strip()
             major_pick = None
