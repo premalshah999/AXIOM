@@ -102,3 +102,13 @@ def test_an_unregistered_address_reads_as_no_account(message, unregistered):
     from jobpilot.adapters.base import NOT_FOUND
 
     assert bool(NOT_FOUND.search(message)) is unregistered
+
+
+def test_avatures_sign_in_wording_reads_as_refused_and_create_profile_as_sign_up():
+    """Deloitte's Avature login says "The username or password may be incorrect, or access might be restricted." and
+    offers new candidates "Create profile!"; runs read the refusal as unknown and never registered (2026-10-26)."""
+    from jobpilot.adapters.base import BAD_CREDENTIALS, CREATE_LINK
+
+    assert BAD_CREDENTIALS.search("The username or password may be incorrect, or access might be restricted.")
+    assert CREATE_LINK.fullmatch("Create profile!") and CREATE_LINK.fullmatch("Create account")
+    assert not CREATE_LINK.fullmatch("Create profile and apply later today")

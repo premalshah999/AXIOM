@@ -122,3 +122,13 @@ def test_an_already_applied_refusal_is_an_already_applied_outcome():
     other = object.__new__(BrowserEngine)
     other.refusal_said = ["Please enter your first name using ALL CAPITAL LETTERS (Example: JOHN)."]
     assert other.refused_as_already_applied() is None
+
+
+def test_a_refusal_records_header_and_key_names_never_values():
+    from jobpilot.browser import request_shape
+
+    request = SimpleNamespace(headers={"content-type": "application/json", "x-turnstile-token": "secret-token",
+                                       "cookie": "a=b"}, post_data_json={"candidate": {"email": "x@y.test"}, "token": "t"})
+    shape = request_shape(request)
+    assert shape == {"sent_headers": ["content-type", "x-turnstile-token"], "sent_keys": ["candidate", "token"]}
+    assert "secret-token" not in str(shape) and "x@y.test" not in str(shape)

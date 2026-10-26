@@ -124,7 +124,7 @@ SMS = re.compile(
 )
 CREATE_LINK = re.compile(
     r"^(?:create (?:an? )?(?:account|profile)|sign up|register|new user|join(?: now)?|new candidate|"
-    r"don'?t have an account\??.{0,20}|create account)$",
+    r"don'?t have an account\??.{0,20}|create account)[!.]?$",  # Deloitte's Avature: "Create profile!" (2026-10-26)
     re.I,
 )
 SIGNIN_LINK = re.compile(
@@ -148,7 +148,9 @@ BAD_CREDENTIALS = re.compile(
     r"couldn'?t find (?:an |your )?account|does not correspond to a registered user|"
     # SAP SuccessFactors: "We couldn't authenticate you. Check your username and password."
     r"couldn'?t authenticate|could not authenticate|check your (?:user ?name|e-?mail)(?: and| or) password|"
-    r"authenticat\w* (?:failed|unsuccessful)",
+    r"authenticat\w* (?:failed|unsuccessful)|"
+    # Avature (Deloitte 2026-10-26): "The username or password may be incorrect, or access might be restricted."
+    r"(?:user ?name|e-?mail|password|credentials) (?:may|might) be (?:incorrect|invalid|wrong)",
     # Taleo uses this wording for a username with no account, before offering New User.
     re.I,
 )
@@ -2016,7 +2018,12 @@ class Adapter:
         with no password ("A password is required"), and the run reported a reset that was never requested. A link
         that has not opened its page in time is followed by its address, on the sign-in page's own website."""
         before = self.page.url
-        await self.click(forgot, auth=True)
+        try:
+            await self.click(forgot, auth=True)
+        except (PlaywrightError, TimeoutError):
+            # Deloitte's Avature "Forgot your password?" is a script-only link the pointer click never reached (6 s
+            # timeouts on every run, 2026-10-26); its own click event runs the same handler.
+            await self.form.locator(forgot["id"]).evaluate("e => e.click()", timeout=5000)
         deadline = time.monotonic() + RESET_STEP_SECONDS
         while True:
             await self.form.settle(timeout=3)

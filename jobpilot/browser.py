@@ -127,6 +127,30 @@ REFUSAL_KEYS = {"message", "error", "errors", "error_message", "errormessage", "
                 "reason", "title", "msg"}
 
 
+# Unfinished outcomes whose tab closes once its draft is saved; their next run reopens the saved route.
+RELEASED_TAB_STATES = {"waiting_browser", "timed_out", "needs_review", "waiting_answer"}
+
+
+def request_shape(request):
+    """Names only (never values) of a refused write's headers and JSON body keys: whether Workable's apply POST carried
+    its X-TURNSTILE-TOKEN header decides between a missing bot-check token and a refusal of the applicant (412)."""
+    shape = {}
+    try:
+        shape["sent_headers"] = sorted(
+            name for name in (request.headers or {})
+            if not re.fullmatch(r"cookie|authorization|sec-.*|accept.*|user-agent|referer|origin|content-length", name, re.I)
+        )[:30]
+    except Exception:
+        pass
+    try:
+        body = request.post_data_json
+        if isinstance(body, dict):
+            shape["sent_keys"] = sorted(body)[:40]
+    except Exception:
+        pass
+    return shape
+
+
 def refusal_text(body, limit=300):
     """What an employer's 4xx body says, without applicant values: its JSON message strings (or its visible text),
     addresses and digits masked."""
@@ -1413,6 +1437,15 @@ class BrowserEngine:
             if external and hasattr(self, "page"):
                 if self.retain_owned_draft():
                     await self.retain_desktop_draft()
+                    if self.releases_retained_tab():
+                        # The saved route and checkpoint reopen this draft on its next run (the inactive-tab path).
+                        # Every unfinished run kept its tab open: two Chrome profiles grew to 47 GB each on a 16 GB
+                        # Mac and the machine ran out of memory (2026-10-26).
+                        for owned_page in {self.page, getattr(getattr(self, "form", None), "page", self.page)}:
+                            try:
+                                await asyncio.wait_for(owned_page.close(), timeout=4)
+                            except Exception:
+                                pass
                 else:
                     self.db.set_setting("desktop_job:" + job["id"], {})
                     owned = {self.page}
@@ -1915,7 +1948,8 @@ class BrowserEngine:
     def refusal_event(self, response, said=None):
         request = response.request
         data = {"status": response.status, "method": request.method, "resource_type": request.resource_type,
-                "path": urlsplit(response.url).path[:120], **({"said": said} if said else {})}
+                "path": urlsplit(response.url).path[:120], **({"said": said} if said else {}),
+                **request_shape(request)}
         if said:
             # What the employer said is read like the page's own text: a capitals-only rule stated only in the
             # refusal (Dallas County's Oracle "Please enter your first name using ALL CAPITAL LETTERS").
@@ -3770,6 +3804,11 @@ class BrowserEngine:
                 await agent.run(max_steps=30)
             finally:
                 await browser.stop()
+
+    def releases_retained_tab(self):
+        """A retained draft whose tab may close: nothing was sent and no live wait needs the page. Uncertain submissions,
+        email waits, pauses and dry runs keep theirs."""
+        return not self.armed and (self.result or {}).get("state") in RELEASED_TAB_STATES
 
     def retain_owned_draft(self):
         """Retain unfinished owned pages independently of paid retry admission."""

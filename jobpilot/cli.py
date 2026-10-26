@@ -218,6 +218,8 @@ def main():
                 "--disable-background-timer-throttling",
                 "--disable-renderer-backgrounding",
                 "--disable-backgrounding-occluded-windows",
+                # Bounded renderers: two profiles reached 47 GB each on a 16 GB Mac (2026-10-26).
+                "--renderer-process-limit=8",
                 # A capped disk cache: an unbounded one grew to ~1 GB and slowed page loads.
                 "--disk-cache-size=268435456",
                 "about:blank",
@@ -247,6 +249,8 @@ def main():
                 "--disable-background-timer-throttling",
                 "--disable-renderer-backgrounding",
                 "--disable-backgrounding-occluded-windows",
+                # Bounded renderers: two profiles reached 47 GB each on a 16 GB Mac (2026-10-26).
+                "--renderer-process-limit=8",
                 "--disk-cache-size=134217728",
             ],
             stdout=subprocess.DEVNULL,

@@ -36,6 +36,7 @@ launch_chrome() {
     --disable-background-timer-throttling \
     --disable-renderer-backgrounding \
     --disable-backgrounding-occluded-windows \
+    --renderer-process-limit="${RENDERER_LIMIT:-8}" \
     ${EXTRA_FLAGS}
   if [ "${DRY_RUN:-0}" = "1" ]; then
     printf '%s\n' "$@"
