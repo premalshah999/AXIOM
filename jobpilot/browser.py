@@ -96,6 +96,15 @@ NET_RETRY = re.compile(r"net::ERR_(?:CONNECTION_(?:CLOSED|RESET|TIMED_OUT)|NETWO
 NET_ERROR = re.compile(r"net::ERR_([A-Z_]+)")
 
 
+def current_role_end_date(resolver, field):
+    """True when the resolver declines this field as the current role's end date."""
+    try:
+        answer = resolver.local(field) if resolver is not None else None
+    except Exception:
+        return False
+    return bool(answer and answer.reason == "Current role has no end date")
+
+
 def net_failure(exc, diagnostics=None):
     """The outcome of a page the employer's site would not serve, or None. West Monroe's career site served an
     expired certificate and Amazon's dropped the connection (2026-10-25): each run read "Browser control failed at
@@ -3914,14 +3923,6 @@ class BrowserEngine:
                 supporting_facts=validated.supporting_facts,
             )
 
-    def current_role_end_date(self, field):
-        """True when the resolver declines this field as the current role's end date."""
-        try:
-            answer = self.resolver.local(field)
-        except Exception:
-            return False
-        return bool(answer and answer.reason == "Current role has no end date")
-
     def controller_blocker(self, reason="", *, original=None):
         """Keep real answer/control causes when an owned controller stops."""
         from .failure_reports import clean
@@ -4047,7 +4048,11 @@ class BrowserEngine:
                 # No offered option can be the applicant's saved source; re-choosing repeats the refusal.
                 return unoffered_source_result(target.get("label", ""))
             if rejected[key] >= 2:
-                if target.get("label") and target.get("id") and self.current_role_end_date(target):
+                if (
+                    target.get("label")
+                    and target.get("id")
+                    and current_role_end_date(getattr(self, "resolver", None), target)
+                ):
                     # The page still wants an end date for the applicant's current role: its "current job" box did
                     # not commit. No owner can answer that (Dallas County's Oracle row, 2026-10-25).
                     return {
