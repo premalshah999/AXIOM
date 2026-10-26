@@ -230,7 +230,12 @@ OTHER_COUNTRY = re.compile(
 )
 
 
-NOT_DESIRED = re.compile(r"\b(?:current|previous|present|last|prior|most recent|past)\b", re.I)
+# A compensation question about pay already earned, not the applicant's expectation. "Current Salary Expectation"
+# asks the expectation (Prosidian 2026-10-25 reached the owner as "current salary").
+NOT_DESIRED = re.compile(
+    r"^(?!.*\b(?:expect\w*|desired)\b).*\b(?:current|previous|present|last|prior|most recent|past)\b",
+    re.I | re.S,
+)
 
 
 NOT_AVAILABILITY = re.compile(

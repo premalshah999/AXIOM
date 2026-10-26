@@ -6,7 +6,7 @@ one or more apply-flow sections (cx-select-pills, oj-select comboboxes, e-signat
 import re
 from .. import widgets
 
-from .base import CODE_TEXT, CONFIRM_TEXT, Adapter, Step
+from .base import CODE_TEXT, Adapter, Step, confirmation_wording
 
 TERMS = re.compile(r"terms|privacy|agree|consent", re.I)
 # "Too Many Attempts. Try Again Later." / "You reached the maximum number of attempts. Try again in 30 minutes."
@@ -138,7 +138,7 @@ class Oracle(Adapter):
         if oracle_job_catalog(obs["url"]) or LOCKED.search(obs["text"]):
             return Step.UNKNOWN
         text = obs["text"]
-        if CONFIRM_TEXT.search(text) and (self.committed or "Apply Now" not in text):
+        if confirmation_wording(text, self.committed) and (self.committed or "Apply Now" not in text):
             if len([f for f in obs["fields"] if f["type"] != "checkbox"]) <= 1:
                 return Step.CONFIRMATION
         pins = [f for f in obs["fields"] if re.search(r"pin|code|digit", f["label"] + f["name"], re.I)]
