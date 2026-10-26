@@ -104,3 +104,14 @@ def test_a_postings_courtesy_line_is_no_confirmation_before_a_submit(service):
     after = adapter(service, obs)
     after.committed = True
     assert after.classify(obs) == Step.CONFIRMATION
+
+
+def test_confirmation_wording_ignores_the_courtesy_line_until_a_submit():
+    """Oracle's own classifier checked only whether "Apply Now" was in the text, and Rice's button was not yet rendered
+    (2026-10-25)."""
+    from jobpilot.adapters.base import confirmation_wording
+
+    posting = "Job Description ... Thank you for your interest in employment with Acme University."
+    assert confirmation_wording(posting, committed=False) == []
+    assert confirmation_wording(posting, committed=True)
+    assert confirmation_wording("Thank you for applying! We received your application.", committed=False)

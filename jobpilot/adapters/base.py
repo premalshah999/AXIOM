@@ -35,6 +35,16 @@ NEXT = re.compile(
     r"(?:\s*[>›→»])?$",
     re.I,
 )
+def confirmation_wording(text, committed):
+    """Confirmation phrases on the page. Before this run submitted, a posting's "thank you for your interest" courtesy
+    line is none: Rice's Oracle postings end "Thank you for your interest in employment with Rice University" above an
+    Apply Now not yet rendered, and every run stopped there as a confirmation it had not produced (2026-10-23..25)."""
+    found = [m[0] for m in CONFIRM_TEXT.finditer(text)]
+    if committed:
+        return found
+    return [c for c in found if not re.fullmatch(r"thank you for your interest", c, re.I)]
+
+
 CONFIRM_TEXT = re.compile(
     r"thank you for (?:applying|your (?:job )?application|your interest|submitting)|"
     r"application (?:has been |was )?(?:successfully )?(?:submitted|received|complete)|"
@@ -461,14 +471,9 @@ class Adapter:
         fields = self.app_fields(obs)
         passwords = [f for f in obs["fields"] if f["type"] == "password"]
         meaningful = [f for f in fields if f["type"] != "checkbox"]
-        # A job page saying "thank you for your interest" still has an Apply button. Before this run submitted, that
-        # courtesy line alone is no confirmation: Rice's Oracle postings end "Thank you for your interest in employment
-        # with Rice University" above an Apply Now that was not yet enabled, and every run stopped there (2026-10-23..25).
-        confirms = [m[0] for m in CONFIRM_TEXT.finditer(text)]
-        if not self.committed:
-            confirms = [c for c in confirms if not re.fullmatch(r"thank you for your interest", c, re.I)]
+        # A job page saying "thank you for your interest" still has an Apply button.
         if (
-            confirms
+            confirmation_wording(text, self.committed)
             and len(meaningful) <= 1
             and not passwords
             and (self.committed or not self.find_apply(obs))
