@@ -347,7 +347,9 @@ SF_APPLICATION_PAGE = re.compile(
 SF_CONFIRMATION_RE = re.compile(
     r"you have successfully submitted your application[^.]{0,60}"
     r"|thank you for (?:applying|your application)[^.]{0,60}"
-    r"|your application (?:has been|was) (?:successfully )?(?:submitted|received|sent)",
+    # The candidate portal names the job in it: "Your application for Software Developer Engineer II has been submitted"
+    # (Optimum 2026-10-26 read as unconfirmed).
+    r"|your application(?: for [^.\n]{1,120}?)? (?:has been|was) (?:successfully )?(?:submitted|received|sent)",
     re.I,
 )
 NOT_FINAL_SUBMIT = re.compile(
