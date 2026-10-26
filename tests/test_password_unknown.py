@@ -88,3 +88,17 @@ async def test_other_platforms_keep_the_owner_action_for_an_unknown_password(ser
     await value.on_sign_in(obs)
     value.switch.assert_not_awaited()
     assert value.accounts.record(URL)["state"] == "password_unknown"  # never overwritten by credentials_rejected
+
+
+@pytest.mark.parametrize("message,unregistered", [
+    ("Incorrect email", True),
+    ("Invalid email address", True),
+    ("Incorrect email or password", False),
+    ("Invalid email address or password.", False),
+    ("Incorrect password", False),
+])
+def test_an_unregistered_address_reads_as_no_account(message, unregistered):
+    """TikTok's careers login answers an unregistered address with "Incorrect email"; runs kept signing in (2026-10-26)."""
+    from jobpilot.adapters.base import NOT_FOUND
+
+    assert bool(NOT_FOUND.search(message)) is unregistered

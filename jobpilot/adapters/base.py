@@ -154,7 +154,10 @@ BAD_CREDENTIALS = re.compile(
 )
 NOT_FOUND = re.compile(
     r"no account|account (?:was )?not found|not registered|couldn'?t find (?:an |your )?account|"
-    r"does not correspond to a registered user|(?:user|account) (?:does not|doesn'?t) exist|no user (?:found|with)",
+    r"does not correspond to a registered user|(?:user|account) (?:does not|doesn'?t) exist|no user (?:found|with)|"
+    # TikTok's careers login refuses an unregistered address as "Incorrect email" (its account creation never finished,
+    # 2026-10-12): every later run signed in again and stopped. "Incorrect email or password" is a refused password.
+    r"(?:incorrect|invalid|unknown|unrecognized) e-?mail(?: address)?(?! (?:address )?(?:and|or|/) ?password)\b",
     re.I,
 )
 EXISTS = re.compile(
