@@ -527,14 +527,16 @@ class HistoryRulesMixin:
             elif attr in {"start", "end"}:
                 if attr == "end" and getattr(entry, "current", False):
                     ats = self.job.get("ats")
-                    if not ((f.get("required") and ats == "successfactors") or ats == "icims"):
+                    # Workday's "I currently work here" box hides its end date; the box answers it there.
+                    if not ((f.get("required") and ats != "workday") or ats == "icims"):
                         return Answer(
                             field_id=f["id"], disposition="skip", reason="Current role has no end date"
                         )
                     # SuccessFactors' application wizard requires an end date on every employment row and has
                     # no currently-employed checkbox (ASSA ABLOY, 2026-10-15): today's date says "ongoing".
                     # iCIMS has no such checkbox either; ICE refused a blank one with "Invalid Data Error" although
-                    # the field carries no required marker (2026-10-19).
+                    # the field carries no required marker (2026-10-19). Oracle rows without the checkbox
+                    # (Dallas County, Community Health Systems 2026-10-26) asked the owner for the month instead.
                     from datetime import date as _date
 
                     value = _date.today().isoformat()

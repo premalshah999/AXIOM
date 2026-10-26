@@ -302,7 +302,7 @@ def check_fixes(plan, ev, profile):
 
 
 async def closed_posting(db, config, job_id):
-    """Why this job's Greenhouse or Lever posting is gone, or ''."""
+    """Why this job's Greenhouse, Lever or Workable posting is gone, or ''."""
     from .browser import posting_gone
 
     if getattr(config, "allow_private_urls", False):

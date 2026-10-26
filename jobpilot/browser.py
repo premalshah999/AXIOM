@@ -161,10 +161,11 @@ def application_created(requests, job_id, run_id):
 
 GREENHOUSE_JOB = re.compile(r"^https://(?:job-)?boards(?:\.eu)?\.greenhouse\.io/(?:embed/job_app\?for=)?([A-Za-z0-9_-]+)(?:/jobs/|&token=)(\d+)")
 LEVER_JOB = re.compile(r"^https://jobs\.lever\.co/([A-Za-z0-9_.-]+)/([0-9a-f-]{36})")
+WORKABLE_JOB = re.compile(r"^https://apply\.workable\.com/([A-Za-z0-9_-]+)/j/([0-9A-Za-z]{6,16})(?:[/?#]|$)")
 
 
 async def posting_gone(url):
-    """Why a Greenhouse or Lever posting is gone, from the platform's public jobs API, or ''. Dead postings stalled as
+    """Why a Greenhouse, Lever or Workable posting is gone, from the platform's public jobs API, or ''. Dead postings stalled as
     repairs: Toast's redirected to its careers homepage, Gas South's and Sparksoft's boards no longer listed the role
     (2026-10-26). Any doubt (network, other answers) is no verdict."""
     import httpx
@@ -175,6 +176,10 @@ async def posting_gone(url):
     elif match := LEVER_JOB.match(url or ""):
         check = f"https://api.lever.co/v0/postings/{match[1]}/{match[2]}"
         platform = "Lever"
+    elif match := WORKABLE_JOB.match(url or ""):
+        # TMEIC (2026-10-26) redirected to the careers page with not_found=true and stalled as a repair.
+        check = f"https://apply.workable.com/api/v2/accounts/{match[1]}/jobs/{match[2]}"
+        platform = "Workable"
     else:
         return ""
     try:

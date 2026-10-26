@@ -53,3 +53,11 @@ def test_a_finished_role_keeps_its_own_dates_and_a_month_date_starts_on_the_firs
 def test_other_ats_still_leave_a_current_end_date_blank(service):
     skipped = resolver(service, ats="workday").local(box("End Date Month", 1, MONTHS))
     assert skipped is None or skipped.disposition == "skip"
+
+
+def test_a_required_current_end_date_ends_today_on_any_platform(service):
+    # Dallas County and Community Health Systems (Oracle, 2026-10-26): rows without a currently-employed checkbox
+    # require an end date, and the owner was asked for the month of a job that has not ended.
+    today = date.today()
+    answer = resolver(service, ats="oracle").local({**box("End Date Month", 1, MONTHS), "required": True})
+    assert answer.disposition == "answer" and answer.value == MONTHS[today.month]

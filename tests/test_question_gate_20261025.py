@@ -147,16 +147,21 @@ def test_two_spellings_of_one_date_are_one_answer():
 
 def test_an_end_date_the_page_demands_for_the_current_role_is_never_an_owner_question(service):
     """Dallas County's Oracle row kept asking "End Date Month" for the current job after "Current Job" was answered;
-    the navigator sent it to the owner, who has no end date to give (2026-10-25)."""
+    the navigator sent it to the owner, who has no end date to give (2026-10-25). Since 2026-10-26 a required end date
+    on the current role is today's date ("ongoing") on every platform, as on SuccessFactors and iCIMS."""
+    from datetime import date
+
     from jobpilot.browser import current_role_end_date
     from jobpilot.schemas import WorkEntry
 
     profile = Profile(first_name="Alex", work=[WorkEntry(company="Globex", title="Analyst", start="2025-12", current=True),
                                                WorkEntry(company="Initech", title="Intern", start="2024-06", end="2024-08")])
     resolver = Resolver(profile, service.db, service.config, job={"ats": "oracle", "url": "https://example.test/j"})
-    months = ["January", "February", "March"]
+    months = [date(2026, m, 1).strftime("%B") for m in range(1, 13)]
     current = {"id": "e1", "label": "End Date Month", "type": "combobox", "required": True, "options": months,
                "group": "Work Experience 1"}
     past = {**current, "id": "e2", "group": "Work Experience 2"}
-    assert current_role_end_date(resolver, current)
+    answer = resolver.local(current)
+    assert answer.disposition == "answer" and answer.value == date.today().strftime("%B")
+    assert not current_role_end_date(resolver, current)
     assert not current_role_end_date(resolver, past)

@@ -30,6 +30,8 @@ class Client:
      "https://boards-api.greenhouse.io/v1/boards/acme/jobs/5003468101"),
     ("https://jobs.lever.co/acme/2f6c6a62-1111-4c3e-9a0b-0123456789ab",
      "https://api.lever.co/v0/postings/acme/2f6c6a62-1111-4c3e-9a0b-0123456789ab"),
+    ("https://apply.workable.com/acme-inc/j/C4B8B72648/apply",
+     "https://apply.workable.com/api/v2/accounts/acme-inc/jobs/C4B8B72648"),
 ])
 async def test_a_404_from_the_public_api_closes_the_posting(monkeypatch, url, api):
     seen = []

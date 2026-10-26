@@ -87,7 +87,7 @@ def _end_date(service, ats):
     return resolver.local(f)
 
 
-def test_current_role_end_date_is_today_only_on_successfactors(service):
+def test_current_role_end_date_is_today_where_required_but_not_on_workday(service):
     today = date.today()
     answer = _end_date(service, "successfactors")
     assert answer and answer.disposition == "answer" and answer.value == f"{today.month:02d}/{today.year}"
