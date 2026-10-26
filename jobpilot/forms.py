@@ -2389,6 +2389,19 @@ class FormSession:
                     return None
 
                 choose = no_guess
+            broad_queries, degree_pick = [], None
+            if EDUCATION["degree"].search(field["label"]):
+                from .answers.history import DEGREE_FALLBACK, degree_level
+                from .answers.text import first_matching
+
+                if level := degree_level(str(value)):
+                    # A server-searched degree list is searched by the degree's level, whose results hold the catalog's
+                    # own spelling ("Master's Level Degree" for "Master of Science", Emory iCIMS 2026-10-25), and the
+                    # row is the level's offered equivalent by the same rules as a known catalog.
+                    broad_queries = [level.capitalize()]
+
+                    def degree_pick(texts):
+                        return first_matching(texts, DEGREE_FALLBACK[level])
             try:
                 committed = await widgets.combobox(
                     frame,
@@ -2400,10 +2413,11 @@ class FormSession:
                     or field.get("widget") == "oracle-multiselect",
                     search_queries=search_queries,
                     school_scope=school_picker,
-                    resolve=self.location_resolver(field) or major_pick,
+                    resolve=self.location_resolver(field) or major_pick or degree_pick,
                     employer_scope=bool(EMPLOYER_PICKER.search(field["label"])) and not school_picker,
                     # Optional pickers get one search, no paging: each is a request to the employer's servers.
                     thorough=bool(field.get("required")),
+                    broad_queries=broad_queries,
                 )
             except ValueError as exc:
                 if str(exc).startswith(widgets.NO_OPTIONS_READABLE):
