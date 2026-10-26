@@ -54,25 +54,19 @@ The database tables are created by the app the first time it starts; there is no
 
 ## Add your keys
 
-Edit `.env` (it is in the AXIOM folder; it never leaves your computer and is never committed), then apply with
-`docker compose up -d`.
-
-**Model.** Choose the provider and paste its key. The default is DeepSeek:
-
-```
-LLM_PROVIDER=deepseek
-DEEPSEEK_API_KEY=...
-```
-
-For Anthropic use `LLM_PROVIDER=haiku` with `HAIKU_API_KEY` (or `ANTHROPIC_API_KEY`); for Xiaomi MiMo use `mimo` with
-`MIMO_API_KEY`. After the first start you can pick a different model for answers and for navigation in Setup > System.
+Open **Setup → Connections** in the dashboard and paste each key there: the AI model (DeepSeek, Anthropic or MiMo),
+the Telegram bot token and user ID, 2Captcha and Serper. Each has a **Test** button. Keys are encrypted with the
+installation's key (`DATA_DIR/mail-key`) in `DATA_DIR/connections.enc`, apply at once without a restart, and take
+precedence over `.env` (where the same settings still work: `LLM_PROVIDER`, `DEEPSEEK_API_KEY`, `HAIKU_API_KEY`,
+`MIMO_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_USER_ID`, `TWOCAPTCHA_API_KEY`, `SERPER_API_KEY`). Clearing a key in
+the app falls back to `.env`.
 
 **Gmail app password.** Google only gives app passwords to accounts with 2-Step Verification.
 
 1. Turn on 2-Step Verification in your Google Account (Security).
 2. Open <https://myaccount.google.com/apppasswords>, create an app password named AXIOM and copy the 16 letters.
 3. In AXIOM open Setup > Email and paste your Gmail address and the app password. The password is checked, encrypted
-   and never shown again. (You can instead put `GMAIL_ADDRESS` and `GMAIL_APP_PASSWORD` in `.env`.)
+   and never shown again.
 4. The mailbox must be the same address as your profile email, because AXIOM matches codes by recipient.
 
 ## The worker Chrome (for real job sites)

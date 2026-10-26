@@ -49,7 +49,13 @@ create_env() {
   case "$tz" in [A-Za-z]*/[A-Za-z_+-]* | UTC) ;; *) tz="" ;; esac
   umask 077
   tmp=$(mktemp ".env.XXXXXX")
-  sed -e "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(random_hex)/" .env.example >"$tmp"
+  cdp=""
+  if [ "$(uname -s)" = "Darwin" ] && [ -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ]; then
+    # The worker and twin Chrome run on this Mac; make up starts both (see the end of this script).
+    cdp="http://host.docker.internal:9224"
+  fi
+  sed -e "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(random_hex)/" \
+    -e "s#^BROWSER_CDP_URL=.*#BROWSER_CDP_URL=$cdp#" .env.example >"$tmp"
   {
     printf '\n# ---- Written by scripts/setup.sh on %s ----\n' "$(date +%Y-%m-%d)"
     if [ "$port" != "8080" ]; then
@@ -58,11 +64,16 @@ create_env() {
     if [ -n "${APP_BIND:-}" ]; then printf 'APP_BIND=%s\n' "$APP_BIND"; fi
     if [ -n "${COMPOSE_PROJECT_NAME:-}" ]; then printf 'COMPOSE_PROJECT_NAME=%s\n' "$COMPOSE_PROJECT_NAME"; fi
     if [ -n "$tz" ]; then printf 'TIMEZONE=%s\n' "$tz"; fi
+    if [ -n "$cdp" ]; then printf 'BROWSER_TWIN_CDP_URL=http://host.docker.internal:9225\n'; fi
+    # Each worker drives its own Chrome tab: a 16 GB Mac ran out of memory with eight (2026-10-26).
+    mem_gb=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 17179869184) / 1073741824 ))
+    if [ "$mem_gb" -le 16 ]; then
+      printf 'NORMAL_WORKERS=3\nSPECIALIST_WORKERS=1\nDISCOVERY_WORKERS=1\n'
+    fi
   } >>"$tmp"
   mv "$tmp" .env
   chmod 600 .env
-  say "Created .env with a generated database password."
-  say "Add your model API key to .env before applying to jobs (LLM_PROVIDER and its *_API_KEY)."
+  say "Created .env with a generated database password. Your API keys go in the app (Setup > Connections), not here."
 }
 
 if [ ! -f .env ]; then
@@ -100,19 +111,21 @@ port=${APP_PORT:-$(sed -n 's/^APP_PORT=//p' .env | tail -n 1)}
 url=${BASE_URL:-$(sed -n 's/^BASE_URL=//p' .env | tail -n 1)}
 url=${url:-http://127.0.0.1:${port:-8080}}
 
+if grep -Eq '^BROWSER_CDP_URL=http' .env; then
+  # The browsers the workers drive. Both scripts do nothing when their Chrome is already running.
+  scripts/chrome-worker.sh >/dev/null 2>&1 || say "Could not start the worker Chrome; run: make chrome"
+  scripts/chrome-twin.sh >/dev/null 2>&1 || true
+fi
+
 say ""
 say "AXIOM is running:  $url"
-say "  1. Open that address and create your account; the setup guide takes it from there."
-say "  2. Access token for scripts:  docker compose exec app jobpilot token"
-step=3
-if ! grep -Eq '^(DEEPSEEK|HAIKU|ANTHROPIC|MIMO)_API_KEY=.+' .env; then
-  say "  $step. Add a model API key to .env (DEEPSEEK_API_KEY by default), then: docker compose up -d"
-  say "     Until then the dashboard and setup guide work, but resume prefill and real applications are refused."
-  step=$((step + 1))
-fi
+say "  1. Open that address and create your account."
+say "  2. Go to Setup > Connections and paste your AI key (DeepSeek is the cheapest). Test it with the Test button."
+say "  3. Go to Setup > Email and connect Gmail with an app password (the README shows how)."
+say "  4. Follow the setup guide: resume, contact details, work authorization, the jobs you want."
 if ! grep -Eq '^BROWSER_CDP_URL=.+' .env; then
-  say "  $step. To apply on real job sites, start the worker Chrome (make chrome) and set BROWSER_CDP_URL in .env."
-  say "     Without it AXIOM uses a headless browser inside Docker, which is enough for the demo only."
+  say "  Note: no Google Chrome was found, so AXIOM uses a built-in headless browser. Many job sites distrust it;"
+  say "        install Google Chrome, then run: make chrome  and set BROWSER_CDP_URL in .env (README, Troubleshooting)."
 fi
 say "Optional self-test, only before you create your account:  make verify"
 say "Stop: make down.   Logs: make logs.   Full guide: docs/SETUP.md"

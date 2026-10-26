@@ -14,9 +14,10 @@ from jobpilot.schemas import JobInput
 @pytest.mark.parametrize(
     "provider,setting", [("deepseek", "DEEPSEEK_API_KEY"), ("haiku", "HAIKU_API_KEY"), ("mimo", "MIMO_API_KEY")]
 )
-def test_the_message_names_the_setting_the_file_and_the_command(provider, setting):
+def test_the_message_sends_the_owner_to_setup_connections(provider, setting):
+    """Keys are pasted in the dashboard now; editing .env stays possible (owner 2026-10-26)."""
     message = missing_key_message(provider)
-    assert setting in message and ".env" in message and "docker compose up -d" in message
+    assert "Setup > Connections" in message and setting in message
 
 
 def test_selecting_a_provider_without_a_key_says_how_to_add_it(client, service):

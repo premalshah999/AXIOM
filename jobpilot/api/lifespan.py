@@ -13,10 +13,8 @@ async def lifespan(app):
 
         await start(service)
         scheduler_task = asyncio.create_task(monitor_scheduler(service))
-    if config.telegram_enabled and config.telegram_bot_token and config.telegram_user_id:
-        from ..telegram import poll
-
-        bot = asyncio.create_task(poll(service))
+    # The bot starts once its token and user ID are set, also when they are saved in Setup > Connections later.
+    bot = asyncio.create_task(keep_telegram(service))
     from ..telegram_workers import poll_all
 
     worker_bots = asyncio.create_task(poll_all(service))
@@ -71,3 +69,19 @@ async def lifespan(app):
         task.cancel()
     await asyncio.gather(*pending_notifications, return_exceptions=True)
     db.engine.dispose()
+
+
+async def keep_telegram(service, interval=15):
+    """Run the Telegram bot whenever it is configured; restart it if it stops."""
+    from ..telegram import configured, poll
+
+    task = None
+    try:
+        while True:
+            if (task is None or task.done()) and configured(service.config):
+                task = asyncio.create_task(poll(service))
+            await asyncio.sleep(interval)
+    finally:
+        if task:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)

@@ -40,9 +40,8 @@ def missing_key_message(provider):
     """What a newcomer does about a model provider without a key: name the setting and where it goes."""
     name = KEY_NAMES.get(provider, f"{provider}_API_KEY".upper())
     return (
-        f"No API key for the {provider} model provider. Add {name}=... to the .env file in the AXIOM folder, "
-        "then run `docker compose up -d` (docs/SETUP.md, 'Add your keys'); or choose a provider you have a key "
-        "for in Setup > System."
+        f"No API key for the {provider} model provider. Paste it in Setup > Connections (no restart needed), "
+        f"or choose a provider you have a key for there. ({name} in .env also works.)"
     )
 
 

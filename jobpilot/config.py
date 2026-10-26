@@ -273,7 +273,9 @@ class Settings(BaseSettings):
             self.dbos_database_url = f"sqlite:///{self.data_dir / 'workflows.db'}"
         os.environ.setdefault("ANONYMIZED_TELEMETRY", "false")
         os.environ.setdefault("BROWSER_USE_LOGGING_LEVEL", "warning")
-        return self
+        from .connections import apply
+
+        return apply(self)  # Keys saved in Setup > Connections win over .env.
 
 
 def password_problems(password: str) -> list[str]:

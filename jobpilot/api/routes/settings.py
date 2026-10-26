@@ -23,9 +23,43 @@ class Platforms(BaseModel):
     reason: str = Field(default="", max_length=300)
 
 
+class ConnectionsUpdate(BaseModel):
+    """Values to save in Setup > Connections; a blank value clears that saved value."""
+
+    values: dict[str, str] = Field(max_length=20)
+
+
 def router(service) -> APIRouter:
     db, config = service.db, service.config
     r = APIRouter()
+
+    @r.get("/api/connections")
+    def connections_status():
+        from ... import connections
+
+        return connections.status(config)
+
+    @r.put("/api/connections")
+    def save_connections(data: ConnectionsUpdate):
+        from ... import connections
+        from ...config import settings
+
+        try:
+            connections.save(config, data.values)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+        cached = settings()
+        if cached is not config:
+            connections.apply(cached)  # Code that reads settings() directly sees the same keys at once.
+        return connections.status(config)
+
+    @r.post("/api/connections/{name}/test")
+    async def test_connection(name: str):
+        from ... import connections
+
+        if name not in connections.FIELDS:
+            raise HTTPException(404)
+        return await connections.test(config, name)
 
     @r.get("/api/control")
     def get_control():

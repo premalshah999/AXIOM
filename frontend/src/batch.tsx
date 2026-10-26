@@ -55,12 +55,6 @@ export function BatchView() {
   );
 }
 
-const KEY_NAMES: Record<string, string> = {
-  deepseek: "DEEPSEEK_API_KEY",
-  haiku: "HAIKU_API_KEY",
-  mimo: "MIMO_API_KEY",
-};
-
 /** Until the first job exists: the few things that decide whether the first application works. */
 function FirstRun({ mail }: { mail: MailStatus | null }) {
   const { snapshot, counts, go, refresh } = useWorkspace();
@@ -92,7 +86,7 @@ function FirstRun({ mail }: { mail: MailStatus | null }) {
       title: "Model key",
       detail: snapshot.config.mimo
         ? `${snapshot.config.model_provider ?? "The model provider"} key found`
-        : `Reads job pages and writes answers. Add ${KEY_NAMES[snapshot.config.model_provider ?? ""] ?? "your provider's API key"} to .env, then run docker compose up -d.`,
+        : "Reads job pages and writes answers. Paste your AI key in Setup > Connections.",
       action: "Model settings",
       onClick: () => go({ view: "setup", tab: "system" }),
     },

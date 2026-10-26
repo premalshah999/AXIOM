@@ -6,6 +6,7 @@ import { useAction, useDraft, usePoll } from "./hooks";
 import { AccountSettings, ProfileSettings } from "./autonomy";
 import { DiscoverySettings } from "./jobboard";
 import { MailSettings } from "./mail";
+import { ConnectionSettings } from "./connections";
 import { SignInSettings } from "./account";
 import { KnowledgeSection, TailoredResumes } from "./features";
 import { Pagination, usePagination } from "./pagination";
@@ -34,6 +35,7 @@ import {
 } from "./ui";
 
 const SECTIONS = [
+  { id: "connections", label: "Connections", note: "AI key, Telegram, captcha" },
   { id: "profile", label: "Profile", note: "Facts every answer is built from" },
   {
     id: "answers",
@@ -74,6 +76,7 @@ export function SetupView() {
         </nav>
         <div className="setup-body">
           <h2 className="setup-title">{section.label}</h2>
+          {section.id === "connections" && <ConnectionSettings />}
           {section.id === "profile" && <ProfileSettings />}
           {section.id === "answers" && <KnowledgeSection />}
           {section.id === "resumes" && (
@@ -712,7 +715,7 @@ function AgentControls() {
                   hint={
                     provider.available
                       ? provider.model
-                      : "Add its API key to .env, then run docker compose up -d (docs/SETUP.md, Add your keys)."
+                      : "Add its API key in Setup > Connections."
                   }
                 >
                   <select

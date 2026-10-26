@@ -3441,3 +3441,30 @@ details:not(.fold) summary {
     margin-bottom: 0;
   }
 }
+
+/* ---------- Setup > Connections ---------- */
+.connection-group + .connection-group {
+  margin-top: 20px;
+}
+.connection-group h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.connection-group > .muted {
+  margin: 2px 0 10px;
+}
+.input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.input-row > input {
+  flex: 1;
+  min-width: 0;
+}
+.callout.warn {
+  border-left: 3px solid var(--fix);
+  padding: 8px 12px;
+  margin: 0 0 16px;
+  color: var(--fix);
+}
