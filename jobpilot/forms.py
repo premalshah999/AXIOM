@@ -392,6 +392,14 @@ TALENT_FORM_JS = r"""b => {
     .test((f.innerText || '').slice(0, 600));
 }"""
 AUTOFILL = re.compile(r"auto.?fill|autofill|parse your|pre.?fill", re.IGNORECASE)
+# An upload control that names no document ("Choose a file or drop it here"), in the languages career sites use.
+GENERIC_UPLOAD = re.compile(
+    r"\b(?:choose|select|upload|drop|drag|attach|browse)\b.{0,40}\bfiles?\b|"
+    r"datei\b.{0,40}(?:auswählen|ablegen|hochladen)|(?:auswählen|hochladen).{0,40}datei|"
+    r"(?:choisir|sélectionner|déposer|glisser).{0,40}fichier|(?:seleccion|arrastr|sub)\w*.{0,40}archivo",
+    re.IGNORECASE,
+)
+PHOTO_UPLOAD = re.compile(r"photo|picture|profilbild|\bfoto|avatar|\bimage\b|\bbild\b", re.IGNORECASE)
 NOT_RESUME = re.compile(
     r"cover letter|transcript|portfolio|writing sample|certificat|reference", re.IGNORECASE
 )
@@ -1867,7 +1875,16 @@ class FormSession:
             return unnamed[:1]
         # Generic "Upload a file" inputs named by their section (Jabil: Resume/CV/... beside Additional Attachments).
         grouped = [f for f in unnamed if RESUME.search(f.get("group") or "")]
-        return grouped if len(grouped) == 1 else []
+        if len(grouped) == 1:
+            return grouped
+        # Drop zones that name no document, beside a profile photo: the first is the resume's. SmartRecruiters' German form
+        # labels each "Eine Datei auswählen oder hier ablegen." inside its shadow DOM; nothing was attached and "Weiter"
+        # never advanced (Sopra Steria, four jobs, 2026-10-25/26).
+        generic = [f for f in unnamed if GENERIC_UPLOAD.search(f["label"]) and not PHOTO_UPLOAD.search(f["label"])]
+        photo = any(PHOTO_UPLOAD.search(f["label"]) for f in files)
+        if not grouped and generic and len({normalize(f["label"]) for f in generic}) == 1 and (len(generic) > 1 or photo):
+            return generic[:1]
+        return []
 
     async def control_structure(self, control_id):
         """Redacted DOM shape of a control that failed to commit: tags, roles, ids/classes and
