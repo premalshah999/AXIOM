@@ -85,3 +85,22 @@ async def test_the_candidate_dashboard_continues_or_confirms_never_reads_as_a_re
     walked.step_submits = 3
     result = await walked.on_unknown(obs)
     assert result["state"] == "confirmed" and result["receipt"]["evidence_selector"] == "icims_candidate_dashboard_row"
+
+
+def test_a_postings_courtesy_line_is_no_confirmation_before_a_submit(service):
+    """Rice's Oracle postings end "Thank you for your interest in employment with Rice University." above an Apply Now
+    that was not yet enabled; each run read the posting as a confirmation it had not produced and stopped
+    (2026-10-23..25)."""
+    from jobpilot.adapters.base import Step
+    from support_icims import adapter
+
+    obs = {"url": "https://acme.example.test/jobs/1", "fields": [], "controls": [], "errors": [],
+           "headings": ["Data Scientist", "Job Description"],
+           "text": "Data Scientist\nJob Description\nBuild pipelines.\nThank you for your interest in employment with "
+                   "Acme University."}
+    before = adapter(service, obs)
+    before.committed = False
+    assert before.classify(obs) != Step.CONFIRMATION
+    after = adapter(service, obs)
+    after.committed = True
+    assert after.classify(obs) == Step.CONFIRMATION
