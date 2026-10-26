@@ -12,6 +12,8 @@ from jobpilot.autopilot import PERSIST_SKIP
 from support_icims import adapter, observation
 
 URL = "https://careers-acme.icims.com/jobs/42/engineer/login"
+# The employer's page confirmed the reset request (request_reset), so its silence means something.
+CONFIRMED = "2026-10-22T00:00:00+00:00"
 
 
 @pytest.mark.parametrize("minutes_ago,stops", [(20, True), (2, False)])
@@ -19,7 +21,7 @@ async def test_an_unanswered_reset_marks_the_password_unknown(service, minutes_a
     obs = observation(URL)
     value = adapter(service, obs)
     value.accounts.mark(URL, "reset_requested", {"email": "alex@example.test", "password": "Synthetic9!x"},
-                        reset_requested_at=time.time() - minutes_ago * 60)
+                        reset_requested_at=time.time() - minutes_ago * 60, reset_submitted_at=CONFIRMED)
     value.defer = lambda reason, *a, **k: {"state": k.get("state", "waiting_answer"), "reason": reason}
     value.config.account_password_reset = False  # the ordinary path ends at its first guard
     result = await Adapter.recover(value, obs, "Signing in did not succeed")
@@ -30,7 +32,8 @@ async def test_an_unanswered_reset_marks_the_password_unknown(service, minutes_a
 async def test_a_password_unknown_account_stops_without_another_reset(service):
     obs = observation(URL)
     value = adapter(service, obs)
-    value.accounts.mark(URL, "password_unknown", {"email": "alex@example.test", "password": "Synthetic9!x"})
+    value.accounts.mark(URL, "password_unknown", {"email": "alex@example.test", "password": "Synthetic9!x"},
+                        reset_submitted_at=CONFIRMED)
     value.defer = lambda reason, *a, **k: {"state": k.get("state"), "reason": reason}
     value.config.account_password_reset = True
     result = await Adapter.recover(value, obs, "Signing in did not succeed")
@@ -50,7 +53,8 @@ async def test_successfactors_creates_the_account_once_after_an_unanswered_reset
     value = adapter(service, obs)
     value.id = "successfactors"
     value.final = re.compile(r"^Submit Application$", re.I)
-    value.accounts.mark(URL, "password_unknown", {"email": "alex@example.test", "password": "Synthetic9!x"})
+    value.accounts.mark(URL, "password_unknown", {"email": "alex@example.test", "password": "Synthetic9!x"},
+                        reset_submitted_at=CONFIRMED)
     value.auth_outcome = AsyncMock(return_value=("bad_credentials", "Invalid email address or password."))
     value.form.scan = AsyncMock(return_value=obs)
     value.switch = AsyncMock(return_value=True)

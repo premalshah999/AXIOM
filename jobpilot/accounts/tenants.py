@@ -82,7 +82,9 @@ AUTH_HOSTS = {
     "oracle": ["oraclecloud.com"],
     "icims": ["icims.com"],
     "taleo": ["taleo.net"],
-    "successfactors": ["successfactors.com", "successfactors.eu", "sapsf.com", "jobs2web.com"],
+    # ns2cloud.com: SAP's government cloud serves SuccessFactors sign-in and password pages for employers such as
+    # L3Harris (career-hcm20.ns2cloud.com, 2026-10-25); without it the new password of a finished reset was refused.
+    "successfactors": ["successfactors.com", "successfactors.eu", "sapsf.com", "jobs2web.com", "ns2cloud.com"],
     "eightfold": ["eightfold.ai"],
     "smartrecruiters": ["smartrecruiters.com"],
     "avature": ["avature.net"],

@@ -92,11 +92,17 @@ class RulesMixin:
         """Known ATS senders are scoped to this employer and the applicant's mailbox."""
         existing = self.rule_for(job["url"])
         if existing:
-            if job.get("ats") == "workday" and existing["sender_domains"] == ["myworkday.com"]:
+            # A rule built from its platform's senders gains the senders learned since. L3Harris's rule (2026-10-21)
+            # predates ns2cloud.com, SAP's government-cloud sender (added 10-23), so its reset mail could never match.
+            # Workday's otp.workday.com was added the same way. A rule naming any other domain is the owner's; kept.
+            family = KNOWN_SENDERS.get(job.get("ats"), [])
+            current = list(existing["sender_domains"])
+            missing = [d for d in family if d not in current]
+            if current and missing and set(current) <= set(family):
                 with self.db.exclusive() as s:
                     row = s.get(MailRule, existing["id"])
-                    row.sender_domains = ["myworkday.com", "otp.workday.com"]
-                existing["sender_domains"] = ["myworkday.com", "otp.workday.com"]
+                    row.sender_domains = [*current, *missing]
+                existing["sender_domains"] = [*current, *missing]
             return existing
         known = KNOWN_SENDERS
         if job.get("ats") not in known:

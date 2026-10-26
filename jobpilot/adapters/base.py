@@ -9,7 +9,7 @@ from ..db import now
 import time
 from collections import Counter
 from enum import StrEnum
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from playwright.async_api import Error as PlaywrightError
 
@@ -174,6 +174,33 @@ PASSWORD_UNKNOWN = (
     "This employer has an account for your email but refuses the saved password, and its password reset email never "
     "arrives. Reset the password in your own browser, then save it under Setup > Accounts"
 )
+# The page after a reset request that the employer took. SuccessFactors' Password Help: "If an account matches the
+# information you entered, then you will receive an email with instructions on how to reset your password." (REA of
+# L3Harris's career-hcm20.ns2cloud.com, 2026-10-25).
+RESET_SENT = re.compile(
+    r"(?:will|should) (?:soon )?receive an? (?:e-?mail|link|message)|"
+    r"e-?mail (?:with|containing) (?:instructions|a (?:reset |password )?link)|"
+    r"(?:we(?:'ve| have)?|has been|have been|was|were) (?:just )?sent (?:you )?(?:an? )?(?:e-?mail|link|instructions)|"
+    r"check your (?:e-?mail|inbox)|if (?:an|the|this|your) (?:e-?mail|account) (?:matches|exists|is registered)|"
+    r"(?:reset|recovery) (?:link|instructions|e-?mail) (?:has been |was |is )?(?:sent|on (?:its|the) way)",
+    re.I,
+)
+# How long the page after "Forgot your password?" may take to replace the sign-in form.
+RESET_STEP_SECONDS = 10
+# Reset requests the employer's page never confirmed; after these, the owner resets the password.
+UNCONFIRMED_RESETS = 3
+RESET_UNCONFIRMED = (
+    "This employer refuses the saved password, and its password reset form never confirmed a reset request. Reset "
+    "the password in your own browser, then save it under Setup > Accounts"
+)
+
+
+def reset_proven(record):
+    """The employer's page confirmed a reset request for this account (request_reset saw it). Only then does a reset
+    email that never came say anything about the account. L3Harris, Farmers, Westinghouse, Hershey's and Belden
+    (SuccessFactors, 2026-10-21..25) recorded resets that the sign-in page never sent, and every later run stopped
+    for an owner action built on that silence."""
+    return bool((record or {}).get("reset_submitted_at"))
 
 
 # Account states meaning "an account exists here": sign in rather than create.
@@ -1772,6 +1799,7 @@ class Adapter:
             absent = (
                 self.id == "successfactors"
                 and unknown
+                and reset_proven(record)
                 and not record.get("absent_create_at")
             )
             if (not known or not_found or absent) and self.accounts.may_create and self.attempts["create"] == 0:
@@ -1887,6 +1915,19 @@ class Adapter:
             and record.get("reset_requested_at")
             and time.time() - float(record["reset_requested_at"]) > UNANSWERED_RESET_SECONDS
         )
+        if (unanswered or record.get("state") == "password_unknown") and not reset_proven(record):
+            # The silence proves nothing when the employer never confirmed the request (reset_proven): request it again,
+            # up to UNCONFIRMED_RESETS times.
+            if record.get("reset_unconfirmed", 0) >= UNCONFIRMED_RESETS:
+                return self.defer(
+                    RESET_UNCONFIRMED,
+                    [{"question": RESET_UNCONFIRMED, "options": [], "key": "manual", "reason": detail[:200]}],
+                    state="waiting_browser",
+                    blocker_type="account",
+                )
+            self.emit("auth", "The employer never confirmed the earlier password reset request; requesting it again")
+            unanswered = False
+            record = {**record, "state": "credentials_rejected", "reset_requested_at": 0}
         if unanswered or record.get("state") == "password_unknown":
             # The employer holds an account for this email, refuses the saved password, and mails nothing for a reset
             # (SuccessFactors: "If you do not receive an email then no matching account was found"). L3Harris, Entergy,
@@ -1946,21 +1987,90 @@ class Adapter:
                 blocker_type="account",
             )
         self.emit("auth", "Resetting the employer password through your mailbox")
-        await self.click(forgot[0], auth=True)
-        await self.form.settle(timeout=6)
-        return await self.request_reset(await self.form.scan(), detail)
+        return await self.request_reset(await self.open_reset_step(forgot[0]), detail)
+
+    @staticmethod
+    def sign_in_shown(obs):
+        """The sign-in form is still the step: a password box, and no open dialog without one."""
+        view = Adapter.dialog_view(obs)
+        return any(f["type"] == "password" for f in (view or obs)["fields"])
+
+    async def open_reset_step(self, forgot):
+        """Click "Forgot your password?" and wait for the page that replaces the sign-in form.
+
+        L3Harris, Farmers, Westinghouse, Hershey's and Belden (SuccessFactors, 2026-10-21..25): the scan after the click
+        still showed the sign-in page; the reset step typed the email there and pressed its only button, "Sign In",
+        with no password ("A password is required"), and the run reported a reset that was never requested. A link
+        that has not opened its page in time is followed by its address, on the sign-in page's own website."""
+        before = self.page.url
+        await self.click(forgot, auth=True)
+        deadline = time.monotonic() + RESET_STEP_SECONDS
+        while True:
+            await self.form.settle(timeout=3)
+            obs = await self.form.scan()
+            if not self.sign_in_shown(obs) or time.monotonic() >= deadline:
+                break
+            await asyncio.sleep(0.5)
+        href = str(forgot.get("href") or "").strip()
+        if self.sign_in_shown(obs) and href and not href.lower().startswith(("#", "javascript:")):
+            from ..mail import origin
+
+            target = urljoin(self.page.url or before, href)
+            if origin(target) == origin(self.page.url or before):
+                self.emit("auth", "Opened the password reset page by its link address")
+                await self.page.goto(target, wait_until="domcontentloaded", timeout=30000)
+                await self.form.settle(timeout=6)
+                obs = await self.form.scan()
+        return obs
+
+    def reset_button(self, view):
+        """The reset step's own submit. Never the sign-in or sign-up action auth_button falls back to: on a sign-in page
+        that is "Sign In", pressed with no password (see open_reset_step)."""
+        button = self.auth_button(view, "reset")
+        if button and AUTH_BUTTON.search(button["label"]) and re.fullmatch(
+            r"sign in|log ?in|create (?:an? )?account|register|sign up|create profile", button["label"].strip(), re.I
+        ):
+            return None
+        return button
+
+    async def reset_outcome(self, timeout=10):
+        """("sent", "") when the employer's page confirms the reset request, ("refused", its message) when the request
+        form came back with an error, else ("unknown", "")."""
+        deadline = time.monotonic() + timeout
+        while True:
+            await self.form.settle(timeout=4)
+            obs = await self.form.scan()
+            view = self.dialog_view(obs) or obs
+            asking = [f for f in view["fields"] if self.is_login_field(f)]
+            errors = [str(x) for x in obs.get("errors", []) if str(x).strip()]
+            if RESET_SENT.search(view.get("text", "") or obs.get("text", "")) and not errors:
+                return "sent", ""
+            if asking and errors:
+                return "refused", errors[0][:200]
+            if not asking and not errors and not self.sign_in_shown(obs):
+                return "sent", ""  # The request form was replaced by the next page.
+            if time.monotonic() >= deadline:
+                return "unknown", ""
+            await asyncio.sleep(0.5)
 
     async def request_reset(self, obs, detail):
-        """Explicit reset-email step: fill the email, open the request window, click, then wait."""
+        """Explicit reset-email step: fill the email, open the request window, click, confirm the page took the
+        request, then wait for the email."""
         url = self.auth_url(obs) if any(f["type"] == "password" for f in obs["fields"]) else self.page.url
         view = self.dialog_view(obs) or obs
+        if self.sign_in_shown(obs):
+            return self.defer(
+                f"Could not sign in ({detail}) and the password reset page did not open",
+                state="waiting_browser",
+                blocker_type="account",
+            )
         emails = [f for f in view["fields"] if self.is_login_field(f)]
         if not emails:
             return self.defer("The password reset step has no email field")
         for f in emails:
             await self.form.locator(f["id"]).fill(self.accounts.email, timeout=4000)
             await self.form.locator(f["id"]).blur()
-        button = self.auth_button(view, "reset")
+        button = self.reset_button(view)
         if not button:
             return self.defer("The password reset step has no submit control")
         self.release_mail()
@@ -1969,11 +2079,26 @@ class Adapter:
         if not self.challenge:
             return self.defer("The reset email could not be matched safely right now; retry later")
         previous = self.accounts.saved(url)
+        record = self.accounts.record(url)
         self.accounts.mark(url, "reset_requested", previous, reset_requested_at=time.time())
         await self.click(button, auth=True)
         if challenge := await self.after_auth_click():
             return challenge
-        self.emit("auth", "Employer password reset requested")
+        outcome, refusal = await self.reset_outcome()
+        if outcome == "refused":
+            self.finish_mail("failed", "Reset request refused")
+            return self.defer(
+                "The employer refused the password reset request: " + refusal,
+                state="waiting_browser",
+                blocker_type="account",
+            )
+        if outcome == "sent":
+            self.accounts.mark(url, "reset_requested", previous, reset_requested_at=time.time(),
+                               reset_submitted_at=now(), reset_unconfirmed=0)
+        else:
+            self.accounts.mark(url, "reset_requested", previous, reset_requested_at=time.time(),
+                               reset_submitted_at=None, reset_unconfirmed=record.get("reset_unconfirmed", 0) + 1)
+        self.emit("auth", "Employer password reset requested", {"confirmed": outcome == "sent"})
         return await self.complete_password_reset(url)
 
     async def complete_password_reset(self, url):

@@ -164,16 +164,19 @@ class FlowGatesMixin:
         )
 
     def reset_unanswered(self, url, recorded):
-        """This tenant never answered a password reset: the record says so, or its reset is older than ten minutes."""
-        if recorded == "password_unknown":
-            return True
-        if recorded != "reset_requested":
+        """This tenant never answered a password reset its page confirmed: the record says so, or its confirmed reset
+        is older than ten minutes. A reset the page never confirmed proves nothing (adapters.base.reset_proven)."""
+        if recorded not in {"password_unknown", "reset_requested"}:
             return False
         import time
 
-        from ..adapters.base import UNANSWERED_RESET_SECONDS
+        from ..adapters.base import UNANSWERED_RESET_SECONDS, reset_proven
 
         record = getattr(self.store, "record", lambda url: {})(url)
+        if not reset_proven(record):
+            return False
+        if recorded == "password_unknown":
+            return True
         return time.time() - float(record.get("reset_requested_at") or 0) > UNANSWERED_RESET_SECONDS
 
     def applied_before(self):

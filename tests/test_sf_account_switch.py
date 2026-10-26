@@ -270,7 +270,7 @@ async def test_an_unanswered_reset_creates_the_account_once(service):
     """L3Harris (2026-10-21..23): the saved login was refused and four resets never arrived. SuccessFactors says no
     email means no matching account: Create is tried once, and the create page does not bounce back to Sign In."""
     flow, form, scope = _sf_flow(service, SIGN_IN)
-    flow.store.save(URL, flow.store.shared(), "password_unknown")
+    flow.store.save(URL, flow.store.shared(), "password_unknown", reset_submitted_at="2026-10-23T00:00:00+00:00")
     assert flow.store.known(URL)  # the record claims an account
     assert await flow.handle()
     assert form.clicked == ["create"]
@@ -312,10 +312,33 @@ async def test_a_recent_reset_still_waits_for_its_email(service):
     import time
 
     flow, form, scope = _sf_flow(service, SIGN_IN)
-    flow.store.save(URL, flow.store.shared(), "reset_requested", reset_requested_at=time.time() - 60)
+    confirmed = {"reset_submitted_at": "2026-10-23T00:00:00+00:00"}
+    flow.store.save(URL, flow.store.shared(), "reset_requested", reset_requested_at=time.time() - 60, **confirmed)
     assert not flow.reset_unanswered(URL, "reset_requested")
-    flow.store.save(URL, flow.store.shared(), "reset_requested", reset_requested_at=time.time() - 3600)
+    flow.store.save(URL, flow.store.shared(), "reset_requested", reset_requested_at=time.time() - 3600, **confirmed)
     assert flow.reset_unanswered(URL, "reset_requested")
+
+
+async def test_a_reset_the_page_never_confirmed_is_not_an_unanswered_reset(service):
+    """L3Harris and Farmers (SuccessFactors, 2026-10-21..25): the recorded "resets" pressed Sign In on the sign-in
+    page with no password; none reached the employer. Their silence must not read as "no account" (Create) or as an
+    account only the owner can recover."""
+    import time
+
+    flow, form, scope = _sf_flow(service, SIGN_IN)
+    flow.store.save(URL, flow.store.shared(), "reset_requested", reset_requested_at=time.time() - 3600)
+    assert not flow.reset_unanswered(URL, "reset_requested")
+    flow.store.save(URL, flow.store.shared(), "password_unknown")
+    assert not flow.reset_unanswered(URL, "password_unknown")
+    from unittest.mock import AsyncMock
+
+    form.fill_current = AsyncMock(return_value={"pending": [], "filled": []})
+    try:
+        await flow.handle()
+    except (AttributeError, TypeError, KeyError):
+        pass  # the fake form stops inside sign-in, past the point that matters here
+    assert "create" not in form.clicked
+    assert not flow.store.record(URL).get("absent_create_at")
 
 
 async def test_an_existing_account_found_by_the_one_create_stays_password_unknown(service):

@@ -215,7 +215,8 @@ class AccountStore:
 # Markers of a refused login or an unanswered reset. A password the owner saved settles them, so the next run signs
 # in with it instead of requesting another reset. Markers the engine adds under these prefixes are cleared too.
 OWNER_SETTLED = ("error", "previous_credentials")
-OWNER_SETTLED_PREFIXES = ("reset_requested", "rejected_", "password_unknown", "unanswered")
+OWNER_SETTLED_PREFIXES = ("reset_requested", "reset_submitted", "reset_unconfirmed", "rejected_", "password_unknown",
+                          "unanswered")
 
 
 def save_owner_password(service, key, password):
