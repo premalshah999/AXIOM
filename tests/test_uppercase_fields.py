@@ -34,3 +34,17 @@ async def test_a_name_is_typed_in_capitals_and_reads_back_as_the_same_answer(pag
 
     assert same_value(fields["First Name"], "ALEX", "Alex")
     assert not same_value(fields["City"], "SPRINGFIELD", "Springfield")
+
+
+def test_a_capitals_rule_stated_only_in_the_refusal_marks_the_named_fields():
+    """Dallas County's Oracle said it only in its 400: "Please enter your first name using ALL CAPITAL LETTERS"
+    (2026-10-25)."""
+    from jobpilot.forms import mark_uppercase_fields
+    from jobpilot.widgets import same_value
+
+    fields = [{"type": "text", "label": "First Name"}, {"type": "text", "label": "Last Name"},
+              {"type": "text", "label": "City"}]
+    mark_uppercase_fields(fields, "Please enter your first name using ALL CAPITAL LETTERS (Example: JOHN). Please "
+                                  "enter your last name using ALL CAPITAL LETTERS (Example: DOE).")
+    assert [f.get("letter_case") for f in fields] == ["upper", "upper", None]
+    assert not same_value(fields[0], "Alex", "Alex") and same_value(fields[0], "ALEX", "Alex")

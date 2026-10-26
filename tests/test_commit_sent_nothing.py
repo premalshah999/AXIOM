@@ -104,3 +104,21 @@ def test_an_employer_refusal_is_recorded_without_applicant_values(body, said):
     from jobpilot.browser import refusal_text
 
     assert refusal_text(body) == said
+
+
+def test_an_already_applied_refusal_is_an_already_applied_outcome():
+    """Eightfold answered PayPal's and Micron's Submit with 400 "You have already applied to this position." and the
+    runs resubmitted six times, then sat in repair (2026-10-25)."""
+    engine = object.__new__(BrowserEngine)
+    engine.emit, engine.page = (lambda *a, **k: None), SimpleNamespace(url=FORM)
+    engine.form = SimpleNamespace()
+    request = SimpleNamespace(method="POST", resource_type="fetch")
+    response = SimpleNamespace(url=FORM.replace("/job/1/apply/section/1", "/api/application/v2/submit"), status=400,
+                               request=request)
+    BrowserEngine.refusal_event(engine, response, "You have already applied to this position.")
+    result = engine.refused_as_already_applied()
+    assert result["state"] == "already_applied" and "already applied" in result["receipt"]["evidence"]
+    assert engine.form.refusal_notes == ["You have already applied to this position."]
+    other = object.__new__(BrowserEngine)
+    other.refusal_said = ["Please enter your first name using ALL CAPITAL LETTERS (Example: JOHN)."]
+    assert other.refused_as_already_applied() is None

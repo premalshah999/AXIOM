@@ -413,6 +413,8 @@ def same_amount(a, b):
 def same_value(field, actual, expected):
     actual, expected = phone_value(field, actual), phone_value(field, expected)
     a, e = " ".join(str(actual).split()), " ".join(str(expected).split())
+    if field.get("letter_case") == "upper" and a != a.upper():
+        return False  # A capitals-only field still showing lower case was refused (Dallas County 2026-10-25).
     if a == e or (field.get("letter_case") == "upper" and a.upper() == e.upper()):
         return True
     from .forms import display_date

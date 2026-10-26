@@ -1916,7 +1916,29 @@ class BrowserEngine:
         request = response.request
         data = {"status": response.status, "method": request.method, "resource_type": request.resource_type,
                 "path": urlsplit(response.url).path[:120], **({"said": said} if said else {})}
+        if said:
+            # What the employer said is read like the page's own text: a capitals-only rule stated only in the
+            # refusal (Dallas County's Oracle "Please enter your first name using ALL CAPITAL LETTERS").
+            self.__dict__.setdefault("refusal_said", []).append(said)
+            form = getattr(self, "form", None)
+            if form is not None:
+                form.refusal_notes = [*getattr(form, "refusal_notes", []), said][-5:]
         self.emit("submission_http_error", f"Employer returned HTTP {response.status} during submission", data)
+
+    def refused_as_already_applied(self):
+        """The commit's refusal said this posting was already applied to: Eightfold answered PayPal's and Micron's
+        Submit with 400 "You have already applied to this position." and the runs resubmitted six times."""
+        from .adapters.base import ALREADY
+
+        for said in getattr(self, "refusal_said", None) or []:
+            if match := ALREADY.search(said):
+                return {
+                    "state": "already_applied",
+                    "reason": "The employer refused the submit because you already applied to this job",
+                    "receipt": {"type": "employer_already_applied", "url": getattr(self.page, "url", ""),
+                                "evidence": match[0][:200]},
+                }
+        return None
 
     def emit_commit_requests(self):
         """The writes this commit sent (submission_response), once."""
@@ -3278,7 +3300,7 @@ class BrowserEngine:
         for frame in self.page.frames:
             await frame.evaluate(ARM_JS)
         self.emit("submitting", "Commit step started; automatic retries are disabled")
-        self.commit_requests, self.commit_tracking, self.commit_inflight = [], 0, set()
+        self.commit_requests, self.commit_tracking, self.commit_inflight, self.refusal_said = [], 0, set(), []
         self.commit_url = getattr(self.page, "url", "")
         await self.form.locator(final[0]["id"]).click(timeout=10000)
         result = await self.watch_submission(before, before_rejection, validation_attempt)
@@ -3443,6 +3465,10 @@ class BrowserEngine:
                 "recovery_cause": "validation_controls",
                 "receipt": stale_rejection,
             }
+        if already := self.refused_as_already_applied():
+            self.armed = False
+            await self.release_reservation()
+            return already
         if await self.commit_sent_nothing():
             # Dallas County's Oracle form (2026-10-24, four runs): the click sent only Oracle's user-tracking call and
             # LinkedIn pixels, the form and its Submit stayed, and each run ended as an uncertain submission that can

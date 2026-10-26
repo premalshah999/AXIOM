@@ -1319,7 +1319,7 @@ class Adapter:
             except Exception:
                 pass
         self.emit("submitting", "Commit step started; automatic retries are disabled")
-        self.e.commit_requests, self.e.commit_tracking, self.e.commit_inflight = [], 0, set()
+        self.e.commit_requests, self.e.commit_tracking, self.e.commit_inflight, self.e.refusal_said = [], 0, set(), []
         self.e.commit_url = getattr(self.page, "url", "")
         try:
             await self.form.click(final["id"], step_control=True)
@@ -1419,6 +1419,11 @@ class Adapter:
                 return None
             if obs["errors"] and step in {Step.FORM, Step.REVIEW}:
                 break
+        if already := self.e.refused_as_already_applied():
+            self.e.armed = self.committed = False
+            await self.e.release_reservation()
+            self.e.emit_commit_requests()
+            return already
         sent_nothing = await self.e.commit_sent_nothing()
         self.e.emit_commit_requests()
         if sent_nothing:

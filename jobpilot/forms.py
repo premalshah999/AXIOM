@@ -1329,7 +1329,7 @@ class FormSession:
         name_phone_numbers(list(self.fields.values()))
         link_companion_text(self.fields.values())
         label_signature_date(list(self.fields.values()), "\n".join(texts))
-        mark_uppercase_fields(list(self.fields.values()), "\n".join(texts))
+        mark_uppercase_fields(list(self.fields.values()), "\n".join([*texts, *getattr(self, "refusal_notes", [])]))
         icims_protocol.apply(list(self.fields.values()), list(self.buttons.values()), "\n".join(texts))
         numeric_year_counts(self.fields.values())
         oracle_education_block(self.fields.values())
