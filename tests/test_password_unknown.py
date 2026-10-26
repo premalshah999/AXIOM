@@ -112,3 +112,19 @@ def test_avatures_sign_in_wording_reads_as_refused_and_create_profile_as_sign_up
     assert BAD_CREDENTIALS.search("The username or password may be incorrect, or access might be restricted.")
     assert CREATE_LINK.fullmatch("Create profile!") and CREATE_LINK.fullmatch("Create account")
     assert not CREATE_LINK.fullmatch("Create profile and apply later today")
+
+
+@pytest.mark.parametrize("job_host,frame_host,allowed", [
+    ("deloitteus.avature.net", "apply.deloitte.com", True),     # Deloitte's Avature tenant on its own domain
+    ("acme.wd5.myworkdayjobs.com", "careers.acme.com", True),
+    ("careers-acme.icims.com", "jobs.acme.com", True),
+    ("deloitteus.avature.net", "apply.deloitte-careers-login.example", False),
+    ("acmecorp.avature.net", "acm.com", False),                 # too short a name to identify the employer
+    ("deloitteus.avature.net", "evil.com", False),
+])
+def test_an_ats_tenant_names_its_employers_own_domain(job_host, frame_host, allowed):
+    """Deloitte's Avature tenant signs candidates in on apply.deloitte.com; the password was refused as "an unexpected
+    website" and the run never registered (2026-10-26)."""
+    from jobpilot.accounts.credentials import employer_domain_of_tenant
+
+    assert employer_domain_of_tenant(job_host, frame_host) is allowed

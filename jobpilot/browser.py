@@ -127,6 +127,23 @@ REFUSAL_KEYS = {"message", "error", "errors", "error_message", "errormessage", "
                 "reason", "title", "msg"}
 
 
+# Application endpoints whose Turnstile token travels in a request header (platform host, path) -> header name.
+# Workable's apply POST carries X-TURNSTILE-TOKEN; its widget fails in the worker browser, the page swallows the error
+# and posts without the header, and Workable answered 412 on every application from 2026-10-23 (owner-approved
+# 2026-10-26: the clean twin Chrome's token is sent instead).
+HEADER_TOKEN_ENDPOINTS = [
+    (re.compile(r"(?:^|\.)workable\.com$", re.I), re.compile(r"^/api/v\d+/jobs/[^/]+/apply$"), "x-turnstile-token"),
+]
+
+
+def header_token_endpoint(parts):
+    """The header that carries this application request's Turnstile token, or None."""
+    for host, path, header in HEADER_TOKEN_ENDPOINTS:
+        if host.search(parts.hostname or "") and path.search(parts.path):
+            return header
+    return None
+
+
 # Unfinished outcomes whose tab closes once its draft is saved; their next run reopens the saved route.
 RELEASED_TAB_STATES = {"waiting_browser", "timed_out", "needs_review", "waiting_answer"}
 
@@ -667,6 +684,10 @@ class BrowserEngine:
                     return await route.abort()
                 if host.endswith(TRACKERS) and not request.is_navigation_request():
                     return await route.abort()
+            if request.method == "POST" and self.armed and (header := header_token_endpoint(p)):
+                if token := await self.header_turnstile_token(request, header):
+                    self.header_token_sent = True
+                    return await route.fallback(headers={**request.headers, header: token})
             if request.method not in {"GET", "HEAD", "OPTIONS"} and self.endpoint_guard:
                 final_endpoint = re.search(
                     r"/submit(?:$|[/?])|/applications/?$|/applicationForm\.submit|/candidates/?$",
@@ -679,6 +700,48 @@ class BrowserEngine:
             await route.fallback()
         except Exception:
             await route.abort()
+
+    async def header_turnstile_token(self, request, header):
+        """The clean twin Chrome's Turnstile token for an application request that carries it in a header, when the
+        request has none or only an error code (HEADER_TOKEN_ENDPOINTS). None keeps the request unchanged."""
+        sent = str((request.headers or {}).get(header, ""))
+        if sent and not sent.startswith("error_code_"):
+            self.header_token_sent = True  # The page's own token went out; a refusal of it is the site's answer.
+            return None
+        prepared, at = getattr(self, "prepared_header_token", (None, 0))
+        if prepared and time.monotonic() - at < 240:  # Turnstile tokens live 300 s.
+            self.prepared_header_token = (None, 0)
+            return prepared
+        return await self.mint_header_token()
+
+    async def mint_header_token(self):
+        """A Turnstile token for this page's own site key from the clean twin Chrome, or None."""
+        endpoint = getattr(self.config, "browser_twin_cdp_url", "")
+        if not endpoint:
+            return None
+        try:
+            html = await self.page.content()
+        except PlaywrightError:
+            return None
+        key = re.search(r'"turnstile(?:Widget)?SiteKey"\s*:\s*"(0x[A-Za-z0-9_-]{10,60})"', html)
+        if not key:
+            return None
+        from .captcha_twin import mint
+
+        result = {}
+        for attempt in range(3):  # The twin's first mint on a host can time out while its script loads.
+            result = await mint(endpoint, self.page.url, key[1], kind="turnstile", timeout=20)
+            if result.get("token"):
+                self.emit(
+                    "captcha",
+                    "Clean twin browser minted the Turnstile token for the application request",
+                    {"provider": "twin-browser", "attempt": attempt + 1},
+                )
+                return result["token"]
+        self.emit(
+            "captcha", "Clean twin browser did not mint the Turnstile token", {"reason": str(result.get("error"))[:120]}
+        )
+        return None
 
     def nice_resume(self, run):
         """Employers see the file name. Upload 'First_Last_Resume.pdf', never a checksum name."""
@@ -3327,6 +3390,11 @@ class BrowserEngine:
                 await refresh()
             if refused := await self.try_reserve_commit():
                 return refused
+        page_host = urlsplit(getattr(self.page, "url", "") or "").hostname or ""
+        if any(host.search(page_host) for host, _, _ in HEADER_TOKEN_ENDPOINTS):
+            # Minted before the click: the application request then leaves at once instead of waiting seconds for
+            # the twin inside the submit watch.
+            self.prepared_header_token = (await self.mint_header_token(), time.monotonic())
         self.armed = True
         before = await self.form.proof()
         self.pre_commit_proof = before
@@ -3415,7 +3483,9 @@ class BrowserEngine:
                     from .application_pacing import throttle
 
                     if getattr(self, "service", None) is not None:
-                        throttle(self.service.db, self.job.get("ats", ""))  # Workable's per-candidate refusal
+                        # Workable's per-candidate refusal; one without its Turnstile token pauses nothing.
+                        sent = bool(getattr(self, "header_token_sent", False))
+                        throttle(self.service.db, self.job.get("ats", ""), token_sent=sent)
                     return {
                         "state": "waiting_browser",
                         "reason": "The employer could not accept the submission and asked to try again later; "

@@ -78,7 +78,7 @@ def test_a_refusal_pauses_workable_and_other_platforms_continue(service):
     job_id, run_id = add(service, "queued", 1)
     with service.db.session() as s:
         require_ats_admission(s, s.get(Job, job_id), run_id=run_id)  # accepting: no wait
-    throttle(service.db, "workable")
+    throttle(service.db, "workable", token_sent=True)
     with service.db.session() as s:
         assert throttled_until(s, "workable")
         with pytest.raises(QueueBlocked) as blocked:
@@ -88,3 +88,13 @@ def test_a_refusal_pauses_workable_and_other_platforms_continue(service):
     other, other_run = add(service, "queued", 2, ats="greenhouse")
     with service.db.session() as s:
         require_ats_admission(s, s.get(Job, other))
+
+
+def test_a_refusal_of_a_request_without_its_token_pauses_nothing(service):
+    """Workable's 412s from 2026-10-23 answered apply POSTs that lacked X-TURNSTILE-TOKEN: the browser's fault, not
+    the site refusing the applicant, yet each paused Workable for three hours."""
+    from jobpilot.application_pacing import throttle, throttled_until
+
+    throttle(service.db, "workable")
+    with service.db.session() as s:
+        assert not throttled_until(s, "workable")

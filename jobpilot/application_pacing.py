@@ -33,16 +33,25 @@ def throttle_key(ats):
     return "application_pacing:throttled:" + ats
 
 
-def throttle(db, ats):
+# Platforms whose refusal counts only when the request carried its bot-check token: Workable answered 412 to an apply
+# POST that lacked X-TURNSTILE-TOKEN (the worker's widget failed), which was this browser's fault, not the site
+# refusing the applicant, and every such refusal paused the platform for three hours (2026-10-23..26).
+TOKEN_REQUIRED = {"workable"}
+
+
+def throttle(db, ats, token_sent=False):
     """The platform refused an application as too many: no new starts on it for a while."""
     if ats in THROTTLE_SECONDS:
         until = datetime.fromtimestamp(time.time() + THROTTLE_SECONDS[ats], UTC).isoformat()
-        db.set_setting(throttle_key(ats), {"until": until, "at": datetime.now(UTC).isoformat()})
+        db.set_setting(throttle_key(ats), {"until": until, "at": datetime.now(UTC).isoformat(), "token_sent": token_sent})
 
 
 def throttled_until(session, ats):
     row = session.get(Setting, throttle_key(ats)) if ats in THROTTLE_SECONDS else None
-    until = (row.value or {}).get("until", "") if row else ""
+    value = (row.value or {}) if row else {}
+    if ats in TOKEN_REQUIRED and not value.get("token_sent"):
+        return ""  # Refused without its token: nothing about the applicant, no pause.
+    until = value.get("until", "")
     return until if until and until > datetime.now(UTC).isoformat() else ""
 
 

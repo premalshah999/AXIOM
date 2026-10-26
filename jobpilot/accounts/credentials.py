@@ -1,5 +1,6 @@
 """Accounts: which credentials a run may use; the dashboard summary."""
 
+import re
 from urllib.parse import urlsplit
 import hashlib
 from ..db import Setting
@@ -98,7 +99,19 @@ class Accounts:
             return False
         if frame == job or registrable(frame) == registrable(job):
             return True
+        if host_matches(job, AUTH_HOSTS.get(ats, [])) and employer_domain_of_tenant(job, frame):
+            return True
         return host_matches(frame, AUTH_HOSTS.get(ats, []))
+
+
+def employer_domain_of_tenant(job_host, frame_host):
+    """True when an ATS tenant host names the employer whose own domain the page moved to: Deloitte's Avature tenant
+    deloitteus.avature.net signs candidates in on apply.deloitte.com, where the password was refused as "an unexpected
+    website" and the run never registered (2026-10-26). The domain's name must start the tenant's first label (at least
+    four letters), the way nvidia.wd5.myworkdayjobs.com names nvidia.com."""
+    tenant = re.sub(r"^(?:careers?|jobs?|apply)[-.]", "", job_host.split(".")[0].lower())
+    name = registrable(frame_host).split(".")[0].lower()
+    return len(name) >= 4 and tenant.startswith(name)
 
 
 def summary(service):
