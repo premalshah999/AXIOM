@@ -372,7 +372,7 @@ class CompletionMixin:
         except Exception:
             return
 
-    def reconcile(self, run_id, submitted, evidence, *, submitted_by_owner=False):
+    def reconcile(self, run_id, submitted, evidence, *, submitted_by_owner=False, final_page=False):
         if not evidence.strip():
             raise ValueError("Provide confirmation evidence or an explanation of non-submission")
         with self.db.exclusive() as s:
@@ -394,6 +394,13 @@ class CompletionMixin:
                     raise ValueError("Only a parked application the owner submitted can be recorded this way")
                 run.receipt = {"type": "owner_submitted", "evidence": evidence[:4000], "at": now()}
                 run.reason = "Submitted by the applicant in the browser"
+            elif final_page:
+                # The run's own final page acknowledges the application although the run parked (Sopra Steria,
+                # SmartRecruiters 2026-10-26: "Bewerbung eingereicht!" after "Absenden" was clicked as a step).
+                if not run or run.state not in OWNER_FINISHABLE | {"submission_unknown"} or not submitted:
+                    raise ValueError("Only a parked run whose final page shows the acknowledgement can be recorded")
+                run.receipt = {"type": "final_page_confirmation", "evidence": evidence[:4000], "at": now()}
+                run.reason = "The employer's final page acknowledged the application"
             elif not run or (run.state not in {"submission_unknown", "already_applied"} and not committed):
                 raise ValueError("Only uncertain submissions or already-applied notices can be reconciled")
             else:

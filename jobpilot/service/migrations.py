@@ -90,7 +90,7 @@ class MigrationsMixin:
                     and receipt.get("evidence_selector")
                     and receipt.get("status_region")
                 )
-                if trusted_email or current_dom or receipt.get("type") == "user_reconciled":
+                if trusted_email or current_dom or receipt.get("type") in {"user_reconciled", "final_page_confirmation"}:
                     receipt["evidence_reconciliation"] = "verified"
                 else:
                     receipt["evidence_reconciliation"] = "pending"

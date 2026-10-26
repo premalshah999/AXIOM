@@ -337,7 +337,12 @@ class ResumeAttachmentError(ValueError):
 
 
 FINAL = re.compile(
-    r"\bsubmit\b|send (?:my )?application|complete (?:my )?application|finish application", re.IGNORECASE
+    r"\bsubmit\b|send (?:my )?application|complete (?:my )?application|finish application"
+    # German and French submits (Sopra Steria, SmartRecruiters 2026-10-26): "Absenden" was clicked as an ordinary
+    # step, the application went through outside the commit step and the run stalled on a success page. The page
+    # guards (browser.GUARD, forms.click, workday.py) carry the same words.
+    r"|\babsenden\b|bewerbung (?:abschicken|einreichen)|envoyer ma candidature|\bsoumettre\b",
+    re.IGNORECASE,
 )
 # SuccessFactors application pages (classic career site, the candidate portal wizard, Career Site
 # Builder's apply route). Their bare "Apply" is the application submit, never the posting's "Apply now".
@@ -826,6 +831,17 @@ def display_date(text):
         except ValueError:
             continue
     return None
+
+
+# Acknowledgements on German, French and Spanish career sites; read like the English ones, in a status region only.
+LOCALIZED_CONFIRMATION = (
+    r"bewerbung(?: [^.!?\n]{1,160}?)? (?:wurde |ist )?(?:erfolgreich )?"
+    r"(?:eingereicht|versendet|abgeschickt|übermittelt|gesendet|eingegangen)\b|"
+    r"vielen dank für (?:ihre|deine) bewerbung|"
+    r"candidature (?:a (?:bien )?été )?(?:envoyée|soumise|transmise|reçue|enregistrée)|merci pour votre candidature|"
+    r"(?:solicitud|candidatura|postulación) (?:ha sido |fue )?(?:enviada|recibida|registrada)|"
+    r"gracias por (?:su |tu )?(?:solicitud|postulación|candidatura)"
+)
 
 
 EMPLOYER_CONFIRMATION_RE = re.compile(
@@ -4962,7 +4978,7 @@ class FormSession:
             marked = await el.evaluate(
                 r"""(el,auth) => {
                   const label=(el.innerText || el.value || el.getAttribute('aria-label') || '').trim();
-                  if(!auth && !window.__jpArmed && /\bsubmit\b|send (?:my )?application|complete (?:my )?application|finish application/i.test(label))return false;
+                  if(!auth && !window.__jpArmed && /\bsubmit\b|send (?:my )?application|complete (?:my )?application|finish application|\babsenden\b|bewerbung (?:abschicken|einreichen)|envoyer ma candidature|\bsoumettre\b/i.test(label))return false;
                   el.dataset.jpAuthControl='true';el.dataset.jpControlLabel=label;
                   el.dataset.jpFinalAuth=String(auth);
                   const f=el.closest('form');if(f)f.__jpAllowedControl=el;
@@ -5457,7 +5473,9 @@ class FormSession:
             r"thank you for sending us your online job submission|"
             r"your application (?:is |has been |was )?(?:complete|submitted|received|sent|on its way)|"
             r"your application is in\b|"
-            r"(?:^|(?<=[.!?\n]))\s*you(?:'ve| have) (?:successfully )?applied"
+            r"(?:^|(?<=[.!?\n]))\s*you(?:'ve| have) (?:successfully )?applied|"
+            # German, French and Spanish career sites (Sopra Steria 2026-10-26: "Bewerbung eingereicht!").
+            + LOCALIZED_CONFIRMATION
         )
         # A phrase in a help block, description or still-editable form cannot
         # establish that this application was accepted. Observe an actual status

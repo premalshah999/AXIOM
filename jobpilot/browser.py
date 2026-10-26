@@ -38,7 +38,7 @@ from .pipeline_comparison import worker_context
 GUARD = r"""(() => {
   if(""" + PROVIDER_FRAME_JS + r""")return;
   window.__jpArmed = false;
-  const final=label=>/\bsubmit\b|send (?:my )?application|complete (?:my )?application|finish application/i.test(label);
+  const final=label=>/\bsubmit\b|send (?:my )?application|complete (?:my )?application|finish application|\babsenden\b|bewerbung (?:abschicken|einreichen)|envoyer ma candidature|\bsoumettre\b/i.test(label);
   const label=el=>(el ? (el.innerText || el.value || el.getAttribute('aria-label') || '') : '').trim();
   const permitted=el=>!!el && el.dataset.jpAuthControl==='true'
     && (!el.dataset.jpControlLabel || el.dataset.jpControlLabel===label(el))
@@ -159,7 +159,7 @@ def application_created(requests, job_id, run_id):
     return None
 
 
-GREENHOUSE_JOB = re.compile(r"^https://(?:job-)?boards\.greenhouse\.io/(?:embed/job_app\?for=)?([A-Za-z0-9_-]+)(?:/jobs/|&token=)(\d+)")
+GREENHOUSE_JOB = re.compile(r"^https://(?:job-)?boards(?:\.eu)?\.greenhouse\.io/(?:embed/job_app\?for=)?([A-Za-z0-9_-]+)(?:/jobs/|&token=)(\d+)")
 LEVER_JOB = re.compile(r"^https://jobs\.lever\.co/([A-Za-z0-9_.-]+)/([0-9a-f-]{36})")
 
 
@@ -1112,13 +1112,20 @@ class BrowserEngine:
                 # Greenhouse form in an iframe whose pickers/uploads time out across the
                 # frame boundary. Open Greenhouse's own embed URL as the top-level page.
                 try:
-                    handle = await page.wait_for_function(
-                        r"""() => { const f=[...document.querySelectorAll('iframe[src]')]
-                          .find(i => /^https:\/\/(?:job-)?boards\.greenhouse\.io\/embed\/job_app\?/.test(i.src));
-                          return f ? f.src : null; }""",
-                        timeout=10000,
-                    )
-                    embedded = await handle.json_value()
+                    if board := GREENHOUSE_JOB.match(job["url"]):
+                        # Waymo's board link (2026-10-26) redirects to careers.withwaymo.com, whose form is not an
+                        # iframe found in time; its emailed code then had no Greenhouse origin to go to, and its runs
+                        # stopped there. The board and job named in the link open Greenhouse's own embedded form.
+                        region = ".eu" if ".eu.greenhouse.io/" in job["url"] else ""
+                        embedded = f"https://job-boards{region}.greenhouse.io/embed/job_app?for={board[1]}&token={board[2]}"
+                    else:
+                        handle = await page.wait_for_function(
+                            r"""() => { const f=[...document.querySelectorAll('iframe[src]')]
+                              .find(i => /^https:\/\/(?:job-)?boards\.greenhouse\.io\/embed\/job_app\?/.test(i.src));
+                              return f ? f.src : null; }""",
+                            timeout=10000,
+                        )
+                        embedded = await handle.json_value()
                     if embedded:
                         await page.goto(embedded, wait_until="domcontentloaded", timeout=30000)
                         self.emit("browser", "Opened the employer's embedded Greenhouse form directly")
@@ -1392,7 +1399,9 @@ class BrowserEngine:
                 "recovery_cause": "navigation_stalled",
             }
             if self.result.get("state") == "waiting_browser" and not self.armed:
-                self.result = await self.employer_already_applied() or self.result
+                self.result = (
+                    await self.employer_already_applied() or await self.page_acknowledged() or self.result
+                )
             return self.result
         except MailSenderBusy as exc:
             self.result = exc.result(armed=self.armed)
@@ -1616,6 +1625,19 @@ class BrowserEngine:
                 except Exception:
                     pass
             shutil.rmtree(temp, ignore_errors=True)
+
+    async def page_acknowledged(self):
+        """A stalled flow that ends on the employer's acknowledgement. Sopra Steria (SmartRecruiters 2026-10-26): its
+        German "Absenden" was clicked as an ordinary step, the application went through, and the run waited on
+        "Bewerbung eingereicht!" until its recovery budget ran out. The same status-region proof as a commit."""
+        try:
+            receipt = await asyncio.wait_for(self.form.proof(), 8)
+        except Exception:
+            return None
+        if not receipt:
+            return None
+        self.emit("submission", "The employer's page acknowledged the application")
+        return {"state": "confirmed", "reason": "Website confirmation captured", "receipt": receipt}
 
     async def employer_already_applied(self):
         """A stalled generic flow that ends on the employer's own "already applied" notice."""

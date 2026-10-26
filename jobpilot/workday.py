@@ -277,7 +277,7 @@ class WorkdayAuth:
             accepted = await control.evaluate(
                 r"""(e,auth) => {
                   const label=(e.innerText || e.value || e.getAttribute('aria-label') || '').trim();
-                  const final=/\bsubmit\b|send (?:my )?application|complete (?:my )?application|finish application/i.test(label);
+                  const final=/\bsubmit\b|send (?:my )?application|complete (?:my )?application|finish application|\babsenden\b|bewerbung (?:abschicken|einreichen)|envoyer ma candidature|\bsoumettre\b/i.test(label);
                   const allowed=auth && /^submit$/i.test(label);
                   if(final && !allowed)return false;
                   e.dataset.jpAuthControl='true';e.dataset.jpControlLabel=label;

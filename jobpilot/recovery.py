@@ -179,6 +179,7 @@ def _submission_receipt(receipt):
             "explicit_rejection_page",
             "explicit_validation_rejection",
             "user_reconciled",
+            "final_page_confirmation",
             "authenticated_email",
             "already_applied",
         }

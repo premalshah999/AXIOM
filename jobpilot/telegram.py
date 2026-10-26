@@ -683,6 +683,8 @@ def question_payload(service, review_id, question, options, context, reason, com
             if oq.free_text_allowed(options, context)
             else "Tap your answer, or reply with it in your own words."
         )
+        if allows_several(question, context):
+            tail = "You may choose several: reply with their numbers, for example “1, 3”. " + tail
         markup = option_keyboard(review_id, listed, 0)
     elif kind == "upload":
         tail = (
@@ -697,6 +699,23 @@ def question_payload(service, review_id, question, options, context, reason, com
     if len(text) > 4000:
         text = "\n".join([*lines, "", f"{len(listed)} choices: use the buttons below.", "", tail])
     return {"chat_id": service.config.telegram_user_id, "text": text[:4000], "reply_markup": markup}
+
+
+from .owner_questions import allows_several  # noqa: E402  (one rule for the dashboard and Telegram)
+
+
+def multiple_picks(text, options):
+    """The options a reply like "1, 3" or "Python, SQL" names, in the order given; [] when it names fewer than two."""
+    parts = [p.strip() for p in re.split(r"[,;\n]|\band\b", text or "") if p.strip()]
+    picks = []
+    for part in parts:
+        if part.isdigit() and 1 <= int(part) <= len(options):
+            pick = options[int(part) - 1]
+        else:
+            pick = next((o for o in options if normalize(o) == normalize(part)), None)
+        if pick and pick not in picks:
+            picks.append(pick)
+    return picks if len(picks) > 1 and len(picks) == len(parts) else []
 
 
 def confirm_choice(review_id, index, text):
@@ -1046,7 +1065,10 @@ async def answer_from_text(service, message):
         listed = oq.choices(options)
         texts = [t for _, t in listed]
         hit = oq.match_option(texts, text)
-        if hit and hit[1]:
+        picks = multiple_picks(text, texts) if allows_several(question, context) else []
+        if len(picks) > 1:
+            answer = "\n".join(picks)  # "Select all that apply": the form ticks each (one option per line).
+        elif hit and hit[1]:
             answer = texts[hit[0]]
         else:
             # The model reads the owner's words against the offered options first; a near text match is the fallback.

@@ -20,6 +20,8 @@ class Reconcile(BaseModel):
     evidence: str = Field(min_length=5, max_length=4000)
     # The owner submitted a parked application in the browser themselves.
     submitted_by_owner: bool = False
+    # The parked run's own final page shows the employer's acknowledgement (quote it in evidence).
+    final_page: bool = False
 
 
 def router(service) -> APIRouter:
@@ -98,7 +100,9 @@ def router(service) -> APIRouter:
 
     @r.post("/api/runs/{run_id}/reconcile")
     async def reconcile(run_id: str, data: Reconcile):
-        service.reconcile(run_id, data.submitted, data.evidence, submitted_by_owner=data.submitted_by_owner)
+        service.reconcile(
+            run_id, data.submitted, data.evidence, submitted_by_owner=data.submitted_by_owner, final_page=data.final_page
+        )
         return {"reconciled": True}
 
     @r.post("/api/runs/{run_id}/check-email")

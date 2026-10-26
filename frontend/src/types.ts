@@ -64,6 +64,8 @@ export type Review = {
   kind?: "choice" | "upload" | "text";
   why?: string;
   allow_other?: boolean;
+  /** The form takes several answers ("select all that apply"): sent one option per line. */
+  multiple?: boolean;
   accept?: string;
 };
 export type Source = {

@@ -3468,3 +3468,18 @@ details:not(.fold) summary {
   margin: 0 0 16px;
   color: var(--fix);
 }
+
+/* Needs you: several answers */
+.question-multi {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 6px;
+  flex: 1;
+}
+.question-multi .check {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}

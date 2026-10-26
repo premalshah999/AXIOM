@@ -25,6 +25,9 @@ class Client:
 @pytest.mark.parametrize("url,api", [
     ("https://job-boards.greenhouse.io/toast/jobs/8224111", "https://boards-api.greenhouse.io/v1/boards/toast/jobs/8224111"),
     ("https://boards.greenhouse.io/embed/job_app?for=acme&token=123", "https://boards-api.greenhouse.io/v1/boards/acme/jobs/123"),
+    # EU boards are served by the same public API (Coherent Solutions 2026-10-26 stalled twice as a repair).
+    ("https://job-boards.eu.greenhouse.io/acme/jobs/5003468101",
+     "https://boards-api.greenhouse.io/v1/boards/acme/jobs/5003468101"),
     ("https://jobs.lever.co/acme/2f6c6a62-1111-4c3e-9a0b-0123456789ab",
      "https://api.lever.co/v0/postings/acme/2f6c6a62-1111-4c3e-9a0b-0123456789ab"),
 ])

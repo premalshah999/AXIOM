@@ -206,3 +206,22 @@ async def test_no_retry_storms(service, tmp_path, monkeypatch):
                     reason="Control failed at forms.py:3919; tab retained again", created_at="2000-01-01T00:00:00")
         s.add(older)
     assert (await repair_run(service, run2))["outcome"] == "stopped" and not resumed
+
+
+async def test_a_posting_the_platform_no_longer_lists_is_closed_without_a_model_call(service, tmp_path, monkeypatch):
+    # Gas South and Coherent Solutions (2026-10-26): the agent saw the role missing from the board but could only
+    # decline to retry, so each sat in Repairing. The public jobs API settles it.
+    run_id, job_id, _ = seed(service, tmp_path)
+    monkeypatch.setattr(service.config, "allow_private_urls", False, raising=False)
+
+    async def gone(url):
+        return "The posting is closed: Greenhouse no longer lists it, so nothing was submitted"
+
+    async def no_model(*args, **kwargs):
+        raise AssertionError("no model call for a closed posting")
+
+    monkeypatch.setattr("jobpilot.browser.posting_gone", gone)
+    monkeypatch.setattr("jobpilot.models.structured", no_model)
+    assert (await repair_run(service, run_id))["outcome"] == "closed"
+    with service.db.session() as s:
+        assert s.get(Run, run_id).state == "closed" and s.get(Job, job_id).status == "closed"

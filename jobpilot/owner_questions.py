@@ -387,6 +387,15 @@ def owner_blocker(reason, blocker_type=""):
     return "The application stopped at a step it couldn't finish on its own."
 
 
+MULTI_SELECT = re.compile(r"select all|check all|all that apply|choose all|mark all|one or more|multiple", re.I)
+
+
+def allows_several(question, context):
+    """A question whose form takes several answers: a checkbox group or multi-select, or "select all that apply"
+    (owner 2026-10-26: such questions could only be answered with one option)."""
+    return (context or {}).get("type") in {"checkboxgroup", "select-multiple"} or bool(MULTI_SELECT.search(question or ""))
+
+
 def present(review):
     """The owner-facing form of a review row (a dict from db.record) for the web app."""
     context = review.get("context") or {}
@@ -400,6 +409,7 @@ def present(review):
         "requirement": requirement(review.get("question", ""), options, context, review.get("reason", "")),
         "why": owner_reason(review.get("reason", ""), question_kind),
         "allow_other": question_kind == "choice" and free_text_allowed(options, context),
+        "multiple": question_kind == "choice" and allows_several(review.get("question", ""), context),
         "accept": context.get("accept", "") if question_kind == "upload" else "",
         "reason": owner_reason(review.get("reason", ""), question_kind),
     }

@@ -301,6 +301,18 @@ def check_fixes(plan, ev, profile):
     return accepted, rejected
 
 
+async def closed_posting(db, config, job_id):
+    """Why this job's Greenhouse or Lever posting is gone, or ''."""
+    from .browser import posting_gone
+
+    if getattr(config, "allow_private_urls", False):
+        return ""  # Owned test fixtures use made-up postings.
+    with db.session() as s:
+        job = s.get(Job, job_id)
+        url = job.url if job and not job.demo else ""
+    return await posting_gone(url) if url else ""
+
+
 def attempts_today(db, job_id):
     day = datetime.now(UTC).date().isoformat()
     record = db.get_setting("repair_attempts:" + job_id, {}) or {}
@@ -353,6 +365,16 @@ async def _repair_run(service, run_id):
         return {"skipped": "superseded" if newer else "waiting on the owner" if asking else "not repairable"}
     if state == "submission_unknown" and not (Path(config.data_dir) / "runs" / run_id / "final_outline.txt").exists():
         return {"skipped": "no final page to read"}
+    if state != "submission_unknown" and (gone := await closed_posting(db, config, job_id)):
+        # The agent diagnosed Gas South's and Coherent Solutions' removed postings correctly but could only decline to
+        # retry, so they sat in Repairing (2026-10-26). The platform's public API settles it without a model call.
+        with db.exclusive() as s:
+            run = s.get(Run, run_id)
+            if run and run.state == state:
+                run.state, run.reason = "closed", gone
+                s.get(Job, job_id).status = "closed"
+        db.event(run_id, "repair_agent", "Repair agent: " + gone, {"category": "closed", "outcome": "closed"})
+        return {"category": "closed", "outcome": "closed"}
     count, day = attempts_today(db, job_id)
     if count >= MAX_DAILY:
         return {"skipped": "daily repair budget used"}

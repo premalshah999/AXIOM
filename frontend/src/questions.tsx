@@ -122,6 +122,26 @@ export function QuestionCard({
             required
             onChange={(e) => setFile(e.target.files?.[0] || null)}
           />
+        ) : kind === "choice" && q.multiple ? (
+          <fieldset className="question-multi" aria-label="Your answers">
+            {q.options.map((x) => {
+              const picked = answer.split("\n").filter(Boolean);
+              return (
+                <label key={x} className="check">
+                  <input
+                    type="checkbox"
+                    checked={picked.includes(x)}
+                    onChange={(e) =>
+                      setAnswer(
+                        (e.target.checked ? [...picked, x] : picked.filter((p) => p !== x)).join("\n"),
+                      )
+                    }
+                  />
+                  <span>{x}</span>
+                </label>
+              );
+            })}
+          </fieldset>
         ) : kind === "choice" && q.allow_other ? (
           <>
             <input

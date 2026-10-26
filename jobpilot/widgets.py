@@ -2407,6 +2407,7 @@ ICIMS_CODE_DROPDOWN = """e => {
   return [anchor.id, ctnr.id];
 }"""
 DIAL_PREFIX = re.compile(r"^\s*\(\+?\d+\)\s*")
+DIAL_CODE = re.compile(r"\(?\+\d{1,4}\)?")
 
 
 async def icims_code_dropdown_commit(frame, el, value):
@@ -2431,18 +2432,26 @@ async def icims_code_dropdown_commit(frame, el, value):
         "els=>els.filter(e=>e.getClientRects().length).map(e=>[e.id,"
         "(e.getAttribute('aria-label')||e.innerText||'').replace(/\\s+/g,' ').trim()])"
     )
-    named = [r for r in rows if r[0] and norm(DIAL_PREFIX.sub("", r[1])) == norm(wanted)]
+
+    def name(row):
+        # "(+1) United States", "United States (+1)" and "United States +1" name one country. Planview's email step
+        # (2026-10-26) stopped at "No matching option is offered" on every pass; only the prefix form was read.
+        return norm(DIAL_CODE.sub(" ", row))
+
+    want = norm(wanted)
+    same = next((group for group in ALIASES if want in group), {want})
+    named = [r for r in rows if r[0] and name(r[1]) == want] or [r for r in rows if r[0] and name(r[1]) in same]
     if digits:
-        coded = [r for r in rows if r[0] and re.match(rf"\(\+{digits}\)", r[1])]
+        coded = [r for r in rows if r[0] and re.search(rf"\+{digits}(?!\d)", r[1])]
         # +1 is shared by the North American plan; the code alone means the United States.
-        named = coded if len(coded) == 1 else [r for r in coded if norm(DIAL_PREFIX.sub("", r[1])) == "united states"]
+        named = coded if len(coded) == 1 else [r for r in coded if name(r[1]) in ALIASES[0]]
     if len(named) != 1:
         await anchor.press("Escape")
         raise ValueError("No matching option is offered")
     await frame.locator(f'[id="{named[0][0]}"]').click(timeout=3000)
     await asyncio.sleep(0.3)
-    shown = norm(await anchor.inner_text())
-    if norm(DIAL_PREFIX.sub("", named[0][1])) in shown:
+    shown = norm(DIAL_CODE.sub(" ", await anchor.inner_text()))
+    if name(named[0][1]) in shown:
         return named[0][1]
     raise ValueError("The website did not commit the observed choice")
 
@@ -3253,8 +3262,10 @@ async def select(el, value, widget=""):
             !o.disabled && !o.closest('optgroup[disabled]') && o.value!=='' && o.text.trim()===text ? [index]:[])""",
             choice,
         )
-        if len(indices) != 1:
+        if not indices:
             raise ValueError("Native option is ambiguous or changed")
+        # Options with the same visible text are one choice to a person; ZS (iCIMS 2026-10-26) lists "Job Board"
+        # twice, and refusing it left a required source question unanswered on every pass.
         await el.select_option(index=indices[0], timeout=4000)
     # Leave the control as a person would. SuccessFactors clears an earlier
     # "…is required"/aria-invalid only on blur, so readback saw a set value as invalid.

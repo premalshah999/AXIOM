@@ -1226,7 +1226,10 @@ class Adapter:
             raise ValueError("Refusing to click a final submit control outside the commit step")
         await self.dismiss_overlays()
         before = set(self.page.context.pages)
-        result = await self.form.click(button["id"], auth_control=auth, step_control=step or auth)
+        # An adapter that classified a "Submit ..." label as a step (iCIMS "Submit Profile") vouches for it; the form's
+        # own guard sees only the label and refused it after the profile's CAPTCHA (America's Tire, Noblis 2026-10-26).
+        vouched = bool(FINAL.search(button["label"])) and not self.is_final_control(button)
+        result = await self.form.click(button["id"], auth_control=auth or vouched, step_control=step or auth)
         if set(self.page.context.pages) - before:
             self.emit("new_tab", "The application opened in a new tab")
         return result

@@ -202,3 +202,20 @@ async def test_the_resume_is_attached_before_the_password_is_typed(service):
     await value.authenticate(profile(), "create")
     assert order[0] == "upload" and "password" in order
     value.on_form.assert_awaited_once()
+
+
+async def test_submit_profile_passes_the_form_guard_as_a_vouched_step(service):
+    # America's Tire, Noblis 2026-10-26: after the profile's CAPTCHA the step click reached the form guard, which saw
+    # only the word "submit" and refused it ("Use the submit action for final submission").
+    from types import SimpleNamespace
+
+    from jobpilot.adapters.base import Adapter
+
+    value = adapter(service, profile())
+    value.committed = False
+    value.dismiss_overlays = AsyncMock()
+    value.form.click = AsyncMock(return_value=True)
+    value.form.page = SimpleNamespace(url=PROFILE, context=SimpleNamespace(pages=[]))
+    value.emit = lambda *args, **kwargs: None
+    await Adapter.click(value, {"id": "save", "label": "Submit Profile", "href": ""}, step=True)
+    assert value.form.click.await_args.kwargs["auth_control"] is True
