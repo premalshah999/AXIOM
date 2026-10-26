@@ -597,3 +597,17 @@ def test_language_row_is_answered_from_the_confirmed_languages(service):
         ask("", label="Language of instruction") is None
         or ask("", label="Language of instruction").disposition != "answer"
     )
+
+
+@pytest.mark.parametrize("label", [
+    "Are you, or have you ever been, a contractor for Acme?",
+    "Have you ever been an employee for Acme?",
+])
+def test_ever_been_a_contractor_or_employee_is_prior_employment(service, label):
+    # The Federal Reserve System (2026-10-26): the contractor wording went to the model, which copied "Yes" from the
+    # complete-history fact and opened an entity checklist the applicant has no answer for.
+    attest(service.db, "employment_history_complete", EMPLOYMENT_HISTORY["statement"])
+    resolver = Resolver(Profile(work=[{"company": "Globex", "title": "Developer"}]), service.db, service.config,
+                        employer="Acme", job={"company": "Acme", "url": "https://acme.wd5.myworkdayjobs.com/job/42"})
+    answer = resolver.local({**field(label), "options": ["Yes", "No"], "type": "select"})
+    assert answer is not None and answer.value == "No"

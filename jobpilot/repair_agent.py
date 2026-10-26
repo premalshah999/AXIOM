@@ -406,7 +406,12 @@ async def _repair_run(service, run_id):
         db.set_setting("repair_overrides:" + job_id, overrides)
     if plan.navigator_instruction.strip():
         applied["instruction"] = plan.navigator_instruction.strip()[:800]
-        db.set_setting("repair_directive:" + job_id, {"text": applied["instruction"], "run_id": run_id, "at": now()})
+        from .runtime import engine_version
+
+        db.set_setting(
+            "repair_directive:" + job_id,
+            {"text": applied["instruction"], "run_id": run_id, "at": now(), "engine": engine_version()},
+        )
     outline = ev.get("final_page_outline", "")
     outcome = "unchanged"
     if state == "submission_unknown":

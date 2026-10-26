@@ -129,7 +129,10 @@ def _topic(text):
             r"(?![^?]*(?:government|public (?:institution|sector)|military))|"
             r"(?:current or former|former|current) employee (?:of|at|for)|"
             r"(?:have you|are you|were you).{0,35}(?:worked for|employed by) (?:this|our) (?:organi[sz]ation|company)|"
-            r"\b(?:current|former|active)\b.{0,25}\b(?:contractor|consultant)s?\b",
+            r"\b(?:current|former|active)\b.{0,25}\b(?:contractor|consultant)s?\b|"
+            # "Are you, or have you ever been, a contractor for the Federal Reserve System and/or CFPB?" went to the
+            # model, which copied "Yes" from the complete-history fact and opened an entity checklist (2026-10-26).
+            r"\bever been,? an? (?:employee|contractor|consultant|contract worker|intern) (?:of|for|at|with)\b",
         ),
         (
             "sponsorship",

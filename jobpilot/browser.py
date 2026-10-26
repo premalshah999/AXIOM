@@ -846,14 +846,19 @@ class BrowserEngine:
         return None
 
     def current_repair_instruction(self):
-        """The repair agent's note for this job, unless the owner clicked Apply after it was written: Deloitte's note
-        "stop retrying sign-in" outlived the fix for its sign-in, and the next run stopped on it (2026-10-26)."""
+        """The repair agent's note for this job, unless the owner clicked Apply after it was written or a newer build
+        runs: Deloitte's note "stop retrying sign-in" outlived the fix for its sign-in, and Applied Materials' "do not
+        retry the Workday tenant" outlived the handoff fix; the next runs stopped on them (2026-10-26)."""
+        from .runtime import engine_version
+
         directive = self.db.get_setting("repair_directive:" + self.job["id"], {}) or {}
         clicked = [
             str((self.db.get_setting(prefix + self.job["id"], {}) or {}).get("at") or "")
             for prefix in ("owner_pick:", "application_budget_reset:")
         ]
         if directive.get("at") and max(clicked) > str(directive["at"]):
+            return ""
+        if directive.get("engine") != engine_version():
             return ""
         return directive.get("text", "")
 

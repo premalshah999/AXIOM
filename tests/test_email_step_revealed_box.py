@@ -59,3 +59,18 @@ async def test_only_agreement_menus_are_consents(service):
     a.form.resolver.resolve.assert_awaited_once_with([consent])
     assert [call.args[0]["id"] for call in a.form.fill.await_args_list] == ["email", "consent"]
     a.click.assert_awaited_once()
+
+
+async def test_a_box_that_names_email_never_gets_the_address(service):
+    # GuideWell (Oracle) 2026-10-26: "Checkbox answer must specify checked or unchecked".
+    alerts = {"id": "alerts", "type": "checkbox", "label": "Email me about new jobs", "required": False, "value": ""}
+    obs = observation([EMAIL, alerts], True)
+    a = adapter(service, obs)
+    a.form.fill = AsyncMock()
+    a.form.resolver = SimpleNamespace(resolve=AsyncMock(return_value=[
+        Answer(field_id="alerts", value="false", disposition="answer")]))
+    a.form.scan = AsyncMock(return_value=obs)
+    a.challenge = None
+    a.after_auth_dialogs = AsyncMock()
+    await a.on_email_entry(obs)
+    assert ("alerts", "alex@example.test") not in [(c.args[0]["id"], c.args[1]) for c in a.form.fill.await_args_list]

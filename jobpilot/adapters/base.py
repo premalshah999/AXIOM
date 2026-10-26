@@ -762,7 +762,11 @@ class Adapter:
             return None
 
         for f in obs["fields"]:
-            if f["type"] == "email" or re.search(r"e-?mail", f["label"], re.I):
+            # A box such as "Email me new jobs" names email too; it is an agreement, not the address (GuideWell's
+            # Oracle email step 2026-10-26: "Checkbox answer must specify checked or unchecked").
+            if f["type"] == "email" or (
+                re.search(r"e-?mail", f["label"], re.I) and f["type"] in {"text", "search", "", None}
+            ):
                 await self.form.fill(f, self.accounts.email)
         if deferred := await agree(obs["fields"]):
             return deferred
