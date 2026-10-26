@@ -2,6 +2,7 @@
 
 import asyncio
 import calendar
+import html
 import re
 import time
 from datetime import date, datetime
@@ -2163,12 +2164,20 @@ async def icims_select_texts(el):
     return [t for t in texts if not placeholder_option(t)]
 
 
+def icims_text(label):
+    """A row's text from its aria-label. iCIMS writes the label through ICIMS.escapeHtml, so "Master's Level Degree" is
+    the attribute text "Master&#039;s Level Degree"; read raw, Emory's degrees never matched the applicant's, and a clicked
+    row failed read-back against the select's own text (2026-10-25, 365 field errors in 25 runs)."""
+    return re.sub(r"\s+", " ", html.unescape(str(label or ""))).strip()
+
+
 async def icims_rows_now(frame, select_id):
     """The rows the dropdown shows right now, as (dropdown-index, text)."""
     found = await frame.locator(f'[id="{select_id}_dropdown-results"] {ICIMS_ROWS}').evaluate_all(
         "els=>els.filter(e=>e.getClientRects().length).map(e=>[e.getAttribute('dropdown-index'),"
         "(e.getAttribute('aria-label')||e.innerText||'').replace(/\\s+/g,' ').trim()])"
     )
+    found = [(index, icims_text(text)) for index, text in found]
     return [(index, text) for index, text in found if text and not placeholder_option(text)]
 
 
@@ -2187,6 +2196,11 @@ async def icims_rows(frame, select_id, *, before=None, timeout=8.0):
     started, last, stable, changed = time.monotonic(), None, 0, before is None
     while time.monotonic() - started < timeout:
         found = await icims_rows_now(frame, select_id)
+        if before is None and not found and not await status():
+            # A server-searched list opens empty and fills when its first page answers: an empty list read twice was
+            # taken as the catalog, and Emory's degree list read as having no choices (2026-10-25).
+            await asyncio.sleep(0.25)
+            continue
         if not changed:
             said = await status()
             empty = bool(re.search(r"no results|no matches", said, re.I))
@@ -2200,7 +2214,7 @@ async def icims_rows(frame, select_id, *, before=None, timeout=8.0):
 
 
 async def icims_more_rows(frame, select_id, value, pages=10):
-    """Scroll the open list to load further pages (25 rows each) until a row matches `value`."""
+    """Scroll the open list to load further pages (25 rows each) until a row matches `value` or the list ends."""
     results = frame.locator(f'[id="{select_id}_dropdown-results"]')
     found = await icims_rows_now(frame, select_id)
     for _ in range(pages):
@@ -2210,7 +2224,11 @@ async def icims_more_rows(frame, select_id, value, pages=10):
         more = await icims_rows(frame, select_id, before=found, timeout=4)
         if more == found:
             break
-        found = more
+        found, added = more, len(more) - len(found)
+        if added < 20:
+            # A short page is the last one: scrolling again only waited 4 s for rows that never came, and a
+            # degree spelled unlike every row paged Emory's list to the field deadline (2026-10-25).
+            break
     return found
 
 
@@ -2224,6 +2242,7 @@ async def icims_dropdown_commit(
     employer_scope=False,
     search_queries=None,
     thorough=True,
+    broad_queries=None,
 ):
     """Pick through iCIMS's own dropdown UI: open, search, click the row. None when the control is not one.
 
@@ -2255,14 +2274,16 @@ async def icims_dropdown_commit(
     def left():
         return ends - time.monotonic()
 
+    async def searchable():
+        return bool(await box.count()) and await box.evaluate(
+            "b=>!b.classList.contains('dropdown-invisible')&&b.getAttribute('aria-hidden')!=='true'"
+        )
+
     async def rows_for(query):
         if not await container.evaluate("c=>!c.classList.contains('dropdown-invisible')&&c.getClientRects().length>0"):
             await el.click(timeout=3000)
             await asyncio.sleep(0.3)
-        searchable = await box.count() and await box.evaluate(
-            "b=>!b.classList.contains('dropdown-invisible')&&b.getAttribute('aria-hidden')!=='true'"
-        )
-        if query is not None and searchable:
+        if query is not None and await searchable():
             before = await icims_rows_now(frame, select_id)
             await box.fill("", timeout=2000)
             await box.press_sequentially(str(query)[:40], delay=35, timeout=6000)
@@ -2273,11 +2294,13 @@ async def icims_dropdown_commit(
         pages = int(max(0, left() - 1) // 1.5) if thorough else 0
         return await icims_more_rows(frame, select_id, value, pages=min(10, pages)) if found and pages else found
 
-    queries = [str(value)] + list(search_queries or [])
+    # Searches whose results hold the value's own rows (a degree's level) go first: "Master of Science" found nothing in
+    # Emory's catalog, whose row is "Master's Level Degree", and each empty search cost the field 2-4 s (2026-10-25).
+    queries = list(broad_queries or []) + [str(value)] + list(search_queries or [])
     queries += sorted(_alias_group(value) - {norm(value)}, key=len, reverse=True)
     if len(str(value).split()) > 1:
         queries.append(str(value).split()[0])
-    choice, seen = None, []
+    choice, seen, seen_query = None, [], None
     for query in list(dict.fromkeys(q for q in queries if q))[: 3 if thorough else 1]:
         if seen and left() < 2.5:
             break
@@ -2287,12 +2310,16 @@ async def icims_dropdown_commit(
             # searched at once, State answered nothing and failed its first commit on every tenant (2026-10-19).
             await asyncio.sleep(1.5)
             found = await rows_for(query)
-        seen = found or seen
+        if found:
+            seen, seen_query = found, query
         options = [{"text": text, "disabled": False, "index": index} for index, text in found]
         eligible = [o for o in options if not school_scope or school_option_matches(value, o["text"])]
         choice = best_option(eligible, value)
-        if choice:
-            break
+        if not choice and resolve and eligible and (picked := resolve([o["text"] for o in eligible])):
+            # The rows on screen hold the value's equivalent: pick it now, before another search replaces them.
+            choice = next((o for o in eligible if o["text"] == picked), None)
+        if choice or not await searchable():
+            break  # A list without a search box shows the same rows for every query.
     options = [{"text": text, "disabled": False, "index": index} for index, text in seen]
     if not choice and resolve and options:
         picked = resolve([o["text"] for o in options])
@@ -2300,6 +2327,10 @@ async def icims_dropdown_commit(
     if not choice and choose and options and not employer_scope:
         selected = await choose([o["text"] for o in options])
         choice = next((o for o in options if o["text"] == selected), None)
+    if choice and await icims_rows_now(frame, select_id) != seen:
+        # The rows shown are a later search's: an index from the earlier results would click another row, or none.
+        shown = await rows_for(seen_query)
+        choice = next(({"text": t, "index": i} for i, t in shown if t == choice["text"]), None)
     if not choice and (school_scope or employer_scope):
         other = school_other_option if school_scope else employer_other_option
         others = [
@@ -2422,6 +2453,7 @@ async def combobox(
     resolve=None,
     employer_scope=False,
     thorough=True,
+    broad_queries=None,
 ):
     """ARIA combobox: input or div. Types to search when editable, then commits a real option.
 
@@ -2439,6 +2471,7 @@ async def combobox(
         employer_scope=employer_scope,
         search_queries=search_queries,
         thorough=thorough,
+        broad_queries=broad_queries,
     )
     if picked is not None:
         return picked

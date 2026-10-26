@@ -1,0 +1,139 @@
+<!doctype html>
+<!--
+A faithful stand-in for iCIMS's server-searched icimsDropdown (script/common/icimsDropdown.js, platform 183/188,
+read 2026-10-26; this file re-implements the observed behaviour, it holds none of iCIMS's code):
+
+- The <select icimsdropdown-enabled="1" icimsdropdown-ajax="1"> keeps only its legacy "" option; the catalog lives on the
+  server (/jobs/profileoptions?q=&page=&size=25), answered page by page.
+- The select is replaced by <a id="<select>_icimsDropdown" class="dropdown-select" role="combobox"> (label copied through
+  aria-labelledby), a "<that id>_ctnr" container holding input.dropdown-search (with class dropdown-invisible and
+  aria-hidden when the field has icimsdropdown-search="0") and ul#"<select>_dropdown-results".
+- A document mousedown on the anchor toggles the list; the first open requests page 0 with an empty query.
+- Each row is li.dropdown-result.result-selectable[role=option][dropdown-index] whose title and aria-label hold
+  ICIMS.escapeHtml(text): "Master's" is the attribute text "Master&#039;s". Its innerHTML is the same escaped text (with
+  the query in <b>), so it renders as "Master's". "No Results" is li.result-unselectable[role=presentation].
+- A keyup that changes the query waits 500 ms, then asks the server again from page 0.
+- Scrolling within a quarter of the end loads the next page (lazyLoad).
+- A row click (optionSelected) replaces the select's options with the one picked option, writes .dropdown-text,
+  collapses the list and runs the select's onchange. Escape on the open list collapses it.
+-->
+<html><head><meta charset="utf-8">
+<style>
+  .dropdown-invisible { display: none }
+  .dropdown-results { max-height: 24em; overflow-y: auto; margin: 0; padding: 0 }
+  .dropdown-result { list-style: none; line-height: 2em }
+  .dropdown-select { display: inline-block; min-width: 300px; border: 1px solid #888; padding: 4px }
+</style></head>
+<body>
+<form id="profile">
+  <div class="iCIMS_TableRow">
+    <label id="label_rcf2011" for="rcf2011">What is the highest level of education you have completed?<span class="Field_Required">*</span></label>
+    <select id="rcf2011" name="rcf2011" class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_ListEditorField dropdown-hide"
+      style="display:none" aria-labelledby="label_rcf2011" aria-required="true" icimsdropdown-enabled="1"
+      icimsdropdown-ajax="1" icimsdropdown-search="0" onchange="window.changes.push(this.value)">
+      <option value="" legacy="true"></option>
+    </select>
+  </div>
+</form>
+<script>
+window.changes = [];
+window.requests = [];
+const escapeHtml = t => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/'/g, '&#039;').replace(/"/g, '&#034;');
+
+function icimsAjaxDropdown(list, catalog, {latency = 400, search = false} = {}) {
+  const id = list.id, placeholder = '— Make a Selection —';
+  list.insertAdjacentHTML('afterend', `
+    <a id="${id}_icimsDropdown" class="dropdown-select" aria-expanded="false" tabindex="0" role="combobox"
+       aria-labelledby="${list.getAttribute('aria-labelledby')}" aria-required="true"><span
+       id="${id}_fakeSelected_icimsDropdown" class="dropdown-text">${placeholder}</span></a>
+    <div id="${id}_icimsDropdown_ctnr" class="dropdown-container dropdown-invisible" aria-owns="${id}_dropdown-results" aria-expanded="false">
+      <input type="text" class="dropdown-search${search ? '' : ' dropdown-invisible'}" autocomplete="off" role="combobox"
+        aria-label="— Type to Search —" ${search ? '' : 'aria-hidden="true"'}>
+      <div aria-live="polite"><ul id="${id}_dropdown-results" class="dropdown-results" role="listbox"></ul></div>
+    </div>`);
+  list.removeAttribute('aria-labelledby');
+  const fake = document.getElementById(id + '_icimsDropdown');
+  const ctnr = document.getElementById(id + '_icimsDropdown_ctnr');
+  const box = ctnr.querySelector('input'), ul = document.getElementById(id + '_dropdown-results');
+  let open = false, initialized = false, words = [], page = 0, lastRequested = -1, totalPages = 1, inputWord = '', timer = null, ticket = 0;
+
+  const status = text => {
+    let s = document.getElementById('result-summary_' + id);
+    if (!s) { s = document.createElement('div'); s.id = 'result-summary_' + id; s.setAttribute('role', 'status'); ul.parentNode.appendChild(s); }
+    s.textContent = text;
+  };
+  const server = (q, p) => {
+    window.requests.push({q, page: p});
+    const hits = catalog.filter(t => t.toUpperCase().includes(q.toUpperCase()));
+    return {options: hits.slice(p * 25, p * 25 + 25).map(t => ({value: 'v' + catalog.indexOf(t), text: t})), total: hits.length};
+  };
+  const row = (word, index) => {
+    const li = document.createElement('li');
+    const escaped = escapeHtml(word.text), q = escapeHtml(box.value);
+    li.id = `result-selectable_${id}_${index}`;
+    li.className = 'dropdown-result result-selectable';
+    li.setAttribute('role', 'option');
+    li.setAttribute('dropdown-index', index);
+    li.setAttribute('title', escaped);
+    li.setAttribute('aria-label', escaped);
+    li.innerHTML = q ? escaped.replace(new RegExp('(' + q.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + ')', 'gi'), '<b>$1</b>') : escaped;
+    return li;
+  };
+  const loadOptions = reset => {
+    if (!(page < totalPages && page > lastRequested)) return;
+    lastRequested = page;
+    const mine = ++ticket, q = box.value, p = page;
+    setTimeout(() => {
+      if (mine !== ticket) return;  // An aborted request.
+      const answer = server(q, p);
+      totalPages = Math.ceil(answer.total / 25);
+      if (reset) { words = []; ul.innerHTML = ''; }
+      answer.options.forEach(w => { ul.appendChild(row(w, words.length)); words.push(w); });
+      if (!words.length) {
+        const li = document.createElement('li');
+        li.className = 'dropdown-result result-unselectable'; li.setAttribute('role', 'presentation'); li.textContent = 'No Results';
+        ul.appendChild(li);
+      }
+      page++;
+      status(words.length ? `${answer.total} results found` : 'No Results');
+    }, latency);
+  };
+  const resetOptions = () => { initialized = true; page = 0; lastRequested = -1; totalPages = 1; ticket++; loadOptions(true); };
+  const collapse = () => { open = false; ctnr.classList.add('dropdown-invisible'); fake.setAttribute('aria-expanded', 'false'); };
+  const expand = () => { open = true; ctnr.classList.remove('dropdown-invisible'); fake.setAttribute('aria-expanded', 'true'); };
+
+  document.addEventListener('mousedown', e => {
+    if (e.target === fake || fake.contains(e.target)) {
+      if (!initialized) resetOptions();
+      open ? collapse() : expand();
+      if (search && open) box.focus();
+      e.preventDefault(); e.stopPropagation();
+    } else if (open && !ctnr.contains(e.target)) collapse();
+  });
+  fake.addEventListener('click', e => e.preventDefault());
+  box.addEventListener('keyup', () => {
+    if (box.value === inputWord) return;
+    inputWord = box.value;
+    ticket++; clearTimeout(timer);
+    timer = setTimeout(resetOptions, 500);
+  });
+  ul.addEventListener('scroll', () => {
+    if (ul.offsetHeight + ul.scrollTop + ul.scrollHeight * 0.25 >= ul.scrollHeight) loadOptions(false);
+  });
+  ul.addEventListener('click', e => {
+    const li = e.target.closest('li.result-selectable');
+    if (!li) return;
+    const word = words[Number(li.getAttribute('dropdown-index'))];
+    list.options.length = 0;
+    const option = document.createElement('option');
+    option.value = word.value; option.selected = true; option.innerHTML = escapeHtml(word.text);
+    list.appendChild(option);
+    document.getElementById(id + '_fakeSelected_icimsDropdown').innerHTML = escapeHtml(word.text);
+    collapse();
+    list.onchange();
+  });
+  ctnr.addEventListener('keydown', e => { if (open && e.keyCode === 27) { collapse(); fake.focus(); } });
+}
+</script>
+</body></html>
