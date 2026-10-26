@@ -175,6 +175,7 @@ def _submission_receipt(receipt):
         receipt.get("type")
         in {
             "explicit_confirmation_page",
+            "application_created",
             "explicit_rejection_page",
             "explicit_validation_rejection",
             "user_reconciled",

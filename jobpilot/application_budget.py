@@ -16,7 +16,7 @@ the start limit. Ford's Oracle application spent all three starts waiting for th
 """
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from .admission import QueueBlocked
 from .db import Job, Run, Setting
@@ -73,8 +73,15 @@ def allowance(session, job_id, *, exclude_run=None, at=None, aliases=None):
         aliases = [row.id for row in session.execute(
             select(Job.id, Job.url, Job.ats, Job.company).where(Job.ats == job.ats)
         ) if url_identity(row.url) == identity or icims_requisition_alias(job, row)]
+    from .runtime import engine_version
+
+    current = engine_version()
+    # Only starts on this engine build count: a failure on an older build says nothing about the current one, and the
+    # owner wants fresh tries once a fix ships (2026-10-26, "Application already used its initial attempt and two
+    # retries" held 40+ fixable jobs). The per-job daily model budget still bounds the cost.
     rows = session.execute(select(Run.id, Run.started_at, Run.state, Run.reason).where(
         Run.job_id.in_(aliases), Run.mode == "submit", Run.started_at.is_not(None),
+        or_(Run.packet["engine_version"].as_string() == current, Run.packet["engine_version"].as_string().is_(None)),
     )).all()
     reset_at = None
     for value in session.scalars(

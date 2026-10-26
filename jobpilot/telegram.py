@@ -1244,6 +1244,9 @@ async def send_live_questions(service, review_ids):
 async def ask_next_browser(service):
     from .telegram_workers import accepts_run
 
+    if not (service.db.get_setting("telegram_browser_help", {}) or {}).get("enabled"):
+        return  # Off unless the owner turns it on: stuck pages are the app's to repair (owner 2026-10-26).
+
     def recovering(run):
         value = service.db.get_setting("draft_recovery:" + run.job_id, {})
         return value.get("source_run_id") == run.id and value.get("status") in {"scheduled", "queued"}
@@ -1440,6 +1443,10 @@ def retried_automatically(service, run, job):
     return False
 
 
+# Outcomes Telegram reports; the others are the app's own work (see notify_outcome).
+OWNER_OUTCOMES = {"confirmed", "already_applied", "dry_run_passed"}
+
+
 async def notify_outcome(service, run, job):
     """Acknowledge each current outcome; repeated repair failures share one update."""
     from .failure_reports import clean
@@ -1462,6 +1469,10 @@ async def notify_outcome(service, run, job):
         "failed": "🔧 This attempt stopped without confirmation.",
         "closed": "ℹ️ This posting is closed; no application was submitted.",
     }
+    if run.state not in OWNER_OUTCOMES and cause != "posting_unavailable":
+        # Owner 2026-10-26: "I hate looking at Telegram and seeing these errors". Repairs, retries and site trouble are
+        # the app's work and stay on the dashboard; Telegram carries results and the owner's own questions.
+        return
     text = messages.get(run.state)
     if not text:
         return  # Uncertain submits and personal questions already have dedicated messages.

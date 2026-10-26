@@ -128,3 +128,25 @@ def test_an_ats_tenant_names_its_employers_own_domain(job_host, frame_host, allo
     from jobpilot.accounts.credentials import employer_domain_of_tenant
 
     assert employer_domain_of_tenant(job_host, frame_host) is allowed
+
+
+@pytest.mark.parametrize("text,kind", [
+    ("We can't find an account with that email address.", "not_found"),
+    ("No account found for this email.", "not_found"),
+    ("This email is not registered.", "not_found"),
+    ("Your account may be locked. Please try again in 30 minutes.", "locked"),
+    ("Too many sign-in attempts.", "locked"),
+    ("Login failed. Please check your details.", "bad"),
+    ("We couldn't sign you in.", "bad"),
+    ("The email or password you entered is incorrect.", "bad"),
+    ("Incorrect email or password", "bad"),
+])
+def test_common_sign_in_wording_is_understood(text, kind):
+    """Owner 2026-10-26: sign-in and sign-up texts on known and unknown platforms were missed."""
+    from jobpilot.adapters.base import BAD_CREDENTIALS, LOCKED, NOT_FOUND
+
+    found = {"not_found": bool(NOT_FOUND.search(text)), "locked": bool(LOCKED.search(text)),
+             "bad": bool(BAD_CREDENTIALS.search(text))}
+    assert found[kind]
+    if kind == "bad":
+        assert not NOT_FOUND.search(text)  # A refused password is never read as "no account".

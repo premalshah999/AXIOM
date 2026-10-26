@@ -181,6 +181,12 @@ class CompletionMixin:
                 and evidence.get("job_id") == run.job_id
                 and evidence.get("run_id") == run.id
             )
+            api_proof = (
+                evidence.get("type") == "application_created"
+                and int(evidence.get("status") or 0) in {200, 201}
+                and evidence.get("job_id") == run.job_id
+                and evidence.get("run_id") == run.id
+            )
             email = evidence.get("email", {})
             email_proof = (
                 isinstance(email, dict)
@@ -189,7 +195,7 @@ class CompletionMixin:
                 and email.get("job_id") == run.job_id
             )
             if state == "confirmed" and not (
-                website_proof or email_proof or evidence.get("type") == "user_reconciled"
+                website_proof or api_proof or email_proof or evidence.get("type") == "user_reconciled"
             ):
                 # "Confirmed" needs a website confirmation, an employer email, or the applicant's word.
                 state = "submission_unknown" if run.state == "submitting" else "waiting_browser"

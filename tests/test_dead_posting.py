@@ -204,4 +204,4 @@ async def test_outcomes_the_app_retries_send_no_telegram_message(service, monkey
                       reason="Application exceeded the 600-second execution budget",
                       created_at=f"2026-10-19T03:0{n}:00+00:00", started_at=f"2026-10-19T03:0{n}:00+00:00"))
     await telegram.notify_outcome(service, stalled, job)
-    assert len(sent) == 1 and "ran out of time" in sent[0]
+    assert sent == []  # A timeout is the app's to retry; Telegram carries results only (owner 2026-10-26).

@@ -3,6 +3,9 @@ import pytest
 from jobpilot.db import Job, Run, Setting
 from jobpilot.admission import QueueBlocked
 from jobpilot.application_budget import HOST_OVERLOADED, require_allowance
+from jobpilot.runtime import engine_version
+
+CURRENT = {"engine_version": engine_version()}
 
 AT = datetime(2026, 10, 17, 7, tzinfo=UTC)
 
@@ -12,7 +15,7 @@ def seed(service, starts):
         s.add(Job(id='budget', identity='budget', url='https://example.test/job/123'))
         s.flush()
         for i, ago in enumerate(starts):
-            s.add(Run(id=f'r{i}', job_id='budget', mode='submit', state='timed_out',
+            s.add(Run(id=f'r{i}', job_id='budget', mode='submit', state='timed_out', packet=CURRENT,
                       started_at=(AT-timedelta(seconds=ago)).isoformat()))
 
 
@@ -98,13 +101,13 @@ def test_free_timeouts_do_not_use_up_a_jobs_three_starts(service):
         s.add(Job(id="budget", identity="budget", url="https://example.test/job/9"))
         s.flush()
         for i in range(3):
-            s.add(Run(id=f"free{i}", job_id="budget", mode="submit", state="timed_out", reason=free,
+            s.add(Run(id=f"free{i}", job_id="budget", mode="submit", state="timed_out", reason=free, packet=CURRENT,
                       started_at=(at - timedelta(seconds=300 - i)).isoformat()))
     with service.db.session() as s:
         assert require_allowance(s, "budget", at=at)  # still three starts left
     with service.db.exclusive() as s:
         for i in range(3):
-            s.add(Run(id=f"spent{i}", job_id="budget", mode="submit", state="timed_out",
+            s.add(Run(id=f"spent{i}", job_id="budget", mode="submit", state="timed_out", packet=CURRENT,
                       reason="Application exceeded the 600-second execution budget", started_at=(at - timedelta(seconds=60 - i)).isoformat()))
     with service.db.session() as s, pytest.raises(QueueBlocked) as caught:
         require_allowance(s, "budget", at=at)
@@ -126,3 +129,18 @@ def test_a_dead_chrome_or_an_overloaded_host_sent_nothing(reason):
 
     assert nothing_sent("timed_out", reason) and nothing_sent("waiting_browser", reason)
     assert not nothing_sent("submission_unknown", reason)  # a commit in flight is never "nothing sent"
+
+
+
+def test_starts_on_an_older_engine_build_do_not_count(service):
+    """Owner 2026-10-26: "Application already used its initial attempt and two retries" held jobs whose failures came
+    from builds that have since been fixed. A new build gives them fresh tries."""
+    with service.db.exclusive() as s:
+        s.add(Job(id="budget", identity="budget", url="https://example.test/job/7"))
+        s.flush()
+        for i in range(3):
+            s.add(Run(id=f"old{i}", job_id="budget", mode="submit", state="timed_out",
+                      packet={"engine_version": "execution-v2-older"},
+                      started_at=(AT - timedelta(seconds=300 - i)).isoformat()))
+    with service.db.session() as s:
+        assert require_allowance(s, "budget", at=AT)

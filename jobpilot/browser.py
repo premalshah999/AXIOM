@@ -136,6 +136,29 @@ HEADER_TOKEN_ENDPOINTS = [
 ]
 
 
+# Application endpoints whose own answer proves the application was created: Workable's apply POST answers 201 Created
+# and shows a thank-you page the receipt readers did not know, so accepted applications read as unconfirmed
+# (2026-10-26). (platform host, path, statuses that mean "created").
+APPLICATION_CREATED = [
+    (re.compile(r"(?:^|\.)workable\.com$", re.I), re.compile(r"^/api/v\d+/jobs/[^/]+/apply$"), {201}),
+]
+
+
+def application_created(requests, job_id, run_id):
+    """The receipt of a commit write the platform answered as created, or None."""
+    for r in requests or []:
+        for host, path, statuses in APPLICATION_CREATED:
+            if (
+                r.get("method") == "POST"
+                and host.search(r.get("host") or "")
+                and path.search(r.get("path") or "")
+                and int(r.get("status") or 0) in statuses
+            ):
+                return {"type": "application_created", "host": r["host"], "path": r["path"], "status": r["status"],
+                        "job_id": job_id, "run_id": run_id}
+    return None
+
+
 def header_token_endpoint(parts):
     """The header that carries this application request's Turnstile token, or None."""
     for host, path, header in HEADER_TOKEN_ENDPOINTS:
@@ -3420,6 +3443,14 @@ class BrowserEngine:
         self.commit_url = getattr(self.page, "url", "")
         await self.form.locator(final[0]["id"]).click(timeout=10000)
         result = await self.watch_submission(before, before_rejection, validation_attempt)
+        if result.get("state") == "submission_unknown" and (
+            created := application_created(
+                getattr(self, "commit_requests", None), (getattr(self, "job", None) or {}).get("id"),
+                getattr(self, "run_id", None),
+            )
+        ):
+            result = {"state": "confirmed", "reason": "The platform answered the application request as created",
+                      "receipt": created}
         self.emit_commit_requests()
         return result
 

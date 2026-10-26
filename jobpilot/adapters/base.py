@@ -150,7 +150,15 @@ BAD_CREDENTIALS = re.compile(
     r"couldn'?t authenticate|could not authenticate|check your (?:user ?name|e-?mail)(?: and| or) password|"
     r"authenticat\w* (?:failed|unsuccessful)|"
     # Avature (Deloitte 2026-10-26): "The username or password may be incorrect, or access might be restricted."
-    r"(?:user ?name|e-?mail|password|credentials) (?:may|might) be (?:incorrect|invalid|wrong)",
+    r"(?:user ?name|e-?mail|password|credentials) (?:may|might) be (?:incorrect|invalid|wrong)|"
+    # Wording seen across career sites and unknown platforms (owner 2026-10-26: "texts like your account might be
+    # locked would indicate there's no account or the password is wrong").
+    r"(?:login|log.?in|sign.?in) (?:failed|unsuccessful|was unsuccessful|attempt failed)|"
+    r"(?:we )?(?:can'?t|cannot|could ?n'?t|could not|were unable to) (?:sign|log) you in|unable to (?:log|sign) ?in|"
+    r"(?:user ?name|e-?mail|login)(?: (?:and|or|/) ?password)?(?: combination)? (?:you entered |provided )?"
+    r"(?:is|are|was|were) (?:incorrect|invalid|wrong|not correct|not valid|not recogni[sz]ed)|"
+    r"the (?:password|credentials) you (?:entered|provided|supplied) (?:is|are|was|were) (?:incorrect|invalid|wrong)|"
+    r"(?:invalid|incorrect|wrong) (?:login|sign.?in) (?:details|information|credentials)",
     # Taleo uses this wording for a username with no account, before offering New User.
     re.I,
 )
@@ -159,7 +167,11 @@ NOT_FOUND = re.compile(
     r"does not correspond to a registered user|(?:user|account) (?:does not|doesn'?t) exist|no user (?:found|with)|"
     # TikTok's careers login refuses an unregistered address as "Incorrect email" (its account creation never finished,
     # 2026-10-12): every later run signed in again and stopped. "Incorrect email or password" is a refused password.
-    r"(?:incorrect|invalid|unknown|unrecognized) e-?mail(?: address)?(?! (?:address )?(?:and|or|/) ?password)\b",
+    r"(?:incorrect|invalid|unknown|unrecognized) e-?mail(?: address)?(?! (?:address )?(?:and|or|/) ?password)\b|"
+    r"(?:we )?(?:can'?t|cannot|could ?n'?t|could not) find (?:an? |your |any )?(?:account|user|profile|candidate)|"
+    r"no (?:account|profile|user|candidate)(?: was| is)? (?:found|exists|registered|associated|matches)|"
+    r"(?:e-?mail|user ?name)(?: address)? (?:is |was )?not (?:recogni[sz]ed|registered|found|associated with an account)|"
+    r"(?:does ?n'?t|does not|did not) (?:have|match) an? (?:existing )?account|not associated with (?:an|any) account",
     re.I,
 )
 EXISTS = re.compile(
@@ -168,7 +180,9 @@ EXISTS = re.compile(
     re.I,
 )
 LOCKED = re.compile(
-    r"account (?:is |has been )?locked|too many (?:failed )?(?:attempts|tries)|temporarily (?:locked|disabled)",
+    r"account (?:is |has been |may be |might be |was )?(?:locked|disabled|suspended|blocked)|"
+    r"too many (?:failed |unsuccessful |sign.?in |login )?(?:attempts|tries|requests)|temporarily (?:locked|disabled|blocked)|"
+    r"try again (?:in|after) \d+ (?:minutes?|hours?)|exceeded the (?:maximum|number of) (?:login |sign.?in )?attempts",
     re.I,
 )
 PASSWORD_RULES = re.compile(
@@ -1466,6 +1480,12 @@ class Adapter:
             await self.e.release_reservation()
             self.e.emit_commit_requests()
             return already
+        from ..browser import application_created
+
+        if created := application_created(getattr(self.e, "commit_requests", None), self.e.job["id"], self.e.run_id):
+            self.e.emit_commit_requests()
+            return {"state": "confirmed", "reason": "The platform answered the application request as created",
+                    "receipt": created}
         sent_nothing = await self.e.commit_sent_nothing()
         self.e.emit_commit_requests()
         if sent_nothing:
