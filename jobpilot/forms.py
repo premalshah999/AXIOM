@@ -2519,6 +2519,10 @@ class FormSession:
         elif kind == "pills":
             committed = await widgets.pills(el, value)
         elif field.get("widget") == "date-text":
+            if re.fullmatch(r"\s*(?:immediately|immediate|asap|as soon as possible|right away)\s*", str(value), re.I):
+                # Availability "Immediately" in a date box is today's date: Paylocity's "Available to Start" raised
+                # "Unsupported date format" on every write (Lightology, Space Tango 2026-10-26).
+                value = "today"
             value = self.first_of_month(field, value)
             widgets.date_text(field, value)
             month, day, year = widgets.parse_date(value)

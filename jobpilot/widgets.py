@@ -525,6 +525,13 @@ def parse_date(value):
     m = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4})", v)
     if m:
         return f"{int(m[1]):02d}", f"{int(m[2]):02d}", m[3]
+    # A full date with a time or a note after it ("2026-10-23T00:00:00", "10/23/2026 (today)"): Paylocity's "Available
+    # to Start" raised here on every write and the run stalled (Lightology, Space Tango 2026-10-26).
+    m = re.match(r"(\d{4})-(\d{1,2})-(\d{1,2})(?![\d-])", v) or re.match(r"(\d{1,2})/(\d{1,2})/(\d{4})(?![\d/])", v)
+    if m:
+        year_first = len(m[1]) == 4
+        month, day, year = (m[2], m[3], m[1]) if year_first else (m[1], m[2], m[3])
+        return f"{int(month):02d}", f"{int(day):02d}", year
     m = re.fullmatch(r"(\d{1,2})/(\d{4})", v)
     if m:
         return f"{int(m[1]):02d}", "", m[2]
