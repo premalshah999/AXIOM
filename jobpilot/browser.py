@@ -3914,6 +3914,14 @@ class BrowserEngine:
                 supporting_facts=validated.supporting_facts,
             )
 
+    def current_role_end_date(self, field):
+        """True when the resolver declines this field as the current role's end date."""
+        try:
+            answer = self.resolver.local(field)
+        except Exception:
+            return False
+        return bool(answer and answer.reason == "Current role has no end date")
+
     def controller_blocker(self, reason="", *, original=None):
         """Keep real answer/control causes when an owned controller stops."""
         from .failure_reports import clean
@@ -4039,6 +4047,16 @@ class BrowserEngine:
                 # No offered option can be the applicant's saved source; re-choosing repeats the refusal.
                 return unoffered_source_result(target.get("label", ""))
             if rejected[key] >= 2:
+                if target.get("label") and target.get("id") and self.current_role_end_date(target):
+                    # The page still wants an end date for the applicant's current role: its "current job" box did
+                    # not commit. No owner can answer that (Dallas County's Oracle row, 2026-10-25).
+                    return {
+                        "state": "waiting_browser",
+                        "reason": "The page still asks an end date for the current role; its current-job box did "
+                        "not commit",
+                        "blocker_type": "control_failure",
+                        "recovery_cause": "control_observation",
+                    }
                 if target.get("label") and target.get("id"):
                     # Owner policy: an application question the model cannot answer from stored
                     # evidence goes to the owner (Telegram) instead of stalling the run. The reply is
