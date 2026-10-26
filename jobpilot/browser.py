@@ -159,6 +159,34 @@ def application_created(requests, job_id, run_id):
     return None
 
 
+GREENHOUSE_JOB = re.compile(r"^https://(?:job-)?boards\.greenhouse\.io/(?:embed/job_app\?for=)?([A-Za-z0-9_-]+)(?:/jobs/|&token=)(\d+)")
+LEVER_JOB = re.compile(r"^https://jobs\.lever\.co/([A-Za-z0-9_.-]+)/([0-9a-f-]{36})")
+
+
+async def posting_gone(url):
+    """Why a Greenhouse or Lever posting is gone, from the platform's public jobs API, or ''. Dead postings stalled as
+    repairs: Toast's redirected to its careers homepage, Gas South's and Sparksoft's boards no longer listed the role
+    (2026-10-26). Any doubt (network, other answers) is no verdict."""
+    import httpx
+
+    if match := GREENHOUSE_JOB.match(url or ""):
+        check = f"https://boards-api.greenhouse.io/v1/boards/{match[1]}/jobs/{match[2]}"
+        platform = "Greenhouse"
+    elif match := LEVER_JOB.match(url or ""):
+        check = f"https://api.lever.co/v0/postings/{match[1]}/{match[2]}"
+        platform = "Lever"
+    else:
+        return ""
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            response = await client.get(check)
+    except httpx.HTTPError:
+        return ""
+    if response.status_code == 404:
+        return f"The posting is closed: {platform} no longer lists it, so nothing was submitted"
+    return ""
+
+
 def header_token_endpoint(parts):
     """The header that carries this application request's Turnstile token, or None."""
     for host, path, header in HEADER_TOKEN_ENDPOINTS:
@@ -804,6 +832,13 @@ class BrowserEngine:
         temp = tempfile.mkdtemp(prefix="applypilot-browser-")
         external = bool(self.config.browser_cdp_url)
         try:
+            if (
+                not job.get("demo")
+                and not self.config.allow_private_urls  # Owned test fixtures use made-up postings.
+                and (gone := await posting_gone(job["url"]))
+            ):
+                self.result = {"state": "closed", "reason": gone}
+                return self.result
             if external:
                 import httpx
 
