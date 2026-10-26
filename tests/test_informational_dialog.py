@@ -28,3 +28,21 @@ async def test_a_consequential_dialog_is_never_acknowledged(page, tmp_path):
     form = FormSession(page, Resolver(Profile(), None, None), tmp_path / "r.pdf", lambda *a, **k: None)
     await form.scan()
     assert await page.locator("#tip").count() == 1
+
+
+GUIDE = """<main id=main aria-hidden=true><label>Email<input type=email id=email></label>
+  <a href="/resetPassword">Forgot password?</a></main>
+<section role=dialog aria-modal=true id=guide style="width:400px"><button aria-label="Close guide" onclick="close_()">×</button>
+  <h2>Your AI assistant for careers at Acme. Ask anything.</h2><p>Explore roles and find opportunities.</p>
+  <button onclick="document.body.dataset.tried=1">Try Now</button><button onclick="close_()">Maybe Later</button></section>
+<script>function close_(){document.getElementById('guide').remove();document.getElementById('main').removeAttribute('aria-hidden');}</script>"""
+
+
+async def test_a_promotional_guide_is_declined(page, tmp_path):
+    # TikTok's careers site (2026-10-26, REA): the "AI assistant" tour's mask swallowed sign-in and "Forgot password?".
+    await page.set_content(GUIDE)
+    form = FormSession(page, Resolver(Profile(), None, None), tmp_path / "r.pdf", lambda *a, **k: None)
+    obs = await form.scan()
+    assert await page.locator("#guide").count() == 0
+    assert await page.evaluate("document.body.dataset.tried") is None
+    assert any(f["type"] == "email" for f in obs["fields"])

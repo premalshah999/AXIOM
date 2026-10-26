@@ -44,3 +44,58 @@ async def test_a_live_posting_or_other_platform_is_no_verdict(monkeypatch):
     monkeypatch.setattr(httpx, "AsyncClient", lambda **k: Client(200, seen))
     assert await browser.posting_gone("https://job-boards.greenhouse.io/lyft/jobs/1") == ""
     assert await browser.posting_gone("https://acme.wd5.myworkdayjobs.com/en-US/careers/job/x") == ""
+
+
+class Replies(Client):
+    """Answers each GET with the next (status, json) pair."""
+
+    def __init__(self, replies, seen):
+        self.replies, self.seen = list(replies), seen
+
+    async def get(self, url):
+        self.seen.append(url)
+        status, body = self.replies.pop(0)
+        return httpx.Response(status, json=body, request=httpx.Request("GET", url))
+
+
+async def test_a_smartrecruiters_posting_under_a_renamed_company_that_is_inactive_is_closed(monkeypatch):
+    # Crown Innovations (2026-10-26): the old identifier's link opened SmartRecruiters' homepage.
+    seen = []
+    moved = {"message": "Provided companyIdentifier (TBD1Acme) does not match companyIdentifier (Acme) from publication."}
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **k: Replies([(400, moved), (200, {"active": False})], seen))
+    assert "no longer lists it" in await browser.posting_gone("https://jobs.smartrecruiters.com/TBD1Acme/744000144160949")
+    assert seen[-1] == "https://api.smartrecruiters.com/v1/companies/Acme/postings/744000144160949"
+
+
+async def test_an_active_smartrecruiters_posting_is_no_verdict(monkeypatch):
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **k: Replies([(200, {"active": True})], []))
+    assert await browser.posting_gone("https://jobs.smartrecruiters.com/Acme/744000154977749-data-engineer") == ""
+
+
+class Paths(Client):
+    """Answers by URL suffix."""
+
+    def __init__(self, answers, seen):
+        self.answers, self.seen = answers, seen
+
+    async def get(self, url):
+        self.seen.append(url)
+        status = next((code for tail, code in self.answers.items() if url.endswith(tail)), 404)
+        return httpx.Response(status, json={}, request=httpx.Request("GET", url))
+
+
+async def test_a_gh_jid_page_finds_its_board_by_domain(monkeypatch):
+    # SeatGeek (2026-10-26): seatgeek.com/jobs/<id>?gh_jid=<id> opened the consumer homepage.
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **k: Paths({"/boards/seatgeek/jobs/8248135": 200}, []))
+    assert await browser.greenhouse_board("https://seatgeek.com/jobs/8248135?gh_jid=8248135", "SeatGeek") == (
+        "seatgeek", "8248135", True)
+
+
+async def test_a_gh_jid_job_its_board_no_longer_lists_is_closed(monkeypatch):
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **k: Paths({"/boards/seatgeek": 200}, []))
+    assert "no longer lists it" in await browser.posting_gone("https://seatgeek.com/jobs/8247550?gh_jid=8247550", "SeatGeek")
+
+
+async def test_an_unknown_board_is_no_verdict(monkeypatch):
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **k: Paths({}, []))
+    assert await browser.posting_gone("https://careers.example.test/jobs?gh_jid=123", "Example Co") == ""

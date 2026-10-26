@@ -162,12 +162,41 @@ def application_created(requests, job_id, run_id):
 GREENHOUSE_JOB = re.compile(r"^https://(?:job-)?boards(?:\.eu)?\.greenhouse\.io/(?:embed/job_app\?for=)?([A-Za-z0-9_-]+)(?:/jobs/|&token=)(\d+)")
 LEVER_JOB = re.compile(r"^https://jobs\.lever\.co/([A-Za-z0-9_.-]+)/([0-9a-f-]{36})")
 WORKABLE_JOB = re.compile(r"^https://apply\.workable\.com/([A-Za-z0-9_-]+)/j/([0-9A-Za-z]{6,16})(?:[/?#]|$)")
+SMARTRECRUITERS_JOB = re.compile(r"^https://jobs\.smartrecruiters\.com/([A-Za-z0-9_-]+)/(\d{6,})(?:[-/?#]|$)")
+SR_MOVED = re.compile(r"does not match companyIdentifier \(([A-Za-z0-9_-]+)\)")
 
 
-async def posting_gone(url):
-    """Why a Greenhouse, Lever or Workable posting is gone, from the platform's public jobs API, or ''. Dead postings stalled as
-    repairs: Toast's redirected to its careers homepage, Gas South's and Sparksoft's boards no longer listed the role
-    (2026-10-26). Any doubt (network, other answers) is no verdict."""
+async def greenhouse_board(url, company=""):
+    """(board, job id, listed) for an employer career page that names its Greenhouse job (?gh_jid=), or None.
+
+    156 such jobs (Duolingo, IXL, SeatGeek, Waymo 2026-10-26) opened the employer's wrapper, which hid the form in an
+    iframe or redirected to a consumer homepage. The board is the domain's or the company's name when Greenhouse's
+    public API knows it; `listed` is False when that board exists but no longer lists the job (closed)."""
+    import httpx
+
+    parts = urlsplit(url or "")
+    job_id = dict(parse_qsl(parts.query)).get("gh_jid", "")
+    if not job_id.isdigit() or (parts.hostname or "").endswith("greenhouse.io"):
+        return None
+    labels = [x for x in (parts.hostname or "").lower().split(".")[:-1] if x not in {"www", "careers", "jobs", "join"}]
+    names = [labels[-1] if labels else "", re.sub(r"[^a-z0-9]", "", str(company or "").lower())]
+    try:
+        async with httpx.AsyncClient(timeout=6) as client:
+            for name in dict.fromkeys(n for n in names if n):
+                job = await client.get(f"https://boards-api.greenhouse.io/v1/boards/{name}/jobs/{job_id}")
+                if job.status_code == 200:
+                    return name, job_id, True
+                if job.status_code == 404 and (await client.get(f"https://boards-api.greenhouse.io/v1/boards/{name}")).status_code == 200:
+                    return name, job_id, False
+    except httpx.HTTPError:
+        return None
+    return None
+
+
+async def posting_gone(url, company=""):
+    """Why a Greenhouse, Lever, Workable or SmartRecruiters posting is gone, from the platform's public jobs API, or ''.
+    Dead postings stalled as repairs: Toast's redirected to its careers homepage, Gas South's and Sparksoft's boards no
+    longer listed the role (2026-10-26). Any doubt (network, other answers) is no verdict."""
     import httpx
 
     if match := GREENHOUSE_JOB.match(url or ""):
@@ -180,15 +209,32 @@ async def posting_gone(url):
         # TMEIC (2026-10-26) redirected to the careers page with not_found=true and stalled as a repair.
         check = f"https://apply.workable.com/api/v2/accounts/{match[1]}/jobs/{match[2]}"
         platform = "Workable"
+    elif match := SMARTRECRUITERS_JOB.match(url or ""):
+        check = f"https://api.smartrecruiters.com/v1/companies/{match[1]}/postings/{match[2]}"
+        platform = "SmartRecruiters"
     else:
-        return ""
+        board = await greenhouse_board(url, company)
+        return "The posting is closed: Greenhouse no longer lists it, so nothing was submitted" if board and not board[2] else ""
+    gone = f"The posting is closed: {platform} no longer lists it, so nothing was submitted"
     try:
         async with httpx.AsyncClient(timeout=8) as client:
             response = await client.get(check)
+            # Crown Innovations (SmartRecruiters 2026-10-26) renamed its company identifier; the old link opened
+            # SmartRecruiters' homepage and the API names the new identifier, under which the posting is inactive.
+            if platform == "SmartRecruiters" and response.status_code == 400 and (
+                moved := SR_MOVED.search(response.text)
+            ):
+                response = await client.get(f"https://api.smartrecruiters.com/v1/companies/{moved[1]}/postings/{match[2]}")
     except httpx.HTTPError:
         return ""
     if response.status_code == 404:
-        return f"The posting is closed: {platform} no longer lists it, so nothing was submitted"
+        return gone
+    if platform == "SmartRecruiters" and response.status_code == 200:
+        try:
+            if response.json().get("active") is False:
+                return gone
+        except ValueError:
+            return ""
     return ""
 
 
@@ -840,7 +886,7 @@ class BrowserEngine:
             if (
                 not job.get("demo")
                 and not self.config.allow_private_urls  # Owned test fixtures use made-up postings.
-                and (gone := await posting_gone(job["url"]))
+                and (gone := await posting_gone(job["url"], job.get("company") or ""))
             ):
                 self.result = {"state": "closed", "reason": gone}
                 return self.result
@@ -1117,12 +1163,16 @@ class BrowserEngine:
                 # Greenhouse form in an iframe whose pickers/uploads time out across the
                 # frame boundary. Open Greenhouse's own embed URL as the top-level page.
                 try:
-                    if board := GREENHOUSE_JOB.match(job["url"]):
-                        # Waymo's board link (2026-10-26) redirects to careers.withwaymo.com, whose form is not an
-                        # iframe found in time; its emailed code then had no Greenhouse origin to go to, and its runs
-                        # stopped there. The board and job named in the link open Greenhouse's own embedded form.
+                    # Waymo's board link (2026-10-26) redirects to careers.withwaymo.com, whose form is not an
+                    # iframe found in time; its emailed code then had no Greenhouse origin to go to, and its runs
+                    # stopped there. A board link names the board and job; a ?gh_jid= page's board is looked up.
+                    named = GREENHOUSE_JOB.match(job["url"])
+                    board = (named[1], named[2]) if named else None
+                    if not board and (found := await greenhouse_board(job["url"], job.get("company") or "")):
+                        board = found[:2] if found[2] else None
+                    if board:
                         region = ".eu" if ".eu.greenhouse.io/" in job["url"] else ""
-                        embedded = f"https://job-boards{region}.greenhouse.io/embed/job_app?for={board[1]}&token={board[2]}"
+                        embedded = f"https://job-boards{region}.greenhouse.io/embed/job_app?for={board[0]}&token={board[1]}"
                     else:
                         handle = await page.wait_for_function(
                             r"""() => { const f=[...document.querySelectorAll('iframe[src]')]
@@ -2180,6 +2230,11 @@ class BrowserEngine:
         """Redirects and embedded frames reveal the real ATS behind a company career site."""
         current = detect(page.url).id
         if current != "custom":
+            if ats == "custom" and detect(self.job.get("url", "")).id == "custom":
+                # A custom link that redirects to the platform (Applied Materials' and Booz Allen's short links ->
+                # their Workday tenants, 2026-10-26) is the employer's handoff: without it Workday refused the tenant
+                # as "account origin does not match this employer".
+                self.adopt_handoff(current)
             return current
         if ats != "custom":
             return ats

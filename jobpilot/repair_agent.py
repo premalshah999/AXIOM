@@ -309,8 +309,8 @@ async def closed_posting(db, config, job_id):
         return ""  # Owned test fixtures use made-up postings.
     with db.session() as s:
         job = s.get(Job, job_id)
-        url = job.url if job and not job.demo else ""
-    return await posting_gone(url) if url else ""
+        url, company = (job.url, job.company or "") if job and not job.demo else ("", "")
+    return await posting_gone(url, company) if url else ""
 
 
 def attempts_today(db, job_id):

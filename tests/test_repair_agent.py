@@ -214,7 +214,7 @@ async def test_a_posting_the_platform_no_longer_lists_is_closed_without_a_model_
     run_id, job_id, _ = seed(service, tmp_path)
     monkeypatch.setattr(service.config, "allow_private_urls", False, raising=False)
 
-    async def gone(url):
+    async def gone(url, company=""):
         return "The posting is closed: Greenhouse no longer lists it, so nothing was submitted"
 
     async def no_model(*args, **kwargs):

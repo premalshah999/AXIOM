@@ -362,6 +362,20 @@ class ICIMS(Adapter):
             await self.form.settle(timeout=4)
             await asyncio.sleep(1.5)
             return None
+        location = urlsplit(obs.get("url", ""))
+        if (
+            not obs["fields"]
+            and path.rstrip("/").endswith("/jobs/login")
+            and location.hostname == urlsplit(self.job["url"]).hostname
+            and not self.attempts["login_callback_return"]
+        ):
+            # Emory (2026-10-26): after Central accepted the password, its callback (/jobs/login?universalLogin=1&
+            # code=...) rendered only the site's navigation and two runs stopped there. REA: the same page without its
+            # job context is empty in any browser. The signed-in session continues from the job's own Apply.
+            self.attempts["login_callback_return"] += 1
+            self.emit("auth", "The sign-in callback page was empty; returning to the job's application")
+            await self.e.return_to_job()
+            return None
         return await super().on_unknown(obs)
 
     async def on_review(self, obs, report=None):

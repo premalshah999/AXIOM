@@ -296,6 +296,7 @@ def mark_history_rows(fields):
 
 
 ACKNOWLEDGE = re.compile(r"ok(?:ay)?|got it|i understand|understood|continue|dismiss|close", re.I)
+DECLINE = re.compile(r"maybe later|not now|no,? thanks?|skip(?: for now| tour| this)?|remind me later|later", re.I)
 # A dialog that asks to confirm something consequential is never acknowledged on the applicant's behalf.
 INFORMATIONAL_DIALOG_REFUSES = re.compile(
     r"withdraw|delete|remov|discard|cancel (?:your |this )?application|sign ?out|log ?out|submit|are you sure|"
@@ -304,6 +305,18 @@ INFORMATIONAL_DIALOG_REFUSES = re.compile(
     r"thank|received|success|confirm|applied|cookie|accept",
     re.I,
 )
+
+
+def greenhouse_job_ref(parts):
+    """(board, job id) of a Greenhouse board or embed URL (already split), or None."""
+    if not re.fullmatch(r"(?:job-)?boards(?:\.eu)?\.greenhouse\.io", parts.hostname or ""):
+        return None
+    if board := re.fullmatch(r"/([A-Za-z0-9_-]+)/jobs/([0-9]+)/?", parts.path):
+        return board[1], board[2]
+    query = dict(parse_qsl(parts.query))
+    if parts.path.rstrip("/") == "/embed/job_app" and query.get("for") and query.get("token"):
+        return query["for"], query["token"]
+    return None
 
 
 class BrowserTabClosed(PlaywrightError):
@@ -1785,6 +1798,12 @@ class FormSession:
         ]
         if len(actions) == 1 and ACKNOWLEDGE.fullmatch(actions[0]["label"].strip()):
             return actions[0]["id"]
+        # A promotional prompt over the page offers its own way out. TikTok's careers site (2026-10-26, REA) opens an
+        # "AI assistant" tour (Try Now / Maybe Later) whose mask swallowed every click: sign-in and "Forgot password?"
+        # never reached the page, and the account flow stopped.
+        declines = [b for b in actions if DECLINE.fullmatch(b["label"].strip())]
+        if len(declines) == 1:
+            return declines[0]["id"]
         return None
 
     def locator(self, field_id):
@@ -5154,6 +5173,37 @@ class FormSession:
                 "evidence_selector": "greenhouse_job_confirmation_document_title",
                 "status_region": "job_application_status",
             }
+        if (
+            host in {"job-boards.greenhouse.io", "job-boards.eu.greenhouse.io", "boards.greenhouse.io"}
+            and current.scheme == "https"
+            and current.path.rstrip("/") == "/embed/job_app/confirmation"
+            and (owned := greenhouse_job_ref(expected))
+            and owned == (dict(parse_qsl(current.query)).get("for"), dict(parse_qsl(current.query)).get("token"))
+        ):
+            # Greenhouse redirects an accepted embed POST to this route. Invisible Technologies (2026-10-23..26) draws
+            # "Thank you. Your application has been submitted." as an image: the text checks found only "View more
+            # jobs" and "Back to job post", the submitted run was reconciled as unsent, and three later runs parked on
+            # the same page. The route for this exact board and job, with no application form left, is the receipt.
+            try:
+                form_left = await self.page.locator(
+                    "input[type=file],textarea:visible,button[type=submit]:visible,input[type=submit]:visible"
+                ).count()
+                body = " ".join((await self.page.locator("body").inner_text(timeout=1500)).split())
+            except PlaywrightError:
+                form_left, body = 1, ""
+            if not form_left:
+                said = re.search(r"[^.!?]{0,60}application (?:has been|was) (?:successfully )?(?:submitted|received)",
+                                 body, re.I)
+                return {
+                    "url": urlunsplit(current._replace(query="", fragment="")),
+                    "confirmation": said[0].strip()[:300] if said else "Greenhouse confirmation page for this job",
+                    "title": await self.page.title(),
+                    "type": "explicit_confirmation_page",
+                    "evidence_version": 2,
+                    **self.evidence_context(),
+                    "evidence_selector": "greenhouse_embed_confirmation_route",
+                    "status_region": "job_application_status",
+                }
         # Employer-hosted Greenhouse forms acknowledge a commit with plain text
         # and no form fields. Fields or a submit/apply control keep it a form.
         job = getattr(self.resolver, "job", {}) or {}

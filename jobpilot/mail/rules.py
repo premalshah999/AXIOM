@@ -105,7 +105,8 @@ class RulesMixin:
                 existing["sender_domains"] = [*current, *missing]
             return existing
         known = KNOWN_SENDERS
-        if job.get("ats") not in known:
+        own_site = job.get("ats") == "custom" and (urlsplit(job.get("url", "")).hostname or "")
+        if job.get("ats") not in known and not own_site:
             return None
         with self.db.session() as s:
             box = s.scalar(
@@ -116,12 +117,13 @@ class RulesMixin:
             mailbox_id = box.id
         url = urlsplit(job["url"])
         prefix = "/" + url.path.strip("/").split("/")[0] if job["ats"] == "greenhouse" else "/"
+        # An employer's own career site mails from its own domain. Intuit (2026-10-26) refused the saved password, and
+        # with no sender rule its reset was never requested ("Connect Gmail and an email rule for this employer").
+        from ..accounts.tenants import registrable
+
+        senders = known.get(job["ats"]) or [registrable(own_site)]
         return await self.save_rule(
-            RuleInput(
-                mailbox_id=mailbox_id,
-                employer_origin=origin(job["url"]) + prefix,
-                sender_domains=known[job["ats"]],
-            )
+            RuleInput(mailbox_id=mailbox_id, employer_origin=origin(job["url"]) + prefix, sender_domains=senders)
         )
 
     async def discover_rule(self, job, recipient, since):

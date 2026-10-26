@@ -37,3 +37,11 @@ async def test_a_platform_rule_gains_the_platforms_newer_senders_but_an_owners_r
     kept = await service.mail.ensure_rule({"url": "https://other.example.test/jobs", "ats": "successfactors"},
                                           "alex@example.test")
     assert kept["id"] == owners["id"] and kept["sender_domains"] == ["hr.other.example.test"]
+
+
+async def test_an_employers_own_career_site_mails_from_its_own_domain(service):
+    # Intuit (2026-10-26): a custom career site had no sender rule, so its password reset was never requested.
+    seed(service, employer="https://jobs.acme-corp.example.test")
+    rule = await service.mail.ensure_rule({"url": "https://jobs.acme-corp.example.test/login", "ats": "custom"},
+                                          "alex@example.test")
+    assert rule and rule["sender_domains"] == ["example.test"]
