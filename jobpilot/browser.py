@@ -743,6 +743,18 @@ class BrowserEngine:
         )
         return None
 
+    def current_repair_instruction(self):
+        """The repair agent's note for this job, unless the owner clicked Apply after it was written: Deloitte's note
+        "stop retrying sign-in" outlived the fix for its sign-in, and the next run stopped on it (2026-10-26)."""
+        directive = self.db.get_setting("repair_directive:" + self.job["id"], {}) or {}
+        clicked = [
+            str((self.db.get_setting(prefix + self.job["id"], {}) or {}).get("at") or "")
+            for prefix in ("owner_pick:", "application_budget_reset:")
+        ]
+        if directive.get("at") and max(clicked) > str(directive["at"]):
+            return ""
+        return directive.get("text", "")
+
     def nice_resume(self, run):
         """Employers see the file name. Upload 'First_Last_Resume.pdf', never a checksum name."""
         source = Path(run["packet"]["resume_path"])
@@ -1032,10 +1044,12 @@ class BrowserEngine:
                     self.emit("browser_retry", "Retrying the job page after a connection interruption")
                     await asyncio.sleep(1)
             if (
-                job["ats"] == "greenhouse"
+                (job["ats"] == "greenhouse" or "gh_jid" in parse_qs(urlsplit(job["url"]).query))
                 and not resumed
                 and not (urlsplit(page.url).hostname or "").endswith("greenhouse.io")
             ):
+                # A career page naming its Greenhouse job (?gh_jid=) is imported as a custom site (Duolingo, IXL
+                # 2026-10-26: its school and degree pickers never listed options inside the wrapper).
                 # Employer-hosted wrappers (asana.com/jobs/apply?gh_jid=...) embed the
                 # Greenhouse form in an iframe whose pickers/uploads time out across the
                 # frame boundary. Open Greenhouse's own embed URL as the top-level page.
@@ -4461,9 +4475,7 @@ class BrowserEngine:
                             "application_directive:" + self.job["id"], {}
                         ).get("text", ""),
                         # The repair agent's diagnosis of this job's last failure (repair_agent.py).
-                        "repair_instruction": self.db.get_setting(
-                            "repair_directive:" + self.job["id"], {}
-                        ).get("text", ""),
+                        "repair_instruction": self.current_repair_instruction(),
                     }
                 ),
                 self.run_id,
