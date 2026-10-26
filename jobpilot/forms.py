@@ -5540,6 +5540,9 @@ class FormSession:
             r"cannot submit your application|problem saving answers to preliminary question|this job ad has expired|"
             # Its client-side check: a required preliminary question left empty never POSTs at all.
             r"please make sure that you answered all questions marked as required|"
+            # JazzHR re-renders the form with this banner (Axtria 2026-10-25); Workday's review page lists "Errors
+            # Found" with this hint while its finalize call answers 200 (Airbus 2026-10-25). Nothing was submitted.
+            r"please fix the highlighted errors and try again|answer all required questions to submit this application|"
             # Workable's banner with HTTP 412 from /api/v1/jobs/<code>/apply when it throttles a candidate
             # (2026-10-23): nothing was accepted, and the same application went through later.
             r"something went wrong\. we are working on this,? please try again later",
@@ -5561,7 +5564,7 @@ class FormSession:
                 return {"type": "explicit_rejection_page", "url": self.page.url, "category": "employer_limit",
                         "cap": cap, "evidence": text[max(0, match.start() - 20) : match.end() + 300],
                         "missing_fields": []}
-            if "answered all questions" in phrase:
+            if re.search(r"answered all questions|highlighted errors|answer all required questions", phrase):
                 return {"type": "explicit_rejection_page", "url": self.page.url, "category": "validation",
                         "evidence": text[max(0, match.start() - 20) : match.end() + 200],
                         "missing_fields": self.inline_field_errors(await self.scan())[:10]}

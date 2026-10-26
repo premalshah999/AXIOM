@@ -73,3 +73,22 @@ def test_commit_write_requests_are_recorded_without_query_or_noise():
 async def test_unanswered_required_preliminary_question_is_a_validation_refusal(page, tmp_path):
     r = await rejection(page, tmp_path, "Please make sure that you answered all questions marked as required.")
     assert r and r["category"] == "validation"
+
+
+@pytest.mark.parametrize("message", [
+    "Please fix the highlighted errors and try again.",  # JazzHR (Axtria 2026-10-25)
+    "Errors Found. Page Error. Answer all required questions to submit this application.",  # Workday (Airbus)
+])
+async def test_other_platforms_field_refusals_are_validation(page, tmp_path, message):
+    r = await rejection(page, tmp_path, message)
+    assert r and r["category"] == "validation"
+
+
+def test_datadome_signals_during_the_click_are_not_an_application_write():
+    from jobpilot.browser import BrowserEngine
+
+    engine = object.__new__(BrowserEngine)
+    engine.armed, engine.job, engine.emit = True, {"url": "https://jobs.smartrecruiters.com/Acme/1"}, lambda *a, **k: None
+    request = SimpleNamespace(method="POST", resource_type="fetch", url="https://api-js.datadome.co/js/")
+    engine.submission_response(SimpleNamespace(url=request.url, status=200, request=request))
+    assert not getattr(engine, "commit_requests", [])

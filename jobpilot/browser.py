@@ -160,7 +160,9 @@ def refusal_text(body, limit=300):
 COMMIT_NOISE = re.compile(
     r"google-analytics|googletagmanager|doubleclick|analytics|(?:^|\.)rum\.|sentry|datadoghq|segment\.io|hotjar|"
     r"clarity\.ms|facebook|linkedin\.com/px|bat\.bing|cdn-cgi/rum|newrelic|nr-data|"
-    r"(?:^|\.)(?:px\.)?ads\.linkedin\.com$|(?:^|\.)sr\.qualtrics\.com$|fullstory|mouseflow|amplitude|mixpanel|heapanalytics",
+    r"(?:^|\.)(?:px\.)?ads\.linkedin\.com$|(?:^|\.)sr\.qualtrics\.com$|fullstory|mouseflow|amplitude|mixpanel|heapanalytics|"
+    # DataDome's bot check posts its signals during the click; it carries no application (AbbVie 2026-10-25).
+    r"(?:^|\.)datadome\.co$",
     re.I,
 )
 FORM_PART = re.compile(rb'name="([^"]{1,160})"(?:; filename="([^"]{0,260})")?')
