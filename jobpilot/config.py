@@ -172,7 +172,7 @@ class Settings(BaseSettings):
     multipage_timeout: int = Field(default=480, ge=60, le=1200)
     daily_application_limit: int = Field(default=100, ge=1, le=500)
     daily_budget_usd: float = Field(default=5, gt=0)
-    max_model_calls: int = Field(default=18, ge=1, le=80)
+    max_model_calls: int = Field(default=18, ge=1, le=300)
     # IANA zone for the daily limit, the daily budget, schedules and "today" on forms. scripts/setup.sh writes the computer's.
     timezone: str = "UTC"
     # Dashboard snapshot: polls older than this are answered from the last result while it refreshes in
