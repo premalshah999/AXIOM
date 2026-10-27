@@ -1285,6 +1285,11 @@ class BrowserEngine:
 
                 if ats in KNOWN_SENDERS:
                     await self.service.mail.ensure_rule({**job, "ats": ats}, self.profile.email)
+                if ats in {"icims", "successfactors", "taleo"} and self.job is job:
+                    # The platform's own rules apply to its forms (this record is the resolver's and the engine's):
+                    # iCIMS refuses a current role without an end date as "Invalid Data Error", and Medpace's and
+                    # America's Tire's profiles failed so while their jobs read as custom career sites (2026-10-27).
+                    job["ats"] = ats
             adapters = self.use_adapters(ats)
             budget = (
                 self.config.multipage_timeout
