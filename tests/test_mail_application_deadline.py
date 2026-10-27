@@ -129,3 +129,51 @@ async def test_queued_sender_retry_never_claims_browser_while_blocked(service, m
     monkeypatch.setattr(service_module, "asyncio", SimpleNamespace(sleep=stop_after_wait))
     await service._execute_owned("queued")
     assert slept == [1]
+
+
+def park(service, run_id, challenge_id, state):
+    from jobpilot.db import Job
+
+    with service.db.exclusive() as session:
+        run = session.get(Run, run_id)
+        if not session.get(Job, run.job_id):
+            session.add(Job(id=run.job_id, identity=run.job_id, url="https://careers.example.test/job/1"))
+            session.flush()
+        run.state = "waiting_email"
+        run.packet = {**run.packet, "waiting_kind": "email",
+                      "wait_handle": {"challenge_id": challenge_id, "kind": "password_reset"}}
+        session.get(Job, run.job_id).status = "waiting_email"
+        session.get(MailChallenge, challenge_id).state = state
+
+
+async def test_a_parked_run_whose_email_wait_ended_becomes_a_browser_recovery(service):
+    """Intuit 2026-10-27: the reset email never came, the challenge expired, and the run stayed parked for hours."""
+    from jobpilot.db import Job
+
+    _, run, rule = await configured(service)
+    challenge = service.mail.begin(run["id"], rule, "alex@example.test", "password_reset")
+    park(service, run["id"], challenge["id"], "pending")
+    with service.db.exclusive() as session:
+        assert service.mail.end_dead_email_waits(session) == []
+    park(service, run["id"], challenge["id"], "expired")
+    with service.db.exclusive() as session:
+        ended = service.mail.end_dead_email_waits(session)
+    assert [run_id for run_id, _ in ended] == [run["id"]]
+    with service.db.session() as session:
+        row = session.get(Run, run["id"])
+        assert row.state == "waiting_browser" and "password reset email did not arrive" in row.reason
+        assert session.get(Job, row.job_id).status == "waiting_browser"
+
+
+async def test_a_superseded_parked_run_is_left_alone(service):
+    _, run, rule = await configured(service)
+    challenge = service.mail.begin(run["id"], rule, "alex@example.test", "code")
+    park(service, run["id"], challenge["id"], "expired")
+    with service.db.exclusive() as session:
+        old = session.get(Run, run["id"])
+        session.add(Run(job_id=old.job_id, mode=old.mode, resume_id=old.resume_id, packet={},
+                        created_at="9999-01-01T00:00:00+00:00"))
+    with service.db.exclusive() as session:
+        assert service.mail.end_dead_email_waits(session) == []
+    with service.db.session() as session:
+        assert session.get(Run, run["id"]).state == "waiting_email"

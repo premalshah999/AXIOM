@@ -815,7 +815,7 @@
       if (PLACEHOLDER_VALUE.test(clean(value))) value = '';
     } else if (type === 'combobox' && !value) {
       // react-select keeps the chosen value outside the input.
-      const chosen = el.closest('.select__control')?.querySelectorAll('.select__single-value,.select__multi-value__label') || [];
+      const chosen = el.closest('[class*=__control]')?.querySelectorAll('[class*=__single-value],[class*=__multi-value__label]') || [];
       value = [...chosen].map(x => clean(x.textContent)).filter(Boolean).join(', ');
       if (!value && !el.matches('input,textarea')) {
         const shown = textOf(el);

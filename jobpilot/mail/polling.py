@@ -31,6 +31,28 @@ from .senders import tenant_tokens
 
 
 class PollingMixin:
+    @staticmethod
+    def end_dead_email_waits(s):
+        """A job's latest run parked on an email wait that has ended is waiting for nothing: Intuit's password reset
+        never arrived and its run read "waiting for an employer email" for eleven hours, L3Harris's for four days
+        (2026-10-27). It becomes a browser recovery with the reason. A superseded run's state drives nothing."""
+        ended = []
+        for run in s.scalars(select(Run).where(Run.state == "waiting_email")):
+            handle = (run.packet or {}).get("wait_handle") or {}
+            challenge = s.get(MailChallenge, handle.get("challenge_id", handle.get("id")) or "")
+            if challenge is not None and challenge.state not in {"expired", "cancelled", "failed"}:
+                continue
+            if s.scalar(select(Run.id).where(Run.job_id == run.job_id, Run.created_at > run.created_at).limit(1)):
+                continue
+            what = str(handle.get("kind") or "verification").replace("_", " ")
+            run.state = "waiting_browser"
+            run.reason = f"The employer's {what} email did not arrive in time; the draft is kept for recovery"
+            job = s.get(Job, run.job_id)
+            if job and job.status == "waiting_email":
+                job.status = run.state
+            ended.append((run.id, run.reason))
+        return ended
+
     async def poll_once(self):
         from ..agent_settings import enabled
 
@@ -57,10 +79,13 @@ class PollingMixin:
                             "",
                             "Application or verification deadline ended",
                         )
+                ended = self.end_dead_email_waits(s)
                 pending = [
                     record(c)
                     for c in s.scalars(select(MailChallenge).where(MailChallenge.state == "pending"))
                 ]
+            for run_id, why in ended:
+                self.db.event(run_id, "email_wait_ended", why)
             for c in pending:
                 with self.db.session() as s:
                     row = s.get(MailRule, c["rule_id"])

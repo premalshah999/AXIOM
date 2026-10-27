@@ -2757,7 +2757,7 @@ class FormSession:
             # Greenhouse's phone-country picker shows only the dial code after
             # an exact option was clicked (for example, "United States +1" -> "+1").
             displayed = await el.evaluate(
-                "e=>e.closest('.select__control')?.querySelector('.select__single-value')?.textContent.trim() || ''"
+                "e=>e.closest('[class*=__control]')?.querySelector('[class*=__single-value]')?.textContent.trim() || ''"
             )
             if re.fullmatch(r"\+\d+", displayed) and str(committed).endswith(displayed):
                 committed = displayed

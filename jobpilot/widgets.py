@@ -18,7 +18,9 @@ install_playwright_fast()
 OPTION_SELECTOR = (
     "[role=option],[role=menuitem],[role=menuitemradio],[role=treeitem],.select2-results__option,"
     ".chosen-results li,.ui-menu-item,.pac-item,.oj-listbox-result,.dropdown-location,[data-automation-id=promptOption],"
-    "[data-automation-id=menuItem],.cx-select__list-item[role=gridcell]"
+    "[data-automation-id=menuItem],.cx-select__list-item[role=gridcell],"
+    # Older react-select rows carry no role, only their generated id (Pinpoint's Country, Kenway 2026-10-27).
+    '[id^="react-select-"][id*="-option-"]'
 )
 
 VISIBLE_OPTIONS = r"""(args) => {
@@ -1239,8 +1241,15 @@ async def open_combobox(el):
     try:
         await field_click(el, timeout=2000)
     except Exception:
-        # Slotted multiselect search inputs can be covered by their host trigger.
-        handle = await el.evaluate_handle("e=>e.closest('.c-spl-multiselect-autocomplete-trigger')")
+        # Slotted multiselect search inputs can be covered by their host trigger, and a react-select's few-pixel
+        # input by its own placeholder (Pinpoint's Country, Kenway 2026-10-27): its control opens the menu instead.
+        handle = await el.evaluate_handle(
+            """e=>e.closest('.c-spl-multiselect-autocomplete-trigger') || (() => {
+              for (let n=e.parentElement, i=0; n && i<5; n=n.parentElement, i++)
+                if ([...n.classList].some(c=>/__control$|^css-\\w+-control$/.test(c))) return n;
+              return null;
+            })()"""
+        )
         trigger = handle.as_element()
         if not trigger or not await trigger.is_visible():
             raise
@@ -2507,9 +2516,9 @@ MULTI_SELECTED_JS = """e=>{
             .map(x=>x.textContent.trim()).filter(Boolean).join('\\n');
     }
     let h=e;while(h&&h.tagName!=='SPL-MULTISELECT-AUTOCOMPLETE')h=h.parentElement||h.getRootNode()?.host;
-    const react=e.closest('.select__control');
+    const react=e.closest('[class*=__control]');
     if(react && react.querySelectorAll('[role=combobox]').length===1)
-        return [...react.querySelectorAll('.select__multi-value__label')]
+        return [...react.querySelectorAll('[class*=__multi-value__label]')]
             .filter(n=>n.getClientRects().length).map(n=>n.textContent.trim()).join('\\n');
     const values=new Set(Array.isArray(h?.value)?h.value:[]);
     return [...(h?.shadowRoot?.querySelectorAll('spl-select-option[value]')||[])]
@@ -2579,7 +2588,7 @@ async def combobox(
     # Greenhouse "mark all that apply" questions are react-select multi
     # comboboxes: the commit is a chip, never a single-value or input value.
     multi = multi or await el.evaluate(
-        "e => !!e.closest('.select__control')?.querySelector('.select__value-container--is-multi')"
+        "e => !!e.closest('[class*=__control]')?.querySelector('[class*=__value-container--is-multi]')"
     )
     if await el.evaluate("e => e.classList.contains('rcmpaginatedselectinput')"):
         if employer_scope:
@@ -2716,8 +2725,8 @@ async def combobox(
             return choice["text"]  # The form owner rematches and verifies the replacement control.
         actual = (
             await el.evaluate("""e=>{
-            const root=e.closest('.select__control');
-            const chosen=root?.querySelectorAll('.select__single-value');
+            const root=e.closest('[class*=__control]');
+            const chosen=root?.querySelectorAll('[class*=__single-value]');
             if(root?.querySelectorAll('[role=combobox]').length===1 && chosen?.length===1
                 && chosen[0].getClientRects().length)return chosen[0].textContent.trim();
             return e.value || '';
