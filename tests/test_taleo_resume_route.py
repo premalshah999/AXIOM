@@ -24,3 +24,12 @@ def test_other_saved_routes_still_reopen():
     assert route_for(JOB) == JOB
     flow = "https://beallsinc.taleo.net/careersection/careersection/candidateacquisition/flow.jsf"
     assert route_for(flow, ats="custom") == flow
+
+
+def test_a_parked_error_page_is_never_reopened():
+    """Hearst (Oracle, 2026-10-27): the tab was parked on /errors/404 while the posting was live; reopened, the 404
+    became the entry and "return to job" went back to it."""
+    assert route_for("https://acme.fa.us6.oraclecloud.com/hcmUI/CandidateExperience/errors/404", ats="oracle") is None
+    assert route_for("https://jobs.example.test/apply/404", ats="custom") is None
+    assert route_for("https://jobs.example.test/error", ats="custom") is None
+    assert route_for("https://jobs.example.test/apply/errors-and-omissions-analyst", ats="custom") is not None

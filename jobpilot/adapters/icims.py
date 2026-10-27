@@ -60,6 +60,10 @@ INVALID_DATA = re.compile(r"invalid data error|please check all information befo
 # "This email address is already in use" (profile) and "The email address and phone number are already in use. Please
 # login ..." (Eide Bailly's email step, which registers new candidates; 2026-10-19).
 EMAIL_IN_USE = re.compile(r"email address(?: and phone number)? (?:is|are) already in use", re.I)
+# A saved profile can carry a second phone or address row ("Delete Phones (2)"). The applicant has one of each, so both
+# rows were filled with the same Mobile number and every Update Profile came back "An unexpected server error occurred"
+# (Emory, 2026-10-24..27). The extra rows are deleted before the profile is filled.
+EXTRA_CONTACT_ROW = re.compile(r"^(?:delete|remove)\s+(?:phones?|addresses?)\s*\((\d+)\)$", re.I)
 # A workflow can end on an optional third-party assessment (Goldbelt 2026-10-19: an Employment Tax Credit questionnaire,
 # "optional ... navigate away"). iCIMS has already received the application; its candidate dashboard says so
 # ("2026-20717 Junior Data Analyst Received Submission").
@@ -1454,8 +1458,34 @@ class ICIMS(Adapter):
             return None
         if repeated := await self.email_step_repeat(obs):
             return repeated
+        if await self.drop_extra_contact_rows(obs):
+            return None
         await self.record_unlabeled(obs)
         return await super().on_form(obs)
+
+    async def drop_extra_contact_rows(self, obs):
+        """Delete a saved profile's second and later phone or address rows (EXTRA_CONTACT_ROW), last row first; their
+        delete asks for confirmation, which is accepted. True when a row was deleted, so the profile is scanned again."""
+        rows = sorted(
+            (
+                (int(match[1]), control)
+                for control in obs["controls"]
+                if (match := EXTRA_CONTACT_ROW.match(control["label"].strip())) and int(match[1]) >= 2
+            ),
+            key=lambda row: -row[0],
+        )
+        if not rows or self.attempts["extra_contact_rows"] >= 2:
+            return False
+        self.attempts["extra_contact_rows"] += 1
+        for _, control in rows:
+            self.e.accept_confirms = 1
+            try:
+                await self.click(control)
+                await self.form.settle(timeout=3)
+            finally:
+                self.e.accept_confirms = 0  # Never left armed for a later, unrelated confirmation.
+        self.emit("profile_rows", "Deleted the profile's extra phone and address rows", {"rows": [c["label"] for _, c in rows]})
+        return True
 
     async def email_step_repeat(self, obs):
         """The email step returned unchanged after its own post (Eide Bailly 2026-10-19, an existing account: Email,

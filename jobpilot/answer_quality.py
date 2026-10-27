@@ -254,6 +254,17 @@ def squash(value):
     return re.sub(r"[^a-z0-9]+", "", normalize(str(value or "")))
 
 
+def demonym_of(observed, country):
+    """"Indian" for India, "Canadian" for Canada, "Chinese" for China, "German" for Germany, "American" for the US."""
+    person, place = normalize(str(observed or "")), normalize(str(country or ""))
+    if not person or not place or person == place:
+        return False
+    if place in {"united states", "united states of america", "usa", "us"}:
+        return person in {"american", "us citizen", "united states citizen"}
+    stem = re.sub(r"[aeiouy]$", "", place)
+    return len(stem) >= 4 and person.startswith(stem) and len(person) - len(stem) <= 4 and " " not in person[len(stem):]
+
+
 def equivalent(field, observed, expected):
     if (
         field.get("type") in {"select", "dropdown", "combobox", "prompt", "pills"}
@@ -279,6 +290,10 @@ def equivalent(field, observed, expected):
         return True
     if squash(observed) and squash(observed) == squash(expected):
         # Employer catalogs spell the same choice differently: "Linked-in", "E-mail".
+        return True
+    if re.search(r"citizen|nationalit", field.get("label", ""), re.I) and demonym_of(observed, expected):
+        # A nationality menu offers "Indian" for the citizenship fact "India"; flagged as a mismatch, the repair looped
+        # until the run stalled (Vertiv, Oracle 2026-10-27).
         return True
     if (
         field.get("type") in {"select", "dropdown", "combobox", "prompt", "pills"}

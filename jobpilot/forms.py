@@ -2021,7 +2021,12 @@ class FormSession:
     def first_of_month(self, field, value):
         """The owner's rule (answer_rules.history_day "first"): a full-date field gets the 1st for a month/year answer
         from any source. Quora's Ashby box refused the owner's own "05/2026" reply as too imprecise (2026-10-24)."""
-        month, day, year = widgets.parse_date(value)
+        try:
+            month, day, year = widgets.parse_date(value)
+        except ValueError:
+            # Not a date: the field's own writer reports the precise refusal. Raised here, it surfaced as an
+            # unclassified failure of this rule (OmegaHires' "Current contract end date", 2026-10-27).
+            return value
         kinds = [p["kind"] for p in field.get("parts", [])] or ["month", "day", "year"]
         rules = getattr(self.resolver, "answer_rules", None)
         if month and year and not day and "day" in kinds and getattr(rules, "history_day", "") == "first":

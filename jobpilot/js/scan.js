@@ -521,7 +521,9 @@
         || box.querySelector('input:not([type=checkbox]):not([type=hidden]),select,textarea')) continue;
     const q = box.querySelector('legend') ? textOf(box.querySelector('legend')) : label(box,{visibleFirst:true});
     if (!q || q === 'Unlabelled field' || q === box.id) continue;
-    if (!/CheckboxGroup/i.test(box.dataset.automationId || '')
+    // Oracle CX disclosure questions render their choices as unnamed checkboxes in one labelled .input-row group
+    // (Rice 2026-10-27: each option read as its own required box and the page never validated).
+    if (!/CheckboxGroup/i.test(box.dataset.automationId || '') && !box.matches('.input-row[role=group]')
         && !/select all|choose all|check all|select \d|which (?:locations|interests)|where.{0,40}relocat/i.test(q)) continue;
     const options = group.map(c=>label(c));
     const value = group.filter(c=>c.checked).map(c=>label(c)).join('\n');
@@ -835,6 +837,15 @@
       // react-select keeps the chosen value outside the input.
       const chosen = el.closest('[class*=__control]')?.querySelectorAll('[class*=__single-value],[class*=__multi-value__label]') || [];
       value = [...chosen].map(x => clean(x.textContent)).filter(Boolean).join(', ');
+      const flag = el.matches('.iti__selected-country') && [...(el.querySelector('.iti__flag')?.classList || [])]
+        .map(c => /^iti__([a-z]{2})$/.exec(c)?.[1]).find(Boolean);
+      if (!value && flag) {
+        // intl-tel-input's country button reads "Selected country"; its flag and dial code name the choice
+        // ("United States +1"). Read as empty, VAST Data's (Comeet) US phone was refused on every pass (2026-10-27).
+        let region = flag.toUpperCase();
+        try { region = new Intl.DisplayNames(['en'], { type: 'region' }).of(region) || region; } catch (e) {}
+        value = clean(region + ' ' + textOf(el.querySelector('.iti__selected-dial-code')));
+      }
       if (!value && !el.matches('input,textarea')) {
         const shown = textOf(el);
         if (!GENERIC_PLACEHOLDER.test(shown)) value = shown;

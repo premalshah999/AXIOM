@@ -1879,6 +1879,10 @@ class BrowserEngine:
             # A saved Workday step (/apply/applyManually) is not a posting. Reopened after
             # cleanup it renders blank or "does not exist", which marked live postings gone.
             return None
+        if re.search(r"/errors?(?:/|$)|/(?:404|not-?found|page-?not-?found)(?:/|\.|$)", urlsplit(state.get("url", "")).path, re.I):
+            # The tab was parked on the site's error page (Hearst's Oracle /hcmUI/CandidateExperience/errors/404 while its
+            # posting was live, 2026-10-27). Reopened, it became the entry, and "return to job" went back to the 404.
+            return None
         return state.get("url")
 
     def desktop_resume_state(self, saved):
@@ -2153,6 +2157,10 @@ class BrowserEngine:
                 if dialog.type == "beforeunload":
                     # "Leave site?" asks about a navigation this run or the site already started. Staying aborted it:
                     # restarting from a kept iCIMS tab failed net::ERR_ABORTED (Schwab, Iridium 2026-10-21).
+                    await dialog.accept()
+                elif dialog.type == "confirm" and getattr(self, "accept_confirms", 0) > 0:
+                    # An adapter clicked a control whose confirmation it expects (iCIMS "Delete Phones (2)").
+                    self.accept_confirms -= 1
                     await dialog.accept()
                 else:
                     await dialog.dismiss()

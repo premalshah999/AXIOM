@@ -1959,6 +1959,10 @@ class Adapter:
         ]
         if not hits:
             hits = [b for b in obs["controls"] if AUTH_BUTTON.search(b["label"])]
+        if not hits and mode == "reset":
+            # Taleo's "Forgot your password?" page (User Name, Email Address) submits with "OK" beside "Cancel"; the reset
+            # step found no submit and the fallback model pressed Cancel (Textron, 2026-10-27).
+            hits = [b for b in obs["controls"] if re.fullmatch(r"\s*ok\s*", b["label"], re.I)]
         # Workday overlays the real button with a click_filter that must receive the click.
         filters = [b for b in hits if b["automation_id"] == "click_filter"]
         primary = [b for b in hits if "submit" in b["automation_id"].lower()]

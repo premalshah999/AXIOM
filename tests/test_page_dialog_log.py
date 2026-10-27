@@ -27,3 +27,15 @@ async def test_leave_site_is_accepted_so_our_navigation_proceeds(page):
     await page.goto("data:text/html,<p>next</p>")
     assert engine.last_dialog["type"] == "beforeunload"
     assert await page.inner_text("p") == "next"
+
+
+async def test_an_expected_confirmation_is_accepted_once(page):
+    """iCIMS's "Delete Phones (2)" asks for confirmation; the adapter arms exactly that click (Emory 2026-10-27)."""
+    engine = BrowserEngine.__new__(BrowserEngine)
+    engine.emit = lambda *args: None
+    page.on("dialog", engine.page_dialog)
+    await page.set_content("<p>form</p>")
+    engine.accept_confirms = 1
+    assert await page.evaluate("() => confirm('Delete this phone?')") is True
+    assert engine.accept_confirms == 0
+    assert await page.evaluate("() => confirm('Withdraw your application?')") is False
