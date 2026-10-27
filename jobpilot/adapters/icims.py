@@ -1298,8 +1298,22 @@ class ICIMS(Adapter):
         """The employer already holds this email (and phone): sign in through iCIMS's returning-candidate login instead of
         registering again. Eide Bailly's email step answered "The email address and phone number are already in use.
         Please login ..." to every post, and returning to the posting led back to the same registration (2026-10-19)."""
+        if self.attempts["returning_login"]:
+            return False
         said = " ".join([str(e) for e in obs.get("errors", [])] + [str(obs.get("text", ""))[:4000]])
-        if not EMAIL_IN_USE.search(said) or self.attempts["returning_login"]:
+        if not EMAIL_IN_USE.search(said):
+            # Planview (2026-10-27): the message sat in the iCIMS frame (or its alert), outside the scanned text, and
+            # the run reposted the email step until it gave up.
+            said = str((getattr(self.e, "last_dialog", None) or {}).get("message", "")) if isinstance(
+                getattr(self.e, "last_dialog", None), dict) else str(getattr(self.e, "last_dialog", "") or "")
+            for frame in getattr(self.page, "frames", []) or []:
+                if EMAIL_IN_USE.search(said):
+                    break
+                try:
+                    said += " " + await frame.locator("body").inner_text(timeout=1500)
+                except Exception:
+                    continue
+        if not EMAIL_IN_USE.search(said):
             return False
         self.attempts["returning_login"] += 1
         self.accounts.mark(self.job["url"], "exists")
