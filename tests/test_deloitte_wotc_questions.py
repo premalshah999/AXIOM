@@ -49,3 +49,49 @@ async def test_nested_radiogroups_are_one_question_read_from_their_inner_caption
     assert field["options"] == ["Yes", "No"] and field["required"]
     await form.fill(field, "No")
     assert await page.locator("input[value='0']").is_checked()
+
+
+# Its menus are plain buttons: no aria-haspopup, and the choices are role-less rows rendered while the menu is open.
+SELECT = """<form><wotc-select-input class="form__group"><div class="wotc-control">
+  <div class="wotc-control__label"><span class="wotc-control__title required">State in which you plan to work (choose
+    Unsure if multiple options exist or are not certain)</span></div>
+  <div class="wotc-select-container wotc-control__input">
+    <button class="wotc-select-input dds-input__field select-btn"><span class="dds-select__placeholder">Select one...</span
+      ><span class="dds-select__icon dds-icon dds-icon_arrow-down"></span></button>
+  </div>
+</div></wotc-select-input>
+<button class="btn btn-primary" disabled>Continue</button></form>
+<script>
+  const button = document.querySelector('.select-btn');
+  button.addEventListener('click', event => {
+    event.preventDefault();
+    const open = document.querySelector('.wotc-select-options');
+    if (open) { open.remove(); return; }
+    const menu = document.createElement('div');
+    menu.className = 'wotc-select-options';
+    for (const heading of ['Select one...', 'Maryland', 'Nevada', 'Unsure']) {
+      const row = document.createElement('div');
+      row.className = 'wotc-select-option dds-context-menu-item dds-context-menu-item__text';
+      row.textContent = ' ' + heading + ' ';
+      row.addEventListener('click', () => {
+        button.querySelector('.dds-select__placeholder').textContent = heading;
+        menu.remove();
+      });
+      menu.append(row);
+    }
+    button.parentElement.append(menu);
+  });
+</script>"""
+
+
+async def test_a_placeholder_menu_button_is_a_dropdown_question_and_commits_its_choice(page, tmp_path):
+    await page.set_content(SELECT)
+    form = FormSession(page, None, tmp_path / "unused.pdf", lambda *a: None)
+    fields = (await form.scan())["fields"]
+    assert [f["type"] for f in fields] == ["dropdown"]
+    field = fields[0]
+    assert field["label"].startswith("State in which you plan to work") and field["value"] == ""
+    await form.fill(field, "Nevada")
+    assert (await page.locator(".select-btn").inner_text()).strip() == "Nevada"
+    (after,) = (await form.scan())["fields"]
+    assert after["type"] == "dropdown" and after["value"] == "Nevada"

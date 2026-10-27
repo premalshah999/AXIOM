@@ -658,7 +658,14 @@
 
   const controls = all.filter(e => e.matches(
     'input,select,textarea,[role=combobox],[role=radiogroup],[role=checkbox],[role=switch],' +
-    'button[aria-haspopup=listbox],[role=button][aria-haspopup=listbox]'));
+    'button[aria-haspopup=listbox],[role=button][aria-haspopup=listbox],button[class*=select]:not([aria-haspopup])'));
+  // A plain button standing in for a <select>: Deloitte's tax-credit questionnaire (Caesars, 2026-10-27) renders "State
+  // in which you plan to work" as <button class="wotc-select-input select-btn">Select one... <span arrow-down></button>
+  // with no ARIA popup and role-less rows; the question was never observed and Continue stayed disabled.
+  const selectButton = el => el.matches('button[class*=select]:not([aria-haspopup]):not([role])')
+    && [...el.classList].some(c => /(?:^|[-_])select(?:[-_](?:btn|button|toggle|trigger|input))?$/i.test(c))
+    && !!el.querySelector('[class*=arrow],[class*=caret],[class*=chevron]')
+    && !el.parentElement?.querySelector('select');
   const optionSearch = el => el.matches('input,textarea') && (
     el.id === 'countryCodeSearch' || el.name === 'countryCodeSearch'
     || (composedClosest(el,'[role=listbox],[role=menu],.select2-dropdown,.select2-search,.chosen-search,.chosen-drop')
@@ -677,7 +684,7 @@
     const role = el.getAttribute('role');
     let type = ['combobox', 'radiogroup'].includes(role) ? role : (el.type || el.tagName.toLowerCase());
     if (el.matches('input[aria-autocomplete="list"][aria-haspopup="listbox"]')) type = 'combobox';
-    if (el.matches('[aria-haspopup=listbox]') && !el.matches('input,[role=combobox]')) type = 'dropdown';
+    if (el.matches('[aria-haspopup=listbox]') && !el.matches('input,[role=combobox]') || selectButton(el)) type = 'dropdown';
     if (el.matches('[role=checkbox],[role=switch]') && !el.matches('input')) type = 'checkbox';
     if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
     if (el.readOnly && !['combobox','radio','checkbox'].includes(type)) continue;

@@ -20,7 +20,9 @@ OPTION_SELECTOR = (
     ".chosen-results li,.ui-menu-item,.pac-item,.oj-listbox-result,.dropdown-location,[data-automation-id=promptOption],"
     "[data-automation-id=menuItem],.cx-select__list-item[role=gridcell],"
     # Older react-select rows carry no role, only their generated id (Pinpoint's Country, Kenway 2026-10-27).
-    '[id^="react-select-"][id*="-option-"]'
+    '[id^="react-select-"][id*="-option-"],'
+    # Deloitte's tax-credit questionnaire lists a menu's choices as role-less rows (Caesars, 2026-10-27).
+    ".wotc-select-option"
 )
 
 VISIBLE_OPTIONS = r"""(args) => {
