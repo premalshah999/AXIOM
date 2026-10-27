@@ -312,9 +312,17 @@ def hires_elsewhere(db, job_id, profile):
     """The applicant's state when a question this job asked limits hiring to listed places that exclude it, else ''."""
     from .answers import residence_outside
 
+    from sqlalchemy import func
+
     with db.session() as s:
+        company = s.scalar(select(Job.company).where(Job.id == job_id)) or ""
+        # The statement is about where the employer hires, so any posting of the same employer that asked it counts
+        # (Jerry 2026-10-27: an archived posting asked; the next posting stalled on the same picker).
+        jobs = select(Job.id).where(func.lower(Job.company) == company.lower()) if company else select(Job.id).where(
+            Job.id == job_id
+        )
         asked = s.execute(
-            select(Review.question, Review.options).join(Run, Review.run_id == Run.id).where(Run.job_id == job_id)
+            select(Review.question, Review.options).join(Run, Review.run_id == Run.id).where(Run.job_id.in_(jobs))
         ).all()
     for question, options in asked:
         if where := residence_outside(question, options or [], profile.get("facts"), profile.get("location", "")):
