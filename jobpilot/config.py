@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     # MiMo enables deep thinking by default. Form answers need fast JSON, not reasoning traces.
     # "disabled", "enabled", or empty to send nothing (for other OpenAI-compatible providers).
     mimo_thinking: str = "disabled"
-    llm_provider: Literal["mimo", "deepseek", "haiku", "openai"] = "deepseek"
+    llm_provider: Literal["mimo", "deepseek", "haiku", "openai", "openrouter"] = "deepseek"
     haiku_api_key: str = Field(
         default="", repr=False, validation_alias=AliasChoices("haiku_api_key", "anthropic_api_key")
     )
@@ -88,6 +88,17 @@ class Settings(BaseSettings):
     openai_input_price: float = Field(default=0.10, ge=0)
     openai_output_price: float = Field(default=0.50, ge=0)
     openai_cache_price: float = Field(default=0.01, ge=0)
+    # OpenRouter (owner 2026-10-27): DeepSeek V4.1 Flash 1017 served only by Relace, reasoning off. Relace's rates per 1M
+    # tokens: $0.07 input, $0.50 output, $0.008 cached input. No fallback to other hosts unless enabled.
+    openrouter_api_key: str = Field(default="", repr=False)
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_model: str = "deepseek/deepseek-v4.1-flash-1017"
+    openrouter_provider: str = "relace"
+    openrouter_allow_fallbacks: bool = False
+    openrouter_thinking: str = "disabled"
+    openrouter_input_price: float = Field(default=0.07, ge=0)
+    openrouter_output_price: float = Field(default=0.50, ge=0)
+    openrouter_cache_price: float = Field(default=0.008, ge=0)
     # TypeSafe Jev answers bounded choices (pick one offered option) before DeepSeek; output is free.
     typesafe_api_key: str = Field(default="", repr=False)
     typesafe_base_url: str = "https://api.typesafe.ai"

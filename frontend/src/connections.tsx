@@ -28,6 +28,7 @@ const PROVIDERS = [
   { id: "haiku", label: "Anthropic Claude Haiku" },
   { id: "mimo", label: "Xiaomi MiMo" },
   { id: "openai", label: "OpenAI GPT-6 Luna (cheapest setting)" },
+  { id: "openrouter", label: "OpenRouter: DeepSeek V4.1 Flash 1017 on Relace" },
 ];
 
 /** Setup > Connections: every service key is entered here; nothing needs editing in .env. */
