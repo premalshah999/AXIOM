@@ -2021,6 +2021,15 @@ class Adapter:
                 state="waiting_browser",
                 blocker_type="account",
             )
+        from ..runtime import engine_version
+
+        if record.get("reset_failed_engine") == engine_version():
+            return self.defer(
+                "This employer's new-password step failed on this build; no further reset emails are requested",
+                manual,
+                state="waiting_browser",
+                blocker_type="account",
+            )
         if time.time() - record.get("reset_requested_at", 0) < 300:
             return self.defer(
                 "A password reset was requested recently; awaiting delivery",
@@ -2168,6 +2177,46 @@ class Adapter:
         self.emit("auth", "Employer password reset requested", {"confirmed": outcome == "sent"})
         return await self.complete_password_reset(url)
 
+    async def type_password(self, locator, password):
+        """Type a new password key by key: rule checklists ("at least one upper case letter") and their Submit gates
+        listen for keystrokes, which a value set in one step does not send."""
+        await locator.fill("", timeout=4000)
+        await locator.press_sequentially(password, delay=25, timeout=15000)
+        try:
+            await locator.evaluate("e => e.blur()")
+        except Exception:
+            pass
+
+    async def nudge_reset_form(self, field_id, how):
+        """Submit the new-password form another way after its button sent nothing; True when something was tried."""
+        try:
+            el = self.form.locator(field_id)
+            if how == "enter":
+                await el.press("Enter", timeout=3000)
+                return True
+            # The form's own submit button is marked as this auth action for the page guard, then submits its form.
+            return bool(await el.evaluate(
+                "e => { const f = e.form; if (!f) return false;"
+                " const s = [...f.querySelectorAll('button,input[type=submit]')].find(b => /submit|save|reset|change|"
+                "update|continue/i.test(b.innerText || b.value || ''));"
+                " if (!s) { f.submit(); return true; }"
+                " s.dataset.jpAuthControl = 'true'; s.dataset.jpControlLabel = (s.innerText || s.value || '').trim();"
+                " s.dataset.jpFinalAuth = 'true'; f.__jpAllowedControl = s;"
+                " if (f.requestSubmit) f.requestSubmit(s); else s.click(); return true; }"
+            ))
+        except Exception:
+            return False
+
+    async def save_reset_page(self):
+        """Keep the new-password page's markup for diagnosis. Input values are properties, not markup: no password."""
+        try:
+            folder = getattr(self.e, "dir", None)
+            if folder is not None:
+                html = await self.page.content()
+                (folder / "reset_page.html").write_text(html[:400_000])
+        except Exception:
+            pass
+
     async def complete_password_reset(self, url):
         """Consume this owner's request; save credentials only after acceptance."""
         token = await self.wait_email("password_reset")
@@ -2203,19 +2252,37 @@ class Adapter:
             if not self.accounts.password_allowed(self.id, self.form.frames[f["id"]].url, self.job["url"]):
                 self.finish_mail("failed", "Reset form on an unexpected website")
                 return self.defer("The reset page is on an unexpected website; not entering the password")
-            await self.form.locator(f["id"]).fill(credentials["password"], timeout=4000)
+            await self.type_password(self.form.locator(f["id"]), credentials["password"])
         button = self.auth_button(obs, "reset")
         if not button:
             self.finish_mail("failed", "No new-password submit control")
             return self.defer("The new-password form had no submit control")
         await self.click(button, auth=True)
         outcome, detail = await self.auth_outcome()
+        if outcome == "unknown":
+            # L3Harris (SuccessFactors, 2026-10-21..27): Submit on the new-password form sent no request and the form
+            # stayed; every later run failed sign-in and mailed the owner another reset link. The same form gets Enter
+            # in its last password box, then its own submit, before the reset is given up.
+            await self.save_reset_page()
+            for nudge in ("enter", "submit"):
+                if not await self.nudge_reset_form(passwords[-1]["id"], nudge):
+                    continue
+                outcome, detail = await self.auth_outcome()
+                self.emit("auth", f"reset after {nudge}: {outcome}")
+                if outcome != "unknown":
+                    break
         self.emit("auth", f"reset: {outcome}")
         if outcome == "password_rules":
             self.finish_mail("failed", "Password rules")
             return self.defer("The shared account password does not meet this employer's rules: " + detail)
         if outcome != "ok":
+            from ..runtime import engine_version
+
             self.finish_mail("failed", "New password not accepted")
+            # One reset per employer per build: each failed new-password step mailed the owner another link
+            # (L3Harris 2026-10-27: "I'm getting password reset links all the time").
+            self.accounts.mark(url, self.accounts.record(url).get("state") or "reset_requested", self.accounts.saved(url),
+                               reset_failed_engine=engine_version())
             return self.defer("The employer did not accept the new password: " + (detail or outcome))
         self.finish_mail("verified", "Employer accepted the password reset")
         record = self.accounts.record(url)

@@ -150,3 +150,22 @@ def test_common_sign_in_wording_is_understood(text, kind):
     assert found[kind]
     if kind == "bad":
         assert not NOT_FOUND.search(text)  # A refused password is never read as "no account".
+
+
+async def test_a_failed_new_password_step_requests_no_further_reset_on_this_build(service, monkeypatch):
+    # L3Harris (2026-10-27): every run requested another reset and the owner got reset links "all the time".
+    from unittest.mock import AsyncMock
+
+    from jobpilot.runtime import engine_version
+
+    obs = observation(URL)
+    value = adapter(service, obs)
+    value.accounts.mark(URL, "credentials_rejected", {"email": "alex@example.test", "password": "Synthetic9!x"},
+                        reset_failed_engine=engine_version())
+    value.defer = lambda reason, *a, **k: {"state": k.get("state"), "reason": reason}
+    value.config.account_password_reset = True
+    value.inbox = type("Inbox", (), {"configured": True, "rule": AsyncMock(return_value={"id": "r"})})()
+    value.request_reset = AsyncMock()
+    result = await Adapter.recover(value, obs, "Signing in did not succeed")
+    assert "no further reset emails" in result["reason"]
+    value.request_reset.assert_not_awaited()
