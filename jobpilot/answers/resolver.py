@@ -442,6 +442,8 @@ class Resolver(
             return answer
         if answer := self.signature_block(f):
             return answer
+        if answer := self.initials_block(f):
+            return answer
         if answer := self.talent_pool_opt_out(f):
             return answer
         if f.get("options") and re.search(

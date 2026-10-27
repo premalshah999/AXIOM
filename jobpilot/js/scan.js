@@ -31,6 +31,9 @@
       if (n.nodeType !== Node.ELEMENT_NODE) return '';
       if (!top && (style(n).display === 'none' || style(n).visibility === 'hidden')) return '';
       if (!top && n.matches('input,select,textarea,button,[role=option],script,style')) return '';
+      // An SVG's never-rendered fallback: Workable's icons hold "SVGs not supported by this browser." in <desc>,
+      // which became part of every checkbox option and no fill matched it (JeffreyM Consulting 2026-10-27).
+      if (!top && n.matches('svg desc,svg metadata')) return '';
       const assigned = n.tagName === 'SLOT' ? n.assignedNodes({flatten: true}) : [];
       const children = assigned.length ? assigned : n.shadowRoot ? n.shadowRoot.childNodes : n.childNodes;
       return [...children].map(c => read(c)).join(' ');

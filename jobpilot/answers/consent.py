@@ -91,7 +91,19 @@ EMBEDDED_DISCLOSURE = re.compile(
     r"authori[sz]ed to work|work authori[sz]ation|eligib\w* to work|sponsor|\bvisa\b|citizen|"
     r"convict|felon|misdemeanor|\b(?:no|any|never)\b.{0,20}criminal|non[\s-]?(?:compet|solicit)|restrictive covenant|"
     r"government (?:employ|official)|security clearance|export control|sanction|"
-    r"(?:been|ever been) (?:fired|terminated|discharged)|asked to resign|related to|relative",
+    r"(?:been|ever been) (?:fired|terminated|discharged)|asked to resign|relative|"
+    # Kinship only: Credence's attestation "investigate ... other matters related to my suitability" (2026-10-27).
+    r"\brelated to(?:,? or\b| any(?:one|body)?\b| some(?:one|body)\b|"
+    r" an? (?:current |former )?(?:employee|member|director|officer|person|individual|staff)|"
+    r" (?:current |our |its )?(?:employees?|members?|staff|directors?|officers?)\b)",
+    re.I,
+)
+
+# A box for the applicant's initials under an agreement: Credence (Workable) 2026-10-27 ended a drug-test, medical and
+# background-check acknowledgement with "Initial to agree." and the model typed "I agree".
+INITIALS_REQUEST = re.compile(
+    r"\b(?:please\s+)?initial\s+(?:to|here|below|if|indicating)\b|"
+    r"\b(?:enter|type|provide|write|add|insert)\s+(?:your\s+)?initials\b|\binitials?\s*:?\s*\*?\s*$",
     re.I,
 )
 

@@ -29,7 +29,7 @@ WIDGET = """
 <a id="plain" role="combobox">Pick</a>
 <script>
 window.changes = [];
-function makeDropdown(id, catalog, {ajax = true, delay = 500, search = true, onchange = () => {}} = {}) {
+function makeDropdown(id, catalog, {ajax = true, delay = 500, search = true, onchange = () => {}, match = (t, q) => t.toLowerCase().includes(q)} = {}) {
   document.getElementById('fields').insertAdjacentHTML('beforeend', `
     <select id="${id}" style="display:none">${ajax ? '' : catalog().map((t, i) => `<option value="${i}">${t}</option>`).join('')}</select>
     <a id="${id}_icimsDropdown" class="dropdown-select" role="combobox" tabindex="0"><span class="dropdown-text">— Make a Selection —</span></a>
@@ -43,7 +43,8 @@ function makeDropdown(id, catalog, {ajax = true, delay = 500, search = true, onc
   let words = [], pages = 1, timer;
   const render = () => {
     const q = box.value.toLowerCase();
-    const all = catalog().filter(t => t.toLowerCase().includes(q));
+    if (q) (window.searches = window.searches || []).push(id + ':' + q);
+    const all = catalog().filter(t => match(t, q));
     words = all.slice(0, 25 * pages);
     status.textContent = all.length ? `${all.length} results` : 'No Results';
     ul.innerHTML = '<li class="dropdown-result" role="option" dropdown-index="-1" aria-label="— Make a Selection —">— Make a Selection —</li>' +
@@ -71,6 +72,9 @@ makeDropdown('-1_PersonProfileFields.AddressState', () => window.country === 'Un
 // No search box: the value sits past the first page and loads on scroll.
 makeDropdown('-1_PersonProfileFields.rcf3217', () => STATES, {ajax: false, search: false});
 makeDropdown('rcf2010', () => ['He/him/his', 'She/her/hers', 'They/them/theirs'], {ajax: false});
+// PepsiCo 2026-10-27: phone country codes read "United States (1)" and the server searches the name only.
+makeDropdown('rcf2045', () => ['United Kingdom (44)', 'United States (1)', 'India (91)'],
+  {match: (t, q) => t.replace(/\\s*\\(\\d+\\)$/, '').toLowerCase().includes(q)});
 </script>"""
 
 COUNTRY = '[id="-1_PersonProfileFields.AddressCountry_icimsDropdown"]'
@@ -173,3 +177,11 @@ async def test_a_major_the_catalog_lacks_is_searched_as_the_fallback_and_picked_
     )
     assert picked == "Computer Science"
     assert await field.inner_text() == "Computer Science"
+
+
+async def test_a_dial_code_row_is_searched_by_its_country_name(form):
+    code = form.locator('[id="rcf2045_icimsDropdown"]')
+    assert await widgets.combobox(form.main_frame, code, "United States (1)") == "United States (1)"
+    assert [q for q in await form.evaluate("window.searches || []") if q.startswith("rcf2045:")] == [
+        "rcf2045:united states"
+    ]

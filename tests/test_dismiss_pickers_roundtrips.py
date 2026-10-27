@@ -63,3 +63,19 @@ async def test_a_list_that_will_not_close_still_gets_the_escape_fallback(page):
     await widgets.dismiss_pickers(page.main_frame)
     assert await page.locator("#list").is_hidden()
     assert time.monotonic() - started < 5
+
+
+async def test_a_menu_without_items_is_not_an_open_picker(page):
+    """Workable's uploaded-resume card keeps its view/delete links in a permanent role=menu; every dropdown after the
+    upload was refused as "Previous dropdown remains open"."""
+    await page.set_content(
+        """<section><div role=menu><div role=group><a href="#" aria-label="view resume.pdf">view</a>
+        <button type=button aria-label="delete resume.pdf">delete</button></div></div></section>
+        <input id=box role=combobox aria-controls=list aria-expanded=false>
+        <ul id=list role=listbox hidden><li role=option>Available immediately</li></ul>"""
+    )
+    with roundtrips() as calls:
+        await widgets.dismiss_pickers(page.main_frame)
+    assert calls.total == 1, dict(calls)
+    await page.evaluate("list.hidden = false")
+    assert await page.main_frame.evaluate(widgets.COUNT_OPEN_LISTS_JS) == 1, "a real list still counts as open"

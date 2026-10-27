@@ -12,6 +12,7 @@ from .consent import AGREEMENT_TEXT
 from .consent import CHECK_WILLINGNESS
 from .consent import CONTACT_CONSENT
 from .consent import EMBEDDED_DISCLOSURE
+from .consent import INITIALS_REQUEST
 from .consent import READ_ACKNOWLEDGEMENT
 from .consent import RECORD_STATEMENT
 from .consent import SELF_ASSERTION
@@ -43,6 +44,29 @@ class ConsentRulesMixin:
             disposition="answer",
             evidence_ids=["fact:application_consent_policy"],
             reason="E-signature under the terms policy",
+        )
+
+    def initials(self):
+        """The applicant's first and last initials ("PS"), or "" when the name is incomplete."""
+        parts = [normalize(x) for x in self.profile.given_names()]
+        return "".join(part[0] for part in parts).upper() if all(parts) else ""
+
+    def initials_block(self, f):
+        """A text box asking for initials under an agreement is initialled under the accept-all-terms policy."""
+        label = str(f.get("label", ""))
+        if f.get("type") not in {"text", "textarea"} or f.get("options") or not self.profile.accept_all_application_terms:
+            return None
+        read_only = bool(READ_ACKNOWLEDGEMENT.search(label)) and not SELF_ASSERTION.search(label)
+        if not INITIALS_REQUEST.search(label[-160:]) or (EMBEDDED_DISCLOSURE.search(label) and not read_only):
+            return None
+        if not (value := self.initials()):
+            return None
+        return Answer(
+            field_id=f["id"],
+            value=value,
+            disposition="answer",
+            evidence_ids=["fact:application_consent_policy"],
+            reason="Initials under the terms policy",
         )
 
     def required_contact_consent(self, f):
@@ -132,7 +156,11 @@ class ConsentRulesMixin:
         if field.get("options") or not self.profile.accept_all_application_terms:
             return False
         read_only = bool(READ_ACKNOWLEDGEMENT.search(label)) and not SELF_ASSERTION.search(label)
-        if not SIGNED_CERTIFICATION.search(label) or (EMBEDDED_DISCLOSURE.search(label) and not read_only):
+        if EMBEDDED_DISCLOSURE.search(label) and not read_only:
+            return False
+        if INITIALS_REQUEST.search(label[-160:]) and str(answer.value or "").strip():
+            return re.sub(r"[\s.]", "", str(answer.value)).upper() == self.initials()
+        if not SIGNED_CERTIFICATION.search(label):
             return False
         p = self.profile
         parts = [normalize(p.first_name or ""), normalize(p.last_name or "")]

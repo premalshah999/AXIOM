@@ -720,8 +720,11 @@ async def _popup_scope(el):
               }
               // Some Workday buttons omit ARIA ownership. Only the single
               // visible popup is usable after other pickers have been dismissed.
-              const menus = [...document.querySelectorAll('[role=listbox]:not([data-automation-id="selectedItemList"]):not([aria-label="items selected"]),[role=menu]')]
-                .filter(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden');
+              const menus = [...document.querySelectorAll('"""
+            + OPEN_LISTS
+            + """')].filter("""
+            + OPEN_LIST_SHOWN
+            + """);
               if (menus.length !== 1) return reference || null;
               if (!menus[0].id) menus[0].id = 'jp-menu-' + Math.random().toString(36).slice(2,10);
               return menus[0].id;
@@ -1297,6 +1300,14 @@ OPEN_LISTS = (
     "[role=listbox]:not([data-automation-id=\"selectedItemList\"]):not([aria-label=\"items selected\"]),[role=menu]"
 )
 
+# Whether a matched list is an open picker. A menu without items is an action bar: Workable's uploaded-resume card
+# keeps its view/delete links in a permanent role=menu, and every dropdown after the upload was refused as "Previous
+# dropdown remains open" (Thorlabs, Saalex, TMEIC 2026-10-27).
+OPEN_LIST_SHOWN = """e=>e.getClientRects().length && getComputedStyle(e).visibility!=='hidden'
+      && !(e.matches('[role=menu]') && !e.querySelector('[role^=menuitem],[role=option]'))"""
+COUNT_OPEN_LISTS_JS = f"() => [...document.querySelectorAll('{OPEN_LISTS}')].filter({OPEN_LIST_SHOWN}).length"
+NO_OPEN_LISTS_JS = f"() => !({COUNT_OPEN_LISTS_JS})()"
+
 # One call: the outside click, the toggle of pickers that ignore it, and a count of the lists still visible. Every
 # picker write starts here, and the three calls it used to make (plus a wait_for_function that answered at once on a
 # quiet page) were five protocol calls before the first option was read.
@@ -1314,10 +1325,9 @@ DISMISS_PICKERS_JS = (
     e.click();
     if(e.tagName==='BUTTON'){if(original===null)e.removeAttribute('type');else e.setAttribute('type',original)}
   }
-  return [...document.querySelectorAll('"""
-    + OPEN_LISTS
-    + """')]
-    .filter(e=>e.getClientRects().length && getComputedStyle(e).visibility!=='hidden').length;
+  return ("""
+    + COUNT_OPEN_LISTS_JS
+    + """)();
 }"""
 )
 
@@ -1328,16 +1338,14 @@ async def dismiss_pickers(frame):
         return
     try:
         await frame.wait_for_function(
-            """() => ![...document.querySelectorAll('[role=listbox]:not([data-automation-id="selectedItemList"]):not([aria-label="items selected"]),[role=menu]')]
-          .some(e=>e.getClientRects().length && getComputedStyle(e).visibility!=='hidden')""",
+            NO_OPEN_LISTS_JS,
             timeout=600,
             polling=50,
         )
         return
     except Exception:
         pass
-    remaining = await frame.evaluate("""() => [...document.querySelectorAll('[role=listbox]:not([data-automation-id="selectedItemList"]):not([aria-label="items selected"]),[role=menu]')]
-      .filter(e=>e.getClientRects().length && getComputedStyle(e).visibility!=='hidden').length""")
+    remaining = await frame.evaluate(COUNT_OPEN_LISTS_JS)
     if remaining:
         # Workday uses trusted pointer events for some outside-click listeners.
         # Observe a blank, noninteractive point; never force a click through a menu.
@@ -1367,16 +1375,14 @@ async def dismiss_pickers(frame):
         await frame.evaluate(OUTSIDE_PICKER_CLICK)
         try:
             await frame.wait_for_function(
-                """() => ![...document.querySelectorAll('[role=listbox]:not([data-automation-id="selectedItemList"]):not([aria-label="items selected"]),[role=menu]')]
-              .some(e=>e.getClientRects().length && getComputedStyle(e).visibility!=='hidden')""",
+                NO_OPEN_LISTS_JS,
                 timeout=600,
                 polling=50,
             )
             return
         except Exception:
             pass
-        remaining = await frame.evaluate("""() => [...document.querySelectorAll('[role=listbox]:not([data-automation-id="selectedItemList"]):not([aria-label="items selected"]),[role=menu]')]
-          .filter(e=>e.getClientRects().length && getComputedStyle(e).visibility!=='hidden').length""")
+        remaining = await frame.evaluate(COUNT_OPEN_LISTS_JS)
     if remaining:
         raise ValueError("Previous dropdown remains open; its choices cannot be reused")
 
@@ -2318,7 +2324,11 @@ async def icims_dropdown_commit(
 
     # Searches whose results hold the value's own rows (a degree's level) go first: "Master of Science" found nothing in
     # Emory's catalog, whose row is "Master's Level Degree", and each empty search cost the field 2-4 s (2026-10-25).
-    queries = list(broad_queries or []) + [str(value)] + list(search_queries or [])
+    # A phone country code's row reads "United States (1)", and iCIMS searches the name only: the whole value found
+    # "No Results" until the field's deadline (PepsiCo 2026-10-27). The bare name is searched first.
+    bare = re.sub(r"^\s*\(\+?\d{1,4}\)\s*|\s*\(\+?\d{1,4}\)\s*$", "", str(value)).strip()
+    queries = list(broad_queries or []) + ([bare] if bare and bare != str(value).strip() else [])
+    queries += [str(value)] + list(search_queries or [])
     queries += sorted(_alias_group(value) - {norm(value)}, key=len, reverse=True)
     if len(str(value).split()) > 1:
         queries.append(str(value).split()[0])
