@@ -4387,6 +4387,18 @@ class BrowserEngine:
                     or []
                     if str(o).strip()
                 ]
+                if not options:
+                    # Neither held the catalog; the pending question that refused the source did (Bank of America
+                    # asked the owner again on 2026-10-27 with "Displaced (US)" / "LOA - Job Search (US)" in it).
+                    label = str(target.get("label", "")).strip().casefold()
+                    options = next(
+                        (
+                            [str(o) for o in q.get("options") or [] if str(o).strip()]
+                            for q in getattr(getattr(self, "form", None), "pending", None) or []
+                            if str(q.get("question", "")).strip().casefold() == label and q.get("options")
+                        ),
+                        [],
+                    )
                 if (
                     options
                     and all(NOT_A_SOURCE.search(o) for o in options)

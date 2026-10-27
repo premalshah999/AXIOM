@@ -30,3 +30,11 @@ def test_an_internal_only_catalog_closes_the_job_even_when_the_target_lacks_opti
 def test_a_public_catalog_without_the_saved_source_still_asks():
     result = verdict(engine(["Select One", "Indeed", "Company Website"]))
     assert result["state"] != "closed"
+
+
+def test_the_pending_question_supplies_the_catalog_when_the_field_record_has_none():
+    # Bank of America 2026-10-27: the field record carried no options; the refused pending question held them.
+    e = engine([])
+    e.form.pending = [{"question": "How Did You Hear About Us?", "options": ["Displaced (US)", "LOA - Job Search (US)"]}]
+    result = verdict(e)
+    assert result["state"] == "closed" and "Internal-only" in result["reason"]
