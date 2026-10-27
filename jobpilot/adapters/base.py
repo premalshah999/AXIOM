@@ -69,7 +69,11 @@ ALREADY = re.compile(
 CLOSED = re.compile(
     r"no longer (?:accepting (?:applications)?|available|active|open)|position has been filled|"
     r"job (?:posting |ad |listing |opening )?(?:has (?:been )?)?(?:closed|expired|removed)|this (?:job|position|requisition) (?:is )?"
-    r"(?:closed|unavailable|no longer)|job not found|the page you are looking for (?:does not|doesn't) exist",
+    r"(?:closed|unavailable|no longer)|job not found|the page you are looking for (?:does not|doesn't) exist|"
+    # Paylocity (Monti 2026-10-26): "We're sorry, that job does not exist or is not currently active."
+    r"\b(?:that|this|the) (?:job|position|posting|requisition|opening) (?:you(?:'re| are) looking for )?"
+    r"(?:does not|doesn't|no longer) exists?\b(?! yet)|"
+    r"\b(?:that|this|the) (?:job|position|posting|requisition|opening) is not currently (?:active|available|open)",
     re.I,
 )
 CHECK_EMAIL = re.compile(
