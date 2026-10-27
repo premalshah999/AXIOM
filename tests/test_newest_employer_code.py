@@ -109,3 +109,21 @@ def test_greenhouse_code_alias_permission_never_authorizes_other_jobs_or_email_l
     browser.rule = {"link_origins": ["https://boards.greenhouse.io"]}
     assert browser.code_origin_allowed(url, {"text": "To submit your application, enter the code"}) == allowed
     assert browser.rule["link_origins"] == ["https://boards.greenhouse.io"]
+
+
+def test_codes_for_two_employers_at_one_address_are_attributed_by_name():
+    # ADP (2026-10-27): Midco's and ZincFive's codes reached one address together and both runs gave up.
+    def mail(subject, date, code):
+        return (subject, {"kind": "code", "value": code},
+                {"internalDate": date, "snippet": "",
+                 "payload": {"headers": [{"name": "Subject", "value": subject}, {"name": "From", "value": "ADP <x@adp.com>"}]}},
+                None)
+
+    midco = mail("Midco: your verification code", "2000", "111111")
+    zinc = mail("ZincFive: your verification code", "2100", "222222")
+    challenge = {"ats": "adp", "tenant_tokens": ["midco"], "peer_tokens": [["zincfive"]]}
+    assert latest_employer_code([midco, zinc], challenge) == [midco]
+    resent = mail("Midco: your verification code", "2200", "333333")
+    assert latest_employer_code([midco, zinc, resent], challenge) == [resent]
+    nameless = [mail("Your verification code", "2000", "1"), mail("Your verification code", "2100", "2")]
+    assert len(latest_employer_code(nameless, challenge)) == 2  # never guessed

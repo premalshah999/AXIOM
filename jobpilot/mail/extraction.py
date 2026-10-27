@@ -429,16 +429,35 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
     return reject("ambiguous_token" if len(codes) > 1 or len(valid_links) > 1 else "token_format")
 
 
-def latest_employer_code(matches, challenge):
-    """Newest uniquely timed Greenhouse OTP, after every identity check passed.
+def names_employer(message, tokens):
+    """Whether a message's subject, sender name or snippet names an employer (a tenant token of 4+ letters)."""
+    headers = {h["name"].lower(): h["value"] for h in message.get("payload", {}).get("headers", [])}
+    text = " ".join([headers.get("subject", ""), headers.get("from", "").split("<")[0], message.get("snippet", "")])
+    squashed = re.sub(r"[^a-z0-9]+", "", text.casefold())
+    return any(len(t) >= 4 and t in squashed for t in tokens or [])
 
-    Generic senders, links and tied timestamps retain the ambiguous-match rule.
-    Gmail internalDate is receiving metadata, never an employer-supplied Date.
+
+def latest_employer_code(matches, challenge):
+    """Newest uniquely timed OTP, after every identity check passed.
+
+    Several matches are first narrowed to those naming this employer and no other open window's (ADP's Midco and ZincFive
+    codes reached one address at once, 2026-10-27). Among this employer's codes the newest wins: a resent code replaces
+    the earlier one. Links and tied timestamps retain the ambiguous-match rule. Gmail internalDate is receiving metadata,
+    never an employer-supplied Date.
     """
+    if len(matches) < 2:
+        return matches
+    own = [
+        item
+        for item in matches
+        if names_employer(item[2], challenge.get("tenant_tokens"))
+        and not any(names_employer(item[2], peer) for peer in challenge.get("peer_tokens") or [])
+    ]
+    if own:
+        matches = own
     if (
         len(matches) < 2
-        or challenge.get("ats") != "greenhouse"
-        or not challenge.get("employer_name")
+        or not (own or (challenge.get("ats") == "greenhouse" and challenge.get("employer_name")))
         or any(token.get("kind") != "code" for _, token, _, _ in matches)
     ):
         return matches

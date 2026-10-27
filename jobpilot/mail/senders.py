@@ -63,6 +63,10 @@ GENERIC_LOCAL = re.compile(
 
 
 GENERIC_LABELS = {
+    # ADP's own hosts name the platform, not the employer (Midco's and ZincFive's codes both "named" adp, 2026-10-27).
+    "adp",
+    "myjobs",
+    "workforcenow",
     "www",
     "careers",
     "career",
@@ -134,6 +138,10 @@ def tenant_tokens(url, company=""):
     if re.search(r"myworkdaysite\.com$|myworkdayjobs\.com$", p.hostname or ""):
         # wd1.myworkdaysite.com/recruiting/<tenant>/<site>
         words += re.split(r"[^a-z0-9]+", p.path.lower())[:4]
+    if (p.hostname or "").lower() == "myjobs.adp.com":
+        # myjobs.adp.com/<tenant>careers/cx: the path names the employer ("midcocareers" -> midco).
+        first = (p.path.strip("/").split("/") or [""])[0].lower()
+        words += [first, re.sub(r"(?:careers?|jobs?)$", "", first)]
     words += re.split(r"[^a-z0-9]+", (company or "").lower())
     # "HealthEdge" -> healthedge, "My Funded Futures" -> myfundedfutures (an employer's domain label).
     words.append(re.sub(r"[^a-z0-9]", "", (company or "").lower()))
