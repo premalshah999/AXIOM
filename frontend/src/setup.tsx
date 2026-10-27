@@ -267,7 +267,7 @@ function LimitSettings() {
             <input
               type="number"
               min={50000}
-              max={2000000}
+              max={50000000}
               step={50000}
               value={value.job_token_cap}
               onChange={(e) => setDraft({ ...value, job_token_cap: Number(e.target.value) })}

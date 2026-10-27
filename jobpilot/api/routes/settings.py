@@ -12,7 +12,7 @@ class Control(BaseModel):
 
 
 class Limits(BaseModel):
-    job_token_cap: int = Field(ge=50_000, le=2_000_000)
+    job_token_cap: int = Field(ge=50_000, le=50_000_000)
     company_limit: int = Field(ge=1, le=25)
 
 
