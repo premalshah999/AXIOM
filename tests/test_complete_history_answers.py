@@ -675,3 +675,11 @@ def test_no_clearance_picks_the_offered_none_option(service, kind):
     answer = resolver.local({"id": "q", "label": "Please indicate which active clearances you have.", "type": kind,
                              "options": options, "required": True})
     assert answer and answer.value == "I currently do not have an active security clearance"
+
+
+def test_a_date_asked_of_a_named_employer_comes_from_its_row(service):
+    # Leonardo DRS (2026-10-27) asked the owner "What was your end date at ExampleSoft?".
+    profile = Profile(work=[{"company": "Globex", "title": "Engineer", "start": "2022-03", "end": "2022-06"}])
+    resolver = Resolver(profile, service.db, service.config)
+    answer = resolver.local({"id": "q", "label": "What was your end date at Globex?", "type": "text", "options": []})
+    assert answer and answer.value and "profile:work.0" in answer.evidence_ids

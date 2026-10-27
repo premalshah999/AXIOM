@@ -419,6 +419,24 @@ class Resolver(
             reason="Repair agent correction",
         )
 
+    def named_employer_date(self, f):
+        """A start or end date asked of an employer named in the question ("What was your end date at ExampleSoft?"): that work row's own date. Leonardo DRS (2026-10-27) asked the owner although the profile holds it."""
+        if f.get("options"):
+            return None
+        match = re.search(r"\b(start|end|starting|ending|from|to)\s+date\b.{0,30}?\b(?:at|with|for)\s+(.+?)\s*\??$",
+                          str(f.get("label", "")), re.I)
+        if not match:
+            return None
+        named = normalize(match[2])
+        rows = [i for i, w in enumerate(self.profile.work) if w.company and normalize(w.company) == named]
+        if len(rows) != 1:
+            return None
+        row = self.profile.work[rows[0]]
+        value = row.start if match[1].lower() in {"start", "starting", "from"} else row.end
+        if not value or (match[1].lower() not in {"start", "starting", "from"} and row.current):
+            return None
+        return self._ans(f, value, [f"profile:work.{rows[0]}"], "The named employer's row in the work history")
+
     def local(self, f):
         if answer := self.repair_override(f):
             return answer
@@ -460,6 +478,8 @@ class Resolver(
         if answer := self.located_in_answer(f):
             return answer
         if answer := self.language_answer(f):
+            return answer
+        if answer := self.named_employer_date(f):
             return answer
         if f.get("type") == "checkbox":
             # A single checkbox's caption is a proposition, not an offered
