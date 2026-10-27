@@ -34,6 +34,14 @@ PROFILE_SAVE = re.compile(r"^(?:create|submit|update|save)(?: (?:my|your|a))? pr
 # went to the guided agent, which clicked the site's "Careers" link until it stalled.
 CENTRAL_ENROLLMENT = re.compile(r"^/(?:u/(?:mfa-[a-z-]*enrollment|passkey-enrollment[a-z-]*)|ui/login-continue)$", re.I)
 ENROLLMENT_DECLINES = ("remind me later", "not now", "maybe later", "skip for now", "skip", "no thanks", "not on this device")
+# The same prompt with no way to skip it is the employer's mandatory two-step verification: Live! Casino & Hotel
+# Maryland (2026-10-26..27) offered only Back / Enable two-step verification (an authenticator app or SMS) / Log Out,
+# and Back answered "Two-factor authentication is required to access this application". Read as unknown, the guided
+# agent logged out, wandered into the email step and requested a password reset on every retry.
+MFA_REQUIRED = re.compile(
+    r"you haven'?t enabled two-step verification|two-(?:factor|step) (?:authentication|verification) is required", re.I
+)
+CENTRAL_HOSTS = {"login.icims.com", "login.icims.eu", "login-page.icims.com"}
 # iCIMS writes its progress bar for screen readers: "Step 2 of 4. Voluntary Self-Identification(Current Step)" (ICE
 # 2026-10-19: Candidate Profile, Voluntary Self-Identification, Job Specific Questions, Portal Specific Forms). Only
 # the last step submits the application; an earlier step's "Submit" opens the next one. ICE's run committed on EEO's
@@ -681,7 +689,7 @@ class ICIMS(Adapter):
     def classify_page(self, obs):
         location = urlsplit(obs["url"])
         path = location.path
-        if self.central_enrollment(obs):
+        if self.central_enrollment(obs) or self.central_mfa_required(obs):
             return Step.CONSENT
         if path.rstrip("/").endswith("/jobs/dashboard"):
             return Step.UNKNOWN  # The candidate dashboard: on_unknown reads this job's row (never a confirmation page).
@@ -983,7 +991,7 @@ class ICIMS(Adapter):
         location = urlsplit(obs.get("url", ""))
         if (
             location.scheme != "https"
-            or location.hostname not in {"login.icims.com", "login.icims.eu", "login-page.icims.com"}
+            or location.hostname not in CENTRAL_HOSTS
             or not CENTRAL_ENROLLMENT.match(location.path)
         ):
             return None
@@ -994,12 +1002,41 @@ class ICIMS(Adapter):
         }
         return next((offered[label] for label in ENROLLMENT_DECLINES if label in offered), None)
 
+    def central_mfa_required(self, obs):
+        """Central demands two-step verification for this employer and offers no way to skip it (MFA_REQUIRED)."""
+        location = urlsplit(obs.get("url", ""))
+        said = " ".join(
+            [*map(str, obs.get("headings", [])), *map(str, obs.get("errors", [])), str(obs.get("text", ""))[:4000]]
+        )
+        return bool(
+            location.scheme == "https"
+            and location.hostname in CENTRAL_HOSTS
+            and MFA_REQUIRED.search(said)
+            and not self.central_enrollment(obs)
+        )
+
+    def site_lock(self, obs):
+        # The guided flow meets the same wall (Live!, 2026-10-27: Back, Log Out, then the email step and a reset).
+        if self.central_mfa_required(obs):
+            return self.mfa_wall()
+        return super().site_lock(obs)
+
+    def mfa_wall(self):
+        return self.defer(
+            "The employer requires two-step verification (an authenticator app or SMS code) on its iCIMS account and "
+            "offers no way to skip it; it cannot be enrolled automatically",
+            state="waiting_browser",
+            blocker_type="account",
+        )
+
     async def guided_step(self, obs):
         """Central's passkey prompt while the guided flow drives: its type=submit buttons were refused as application
         submits and iPipeline's run stopped on "Log In Faster on This Device" (2026-10-19)."""
         return bool(self.central_enrollment(obs)) and await self.on_consent(obs) is None
 
     async def on_consent(self, obs):
+        if self.central_mfa_required(obs):
+            return self.mfa_wall()
         if decline := self.central_enrollment(obs):
             self.attempts["central_enrollment"] += 1
             if self.attempts["central_enrollment"] > 3:
