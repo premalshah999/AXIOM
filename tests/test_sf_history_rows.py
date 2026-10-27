@@ -164,3 +164,52 @@ def test_a_single_school_is_still_answered_as_a_whole():
                if "history_row" in f and f["history_row"]["kind"] == "education")
     assert all(by["history_row"]["kind"] == "work" for by in fields if by["id"].startswith(("e", "s")) and "history_row" in by)
     assert {f["id"] for f in fields if "history_row" in f} >= {"e0", "e1", "e2", "s0", "c2"}
+
+
+def supermicro_rows(work=2, education=2):
+    """Supermicro's SuccessFactors page (2026-10-27): work rows "From Date, End Date, * Company Name, * Title", then
+    education rows "* From Date, Program End Date, * University/College/School:, Degree, Major"."""
+    date = {"type": "text", "widget": "date-text", "date_format": "mdy", "required": True}
+    fields = []
+    for i in range(work):
+        fields += [
+            {"id": f"s{i}", "label": "From Date", **date},
+            {"id": f"e{i}", "label": "End Date", **date, "required": False},
+            {"id": f"c{i}", "label": "* Company Name", "type": "text", "required": True},
+            {"id": f"t{i}", "label": "* Title", "type": "text", "required": True},
+        ]
+    for i in range(education):
+        fields += [
+            {"id": f"from{i}", "label": "* From Date", **date},
+            {"id": f"to{i}", "label": "Program End Date", **date},
+            {"id": f"sch{i}", "label": "* University/College/School:", "type": "text", "required": True},
+            {"id": f"deg{i}", "label": "Degree", "type": "combobox", "required": True},
+            {"id": f"maj{i}", "label": "Major", "type": "combobox", "required": True},
+        ]
+    for f in fields:
+        f.update({"value": "", "valid": True, "group": "", "section": "", "options": []})
+    return fields
+
+
+def test_program_end_date_and_slashed_school_label_place_each_education_row(service):
+    from jobpilot.schemas import EducationEntry
+
+    fields = supermicro_rows()
+    mark_history_rows(fields)
+    placed = {f["id"]: (f["history_row"]["kind"], f["history_row"]["index"]) for f in fields if "history_row" in f}
+    assert all(placed[f"{k}{i}"] == ("work", i) for i in range(2) for k in ("s", "e", "c", "t"))
+    assert all(placed[f"{k}{i}"] == ("education", i) for i in range(2) for k in ("from", "to", "sch", "deg", "maj"))
+
+    education = [
+        EducationEntry(school="State University", degree="Master of Science", field_of_study="Data Science",
+                       start="2024-08", end="2026-05"),
+        EducationEntry(school="Institute of Technology", degree="BE", field_of_study="Computer Engineering",
+                       start="2020-06", end="2024-06"),
+    ]
+    resolver = Resolver(Profile(work=WORK, education=education), service.db, service.config,
+                        job={"ats": "successfactors", "url": "https://example.test/job"})
+    by_id = {f["id"]: f for f in fields}
+    second_end = resolver.local(by_id["to1"])
+    assert second_end.value == "2024-06-01" and second_end.evidence_ids == ["profile:education.1.end"]
+    assert resolver.local(by_id["to0"]).value == "2026-05-01"
+    assert resolver.local(by_id["sch1"]).value == "Institute of Technology"

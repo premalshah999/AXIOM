@@ -51,14 +51,20 @@ HISTORY_ROW_LABELS = {
     # HF Sinclair (SuccessFactors 2026-10-23): "* Final Job Title"; the rows were not placed and the bare Start Date
     # took the availability answer (today), "Start date must be before End date".
     "title": re.compile(r"(?:(?:final|current|most recent|last) )?(?:(?:position|job) )?title", re.I),
-    "start": re.compile(r"start date|from(?: date)?", re.I),
-    "end": re.compile(r"end date|to(?: date)?", re.I),
+    # Supermicro's education rows (SuccessFactors 2026-10-27): "* From Date", "Program End Date".
+    "start": re.compile(r"(?:program )?start date|from(?: date)?", re.I),
+    "end": re.compile(r"(?:program )?end date|to(?: date)?", re.I),
 }
 # Classic SuccessFactors (Syncreon, Lear 2026-10-21) repeats education rows above the work rows: Education Level, Major
 # or Subject, * School, From Date, End Date. They reuse the work rows' End Date, so no work End Date was ever placed,
 # and every education row was answered from the first degree.
 EDUCATION_ROW_LABELS = {
-    "school": re.compile(r"school(?: name)?|university|college|institution", re.I),
+    # "* University/College/School:" (Supermicro, 2026-10-27): left unplaced, both rows took the first degree and the
+    # second row's "Program End Date" went to the owner.
+    "school": re.compile(
+        r"(?:school|university|college|institution)(?:\s*/\s*(?:school|university|college|institution))*(?: name)?",
+        re.I,
+    ),
     "degree": re.compile(r"degree|education level|level of education", re.I),
     "field_of_study": re.compile(r"major(?: or subject)?|field of study|discipline", re.I),
 }
