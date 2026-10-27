@@ -164,6 +164,7 @@ LEVER_JOB = re.compile(r"^https://jobs\.lever\.co/([A-Za-z0-9_.-]+)/([0-9a-f-]{3
 WORKABLE_JOB = re.compile(r"^https://apply\.workable\.com/([A-Za-z0-9_-]+)/j/([0-9A-Za-z]{6,16})(?:[/?#]|$)")
 SMARTRECRUITERS_JOB = re.compile(r"^https://jobs\.smartrecruiters\.com/([A-Za-z0-9_-]+)/(\d{6,})(?:[-/?#]|$)")
 SR_MOVED = re.compile(r"does not match companyIdentifier \(([A-Za-z0-9_-]+)\)")
+ORACLE_JOB = re.compile(r"^https://[a-z0-9.-]+\.oraclecloud\.com/hcmUI/CandidateExperience/[^/?#]+/sites/[^/?#]+/job/\d+", re.I)
 
 
 async def greenhouse_board(url, company=""):
@@ -194,7 +195,8 @@ async def greenhouse_board(url, company=""):
 
 
 async def posting_gone(url, company=""):
-    """Why a Greenhouse, Lever, Workable or SmartRecruiters posting is gone, from the platform's public jobs API, or ''.
+    """Why a Greenhouse, Lever, Workable or SmartRecruiters posting is gone, from the platform's public jobs API (an
+    Oracle posting, from its own link), or ''.
     Dead postings stalled as repairs: Toast's redirected to its careers homepage, Gas South's and Sparksoft's boards no
     longer listed the role (2026-10-26). Any doubt (network, other answers) is no verdict."""
     import httpx
@@ -212,6 +214,19 @@ async def posting_gone(url, company=""):
     elif match := SMARTRECRUITERS_JOB.match(url or ""):
         check = f"https://api.smartrecruiters.com/v1/companies/{match[1]}/postings/{match[2]}"
         platform = "SmartRecruiters"
+    elif ORACLE_JOB.match(url or ""):
+        # Oracle answers a posting its career site no longer serves with a redirect to /errors/404: Hearst's sites are
+        # all inactive, so its link landed on "Page not found" in 14 runs although the requisition API still returns it
+        # (2026-10-27). A live posting answers 200.
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                response = await client.get(url, follow_redirects=False)
+        except httpx.HTTPError:
+            return ""
+        location = urlsplit(response.headers.get("location", "")).path
+        if response.is_redirect and re.search(r"/CandidateExperience/errors?/404\b", location, re.I):
+            return "The posting is closed: Oracle's career site no longer serves it (Page not found), so nothing was submitted"
+        return ""
     else:
         board = await greenhouse_board(url, company)
         return "The posting is closed: Greenhouse no longer lists it, so nothing was submitted" if board and not board[2] else ""
