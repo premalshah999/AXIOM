@@ -2874,11 +2874,12 @@ class FormSession:
         try:
             await widgets.dismiss_pickers(frame)
             if field.get("widget") == "sdf-select":
-                # ADP's sdf-select-simple lists every item in its own children: no popup is opened to read them.
+                # ADP's sdf-select-simple lists its items in its own children: no popup is opened to read them. Midco's
+                # render only once opened, and a filterable one shows a window of 20 (State): neither is the catalog.
                 field["options"] = [
                     text for _, text in await el.evaluate(widgets.SDF_ITEMS_JS) if text and not widgets.placeholder_option(text)
                 ][:400]
-                field["options_partial"] = False
+                field["options_partial"] = not field["options"] or bool(await el.locator(widgets.SDF_FILTER).count())
             elif field.get("widget") == "ui5wc-select":
                 field["options"] = [
                     o
