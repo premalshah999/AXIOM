@@ -122,6 +122,25 @@ def oracle_education_block(fields):
         f["group"] = "Education 1"
 
 
+STATUS_DATE = re.compile(r"\*?\s*date (?:obtained|acquired|granted)\s*(\d+)\s*:?\s*\*?", re.I)
+STATUS_ROW = re.compile(r"\*?\s*(?:type of status|country)\s*(\d+)(?: name)?\s*:?\s*\*?", re.I)
+
+
+def label_status_dates(fields):
+    """SuccessFactors' citizenship table (Westinghouse 2026-10-27) repeats "Country N Name", "Type of Status N" (Citizen,
+    Nationality, Permanent Resident) and "Date Obtained N". A bare "Date Obtained" is as often a certificate's, so it
+    went to the owner three times; beside its row's country and status it is the date that status was obtained."""
+    fields = list(fields)
+    seen = {}
+    for f in fields:
+        if m := STATUS_ROW.fullmatch(str(f.get("label") or "").strip()):
+            seen.setdefault(m[1], set()).add("country" if "country" in m[0].lower() else "status")
+    for f in fields:
+        m = STATUS_DATE.fullmatch(str(f.get("label") or "").strip())
+        if m and seen.get(m[1]) == {"country", "status"}:
+            f["label"] = f"Date Obtained {m[1]} (citizenship or residency status)"
+
+
 def numeric_year_counts(fields):
     for f in fields:
         if f.get("type") == "text" and not f.get("options") and YEAR_COUNT.search(str(f.get("label") or "")):
@@ -1382,6 +1401,7 @@ class FormSession:
         name_phone_numbers(list(self.fields.values()))
         link_companion_text(self.fields.values())
         label_signature_date(list(self.fields.values()), "\n".join(texts))
+        label_status_dates(self.fields.values())
         mark_uppercase_fields(list(self.fields.values()), "\n".join([*texts, *getattr(self, "refusal_notes", [])]))
         icims_protocol.apply(list(self.fields.values()), list(self.buttons.values()), "\n".join(texts))
         numeric_year_counts(self.fields.values())

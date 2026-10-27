@@ -441,6 +441,38 @@ class Resolver(
             return None
         return self._ans(f, value, [f"profile:work.{rows[0]}"], "The named employer's row in the work history")
 
+    def citizenship_obtained_date(self, f):
+        """The date a citizenship was obtained, for an applicant whose recorded citizenship was acquired at birth and
+        who records no other status (permanent residency, naturalization): the date of birth. Westinghouse's
+        SuccessFactors citizenship table (2026-10-27) asked the owner for "Date Obtained 1" three times."""
+        label = str(f.get("label") or "")
+        if (
+            f.get("options")
+            or not re.search(r"\b(?:citizenship|nationality)\b", label, re.I)
+            or not re.search(r"\bdate\b.{0,40}\b(?:obtained|acquired|granted)\b|\b(?:obtained|acquired)\b.{0,40}\bdate\b",
+                             label, re.I)
+            or re.search(r"\b(?:[2-9]|second|third)\b", label, re.I)  # A further row holds another status.
+        ):
+            return None
+        facts = self.profile.facts
+        births = [
+            k for k, v in facts.items()
+            if (re.search(r"(?:citizenship|nationality)_acquired$", k, re.I)
+                and re.search(r"\b(?:at|by|since|from) birth\b|\bbirthright\b", str(v), re.I))
+            or (re.search(r"(?:citizenship|nationality)_acquired_at_birth$", k, re.I) and v is True)
+        ]
+        other = any(
+            re.search(r"permanent_resid|green_card|naturali[sz]|refugee|asylee", k, re.I)
+            and (v is True or str(v).strip().casefold() in {"true", "yes"})
+            for k, v in facts.items()
+        )
+        dob = next((k for k in facts if k.casefold() in {"date_of_birth", "dob", "birth_date"} and facts[k]), None)
+        if not births or other or not dob:
+            return None
+        return self._ans(
+            f, str(facts[dob]), [f"fact:{births[0]}", f"fact:{dob}"], "Citizenship acquired at birth: the date of birth"
+        )
+
     def local(self, f):
         if answer := self.repair_override(f):
             return answer
@@ -486,6 +518,8 @@ class Resolver(
         if answer := self.language_answer(f):
             return answer
         if answer := self.named_employer_date(f):
+            return answer
+        if answer := self.citizenship_obtained_date(f):
             return answer
         if f.get("type") == "checkbox":
             # A single checkbox's caption is a proposition, not an offered
