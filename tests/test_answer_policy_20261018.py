@@ -236,3 +236,10 @@ def test_the_repair_agent_never_asks_about_accounts():
     assert ACCOUNT_QUESTION.search("Dayforce requires creating an account to apply. What password should be used?")
     assert ACCOUNT_QUESTION.search("TikTok requires an account to apply. Should the applicant create a new account?")
     assert not ACCOUNT_QUESTION.search("What is your desired annual salary?")
+
+
+def test_still_employed_follows_each_work_row(service):
+    """America's Tire (iCIMS) 2026-10-27: "Still Employed?" was left blank on every row."""
+    yes = local(service, field("Still Employed?", ["Yes", "No"], "combobox", group="Work Experience 1"))
+    no = local(service, field("Still Employed?", ["Yes", "No"], "combobox", group="Work Experience 2"))
+    assert (yes.value, no.value) == ("Yes", "No")

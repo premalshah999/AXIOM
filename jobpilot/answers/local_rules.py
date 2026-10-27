@@ -755,6 +755,10 @@ class LocalRulesMixin:
             none = [o for o in options if re.search(
                 r"(?:do not|don't|not) (?:currently )?(?:have|hold)|\bno (?:active |current )?(?:security )?clearance"
                 r"|^\s*none\b|not applicable", str(o), re.I)]
+            # Node.Digital (Workable 2026-10-27) asked "Do you have an active security clearance?" with YES / NO.
+            nos = [o for o in options if yes_no(str(o)) == "No"]
+            if not none and len(nos) == 1 and re.search(r"\b(?:do|does) you (?:currently )?(?:have|hold|possess)\b", label):
+                none = nos
             if len(none) == 1:
                 return Answer(field_id=f["id"], value=none[0], disposition="answer",
                               evidence_ids=["fact:" + no_clearance], reason="The applicant holds no security clearance")

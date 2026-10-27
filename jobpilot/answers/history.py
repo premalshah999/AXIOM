@@ -11,7 +11,12 @@ WORK = {
     "location": re.compile(r"location|city", re.I),
     "start": re.compile(r"^from$|start date|start|from date|date from", re.I),
     "end": re.compile(r"^to\b|end date|^end$|to date|date to", re.I),
-    "current": re.compile(r"currently work|current(ly)? (employ|job|position|role)|i currently", re.I),
+    # iCIMS asks each row "Still Employed?" (America's Tire 2026-10-27): left blank beside a blank end date, the
+    # profile page failed with "Invalid Data Error".
+    "current": re.compile(
+        r"currently work|current(ly)? (employ|job|position|role)|i currently|still employed|still work(?:ing)? (?:here|there)",
+        re.I,
+    ),
     "description": re.compile(r"description|responsibilit|summary|duties", re.I),
 }
 

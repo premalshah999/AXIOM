@@ -959,7 +959,8 @@
 
   // Resolve conditional labels in document order across different widget scans.
   for (const f of fields) {
-    if (!/^if (?:yes|no|you (?:selected|currently|have|possess))\b/i.test(f.label)) continue;
+    // Node.Digital (Workable) 2026-10-27: "If you answered \"yes\" above, please list" had no parent and was asked.
+    if (!/^(?:\(?[a-z0-9]\)\W*)?if (?:yes|no|so|you (?:selected|currently|have|possess|answered)|(?:the|your) answer (?:is|was))\b/i.test(f.label)) continue;
     const node=document.querySelector('[data-jp-id="'+f.id+'"]');
     if (!node) continue;
     const prior=fields.filter(p=>p!==f && !['password','file'].includes(p.type) && !/code|password|one.time/i.test(p.label))
