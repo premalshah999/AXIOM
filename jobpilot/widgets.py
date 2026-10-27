@@ -2473,6 +2473,46 @@ async def icims_code_dropdown_commit(frame, el, value):
     raise ValueError("The website did not commit the observed choice")
 
 
+# The values a multiselect holds now: Oracle CX pills, React-Select chips, SmartRecruiters' spl-multiselect.
+MULTI_SELECTED_JS = """e=>{
+    if(e.matches('input.cx-multi-select-input')) {
+        const root=e.closest('.cx-multi-select-container')?.parentElement;
+        if(root?.querySelectorAll('input.cx-multi-select-input').length!==1)return '';
+        return [...root.querySelectorAll('.cx-multi-select-pill__value-text')]
+            .map(x=>x.textContent.trim()).filter(Boolean).join('\\n');
+    }
+    let h=e;while(h&&h.tagName!=='SPL-MULTISELECT-AUTOCOMPLETE')h=h.parentElement||h.getRootNode()?.host;
+    const react=e.closest('.select__control');
+    if(react && react.querySelectorAll('[role=combobox]').length===1)
+        return [...react.querySelectorAll('.select__multi-value__label')]
+            .filter(n=>n.getClientRects().length).map(n=>n.textContent.trim()).join('\\n');
+    const values=new Set(Array.isArray(h?.value)?h.value:[]);
+    return [...(h?.shadowRoot?.querySelectorAll('spl-select-option[value]')||[])]
+        .filter(c=>values.has(c.getAttribute('value'))).map(c=>c.textContent.trim()).join('\\n');
+}"""
+
+
+async def multi_combobox(frame, el, value, **options):
+    """Every value of a multiselect answer ("A\\nB\\nC"), each picked once. An Oracle CX multiselect was given the
+    whole answer as one search and refused it ("No matching option is offered", 2026-10-27); values already shown as
+    pills are kept, not searched again (a chosen option leaves the list)."""
+    wanted = [v.strip() for v in re.split(r"[\n;]", str(value)) if v.strip()]
+
+    async def held():
+        return {norm(v) for v in (await el.evaluate(MULTI_SELECTED_JS)).splitlines() if v.strip()}
+
+    have = await held()
+    for item in wanted:
+        if norm(item) in have:
+            continue
+        await combobox(frame, el, item, multi=True, **options)
+        have = await held()
+    missing = [item for item in wanted if norm(item) not in have]
+    if missing:
+        raise ValueError("Multiselect did not retain the selected option")
+    return await el.evaluate(MULTI_SELECTED_JS)
+
+
 async def combobox(
     frame,
     el,
@@ -2641,22 +2681,7 @@ async def combobox(
     await asyncio.sleep(0.1)
     if multi:
         await close_picker(el, frame)
-        selected = await el.evaluate("""e=>{
-            if(e.matches('input.cx-multi-select-input')) {
-                const root=e.closest('.cx-multi-select-container')?.parentElement;
-                if(root?.querySelectorAll('input.cx-multi-select-input').length!==1)return '';
-                return [...root.querySelectorAll('.cx-multi-select-pill__value-text')]
-                    .map(x=>x.textContent.trim()).filter(Boolean).join('\\n');
-            }
-            let h=e;while(h&&h.tagName!=='SPL-MULTISELECT-AUTOCOMPLETE')h=h.parentElement||h.getRootNode()?.host;
-            const react=e.closest('.select__control');
-            if(react && react.querySelectorAll('[role=combobox]').length===1)
-                return [...react.querySelectorAll('.select__multi-value__label')]
-                    .filter(n=>n.getClientRects().length).map(n=>n.textContent.trim()).join('\\n');
-            const values=new Set(Array.isArray(h?.value)?h.value:[]);
-            return [...(h?.shadowRoot?.querySelectorAll('spl-select-option[value]')||[])]
-                .filter(c=>values.has(c.getAttribute('value'))).map(c=>c.textContent.trim()).join('\\n');
-        }""")
+        selected = await el.evaluate(MULTI_SELECTED_JS)
         if norm(choice["text"]) not in {norm(v) for v in selected.splitlines()}:
             raise ValueError("Multiselect did not retain the selected option")
         return selected

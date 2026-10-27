@@ -2456,13 +2456,14 @@ class FormSession:
 
                     def degree_pick(texts):
                         return first_matching(texts, DEGREE_FALLBACK[level])
+            multiselect = field.get("widget") in {"spl-multiselect", "oracle-multiselect"}
             try:
-                committed = await widgets.combobox(
+                committed = await (widgets.multi_combobox if multiselect else widgets.combobox)(
                     frame,
                     el,
                     value,
                     choose=choose,
-                    multi=field.get("widget") in {"spl-multiselect", "oracle-multiselect"},
+                    **({} if multiselect else {"multi": False}),
                     prefer_catalog=topic(field["label"]) == "source"
                     or field.get("widget") == "oracle-multiselect",
                     search_queries=search_queries,

@@ -77,6 +77,12 @@ PASSWORD_HISTORY = re.compile(
     r"(?:\d+ )?passwords?|password (?:has been|was) used (?:before|recently|previously)|password history",
     re.I,
 )
+AUTH_AGREEMENT = re.compile(
+    r"\bI (?:have )?read and (?:agree|accept)|\bI (?:agree|consent) to (?:the |their )?(?:[\w-]+ ){0,3}"
+    r"(?:terms|privacy|user agreement|policy|notice)|\bI accept (?:the )?(?:terms|privacy|user agreement)",
+    re.I,
+)
+AUTH_MARKETING = re.compile(r"newsletter|marketing|promotion|job alerts?|text messages?|\bsms\b|talent community", re.I)
 CLOSED = re.compile(
     r"no longer (?:accepting (?:applications)?|available|active|open)|position has been filled|"
     r"job (?:posting |ad |listing |opening )?(?:has (?:been )?)?(?:closed|expired|removed)|this (?:job|position|requisition) (?:is )?"
@@ -1790,6 +1796,7 @@ class Adapter:
             await self.form.locator(f["id"]).fill(credentials["password"], timeout=4000)
             await self.form.locator(f["id"]).blur()
         profile = getattr(getattr(self.form, "resolver", None), "profile", None)
+        await self.tick_auth_agreements(obs, profile)
         if mode == "create" and await acknowledge_privacy_notice(
             getattr(self.form, "page", None), authorized=bool(getattr(profile, "accept_all_application_terms", False))
         ):
@@ -2064,6 +2071,31 @@ class Adapter:
             )
         self.emit("auth", "Resetting the employer password through your mailbox")
         return await self.request_reset(await self.open_reset_step(forgot[0]), detail)
+
+    async def tick_auth_agreements(self, obs, profile):
+        """Tick a sign-in or sign-up page's own terms box ("I have read and agree to the User Agreement and Applicant
+        Privacy Policy") when the applicant pre-approved routine terms. TikTok (2026-10-27, REA): the box has no label,
+        and with it unticked Sign in sent nothing; four runs read the unchanged form as a failed sign-in. Marketing,
+        alert and text-message boxes are never ticked."""
+        if not getattr(profile, "accept_all_application_terms", False):
+            return
+        for f in obs["fields"]:
+            if f["type"] != "checkbox" or f.get("value") == "true":
+                continue
+            try:
+                text = await self.form.locator(f["id"]).evaluate(
+                    "e => (e.labels?.[0]?.innerText || e.closest('label')?.innerText || e.parentElement?.innerText"
+                    " || e.parentElement?.parentElement?.innerText || '').replace(/\\s+/g, ' ').slice(0, 400)"
+                )
+            except Exception:
+                continue
+            text = f"{f.get('label', '')} {text}"
+            if AUTH_AGREEMENT.search(text) and not AUTH_MARKETING.search(text):
+                try:
+                    await self.form.fill(f, "true")
+                    self.emit("policy_accepted", "Agreed to the sign-in page's terms (applicant pre-approved terms)")
+                except Exception:
+                    pass
 
     @staticmethod
     def sign_in_shown(obs):
