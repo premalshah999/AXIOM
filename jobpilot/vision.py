@@ -99,6 +99,8 @@ def vision_config(config):
                 "mimo_output_price": config.vision_output_price,
             }
         )
+    if config.llm_provider == "openai" and config.openai_api_key:
+        return config  # GPT-6 Luna reads images at the same cheapest setting.
     if (
         config.llm_provider == "deepseek"
         and config.deepseek_api_key

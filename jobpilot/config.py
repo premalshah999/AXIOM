@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     # MiMo enables deep thinking by default. Form answers need fast JSON, not reasoning traces.
     # "disabled", "enabled", or empty to send nothing (for other OpenAI-compatible providers).
     mimo_thinking: str = "disabled"
-    llm_provider: Literal["mimo", "deepseek", "haiku"] = "deepseek"
+    llm_provider: Literal["mimo", "deepseek", "haiku", "openai"] = "deepseek"
     haiku_api_key: str = Field(
         default="", repr=False, validation_alias=AliasChoices("haiku_api_key", "anthropic_api_key")
     )
@@ -78,6 +78,16 @@ class Settings(BaseSettings):
     # Cache-hit input tokens bill at a fraction of the miss rate; most of an application's
     # prompt is a repeated prefix (2026-10-13: dashboard $4.90 for 46M tokens).
     deepseek_cache_price: float = Field(default=0.03, ge=0)
+    # OpenAI GPT-6 Luna at its cheapest setting (owner 2026-10-27): reasoning effort "none", $0.10/$0.50 per 1M tokens,
+    # $0.01 cached input. A stronger retry tier may raise the effort to "low"; nothing higher.
+    openai_api_key: str = Field(default="", repr=False)
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_model: str = "gpt-6-luna"
+    openai_thinking: str = "disabled"
+    openai_reasoning_effort: str = "none"
+    openai_input_price: float = Field(default=0.10, ge=0)
+    openai_output_price: float = Field(default=0.50, ge=0)
+    openai_cache_price: float = Field(default=0.01, ge=0)
     # TypeSafe Jev answers bounded choices (pick one offered option) before DeepSeek; output is free.
     typesafe_api_key: str = Field(default="", repr=False)
     typesafe_base_url: str = "https://api.typesafe.ai"

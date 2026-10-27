@@ -1,4 +1,4 @@
-export type AgentModelProvider = "mimo" | "deepseek" | "haiku";
+export type AgentModelProvider = "mimo" | "deepseek" | "haiku" | "openai";
 export type AgentSettingsUpdate = {
   enabled: Record<
     "answers" | "accounts" | "email" | "captcha" | "navigator" | "discovery",

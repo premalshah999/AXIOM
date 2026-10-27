@@ -136,7 +136,7 @@ def effort_for(tier, default):
 def provider_for(db, config, tier):
     """A tier may name its own provider (setting `runner_tiers`), when its key is configured."""
     chosen = ((db.get_setting("runner_tiers", {}) or {}).get(str(tier)) or {}).get("provider")
-    if chosen in {"mimo", "deepseek", "haiku"} and getattr(config, chosen + "_api_key", ""):
+    if chosen in {"mimo", "deepseek", "haiku", "openai"} and getattr(config, chosen + "_api_key", ""):
         return config.model_copy(update={"llm_provider": chosen})
     return config
 

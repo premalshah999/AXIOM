@@ -600,6 +600,7 @@ const AGENT_PROVIDERS: { value: AgentModelProvider; label: string }[] = [
   { value: "haiku", label: "Haiku" },
   { value: "mimo", label: "MiMo" },
   { value: "deepseek", label: "DeepSeek" },
+  { value: "openai", label: "OpenAI GPT-6 Luna" },
 ];
 
 function AgentControls() {

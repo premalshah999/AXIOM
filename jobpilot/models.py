@@ -157,8 +157,8 @@ async def model_deadline(timeout):
 
 def effective_thinking(db, config, thinking=None):
     """Apply the selected provider's runtime preference even to older callers."""
-    if config.llm_provider == "haiku":
-        return "disabled"
+    if config.llm_provider in {"haiku", "openai"}:
+        return "disabled"  # OpenAI's effort is its own parameter (openai_reasoning_effort), not a thinking switch.
     override = db.get_setting("model_reasoning", {}) or {}
     provider_preference = override.get(config.llm_provider + "_thinking")
     if provider_preference in {"enabled", "disabled"}:
@@ -230,6 +230,7 @@ class MeteredTransport(httpx.AsyncBaseTransport):
         if args.get("response_format", {}).get("type") == "json_schema":
             args["response_format"] = {"type": "json_object"}
         deepseek = request.url.host == "api.deepseek.com"
+        use_openai = self.config.llm_provider == "openai"
         # Applicant directive (2026-10-08): DeepSeek reasons at maximum effort. The deployment
         # .env stays untouched; the `model_reasoning` setting overrides it at runtime.
         override = self.db.get_setting("model_reasoning", {}) or {}
@@ -240,13 +241,16 @@ class MeteredTransport(httpx.AsyncBaseTransport):
         )
         if deepseek and self.thinking == "enabled":
             args["reasoning_effort"] = effort
+        elif use_openai:
+            # The cheapest setting almost always; a stronger retry tier gets "low", never more.
+            args["reasoning_effort"] = "low" if self.tier >= 2 else (self.config.openai_reasoning_effort or "none")
         else:
             args.pop("reasoning_effort", None)
         args.pop("frequency_penalty", None)
         # Thinking is on by default for MiMo v2.6 and shares the completion budget with the JSON.
-        if self.thinking in {"enabled", "disabled"}:
+        if self.thinking in {"enabled", "disabled"} and not use_openai:
             args["thinking"] = {"type": self.thinking}
-        if self.thinking == "enabled" or anthropic:
+        if self.thinking == "enabled" or anthropic or use_openai:
             # MiMo's deep-thinking endpoint rejects sampling overrides.
             args.pop("temperature", None)
             args.pop("top_p", None)

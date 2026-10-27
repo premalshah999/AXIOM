@@ -27,6 +27,7 @@ const PROVIDERS = [
   { id: "deepseek", label: "DeepSeek (recommended, lowest cost)" },
   { id: "haiku", label: "Anthropic Claude Haiku" },
   { id: "mimo", label: "Xiaomi MiMo" },
+  { id: "openai", label: "OpenAI GPT-6 Luna (cheapest setting)" },
 ];
 
 /** Setup > Connections: every service key is entered here; nothing needs editing in .env. */
