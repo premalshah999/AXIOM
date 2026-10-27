@@ -238,6 +238,7 @@ UNANSWERED_RESET_SECONDS = 600
 # Owner 2026-10-27: password resets through the mailbox are always allowed. A reset that went unanswered or was refused
 # is requested again after this long instead of waiting for the owner, and the per-employer caps count one day only.
 RESET_RETRY_SECONDS = 6 * 3600
+RESET_CODE_INLINE_WAIT = 150
 RESET_WINDOW_SECONDS = 24 * 3600
 PASSWORD_UNKNOWN = (
     "This employer has an account for your email but refuses the saved password, and its password reset email never "
@@ -1708,6 +1709,11 @@ class Adapter:
         self.service.mail.narrow(self.challenge["id"], kind)
         self.emit("email_wait", f"Waiting for the employer's verification {kind}")
         inline = code_inline_wait(self.id) if kind == "code" else 3
+        if kind == "code" and getattr(self, "reset_in_progress", False):
+            # A reset's code page cannot be reopened: a parked run's continuation requests another reset, whose new
+            # code replaces this one (Amazon 2026-10-27: three resets, each code "Incorrect" in the next run). Its code
+            # is awaited here, as Oracle's are.
+            inline = max(inline, RESET_CODE_INLINE_WAIT)
         self.e.extend(max(min(self.config.mail_wait_seconds, 120), inline))
         token = await self.inbox.wait(self.challenge, max_wait_seconds=inline)
         if token:
@@ -2233,6 +2239,7 @@ class Adapter:
         previous = self.accounts.saved(url)
         record = self.accounts.record(url)
         self.accounts.mark(url, "reset_requested", previous, reset_requested_at=time.time())
+        self.reset_in_progress = True
         await self.click(button, auth=True)
         if challenge := await self.after_auth_click():
             return challenge

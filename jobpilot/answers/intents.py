@@ -44,6 +44,8 @@ INTENTS = [
             r"(?:previously|ever|formerly|currently) (?:been )?(?:employed|worked|work) (?:by|for|at|with)|"
             r"former employee|current or former|worked (?:for|at) .{0,40} before|previous(?:ly)? (?:work|employ)|"
             r"(?:have|had) you (?:ever )?(?:been )?(?:employed|worked|interned|contracted) (?:by|for|at|with)|"
+            # Amazon 2026-10-27: "Are you currently working as an intern at Amazon?"
+            r"\b(?:currently|presently) (?:working|employed|interning) (?:as an? [\w-]+ )?(?:at|for|with)\b|"
             r"(?:employ|work).{0,80}(?:subsidiar|affiliate|parent (?:company|organi[sz]ation)|sister compan|"
             r"any of (?:the following|these|our) (?:companies|organi[sz]ations|entities|brands))",
             re.I,

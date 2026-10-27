@@ -136,7 +136,10 @@ def _topic(text):
             r"\b(?:current|former|active)\b.{0,25}\b(?:contractor|consultant)s?\b|"
             # "Are you, or have you ever been, a contractor for the Federal Reserve System and/or CFPB?" went to the
             # model, which copied "Yes" from the complete-history fact and opened an entity checklist (2026-10-26).
-            r"\bever been,? an? (?:employee|contractor|consultant|contract worker|intern) (?:of|for|at|with)\b",
+            r"\bever been,? an? (?:employee|contractor|consultant|contract worker|intern) (?:of|for|at|with)\b|"
+            # Amazon (2026-10-27): "Are you currently working as an intern at Amazon?" had no subject and the model
+            # proposed "Yes".
+            r"\b(?:currently|presently) (?:working|employed|interning) (?:as an? [\w-]+ )?(?:at|for|with)\b",
         ),
         (
             "sponsorship",
