@@ -51,7 +51,7 @@ class Anchor:
     [("row1", "(+1) Canada"), ("row2", "(+1) United States"), ("row3", "(+91) India")],
     [("row1", "Canada +1"), ("row2", "United States of America +1"), ("row3", "India +91")],
 ])
-@pytest.mark.parametrize("value", ["United States", "+1"])
+@pytest.mark.parametrize("value", ["United States", "+1", "+1 (United States)", "(+1) United States"])
 async def test_the_country_is_found_wherever_its_code_is_written(rows, value):
     frame = Frame(rows)
     assert await widgets.icims_code_dropdown_commit(frame, Anchor(), value) == rows[1][1]

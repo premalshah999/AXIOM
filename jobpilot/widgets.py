@@ -2419,13 +2419,17 @@ async def icims_code_dropdown_commit(frame, el, value):
     if not ids:
         return None
     anchor, container = frame.locator(f'[id="{ids[0]}"]'), frame.locator(f'[id="{ids[1]}"]')
-    wanted = DIAL_PREFIX.sub("", str(value)).strip()
-    digits = re.sub(r"\D", "", str(value)) if re.fullmatch(r"\s*\+?\d{1,4}\s*", str(value)) else ""
+    # A saved code reads "+1 (United States)", "(+1) United States" or "+1": the country name and the dial code
+    # are matched separately. Planview (2026-10-26) searched the whole "+1 (United States)" and found no row.
+    raw = str(value)
+    code = re.search(r"\+\s?(\d{1,4})(?!\d)", raw)
+    digits = code[1] if code else (re.sub(r"\D", "", raw) if re.fullmatch(r"\s*\d{1,4}\s*", raw) else "")
+    wanted = " ".join(re.sub(r"[()]", " ", DIAL_CODE.sub(" ", raw)).split())
     if not await container.is_visible():
         await anchor.click(timeout=3000)
         await asyncio.sleep(0.3)
     box = container.locator("input.dropdown-search")
-    if await box.count() and await box.is_visible() and not digits:
+    if await box.count() and await box.is_visible() and wanted and not wanted.isdigit():
         await box.fill(wanted[:30], timeout=2000)
         await asyncio.sleep(0.6)
     rows = await container.locator("ul.dropdown-results li[role=option]").evaluate_all(
@@ -2441,7 +2445,7 @@ async def icims_code_dropdown_commit(frame, el, value):
     want = norm(wanted)
     same = next((group for group in ALIASES if want in group), {want})
     named = [r for r in rows if r[0] and name(r[1]) == want] or [r for r in rows if r[0] and name(r[1]) in same]
-    if digits:
+    if digits and len(named) != 1:
         coded = [r for r in rows if r[0] and re.search(rf"\+{digits}(?!\d)", r[1])]
         # +1 is shared by the North American plan; the code alone means the United States.
         named = coded if len(coded) == 1 else [r for r in coded if name(r[1]) in ALIASES[0]]

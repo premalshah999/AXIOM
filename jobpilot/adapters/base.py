@@ -72,6 +72,11 @@ EMBED_FRAME = re.compile(
     r"intercom\.io|drift\.com|zendesk\.com|livechatinc\.com|facebook\.com|twitter\.com|linkedin\.com)$",
     re.I,
 )
+PASSWORD_HISTORY = re.compile(
+    r"(?:same as|match(?:es)?|reuse|re-use|used) (?:(?:one of )?(?:your|a|the) )?(?:previous|last|old|recent|prior)\w* "
+    r"(?:\d+ )?passwords?|password (?:has been|was) used (?:before|recently|previously)|password history",
+    re.I,
+)
 CLOSED = re.compile(
     r"no longer (?:accepting (?:applications)?|available|active|open)|position has been filled|"
     r"job (?:posting |ad |listing |opening )?(?:has (?:been )?)?(?:closed|expired|removed)|this (?:job|position|requisition) (?:is )?"
@@ -2271,6 +2276,19 @@ class Adapter:
                 self.emit("auth", f"reset after {nudge}: {outcome}")
                 if outcome != "unknown":
                     break
+        if outcome in {"unknown", "password_rules"} and not configured:
+            page = await self.form.scan()
+            if PASSWORD_HISTORY.search(" ".join(page.get("errors", [])) + " " + page.get("text", "")):
+                # A reset refuses a password the account used before; this employer gets its own new password.
+                credentials = {**credentials, "password": self.accounts.store.generated(
+                    max(12, min(min(maxima), 16)) if maxima else 16)}
+                fresh = [f for f in page["fields"] if f["type"] == "password"]
+                for f in fresh:
+                    await self.type_password(self.form.locator(f["id"]), credentials["password"])
+                if fresh and (again := self.auth_button(page, "reset")):
+                    await self.click(again, auth=True)
+                    outcome, detail = await self.auth_outcome()
+                    self.emit("auth", f"reset with a new password: {outcome}")
         self.emit("auth", f"reset: {outcome}")
         if outcome == "password_rules":
             self.finish_mail("failed", "Password rules")
