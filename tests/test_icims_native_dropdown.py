@@ -198,3 +198,12 @@ async def test_a_prefilled_dial_code_is_kept_without_a_search(form):
     code = form.locator('[id="rcf2045_icimsDropdown"]')
     assert await widgets.combobox(form.main_frame, code, "United States (1)") == "United States (1)"
     assert await form.evaluate("window.searches") == []
+
+
+async def test_a_country_name_alone_matches_its_dial_code_row(form):
+    """A repair answered PepsiCo's phone code "United States"; the rows read "United States (1)" (2026-10-27)."""
+    code = form.locator('[id="rcf2045_icimsDropdown"]')
+    assert await widgets.combobox(form.main_frame, code, "United States") == "United States (1)"
+    await form.evaluate("window.searches = []")
+    assert await widgets.combobox(form.main_frame, code, "United States") == "United States (1)"
+    assert await form.evaluate("window.searches") == [], "the held row is kept without a search"

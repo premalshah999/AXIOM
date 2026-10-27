@@ -397,6 +397,10 @@ class Resolver(
         fix = self._repair_overrides.get(normalize(re.sub(r"[\s.*:]+$", "", f.get("label", ""))))
         if not fix:
             return None
+        from .validate import BARE_HISTORY_DATE
+
+        if BARE_HISTORY_DATE.fullmatch(f.get("label", "")):
+            return None  # One row's corrected "From Date" is not every row's (Supermicro 2026-10-27).
         from ..repair_agent import MASKED_VALUE, YES_NO
 
         if MASKED_VALUE.search(str(fix.get("value", ""))):

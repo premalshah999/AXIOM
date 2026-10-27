@@ -361,7 +361,7 @@ class LocalRulesMixin:
             pattern.search(f["label"]) for pattern, keys in INTENTS if "availability" in keys
         )
         history_context = f.get("history_row") or re.search(
-            r"experience|employment|education", f.get("group", "") + " " + f.get("section", ""), re.I
+            r"experience|employment|education", (f.get("group") or "") + " " + (f.get("section") or ""), re.I
         )
         if (
             availability_question
@@ -469,9 +469,14 @@ class LocalRulesMixin:
                 field_id=f["id"], value="true", disposition="answer", evidence_ids=["policy:consent"]
             )
         key = answer_key({**f, "employer": f.get("employer", self.employer)})
+        from .validate import BARE_HISTORY_DATE
+
+        # A bare "End Date" names no row: a confirmed answer to one row (an owner's birth date, saved by an earlier
+        # build) answered every row, and SuccessFactors kept it as a current role's end date (Supermicro 2026-10-27).
+        saved = topic(f["label"]) != "source" and not BARE_HISTORY_DATE.fullmatch(f["label"])
         # Legacy punctuation-stripping hashes are intentionally not reused without
         # their reviewed question. ReviewedAnswer below safely retains that provenance.
-        if key in p.approved_answers and topic(f["label"]) != "source":
+        if key in p.approved_answers and saved:
             value = option_value(p.approved_answers[key], options)
             if value is not None:
                 return Answer(
@@ -483,7 +488,7 @@ class LocalRulesMixin:
                 )
         for reviewed in reversed(p.reviewed_answers):
             if (
-                topic(f["label"]) != "source"
+                saved
                 and applicable(reviewed, employer)
                 and question_text(reviewed.question) == question_text(f["label"])
                 and not foreign_fallback(reviewed.answer, reviewed.options, options)
@@ -497,7 +502,7 @@ class LocalRulesMixin:
                         disposition="answer",
                         reason="Previously confirmed answer",
                     )
-        if self.kb and topic(f["label"]) != "source":
+        if self.kb and saved:
             # Paraphrases of a confirmed answer (scope, negation and comparators preserved).
             hit = self.kb.lookup(f["label"], options, employer, f.get("type", ""))
             if hit:

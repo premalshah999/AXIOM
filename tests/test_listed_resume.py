@@ -90,3 +90,11 @@ def test_the_icims_rename_is_read_where_innertext_joins_it_to_its_button():
     text = "Or please select your resume from one of the following:\nResume202610211051.pdfReplace Resume\n"
     assert FormSession.icims_renamed_resume(form, text)
     assert not FormSession.icims_renamed_resume(SimpleNamespace(uploaded=False, page=form.page), text)
+
+
+async def test_a_capitalised_listed_resume_is_attached(page, tmp_path):
+    # Pinpoint (Kenway 2026-10-27) prints the uploaded name in capitals and keeps only a hidden input.
+    body = ("<h3>Résumé / CV</h3><div style='text-transform:uppercase'>Alex_Doe_Resume.pdf</div>"
+            "<input type=hidden name='application_form[application][cv]' value='token'>")
+    report = await verify_page(page, tmp_path, body)
+    assert report["resume_attached"] is True

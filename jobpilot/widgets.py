@@ -2201,6 +2201,11 @@ async def icims_select_texts(el):
     return [t for t in texts if not placeholder_option(t)]
 
 
+def dial_name(text):
+    """A phone country row's name without its dial code: "United States (1)" and "(+1) United States" -> "United States"."""
+    return re.sub(r"^\s*\(\+?\d{1,4}\)\s*|\s*\(\+?\d{1,4}\)\s*$", "", str(text or "")).strip()
+
+
 def icims_text(label):
     """A row's text from its aria-label. iCIMS writes the label through ICIMS.escapeHtml, so "Master's Level Degree" is
     the attribute text "Master&#039;s Level Degree"; read raw, Emory's degrees never matched the applicant's, and a clicked
@@ -2293,9 +2298,10 @@ async def icims_dropdown_commit(
         "e=>(s=>s&&s.selectedIndex>=0&&s.options[s.selectedIndex].value!==''"
         "?s.options[s.selectedIndex].text:'')(document.getElementById(e.id.slice(0,-14)))"
     )
-    if held and not placeholder_option(icims_text(held)) and norm(icims_text(held)) == norm(value):
+    if held and not placeholder_option(icims_text(held)) and norm(dial_name(icims_text(held))) == norm(dial_name(value)):
         # The profile page is prefilled from the account: PepsiCo's phone code already held "United States (1)", and
-        # searching the server-searched list for it again outlasted the field's deadline on every run (2026-10-27).
+        # searching the server-searched list for it again outlasted the field's deadline on every run (2026-10-27). A
+        # repair that names the country alone ("United States") means the same row.
         return icims_text(held)
     static = await icims_select_texts(el)
     if len(static) > 1:
@@ -2343,7 +2349,7 @@ async def icims_dropdown_commit(
     # Emory's catalog, whose row is "Master's Level Degree", and each empty search cost the field 2-4 s (2026-10-25).
     # A phone country code's row reads "United States (1)", and iCIMS searches the name only: the whole value found
     # "No Results" until the field's deadline (PepsiCo 2026-10-27). The bare name is searched first.
-    bare = re.sub(r"^\s*\(\+?\d{1,4}\)\s*|\s*\(\+?\d{1,4}\)\s*$", "", str(value)).strip()
+    bare = dial_name(value)
     queries = list(broad_queries or []) + ([bare] if bare and bare != str(value).strip() else [])
     queries += [str(value)] + list(search_queries or [])
     queries += sorted(_alias_group(value) - {norm(value)}, key=len, reverse=True)
@@ -2364,6 +2370,9 @@ async def icims_dropdown_commit(
         options = [{"text": text, "disabled": False, "index": index} for index, text in found]
         eligible = [o for o in options if not school_scope or school_option_matches(value, o["text"])]
         choice = best_option(eligible, value)
+        if not choice and bare:
+            named = [o for o in eligible if norm(dial_name(o["text"])) == norm(bare)]
+            choice = named[0] if len(named) == 1 else None
         if not choice and resolve and eligible and (picked := resolve([o["text"] for o in eligible])):
             # The rows on screen hold the value's equivalent: pick it now, before another search replaces them.
             choice = next((o for o in eligible if o["text"] == picked), None)

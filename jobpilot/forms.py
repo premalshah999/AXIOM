@@ -4562,11 +4562,12 @@ class FormSession:
         if (
             not self.upload_verified
             and not self.resume_fields()
-            and self.resume_path.name in await self._page_text()
+            and self.resume_path.name.casefold() in (await self._page_text()).casefold()
         ):
             # A resumed draft already lists our resume file (ASSA ABLOY SuccessFactors "CV/Resume:
             # Alex_Doe_Resume.pdf", 2026-10-14). The page itself is the evidence; a page that says
-            # "No Response" (Jabil Workday) does not name the file and stays unverified.
+            # "No Response" (Jabil Workday) does not name the file and stays unverified. Pinpoint prints the name in
+            # capitals and swaps its file input for a hidden one (Kenway 2026-10-27).
             self.uploaded = self.upload_verified = True
         greenhouse_uploads = await self.greenhouse_uploads()
         if greenhouse_uploads:
@@ -4696,7 +4697,7 @@ class FormSession:
             not (self.uploaded and self.upload_verified)
             and str((getattr(self.resolver, "job", {}) or {}).get("ats", "")) == "successfactors"
             and not self.resume_fields()
-            and self.resume_path.name in await self._page_text()
+            and self.resume_path.name.casefold() in (await self._page_text()).casefold()
         ):
             # Corning (SuccessFactors classic, 2026-10-16): the candidate profile's My Documents already
             # lists the applicant's resume and the application form has no upload of its own.
