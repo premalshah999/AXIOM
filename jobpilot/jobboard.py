@@ -57,6 +57,9 @@ FOREIGN = re.compile(
     # "New Mexico" is a US state and Dublin a city in Ohio, California and Georgia too (CVS, AIG 2026-10-23).
     r"Australia|Singapore|(?<!New )Mexico|Brazil|Ireland|Dublin(?!,?\s*(?:OH|CA|GA|Ohio|California|Georgia)\b)|"
     r"Netherlands|Amsterdam|"
+    # German-speaking listings name places in German ("Bundesweit, DE" is Germany-wide, not Delaware; Sopra Steria
+    # 2026-10-27). Only German spellings: Hamburg, Stuttgart and Cologne are US towns too.
+    r"Bundesweit|Deutschland|Österreich|Schweiz|München|Köln|Düsseldorf|"
     r"Bengaluru|Bangalore|Pune|Hyderabad|Toronto|Vancouver|Poland|Warsaw|Krakow|"
     r"Japan|Tokyo|China|Beijing|Shanghai|Taiwan|Taipei|South Korea|Seoul|Hong Kong|"
     r"Spain|Portugal|Italy|Sweden|Norway|Finland|Denmark|Belgium|Switzerland|Austria|"

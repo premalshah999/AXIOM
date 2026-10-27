@@ -12,10 +12,11 @@ GREENHOUSE_SENDERS = {"greenhouse.io", "us.greenhouse-mail.io", "eu.greenhouse-m
 CLICK_TRACKERS = {"https://clicks.icims.com", "https://tracking.icims.com"}
 
 
-def tracker_allowed(link_origin, link_origins):
-    """A tracker hop is followed only for iCIMS rules; open_link still lands only on the rule's own origins."""
-    return link_origin in CLICK_TRACKERS and any(
-        (urlsplit(o).hostname or "").endswith("icims.com") for o in link_origins
+def tracker_allowed(link_origin, link_origins, platform=""):
+    """A tracker hop is followed only for iCIMS rules; open_link still lands only on the rule's own origins. iCIMS behind
+    an employer's own domain (Garmin's careers site, 2026-10-27) has no icims.com origin but is the same platform."""
+    return link_origin in CLICK_TRACKERS and (
+        platform == "icims" or any((urlsplit(o).hostname or "").endswith("icims.com") for o in link_origins)
     )
 
 

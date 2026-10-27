@@ -29,7 +29,7 @@ WIDGET = """
 <a id="plain" role="combobox">Pick</a>
 <script>
 window.changes = [];
-function makeDropdown(id, catalog, {ajax = true, delay = 500, search = true, onchange = () => {}, match = (t, q) => t.toLowerCase().includes(q)} = {}) {
+function makeDropdown(id, catalog, {ajax = true, delay = 500, search = true, onchange = () => {}, match = (t, q) => t.toLowerCase().includes(q), keep = false} = {}) {
   document.getElementById('fields').insertAdjacentHTML('beforeend', `
     <select id="${id}" style="display:none">${ajax ? '' : catalog().map((t, i) => `<option value="${i}">${t}</option>`).join('')}</select>
     <a id="${id}_icimsDropdown" class="dropdown-select" role="combobox" tabindex="0"><span class="dropdown-text">— Make a Selection —</span></a>
@@ -50,7 +50,7 @@ function makeDropdown(id, catalog, {ajax = true, delay = 500, search = true, onc
     ul.innerHTML = '<li class="dropdown-result" role="option" dropdown-index="-1" aria-label="— Make a Selection —">— Make a Selection —</li>' +
       words.map((t, i) => `<li class="dropdown-result result-selectable" role="option" dropdown-index="${i}" aria-label="${t}">${t}</li>`).join('');
   };
-  anchor.addEventListener('click', () => { ctnr.classList.remove('dropdown-invisible'); box.value = ''; pages = 1; render(); if (search) box.focus(); });
+  anchor.addEventListener('click', () => { ctnr.classList.remove('dropdown-invisible'); if (!keep) box.value = ''; pages = 1; render(); if (search) box.focus(); });
   box.addEventListener('keyup', () => { clearTimeout(timer); timer = setTimeout(() => { pages = 1; render(); }, ajax ? delay : 0); });
   ul.addEventListener('scroll', () => { if (ul.scrollTop + ul.clientHeight >= ul.scrollHeight * 0.75) { pages += 1; render(); } });
   ul.addEventListener('click', e => {
@@ -75,6 +75,9 @@ makeDropdown('rcf2010', () => ['He/him/his', 'She/her/hers', 'They/them/theirs']
 // PepsiCo 2026-10-27: phone country codes read "United States (1)" and the server searches the name only.
 makeDropdown('rcf2045', () => ['United Kingdom (44)', 'United States (1)', 'India (91)'],
   {match: (t, q) => t.replace(/\\s*\\(\\d+\\)$/, '').toLowerCase().includes(q)});
+// The widget keeps its last search: reopened, it already lists only that search's rows (PepsiCo 2026-10-27).
+makeDropdown('rcf2046', () => ['United Kingdom (44)', 'United States (1)', 'India (91)'],
+  {keep: true, match: (t, q) => t.replace(/\\s*\\(\\d+\\)$/, '').toLowerCase().includes(q)});
 </script>"""
 
 COUNTRY = '[id="-1_PersonProfileFields.AddressCountry_icimsDropdown"]'
@@ -207,3 +210,18 @@ async def test_a_country_name_alone_matches_its_dial_code_row(form):
     await form.evaluate("window.searches = []")
     assert await widgets.combobox(form.main_frame, code, "United States") == "United States (1)"
     assert await form.evaluate("window.searches") == [], "the held row is kept without a search"
+
+
+async def test_a_search_answered_by_the_rows_already_shown_does_not_wait_out_the_field(form):
+    import time
+
+    ctnr = '[id="rcf2046_icimsDropdown_ctnr"]'
+    await form.evaluate(f"document.querySelector('{ctnr} input').value = 'united states'")
+    await form.locator('[id="rcf2046_icimsDropdown"]').click()
+    before = await widgets.icims_rows_now(form.main_frame, "rcf2046")
+    assert before == [("0", "United States (1)")]
+    await form.locator(f"{ctnr} input").fill("")
+    await form.locator(f"{ctnr} input").press_sequentially("United States", delay=35)
+    started = time.monotonic()
+    rows = await widgets.icims_rows(form.main_frame, "rcf2046", before=before, timeout=6, query="United States")
+    assert rows == before and time.monotonic() - started < 3

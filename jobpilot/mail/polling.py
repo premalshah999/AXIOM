@@ -24,6 +24,7 @@ from .extraction import extract_message
 from .extraction import latest_employer_code
 from .helpers import origin
 from .senders import EMPLOYER_SENDER_FAMILIES
+from .senders import KNOWN_SENDERS
 from .senders import icims_names
 from .senders import oracle_pod
 from .senders import sender_domains_overlap
@@ -97,8 +98,21 @@ class PollingMixin:
                         (job.url if job else "") or (rule or {}).get("employer_origin", ""),
                         job.company if job else "",
                     )
-                    c["employer_senders"] = bool(job and job.ats in EMPLOYER_SENDER_FAMILIES)
-                    c["ats"] = job.ats if job else ""
+                    platform = job.ats if job else ""
+                    if platform == "custom" and rule:
+                        # A career site on the employer's domain that is a platform underneath is matched as that
+                        # platform: Garmin's iCIMS link mail ("User account with Garmin International, Inc.", a
+                        # tracking.icims.com link) was refused as "tenant" while the job read as custom (2026-10-27).
+                        platform = next(
+                            (
+                                name
+                                for name, domains in KNOWN_SENDERS.items()
+                                if name != "custom" and set(domains) & set(rule["sender_domains"])
+                            ),
+                            platform,
+                        )
+                    c["employer_senders"] = bool(job and platform in EMPLOYER_SENDER_FAMILIES)
+                    c["ats"] = platform
                     c["employer_name"] = job.company if job else ""
                     # Every live request in this mailbox, read now: an unbranded code is
                     # accepted only when this request is the sole open window at arrival.
@@ -124,9 +138,9 @@ class PollingMixin:
                                 and origin(peer.url) != origin(job.url)
                             ):
                                 c["oracle_peers"].append((peer.company or "", oracle_pod(peer.url)))
-                    c["icims_names"] = sorted(icims_names(job.company, job.url)) if job and job.ats == "icims" else []
+                    c["icims_names"] = sorted(icims_names(job.company, job.url)) if job and platform == "icims" else []
                     c["icims_peers"] = []
-                    if job and job.ats == "icims":
+                    if job and platform == "icims":
                         for w in windows:
                             peer_run = s.get(Run, w.run_id) if w.id != c["id"] else None
                             peer = s.get(Job, peer_run.job_id) if peer_run else None

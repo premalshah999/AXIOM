@@ -1570,7 +1570,8 @@ class Adapter:
         from ..mail import origin as link_origin, platform_link_allowed, tracker_allowed
 
         try:
-            if allowed and tracker_allowed(link_origin(url), allowed):
+            platform = "icims" if "icims.com" in rule.get("sender_domains", []) else ""
+            if allowed and tracker_allowed(link_origin(url), allowed, platform):
                 # iCIMS's click tracker is only the first hop; it must redirect to the rule's own origin.
                 allowed.add(link_origin(url))
             if allowed and platform_link_allowed(link_origin(url), (getattr(self, "job", None) or {}).get("ats")):

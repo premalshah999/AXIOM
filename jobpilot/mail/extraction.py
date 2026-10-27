@@ -228,7 +228,11 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
                 continue
         if len(own) == 1:
             links.append(next(iter(own)))
-        elif not own and any((urlsplit(o).hostname or "").endswith("icims.com") for o in rule["link_origins"]):
+        elif not own and (
+            any((urlsplit(o).hostname or "").endswith("icims.com") for o in rule["link_origins"])
+            # iCIMS behind the employer's own domain (Garmin's careers site, 2026-10-27) mails the same tracked button.
+            or challenge.get("ats") == "icims"
+        ):
             # EBSCO 2026-10-21: "User account with EBSCO Information Services, LLC" carried its button only behind
             # iCIMS's click tracker, with no wording. The one tracker link that is not a footer link is the link; the
             # visit still has to land on the employer's own origin, so a wrong one is refused there.
@@ -381,7 +385,7 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
             elif (
                 urlsplit(link).scheme == "https"
                 and link in cued
-                and tracker_allowed(link_origin, rule["link_origins"])
+                and tracker_allowed(link_origin, rule["link_origins"], challenge.get("ats", ""))
             ):
                 # The employer's own button behind iCIMS's click tracker. Its anchor text carries the cue; footer
                 # links behind the same tracker stay rejected even when the subject is the cue.

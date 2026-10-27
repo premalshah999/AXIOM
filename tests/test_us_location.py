@@ -10,7 +10,7 @@ from jobpilot.jobboard import us_location
     ("Albuquerque, New Mexico", True), ("New Mexico; Washington; Kansas", True), ("Mexico City, Mexico", False),
     ("Los Angeles, CA; Toronto, Canada", True), ("Dublin, OH", True), ("Dublin, Ireland", False),
     ("London, UK; Paris, France", False), ("Toronto, Ontario, Canada", False), ("Bengaluru, KA, IN", False),
-    ("Remote - US", True),
+    ("Remote - US", True), ("Bundesweit, DE", False), ("Wilmington, DE", True), ("München, Germany", False),
 ])
 def test_us_locations(location, us):
     assert us_location(location) is us

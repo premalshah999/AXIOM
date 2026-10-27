@@ -126,3 +126,12 @@ def test_two_tracked_buttons_or_a_non_icims_rule_stay_rejected():
     assert extract_message(two, TENANT_RULE, link_challenge()) is None
     workday = {"sender_domains": ["icims.com"], "link_origins": ["https://acme.wd5.myworkdayjobs.com"]}
     assert extract_message(verify_mail(f'<a href="{TRACKED_ACCOUNT}">Here</a>'), workday, link_challenge()) is None
+
+
+def test_icims_on_the_employers_own_domain_trusts_its_tracked_button():
+    # Garmin 2026-10-27: careers.garmin.com is iCIMS; "User account with Garmin International, Inc." carried only a
+    # tracked button and was refused as token_format while the job read as a custom site.
+    rule = {"sender_domains": ["acme-corp.example.test", "icims.com"], "link_origins": ["https://careers.acme-corp.example.test"]}
+    mail = reset_mail(f'<p>Welcome.</p><a href="{TRACKED}">Click here</a> <a href="{FOOTER}">Privacy Policy</a>')
+    assert extract_message(mail, rule, {**challenge(), "kind": "link", "ats": "icims"}) == {"kind": "link", "value": TRACKED}
+    assert extract_message(mail, rule, {**challenge(), "kind": "link", "ats": "custom"}) is None

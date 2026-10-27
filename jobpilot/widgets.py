@@ -2223,7 +2223,7 @@ async def icims_rows_now(frame, select_id):
     return [(index, text) for index, text in found if text and not placeholder_option(text)]
 
 
-async def icims_rows(frame, select_id, *, before=None, timeout=8.0):
+async def icims_rows(frame, select_id, *, before=None, timeout=8.0, query=None):
     """The rows once they settle (unchanged for 0.5 s). After a search (`before` = the rows shown before typing)
     they must first change, or the widget must say there are no results: a server search answers 0.5-1.5 s after
     the last key plus the network, and reading the old first page as its answer made India "not offered"."""
@@ -2247,6 +2247,15 @@ async def icims_rows(frame, select_id, *, before=None, timeout=8.0):
             said = await status()
             empty = bool(re.search(r"no results|no matches", said, re.I))
             changed = found != before or (empty and (said != shown or time.monotonic() - started >= 1.6))
+            # The list already showed the query's own rows ("United States (1)" for "United States"): the search
+            # answers with the same rows and never "changes"; PepsiCo's phone code waited out every deadline on it.
+            changed = changed or bool(
+                query
+                and found
+                and found == before
+                and all(norm(str(query)) in norm(text) for _, text in found)
+                and time.monotonic() - started >= 1.0
+            )
         stable = stable + 1 if found == last else 0
         last = found
         if changed and stable >= 2:
@@ -2338,7 +2347,9 @@ async def icims_dropdown_commit(
             before = await icims_rows_now(frame, select_id)
             await box.fill("", timeout=2000)
             await box.press_sequentially(str(query)[:40], delay=35, timeout=6000)
-            found = await icims_rows(frame, select_id, before=before, timeout=max(1.5, min(8, left() - 1)))
+            found = await icims_rows(
+                frame, select_id, before=before, timeout=max(1.5, min(8, left() - 1)), query=query
+            )
         else:
             found = await icims_rows(frame, select_id, timeout=max(1.5, min(8, left() - 1)))
         # Lists without a search box, and searches that answer a page at a time, load more rows on scroll.
