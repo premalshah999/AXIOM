@@ -175,12 +175,16 @@ RECEIPT_WORDING = re.compile(
     r"thank (?:you|you!) for (?:applying|your application)|thanks for applying|"
     r"(?:received|reviewing) your application|application.{0,60}(?:received|submitted|landed successfully|is in good hands)|"
     r"(?:confirms?|acknowledges?)\s+(?:our\s+)?receipt of your (?:application|resume)|"
-    r"\breceipt of your (?:application|resume)\b|we(?:'ve| have)? received your (?:application|resume)"
+    r"\breceipt of your (?:application|resume)\b|we(?:'ve| have)? received your (?:application|resume)|"
+    # German, French and Spanish career sites (Sopra Steria's SmartRecruiters mails "Bewerbung", 2026-10-27).
+    r"vielen dank f(?:ü|ue)r ihre bewerbung|ihre bewerbung.{0,80}(?:eingegangen|eingereicht|erhalten)|"
+    r"eingangsbest(?:ä|ae)tigung|merci pour votre candidature|votre candidature.{0,60}(?:reçue|bien été)|"
+    r"gracias por (?:su |tu )?(?:solicitud|postulación|candidatura)"
 )
 # Every RECEIPT_WORDING phrase carries one of these words: the mailbox search asks Gmail for them only. Unfiltered,
 # the search from the oldest unconfirmed run (18 days of codes and alerts) paged through old mail while new receipts
 # waited for the sweep to wrap; Lyft's "Thank you for your application" was never read (2026-10-25).
-RECEIPT_SEARCH = "(application OR applying OR resume)"
+RECEIPT_SEARCH = "(application OR applying OR resume OR Bewerbung OR candidature OR solicitud OR postulación)"
 # How firmly an acknowledgement names its job: by its link, by its title, or only by arriving after the submit.
 BASIS_STRENGTH = {"job_url": 3, "title": 2, "submit_window": 1}
 # Words of employer names too common to narrow a mailbox search.
