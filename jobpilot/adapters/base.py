@@ -513,7 +513,9 @@ class Adapter:
         ]
         if not codes and CODE_TEXT.search(obs["text"]):
             digits = [
-                f for f in obs["fields"] if f["maxlength"] == 1 and f["type"] in {"text", "tel", "number"}
+                f
+                for f in obs["fields"]
+                if f["maxlength"] == 1 and f["type"] in {"text", "tel", "number"} and not embedded(f)
             ]
             if 4 <= len(digits) <= 10:
                 codes = digits
@@ -966,7 +968,8 @@ class Adapter:
             )
             if not landed and not self.accounts.password_allowed(self.id, frame_url, self.job["url"]):
                 self.finish_mail("failed", "Code field on an unexpected website")
-                return self.defer("The code field is on an unexpected website; not entering the code")
+                host = urlsplit(frame_url).hostname or "an unknown host"
+                return self.defer(f"The code field is on an unexpected website ({host}); not entering the code")
         await enter_code([self.form.locator(f["id"]) for f in fields], code, timeout=4000)
         await asyncio.sleep(0.3)
         obs = await self.form.scan()
