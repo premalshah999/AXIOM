@@ -45,3 +45,14 @@ async def test_an_employers_own_career_site_mails_from_its_own_domain(service):
     rule = await service.mail.ensure_rule({"url": "https://jobs.acme-corp.example.test/login", "ats": "custom"},
                                           "alex@example.test")
     assert rule and rule["sender_domains"] == ["example.test"]
+
+
+async def test_an_own_site_rule_gains_the_platform_found_behind_it(service):
+    # Garmin (2026-10-27): careers.garmin.com is iCIMS; its rule named only garmin.com and the link mail was refused.
+    seed(service, employer="https://careers.acme-corp.example.test")
+    url = "https://careers.acme-corp.example.test/jobs/1/engineer/login"
+    own = await service.mail.ensure_rule({"url": url, "ats": "custom"}, "alex@example.test")
+    assert own["sender_domains"] == ["example.test"]
+    upgraded = await service.mail.ensure_rule({"url": url, "ats": "icims"}, "alex@example.test")
+    assert upgraded["id"] == own["id"] and "icims.com" in upgraded["sender_domains"]
+    assert own["sender_domains"][0] in upgraded["sender_domains"]

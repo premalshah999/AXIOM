@@ -98,7 +98,13 @@ class RulesMixin:
             family = KNOWN_SENDERS.get(job.get("ats"), [])
             current = list(existing["sender_domains"])
             missing = [d for d in family if d not in current]
-            if current and missing and set(current) <= set(family):
+            from ..accounts.tenants import registrable
+
+            # A career site on the employer's own domain that turns out to be a platform (Garmin's careers.garmin.com is
+            # iCIMS, 2026-10-27) had a rule naming only that domain; the platform's verification link was refused as
+            # "sender". Its link must still lead back to the employer's origin.
+            own_site = current == [registrable(urlsplit(job.get("url", "")).hostname or "")]
+            if current and missing and (set(current) <= set(family) or own_site):
                 with self.db.exclusive() as s:
                     row = s.get(MailRule, existing["id"])
                     row.sender_domains = [*current, *missing]

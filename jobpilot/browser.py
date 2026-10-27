@@ -1278,6 +1278,13 @@ class BrowserEngine:
                 else await self.detect_ats(page, job["ats"])
             )
             self.observed_ats = ats
+            if not job["demo"] and job["ats"] == "custom" and ats != "custom":
+                # The rule built above names the career site's own domain; the platform behind it mails from its
+                # own senders.
+                from .mail.senders import KNOWN_SENDERS
+
+                if ats in KNOWN_SENDERS:
+                    await self.service.mail.ensure_rule({**job, "ats": ats}, self.profile.email)
             adapters = self.use_adapters(ats)
             budget = (
                 self.config.multipage_timeout

@@ -3843,6 +3843,16 @@ class FormSession:
                                     for frame in traceback.extract_tb(exc.__traceback__)
                                     if "/jobpilot/" in frame.filename
                                 ][-6:],
+                                # A field deadline replaces the cancelled task's stack with this frame's; the
+                                # cancellation it wraps still holds where the write was waiting (PepsiCo's phone code
+                                # timed out at 12 s on every run with no trace below fill, 2026-10-27).
+                                "cancelled_at": [
+                                    {"file": Path(frame.filename).name, "line": frame.lineno, "function": frame.name}
+                                    for frame in traceback.extract_tb(exc.__context__.__traceback__)
+                                    if "/jobpilot/" in frame.filename
+                                ][-8:]
+                                if isinstance(exc, TimeoutError) and exc.__context__ is not None
+                                else [],
                                 "safe_detail": str(exc)[:400]
                                 if type(exc) is ValueError
                                 and (str(exc) in SAFE_CONTROL_ERRORS or str(exc).startswith(SAFE_CONTROL_PREFIXES))
