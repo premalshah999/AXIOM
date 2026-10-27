@@ -1288,8 +1288,11 @@ class ICIMS(Adapter):
         )
 
     def employer_profile_editor(self, obs):
+        # A refused save leaves the signed-in editor in place with its error ("An unexpected server error occurred").
+        # Read as a session-less page, its Login/Password boxes made it account creation and the run ended "Could not
+        # sign in" (Emory, 2026-10-26..27); the editor stays a form, whose repair reports the employer's refusal.
         return bool(
-            self.employer_session(obs)
+            self.employer_session({**obs, "errors": []})
             and any(
                 not b.get("href")
                 and re.fullmatch(r"(?:update|save)(?: (?:my|your))? profile", b["label"], re.I)
