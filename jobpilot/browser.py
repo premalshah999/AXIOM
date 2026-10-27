@@ -1686,6 +1686,26 @@ class BrowserEngine:
                     pass
             shutil.rmtree(temp, ignore_errors=True)
 
+    async def portal_lists_application(self):
+        """SuccessFactors' read-only view of a submitted application (My Applications -> the job; ASSA ABLOY 2026-10-27:
+        34 runs stalled on it, offering only Close): the employer records this job as applied."""
+        query = dict(parse_qsl(urlsplit(getattr(self.page, "url", "") or "").query))
+        if query.get("subNavBarLevel") != "JOB_APPLIED" or query.get("fbja_action") != "fbja_viewApp":
+            return None
+        title = " ".join(str((getattr(self, "job", None) or {}).get("title") or "").split()).casefold()
+        try:
+            body = " ".join((await self.page.locator("body").inner_text(timeout=2000)).split())
+        except Exception:
+            return None
+        if not title or title not in body.casefold() or not re.search(r"\bwithdraw application\b", body, re.I):
+            return None
+        return {
+            "state": "already_applied",
+            "reason": "The employer's portal lists this application as submitted",
+            "receipt": {"type": "employer_already_applied", "url": self.page.url,
+                        "evidence": "My Applications: applied-application view with Withdraw Application"},
+        }
+
     async def page_acknowledged(self):
         """A stalled flow that ends on the employer's acknowledgement. Sopra Steria (SmartRecruiters 2026-10-26): its
         German "Absenden" was clicked as an ordinary step, the application went through, and the run waited on
@@ -1702,6 +1722,9 @@ class BrowserEngine:
     async def employer_already_applied(self):
         """A stalled generic flow that ends on the employer's own "already applied" notice."""
         from .adapters.base import ALREADY
+
+        if applied := await self.portal_lists_application():
+            return applied
 
         try:
             obs = await self.form.scan()
