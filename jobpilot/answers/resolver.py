@@ -393,10 +393,14 @@ class Resolver(
         fix = self._repair_overrides.get(normalize(re.sub(r"[\s.*:]+$", "", f.get("label", ""))))
         if not fix:
             return None
-        from ..repair_agent import MASKED_VALUE
+        from ..repair_agent import MASKED_VALUE, YES_NO
 
         if MASKED_VALUE.search(str(fix.get("value", ""))):
             return None  # Saved before the repair agent refused masked placeholders ("[email]", iPipeline 2026-10-19).
+        if YES_NO.fullmatch(str(fix.get("value", "")).strip()):
+            # Saved before the repair agent refused bare yes/no fixes: "Yes" to "Are you, or have you ever been, a
+            # contractor for the Federal Reserve System?" traced only to some other fact's "Yes" (2026-10-26).
+            return None
         from ..widgets import placeholder_option
 
         options = [o for o in f.get("options", []) if not placeholder_option(o)]

@@ -225,3 +225,32 @@ async def test_a_posting_the_platform_no_longer_lists_is_closed_without_a_model_
     assert (await repair_run(service, run_id))["outcome"] == "closed"
     with service.db.session() as s:
         assert s.get(Run, run_id).state == "closed" and s.get(Job, job_id).status == "closed"
+
+
+def test_a_bare_yes_or_no_is_never_traced_from_other_facts(service, tmp_path):
+    # The Federal Reserve System (2026-10-26): "Yes" to "Are you, or have you ever been, a contractor for the Federal
+    # Reserve System?" traced only to other facts' "Yes" and was saved for every later run.
+    run_id, _, _ = seed(service, tmp_path)
+    profile = Profile.model_validate({**PROFILE, "facts": {**PROFILE["facts"], "authorized": "Yes"}})
+    ev = repair_agent.evidence(service.db, service.config.data_dir, run_id, profile)
+    ev["page"]["fields"].append({"label": "Are you, or have you ever been, a contractor for Acme?", "type": "select",
+                                 "required": True, "filled": True, "error": "", "options": ["Yes", "No"]})
+    plan = RepairPlan(diagnosis="d", field_fixes=[FieldFix(label="Are you, or have you ever been, a contractor for Acme?",
+                                                           value="Yes")])
+    accepted, rejected = check_fixes(plan, ev, profile)
+    assert not accepted
+    ev["page"]["fields"].append({"label": "Are you willing to travel?", "type": "select", "required": True,
+                                 "filled": True, "error": "", "options": ["Yes", "No"]})
+    plan = RepairPlan(diagnosis="d", field_fixes=[FieldFix(label="Are you willing to travel?", value="Yes")])
+    accepted, rejected = check_fixes(plan, ev, profile)
+    assert not accepted and rejected[0][1] == "a yes/no answer comes from the answer rules"
+
+
+def test_a_saved_yes_or_no_override_is_ignored(service, tmp_path):
+    _, job_id, _ = seed(service, tmp_path)
+    service.db.set_setting("repair_overrides:" + job_id, {
+        "are you or have you ever been a contractor for acme": {"label": "x", "value": "Yes", "run_id": "r"}})
+    resolver = Resolver(Profile.model_validate(PROFILE), service.db, service.config, job={"id": job_id})
+    field = {"id": "c", "label": "Are you, or have you ever been, a contractor for Acme?", "type": "select",
+             "options": ["Yes", "No"]}
+    assert resolver.repair_override(field) is None

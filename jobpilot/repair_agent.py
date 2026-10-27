@@ -60,6 +60,7 @@ INTERNAL_QUESTION = re.compile(
 # The evidence's masks for the applicant's email and numbers; never an answer. mask() shows a phone number or long id
 # with every digit as 9 and the format kept, so a run of seven or more nines is the mask too: the agent saved
 # "9999999999" as a Greenhouse Phone override (Stripe, 2026-10-18).
+YES_NO = re.compile(r"(?:yes|no|y|n|true|false)\.?", re.I)
 MASKED_VALUE = re.compile(
     r"\[(?:email|number|phone|private|redacted)\]|(?<!\d)\+?(?:9[ ()+.-]*){7,}(?!\d)", re.I
 )
@@ -281,6 +282,12 @@ def check_fixes(plan, ev, profile):
             continue
         if critical_question(fix.label) or DEMOGRAPHIC.search(fix.label):
             rejected.append((fix.label, "legal or demographic answers come from the owner"))
+            continue
+        if YES_NO.fullmatch(value):
+            # Any saved "Yes" traced any "Yes": the agent saved "Yes" to "Are you, or have you ever been, a contractor
+            # for the Federal Reserve System?" and every later run answered it so (2026-10-26). Yes/no questions are
+            # decided by the answer rules from their own facts.
+            rejected.append((fix.label, "a yes/no answer comes from the answer rules"))
             continue
         if field is None:
             rejected.append((fix.label, "no such field on the page"))
