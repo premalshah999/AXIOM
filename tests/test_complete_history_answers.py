@@ -652,3 +652,16 @@ def test_a_saved_answer_never_fills_a_bare_history_date(service, ref):
     answer = Answer(field_id="q", disposition="answer", value="05/13/2003", evidence_ids=[ref])
     result = resolver._validate_answer(question, answer, {}, {ref: "05/13/2003"}, {})
     assert result.disposition != "answer"
+
+
+@pytest.mark.parametrize("label,ok", [("Date:", False), ("End Date", False), ("Date Obtained 1", False),
+                                      ("Date of Birth", True)])
+def test_the_date_of_birth_answers_only_a_birth_question(service, label, ok):
+    # Supermicro (2026-10-27): "Date:" next to a signature took the date of birth.
+    from jobpilot.schemas import Answer
+
+    resolver = Resolver(Profile(facts={"date_of_birth": "05/13/1990"}), service.db, service.config)
+    question = {**field(label), "type": "text", "options": []}
+    answer = Answer(field_id="q", disposition="answer", value="05/13/1990", evidence_ids=["fact:date_of_birth"])
+    result = resolver._validate_answer(question, answer, {"fact:date_of_birth": "05/13/1990"}, {}, {})
+    assert (result.disposition == "answer") is ok

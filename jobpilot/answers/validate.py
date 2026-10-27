@@ -197,6 +197,12 @@ class ValidateMixin:
             # Duolingo?" and to "have you ever been a contractor for the Federal Reserve?" (2026-10-26). A fact about
             # past employers supports only a question about the applicant's own past employment, and never a Yes.
             valid_evidence = False
+        if any("date_of_birth" in x or x.endswith(":dob") for x in a.evidence_ids) and not re.search(
+            r"birth|\bdob\b|\bborn\b|\bage\b|citizenship|nationality|permanent residency|year acquired", field["label"], re.I
+        ):
+            # The applicant's date of birth answered a bare "Date:" (a signature date) and, saved, every "End Date"
+            # (Supermicro, Cintas 2026-10-27). It answers only a question about birth or age.
+            valid_evidence = False
         if BARE_HISTORY_DATE.fullmatch(field["label"]) and any(
             x.startswith(("reviewed:", "knowledge:m:review:")) for x in a.evidence_ids
         ):
