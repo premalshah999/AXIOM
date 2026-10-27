@@ -66,6 +66,12 @@ ALREADY = re.compile(
     r"you(?:'re| are) (?:currently )?submitted (?:to|for) this (?:job|position|role)",
     re.I,
 )
+EMBED_FRAME = re.compile(
+    r"(?:^|\.)(?:youtube(?:-nocookie)?\.com|vimeo\.com|player\.vimeo\.com|wistia\.(?:com|net)|vidyard\.com|"
+    r"google\.com|googleapis\.com|gstatic\.com|recaptcha\.net|hcaptcha\.com|challenges\.cloudflare\.com|"
+    r"intercom\.io|drift\.com|zendesk\.com|livechatinc\.com|facebook\.com|twitter\.com|linkedin\.com)$",
+    re.I,
+)
 CLOSED = re.compile(
     r"no longer (?:accepting (?:applications)?|available|active|open)|position has been filled|"
     r"job (?:posting |ad |listing |opening )?(?:has (?:been )?)?(?:closed|expired|removed)|this (?:job|position|requisition) (?:is )?"
@@ -468,10 +474,20 @@ class Adapter:
     def code_fields(self, obs):
         from ..email_browser import autocomplete_code_field
 
+        frames = getattr(getattr(self, "form", None), "frames", None) or {}
+
+        def embedded(f):
+            # Wipro's SuccessFactors job page (2026-10-26) embeds a YouTube player; a field in it was taken for the
+            # code box and the code was refused as "on an unexpected website". Media, map, chat and captcha frames are
+            # never the employer's verification step.
+            frame = frames.get(f["id"])
+            return bool(frame) and bool(EMBED_FRAME.search(urlsplit(getattr(frame, "url", "") or "").hostname or ""))
+
         codes = [
             f
             for f in obs["fields"]
             if f["type"] in {"text", "tel", "number", "password"}
+            and not embedded(f)
             and (
                 CODE_LABEL.search(code_label(f["label"]))
                 or autocomplete_code_field(f, obs["text"])
