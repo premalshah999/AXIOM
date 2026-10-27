@@ -343,7 +343,7 @@ KNOWN_SENDERS = {
     "taleo": ["taleo.net"],
     # ns2cloud.com: SAP's government cloud (L3Harris's career-hcm20.ns2cloud.com, 2026-10-23); none of its five
     # password resets was ever matched, though the one Create showed the account exists.
-    "successfactors": ["successfactors.com", "successfactors.eu", "sapsf.com", "ns2cloud.com"],
+    "successfactors": ["successfactors.com", "successfactors.eu", "sapsf.com", "sapsf.eu", "ns2cloud.com"],
     "eightfold": ["eightfold.ai"],
     "smartrecruiters": ["smartrecruiters.com"],
     "avature": ["avature.net"],
