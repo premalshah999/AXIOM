@@ -448,6 +448,11 @@ PROVIDER_FRAME = re.compile(
     re.I,
 )
 MAX_FRAMES = 12
+# A frame is known by its title, id and src without the query. iCIMS keeps its email step's GET submission in the content
+# iframe's src ("/jobs/login?step=email&h-captcha-response=P1_..."); that query read as a CAPTCHA frame dropped Noblis's
+# whole profile from uploads and page evidence, so the renamed resume never verified and every pass uploaded it again
+# (2026-10-26..27). CAPTCHA frames name their provider in the host or path.
+FRAME_IDENTITY_JS = "e=>[e.title,e.id,(e.src||'').split(/[?#]/)[0].slice(0,200)].join(' ')"
 DEPENDENT_TYPES = {"radio", "radiogroup", "select", "dropdown", "pills", "checkbox", "combobox", "prompt"}
 
 
@@ -1196,7 +1201,7 @@ class FormSession:
                     if frame.is_detached() or PROVIDER_FRAME.search(frame.url or ""):
                         continue
                     owner = await frame.frame_element()
-                    identity = await owner.evaluate("e=>[e.title,e.id,e.src?.slice(0,200)].join(' ')")
+                    identity = await owner.evaluate(FRAME_IDENTITY_JS)
                     # CAPTCHA widgets (Skip, Refresh Challenge, accessibility) are never applicant
                     # fields or navigation; the CAPTCHA solver owns them.
                     if PROVIDER_FRAME.search(identity) or re.search(
@@ -4777,7 +4782,7 @@ class FormSession:
             if frame != self.page.main_frame:
                 try:
                     owner = await frame.frame_element()
-                    identity = await owner.evaluate("e=>[e.title,e.id,e.src].join(' ')")
+                    identity = await owner.evaluate(FRAME_IDENTITY_JS)
                     if not isinstance(identity, str):
                         continue  # An unobserved frame cannot establish application ownership.
                     if PROVIDER_FRAME.search(identity) or re.search(r"captcha|challenge", identity, re.I):
