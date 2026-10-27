@@ -354,7 +354,7 @@
     || /\.\s*Required\./i.test(q)
     || [...(el.labels || [])].some(l=>/mandatory|required/i.test(l.title || '') || l.querySelector('img.requiredimg'))
     || !!el.closest('.input-row')?.querySelector('.input-row__label--required');
-  const PLACEHOLDER_VALUE = /^(select( one)?(\.\.\.)?|choose( one)?(\.\.\.)?|-+|--\s*select\s*--|please select|make a selection|none selected|no selection|not specified)$/i;
+  const PLACEHOLDER_VALUE = /^(select( one)?(\.\.\.)?|choose( one)?(\.\.\.)?|-+|[-–—]{1,2}\s*select\s*[-–—]{1,2}|please select|make a selection|none selected|no selection|not specified)$/i;
 
   // Never applicant fields: inert/hidden subtrees, honeypots, CAPTCHA widgets and their responses.
   const HONEYPOT = /honey.?pot|beecatcher|bot.?trap|leave.?(?:this|blank)|^hp_/i;
@@ -494,6 +494,26 @@
     consumed.add(host);
     push(host, { label: q, type: 'combobox', widget: 'sdf-select', required: req, options: items.map(itemText).filter(Boolean),
       value, valid: !req || !!value, maxlength: -1 });
+  }
+
+  // BambooHR's Fabric pick lists (Performance Software, 2026-10-27): a toggle button[aria-haspopup] opens the menu, and
+  // a zero-size aria-hidden <select> beside it mirrors only the chosen value's id for the form post. Observed as the
+  // select, State/Country/Highest Education offered nothing to pick and stayed empty: the toggle is the field.
+  for (const mirror of all.filter(e => e.matches('select[aria-hidden="true"]:not([multiple])'))) {
+    if (consumed.has(mirror) || excluded(mirror) || mirror.disabled) continue;
+    if ([...mirror.options].filter(o => o.value !== '').length > 1) continue; // a select2/chosen list, not a mirror
+    const toggles = [...(mirror.parentElement?.querySelectorAll('button[aria-haspopup]:not([aria-haspopup="false"])') || [])]
+      .filter(b => visible(b) && !consumed.has(b));
+    if (toggles.length !== 1) continue;
+    const toggle = toggles[0];
+    if (toggle.disabled || toggle.getAttribute('aria-disabled') === 'true') continue;
+    const shown = clean(toggle.innerText);
+    const value = PLACEHOLDER_VALUE.test(shown) ? '' : shown;
+    const q = label(mirror);
+    const req = isReq(mirror, q);
+    consumed.add(mirror);
+    consumed.add(toggle);
+    push(toggle, { label: q, type: 'dropdown', required: req, options: [], value, valid: !req || !!value, maxlength: -1 });
   }
 
   // Ashby gives each checkbox its own name; the fieldset defines the question.
