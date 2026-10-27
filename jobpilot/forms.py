@@ -2705,6 +2705,13 @@ class FormSession:
                             "visible_inputs": await visible_phone.count(),
                         },
                     )
+                elif await widgets.web_component_phone(el):
+                    # Its own country picker holds the code; the component takes the national digits by keystrokes.
+                    await el.fill("", timeout=4000)
+                    await el.press_sequentially(widgets.national_digits(value), delay=40, timeout=8000)
+                    shown = await el.input_value(timeout=1500)
+                    if re.sub(r"\D", "", shown)[-10:] == widgets.national_digits(value)[-10:]:
+                        self.typed_phones.add(field["id"])
                 else:
                     await el.fill(value, timeout=4000)
                 if await el.count() != 1:

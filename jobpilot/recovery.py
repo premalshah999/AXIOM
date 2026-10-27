@@ -608,12 +608,15 @@ def open_blocked_site_circuit(session, run, state):
         blocker += " step"
     if len(jobs) < SITE_BLOCKER_JOBS:
         return False
+    from .runtime import engine_version
+
     key = "site_circuit:" + hashlib.sha256(partition.encode()).hexdigest()
     data = {
         "until": (datetime.now(UTC) + timedelta(hours=SITE_BLOCKER_HOURS)).isoformat(),
         "source_run_id": run.id,
         "reason": f"{len(jobs)} applications on this employer's site stopped at the same {blocker}; its other jobs "
         "wait while other employers continue",
+        "engine": engine_version(),
     }
     circuit = session.get(Setting, key)
     if circuit:

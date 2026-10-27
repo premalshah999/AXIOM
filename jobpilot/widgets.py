@@ -989,6 +989,19 @@ async def keystroke_phone(el):
         return False
 
 
+async def web_component_phone(el):
+    """A phone input inside a custom element's shadow root (ADP MyJobs' sdf-phone-number-input): the component keeps its
+    own value from key events, so a value write shows the digits while the component stays empty ("Phone Number is
+    required", REA 2026-10-27)."""
+    try:
+        return await el.evaluate(
+            "e => { const r = e.getRootNode(); return r instanceof ShadowRoot && !!r.host && r.host.tagName.includes('-'); }",
+            timeout=1000,
+        )
+    except Exception:
+        return False
+
+
 def national_digits(value):
     """Digits of a US number without its +1 prefix; other numbers keep all their digits."""
     digits = re.sub(r"\D", "", str(value))
