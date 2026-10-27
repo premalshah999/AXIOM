@@ -14,3 +14,14 @@ from jobpilot.jobboard import us_location
 ])
 def test_us_locations(location, us):
     assert us_location(location) is us
+
+
+@pytest.mark.parametrize("title,german", [
+    ("AI Backend Developer - m/w/d", True), ("PEGA Developer - w/m/d", True), ("Data Engineer (m/f/d)", True),
+    ("Data Engineer", False), ("B2B/SaaS Analyst", False), ("Engineer, M/W/F schedule", False),
+])
+def test_german_role_marker(title, german):
+    # Sopra Steria's "Bundesweit, DE" (Germany) read as Delaware (2026-10-27); the title marks the German posting.
+    from jobpilot.jobboard import GERMAN_ROLE
+
+    assert bool(GERMAN_ROLE.search(title)) is german

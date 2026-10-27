@@ -359,6 +359,7 @@ class ReviewsMixin:
 
         from .. import owner_questions as oq
         from ..answers import Resolver, protected_status_missing, residence_outside
+        from ..jobboard import GERMAN_ROLE
         from ..db import record
         from ..schemas import Profile
 
@@ -399,6 +400,8 @@ class ReviewsMixin:
                 if identifier
                 else "The role is in another country (its form asks for that country's province, documents or pay)"
                 if FOREIGN_POSTING.search(oq.tidy(question))
+                else "The role is in another country (a German-language posting: " + job.title[:80] + ")"
+                if GERMAN_ROLE.search(job.title or "")
                 else None
             )
             problem = None if closing else oq.defect(question, options, context, reason or "")

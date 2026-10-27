@@ -86,6 +86,10 @@ NDA_INSTRUCTION = re.compile(r"\bif\b[^.?;]{0,60}\bunder (?:an? )?(?:nda|non.?di
 
 def _topic(text):
     for name, pattern in [
+        # Aptiv (Workday 2026-10-27): "will be conducting restricted party screening ... checked against government
+        # watchlists and sanctions databases ... may affect my employment eligibility" is a screening notice; read as
+        # work authorization, the applicant's acknowledgement was refused and the owner was asked.
+        ("background_check", r"restricted party screening|denied party screening|screen\w* against .{0,60}watch ?lists?"),
         (
             # BNY (2026-10-22): "regulatory charges ... fined ... license revoked ... sanction arising out of any
             # banking, securities or investment activities" was filed as export control, and the applicant's no

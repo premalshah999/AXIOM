@@ -186,3 +186,18 @@ async def test_identifier_and_foreign_posting_questions_close_and_field_ids_reop
         assert s.get(Run, jobs["ssn"]).state == "closed" and "dropped" in s.get(Run, jobs["ssn"]).reason
         assert s.get(Run, jobs["canada"]).state == "closed"
         assert s.get(Run, jobs["fieldid"]).state == "waiting_browser"
+
+
+async def test_open_questions_of_a_german_posting_close(service):
+    # Sopra Steria (SmartRecruiters, "Bundesweit, DE") asked "Deutschkenntnisse" (2026-10-27).
+    from jobpilot.db import Job
+
+    job = add_job(service, "german")
+    with service.db.exclusive() as s:
+        s.get(Run, job).packet = {"profile": {"first_name": "Alex"}}
+        s.get(Job, "german").title = "AI Backend Developer - m/w/d"
+    add_review(service, "q-german", job, "Deutschkenntnisse")
+    await service.revalidate_open_questions()
+    with service.db.session() as s:
+        run = s.get(Run, job)
+        assert run.state == "closed" and "another country" in run.reason

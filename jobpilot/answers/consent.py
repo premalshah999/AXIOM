@@ -90,7 +90,8 @@ SELF_ASSERTION = re.compile(
 EMBEDDED_DISCLOSURE = re.compile(
     r"authori[sz]ed to work|work authori[sz]ation|eligib\w* to work|sponsor|\bvisa\b|citizen|"
     r"convict|felon|misdemeanor|\b(?:no|any|never)\b.{0,20}criminal|non[\s-]?(?:compet|solicit)|restrictive covenant|"
-    r"government (?:employ|official)|security clearance|export control|sanction|"
+    # "Checked against government watchlists and sanctions databases" is a screening notice (Aptiv 2026-10-27).
+    r"government (?:employ|official)|security clearance|export control|sanction(?!s? (?:databases?|lists?|screening|checks?))|"
     r"(?:been|ever been) (?:fired|terminated|discharged)|asked to resign|relative|"
     # Kinship only: Credence's attestation "investigate ... other matters related to my suitability" (2026-10-27).
     r"\brelated to(?:,? or\b| any(?:one|body)?\b| some(?:one|body)\b|"

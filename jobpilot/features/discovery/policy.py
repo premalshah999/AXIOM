@@ -99,9 +99,9 @@ def gate(job: dict, policy: DiscoveryPolicy) -> str | None:
     if CLOSED.search(description[:3000]) or CLOSED.search(title):
         return "closed"
     if policy.us_only:
-        from ...jobboard import us_location
+        from ...jobboard import GERMAN_ROLE, us_location
 
-        if not us_location(job.get("location", ""), job.get("country", "")):
+        if not us_location(job.get("location", ""), job.get("country", "")) or GERMAN_ROLE.search(title or ""):
             return "non_us_or_unknown"
     if policy.early_career_only:
         if SENIOR.search(title):

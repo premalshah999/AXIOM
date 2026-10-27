@@ -123,6 +123,14 @@ def fresh(value, at, max_age_hours=48):
     return date is not None and at - timedelta(hours=max_age_hours) <= date <= at
 
 
+# German-language postings mark the role's genders in the title ("AI Backend Developer - m/w/d", "(w/m/d)"). Sopra
+# Steria's "Bundesweit, DE" (nationwide, Germany) read as Delaware and five German roles were applied to (2026-10-27).
+# The marker always names "d" (divers) or "x"; "M/W/F" alone is a weekday schedule.
+GERMAN_ROLE = re.compile(
+    r"(?<![\w/])(?:[mwf]\s*/\s*[mwf]\s*/\s*[dx]|[mwf]\s*/\s*[dx]\s*/\s*[mwf]|[dx]\s*/\s*[mwf]\s*/\s*[mwf])(?![\w/])", re.I
+)
+
+
 def us_location(location, country=""):
     # A listing of several locations qualifies when one of them is in the US ("Los Angeles, CA; Toronto, Canada").
     parts = [x for x in re.split(r"\s*(?:;|\||\s/\s)\s*", str(location or "")) if x.strip()]
