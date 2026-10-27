@@ -308,6 +308,20 @@ def check_fixes(plan, ev, profile):
     return accepted, rejected
 
 
+def hires_elsewhere(db, job_id, profile):
+    """The applicant's state when a question this job asked limits hiring to listed places that exclude it, else ''."""
+    from .answers import residence_outside
+
+    with db.session() as s:
+        asked = s.execute(
+            select(Review.question, Review.options).join(Run, Review.run_id == Run.id).where(Run.job_id == job_id)
+        ).all()
+    for question, options in asked:
+        if where := residence_outside(question, options or [], profile.get("facts"), profile.get("location", "")):
+            return where
+    return ""
+
+
 async def closed_posting(db, config, job_id):
     """Why this job's Greenhouse, Lever or Workable posting is gone, or ''."""
     from .browser import posting_gone
@@ -372,6 +386,17 @@ async def _repair_run(service, run_id):
         return {"skipped": "superseded" if newer else "waiting on the owner" if asking else "not repairable"}
     if state == "submission_unknown" and not (Path(config.data_dir) / "runs" / run_id / "final_outline.txt").exists():
         return {"skipped": "no final page to read"}
+    if state != "submission_unknown" and (where := hires_elsewhere(db, job_id, db.get_setting("profile", {}) or {})):
+        # Jerry (Ashby 2026-10-27): its question listed the states it hires in, Maryland not among them, and four runs
+        # stalled on the residence picker instead of closing.
+        reason = f"The employer hires only in its listed locations, and the applicant lives in {where}"
+        with db.exclusive() as s:
+            run = s.get(Run, run_id)
+            if run and run.state == state:
+                run.state, run.reason = "closed", reason
+                s.get(Job, job_id).status = "closed"
+        db.event(run_id, "repair_agent", "Repair agent: " + reason, {"category": "closed", "outcome": "closed"})
+        return {"category": "closed", "outcome": "closed"}
     if state != "submission_unknown" and (gone := await closed_posting(db, config, job_id)):
         # The agent diagnosed Gas South's and Coherent Solutions' removed postings correctly but could only decline to
         # retry, so they sat in Repairing (2026-10-26). The platform's public API settles it without a model call.

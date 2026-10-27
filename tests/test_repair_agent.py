@@ -254,3 +254,25 @@ def test_a_saved_yes_or_no_override_is_ignored(service, tmp_path):
     field = {"id": "c", "label": "Are you, or have you ever been, a contractor for Acme?", "type": "select",
              "options": ["Yes", "No"]}
     assert resolver.repair_override(field) is None
+
+
+async def test_a_job_whose_question_excludes_the_applicants_state_is_closed(service, tmp_path, monkeypatch):
+    # Jerry (Ashby 2026-10-27): the hiring states listed did not include Maryland; four runs stalled on the picker.
+    run_id, job_id, _ = seed(service, tmp_path)
+    service.db.set_setting("profile", {**PROFILE, "location": "Springfield, MD", "facts": {"state_of_residence": "Maryland"}})
+    with service.db.exclusive() as s:
+        earlier = Run(job_id=job_id, state="needs_review", mode="submit", packet={}, reason="asked",
+                      created_at="2026-10-01T00:00:00+00:00")
+        s.add(earlier)
+        s.flush()
+        s.add(Review(run_id=earlier.id, key="q-res", question="Where do you currently reside? Acme can only hire in the "
+                     "locations listed below. If your location is not listed, we are unable to process your application.",
+                     options=["Arizona", "California", "Texas"]))
+
+    async def no_model(*args, **kwargs):
+        raise AssertionError("no model call")
+
+    monkeypatch.setattr("jobpilot.models.structured", no_model)
+    assert (await repair_run(service, run_id))["outcome"] == "closed"
+    with service.db.session() as s:
+        assert s.get(Run, run_id).state == "closed" and "Maryland" in s.get(Run, run_id).reason

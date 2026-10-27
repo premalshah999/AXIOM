@@ -169,3 +169,8 @@ async def test_a_failed_new_password_step_requests_no_further_reset_on_this_buil
     result = await Adapter.recover(value, obs, "Signing in did not succeed")
     assert "no further reset emails" in result["reason"]
     value.request_reset.assert_not_awaited()
+
+
+def test_a_locked_account_is_never_retried_by_the_autopilot():
+    # By Light (iCIMS 2026-10-27) was retried twice after the employer locked the account.
+    assert PERSIST_SKIP.search("The employer locked the account after failed sign-ins: account has been blocked")
