@@ -223,7 +223,7 @@ def evidence(db, data_dir, run_id, profile):
                 "errors": [mask(x)[:400] for x in last.get("errors", [])][:6],
                 "fields": [
                     {
-                        "label": f.get("label", "")[:160],
+                        "label": f.get("label", "")[:800],  # owner questions quote the whole label
                         "type": f.get("type"),
                         "required": f.get("required"),
                         "filled": f.get("filled"),
