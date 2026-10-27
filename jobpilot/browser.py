@@ -473,15 +473,32 @@ REQUIRES_CITIZENSHIP = re.compile(
 
 # Value-free structure of a form: what each control is (name, id, class, label, menu choices), and only whether it is
 # filled. Step records rely on it where no HTML is kept.
-FORM_STRUCTURE_JS = r"""() => [...document.querySelectorAll('input,select,textarea,button')]
-  .filter(e => e.type !== 'hidden').slice(0, 400).map(e => ({
-    tag: e.tagName.toLowerCase(), type: e.type || '', name: e.name || '', id: e.id || '',
-    cls: String(e.className || '').slice(0, 100),
-    label: ((e.labels && e.labels[0] && e.labels[0].innerText) || e.getAttribute('aria-label') || '').trim().slice(0, 120),
-    required: !!(e.required || e.getAttribute('aria-required') === 'true'),
-    filled: e.type === 'checkbox' || e.type === 'radio' ? e.checked : Boolean(e.value),
-    options: e.tagName === 'SELECT' ? [...e.options].slice(0, 40).map(o => o.text.trim().slice(0, 60)) : undefined,
-  }))"""
+# Value-free form structure, through shadow roots: ADP MyJobs' "Phone Type" and "State" are custom elements (sdf-select)
+# whose controls live in shadow DOM, and the old dump (document only) recorded nothing of them (2026-10-27).
+FORM_STRUCTURE_JS = r"""() => {
+  const out = [];
+  const walk = (root, host) => {
+    for (const e of root.querySelectorAll('*')) {
+      if (out.length >= 400) return;
+      const tag = e.tagName.toLowerCase();
+      const control = e.matches('input,select,textarea,button,[role=combobox],[role=listbox],[aria-haspopup]') && e.type !== 'hidden';
+      if (control || tag.includes('-')) {
+        out.push({
+          tag, type: e.type || '', name: e.getAttribute('name') || '', id: e.id || '', host,
+          cls: String(e.className || '').slice(0, 100), role: e.getAttribute('role') || '',
+          popup: e.getAttribute('aria-haspopup') || '',
+          label: ((e.labels && e.labels[0] && e.labels[0].innerText) || e.getAttribute('aria-label') || e.getAttribute('label') || '').trim().slice(0, 120),
+          required: !!(e.required || e.getAttribute('aria-required') === 'true' || e.hasAttribute('required')),
+          filled: e.type === 'checkbox' || e.type === 'radio' ? e.checked : Boolean(e.value),
+          options: tag === 'select' ? [...e.options].slice(0, 40).map(o => o.text.trim().slice(0, 60)) : undefined,
+        });
+      }
+      if (e.shadowRoot) walk(e.shadowRoot, tag);
+    }
+  };
+  walk(document, '');
+  return out;
+}"""
 
 
 class BrowserUnavailable(RuntimeError):
