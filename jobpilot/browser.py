@@ -3129,11 +3129,14 @@ class BrowserEngine:
         try:
             monitor = getattr(getattr(self, "form", None), "network", None)
             if getattr(self, "job", {}).get("ats") == "adp" and monitor and monitor.account_conflict():
+                # ADP holds this address in another kind of ADP account and offers only "an alternate mobile number or
+                # an email address"; Gmail variants of it are the same address to ADP (the googlemail.com alias failed
+                # identically, 2026-10-27). A phone code is closed under the owner's rule, so the application closes.
                 self.result = {
-                    "state": "waiting_browser",
+                    "state": "closed",
                     "blocker_type": "account",
-                    "recovery_cause": "account_identity_conflict",
-                    "reason": "ADP rejected sign-in as Person Not Found (4040), then rejected registration because the email already has an account (40014). Repeating registration cannot resolve this identity conflict.",
+                    "reason": "ADP holds this email in another ADP account (sign-in: Person Not Found 4040; registration: "
+                    "account exists 40014) and offers only a mobile-number sign-in; phone-code applications are closed",
                 }
                 return True
             from .adapters.icims import ICIMS
