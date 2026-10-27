@@ -1460,7 +1460,10 @@ class BrowserEngine:
             }
             if self.result.get("state") == "waiting_browser" and not self.armed:
                 self.result = (
-                    await self.employer_already_applied() or await self.page_acknowledged() or self.result
+                    await self.employer_already_applied()
+                    or await self.page_acknowledged()
+                    or await self.page_closed()
+                    or self.result
                 )
             return self.result
         except MailSenderBusy as exc:
@@ -1705,6 +1708,22 @@ class BrowserEngine:
             "receipt": {"type": "employer_already_applied", "url": self.page.url,
                         "evidence": "My Applications: applied-application view with Withdraw Application"},
         }
+
+    async def page_closed(self):
+        """A stalled flow that ends on the posting's own "position has been filled" (four runs at one career site,
+        2026-10-27, each parked as a repair): no application form is left, so the posting is closed."""
+        from .adapters.base import CLOSED
+
+        try:
+            obs = await self.form.scan()
+        except Exception:
+            return None
+        fields = [f for f in obs.get("fields", []) if f["type"] not in {"search", "hidden"}
+                  and not re.search(r"search|keyword|location", f.get("label", ""), re.I)]
+        text = " ".join([*obs.get("headings", []), *obs.get("errors", []), str(obs.get("text", ""))])
+        if fields or not (match := CLOSED.search(text)):
+            return None
+        return {"state": "closed", "reason": "The posting is closed: " + match[0][:120]}
 
     async def page_acknowledged(self):
         """A stalled flow that ends on the employer's acknowledgement. Sopra Steria (SmartRecruiters 2026-10-26): its

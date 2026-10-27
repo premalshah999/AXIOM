@@ -5251,6 +5251,29 @@ class FormSession:
                     "evidence_selector": "employer_greenhouse_thank_you",
                     "status_region": "job_application_status",
                 }
+        if str(job.get("ats", "")) == "successfactors":
+            # SuccessFactors' classic career site replaces the form with its success screen after applyJob succeeds:
+            # "Back to Job Listings" / "View Profile" (div.rcmSuccessBackToResultsBtn). L3Harris leaves its message area
+            # empty, so six submitted applications read as unconfirmed (2026-10-27).
+            try:
+                success = await self.page.locator("div.rcmSuccessBackToResultsBtn:visible").count()
+                editable = await self.page.locator(
+                    "input:visible:not([type=hidden]):not([type=search]):not([type=button]):not([type=submit]),"
+                    "textarea:visible,select:visible"
+                ).count()
+            except PlaywrightError:
+                success, editable = 0, 1
+            if success and not editable:
+                return {
+                    "url": self.page.url,
+                    "confirmation": "SuccessFactors application success screen",
+                    "title": await self.page.title(),
+                    "type": "explicit_confirmation_page",
+                    "evidence_version": 2,
+                    **self.evidence_context(),
+                    "evidence_selector": "div.rcmSuccessBackToResultsBtn",
+                    "status_region": "application_success",
+                }
         if str(job.get("ats", "")) == "icims":
             for frame in self.page.frames:
                 try:

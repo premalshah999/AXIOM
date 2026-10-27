@@ -2428,14 +2428,12 @@ async def icims_code_dropdown_commit(frame, el, value):
     if not await container.is_visible():
         await anchor.click(timeout=3000)
         await asyncio.sleep(0.3)
-    box = container.locator("input.dropdown-search")
-    if await box.count() and await box.is_visible() and wanted and not wanted.isdigit():
-        await box.fill(wanted[:30], timeout=2000)
-        await asyncio.sleep(0.6)
-    rows = await container.locator("ul.dropdown-results li[role=option]").evaluate_all(
-        "els=>els.filter(e=>e.getClientRects().length).map(e=>[e.id,"
-        "(e.getAttribute('aria-label')||e.innerText||'').replace(/\\s+/g,' ').trim()])"
-    )
+
+    async def visible_rows():
+        return await container.locator("ul.dropdown-results li[role=option]").evaluate_all(
+            "els=>els.filter(e=>e.getClientRects().length).map(e=>[e.id,"
+            "(e.getAttribute('aria-label')||e.innerText||'').replace(/\\s+/g,' ').trim()])"
+        )
 
     def name(row):
         # "(+1) United States", "United States (+1)" and "United States +1" name one country. Planview's email step
@@ -2444,7 +2442,22 @@ async def icims_code_dropdown_commit(frame, el, value):
 
     want = norm(wanted)
     same = next((group for group in ALIASES if want in group), {want})
-    named = [r for r in rows if r[0] and name(r[1]) == want] or [r for r in rows if r[0] and name(r[1]) in same]
+
+    def matching(rows):
+        return [r for r in rows if r[0] and name(r[1]) == want] or [r for r in rows if r[0] and name(r[1]) in same]
+
+    # The whole list is rendered (REA, Planview 2026-10-27: 245 rows, "(+1) United States"); typing the saved
+    # "United States of America" into its search box filtered that row out. Search only when the list holds no match.
+    rows = await visible_rows()
+    named = matching(rows)
+    box = container.locator("input.dropdown-search")
+    if len(named) != 1 and await box.count() and await box.is_visible() and wanted and not wanted.isdigit():
+        for query in dict.fromkeys([wanted, *sorted(same, key=len, reverse=True)]):
+            await box.fill(str(query)[:30], timeout=2000)
+            await asyncio.sleep(0.6)
+            rows = await visible_rows()
+            if len(named := matching(rows)) == 1:
+                break
     if digits and len(named) != 1:
         coded = [r for r in rows if r[0] and re.search(rf"\+{digits}(?!\d)", r[1])]
         # +1 is shared by the North American plan; the code alone means the United States.

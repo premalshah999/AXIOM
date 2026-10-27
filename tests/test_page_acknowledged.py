@@ -48,3 +48,19 @@ def test_localized_steps_are_not_final(label):
 ])
 def test_localized_acknowledgements(text):
     assert re.search(LOCALIZED_CONFIRMATION, text, re.I)
+
+
+async def test_a_stall_on_a_filled_position_is_closed():
+    value = Browser.__new__(Browser)
+    value.form = SimpleNamespace(scan=AsyncMock(return_value={
+        "fields": [{"type": "search", "label": "Search jobs"}], "headings": ["This position has been filled"],
+        "errors": [], "text": ""}))
+    assert (await value.page_closed())["state"] == "closed"
+
+
+async def test_a_form_is_never_closed_by_its_text():
+    value = Browser.__new__(Browser)
+    value.form = SimpleNamespace(scan=AsyncMock(return_value={
+        "fields": [{"type": "text", "label": "First name"}], "headings": ["This position has been filled"],
+        "errors": [], "text": ""}))
+    assert await value.page_closed() is None
