@@ -639,3 +639,16 @@ def test_the_history_attestation_still_backs_a_no_on_prior_employment(service):
     answer = Answer(field_id="q", disposition="answer", value="No", evidence_ids=[ref])
     assert not resolver.relationship_evidence_misused({"id": "q", "label": "Have you previously worked for Acme?"},
                                                       answer, {})
+
+
+@pytest.mark.parametrize("ref", ["knowledge:m:review:abc", "reviewed:abc"])
+def test_a_saved_answer_never_fills_a_bare_history_date(service, ref):
+    # Cintas and Supermicro (SuccessFactors 2026-10-27): "End Date: 05/13/2003", saved once without its row, became
+    # every row's end date and "End date must be after Start date" stalled both.
+    from jobpilot.schemas import Answer
+
+    resolver = Resolver(Profile(), service.db, service.config)
+    question = {**field("End Date"), "type": "text", "options": []}
+    answer = Answer(field_id="q", disposition="answer", value="05/13/2003", evidence_ids=[ref])
+    result = resolver._validate_answer(question, answer, {}, {ref: "05/13/2003"}, {})
+    assert result.disposition != "answer"

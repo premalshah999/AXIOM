@@ -184,6 +184,10 @@ class Resolver(
         # reused from an earlier dated application.
         if TODAY.search(field["label"]) or "notice period" in field["label"].casefold():
             return None
+        from .validate import BARE_HISTORY_DATE
+
+        if BARE_HISTORY_DATE.fullmatch(field["label"]):
+            return None  # A saved "End Date" answered every history row (validate.BARE_HISTORY_DATE).
         if packet.exact_answer is None:
             return None
         refs = [

@@ -83,6 +83,13 @@ AUTH_AGREEMENT = re.compile(
     re.I,
 )
 AUTH_MARKETING = re.compile(r"newsletter|marketing|promotion|job alerts?|text messages?|\bsms\b|talent community", re.I)
+# A cookie banner announced as a dialog is never the page's step (ZincFive's ADP sign-in, 2026-10-27: the banner's
+# "manage your preferences" link and "x" hid the email box and Continue, and three runs stopped on "only a privacy
+# dialog with Close").
+COOKIE_NOTICE = re.compile(
+    r"\bcookies?\b.{0,240}\b(?:privacy|preferences|statement|policy|consent|settings)\b|\bcookie (?:settings|preferences)\b",
+    re.I | re.S,
+)
 CLOSED = re.compile(
     r"no longer (?:accepting (?:applications)?|available|active|open)|position has been filled|"
     r"job (?:posting |ad |listing |opening )?(?:has (?:been )?)?(?:closed|expired|removed)|this (?:job|position|requisition) (?:is )?"
@@ -523,7 +530,12 @@ class Adapter:
     @staticmethod
     def dialog_view(obs):
         """The observation restricted to the top-most open modal dialog, if it holds controls."""
-        dialogs = [d for d in obs.get("dialogs", []) if d.get("field_ids") or d.get("control_ids")]
+        dialogs = [
+            d
+            for d in obs.get("dialogs", [])
+            if d.get("field_ids")
+            or (d.get("control_ids") and not COOKIE_NOTICE.search(str(d.get("text", "")) + " " + str(d.get("title", ""))))
+        ]
         if not dialogs:
             return None
         top = dialogs[-1]

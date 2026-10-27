@@ -27,6 +27,11 @@ from .text import option_value
 # A history row's date part ("Start Date Month", "To Date Year"), and the availability facts it must never take.
 HISTORY_DATE_PART = re.compile(r"\s*(?:start|end|from|to) date (?:month|year|day)\s*", re.I)
 AVAILABILITY_FACTS = {"fact:availability", "fact:notice_period", "fact:start_date"}
+# A bare history date label ("End Date", "From Date", "Start Date Year") belongs to one work or education row. A
+# saved answer to the bare label answered every row on every form: "End Date: 05/13/2003", given once on an ASSA ABLOY
+# form, became every SuccessFactors row's end date and "End date must be after Start date" stalled Cintas and
+# Supermicro (2026-10-27). Such dates come from the profile's history rows only.
+BARE_HISTORY_DATE = re.compile(r"\s*(?:start|end|from|to)(?: date)?(?: (?:month|year|day))?\s*[:*]?\s*", re.I)
 
 
 
@@ -191,6 +196,10 @@ class ValidateMixin:
             # The applicant's "my employment history is complete" attestation answered "Yes" to "Do you use
             # Duolingo?" and to "have you ever been a contractor for the Federal Reserve?" (2026-10-26). A fact about
             # past employers supports only a question about the applicant's own past employment, and never a Yes.
+            valid_evidence = False
+        if BARE_HISTORY_DATE.fullmatch(field["label"]) and any(
+            x.startswith(("reviewed:", "knowledge:m:review:")) for x in a.evidence_ids
+        ):
             valid_evidence = False
         if HISTORY_DATE_PART.fullmatch(field["label"]) and AVAILABILITY_FACTS & set(a.evidence_ids):
             # A row's "Start Date Month" is that record's date, never the applicant's availability: an Oracle education
