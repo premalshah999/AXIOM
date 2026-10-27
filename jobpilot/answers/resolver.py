@@ -36,6 +36,15 @@ from .text import option_value
 from .text import yes_no
 
 
+# A history row's group: numbered ("Education 2", "Work Experience 1") or, on Oracle, named by its school or employer
+# ("Education at Other", HEXAWARE 2026-10-26: old answers and evidence conflicts reached its End Date Month first).
+HISTORY_GROUP = re.compile(
+    r"(?:work experience|experience|employment|education)\s*\d+|"
+    r"^\s*(?:education|experience|work experience|employment)\s+at\s+\S",
+    re.I,
+)
+
+
 class Resolver(
     DemographicRulesMixin,
     HistoryRulesMixin,
@@ -143,8 +152,8 @@ class Resolver(
         # A generic remembered "Degree" or "Field of Study" cannot answer a
         # numbered history row. The row's saved facts precede old question memory.
         row = " ".join(str(field.get(k) or "") for k in ("group", "section"))
-        if re.search(r"(?:work experience|experience|employment|education)\s*\d+", row, re.I):
-            patterns = EDUCATION if re.search(r"education\s*\d+", row, re.I) else WORK
+        if HISTORY_GROUP.search(row):
+            patterns = EDUCATION if re.match(r"\s*education\s+at\b|.*\beducation\s*\d+", row, re.I) else WORK
             if any(pattern.search(field["label"]) for pattern in patterns.values()):
                 return None
         if self.context_blockers.get(field["id"]):
@@ -547,8 +556,8 @@ class Resolver(
             return self._local(f)
         packet = self.question_context(f)
         row = " ".join(str(f.get(k) or "") for k in ("group", "section"))
-        if re.search(r"(?:work experience|experience|employment|education)\s*\d+", row, re.I):
-            patterns = EDUCATION if re.search(r"education\s*\d+", row, re.I) else WORK
+        if HISTORY_GROUP.search(row):
+            patterns = EDUCATION if re.match(r"\s*education\s+at\b|.*\beducation\s*\d+", row, re.I) else WORK
             if (
                 any(pattern.search(f["label"]) for pattern in patterns.values())
                 # The row's own location (or nothing) answers its address/region boxes, never retrieval guesses.

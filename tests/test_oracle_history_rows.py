@@ -119,3 +119,26 @@ def test_any_dates_month_part_is_a_month():
     assert component_value("Projected Completion Date Month", "5") == "May"
     assert month_component("Date Available Month") and month_component("Month")
     assert not month_component("Number of months") and not month_component("Months of experience")
+
+
+def test_a_row_named_by_the_catalogs_other_is_identified_by_its_degree_level(service):
+    """HEXAWARE (Oracle, 2026-10-26): the unlisted school was saved as "Other", so the row read "Education at Other" and
+    its End Date Month went to the owner. The row's degree level names the entry."""
+    profile = Profile(education=[
+        EducationEntry(school="State University", degree="Master of Science", field_of_study="Data Science",
+                       start="2024-08", end="2026-05"),
+        EducationEntry(school="Institute of Technology", degree="BE", field_of_study="Computer Engineering",
+                       start="2020-06", end="2024-06"),
+    ])
+    names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+             "November", "December"]
+
+    def end_month(degree):
+        return Resolver(profile, service.db, service.config).local(
+            {"id": "x", "label": "End Date Month", "type": "combobox", "group": "Education at Other", "required": True,
+             "options": names, "history_identity": {"school": "Other", "degree": degree}})
+
+    assert end_month("M.PHIL - Master of Philosophy").value == "May"
+    assert end_month("Bachelor of Engineering").value == "June"
+    unknown = end_month("")
+    assert unknown is None or unknown.disposition != "answer"
