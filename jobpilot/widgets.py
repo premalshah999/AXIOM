@@ -2289,6 +2289,14 @@ async def icims_dropdown_commit(
     select_id = await icims_dropdown(el)
     if not select_id:
         return None
+    held = await el.evaluate(
+        "e=>(s=>s&&s.selectedIndex>=0&&s.options[s.selectedIndex].value!==''"
+        "?s.options[s.selectedIndex].text:'')(document.getElementById(e.id.slice(0,-14)))"
+    )
+    if held and not placeholder_option(icims_text(held)) and norm(icims_text(held)) == norm(value):
+        # The profile page is prefilled from the account: PepsiCo's phone code already held "United States (1)", and
+        # searching the server-searched list for it again outlasted the field's deadline on every run (2026-10-27).
+        return icims_text(held)
     static = await icims_select_texts(el)
     if len(static) > 1:
         # A static catalog is all in the native select. Searching it through the widget ran out of the field budget at

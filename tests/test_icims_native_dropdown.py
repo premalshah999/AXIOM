@@ -185,3 +185,16 @@ async def test_a_dial_code_row_is_searched_by_its_country_name(form):
     assert [q for q in await form.evaluate("window.searches || []") if q.startswith("rcf2045:")] == [
         "rcf2045:united states"
     ]
+
+
+async def test_a_prefilled_dial_code_is_kept_without_a_search(form):
+    """PepsiCo 2026-10-27: the profile page held "United States (1)" from the account; searching for it again
+    outlasted the field's deadline on every run."""
+    await form.evaluate("""() => {
+      const s = document.getElementById('rcf2045'); s.add(new Option('United States (1)', 'v-us', true, true));
+      document.querySelector('[id="rcf2045_icimsDropdown"] .dropdown-text').textContent = 'United States (1)';
+      window.searches = [];
+    }""")
+    code = form.locator('[id="rcf2045_icimsDropdown"]')
+    assert await widgets.combobox(form.main_frame, code, "United States (1)") == "United States (1)"
+    assert await form.evaluate("window.searches") == []

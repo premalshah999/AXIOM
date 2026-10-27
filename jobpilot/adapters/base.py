@@ -92,6 +92,8 @@ COOKIE_NOTICE = re.compile(
 )
 CLOSED = re.compile(
     r"no longer (?:accepting (?:applications)?|available|active|open)|position has been filled|"
+    # Phenom (PwC 2026-10-27): "We're sorry… the job you are trying to apply for has been filled."
+    r"\b(?:job|position|role|opening|requisition|vacancy)\b[^.!?]{0,50}\bhas (?:already )?been filled\b|"
     r"job (?:posting |ad |listing |opening )?(?:has (?:been )?)?(?:closed|expired|removed)|this (?:job|position|requisition) (?:is )?"
     r"(?:closed|unavailable|no longer)|job not found|the page you are looking for (?:does not|doesn't) exist|"
     # Paylocity (Monti 2026-10-26): "We're sorry, that job does not exist or is not currently active."
