@@ -99,3 +99,42 @@ async def test_a_gh_jid_job_its_board_no_longer_lists_is_closed(monkeypatch):
 async def test_an_unknown_board_is_no_verdict(monkeypatch):
     monkeypatch.setattr(httpx, "AsyncClient", lambda **k: Paths({}, []))
     assert await browser.posting_gone("https://careers.example.test/jobs?gh_jid=123", "Example Co") == ""
+
+
+class Site(Client):
+    """An iCIMS-backed career site: the posting page's status and the site's own job search results."""
+
+    def __init__(self, page_status, slugs, seen):
+        self.page_status, self.slugs, self.seen = page_status, slugs, seen
+
+    async def get(self, url):
+        self.seen.append(url)
+        request = httpx.Request("GET", url)
+        if "/api/jobs?" in url:
+            jobs = [{"data": {"slug": s, "req_id": s, "title": "Engineer"}} for s in self.slugs]
+            return httpx.Response(200, json={"jobs": jobs, "totalCount": len(jobs)}, request=request)
+        return httpx.Response(self.page_status, text="<title>Oops! An error has occurred.</title>", request=request)
+
+
+ICIMS_SITE = "https://jobs.acme-health.test/jobs/368933?icims=1"
+
+
+async def test_an_icims_career_site_posting_its_search_no_longer_lists_is_closed(monkeypatch):
+    # UHS 2026-10-24..27: the posting answered 500 "Oops! An error has occurred." and its search had no such req.
+    seen = []
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **k: Site(500, ["369266"], seen))
+    assert "no longer lists it" in await browser.posting_gone(ICIMS_SITE)
+    assert seen == [ICIMS_SITE, "https://jobs.acme-health.test/api/jobs?keywords=368933"]
+
+
+@pytest.mark.parametrize("status,slugs", [(200, []), (500, ["368933"]), (503, ["368933", "1"])])
+async def test_a_listed_or_loading_icims_career_site_posting_is_no_verdict(monkeypatch, status, slugs):
+    # A page that loads is live whatever the search says; a failing page whose search still lists it may be transient.
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **k: Site(status, slugs, []))
+    assert await browser.posting_gone(ICIMS_SITE) == ""
+
+
+async def test_a_career_site_without_icims_or_a_job_search_is_no_verdict(monkeypatch):
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **k: Client(500, []))
+    assert await browser.posting_gone("https://jobs.acme-health.test/jobs/368933") == ""
+    assert await browser.posting_gone(ICIMS_SITE) == ""  # The search answered 500, not the site's job list.
