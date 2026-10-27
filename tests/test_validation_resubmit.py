@@ -49,3 +49,24 @@ async def test_a_refused_retry_keeps_the_refusal():
     with pytest.raises(ValueError):
         await e.reserve_commit()
     assert e.validation_refusal == REFUSAL
+
+
+def test_a_released_reservation_is_taken_back_by_the_repaired_resubmit(service):
+    # Westinghouse (2026-10-27): the refused commit released its reservation, and the repaired resubmit then ended
+    # "This run has no authorized submission reservation".
+    from jobpilot.db import Job, Run
+
+    service.db.set_setting("control", {"paused": False, "auto_submit": True})
+    with service.db.exclusive() as s:
+        job = Job(identity="vr-1", url="https://careers.example.test/j/1", company="Acme", title="Engineer", ats="custom")
+        s.add(job)
+        s.flush()
+        from jobpilot.db import now
+
+        run = Run(job_id=job.id, state="running", mode="submit", packet={}, started_at=now())
+        s.add(run)
+        s.flush()
+        run_id = run.id
+    service.authorize_validation_retry(run_id, REFUSAL)
+    with service.db.session() as s:
+        assert s.get(Run, run_id).state == "submitting"

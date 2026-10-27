@@ -21,8 +21,19 @@ class CompletionMixin:
         with self.db.exclusive() as s:
             run = s.get(Run, run_id)
             control = s.get(Setting, "control").value
-            if not run or run.state != "submitting" or run.mode != "submit":
+            if not run or run.state not in {"submitting", "running"} or run.mode != "submit":
                 raise ValueError("This run has no authorized submission reservation")
+            if run.state == "running":
+                # The refused commit gave its reservation back (release_submission); the repaired resubmit takes it
+                # again. Westinghouse (2026-10-27) ended "no authorized submission reservation" after a field refusal.
+                from zoneinfo import ZoneInfo
+
+                from ..db import Budget
+
+                run.state = "submitting"
+                day = datetime.now(ZoneInfo(self.config.timezone)).date().isoformat()
+                if budget := s.get(Budget, day):
+                    budget.submissions += 1
             from ..job_control import require_running
 
             require_running(s, run.job_id)
