@@ -665,3 +665,13 @@ def test_the_date_of_birth_answers_only_a_birth_question(service, label, ok):
     answer = Answer(field_id="q", disposition="answer", value="05/13/1990", evidence_ids=["fact:date_of_birth"])
     result = resolver._validate_answer(question, answer, {"fact:date_of_birth": "05/13/1990"}, {}, {})
     assert (result.disposition == "answer") is ok
+
+
+@pytest.mark.parametrize("kind", ["checkboxgroup", "select"])
+def test_no_clearance_picks_the_offered_none_option(service, kind):
+    # Credence (Workable 2026-10-27): the list offered "I currently do not have an active security clearance".
+    options = ["Confidential", "Secret", "Top Secret", "I currently do not have an active security clearance"]
+    resolver = Resolver(Profile(facts={"active_security_clearance": False}), service.db, service.config)
+    answer = resolver.local({"id": "q", "label": "Please indicate which active clearances you have.", "type": kind,
+                             "options": options, "required": True})
+    assert answer and answer.value == "I currently do not have an active security clearance"

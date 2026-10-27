@@ -742,6 +742,22 @@ class LocalRulesMixin:
             if len(no) == 1:
                 return Answer(field_id=f["id"], value=no[0], disposition="answer",
                               evidence_ids=["fact:us_citizen", "fact:current_immigration_status_US"])
+        no_clearance = next(
+            (k for k in ("active_security_clearance", "has_security_clearance", "security_clearance")
+             if str(p.facts.get(k)).casefold() in {"false", "no"}),
+            None,
+        )
+        if no_clearance and options and re.search(r"\bclearances?\b", label) and not re.search(
+            r"clearable|eligib|obtain|willing|able to", label
+        ):
+            # Credence (Workable 2026-10-27): "Please indicate which active clearances you have." lists the levels and
+            # "I currently do not have an active security clearance"; the owner was asked though the profile says none.
+            none = [o for o in options if re.search(
+                r"(?:do not|don't|not) (?:currently )?(?:have|hold)|\bno (?:active |current )?(?:security )?clearance"
+                r"|^\s*none\b|not applicable", str(o), re.I)]
+            if len(none) == 1:
+                return Answer(field_id=f["id"], value=none[0], disposition="answer",
+                              evidence_ids=["fact:" + no_clearance], reason="The applicant holds no security clearance")
         numbered = re.fullmatch(
             r"(?:link|url|website|web site|web link|online profile|social (?:media )?(?:link|profile)|other link)\s*#?\s*(\d)",
             label,
