@@ -218,6 +218,12 @@ class QueueingMixin:
             from ..job_control import require_running
 
             require_running(s, job_id)
+            from ..reserved import require_approval
+
+            # FAANG, MANGO and the Big Four wait for the owner's approval of this job, whichever path asks: the autopilot,
+            # recovery, the repair agent, a remembered Apply (owner 2026-10-27: "these scrapers should not apply before
+            # my permission"). Before the owner's pick is recorded, so a refused click leaves nothing behind.
+            require_approval(s, job)
             from ..owner_apply import PICK, picked
 
             if owner_pick and not job.demo and not picked(s, job_id):

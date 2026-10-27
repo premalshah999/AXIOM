@@ -3483,3 +3483,8 @@ details:not(.fold) summary {
   gap: 8px;
   align-items: flex-start;
 }
+
+/* Jobs › Reserved (reserved.tsx): the employer list sits below the jobs it holds. */
+.reserved-editor {
+  margin-top: 24px;
+}

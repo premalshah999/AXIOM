@@ -118,3 +118,11 @@ export type ApplyResult = {
 export function applyJob(jobId: string): Promise<ApplyResult> {
   return api<ApplyResult>(`/jobs/${jobId}/apply`, "POST");
 }
+
+// A reserved employer (FAANG, MANGO, the Big Four) applies only with the owner's approval of the job (2026-10-27).
+// `apply` (the default) also starts it, exactly as Apply does; false only lifts the hold.
+export type ApproveResult = ApplyResult & { approved: boolean; employer: string; label: string };
+
+export function approveReserved(jobId: string, apply = true): Promise<ApproveResult> {
+  return api<ApproveResult>(`/jobs/${jobId}/approve-reserved`, "POST", { apply });
+}

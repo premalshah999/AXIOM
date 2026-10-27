@@ -86,7 +86,7 @@ documents say worker or slot). The rest:
 | Employer accounts and mailboxes | `settings['employer_account:*']` (encrypted), `mailboxes` (encrypted) | `accounts/`, `mail/` | Vault key `DATA_DIR/mail-key`. Credentials never enter prompts, events or screenshots |
 | Mail waits | `mail_rules`, `mail_challenges`, `mail_consumption`, `mail_oauth` | `mail/`, `inbox.py` | A challenge is single-use and bound to sender, recipient, tenant and request time |
 | Budgets and limits | `budgets` (daily spend and submissions); settings `application_budget`, `runner_tiers`, `application_pacing`, `unknown_resubmit_policy`… | `application_budget.py`, `tiers.py`, `application_pacing.py` | |
-| Control and policy switches | settings `control` (`paused`, `auto_submit`), `job_board_settings`, `agent_settings`, `ats_focus`, `job_control:<job>`, `execution_v2_deployment_hold`… | API, Telegram, operators | |
+| Control and policy switches | settings `control` (`paused`, `auto_submit`), `job_board_settings`, `agent_settings`, `ats_focus`, `job_control:<job>`, `reserved_employers`, `reserved_approval:<job>`, `execution_v2_deployment_hold`… | API, Telegram, operators | `reserved_employers` holds FAANG, MANGO and Big Four jobs at queue admission until the owner approves each (`reserved.py`) |
 | Run artifacts | `DATA_DIR/runs/<run_id>/` (`answers.json`, `final.png`, `final_outline.txt`, `steps/`) | `BrowserEngine`, `FormSession` | Read by `/api/runs/{id}`, the repair agent and the resubmit guard |
 | Configuration and secrets | `.env` → `config.Settings` | operator | 101 settings; `.env.example` is the complete list |
 

@@ -98,6 +98,7 @@ def test_counts_are_exact_with_more_jobs_and_runs_than_the_old_snapshot_sent(cli
         "done": 2,  # a pause never hides a confirmed submission
         "stopped": 199,
         "new": 95,
+        "reserved": 0,  # no reserved employer (FAANG, MANGO, Big Four) among these synthetic jobs
         "all": 1105,
     }
     assert counts["pipeline"] == 1105 and counts["jobs"] == 1200
@@ -172,7 +173,11 @@ def ts_groups():
 def test_the_server_groups_states_as_the_dashboard_does():
     # "pending:" states are the dashboard's own optimistic marks, never stored.
     expected = {s: g for s, g in ts_groups().items() if not s.startswith("pending:")}
-    run_states = {s: g for s, g in expected.items() if not s.startswith("job:") and s not in {"pausing", "resumed"}}
+    # "reserved" is the owner's hold over any unstarted state of a reserved employer's job (pipeline.classified).
+    run_states = {
+        s: g for s, g in expected.items() if not s.startswith("job:") and s not in {"pausing", "resumed", "reserved"}
+    }
+    assert expected["reserved"] == "reserved"
     server = {state: group for group, states in pipeline.RUN_GROUPS.items() for state in states}
     # A run in "paused" reads as "resumed" (paused group); "pausing" is an owner pause over a running run.
     assert {**server, "paused": "paused"} == run_states

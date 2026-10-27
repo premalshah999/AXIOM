@@ -287,7 +287,13 @@ async def prepare_due(service):
         and not gate(j, policy)
         and ready_for_job(service.db, j["id"], service.config.data_dir) is None
     ]
-    for job_id in list(dict.fromkeys([*due.tailor, *stale]))[: policy.owners * policy.tailor_lookahead]:
+    from .reserved import held_ids
+
+    # No tailored resume (model calls) for a reserved employer's job before the owner approves it (2026-10-27); an
+    # approved Apply asks for one itself (tailoring_pending).
+    waiting = await asyncio.to_thread(held_ids, service.db)
+    due_ids = [job_id for job_id in dict.fromkeys([*due.tailor, *stale]) if job_id not in waiting]
+    for job_id in due_ids[: policy.owners * policy.tailor_lookahead]:
         await enqueue_tailoring(job_id)
     return due
 

@@ -16,7 +16,7 @@ from ...owner_apply import MANY
 from ...schemas import JobInput, QueueInput
 from .. import pipeline
 
-Group = Literal["all", "active", "needs", "repair", "unconfirmed", "paused", "done", "stopped", "new"]
+Group = Literal["all", "active", "needs", "repair", "unconfirmed", "paused", "done", "stopped", "new", "reserved"]
 
 
 class ApplyMany(BaseModel):
@@ -88,6 +88,11 @@ def router(service) -> APIRouter:
                 .order_by(Run.created_at.desc(), Run.id.desc())
                 .limit(1)
             ).first()
+            from ...reserved import approved, match
+
+            # A reserved employer (FAANG, MANGO, the Big Four): the panel offers the owner's approval (2026-10-27).
+            found = match(s, row)
+            reserved = {**found.as_dict(), "approved": approved(s, job_id)} if found else None
         control = db.get_setting("job_control:" + job_id, {})
         # The owner's Apply waiting to start (owner_apply.start), so the job panel says so instead of "Eligible".
         request = db.get_setting("owner_apply:" + job_id)
@@ -100,6 +105,7 @@ def router(service) -> APIRouter:
             "request": {k: request[k] for k in ("at", "code", "reason", "not_before") if k in request}
             if request
             else None,
+            "reserved": reserved,
         }
 
     @r.post("/api/jobs/{job_id}/rank")

@@ -14,7 +14,7 @@ import {
   type JobRow,
 } from "./model";
 import { groupQuestions, QuestionCard } from "./questions";
-import type { Detail, Job, JobRequest, Run } from "./types";
+import type { Detail, Job, JobRequest, Reserved, Run } from "./types";
 import {
   Dialog,
   ErrorLine,
@@ -51,6 +51,7 @@ export function JobPanel({
     latest_run: Omit<Run, "receipt"> | null;
     job_control: { state?: string };
     request?: JobRequest | null;
+    reserved?: Reserved | null;
   }>(
     (signal) => api(`/jobs/${jobId}`, "GET", undefined, signal),
     60000,
@@ -75,6 +76,8 @@ export function JobPanel({
                 control: historical.data.job_control,
                 // A waiting Apply reads as "Waiting to start", not "Eligible" with another Apply button.
                 request: historical.data.request,
+                // A reserved employer's job reads as "Needs your approval" and offers the approval.
+                reserved: historical.data.reserved,
                 reviews: [],
               }),
             ],
@@ -615,7 +618,8 @@ function NotStarted({ row }: { row: JobRow }) {
           job.reason && <p className="panel-reason">{job.reason}</p>
         )}
         <div className="row-actions">
-          {row.state !== "job:paused" && row.state !== "pending:waiting" && snapshot.resumes.length > 0 && (
+          {row.state !== "job:paused" && row.state !== "pending:waiting" && row.state !== "reserved" &&
+            snapshot.resumes.length > 0 && (
             <>
               <button className="btn primary sm" disabled={pending !== null} onClick={applyNow}>
                 {pending === "submit" ? "Applying…" : ready ? "Apply now" : "Apply"}

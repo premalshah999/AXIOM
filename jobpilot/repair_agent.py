@@ -362,6 +362,12 @@ async def repair_run(service, run_id):
         run = s.get(Run, run_id)
         if not run:
             return {"skipped": "missing run"}
+        from .reserved import CODE, held_match
+
+        # A reserved employer's job is not retried until the owner approves it (2026-10-27): no diagnosis to pay for,
+        # no question to send. Reading an uncertain submission's final page still settles what was sent.
+        if run.state != "submission_unknown" and held_match(s, s.get(Job, run.job_id)):
+            return {"skipped": CODE}
         try:
             _, remaining = require_allowance(s, run.job_id)
         except QueueBlocked as exc:
