@@ -180,6 +180,9 @@ BAD_CREDENTIALS = re.compile(
     # SAP SuccessFactors: "We couldn't authenticate you. Check your username and password."
     r"couldn'?t authenticate|could not authenticate|check your (?:user ?name|e-?mail)(?: and| or) password|"
     r"authenticat\w* (?:failed|unsuccessful)|"
+    # Amazon (2026-10-27): "The login information you provided appears to be incorrect." went unrecognised, so the
+    # refused password was never reset and seven applications waited for the owner.
+    r"(?:login|log-in|sign.?in) (?:information|details|credentials)\b[^.]{0,40}\b(?:incorrect|invalid|not valid|not recogni[sz]ed)|"
     # Avature (Deloitte 2026-10-26): "The username or password may be incorrect, or access might be restricted."
     r"(?:user ?name|e-?mail|password|credentials) (?:may|might) be (?:incorrect|invalid|wrong)|"
     # Wording seen across career sites and unknown platforms (owner 2026-10-26: "texts like your account might be
