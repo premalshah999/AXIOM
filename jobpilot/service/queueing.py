@@ -53,6 +53,22 @@ class QueueingMixin:
                 code="employer_cooldown",
                 not_before=item.value["until"],
             )
+        busy = [
+            other
+            for other, other_job in session.execute(
+                select(Run.id, Job).join(Job, Run.job_id == Job.id).where(Run.state.in_(ACTIVE), Job.id != job.id)
+            )
+            if employer_partition(other_job) == employer_partition(job)
+        ]
+        if busy:
+            # One application per employer at a time: seven Amazon retries signed in to one account together and locked
+            # it out (2026-10-27). The next starts when this employer's run ends.
+            raise QueueBlocked(
+                "Another application at this employer is running; this one starts when it ends",
+                outcome="deferred",
+                code="employer_busy",
+                not_before=temporary_time(),
+            )
         key = "site_circuit:" + hashlib.sha256(employer_partition(job).encode()).hexdigest()
         circuit = session.get(Setting, key)
         if circuit and datetime.fromisoformat(circuit.value["until"]) > datetime.now(UTC):

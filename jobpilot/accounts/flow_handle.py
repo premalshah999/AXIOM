@@ -130,9 +130,11 @@ class FlowHandleMixin:
             # Westinghouse (SuccessFactors) 2026-10-16/17 and AMETEK 10-18: the employer already holds this
             # email's account, yet a refused or unanswered sign-in led to Create, whose password then replaced the
             # working one. A known account signs in, resets a refused password by mail, and is never registered again.
-            from ..adapters.base import BAD_CREDENTIALS
+            from ..adapters.base import BAD_CREDENTIALS, LOCKED
 
-            refusal = next((x for x in errors if BAD_CREDENTIALS.search(x)), "")
+            # A lockout after refused sign-ins is recovered the same way: the mailbox reset sets the shared password
+            # and clears it (Amazon 2026-10-27, owner: resets are always allowed).
+            refusal = next((x for x in errors if BAD_CREDENTIALS.search(x) or LOCKED.search(x)), "")
             if not saved or ((scope, False) in self.attempts and refusal and not page_refused):
                 return await self.recover_sign_in(
                     scope, refusal or "No saved login for this employer account"

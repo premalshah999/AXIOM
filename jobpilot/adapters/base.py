@@ -216,7 +216,9 @@ EXISTS = re.compile(
 LOCKED = re.compile(
     r"account (?:is |has been |may be |might be |was )?(?:locked|disabled|suspended|blocked)|"
     r"too many (?:failed |unsuccessful |sign.?in |login )?(?:attempts|tries|requests)|temporarily (?:locked|disabled|blocked)|"
-    r"try again (?:in|after) \d+ (?:minutes?|hours?)|exceeded the (?:maximum|number of) (?:login |sign.?in )?attempts",
+    r"try again (?:in|after) \d+ (?:minutes?|hours?)|exceeded the (?:maximum|number of) (?:login |sign.?in )?attempts|"
+    # Amazon (2026-10-27): "Sorry, you can't log in right now due to unsuccessful login attempts".
+    r"can'?t (?:log|sign) ?in right now|(?:due to|after) (?:\w+ )?(?:unsuccessful|failed) (?:log.?in|sign.?in) attempts",
     re.I,
 )
 PASSWORD_RULES = re.compile(
