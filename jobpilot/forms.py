@@ -4958,6 +4958,9 @@ class FormSession:
             and not (
                 re.fullmatch(r"\s*(?:i )?acknowledge(?: the)? privacy (?:notice|policy|statement)\s*", button["label"], re.I)
             )
+            # iCIMS's candidate profile is saved with "Update Profile" before the application's own steps (Rivian
+            # 2026-10-27: a fully filled profile was refused here and the run stopped at step 1 of 4).
+            and not re.fullmatch(r"\s*(?:update|create|save)(?: (?:my|your|a))? profile\s*", button["label"], re.I)
         ):
             raise ValueError("This may submit the application; use submit_application")
         opener = self.page
