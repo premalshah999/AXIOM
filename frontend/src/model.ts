@@ -1,6 +1,6 @@
 // Product semantics for run/job states. One place decides how a state reads,
 // which group it belongs to and which controls are honest for it.
-import type { Job, JobRequest, PipelineRow, Review, Run, Snapshot } from "./types";
+import type { Job, JobRequest, PipelineRow, Reserved, Review, Run, Snapshot } from "./types";
 
 export type Tone = "ok" | "run" | "ask" | "hold" | "fix" | "bad" | "idle";
 export type Group =
@@ -11,7 +11,8 @@ export type Group =
   | "paused"
   | "done"
   | "stopped"
-  | "new";
+  | "new"
+  | "reserved";
 
 type StateInfo = { label: string; tone: Tone; group: Group; explain: string };
 
@@ -183,6 +184,15 @@ export const STATES: Record<string, StateInfo> = {
     group: "paused",
     explain: "Paused by you. It is held out of automatic intake.",
   },
+  // A reserved employer's job (FAANG, MANGO, the Big Four) the owner has not approved yet (pipeline.py "reserved",
+  // owner 2026-10-27). Whatever its latest attempt said, nothing starts it until the owner approves it.
+  reserved: {
+    label: "Needs your approval",
+    tone: "ask",
+    group: "reserved",
+    explain:
+      "A reserved employer. ApplyPilot finds and ranks these jobs but applies only after you approve the job in Jobs › Reserved.",
+  },
   // Shown right after an Apply click until the next poll confirms what the server did (optimistic marks).
   "pending:waiting": {
     label: "Waiting to start",
@@ -248,6 +258,8 @@ export type JobRow = {
   control?: string;
   // The owner's Apply waiting for a worker, pacing or a shared sender (why, and when it is tried again).
   request?: JobRequest | null;
+  // A reserved employer (FAANG, MANGO, the Big Four): its section and whether the owner approved the job.
+  reserved?: Reserved | null;
   reviews: Review[];
   updated: string;
 };
@@ -265,6 +277,7 @@ const PRIORITY: Record<Group, number> = {
   new: 5,
   done: 6,
   stopped: 7,
+  reserved: 8,
 };
 
 export function displayState(
@@ -272,9 +285,12 @@ export function displayState(
   run: Run | undefined,
   control: string | undefined,
   request?: JobRequest | null,
+  reserved?: Reserved | null,
 ) {
   if (control === "paused" && (!run || !COMMITTED.has(run.state)))
     return run?.state === "running" ? "pausing" : "paused";
+  // Held for the owner's approval unless an application is already under way or submitted (pipeline.py classified).
+  if (reserved && !reserved.approved && (!run || !STARTED.has(run.state))) return "reserved";
   if (request && (!run || !STARTED.has(run.state))) return "pending:waiting";
   if (run?.state === "paused") return "resumed";
   return run ? run.state : "job:" + job.status;
@@ -288,9 +304,10 @@ export function rowFromServer(r: PipelineRow): JobRow {
     job: r.job,
     run,
     attempts: r.attempts,
-    state: displayState(r.job, run, control, r.request),
+    state: displayState(r.job, run, control, r.request, r.reserved),
     control,
     request: r.request,
+    reserved: r.reserved,
     reviews: r.reviews,
     updated:
       run?.finished_at || run?.started_at || run?.created_at || r.job.created_at,

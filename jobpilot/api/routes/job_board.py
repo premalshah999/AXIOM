@@ -22,8 +22,14 @@ SELECTABLE = 500
 
 def unapplied(job):
     """Discovered lists jobs not applied to yet: no run, no waiting Apply, not owned, paused or protected. Those
-    are in Jobs › Pipeline (owner, 2026-10-23: one clear split between the pipeline and discovery)."""
-    return not job.get("attempted") and not job.get("requested") and job["status"] not in LOCKED
+    are in Jobs › Pipeline (owner, 2026-10-23: one clear split between the pipeline and discovery). A reserved
+    employer's job waiting for the owner's approval is in Jobs › Reserved (2026-10-27)."""
+    return (
+        not job.get("attempted")
+        and not job.get("requested")
+        and not job.get("reserved")
+        and job["status"] not in LOCKED
+    )
 
 
 def listing_page(jobs, minimum, q, ats, level, fit, page, size):
@@ -96,6 +102,11 @@ def router(service) -> APIRouter:
         """With `page`, one page of the fresh listings matching the filters and exact totals; without it, the newest
         500 as before."""
         board = board_snapshot(db, limit=None if page else 500)
+        from ...reserved import held_ids
+
+        held = held_ids(db)
+        for job in board["jobs"]:
+            job["reserved"] = job["id"] in held
         board["source_count"] = len(board["sources"])
         if not include_sources:
             board["sources"] = []

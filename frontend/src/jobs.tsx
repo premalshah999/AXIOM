@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Download, Search } from "lucide-react";
-import { api, applyJob } from "./api";
+import { api, applyJob, approveReserved } from "./api";
 import { routeUrl, useWorkspace } from "./context";
 import { useAction, useDraft, useNow, usePoll } from "./hooks";
 import { DiscoveredJobs } from "./jobboard";
@@ -17,6 +17,7 @@ import {
 import { Pagination, usePagination } from "./pagination";
 import { usePipelinePage } from "./pipeline";
 import { QueuePanel } from "./queue";
+import { ReservedJobs } from "./reserved";
 import type { Archived, ControlResult } from "./types";
 import {
   ago,
@@ -34,6 +35,8 @@ import {
 const TABS = [
   { id: "pipeline", label: "Pipeline" },
   { id: "discovered", label: "Discovered" },
+  // FAANG, MANGO and the Big Four wait here for the owner's approval (owner, 2026-10-27).
+  { id: "reserved", label: "Reserved" },
   { id: "archive", label: "Archive" },
 ];
 
@@ -45,6 +48,7 @@ export function JobsView() {
   const counts: Record<string, number | undefined> = {
     pipeline: all.pipeline,
     discovered: all.discovered,
+    reserved: all.groups.reserved,
   };
   return (
     <div className="page">
@@ -71,6 +75,7 @@ export function JobsView() {
       </header>
       {tab === "pipeline" && <Pipeline />}
       {tab === "discovered" && <DiscoveredJobs />}
+      {tab === "reserved" && <ReservedJobs />}
       {tab === "archive" && <ArchiveList />}
     </div>
   );
@@ -276,6 +281,17 @@ export function JobControls({
       },
       (r) => r?.message,
     );
+  // A reserved employer's job: the owner's approval, then the same start as Apply.
+  const approve = () =>
+    run(
+      "approve",
+      async () => {
+        const r = await approveReserved(row.job.id);
+        settle(r);
+        return r;
+      },
+      (r) => r?.message,
+    );
   const withdraw = () =>
     run(
       "withdraw",
@@ -288,7 +304,13 @@ export function JobControls({
     );
   const busy = pending !== null;
   const buttons: React.ReactNode[] = [];
-  if (state === "pending:waiting")
+  if (state === "reserved")
+    buttons.push(
+      <button key="v" className="btn sm primary" disabled={busy} onClick={approve}>
+        {pending === "approve" ? "Approving…" : "Approve & apply"}
+      </button>,
+    );
+  else if (state === "pending:waiting")
     buttons.push(
       <button key="w" className="btn sm" disabled={busy} onClick={withdraw}>
         {pending === "withdraw" ? "Removing…" : "Remove from queue"}

@@ -228,10 +228,16 @@ def batch_snapshot(service):
         ]
         considered = set(batch.get("considered_ids", []))
         deferred = batch.get("deferred", {})
+        from .reserved import held
+
+        # Reserved employers wait for the owner's approval in Jobs › Reserved (2026-10-27): neither eligible nor
+        # Discovered (routes/job_board.unapplied leaves them out too).
+        reserved = set(held(s))
         eligible = [
             j
             for j in fresh
             if not j.attempted
+            and j.id not in reserved
             and j.id not in considered
             and controls.get(j.id) not in {"paused", "deleted"}
             and deferred.get(j.id, {}).get("not_before", "") <= at.isoformat()
@@ -245,6 +251,7 @@ def batch_snapshot(service):
             j
             for j in fresh
             if not j.attempted
+            and j.id not in reserved
             and j.id not in requested
             and j.status not in LOCKED
             and controls.get(j.id) != "paused"
@@ -411,10 +418,14 @@ UNKNOWN_PER_TICK = 1
 def unknown_candidates(db):
     """(job id, uncertain run id) for uncertain submissions the resubmit policy allows, oldest attempt first."""
     from .admission import unknown_resubmit_allowed
+    from .reserved import held
 
     with db.session() as s:
         found = []
+        waiting = held(s)  # A resubmit applies again: reserved employers wait for the owner (2026-10-27).
         for job in s.scalars(select(Job).where(Job.status == "submission_unknown")):
+            if job.id in waiting:
+                continue
             runs = list(s.scalars(select(Run).where(Run.job_id == job.id).order_by(Run.created_at.desc())))
             if runs and runs[0].state == "submission_unknown" and unknown_resubmit_allowed(s, runs):
                 found.append((runs[0].created_at, job.id, runs[0].id))
@@ -493,11 +504,17 @@ async def persist_stalled(service, slots, roles, batch):
             if run.created_at >= day and not nothing_sent(run.state, run.reason):
                 today[run.job_id] = today.get(run.job_id, 0) + 1
         asking = set(s.scalars(select(Review.run_id).where(Review.answer.is_(None))))
+        from .reserved import held
+
+        # Reserved employers are not retried until the owner approves them (2026-10-27); queue admission would refuse
+        # them anyway, every tick.
+        waiting = held(s)
         candidates = []
         for job_id, run in latest.items():
             runs_today = today.get(job_id, 0)
             if (
                 run.state not in {"waiting_browser", "timed_out", "needs_review"}
+                or job_id in waiting
                 or run.id in asking
                 or PERSIST_SKIP.search(run.reason or "")
                 or runs_today >= PERSIST_DAILY
@@ -576,17 +593,26 @@ def admission_revision(db, cfg):
 
 
 def open_repairs(db):
-    """Jobs in the dashboard's Repairing group: their latest run waits for the browser, timed out or failed."""
+    """Jobs in the dashboard's Repairing group: their latest run waits for the browser, timed out or failed.
+
+    Not a reserved employer's job awaiting the owner's approval: it shows in Jobs › Reserved and nothing retries it, so
+    it would hold every new application until the owner approved it (2026-10-27)."""
     from .api.pipeline import RUN_GROUPS
+    from .reserved import held
 
     with db.session() as s:
+        waiting = list(held(s))
         latest = select(Run.job_id, func.max(Run.created_at).label("at")).group_by(Run.job_id).subquery()
         return s.scalar(
             select(func.count())
             .select_from(Run)
             .join(latest, (Run.job_id == latest.c.job_id) & (Run.created_at == latest.c.at))
             .join(Job, Job.id == Run.job_id)
-            .where(Run.state.in_(RUN_GROUPS["repair"]), Job.status != "archived")
+            .where(
+                Run.state.in_(RUN_GROUPS["repair"]),
+                Job.status != "archived",
+                *([Job.id.not_in(waiting)] if waiting else []),
+            )
         ) or 0
 
 
@@ -804,9 +830,14 @@ async def tick(service):
         if not room:
             persist_batch(db, batch)
             return
+        from .reserved import held_ids
+
         with db.session() as s:
             attempted = set(s.scalars(select(Run.job_id)))
-        candidates = [j for j in jobs if j["id"] not in attempted]
+        # FAANG, MANGO and the Big Four wait for the owner's approval (2026-10-27): never a candidate, so they never take
+        # a slot. Queue admission refuses them too, whoever asks.
+        reserved = await asyncio.to_thread(held_ids, db)
+        candidates = [j for j in jobs if j["id"] not in attempted and j["id"] not in reserved]
         # Repairs first: fresh postings wait while any application is repairing (owner 2026-10-27); retries, uncertain
         # submissions and the owner's own Apply clicks continue below.
         holding = new_applications_held(db)
@@ -943,6 +974,7 @@ async def tick(service):
                     for j in (await asyncio.to_thread(board_snapshot, db, limit=None))["jobs"]
                     if (j["id"] not in considered or reconsider(j))
                     and j["id"] not in attempted
+                    and j["id"] not in reserved
                     and deferred.get(j["id"], {}).get("not_before", "") <= now()
                 ]
                 jobs.sort(key=lambda j: dispatch_priority(j, priority), reverse=True)

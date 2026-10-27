@@ -344,7 +344,8 @@ export type Snapshot = {
   ats: { id: string; name: string; tier: string; guidance: string }[];
 };
 export type Counts = {
-  // Pipeline groups (model.ts GROUPS plus "new"); "all" is every started or paused job.
+  // Pipeline groups (model.ts GROUPS plus "new" and "reserved", held for the owner's approval); "all" is every
+  // started or paused job.
   groups: Record<string, number>;
   // Each job's latest run by state, unless the owner's pause overrides how it reads.
   states: Record<string, number>;
@@ -355,13 +356,34 @@ export type Counts = {
 };
 // GET /api/jobs: one page of Jobs › Pipeline.
 export type JobRequest = { at?: string; code?: string; reason?: string; not_before?: string };
+// A reserved employer's section (FAANG, MANGO, Big Four...) and whether the owner approved this job (reserved.py).
+export type Reserved = { section: string; label: string; employer: string; approved: boolean };
 export type PipelineRow = {
   job: Job;
   run: Run | null;
   attempts: number;
   control: JobControl | null;
   request?: JobRequest | null;
+  reserved?: Reserved | null;
   reviews: Review[];
+};
+// The owner's reserved employers (setting reserved_employers), as GET/PUT /api/reserved carry them.
+export type ReservedEmployer = { name: string; aliases: string[]; sites: string[] };
+export type ReservedRules = {
+  enabled: boolean;
+  sections: { id: string; label: string; employers: ReservedEmployer[] }[];
+};
+// GET /api/reserved: one section's held jobs, every section's count and the saved list.
+export type ReservedPage = {
+  enabled: boolean;
+  sections: { id: string; label: string; employers: string[]; held: number }[];
+  section: string;
+  rows: PipelineRow[];
+  total: number;
+  page: number;
+  pages: number;
+  size: number;
+  rules: ReservedRules;
 };
 export type PipelinePage = {
   rows: PipelineRow[];

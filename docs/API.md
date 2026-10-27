@@ -137,15 +137,20 @@ exercised through the HTTP test client; every router now has an HTTP test module
 | Method | Path | Purpose | Request | Response | UI |
 |---|---|---|---|---|---|
 | POST | `/api/jobs` | Import a job by URL; rank and queue it if autonomous mode is on | `JobInput {url, title?, company?, location?, description?}` | `{job, created, [run \| notice, preparation]}` | ✔ |
-| GET | `/api/jobs` | Jobs › Pipeline, one page: started or waiting applications, attention first (`pipeline.py`) | `?group=all\|active\|needs\|repair\|unconfirmed\|paused\|done\|stopped\|new&q&page&size≤100` | `{rows: [{job, run, attempts, control, request, reviews}], total, page, size, pages}` | ✔ |
+| GET | `/api/jobs` | Jobs › Pipeline, one page: started or waiting applications, attention first (`pipeline.py`) | `?group=all\|active\|needs\|repair\|unconfirmed\|paused\|done\|stopped\|new\|reserved&q&page&size≤100` | `{rows: [{job, run, attempts, control, request, reviews, reserved}], total, page, size, pages}` | ✔ |
 | POST | `/api/jobs/apply-many` | The owner's Apply for up to 50 jobs, each through `owner_apply.apply` (fit filters skipped, every duplicate guard kept) | `{job_ids}` | `{results: [{job_id, outcome: queued\|waiting\|preparing\|already\|refused, state, message, code?, company, title}], summary}` | ✔ |
-| GET | `/api/jobs/{id}` | One job, its latest run, its control state and a waiting Apply | – | `{job, latest_run, job_control, request}` | ✔ |
+| GET | `/api/jobs/{id}` | One job, its latest run, its control state, a waiting Apply and its reserved section | – | `{job, latest_run, job_control, request, reserved}` | ✔ |
 | POST | `/api/jobs/{id}/rank` | Rank one job against the profile | – | `{score, eligible, resume_id, reason, uncertainties}` | ✔ |
 | POST | `/api/jobs/{id}/apply` | **One click**: approve if needed, queue, or remember a deferred start | – | `{job_id, state, message, [run_id, deferred, preparing]}` | ✔ |
 | POST | `/api/jobs/{id}/queue` | Queue with explicit options (dry run or submit) | `QueueInput {mode, resume_id?, resume_artifact_id?, controller_policy?}` | run record; 202 `{preparation, message}` while a resume is prepared; 202 deferred start | ✔ |
 | POST | `/api/jobs/{id}/pause` | Pause (saves the draft) | – | `{job_id, state, message}` | ✔ |
 | POST | `/api/jobs/{id}/resume` | Resume or retry; a deferral becomes 202 | `QueueInput?` | same | ✔ |
 | DELETE | `/api/jobs/{id}` | Remove from the active pipeline (history and submission guards are kept) | – | same | ✔ |
+| GET | `/api/reserved` | Jobs › Reserved: jobs at reserved employers (FAANG, MANGO, Big Four; `reserved.py`) waiting for the owner's approval, one section at a time, and the saved employer list | `?section&q&page&size≤100` | `{enabled, sections: [{id, label, employers, held}], section, rows, total, page, size, pages, rules}` | ✔ |
+| PUT | `/api/reserved` | Replace the reserved employers (setting `reserved_employers`) | `{enabled, sections: [{id, label, employers: [{name, aliases, sites}]}]}` | as `GET`; 422 on a bad site | ✔ |
+| POST | `/api/jobs/{id}/approve-reserved` | The owner's permission for one reserved job, then (unless `apply` is false) the one-click Apply | `{apply?}` | `{job_id, approved, section, label, employer, state, message, [run_id]}`; 400 for a job not at a reserved employer | ✔ |
+| DELETE | `/api/jobs/{id}/approve-reserved` | Withdraw that permission: the job is held again | – | `{job_id, approved, removed}` | – |
+| POST | `/api/reserved/approve-all` | Lift the hold on every waiting job of a section (or all); nothing starts here | `{section?}` | `{approved, section}` | ✔ |
 | GET | `/api/runs` | Every attempt of one job, newest first, without packets | `?job_id` | `{runs}` | ✔ |
 | GET | `/api/runs/{id}` | A run, its events, the answers it used, whether a screenshot exists, the failure report | – | `{run, events, answers, screenshot, demo_receipt, failure_report}` | ✔ |
 | GET | `/api/runs/{id}/screenshot` | The final page | – | `image/png` | ✔ |

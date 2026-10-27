@@ -26,11 +26,12 @@ def test_job_detail_has_the_job_its_latest_run_and_its_control_state(client, ser
     older = seed_run(service, job_id, state="failed")
     newer = seed_run(service, job_id, state="queued")
     body = client.get(f"/api/jobs/{job_id}").json()
-    assert set(body) == {"job", "latest_run", "job_control", "request"}
+    assert set(body) == {"job", "latest_run", "job_control", "request", "reserved"}
     assert body["job"]["id"] == job_id and "description" not in body["job"]
     assert body["latest_run"]["id"] in {older, newer}
     assert "packet" not in body["latest_run"] and "receipt" not in body["latest_run"]
     assert body["job_control"] == {} and body["request"] is None
+    assert body["reserved"] is None  # not a reserved employer (FAANG, MANGO, Big Four)
 
 
 def test_job_detail_of_an_unknown_id_is_404(client):

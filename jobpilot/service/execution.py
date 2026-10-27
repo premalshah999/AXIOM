@@ -36,6 +36,11 @@ class ExecutionMixin:
             if not job.demo:
                 if not control.get("auto_submit"):
                     raise ValueError("Automatic submission was disabled")
+                from ..reserved import require_approval
+
+                # The last word before the employer receives anything: a reserved employer's job submits only with the
+                # owner's approval, whichever path started the run (2026-10-27).
+                require_approval(s, job)
                 from ..application_pacing import require_company_limit, require_ats_focus
                 from ..owner_apply import picked
 
@@ -147,6 +152,17 @@ class ExecutionMixin:
 
                 if job_state(self.db, row.job_id).get("state") == "paused":
                     row.state, row.finished_at = "paused", now()
+                    return
+                from ..reserved import held_match
+
+                hold = None if row.packet.get("verification_only") else held_match(s, s.get(Job, row.job_id))
+                if hold:
+                    # Queued before its employer was reserved, or the owner withdrew the approval (2026-10-27). Stopped
+                    # before it starts: left queued it would wait here forever, holding its pool's slot. A verification
+                    # of an earlier submission sends nothing new and continues.
+                    row.state, row.finished_at = "cancelled", now()
+                    row.reason = f"{hold.employer} is a reserved employer ({hold.label}); it waits for your approval"
+                    s.get(Job, row.job_id).status = "ready"
                     return
                 if s.get(Setting, "control").value.get("paused"):
                     return

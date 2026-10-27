@@ -9,6 +9,11 @@ Pipeline is what has started or will start: the queue (including the owner's App
 pacing or a shared sender), running, needs you, repairing, done, stopped. Jobs found but never applied to belong to
 Jobs › Discovered (owner, 2026-10-23: "so confusing for the job pipeline part, like the pipeline and the discovery").
 
+Jobs at a reserved employer (FAANG, MANGO, the Big Four: reserved.py) that the owner has not approved read as their own
+group, "reserved", whatever their latest run says, until an application starts or is submitted (owner, 2026-10-27:
+"make a different section for FAANG, MANGO, Big four consulting"). Like "new", they are outside the pipeline: nothing
+starts them until the owner approves them in Jobs › Reserved.
+
 How a row reads mirrors `frontend/src/model.ts` (`displayState`, `STATES[...].group`); a test keeps the two in step.
 """
 
@@ -35,9 +40,11 @@ RUN_GROUPS = {
 }
 # The group of a job that has no run yet (model.ts "job:<status>"). A status not listed reads as "new".
 JOB_GROUPS = {"new": ("new", "ready", "review", "skipped"), "paused": ("paused",)}
-GROUPS = ("active", "needs", "repair", "unconfirmed", "paused", "done", "stopped", "new")
+GROUPS = ("active", "needs", "repair", "unconfirmed", "paused", "done", "stopped", "new", "reserved")
+# Groups outside the pipeline: never started, or held for the owner's approval.
+OUTSIDE = ("new", "reserved")
 # List order for "All": what needs attention first (model.ts PRIORITY).
-PRIORITY = {group: index for index, group in enumerate(GROUPS[:5] + ("new", "done", "stopped"))}
+PRIORITY = {group: index for index, group in enumerate(GROUPS[:5] + ("new", "done", "stopped", "reserved"))}
 # Latest runs the Batch page shows live: owners at work, waits and questions.
 LIVE = ("queued", "running", "submitting", "waiting_email", "waiting_answer", "needs_review")
 
@@ -54,21 +61,31 @@ def requested_jobs():
     return select(func.substr(Setting.key, len(REQUEST) + 1)).where(Setting.key.like(REQUEST + "%"))
 
 
-def classified(*where):
-    """Every non-demo, non-archived job with its latest run and display group, as a subquery."""
+def classified(*where, reserved=()):
+    """Every non-demo, non-archived job with its latest run and display group, as a subquery. `reserved`: the ids of
+    jobs held for the owner's approval (reserved.held)."""
     latest = latest_runs()
     held = Job.id.in_(held_jobs())
     state = latest.c.state
     paused_by_owner = and_(held, or_(state.is_(None), state.not_in(COMMITTED)))
+    # Held until approved, unless an application is already under way or submitted: that one still reads as itself.
+    reserving = (
+        and_(Job.id.in_(list(reserved)), ~paused_by_owner, or_(state.is_(None), state.not_in(STARTED)))
+        if reserved
+        else None
+    )
     waiting = and_(
         Job.id.in_(requested_jobs()), ~paused_by_owner, or_(state.is_(None), state.not_in(STARTED))
     )
+    if reserving is not None:
+        waiting = and_(waiting, ~reserving)
     # A job an earlier run confirmed is done, whatever a later attempt says: Dayforce's confirmed application read as
     # "Repairing" after a follow-up run failed (2026-10-25).
     succeeded = Job.id.in_(select(Run.job_id).where(Run.state.in_(("confirmed", "already_applied"))))
     group = case(
         (succeeded, "done"),
         (paused_by_owner, "paused"),
+        *([(reserving, "reserved")] if reserving is not None else []),
         (waiting, "active"),
         (state == "paused", "paused"),
         *[(state.in_(states), name) for name, states in RUN_GROUPS.items()],
@@ -95,13 +112,16 @@ def classified(*where):
 
 
 def in_pipeline(rows):
-    """Pipeline scope: a job with a run, one the owner paused, a waiting Apply, or (group "new") one not started."""
-    return or_(rows.c.run_id.is_not(None), rows.c.held, rows.c.waiting, rows.c.grp == "new")
+    """Pipeline scope: a job with a run, one the owner paused, a waiting Apply, or (groups "new" and "reserved") one
+    not started."""
+    return or_(rows.c.run_id.is_not(None), rows.c.held, rows.c.waiting, rows.c.grp.in_(OUTSIDE))
 
 
 def counts(session):
     """Exact counts for the Jobs tab, the Pipeline chips and the Batch page, over every job."""
-    rows = classified()
+    from ..reserved import held as awaiting
+
+    rows = classified(reserved=awaiting(session))
     columns = (rows.c.grp, rows.c.state, rows.c.held, rows.c.waiting, rows.c.run_id.is_not(None))
     grouped = session.execute(
         select(*columns, func.count()).where(in_pipeline(rows)).group_by(*columns)
@@ -124,7 +144,7 @@ def counts(session):
     jobs = session.scalar(
         select(func.count()).select_from(Job).where(Job.demo.is_(False), Job.status != "archived")
     )
-    pipeline = sum(n for group, n in groups.items() if group != "new")
+    pipeline = sum(n for group, n in groups.items() if group not in OUTSIDE)
     return {"groups": {**groups, "all": pipeline}, "states": states, "pipeline": pipeline, "jobs": jobs or 0}
 
 
@@ -138,8 +158,10 @@ def _search(q):
 
 def page(session, group="all", q="", page=1, size=25):
     """One page of Pipeline rows: "all" is every started or paused job, attention first; a group lists only its own."""
-    rows = classified(*_search(q))
-    scope = [in_pipeline(rows), rows.c.grp != "new" if group == "all" else rows.c.grp == group]
+    from ..reserved import held as awaiting
+
+    rows = classified(*_search(q), reserved=awaiting(session))
+    scope = [in_pipeline(rows), rows.c.grp.not_in(OUTSIDE) if group == "all" else rows.c.grp == group]
     size = max(1, min(100, int(size)))
     priority = case(*[(rows.c.grp == name, rank) for name, rank in PRIORITY.items()], else_=len(PRIORITY))
 
@@ -208,6 +230,16 @@ def rows_for(session, picked):
         }
         for row in session.scalars(select(Setting).where(Setting.key.in_([REQUEST + j for j in job_ids])))
     }
+    # A reserved employer's job, approved or not (reserved.py): its section, so the row can offer the approval.
+    from ..reserved import approvals, matcher
+
+    rules = matcher(session)
+    allowed = approvals(session, job_ids)
+    reserved = {
+        job_id: {**found.as_dict(), "approved": job_id in allowed}
+        for job_id, job in jobs.items()
+        if not job["demo"] and (found := rules(job["company"], job["url"]))
+    }
     questions = {}
     if run_ids:
         for review in session.scalars(
@@ -229,10 +261,69 @@ def rows_for(session, picked):
             "control": controls.get(job_id) or None,
             "request": requests.get(job_id),
             "reviews": questions.get(run_id, []) if run_id else [],
+            "reserved": reserved.get(job_id),
         }
         for job_id, run_id in picked
         if job_id in jobs
     ]
+
+
+def awaiting_approval(session, *where):
+    """(job id, latest run id, reserved.Match) of every job in the "reserved" group, newest first: held for the owner's
+    approval and not already applying or submitted."""
+    from ..reserved import held
+
+    found = held(session)
+    if not found:
+        return []
+    rows = classified(*where, reserved=found)
+    return [
+        (row.job_id, row.run_id, found[row.job_id])
+        for row in session.execute(
+            select(rows.c.job_id, rows.c.run_id)
+            .where(rows.c.grp == "reserved")
+            .order_by(bytewise(rows.c.updated).desc(), bytewise(rows.c.job_id))
+        )
+    ]
+
+
+def reserved_page(session, section="", q="", page=1, size=25):
+    """Jobs › Reserved: the jobs held for the owner's approval, one section (FAANG, MANGO, Big Four...) at a time, newest
+    first, with every section's count (whatever the search: "Approve all" covers them all). The first section with held
+    jobs when none is chosen."""
+    from ..reserved import rules as saved_rules
+
+    every = awaiting_approval(session)
+    shown = awaiting_approval(session, *_search(q)) if _search(q) else every
+    held = {}
+    for _, _, found in every:
+        held[found.section] = held.get(found.section, 0) + 1
+    rules = saved_rules(session)
+    sections = [
+        {
+            "id": item.id,
+            "label": item.label,
+            "employers": list(dict.fromkeys(employer.name for employer in item.employers)),
+            "held": held.get(item.id, 0),
+        }
+        for item in (rules.sections if rules.enabled else [])
+    ]
+    ids = [item["id"] for item in sections]
+    chosen = section if section in ids else next((item["id"] for item in sections if item["held"]), ids[0] if ids else "")
+    items = [(job_id, run_id) for job_id, run_id, found in shown if found.section == chosen]
+    size = max(1, min(100, int(size)))
+    pages = max(1, -(-len(items) // size))
+    page = min(max(1, int(page)), pages)
+    return {
+        "enabled": rules.enabled,
+        "sections": sections,
+        "section": chosen,
+        "rows": rows_for(session, items[(page - 1) * size : page * size]),
+        "total": len(items),
+        "page": page,
+        "pages": pages,
+        "size": size,
+    }
 
 
 def _newest_of(session, candidates):

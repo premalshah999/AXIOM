@@ -22,6 +22,7 @@ from .routes import (
     owner,
     profile,
     queue,
+    reserved,
     resumes,
     runs,
     session,
@@ -69,6 +70,7 @@ def create_app(config: Settings | None = None):
     app.include_router(profile.router(service))
     app.include_router(owner_settings.router(service))
     app.include_router(jobs.router(service))
+    app.include_router(reserved.router(service))
     app.include_router(queue.router(service))
     app.include_router(runs.router(service))
     app.include_router(knowledge.router(service))
