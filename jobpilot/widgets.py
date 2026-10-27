@@ -2083,6 +2083,40 @@ async def ui5wc_select_options(el):
     )
 
 
+SDF_ITEMS_JS = """h => [...h.querySelectorAll('sdf-select-item'), ...(h.shadowRoot?.querySelectorAll('sdf-select-item') || [])]
+  .map((item, i) => { item.dataset.jpSdf = String(i); return [String(i), (item.getAttribute('label') || item.textContent || '')
+    .replace(/\\s+/g, ' ').trim()]; })"""
+SDF_SELECTED_JS = """h => { const items = [...h.querySelectorAll('sdf-select-item'), ...(h.shadowRoot?.querySelectorAll('sdf-select-item') || [])];
+  const text = i => (i.getAttribute('label') || i.textContent || '').replace(/\\s+/g, ' ').trim();
+  const raw = typeof h.value === 'string' ? h.value : (h.value?.label || h.value?.value || '');
+  const chosen = items.find(i => i.hasAttribute('selected') || i.getAttribute('aria-selected') === 'true')
+    || items.find(i => raw && (i.getAttribute('value') === raw || text(i) === raw));
+  return chosen ? text(chosen) : ''; }"""
+
+
+async def sdf_select(frame, el, value, choose=None):
+    """ADP MyJobs' sdf-select-simple (Phone Type, State; 2026-10-27): open the host, click the offered item, and read the
+    host's own selection back."""
+    items = await el.evaluate(SDF_ITEMS_JS)
+    texts = [text for _, text in items if text and not placeholder_option(text)]
+    target = (best_option([{"text": t, "disabled": False} for t in texts], value) or {}).get("text")
+    if target is None and choose:
+        target = await choose(texts)
+    if not target:
+        raise ValueError("No matching option is offered")
+    if norm(await el.evaluate(SDF_SELECTED_JS)) == norm(target):
+        return target
+    await el.click(timeout=3000)
+    await asyncio.sleep(0.4)
+    index = next(i for i, text in items if text == target)
+    await frame.locator(f'sdf-select-item[data-jp-sdf="{index}"]').first.click(timeout=3000)
+    for _ in range(12):
+        await asyncio.sleep(0.25)
+        if norm(await el.evaluate(SDF_SELECTED_JS)) == norm(target):
+            return target
+    raise ValueError("The website did not commit the observed choice")
+
+
 async def ui5wc_select(frame, el, value):
     """Pick an option of a ``ui5-select`` (SuccessFactors Gender, ASSA ABLOY 2026-10-15) the way a
     person does: open it and click the entry; keyboard steps are the fallback. Its own selectedOption

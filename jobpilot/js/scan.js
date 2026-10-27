@@ -478,6 +478,24 @@
     consumed.add(box);
   }
 
+  // ADP MyJobs (2026-10-27): "Phone Type" and "State" are sdf-select-simple custom elements; their filter input and
+  // listbox stay hidden in a floating pane until the host is clicked, so no field was observed and both stayed empty.
+  // The phone component's own country picker is one too, inside its shadow root: never a question of its own.
+  for (const host of all.filter(e => e.matches('sdf-select-simple') && !e.getRootNode().host && visible(e))) {
+    if (excluded(host) || consumed.has(host)) continue;
+    const items = [...host.querySelectorAll('sdf-select-item'), ...(host.shadowRoot?.querySelectorAll('sdf-select-item') || [])];
+    const itemText = i => clean(i.getAttribute('label') || i.textContent);
+    const raw = typeof host.value === 'string' ? host.value : (host.value?.label || host.value?.value || '');
+    const chosen = items.find(i => i.hasAttribute('selected') || i.getAttribute('aria-selected') === 'true')
+      || items.find(i => raw && (i.getAttribute('value') === raw || itemText(i) === raw));
+    const value = chosen ? itemText(chosen) : '';
+    const q = label(host, { visibleFirst: true });
+    const req = isReq(host, q) || host.hasAttribute('required');
+    consumed.add(host);
+    push(host, { label: q, type: 'combobox', widget: 'sdf-select', required: req, options: items.map(itemText).filter(Boolean),
+      value, valid: !req || !!value, maxlength: -1 });
+  }
+
   // Ashby gives each checkbox its own name; the fieldset defines the question.
   for (const box of all.filter(e => e.matches('.ashby-application-form-input-checkbox-group') && visible(e))) {
     const group = [...box.querySelectorAll('input[type=checkbox]')];

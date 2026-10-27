@@ -2348,6 +2348,8 @@ class FormSession:
                 raise ValueError("The button answer is no longer offered")
             await widgets.field_click(buttons.nth(labels.index(match)))
             committed = match
+        elif field.get("widget") == "sdf-select":
+            committed = await widgets.sdf_select(frame, el, value, choose=choose)
         elif field.get("widget") == "ui5wc-select":
             committed = await widgets.ui5wc_select(frame, el, value)
         elif field.get("widget") == "ui5wc-valuehelp":
@@ -2866,7 +2868,13 @@ class FormSession:
             return
         try:
             await widgets.dismiss_pickers(frame)
-            if field.get("widget") == "ui5wc-select":
+            if field.get("widget") == "sdf-select":
+                # ADP's sdf-select-simple lists every item in its own children: no popup is opened to read them.
+                field["options"] = [
+                    text for _, text in await el.evaluate(widgets.SDF_ITEMS_JS) if text and not widgets.placeholder_option(text)
+                ][:400]
+                field["options_partial"] = False
+            elif field.get("widget") == "ui5wc-select":
                 field["options"] = [
                     o
                     for o in await widgets.ui5wc_select_options(el)
