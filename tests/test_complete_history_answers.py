@@ -611,3 +611,31 @@ def test_ever_been_a_contractor_or_employee_is_prior_employment(service, label):
                         employer="Acme", job={"company": "Acme", "url": "https://acme.wd5.myworkdayjobs.com/job/42"})
     answer = resolver.local({**field(label), "options": ["Yes", "No"], "type": "select"})
     assert answer is not None and answer.value == "No"
+
+
+@pytest.mark.parametrize("label,value", [
+    ("Do you use Duolingo?", "Yes"),
+    ("Are you, or have you ever been, a contractor for Acme?", "Yes"),
+    ("Are you willing to relocate?", "No"),
+])
+def test_the_history_attestation_never_backs_another_subject_or_a_yes(service, label, value):
+    # Duolingo and the Federal Reserve System (2026-10-26): the model cited "my employment history is complete" (Yes)
+    # for "Do you use Duolingo?" and for a contractor question, and both went out as Yes.
+    from jobpilot.schemas import Answer
+
+    fact = attest(service.db, "employment_history_complete", EMPLOYMENT_HISTORY["statement"])
+    resolver = Resolver(Profile(), service.db, service.config, employer="Acme")
+    ref = "knowledge:" + (fact.fact_id if hasattr(fact, "fact_id") else str(fact))
+    answer = Answer(field_id="q", disposition="answer", value=value, evidence_ids=[ref])
+    assert resolver.relationship_evidence_misused({"id": "q", "label": label}, answer, {})
+
+
+def test_the_history_attestation_still_backs_a_no_on_prior_employment(service):
+    from jobpilot.schemas import Answer
+
+    fact = attest(service.db, "employment_history_complete", EMPLOYMENT_HISTORY["statement"])
+    resolver = Resolver(Profile(), service.db, service.config, employer="Acme")
+    ref = "knowledge:" + (fact.fact_id if hasattr(fact, "fact_id") else str(fact))
+    answer = Answer(field_id="q", disposition="answer", value="No", evidence_ids=[ref])
+    assert not resolver.relationship_evidence_misused({"id": "q", "label": "Have you previously worked for Acme?"},
+                                                      answer, {})

@@ -42,6 +42,29 @@ def same_date(a, b):
     return all(first) and first == second
 
 class ValidateMixin:
+    def relationship_evidence_misused(self, field, answer, scoped_items):
+        """True when an employer-relationship fact (the complete-history attestation, "never worked for X") backs an
+        answer it cannot: any question other than the applicant's own past employment, or an affirmative one."""
+        refs = [x.removeprefix("knowledge:") for x in answer.evidence_ids if x.startswith("knowledge:")]
+        if not refs:
+            return False
+        categories = {
+            "knowledge:" + ref: getattr(scoped_items.get("knowledge:" + ref), "category", None) for ref in refs
+        }
+        unknown = [ref for ref in refs if categories["knowledge:" + ref] is None]
+        if unknown and self.db is not None:
+            from sqlalchemy import select
+
+            from ..features.knowledge.tables import KnFact
+
+            with self.db.session() as s:
+                for fact_id, category in s.execute(select(KnFact.id, KnFact.category).where(KnFact.id.in_(unknown))):
+                    categories["knowledge:" + fact_id] = category
+        if "employer_relationship" not in categories.values():
+            return False
+        affirmative = re.fullmatch(r"(?:yes|y|true|checked)\.?", str(answer.value or "").strip(), re.I)
+        return bool(affirmative) or topic(field["label"]) != "prior_employment"
+
     def _invalid(self, field, reason, blocker="model_output"):
         return Answer(
             field_id=field["id"],
@@ -163,6 +186,11 @@ class ValidateMixin:
         ):
             valid_evidence = False
         if "fact:compensation_choice_policy" in a.evidence_ids and NOT_DESIRED.search(field["label"]):
+            valid_evidence = False
+        if self.relationship_evidence_misused(field, a, scoped_items):
+            # The applicant's "my employment history is complete" attestation answered "Yes" to "Do you use
+            # Duolingo?" and to "have you ever been a contractor for the Federal Reserve?" (2026-10-26). A fact about
+            # past employers supports only a question about the applicant's own past employment, and never a Yes.
             valid_evidence = False
         if HISTORY_DATE_PART.fullmatch(field["label"]) and AVAILABILITY_FACTS & set(a.evidence_ids):
             # A row's "Start Date Month" is that record's date, never the applicant's availability: an Oracle education
