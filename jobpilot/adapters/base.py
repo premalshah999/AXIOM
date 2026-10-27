@@ -221,6 +221,14 @@ LOCKED = re.compile(
     r"can'?t (?:log|sign) ?in right now|(?:due to|after) (?:\w+ )?(?:unsuccessful|failed) (?:log.?in|sign.?in) attempts",
     re.I,
 )
+# A lock that a password reset lifts. Auth0's brute-force block (iCIMS Central) is cleared by changing the password, and
+# its page says so: "... after multiple consecutive login attempts. Reset your password to unblock your account".
+RESET_UNLOCKS = re.compile(
+    r"reset(?:ting)? (?:your |the )?password to (?:unblock|unlock)|"
+    r"(?:unblock|unlock) (?:it|your account) by (?:resetting|changing) (?:your |the )?password|"
+    r"blocked after (?:multiple|several|too many) consecutive (?:log.?in|sign.?in) attempts",
+    re.I,
+)
 PASSWORD_RULES = re.compile(
     r"password (?:must|should|needs to|requirements)|at least \d+ characters|must contain|not meet.{0,40}requirements",
     re.I,
@@ -1867,6 +1875,14 @@ class Adapter:
         self.release_mail()
         if outcome == "locked":
             self.accounts.mark(url, "locked", credentials, error=detail[:200])
+            fresh = await self.form.scan()
+            said = " ".join(fresh.get("errors", [])) + " " + str(fresh.get("text", ""))
+            if RESET_UNLOCKS.search(said) and any(FORGOT.search(b["label"]) for b in fresh["controls"]):
+                # Brute-force protection that a new password lifts: iCIMS Central "Your account has been blocked after
+                # multiple consecutive login attempts. Reset your password to unblock your account" (By Light,
+                # 2026-10-24..27). Parked as "locked", every later run met the same block and nothing ever reset it.
+                self.emit("auth", "The employer unblocks the account through a password reset; resetting it")
+                return await self.recover(fresh, detail)
             return self.defer(
                 "The employer locked the account after failed sign-ins: " + detail,
                 state="waiting_browser",
