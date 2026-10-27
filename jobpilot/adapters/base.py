@@ -8,6 +8,7 @@ import re
 from ..db import now
 import time
 from collections import Counter
+from datetime import UTC, datetime
 from enum import StrEnum
 from urllib.parse import urljoin, urlsplit
 
@@ -229,6 +230,10 @@ SEARCH_RADIUS = re.compile(r"\s*(?:distance|radius|within)\s*:?\s*", re.I)
 
 # A reset whose email has not come within this time is unanswered: the employer mails within seconds when it can.
 UNANSWERED_RESET_SECONDS = 600
+# Owner 2026-10-27: password resets through the mailbox are always allowed. A reset that went unanswered or was refused
+# is requested again after this long instead of waiting for the owner, and the per-employer caps count one day only.
+RESET_RETRY_SECONDS = 6 * 3600
+RESET_WINDOW_SECONDS = 24 * 3600
 PASSWORD_UNKNOWN = (
     "This employer has an account for your email but refuses the saved password, and its password reset email never "
     "arrives. Reset the password in your own browser, then save it under Setup > Accounts"
@@ -2007,10 +2012,21 @@ class Adapter:
             and record.get("reset_requested_at")
             and time.time() - float(record["reset_requested_at"]) > UNANSWERED_RESET_SECONDS
         )
+        recent = time.time() - float(record.get("reset_requested_at") or 0) < RESET_WINDOW_SECONDS
+        if record.get("state") == "password_unknown" and not unanswered:
+            since = str(record.get("password_unknown_at") or "")
+            try:
+                waited = (datetime.now(UTC) - datetime.fromisoformat(since)).total_seconds() if since else 0
+            except ValueError:
+                waited = 0
+            if waited > RESET_RETRY_SECONDS:
+                self.emit("auth", "Requesting this employer's password reset again (resets are always allowed)")
+                record = {**record, "state": "credentials_rejected", "reset_requested_at": 0, "reset_unconfirmed": 0}
+                recent = False
         if (unanswered or record.get("state") == "password_unknown") and not reset_proven(record):
             # The silence proves nothing when the employer never confirmed the request (reset_proven): request it again,
-            # up to UNCONFIRMED_RESETS times.
-            if record.get("reset_unconfirmed", 0) >= UNCONFIRMED_RESETS:
+            # up to UNCONFIRMED_RESETS times a day.
+            if record.get("reset_unconfirmed", 0) >= UNCONFIRMED_RESETS and recent:
                 return self.defer(
                     RESET_UNCONFIRMED,
                     [{"question": RESET_UNCONFIRMED, "options": [], "key": "manual", "reason": detail[:200]}],
@@ -2067,7 +2083,7 @@ class Adapter:
                 state="waiting_browser",
                 blocker_type="email_wait",
             )
-        if record.get("resets", 0) >= 3:
+        if record.get("resets", 0) >= 3 and recent:
             return self.defer(
                 "Password resets for this employer are exhausted; sign in manually once",
                 manual,

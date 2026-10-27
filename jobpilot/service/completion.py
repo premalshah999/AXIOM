@@ -10,6 +10,13 @@ from ..run_trace import phase_timing
 from .states import TERMINAL
 
 # Parked states an application can be in when the owner finishes it by hand.
+# A code sent to the applicant's phone ("SMS verification", "we texted a code to your mobile"); a "Phone Number is
+# required" field error is not one.
+PHONE_OTP = re.compile(
+    r"\bsms\b.{0,40}(?:code|verif)|(?:sms|text message|phone|mobile) (?:code|verification|one.time)|"
+    r"(?:sent|texted)\b.{0,40}\bto your (?:phone|mobile)",
+    re.I,
+)
 OWNER_FINISHABLE = {"waiting_browser", "waiting_email", "waiting_answer", "needs_review", "timed_out", "paused"}
 
 
@@ -103,6 +110,17 @@ class CompletionMixin:
                     s.add(Setting(key="job_control:" + run.job_id, value=value))
                 if job:
                     job.status = "archived"
+            if state in {"waiting_browser", "needs_review", "waiting_email"} and PHONE_OTP.search(
+                str(result.get("reason") or "")
+            ):
+                # Owner rule (2026-10-27): an application that needs a code sent to the phone is closed; nobody can
+                # read it (Lumen's Eightfold SMS step waited for the owner).
+                state = "closed"
+                result = {
+                    **result,
+                    "state": "closed",
+                    "reason": "The employer requires a phone (SMS) verification code; such applications are closed",
+                }
             if state in {"needs_review", "waiting_answer"} and result.get("reviews"):
                 from ..answers import protected_status_missing, residence_outside
 

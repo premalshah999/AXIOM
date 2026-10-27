@@ -385,9 +385,9 @@ PERSIST_ATS = {
     "greenhouse", "ashby",
 }
 PERSIST_SKIP = re.compile(
+    # Owner 2026-10-27: refused passwords and missing verification emails are retried (resets are always allowed).
     r"captcha|security check|\bsms\b|employer already has|closed|no longer available|identity conflict|"
     r"person not found|archiv|social security|already applied|clearance|polygraph|model budget|"
-    r"verification email|refuses the saved password|"
     # By Light (iCIMS 2026-10-27) was retried twice after the employer locked the account: each try extends a lock.
     r"account has been (?:blocked|locked)|locked the account|account is locked|two-step verification",
     re.I,

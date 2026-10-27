@@ -147,10 +147,20 @@ async def test_standing_protection_marks_the_failure_handled(service, monkeypatc
 def test_transport_keeps_tier_reasoning_despite_global_override(service):
     from jobpilot.models import MeteredTransport
 
-    service.db.set_setting("model_reasoning", {"deepseek_thinking": "disabled"})
-    cfg = service.config.model_copy(update={"llm_provider": "deepseek"})
+    service.db.set_setting("model_reasoning", {"mimo_thinking": "disabled"})
+    cfg = service.config.model_copy(update={"llm_provider": "mimo"})
     assert MeteredTransport(service.db, cfg, None, thinking="disabled", tier=1).thinking == "disabled"
     assert MeteredTransport(service.db, cfg, None, thinking="disabled", tier=2).thinking == "enabled"
+
+
+def test_deepseek_never_reasons_at_any_tier_or_override(service):
+    # Owner 2026-10-27: DeepSeek is used without its reasoning mode.
+    from jobpilot.models import MeteredTransport
+
+    service.db.set_setting("model_reasoning", {"deepseek_thinking": "enabled", "thinking": "enabled"})
+    cfg = service.config.model_copy(update={"llm_provider": "deepseek"})
+    for tier in (1, 2, 3):
+        assert MeteredTransport(service.db, cfg, None, thinking="enabled", tier=tier).thinking == "disabled"
 
 
 def test_tier_one_is_the_cheap_engine_and_higher_tiers_use_the_agent(service):

@@ -29,16 +29,25 @@ async def test_an_unanswered_reset_marks_the_password_unknown(service, minutes_a
     assert (value.accounts.record(URL)["state"] == "password_unknown") is stops
 
 
-async def test_a_password_unknown_account_stops_without_another_reset(service):
+@pytest.mark.parametrize("hours_ago,waits", [(1, True), (7, False)])
+async def test_a_password_unknown_account_waits_then_resets_again(service, hours_ago, waits):
+    """Owner 2026-10-27: resets through the mailbox are always allowed; a recent unanswered one waits, an old one is
+    requested again, and the autopilot keeps retrying the job."""
+    from datetime import UTC, datetime, timedelta
+
     obs = observation(URL)
     value = adapter(service, obs)
+    since = (datetime.now(UTC) - timedelta(hours=hours_ago)).isoformat()
     value.accounts.mark(URL, "password_unknown", {"email": "alex@example.test", "password": "Synthetic9!x"},
-                        reset_submitted_at=CONFIRMED)
+                        reset_submitted_at=CONFIRMED, password_unknown_at=since)
     value.defer = lambda reason, *a, **k: {"state": k.get("state"), "reason": reason}
     value.config.account_password_reset = True
+    from types import SimpleNamespace
+
+    value.inbox = SimpleNamespace(configured=False)  # the reset path ends at its mailbox guard here
     result = await Adapter.recover(value, obs, "Signing in did not succeed")
-    assert result == {"state": "waiting_browser", "reason": PASSWORD_UNKNOWN}
-    assert PERSIST_SKIP.search(PASSWORD_UNKNOWN)
+    assert (result == {"state": "waiting_browser", "reason": PASSWORD_UNKNOWN}) is waits
+    assert not PERSIST_SKIP.search(PASSWORD_UNKNOWN)
 
 
 async def test_successfactors_creates_the_account_once_after_an_unanswered_reset(service, monkeypatch):

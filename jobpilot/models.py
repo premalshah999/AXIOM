@@ -157,8 +157,10 @@ async def model_deadline(timeout):
 
 def effective_thinking(db, config, thinking=None):
     """Apply the selected provider's runtime preference even to older callers."""
-    if config.llm_provider in {"haiku", "openai"}:
-        return "disabled"  # OpenAI's effort is its own parameter (openai_reasoning_effort), not a thinking switch.
+    if config.llm_provider in {"haiku", "openai", "deepseek"}:
+        # OpenAI's effort is its own parameter (openai_reasoning_effort), not a thinking switch. DeepSeek never reasons
+        # (owner 2026-10-27): its non-thinking mode answers as well here and keeps the cached prefix cheap.
+        return "disabled"
     override = db.get_setting("model_reasoning", {}) or {}
     provider_preference = override.get(config.llm_provider + "_thinking")
     if provider_preference in {"enabled", "disabled"}:
@@ -190,7 +192,7 @@ class MeteredTransport(httpx.AsyncBaseTransport):
         self.db, self.config, self.run_id, self.tier = db, config, run_id, tier
         self.inner = inner or httpx.AsyncHTTPTransport(retries=0)
         self.thinking = effective_thinking(db, config, thinking)
-        if tier >= 2 and config.llm_provider in {"deepseek", "mimo"}:
+        if tier >= 2 and config.llm_provider == "mimo":
             # A failed application's stronger runner reasons even where the global
             # default is reasoning off (that override applies to tier 1).
             self.thinking = "enabled"

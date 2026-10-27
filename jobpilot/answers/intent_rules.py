@@ -53,6 +53,17 @@ class IntentRulesMixin:
                 return None  # The saved facts are about the US; another country needs interpretation.
             if "desired_salary" in keys and NOT_DESIRED.search(f["label"]):
                 return None  # "Current/previous salary" is a different fact.
+            stance = self.answer_rules.salary_stance.strip()
+            if (
+                "desired_salary" in keys
+                and f.get("type") in {"text", "textarea"}
+                and not f.get("options")
+                and re.search(r"\brange\b", f["label"], re.I)
+                and len(re.findall(r"\d[\d,]{3,}", stance)) == 2
+            ):
+                # A question for the range itself gets the owner's range (owner 2026-10-27: 90,000-120,000; M3 USA
+                # asked "the yearly salary range you are targeting in USD").
+                return self._ans(f, stance, ["policy:compensation_choice"])
             if "government_employment_history" in keys and re.search(
                 r"family|relative|spouse|dependent", f["label"], re.I
             ):
