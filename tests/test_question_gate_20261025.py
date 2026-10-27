@@ -73,6 +73,10 @@ def test_an_agency_question_is_answered_from_the_direct_application(service):
     asked = resolver.local({"id": "a", "type": "radio", "required": True, "options": ["Yes", "No"],
                             "label": "Have you spoken to any recruiters/agencies that have presented opportunities?"})
     assert asked.value == "No"
+    search = resolver.local({"id": "s", "type": "radio", "required": True, "options": ["Yes", "No"],
+                             "label": "Has a search agency submitted your application for consideration within the "
+                                      "last 12 months?"})
+    assert search.value == "No"  # Vanguard 2026-10-27
     without_policy = Resolver(Profile(first_name="Alex"), service.db, service.config,
                               job={"ats": "workday", "url": "https://example.test/j"})
     assert without_policy.local({"id": "l", "label": "Please list recruiter/agency you've spoken with.",

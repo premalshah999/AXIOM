@@ -68,8 +68,9 @@ LANGUAGE_NAME = re.compile(
 # A recruiter or staffing agency that presented this employer's opportunities ("Have you spoken to any
 # recruiters/agencies...", "Please list recruiter/agency you've spoken with").
 RECRUITER_AGENCY = re.compile(
-    r"recruiters?\s*/\s*agenc(?:y|ies)|recruit(?:er|ing) (?:firm|agenc(?:y|ies))|staffing (?:firm|agenc(?:y|ies))|"
-    r"(?:third.party|external|agency) recruiters?",
+    # Vanguard (Workday 2026-10-27): "Has a search agency submitted your application ... within the last 12 months?"
+    r"recruiters?\s*/\s*agenc(?:y|ies)|(?:recruit(?:er|ing)|staffing|search|employment|placement|third.party) "
+    r"(?:firm|agenc(?:y|ies))|(?:third.party|external|agency) recruiters?",
     re.I,
 )
 

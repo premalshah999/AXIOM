@@ -73,3 +73,20 @@ def test_the_self_identification_date_inside_the_forms_own_section_is_today():
     row = [{"id": "x", "label": "Date", "type": "combobox", "section": "Work Experience", "group": "", "options": []}]
     label_signature_date(row, "Voluntary Self-Identification of Disability")
     assert row[0]["label"] == "Date"
+
+
+def test_a_typed_signature_page_dates_its_bare_date_today(service):
+    """Hyundai (SuccessFactors) 2026-10-27: "Typed Signature" then a bare "Date"; today's date was refused."""
+    fields = [{"id": "s", "label": "Typed Signature", "type": "text", "section": "", "group": "", "options": []},
+              {"id": "t", "label": "Date:", "type": "text", "section": "", "group": "", "options": []}]
+    label_signature_date(fields, "I certify the above. Typed Signature Date:")
+    assert fields[1]["label"] == "Today's date"
+    r = Resolver(Profile(name="Alex Doe"), service.db, service.config)
+    today = datetime.now(ZoneInfo(service.config.timezone)).date()
+    assert r.local({**fields[1], "required": True, "value": "", "valid": True}).value == today.strftime("%m/%d/%Y")
+    unsigned = [{"id": "t", "label": "Date", "type": "text", "section": "", "group": "", "options": []}]
+    label_signature_date(unsigned, "Tell us about yourself. Date")
+    assert unsigned[0]["label"] == "Date"
+    parts_on_signed = parts()
+    label_signature_date(parts_on_signed, "Electronic Signature")
+    assert [f["label"] for f in parts_on_signed] == ["Month", "Day", "Year"]  # bare parts stay a self-ID rule

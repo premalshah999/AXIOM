@@ -80,6 +80,11 @@ def name_phone_numbers(fields):
 
 
 SELF_ID_FORM = re.compile(r"self-identification|\bCC-305\b|\bVEVRAA\b", re.I)
+# A page the applicant signs by typing: its one bare "Date" is the signature's date (Hyundai's SuccessFactors "Typed
+# Signature" then "Date", 2026-10-27: today's date was refused as unsupported and the run stalled).
+SIGNED_PAGE = re.compile(
+    r"\b(?:typed|electronic|e-|digital) signature\b|\bsignature of (?:the )?applicant\b|\bapplicant.?s signature\b", re.I
+)
 HISTORY_SCOPE = re.compile(r"experience|employment|education|work history|school|degree", re.I)
 
 
@@ -145,10 +150,11 @@ def label_signature_date(fields, text):
     three controls under a "Date" caption the scanner does not attach: bare Month, Day and Year (DecisionPoint, iCIMS,
     2026-10-21; the run stopped as "Required application facts are missing: Month; Day; Year"). On such a page they
     are today's date."""
-    if not SELF_ID_FORM.search(text or ""):
+    self_id = bool(SELF_ID_FORM.search(text or ""))
+    if not (self_id or SIGNED_PAGE.search(text or "")):
         return
     parts = [f for f in fields if f["label"].strip() in {"Month", "Day", "Year"} and not f.get("section") and not f.get("group")]
-    if {f["label"].strip() for f in parts} == {"Month", "Day", "Year"}:
+    if self_id and {f["label"].strip() for f in parts} == {"Month", "Day", "Year"}:
         for f in parts:
             f["label"] = f"Today's date ({f['label'].strip()})"
     # Micron's Eightfold form (2026-10-22) dates it with one bare "Date" box behind a calendar (role=combobox): read as
@@ -157,7 +163,7 @@ def label_signature_date(fields, text):
     dates = [
         f
         for f in fields
-        if f["label"].strip() == "Date"
+        if re.fullmatch(r"\*?\s*Date\s*:?\s*\*?", f["label"].strip())
         and not HISTORY_SCOPE.search(" ".join(str(f.get(k) or "") for k in ("section", "group")))
     ]
     if len(dates) == 1 and dates[0]["type"] in {"text", "date", "combobox"} and not dates[0].get("options"):
@@ -379,7 +385,9 @@ ENTRY = re.compile(
     r"continue application|i.m interested|apply manually|autofill with resume)$",
     re.I,
 )
-AUTH = re.compile(r"password|verification code|one.time|authentication code|security code", re.IGNORECASE)
+# A sign-in or code field. "password" is a word: "Why 1Password?" (1Password's own question, Ashby 2026-10-27) was
+# taken for a sign-in field, never answered, and every run stopped as "Employer sign-in must complete".
+AUTH = re.compile(r"\bpasswords?\b|verification code|one.time|authentication code|security code", re.IGNORECASE)
 BACK_STEP = re.compile(r"^(?:back|previous|go back)(?: step)?$", re.I)
 RESUME = re.compile(r"r[eé]sum[eé]|cv\b|curriculum", re.IGNORECASE)
 # A submit is live only if rendered, enabled, and not inside an inert/hidden/aria-hidden ancestor.

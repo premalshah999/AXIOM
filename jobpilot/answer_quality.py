@@ -28,7 +28,7 @@ NARRATIVE = re.compile(
     r"why\b|cover.?letter|motivat|describe|description|tell us|achievement|accomplish|experience with|responsibilit|duties",
     re.I,
 )
-SECRET = re.compile(r"password|one.?time|verification code|authentication code|security code", re.I)
+SECRET = re.compile(r"\bpasswords?\b|one.?time|verification code|authentication code|security code", re.I)
 
 
 class QualityCorrection(BaseModel):
