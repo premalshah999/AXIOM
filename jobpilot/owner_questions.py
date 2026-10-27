@@ -219,6 +219,9 @@ def defect(question, options=(), context=None, reason=""):
         return "The field was read without the question or history row it belongs to"
     if options and not choices(options):
         return "The list's options were never loaded"
+    if re.fullmatch(r"field[\s_-]*\d+", text, re.I):
+        # Rippling's "field-44" / "field-113" (2026-10-27): the question's own text was never read.
+        return "The field was read by its id, without its question"
     if EMPLOYER_ENTITY_FOLLOWUP.search(text) and choices(options):
         return "A follow-up to prior employment with this employer, which the applicant never had"
     if re.search(r"\bcurrent (?:role|job|position)\b.{0,40}\bno end date\b", str(reason or ""), re.I):

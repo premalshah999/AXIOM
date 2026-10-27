@@ -16,6 +16,14 @@ from ..runtime import engine_version
 REPAIR_ACCOUNT = re.compile(r"\baccount\b|sign[ -]?in|log ?in", re.I)
 
 
+# Questions only a resident of another country can answer: NerdWallet's "What province in Canada will you be working
+# from?", a South African province, India's PAN or Aadhaar, pay "in INR" (2026-10-27). The applicant lives in the US.
+FOREIGN_POSTING = re.compile(
+    r"\bprovince in (?:canada|south africa|china|the philippines|india)\b|\b(?:canadian|south african) province\b"
+    r"|\baadh?aa?r\b|\bpan card\b|\bin (?:inr|cad|zar|gbp|eur|php)\b|\(inr\)|\bcnic\b|\bnric\b",
+    re.I,
+)
+
 class ReviewsMixin:
     @staticmethod
     def review_kind(question):
@@ -377,11 +385,20 @@ class ReviewsMixin:
                 continue
             options, context, profile = options or [], context or {}, (packet or {}).get("profile") or {}
             outside = residence_outside(question, options, profile.get("facts"), profile.get("location", ""))
+            from ..sensitive_ids import sensitive_field
+
+            identifier = sensitive_field({"type": "text", "label": oq.tidy(question)})
             closing = (
                 f"The employer hires only in its listed locations, and the applicant lives in {outside}"
                 if outside
                 else "The role is open only to U.S. citizens, permanent residents, refugees or asylees"
                 if protected_status_missing(question, options, profile.get("facts"))
+                # Owner rule (2026-10-13): no application where a government or bank identifier is asked. Lowe's,
+                # BCBST and Maersk asked for an SSN or PAN in questions created after the run (2026-10-27).
+                else f"The application asks for a {identifier.replace('_', ' ')}; jobs that ask are dropped (owner rule)"
+                if identifier
+                else "The role is in another country (its form asks for that country's province, documents or pay)"
+                if FOREIGN_POSTING.search(oq.tidy(question))
                 else None
             )
             problem = None if closing else oq.defect(question, options, context, reason or "")

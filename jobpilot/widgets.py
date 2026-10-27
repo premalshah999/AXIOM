@@ -1518,6 +1518,13 @@ async def _rcm_all_pages(el, state):
     return state
 
 
+# Words that name a kind of institution or place, not this one: a catalog search on them returns hundreds of entries.
+CATALOG_GENERIC_WORDS = {
+    "university", "college", "institute", "institution", "school", "academy", "state", "community", "technical",
+    "technology", "polytechnic", "national", "international", "center", "centre", "campus", "department", "faculty",
+}
+
+
 def _rcm_match(text, targets, options):
     wanted = {norm(t) for t in targets}
     exact = next((o for o in options if norm(o["text"]) in wanted), None)
@@ -1542,8 +1549,14 @@ async def _rcm_owned_select(frame, el, text, targets, base, longest, full_list_o
     if not pick and choose and options and (complete or full_list_only):
         chosen = await choose([o["text"] for o in options])
         pick = next((o for o in options if o["text"] == chosen), None) if chosen else None
-    if not pick and not complete and not full_list_only:
-        word = max(re.findall(r"[A-Za-z]{4,}", longest) or [longest[:4]], key=len)
+    # The search word is the answer's most distinctive word: "University" (the longest) matched hundreds of schools at
+    # Hyundai (2026-10-27) and "University of Maryland, College Park" never loaded; "Maryland" finds it.
+    words = sorted(
+        (w for w in dict.fromkeys(re.findall(r"[A-Za-z]{4,}", longest)) if w.lower() not in CATALOG_GENERIC_WORDS),
+        key=len,
+        reverse=True,
+    ) or [max(re.findall(r"[A-Za-z]{4,}", longest) or [longest[:4]], key=len)]
+    for word in words[:2] if not pick and not complete and not full_list_only else []:
         before = [o["id"] for o in state["options"]]
         await el.fill("")
         await el.press_sequentially(word, delay=30)
@@ -1558,6 +1571,8 @@ async def _rcm_owned_select(frame, el, text, targets, base, longest, full_list_o
         if not pick and choose and options:
             chosen = await choose([o["text"] for o in options])
             pick = next((o for o in options if o["text"] == chosen), None) if chosen else None
+        if pick:
+            break
     if not pick:
         try:
             await el.press("Escape", timeout=1000)

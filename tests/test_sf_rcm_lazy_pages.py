@@ -75,3 +75,12 @@ async def test_a_disabled_dependent_list_is_refused_at_once(page):
     with pytest.raises(ValueError, match="earlier answer"):
         await widgets._rcm_paginated(page.main_frame, el, "Yes")
     assert time.monotonic() - started < 1
+
+
+SCHOOLS = [f"University of Somewhere {i:04d}" for i in range(1200)] + ["University of Maryland, College Park"]
+
+
+async def test_a_school_beyond_the_loaded_pages_is_searched_by_its_distinctive_word(page):
+    # Hyundai (2026-10-27): the search used "University", the longest word, and matched every school.
+    el, got, took = await timed(page, SCHOOLS, "University of Maryland, College Park")
+    assert got == "University of Maryland, College Park"

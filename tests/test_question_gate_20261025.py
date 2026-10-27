@@ -165,3 +165,20 @@ def test_an_end_date_the_page_demands_for_the_current_role_is_never_an_owner_que
     assert answer.disposition == "answer" and answer.value == date.today().strftime("%B")
     assert not current_role_end_date(resolver, current)
     assert not current_role_end_date(resolver, past)
+
+
+async def test_identifier_and_foreign_posting_questions_close_and_field_ids_reopen(service):
+    # 2026-10-27: Lowe's asked for the last 4 digits of an SSN, NerdWallet for a Canadian province and Rippling showed
+    # "field-44" as a question; none is the owner's to answer.
+    jobs = {name: add_job(service, name) for name in ("ssn", "canada", "fieldid")}
+    with service.db.exclusive() as s:
+        for run_id in jobs.values():
+            s.get(Run, run_id).packet = {"profile": {"first_name": "Alex"}}
+    add_review(service, "q-ssn", jobs["ssn"], "What are the last 4 digits of your Social Security Number (SSN)?")
+    add_review(service, "q-canada", jobs["canada"], "What province in Canada will you be working from?")
+    add_review(service, "q-field", jobs["fieldid"], "field-44")
+    await service.revalidate_open_questions()
+    with service.db.session() as s:
+        assert s.get(Run, jobs["ssn"]).state == "closed" and "dropped" in s.get(Run, jobs["ssn"]).reason
+        assert s.get(Run, jobs["canada"]).state == "closed"
+        assert s.get(Run, jobs["fieldid"]).state == "waiting_browser"
