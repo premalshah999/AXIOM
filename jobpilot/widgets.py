@@ -2099,7 +2099,13 @@ async def sdf_select(frame, el, value, choose=None):
     host's own selection back."""
     items = await el.evaluate(SDF_ITEMS_JS)
     texts = [text for _, text in items if text and not placeholder_option(text)]
-    target = (best_option([{"text": t, "disabled": False} for t in texts], value) or {}).get("text")
+    offered = [{"text": t, "disabled": False} for t in texts]
+    target = (best_option(offered, value) or {}).get("text")
+    for alias in sorted(_alias_group(value) - {norm(value)}, key=len, reverse=True):
+        # A profile's "MD" for State's "Maryland", "Mobile" for Phone Type's "Cell" (Midco 2026-10-27).
+        if target:
+            break
+        target = (best_option(offered, alias) or {}).get("text")
     if target is None and choose:
         target = await choose(texts)
     if not target:

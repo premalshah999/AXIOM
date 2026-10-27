@@ -39,5 +39,5 @@ async def test_an_sdf_select_is_a_field_and_commits_its_item(page):
     field = next(f for f in data["fields"] if f.get("widget") == "sdf-select")
     assert field["label"].startswith("State") and field["required"] is True
     assert field["options"] == ["Alabama", "Maryland", "Virginia"] and field["value"] == ""
-    assert await widgets.sdf_select(page.main_frame, page.locator("#state"), "Maryland") == "Maryland"
+    assert await widgets.sdf_select(page.main_frame, page.locator("#state"), "MD") == "Maryland"  # the profile holds "MD"
     assert await page.evaluate("document.getElementById('state').value") == "MD"
