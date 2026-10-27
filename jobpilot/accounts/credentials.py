@@ -99,6 +99,11 @@ class Accounts:
             return False
         if frame == job or registrable(frame) == registrable(job):
             return True
+        name = registrable(frame).split(".")[0]
+        if len(name) >= 4 and name == registrable(job).split(".")[0]:
+            # The employer's own name under another domain: Amazon's amazon.jobs signs candidates in on
+            # atozpublic.idprism-auth.amazon.com, where its reset code was refused as "an unexpected website" (2026-10-27).
+            return True
         if host_matches(job, AUTH_HOSTS.get(ats, [])) and employer_domain_of_tenant(job, frame):
             return True
         return host_matches(frame, AUTH_HOSTS.get(ats, []))
