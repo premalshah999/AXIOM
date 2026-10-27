@@ -261,7 +261,7 @@ async def test_poll_finds_unbranded_code_when_sole_open_request(service):
         assert service.mail.vault.open(row.payload)["value"] == "483921"
 
 
-async def test_poll_does_not_widen_search_with_overlapping_requests(service):
+async def test_poll_never_takes_a_nameless_code_with_overlapping_requests(service):
     _, run, rule = await configured(service)
     request = service.mail.begin(run["id"], rule, "alex@example.test", "code")
     with service.db.session() as session:
@@ -282,8 +282,10 @@ async def test_poll_does_not_widen_search_with_overlapping_requests(service):
     await service.mail.poll_once()
     with service.db.session() as session:
         row = session.get(MailChallenge, request["id"])
+        # The widened search may read it (2026-10-27), but a code naming no employer is never taken while windows
+        # overlap.
         assert row.state == "pending"
-        assert row.reason.startswith("Found 0 messages") or row.reason.startswith("No messages")
+        assert row.reason.startswith(("Found 0 messages", "No messages")) or "none matched" in row.reason
 
 
 def in_rule(body):
@@ -298,3 +300,16 @@ def test_auto_wait_takes_an_unlabeled_code_only_when_the_mail_has_no_link():
     with_link = body + " Or open https://careers.acme.test/verify?t=abc"
     result, _ = run_extract(in_rule(with_link), challenge(kind="auto"))
     assert not (result and result.get("kind") == "code")
+
+
+def test_with_several_windows_open_a_code_naming_only_this_employer_is_accepted():
+    # Hershey (2026-10-27): its code came from hersheys.com while a dozen retries had code windows open.
+    now = time.time()
+    ch = challenge(now=now, open_windows=[window("ch-1", now - 30, now + 30), window("ch-2", now - 30, now + 30)])
+    ch["peer_tokens"] = [["globex"]]
+    mine = unbranded("<p>Acme candidate account: your verification code is 482915</p>", received=now)
+    assert run_extract(mine, ch)[0] == {"kind": "code", "value": "482915"}
+    both = unbranded("<p>Acme and Globex: your verification code is 482915</p>", received=now)
+    assert run_extract(both, ch)[0] is None
+    nameless = unbranded("<p>Your verification code is 482915</p>", received=now)
+    assert run_extract(nameless, ch)[0] is None

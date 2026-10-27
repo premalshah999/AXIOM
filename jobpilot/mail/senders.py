@@ -9,15 +9,24 @@ GREENHOUSE_SENDERS = {"greenhouse.io", "us.greenhouse-mail.io", "eu.greenhouse-m
 
 # iCIMS wraps the buttons of its account mail in its own click tracker: Schwab's "Reset your password" button went
 # through clicks.icims.com and was rejected as token_format on every poll (2026-10-18/19).
-CLICK_TRACKERS = {"https://clicks.icims.com", "https://tracking.icims.com"}
+# ClearCompany's sign-in button goes through its own short-link domain clrco.com (Allen Institute 2026-10-27: refused as
+# token_format on every poll). Each tracker is trusted only for its own platform's rules.
+TRACKER_PLATFORMS = {
+    "https://clicks.icims.com": ("icims", "icims.com"),
+    "https://tracking.icims.com": ("icims", "icims.com"),
+    "https://clrco.com": ("clearcompany", "clearcompany.com"),
+}
+CLICK_TRACKERS = set(TRACKER_PLATFORMS)
 
 
 def tracker_allowed(link_origin, link_origins, platform=""):
-    """A tracker hop is followed only for iCIMS rules; open_link still lands only on the rule's own origins. iCIMS behind
-    an employer's own domain (Garmin's careers site, 2026-10-27) has no icims.com origin but is the same platform."""
-    return link_origin in CLICK_TRACKERS and (
-        platform == "icims" or any((urlsplit(o).hostname or "").endswith("icims.com") for o in link_origins)
-    )
+    """A tracker hop is followed only for its platform's rules; open_link still lands only on the rule's own origins.
+    iCIMS behind an employer's own domain (Garmin's careers site, 2026-10-27) has no icims.com origin but is the same
+    platform."""
+    if link_origin not in TRACKER_PLATFORMS:
+        return False
+    name, host = TRACKER_PLATFORMS[link_origin]
+    return platform == name or any((urlsplit(o).hostname or "").endswith(host) for o in link_origins)
 
 
 # SuccessFactors serves sign-in, reset and activation pages from SAP's own career hosts whatever the employer's branded

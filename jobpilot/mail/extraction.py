@@ -228,10 +228,9 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
                 continue
         if len(own) == 1:
             links.append(next(iter(own)))
-        elif not own and (
-            any((urlsplit(o).hostname or "").endswith("icims.com") for o in rule["link_origins"])
+        elif not own and any(
             # iCIMS behind the employer's own domain (Garmin's careers site, 2026-10-27) mails the same tracked button.
-            or challenge.get("ats") == "icims"
+            tracker_allowed(t, rule["link_origins"], challenge.get("ats", "")) for t in CLICK_TRACKERS
         ):
             # EBSCO 2026-10-21: "User account with EBSCO Information Services, LLC" carried its button only behind
             # iCIMS's click tracker, with no wording. The one tracker link that is not a footer link is the link; the
@@ -239,7 +238,9 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
             tracked = {
                 href
                 for href in plain
-                if _origin_or_none(href) in CLICK_TRACKERS and not FOOTER_TEXT.search(anchor_text.get(href, ""))
+                if _origin_or_none(href) in CLICK_TRACKERS
+                and tracker_allowed(_origin_or_none(href), rule["link_origins"], challenge.get("ats", ""))
+                and not FOOTER_TEXT.search(anchor_text.get(href, ""))
             }
             if len(tracked) == 1:
                 href = next(iter(tracked))
@@ -344,11 +345,23 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
         window for window in (challenge.get("open_windows") or []) if window[1] <= received <= window[2]
     ]
     single_window = len(covering) == 1 and covering[0][0] == challenge.get("id")
+    # Several windows open at once (a retry wave, 2026-10-27): the code is this window's when the mail names this
+    # employer (a tenant token in its sender name, subject or text) and no other open window's employer.
+    squashed = re.sub(r"[^a-z0-9]+", "", (" ".join(values.get("subject", []) + [senders[0][0], text])).casefold())
+
+    def names(tokens):
+        return any(len(t) >= 4 and t in squashed for t in tokens or [])
+
+    attributed = (
+        not single_window
+        and names(challenge.get("tenant_tokens"))
+        and not any(names(peer) for peer in challenge.get("peer_tokens") or [])
+    )
     unbranded_cue = bool(UNBRANDED_CODE_CUE.search(text))
     unbranded_ok = bool(
         challenge.get("open_windows") is not None
         and challenge["kind"] in {"code", "auto"}
-        and single_window
+        and (single_window or attributed)
         and unbranded_cue
         and not UNBRANDED_NOT_CODE.search(text)
         and not fallback_code

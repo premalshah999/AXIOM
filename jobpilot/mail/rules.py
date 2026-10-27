@@ -10,13 +10,20 @@ from ..db import MailRule
 from ..db import Mailbox
 from ..db import Run
 from ..db import record
-from ..email_alias import base_address
 from ..network import public_url
 from .constants import LIVE
 from .extraction import extract_message
 from .helpers import origin
 from .models import RuleInput
 from .senders import KNOWN_SENDERS
+
+
+def connected_mailbox(session, recipient):
+    """The connected mailbox that receives this address, a dotted or tagged alias included (email_alias.mailbox_key)."""
+    from ..email_alias import same_mailbox
+
+    boxes = session.scalars(select(Mailbox).where(Mailbox.state == "connected"))
+    return next((box for box in boxes if same_mailbox(box.email, recipient)), None)
 
 
 class RulesMixin:
@@ -115,9 +122,7 @@ class RulesMixin:
         if job.get("ats") not in known and not own_site:
             return None
         with self.db.session() as s:
-            box = s.scalar(
-                select(Mailbox).where(Mailbox.email == base_address(recipient), Mailbox.state == "connected")
-            )
+            box = connected_mailbox(s, recipient)
             if not box:
                 return None
             mailbox_id = box.id
@@ -141,9 +146,7 @@ class RulesMixin:
         if existing := self.rule_for(job["url"]):
             return existing
         with self.db.session() as s:
-            box = s.scalar(
-                select(Mailbox).where(Mailbox.email == base_address(recipient), Mailbox.state == "connected")
-            )
+            box = connected_mailbox(s, recipient)
             if not box:
                 return None
             mailbox_id = box.id

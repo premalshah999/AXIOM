@@ -16,7 +16,7 @@ class Accounts:
     States: created_locally (form submitted), authenticated, reset_requested, password_reset, locked."""
 
     def __init__(self, service, profile, job_url=""):
-        from ..email_alias import base_address
+        from ..email_alias import same_mailbox
 
         self.service, self.config, self.profile = service, service.config, profile
         configured = (self.config.account_email or "").strip().lower()
@@ -25,7 +25,7 @@ class Accounts:
         # platform's login. With ACCOUNT_EMAIL set to the base address, iCIMS kept signing in to the old Central
         # identity whose reset nobody could finish (0 of 19 eligible, 2026-10-18), while the form used the alias.
         aliased = bool(
-            configured and own and own != configured and base_address(own) == base_address(configured)
+            configured and own and own != configured and same_mailbox(own, configured)
         )
         self.email = own if aliased else (configured or own)
         self.store = AccountStore(service, self.email, job_url) if self.email else None

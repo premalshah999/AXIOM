@@ -3129,14 +3129,17 @@ class BrowserEngine:
         try:
             monitor = getattr(getattr(self, "form", None), "network", None)
             if getattr(self, "job", {}).get("ats") == "adp" and monitor and monitor.account_conflict():
-                # ADP holds this address in another kind of ADP account and offers only "an alternate mobile number or
-                # an email address"; Gmail variants of it are the same address to ADP (the googlemail.com alias failed
-                # identically, 2026-10-27). A phone code is closed under the owner's rule, so the application closes.
+                # ADP holds this address in another ADP account and asks for "an alternate mobile number or an email
+                # address". It folds plus-addresses and googlemail.com into it (2026-10-19, 2026-10-27); a dotted Gmail
+                # alias (profile ats_email_aliases {"adp": ".N"}) is the remaining distinct address for the same inbox.
                 self.result = {
-                    "state": "closed",
+                    "state": "waiting_browser",
                     "blocker_type": "account",
-                    "reason": "ADP holds this email in another ADP account (sign-in: Person Not Found 4040; registration: "
-                    "account exists 40014) and offers only a mobile-number sign-in; phone-code applications are closed",
+                    "recovery_cause": "account_identity_conflict",
+                    "reason": "ADP rejected sign-in as Person Not Found (4040) and registration as an existing account "
+                    "(40014) for " + str(getattr(self.form.resolver.profile, "email", "") or "this address")
+                    if getattr(getattr(self, "form", None), "resolver", None)
+                    else "ADP rejected sign-in as Person Not Found (4040) and registration as an existing account (40014)",
                 }
                 return True
             from .adapters.icims import ICIMS

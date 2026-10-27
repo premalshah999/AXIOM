@@ -47,10 +47,12 @@ class Inbox:
         with self.service.db.session() as s:
             query = select(Mailbox).where(Mailbox.state == "connected")
             if recipient:
-                from .email_alias import base_address
+                from .email_alias import same_mailbox
 
-                query = query.where(Mailbox.email == base_address(recipient))
-            box = s.scalar(query)
+                # A dotted or tagged alias reaches the same inbox (email_alias.mailbox_key).
+                box = next((b for b in s.scalars(query) if same_mailbox(b.email, recipient)), None)
+            else:
+                box = s.scalar(query)
             return box.id if box else None
 
     @property

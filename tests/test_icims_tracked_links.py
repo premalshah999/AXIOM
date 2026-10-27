@@ -135,3 +135,16 @@ def test_icims_on_the_employers_own_domain_trusts_its_tracked_button():
     mail = reset_mail(f'<p>Welcome.</p><a href="{TRACKED}">Click here</a> <a href="{FOOTER}">Privacy Policy</a>')
     assert extract_message(mail, rule, {**challenge(), "kind": "link", "ats": "icims"}) == {"kind": "link", "value": TRACKED}
     assert extract_message(mail, rule, {**challenge(), "kind": "link", "ats": "custom"}) is None
+
+
+def test_clearcompany_sign_in_link_behind_its_short_link_domain():
+    # Allen Institute (ClearCompany) 2026-10-27: "Sign-in link for your application" pointed at clrco.com.
+    rule = {"sender_domains": ["clearcompany.com"], "link_origins": ["https://apply.clearcompany.com"]}
+    link = "https://clrco.com/s/AbCdEf123"
+    msg = reset_mail(f'<p>Use this link to sign in.</p><a href="{link}">Sign in to your application</a>')
+    headers = msg["payload"]["headers"]
+    headers[0]["value"] = "Acme Institute <noreply@clearcompany.com>"
+    headers[2]["value"] = "mx.google.com; dkim=pass header.d=clearcompany.com; dmarc=pass header.from=clearcompany.com"
+    headers[-1]["value"] = "Sign-in link for your application at Acme Institute"
+    assert extract_message(msg, rule, {**challenge(), "kind": "link"}) == {"kind": "link", "value": link}
+    assert extract_message(msg, ICIMS_RULE, {**challenge(), "kind": "link"}) is None

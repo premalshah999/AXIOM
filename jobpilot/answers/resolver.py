@@ -202,14 +202,14 @@ class Resolver(
             value = ("true" if value else "false") if field["type"] == "checkbox" else yes_no(value)
         if not isinstance(value, (str, int, float)):
             return None
-        from ..email_alias import base_address
+        from ..email_alias import same_mailbox
 
         own = str(self.profile.email or "").strip()
         if (
             "@" in str(value)
             and own
             and own.lower() != str(value).strip().lower()
-            and (base_address(own) == base_address(str(value)))
+            and same_mailbox(own, str(value))
         ):
             # The run applies with a platform plus-address (iCIMS, see email_alias); the knowledge fact holds the base
             # mailbox. 0 of 17 iCIMS Email answers carried the alias on 2026-10-18 (REA map, icims.md risk 1).
@@ -562,14 +562,14 @@ class Resolver(
 
         ADP (Avalon, 2026-10-19): the Email fields came from knowledge and from saved confirmed answers, both holding
         the base mailbox, so registration hit the old identity (40014) although the run applied with +adp."""
-        from ..email_alias import base_address
+        from ..email_alias import same_mailbox
 
         own, text = str(self.profile.email or "").strip(), str(value).strip()
         if (
             own
             and re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", text)
             and text.lower() != own.lower()
-            and base_address(text) == base_address(own)
+            and same_mailbox(text, own)
         ):
             return own
         return value

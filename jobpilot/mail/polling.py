@@ -125,6 +125,14 @@ class PollingMixin:
                         )
                     )
                     c["open_windows"] = [(w.id, w.since, w.expires, w.kind) for w in windows]
+                    # Other open windows' employers: an unbranded code is attributed by name only when the mail names
+                    # this employer and none of theirs (extraction.extract_message).
+                    c["peer_tokens"] = []
+                    for w in windows:
+                        peer_run = s.get(Run, w.run_id) if w.id != c["id"] else None
+                        peer_job = s.get(Job, peer_run.job_id) if peer_run else None
+                        if peer_job and peer_job.id != (job.id if job else None):
+                            c["peer_tokens"].append(tenant_tokens(peer_job.url or "", peer_job.company or ""))
                     c["oracle_pod"] = oracle_pod(job.url) if job and job.ats == "oracle" else ""
                     c["oracle_peers"] = []
                     if job and job.ats == "oracle":
@@ -195,11 +203,11 @@ class PollingMixin:
                         continue
                     messages = list(listed.get("messages", []))
                     matches, rejections, rejected_origins, last_rejected = [], {}, set(), None
-                    if c["kind"] in {"code", "auto"} and len(c["open_windows"]) == 1:
-                        # Unbranded codes name neither employer nor domain, so the sender
-                        # filter above cannot find them. Search this recipient's window
-                        # for verification wording; extraction still requires the full
-                        # unbranded rule. Only when this is the sole open request.
+                    if c["kind"] in {"code", "auto"}:
+                        # Codes from a domain the rule does not know (Hershey's from hersheys.com for its career site
+                        # thehersheycompany.com, 2026-10-27) are not found by the sender filter above. Search this
+                        # recipient's window for verification wording; extraction accepts one only for the sole open
+                        # window or when it names this employer and no other open window's.
                         unbranded = await self.request(
                             c["mailbox_id"],
                             "/messages",
