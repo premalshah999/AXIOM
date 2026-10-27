@@ -355,3 +355,25 @@ async def test_an_existing_account_found_by_the_one_create_stays_password_unknow
     assert await flow.handle()
     assert form.clicked == ["signin"]
     assert flow.store.state(URL) == "password_unknown"
+
+
+async def test_an_unchanged_sign_in_form_with_forgot_password_resets_through_the_mailbox(service):
+    """Amazon (2026-10-27): the saved login was sent, the sign-in form came back with no message, and the account was
+    keyed under another host; the page's own "Forgot password?" is used instead of waiting for the owner."""
+    obs = {
+        "fields": _fields("Password"),
+        "controls": [{"id": "continue", "label": "Continue"}, {"id": "forgot", "label": "Forgot password?"}],
+        "errors": [],
+        "text": "",
+    }
+    flow, form, scope = _flow(service, obs)
+    flow.attempts.add((scope, False))
+    calls = []
+
+    async def recover(scope_, detail):
+        calls.append(detail)
+        return True
+
+    flow.recover_sign_in = recover
+    assert await flow.handle()
+    assert calls == ["The employer kept its sign-in form after the saved login was sent"]

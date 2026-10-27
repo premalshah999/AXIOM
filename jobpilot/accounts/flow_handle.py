@@ -254,8 +254,19 @@ class FlowHandleMixin:
             self.attempts.discard(signature)
             self.attempts.add(("password_rules", scope))
         if signature in self.attempts:
-            from ..adapters.base import BAD_CREDENTIALS
+            from ..adapters.base import BAD_CREDENTIALS, FORGOT
 
+            if (
+                not creating
+                and ("recover", scope) not in self.attempts
+                and any(FORGOT.search(b.get("label", "")) for b in obs.get("controls", []))
+            ):
+                # The saved login was sent and the sign-in form came back unchanged, with no message the page names
+                # (Amazon 2026-10-27: an account kept under another host, then locked by repeated sign-ins). Its own
+                # "Forgot password?" resets it through the mailbox (owner: resets are always allowed).
+                return await self.recover_sign_in(
+                    scope, "The employer kept its sign-in form after the saved login was sent"
+                )
             rejected = any(BAD_CREDENTIALS.search(error) for error in obs.get("errors", []))
             # Which switch condition held this run on Sign In (NetApp, Entergy, Farmers, L3Harris 2026-10-21 ended here
             # on a first application, with "Create an account" offered). Value-free.
