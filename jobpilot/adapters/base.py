@@ -2195,7 +2195,6 @@ class Adapter:
             unproven = (
                 not absent
                 and not record.get("confirmed_at")
-                and not record.get("absent_create_at")
                 and record.get("state") in {"reset_requested", "credentials_rejected"}
                 and reset_proven(record)
                 and time.time() - float(record.get("reset_requested_at") or 0) > UNANSWERED_RESET_SECONDS
@@ -2205,12 +2204,14 @@ class Adapter:
                 and self.accounts.may_create
                 and self.attempts["create"] == 0
             ):
-                if absent or unproven:
-                    self.accounts.mark(url, "password_unknown" if absent else "no_account",
-                                       self.accounts.saved(url) or credentials, absent_create_at=now())
-                    self.emit("account", "No reset email ever came, so this employer has no account for this email; "
-                              "creating one")
-                if await self.switch(obs, CREATE_LINK):
+                # Only spend the one registration attempt when a route was
+                # actually taken. Older runs set this flag even when no link
+                # existed, permanently blocking a later resume-first route.
+                if not record.get("absent_create_at") and await self.switch(obs, CREATE_LINK):
+                    if absent or unproven:
+                        self.accounts.mark(url, "password_unknown" if absent else "no_account",
+                                           self.accounts.saved(url) or credentials, absent_create_at=now())
+                        self.emit("account", "The reset went unanswered; opened the registration route once")
                     return None
                 if await self.first_time_route(obs, url, credentials):
                     return None

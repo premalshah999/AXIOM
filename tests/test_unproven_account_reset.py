@@ -47,15 +47,26 @@ async def test_an_unanswered_reset_for_an_account_never_seen_creates_it_once(ser
     value.switch.assert_not_awaited()
 
 
+async def test_missing_registration_route_does_not_spend_creation_attempt(service, monkeypatch):
+    value, obs = sign_in(service, monkeypatch, reset_requested_at=time.time() - 1200, reset_submitted_at=CONFIRMED)
+    value.switch = AsyncMock(return_value=False)
+    value.first_time_route = AsyncMock(return_value=False)
+    await value.on_sign_in(obs)
+    assert not value.accounts.record(URL).get("absent_create_at")
+
+
 @pytest.mark.parametrize(
     "record",
     [
-        {"reset_requested_at": time.time() - 120, "reset_submitted_at": CONFIRMED},  # still awaiting delivery
-        {"reset_requested_at": time.time() - 1200},  # the page never confirmed the request
+        {"reset_age": 120, "reset_submitted_at": CONFIRMED},  # still awaiting delivery
+        {"reset_age": 1200},  # the page never confirmed the request
         {"state": "authenticated"},  # this app signed in here before: the account exists
     ],
 )
 async def test_a_reset_that_proves_nothing_keeps_the_reset_path(service, monkeypatch, record):
+    record = dict(record)
+    if "reset_age" in record:
+        record["reset_requested_at"] = time.time() - record.pop("reset_age")
     value, obs = sign_in(service, monkeypatch, **record)
     await value.on_sign_in(obs)
     value.switch.assert_not_awaited()

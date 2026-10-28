@@ -98,3 +98,17 @@ async def test_the_route_is_taken_once_per_run(service, monkeypatch):
     await value.on_sign_in(obs)
     upload.assert_not_awaited()
     recover.assert_awaited()
+
+
+async def test_legacy_unused_create_flag_does_not_block_resume_first_route(service, monkeypatch):
+    import time
+
+    obs = page()
+    value, upload, recover = sign_in(service, monkeypatch, obs)
+    value.accounts.mark(URL, "reset_requested", LOGIN, reset_requested_at=time.time() - 1200,
+                        reset_submitted_at="2026-10-27T00:00:00+00:00",
+                        absent_create_at="2026-10-27T00:01:00+00:00")
+    assert await value.on_sign_in(obs) is None
+    upload.assert_awaited_once()
+    value.switch.assert_not_awaited()
+    recover.assert_not_awaited()
