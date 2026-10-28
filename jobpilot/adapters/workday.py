@@ -31,7 +31,8 @@ BACK_IDS = ("pageFooterBackButton", "bottom-navigation-back-button", "wd-Command
 ASSESSMENT_FORWARD = re.compile(r"\s*(?:next|continue|submit|finish|done|complete)\b.{0,30}", re.I)
 ASSESSMENT_RETURN = re.compile(r"\s*(?:return|back|go back) to (?:the |your )?(?:application|workday|job)\W*", re.I)
 ASSESSMENT_EXIT = re.compile(r"\blater\b|\bexit\b|\bcancel\b|\bquit\b|\bclose\b|\bwithout\b", re.I)
-TAX_CREDIT = re.compile(r"tax credit|work opportunity|\bwotc\b", re.I)
+# AT&T's step says only "This information is for tax purposes and will not be shared with AT&T" (2026-10-27).
+TAX_CREDIT = re.compile(r"tax credit|work opportunity|\bwotc\b|\bfor tax purposes\b", re.I)
 ADD = {
     "work": re.compile(r"^add(?: another)? work experience$|^add(?: another)? experience$", re.I),
     "education": re.compile(r"^add(?: another)? education$", re.I),

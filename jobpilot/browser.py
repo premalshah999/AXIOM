@@ -94,6 +94,15 @@ COMMIT_TRACKING = re.compile(
 # A page load the network refused once and may answer on a second try.
 NET_RETRY = re.compile(r"net::ERR_(?:CONNECTION_(?:CLOSED|RESET|TIMED_OUT)|NETWORK_CHANGED|TIMED_OUT|FAILED|EMPTY_RESPONSE)\b")
 NET_ERROR = re.compile(r"net::ERR_([A-Z_]+)")
+WORKDAY_FAILURE = re.compile(
+    r"something went wrong|unexpected (?:system )?error|session (?:has )?expired|"
+    r"system (?:is )?(?:temporarily )?unavailable|server error",
+    re.I,
+)
+WORKDAY_PAGE_ERROR = re.compile(r"error\W{0,5}page error", re.I)
+STEP_REQUIREMENT = re.compile(
+    r"\byou must\b|\bis required\b|\b(?:answer|complete) all required\b|\bplease (?:complete|enter|select|answer)\b", re.I
+)
 
 
 def current_role_end_date(resolver, field):
@@ -2764,12 +2773,14 @@ class BrowserEngine:
         if self.job.get("ats") != "workday" or self.armed:
             return False
         text = await self.page.locator("body").inner_text(timeout=3000)
-        if not re.search(
-            r"something went wrong|unexpected (?:system )?error|session (?:has )?expired|system (?:is )?(?:temporarily )?unavailable|server error|error[ -]page error",
-            text,
-            re.I,
-        ):
-            return False
+        if not WORKDAY_FAILURE.search(text):
+            if not (page_error := WORKDAY_PAGE_ERROR.search(text)):
+                return False
+            if STEP_REQUIREMENT.search(text[page_error.end() : page_error.end() + 300]):
+                # Workday's "Error - Page Error" also states what the step still requires: AT&T's "You must complete
+                # the assessment test to continue with your job application" (2026-10-27) read as a server error, and
+                # two draft restarts returned to the same untaken assessment. The step handles its requirement.
+                return False
         attempts = getattr(self, "workday_error_restarts", 0)
         if attempts >= 2:
             self.result = {
