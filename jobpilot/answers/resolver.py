@@ -35,6 +35,9 @@ from .text import normalize
 from .text import option_value
 from .text import yes_no
 
+# A repeated history row's group: Workday's "Education 2", "Work Experience 1", "Language 1".
+HISTORY_ROW = re.compile(r"(?:work experience|experience|education|employment|language)s?\s*\d+\b", re.I)
+
 
 class Resolver(
     DemographicRulesMixin,
@@ -401,6 +404,11 @@ class Resolver(
 
         if BARE_HISTORY_DATE.fullmatch(f.get("label", "")):
             return None  # One row's corrected "From Date" is not every row's (Supermicro 2026-10-27).
+        if f.get("history_kind") or HISTORY_ROW.match(f.get("group") or ""):
+            # A correction is saved by label and names no row. Lennar's (Workday, 2026-10-21) "School or University"
+            # fix for the first education row answered the second as well: four applications listed the master's school
+            # for the bachelor's degree. History rows are answered from the profile's own rows.
+            return None
         from ..repair_agent import MASKED_VALUE, YES_NO
 
         if MASKED_VALUE.search(str(fix.get("value", ""))):

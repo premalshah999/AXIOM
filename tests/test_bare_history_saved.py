@@ -25,3 +25,17 @@ def test_a_repair_correction_of_a_bare_from_date_is_not_reused(service):
                                                                      "url": "https://career4.successfactors.com/x"})
     answer = resolver.local(bare("From Date"))
     assert answer is None or answer.evidence_ids != ["repair:r"]
+
+
+def test_a_repair_correction_is_not_reused_across_history_rows(service):
+    # Lennar (Workday 2026-10-21): the fix "School or University" = the first row's school answered the second row too.
+    service.db.set_setting("repair_overrides:job-9", {"school or university": {
+        "label": "School or University", "value": "Example State University", "run_id": "r"}})
+    resolver = Resolver(Profile(), service.db, service.config, job={"id": "job-9", "ats": "workday",
+                                                                     "url": "https://acme.wd1.myworkdayjobs.com/x"})
+    for row in ({"group": "Education 2"}, {"group": "", "history_kind": "education"}):
+        field = {**bare("School or University"), "type": "prompt", **row}
+        answer = resolver.local(field)
+        assert answer is None or answer.evidence_ids != ["repair:r"]
+    # A question outside any history row still takes its checked correction.
+    assert resolver.repair_override({**bare("Preferred Name"), "label": "School or University"}).evidence_ids == ["repair:r"]
