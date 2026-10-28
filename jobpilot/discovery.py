@@ -241,7 +241,8 @@ def validate_classification(result, job, profile, eligibility=None):
     if boolean(facts.get("us_citizen")) is False:
         citizen = re.search(
             r"\b(?:must|requires?)\s+(?:be\s+)?(?:an?\s+)?(?:u\.?s\.?|united states)\s+citizen(?:ship)?\b|"
-            r"\b(?:u\.?s\.?|united states)\s+citizenship\s*,?\s*(?:(?:is|as)\s+)?required\b|"
+            # Collier Aerospace (2026-10-27) lists "US citizen (required)" among its qualifications.
+            r"\b(?:u\.?s\.?|united states)\s+citizen(?:ship)?\s*[,(]?\s*(?:(?:is|as)\s+)?required\b|"
             r"\b(?:u\.?s\.?|united states)\s+citizens\s+only\b",
             job.get("description", ""),
             re.I,
