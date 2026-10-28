@@ -240,6 +240,10 @@ def money_range(text):
     """(low, high) for "$80,000 - $100,000", "$300,000+" or "$300,000 or higher"; else None."""
     num = r"\$?\s*(\d{1,3}(?:,\d{3})+|\d+)\s*([kK])?"
     as_int = lambda n, k: int(n.replace(",", "")) * (1000 if k else 1)  # noqa: E731
+    # A yearly amount may say so: "$71,000 - $80,000/yr" (Versant, SmartRecruiters 2026-10-27), "USD 90,000 per year".
+    # An hourly or monthly rate is not a yearly salary and stays unread.
+    text = re.sub(r"^\s*(?:usd|us\$)\s*", "", str(text), flags=re.I)
+    text = re.sub(r"\s*(?:/\s*(?:yr|year|annum)|per (?:year|annum)|a year|annually|yearly|usd)\s*$", "", text, flags=re.I)
     if match := re.fullmatch(r"\s*" + num + r"\s*(?:-|\u2013|to)\s*" + num + r"\s*", str(text)):
         low, high = as_int(match[1], match[2]), as_int(match[3], match[4])
         if not match[2] and match[4] and low < 1000 <= high:

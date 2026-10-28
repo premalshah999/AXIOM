@@ -196,6 +196,19 @@ class PolicyRulesMixin:
             holding = holding or [o for o in options if (r := money_range(str(o))) and r[0] <= amount <= r[1]]
             if amount and holding:
                 return holding[0]
+            # No offered range holds the amount: the one inside the owner's stated range ("$90,000 - $120,000") nearest
+            # to it. Versant's menu (2026-10-27) was answered "$71,000 - $80,000/yr" by the model, below that range.
+            bounds = sorted(float(x.replace(",", "")) for x in re.findall(r"\d[\d,]{3,}", self.answer_rules.salary_stance or ""))
+            if amount and len(bounds) == 2:
+                ranges = [(o, r) for o in options if (r := money_range(str(o)))]
+                inside = [(o, r) for o, r in ranges if r[0] <= bounds[1] and r[1] >= bounds[0]]
+
+                def distance(r):
+                    top = r[1] if r[1] != float("inf") else r[0]
+                    return 0 if r[0] <= amount <= top else min(abs(r[0] - amount), abs(top - amount))
+
+                if inside:
+                    return min(inside, key=lambda pair: distance(pair[1]))[0]
         if phone_fields.is_phone_type({**f, "options": options}):
             return phone_fields.phone_type_option(options, getattr(p, "phone_type", "") or "")
         if topic(label) == "source" or INTENT_SOURCE.search(label):
