@@ -751,6 +751,36 @@ async def options_scroll(frame, opts):
         return True  # Unknown: keep the long-list search.
 
 
+async def popup_search_box(frame, scope):
+    """The search box of an open menu whose trigger is not itself editable: select2's ".select2-search__field" (its
+    aria-controls names the results list) or chosen's search input. None for any other menu. Avature's lookups are
+    select2 menus that load 100 rows and the rest only for a search (Electronic Arts' Country, 2026-10-27)."""
+    if not scope:
+        return None
+    token = "jp-search-" + str(time.monotonic_ns())
+    try:
+        found = await frame.evaluate(
+            """([scope, token]) => {
+              const list = document.getElementById(scope);
+              if (!list) return false;
+              const shown = x => x && x.getClientRects().length && !x.readOnly && !x.disabled;
+              const linked = [...document.querySelectorAll('input[aria-controls]')]
+                .filter(x => x.getAttribute('aria-controls') === scope && shown(x));
+              const drop = list.closest('.select2-dropdown,.select2-drop,.chosen-drop');
+              const own = drop ? [...drop.querySelectorAll('input.select2-search__field,input.select2-input,.chosen-search input')]
+                .filter(shown) : [];
+              const box = linked.length === 1 ? linked[0] : own.length === 1 ? own[0] : null;
+              if (!box) return false;
+              box.setAttribute('data-jp-search', token);
+              return true;
+            }""",
+            [scope, token],
+        )
+    except Exception:
+        return None
+    return frame.locator(f'[data-jp-search="{token}"]') if found else None
+
+
 async def scroll_for_option(frame, value, scope=None, steps=8):
     """Search a virtualized menu by scrolling its own observed container."""
     for _ in range(steps):
@@ -2829,6 +2859,26 @@ async def combobox(
         )
     else:
         opts = await wait_options(frame, scope, timeout=3, owner=el)
+        if not best_option(eligible(opts), value) and (box := await popup_search_box(frame, scope)):
+            # The menu's own search box reaches rows its first page does not list: Avature's select2 Country and
+            # State lookups show 100 rows (Afghanistan..), so "United States" read as not offered and Electronic Arts'
+            # registration failed "Country: This field is required" (2026-10-27).
+            shown = [o["text"] for o in opts]
+            # The value, then its first word ("United" lists United States for "United States of America"), then its
+            # longest known alias: each search is a request to the employer's server.
+            first = re.split(r"[\s,(]+", str(value).strip())[0]
+            queries = [str(value), *([first] if len(first) >= 4 and norm(first) != norm(value) else [])]
+            queries += sorted(_alias_group(value) - {norm(value)}, key=len, reverse=True)[:1]
+            for query in list(dict.fromkeys(queries))[:3]:
+                await box.fill("")
+                await box.press_sequentially(query, delay=12, timeout=4000)
+                found = await wait_options(
+                    frame, scope, timeout=4, query=query, owner=el, changed_from=shown, stable_for=0.6, empty_after=1.2
+                )
+                if found:
+                    opts = found
+                if best_option(eligible(found), value):
+                    break
     scope = await _popup_scope(el) or scope
     choice = choice or best_option(eligible(opts), value)
     if not choice and resolve and opts:

@@ -44,6 +44,7 @@ def adapter(pages, disabled=()):
     value.challenge = {"id": "ch"}
     value.arm_mail = AsyncMock(return_value=True)
     value.after_auth_click = AsyncMock(return_value=None)
+    value.solve_inpage_puzzle = AsyncMock(return_value=None)
     value.click = AsyncMock(side_effect=lambda b, **k: log.append(("click", b["label"])))
 
     async def wait_email(kind):
@@ -83,3 +84,29 @@ async def test_without_a_send_code_control_nothing_is_typed():
     value, log = adapter([page])
     await Adapter.on_email_code(value, page)
     assert log == [("wait", "code")]
+
+
+async def test_the_picture_puzzle_get_code_opens_is_solved_before_waiting():
+    # ByteDance 2026-10-28: "Get code" opened "Select 2 objects that are the same shape"; no code came until solved.
+    before = {"fields": SIGN_UP, "controls": [control("go", "Continue")], "text": "Create account"}
+    after = {"fields": [field("e", "Email", "alex@example.test"), SIGN_UP[1]],
+             "controls": [control("get", "Get code"), control("go", "Continue")], "text": "Create account"}
+    value, log = adapter([after], disabled=["Get code"])
+
+    async def puzzle():
+        value.attempts["inpage_puzzle"] += 1
+        log.append(("puzzle", "solved"))
+
+    value.solve_inpage_puzzle = AsyncMock(side_effect=puzzle)
+    await Adapter.on_email_code(value, before)
+    assert log[:4] == [("fill", "alex@example.test"), ("click", "Get code"), ("puzzle", "solved"), ("wait", "code")]
+
+
+async def test_an_unsolved_puzzle_stops_the_code_step():
+    before = {"fields": SIGN_UP, "controls": [control("go", "Continue")], "text": "Create account"}
+    after = {"fields": [field("e", "Email", "alex@example.test"), SIGN_UP[1]],
+             "controls": [control("get", "Get code"), control("go", "Continue")], "text": "Create account"}
+    value, log = adapter([after], disabled=["Get code"])
+    value.solve_inpage_puzzle = AsyncMock(return_value={"state": "waiting_browser", "reason": "puzzle"})
+    assert (await Adapter.on_email_code(value, before))["reason"] == "puzzle"
+    assert ("wait", "code") not in log

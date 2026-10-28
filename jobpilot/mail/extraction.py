@@ -445,6 +445,10 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
         return {"kind": "code", "value": next(iter(codes))}
     if kind in {"link", "auto", "password_reset"} and len(valid_links) == 1 and (reset or not codes):
         return {"kind": "link", "value": next(iter(valid_links))}
+    if reset and not valid_links and len(codes) == 1 and not fallback_code:
+        # A reset confirmed by an emailed code ("TikTok verification code: 523632", 2026-10-28) was refused as
+        # token_format on every poll: reset windows took only links. One labelled code and no link is the reset's code.
+        return {"kind": "code", "value": next(iter(codes))}
     return reject("ambiguous_token" if len(codes) > 1 or len(valid_links) > 1 else "token_format")
 
 
