@@ -51,8 +51,11 @@ CONFIRM_TEXT = re.compile(
     r"application (?:has been |was )?(?:successfully )?(?:submitted|received|complete)|"
     r"we(?:'ve| have) received your application|successfully (?:applied|submitted)|"
     r"your application (?:is|has been) (?:complete|submitted|on its way|received)|"
+    # The role named in between: "Congratulations! Your application for Software Engineer has been received" (Gem,
+    # Imagen Technologies 2026-10-28: read as unconfirmed on three runs while the page showed it).
+    r"your application for [^.!?\n]{1,140}? (?:has been|was|is) (?:successfully )?(?:submitted|received|sent|complete)\b|"
     r"you(?:'ve| have) (?:successfully )?applied|application submitted|"
-    r"congratulations.{0,60}(?:submitted|applied)|thank you for sending us your online job submission|"
+    r"congratulations.{0,60}(?:submitted|applied|received)|thank you for sending us your online job submission|"
     r"your application (?:has been|was) sent|thanks? (?:you )?for (?:applying|your application)",
     re.I,
 )

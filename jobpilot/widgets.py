@@ -64,7 +64,8 @@ VISIBLE_OPTIONS = r"""(args) => {
     el.dataset.jpOpt = el.dataset.jpOpt || ('o' + Math.random().toString(36).slice(2, 10));
     const popup = el.closest('[role=listbox],[role=menu]');
     if (popup?.id && !owners.has(popup.id)) owners.set(popup.id, controls.filter(control => {
-      const refs = (control.getAttribute('aria-controls') || control.getAttribute('aria-owns') || '').split(/\s+/);
+      const refs = (control.getAttribute('aria-controls') || control.getAttribute('aria-owns')
+        || control.getAttribute('data-menu-id') || '').split(/\s+/);
       return refs.includes(popup.id) && control.getClientRects().length;
     }));
     const candidates = owners.get(popup?.id) || [];
@@ -714,7 +715,9 @@ async def _popup_scope(el):
     try:
         return await el.evaluate(
             """e => {
-              const reference = e.getAttribute('aria-controls') || e.getAttribute('aria-owns') ||
+              // BambooHR's Fabric toggles name their portal menu only by data-menu-id (Asure, 2026-10-28: State and
+              // Highest Education read "no offered choices" on every run).
+              const reference = e.getAttribute('aria-controls') || e.getAttribute('aria-owns') || e.getAttribute('data-menu-id') ||
                 e.querySelector('[aria-controls]')?.getAttribute('aria-controls');
               const referenced = reference && (e.getRootNode().getElementById?.(reference) || document.getElementById(reference));
               if (referenced && referenced.getClientRects().length && getComputedStyle(referenced).visibility !== 'hidden') return reference;
@@ -1245,6 +1248,14 @@ async def dropdown(frame, el, value, choose=None, prefer=None):
     on every window. `choose` may consult the answer model and runs once, last."""
     await dismiss_pickers(frame)
     await field_click(el, timeout=4000)
+    await asyncio.sleep(0.2)
+    if await el.get_attribute("aria-expanded") == "false":
+        # The synthetic pointer sequence left the menu closed: BambooHR's Fabric toggles open only on a native click
+        # (Asure, 2026-10-28, seen in REA: State and Highest Education read "no offered choices" on every run).
+        try:
+            await el.click(timeout=3000)
+        except PlaywrightError:
+            pass
     scope = await _popup_scope(el)
     opts = await wait_options(frame, scope, timeout=3, owner=el)
     scope = await _popup_scope(el) or scope
