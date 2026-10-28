@@ -354,6 +354,7 @@
     || /\.\s*Required\./i.test(q)
     || [...(el.labels || [])].some(l=>/mandatory|required/i.test(l.title || '') || l.querySelector('img.requiredimg'))
     || !!el.closest('.input-row')?.querySelector('.input-row__label--required');
+  const CALENDAR_POPUP = '.ui-datepicker,.datepicker-dropdown,.flatpickr-calendar,.pika-single';
   const PLACEHOLDER_VALUE = /^(select( one)?(\.\.\.)?|choose( one)?(\.\.\.)?|-+|[-–—]{1,2}\s*select\s*[-–—]{1,2}|please select|make a selection|none selected|no selection|not specified)$/i;
 
   // Never applicant fields: inert/hidden subtrees, honeypots, CAPTCHA widgets and their responses.
@@ -1030,6 +1031,9 @@
     .filter(el => el.matches('sdf-button') || !composedClosest(el,'sdf-button'))
     .filter(el => !consumed.has(el) && !fieldIds.has(el.dataset.jpId) && visible(el) && !el.disabled
       && !composedClosest(el,'[data-automation-id="languageSelectorButton"],[data-automation-id="settingsSelectorButton"]')
+      // A typed date box's calendar popup (Prev / Next / 1..31) is not page navigation: left open after Axtria's
+      // JazzHR mm/yyyy date, its "Next" was taken for the application's Next 45 times (2026-10-27).
+      && !composedClosest(el, CALENDAR_POPUP)
       && !(el.matches('sdf-button') && ((el.shadowRoot?.querySelector('button') || el.querySelector('button'))?.disabled
         || el.hasAttribute('disabled') && el.getAttribute('disabled') !== 'false'))
       && !el.closest('[inert],[aria-hidden="true"]')
