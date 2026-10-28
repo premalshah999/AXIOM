@@ -389,6 +389,22 @@ class LocalRulesMixin:
                 return self._ans(f, today.strftime("%m/%d/%Y"), ["fact:availability"])
             if "notice period" in label and f.get("type") == "number":
                 return self._ans(f, "0", ["fact:notice_period"])
+        if (
+            f.get("type") in {"text", "textarea", "number"}
+            and not options
+            and not history_context
+            and (p.salary_expectation or self.answer_rules.salary_stance.strip())
+            and any(pattern.search(f["label"]) for pattern, keys in INTENTS if "desired_salary" in keys)
+            and not NOT_DESIRED.search(f["label"])
+        ):
+            # The current pay expectation answers before replies saved under an older one: 80000, saved for Equifax's,
+            # M3 USA's and Thorlabs' salary questions before the owner's $90,000-$120,000 policy (2026-10-27), stayed in
+            # Koniag's draft for "What is your desired compensation?" against an expectation of 105000.
+            current = self._intent_answer(f, label)
+            if current and current.disposition == "answer" and any(
+                re.search(r"salary|compensation", e) for e in current.evidence_ids
+            ):
+                return current
         # Explicit user corrections take priority over an older exact answer.
         if re.search(r"\bveterans?\b", label) and not re.search(
             r"(?:status|definition|describe).{0,30}explain", label
