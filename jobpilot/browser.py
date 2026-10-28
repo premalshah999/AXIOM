@@ -408,6 +408,11 @@ SLOW_CONFIRMATION = {"dayforce", "workday", "oracle", "smartrecruiters"}
 # SmartRecruiters tenants with SEON enabled wait for its device session (fieldTimeoutMs 30 s) before the
 # application POST (oneclick-ui getSessionForApply, REA 2026-10-18).
 POST_SUBMIT_CODE_SETTLE_SECONDS = 25
+# A commit that has sent nothing but tracking calls this long after the click, with the form and its Submit still on the
+# page, has sent nothing at all: SEON's device session, the slowest known wait before an application POST, is 30 s.
+# SmartRecruiters' reopened one-click forms (LLNL, AbbVie, 2026-10-26..28) spent three minutes per commit waiting out
+# the slow-confirmation window, and four commits outlasted the 600 s budget.
+NOTHING_SENT_SECONDS = 60
 # Controls whose disabled state means the page has an unfinished requirement.
 STEP_ACTION = re.compile(
     r"^\s*(?:next|continue|save (?:and|&) continue|submit(?: application)?|apply|sign in|log in|create account|register)\s*$",
@@ -3817,6 +3822,7 @@ class BrowserEngine:
         polls = 0
         settle_until = None
         stale_rejection = None
+        watch_started = time.monotonic()
         if self.post_submit_code_pending():
             # Commit polling can run for minutes; keep the armed request alive for its durable window.
             self.email_verification.extend_pre_armed_request()
@@ -3951,6 +3957,12 @@ class BrowserEngine:
                             "reason": "Website confirmation captured",
                             "receipt": receipt,
                         }
+            if (
+                not stale_rejection
+                and time.monotonic() - watch_started >= NOTHING_SENT_SECONDS
+                and await self.commit_sent_nothing()
+            ):
+                break
             if polls >= POST_SUBMIT_POLLS * (3 if getattr(self, "job", {}).get("ats") in SLOW_CONFIRMATION else 1):
                 if not self.post_submit_code_pending():
                     break
