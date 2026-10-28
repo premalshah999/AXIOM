@@ -204,7 +204,9 @@
     }
     if (al) return clean(al);
     const placeholder = el.getAttribute('placeholder');
-    if (placeholder && !GENERIC_PLACEHOLDER.test(placeholder.trim())) return clean(placeholder);
+    // A formatting mask describes the input syntax, not its question. Read
+    // the nearby caption before falling back to masks such as ___-___-____.
+    if (placeholder && !GENERIC_PLACEHOLDER.test(placeholder.trim()) && !/^[\s_()/.+\-–—]+$/.test(placeholder)) return clean(placeholder);
     const near = nearby(el);
     if (near) return near;
     return clean(placeholder || el.getAttribute('title') || el.getAttribute('name') || el.id || 'Unlabelled field');
