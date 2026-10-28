@@ -2952,10 +2952,15 @@ class FormSession:
             if field.get("widget") == "sdf-select":
                 # ADP's sdf-select-simple lists its items in its own children: no popup is opened to read them. Midco's
                 # render only once opened, and a filterable one shows a window of 20 (State): neither is the catalog.
-                field["options"] = [
-                    text for _, text in await el.evaluate(widgets.SDF_ITEMS_JS) if text and not widgets.placeholder_option(text)
-                ][:400]
-                field["options_partial"] = not field["options"] or bool(await el.locator(widgets.SDF_FILTER).count())
+                rows = widgets.sdf_texts(await el.evaluate(widgets.SDF_ITEMS_JS))
+                catalog = [t for t in await el.evaluate(widgets.SDF_CATALOG_JS) if not widgets.placeholder_option(t)]
+                field["options"] = list(dict.fromkeys([*catalog, *rows]))[:400]
+                # A rendered page of 20 (Midco's State stopped at Louisiana, 2026-10-28) is not the whole catalog.
+                field["options_partial"] = (
+                    not field["options"]
+                    or bool(await el.locator(widgets.SDF_FILTER).count())
+                    or (len(rows) >= 20 and len(catalog) <= len(rows))
+                )
             elif field.get("widget") == "ui5wc-select":
                 field["options"] = [
                     o

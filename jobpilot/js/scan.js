@@ -525,7 +525,12 @@
     const q = label(host, { visibleFirst: true });
     const req = isReq(host, q) || host.hasAttribute('required');
     consumed.add(host);
-    push(host, { label: q, type: 'combobox', widget: 'sdf-select', required: req, options: items.map(itemText).filter(Boolean),
+    // Each item is listed twice (a light-DOM copy and the rendered one); duplicates made "Cell" ambiguous (Midco
+    // 2026-10-28). The host's items property can name choices beyond the rendered page.
+    const catalog = (Array.isArray(host.items) ? host.items : []).flatMap(i => Array.isArray(i?.items) ? i.items : [i])
+      .map(i => clean(String(i?.label ?? '')));
+    push(host, { label: q, type: 'combobox', widget: 'sdf-select', required: req,
+      options: [...new Set([...catalog, ...items.map(itemText)].filter(Boolean))],
       value, valid: !req || !!value, maxlength: -1 });
   }
 
