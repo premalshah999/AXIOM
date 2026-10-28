@@ -148,3 +148,34 @@ def test_clearcompany_sign_in_link_behind_its_short_link_domain():
     headers[-1]["value"] = "Sign-in link for your application at Acme Institute"
     assert extract_message(msg, rule, {**challenge(), "kind": "link"}) == {"kind": "link", "value": link}
     assert extract_message(msg, ICIMS_RULE, {**challenge(), "kind": "link"}) is None
+
+
+def clearcompany_mail(html):
+    msg = reset_mail(html)
+    headers = msg["payload"]["headers"]
+    headers[0]["value"] = "Acme Institute <noreply@clearcompany.com>"
+    headers[2]["value"] = "mx.google.com; dkim=pass header.d=clearcompany.com; dmarc=pass header.from=clearcompany.com"
+    headers[-1]["value"] = "Sign-in link for your application at Acme Institute"
+    return msg
+
+
+def test_clearcompany_button_without_cue_words_under_a_cued_subject():
+    # Allen Institute 2026-10-27 (after the clrco.com fix): the subject was the cue and the button's own text was not,
+    # so every poll still refused the mail as token_format.
+    rule = {"sender_domains": ["clearcompany.com"], "link_origins": ["https://apply.clearcompany.com"]}
+    link, footer = "https://clrco.com/s/AbCdEf123", "https://clrco.com/s/Privacy9"
+    msg = clearcompany_mail(f'<a href="{link}">Access your application</a> <a href="{footer}">Privacy Policy</a>')
+    assert extract_message(msg, rule, {**challenge(), "kind": "link"}) == {"kind": "link", "value": link}
+    # Two candidate buttons, an image-only link, or another platform's rule never pick one.
+    two = clearcompany_mail(f'<a href="{link}">Open</a> <a href="{link}2">View job</a>')
+    assert extract_message(two, rule, {**challenge(), "kind": "link"}) is None
+    logo = clearcompany_mail(f'<a href="{link}"><img src="logo.png"></a> <a href="{footer}">Privacy Policy</a>')
+    assert extract_message(logo, rule, {**challenge(), "kind": "link"}) is None
+    assert extract_message(msg, ICIMS_RULE, {**challenge(), "kind": "link"}) is None
+
+
+def test_a_bare_link_after_its_own_cue_is_cued():
+    rule = {"sender_domains": ["clearcompany.com"], "link_origins": ["https://apply.clearcompany.com"]}
+    link = "https://clrco.com/s/AbCdEf123"
+    msg = clearcompany_mail(f"<p>Use this link to sign in: {link}</p><a href='https://clrco.com/s/x'>Our careers</a>")
+    assert extract_message(msg, rule, {**challenge(), "kind": "link"}) == {"kind": "link", "value": link}
