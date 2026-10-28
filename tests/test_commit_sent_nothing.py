@@ -132,3 +132,37 @@ def test_a_refusal_records_header_and_key_names_never_values():
     shape = request_shape(request)
     assert shape == {"sent_headers": ["content-type", "x-turnstile-token"], "sent_keys": ["candidate", "token"]}
     assert "secret-token" not in str(shape) and "x@y.test" not in str(shape)
+
+
+async def test_a_commit_that_sent_nothing_stops_waiting_before_the_slow_confirmation_window(monkeypatch):
+    """LLNL (SmartRecruiters 2026-10-28): each commit that sent no write waited about three minutes, and four of them
+    outlasted the 600 s budget as an uncertain submission."""
+    import jobpilot.browser as browser
+
+    monkeypatch.setattr(browser, "POST_SUBMIT_POLL_SECONDS", 0.001)
+    monkeypatch.setattr(browser, "NOTHING_SENT_SECONDS", 0.02)
+    eng = engine()
+    scans = []
+
+    async def none(*a, **k):
+        return None
+
+    async def scan():
+        scans.append(1)
+        return {"fields": [], "controls": [], "text": ""}
+
+    async def release():
+        return None
+
+    eng.form = SimpleNamespace(proof=none, rejection=none, scan=scan,
+                               application_submit_controls=eng.form.application_submit_controls)
+    eng.job = {"url": FORM, "ats": "smartrecruiters"}
+    eng.browser_challenge, eng.release_reservation = none, release
+    eng.email_verification = SimpleNamespace(state=lambda obs: (None, None))
+    eng.post_submit_code_pending = lambda: False
+    eng.refused_as_already_applied = lambda: None
+    eng.commit_sent_nothing = lambda: BrowserEngine.commit_sent_nothing(eng)
+    eng.armed = True
+    result = await BrowserEngine.watch_submission(eng, None, None)
+    assert result["state"] == "waiting_browser" and "accepted nothing" in result["reason"]
+    assert len(scans) < browser.POST_SUBMIT_POLLS * 3
