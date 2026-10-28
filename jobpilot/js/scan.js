@@ -527,7 +527,12 @@
     const q = label(host, { visibleFirst: true });
     const req = isReq(host, q) || host.hasAttribute('required');
     consumed.add(host);
-    push(host, { label: q, type: 'combobox', widget: 'sdf-select', required: req, options: items.map(itemText).filter(Boolean),
+    // Each item is listed twice (a light-DOM copy and the rendered one); duplicates made "Cell" ambiguous (Midco
+    // 2026-10-28). The host's items property can name choices beyond the rendered page.
+    const catalog = (Array.isArray(host.items) ? host.items : []).flatMap(i => Array.isArray(i?.items) ? i.items : [i])
+      .map(i => clean(String(i?.label ?? '')));
+    push(host, { label: q, type: 'combobox', widget: 'sdf-select', required: req,
+      options: [...new Set([...catalog, ...items.map(itemText)].filter(Boolean))],
       value, valid: !req || !!value, maxlength: -1 });
   }
 
@@ -1092,7 +1097,12 @@
     .map(el => ({
       id: id(el),
       label: historyEditor(el) ? 'Select history row to reveal Edit: ' + clean(textOf(el)).slice(0,140) : clean(textOf(el) || (el.matches('sdf-button') && (textOf(el.shadowRoot?.querySelector('button') || el.querySelector('button')) || clean(el.textContent)))
-        || el.value || el.getAttribute('aria-label') || el.getAttribute('title') || ''),
+        || el.value || el.getAttribute('aria-label') || el.getAttribute('title')
+        // Oracle's refused submit left its tax-credit launcher without text (Mortenson, 2026-10-27): its block names it.
+        || (composedClosest(el, '.inline-partner') && clean(composedClosest(el, '[role=region]')?.getAttribute('aria-label') || ''))
+        || ''),
+      // Oracle's inline partner launcher ("Take Tax Credit Assessment") is shown until its assessment is completed.
+      partner: el.matches('[class*="partner-button"]') && !!composedClosest(el, '.inline-partner'),
       href: el.getAttribute('href') || '', type: historyEditor(el) ? 'history_select' : el.form ? (el.type || '') : '',
       automation_id: el.dataset.automationId || '', aria_label: el.getAttribute('aria-label') || '',
       html_id: el.id || '', section: section(el), group: groupOf(el),

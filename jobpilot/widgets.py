@@ -2115,17 +2115,37 @@ SDF_PICK_JS = (
   return !!hit; }"""
 )
 SDF_FILTER = "input.select-filter-input, input[role=combobox]"
+# The host's own catalog: its items property can hold every choice while only a page of them is rendered.
+SDF_CATALOG_JS = """h => (Array.isArray(h.items) ? h.items : []).flatMap(i => Array.isArray(i?.items) ? i.items : [i])
+  .map(i => String(i?.label ?? '').replace(/\\s+/g, ' ').trim()).filter(Boolean)"""
+SDF_OPEN_JS = "h => h.open === true || h.classList.contains('open')"
+# Scroll the open list to its end: a paged list loads its next items as its last one comes into view.
+SDF_SCROLL_JS = """h => { const items = [...(h.shadowRoot?.querySelectorAll('sdf-select-item,[role=option]') || []),
+    ...h.querySelectorAll('sdf-select-item')].filter(i => i.getClientRects().length);
+  const last = items[items.length - 1]; if (!last) return 0;
+  last.scrollIntoView({block: 'end'});
+  for (let n = last.parentElement || last.getRootNode().host; n; n = n.parentElement || n.getRootNode()?.host) {
+    if (n.scrollHeight > n.clientHeight + 4) { n.scrollTop = n.scrollHeight; n.dispatchEvent(new Event('scroll')); break; }
+    if (n === h) break;
+  }
+  return items.length; }"""
+
+
+def sdf_texts(rows):
+    """Distinct item texts: ADP lists each item twice, a light-DOM copy and the rendered one (Midco 2026-10-28)."""
+    return list(dict.fromkeys(text for _, text in rows if text and not placeholder_option(text)))
 
 
 async def sdf_select(frame, el, value, choose=None):
     """ADP MyJobs' sdf-select-simple (Phone Type, State; 2026-10-27): open the host, click the offered item, and read the
     host's own selection back.
 
-    Midco's items render only once the pane opens, and State shows a window of 20 until its filter is typed into
-    ("Maryland" is past "Louisiana"); the item read before opening was empty and every fill was refused."""
+    Midco's items render only once the pane opens, and State shows a page of 20 (Alabama..Louisiana): "Maryland" is
+    reached by typing into the list's filter, when it has one, or by scrolling the list until it loads (2026-10-28: a
+    0.5 s wait after typing missed the filtered items, and clicking the already open host closed it)."""
 
     async def offered():
-        return [text for _, text in await el.evaluate(SDF_ITEMS_JS) if text and not placeholder_option(text)]
+        return sdf_texts(await el.evaluate(SDF_ITEMS_JS))
 
     aliases = sorted(_alias_group(value) - {norm(value)}, key=len, reverse=True)
 
@@ -2137,27 +2157,44 @@ async def sdf_select(frame, el, value, choose=None):
                 return hit["text"]
         return None
 
+    async def appears(seconds):
+        for _ in range(int(seconds / 0.3)):
+            await asyncio.sleep(0.3)
+            if hit := match(await offered()):
+                return hit
+        return None
+
     texts = await offered()
     target = match(texts)
     if target and norm(await el.evaluate(SDF_SELECTED_JS)) == norm(target):
         return target
-    await el.click(timeout=3000)
+    if not await el.evaluate(SDF_OPEN_JS):
+        await el.click(timeout=3000)
     await asyncio.sleep(0.4)
     if not target:
         texts = await offered() or texts
         target = match(texts)
     search = el.locator(SDF_FILTER).first
-    if not target and await search.count():
-        for typed in [*aliases, str(value)][:4]:
+    if not target and await search.count() and await search.is_visible():
+        for typed in list(dict.fromkeys([str(value), *aliases]))[:3]:
             await search.fill("", timeout=2000)
-            await search.press_sequentially(typed[:24], delay=15)
-            await asyncio.sleep(0.5)
-            if target := match(await offered()):
+            await search.press_sequentially(typed[:24], delay=20)
+            if target := await appears(3):
                 break
         if not target:
             await search.fill("", timeout=2000)
             await asyncio.sleep(0.3)
             texts = await offered() or texts
+    stalled, pages = 0, 0
+    while not target and stalled < 2 and pages < 12:
+        pages += 1
+        before = len(texts)
+        if not await el.evaluate(SDF_SCROLL_JS):
+            break
+        await asyncio.sleep(0.6)
+        texts = await offered() or texts
+        target = match(texts)
+        stalled = stalled + 1 if len(texts) <= before else 0
     if target is None and choose and texts:
         target = await choose(texts)
     if not target or not await el.evaluate(SDF_PICK_JS, target):

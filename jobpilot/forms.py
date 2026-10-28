@@ -2107,7 +2107,15 @@ class FormSession:
                 await self.locator(control_id).evaluate(
                     r"""b => {
                       const f = b.form || b.closest('form');
-                      if (!f || f.querySelector('input[type=file]')) return false;
+                      if (!f) return false;
+                      // Upstart (2026-10-23/25): its closed Greenhouse posting led to the career site's job search, whose
+                      // talent-network form (resume, standard questions, "Please choose the category/categories" and
+                      // "location(s)") was submitted as the application. On a job search page, a form asking for
+                      // job-alert categories is a signup, whatever else it asks.
+                      if (/\/(?:jobs?[\/-])?search(?:-jobs)?\/?$|\/job-search\/?$/i.test(location.pathname)
+                        && /choose the (?:job )?categor(?:y|ies)|categor(?:y|ies)\s*\/\s*categor|job alerts?|talent (?:community|network|pool)/i
+                          .test((f.innerText || '').slice(0, 20000))) return true;
+                      if (f.querySelector('input[type=file]')) return false;
                       // Greenhouse drops the file input once the resume is attached, and Braze's application asks
                       // "join Braze's Talent Community?" (2026-10-23): a resume or a long questionnaire is the job's.
                       if (/\b(?:resume|résumé|cv)\b/i.test(f.innerText || '')
@@ -2992,10 +3000,15 @@ class FormSession:
             if field.get("widget") == "sdf-select":
                 # ADP's sdf-select-simple lists its items in its own children: no popup is opened to read them. Midco's
                 # render only once opened, and a filterable one shows a window of 20 (State): neither is the catalog.
-                field["options"] = [
-                    text for _, text in await el.evaluate(widgets.SDF_ITEMS_JS) if text and not widgets.placeholder_option(text)
-                ][:400]
-                field["options_partial"] = not field["options"] or bool(await el.locator(widgets.SDF_FILTER).count())
+                rows = widgets.sdf_texts(await el.evaluate(widgets.SDF_ITEMS_JS))
+                catalog = [t for t in await el.evaluate(widgets.SDF_CATALOG_JS) if not widgets.placeholder_option(t)]
+                field["options"] = list(dict.fromkeys([*catalog, *rows]))[:400]
+                # A rendered page of 20 (Midco's State stopped at Louisiana, 2026-10-28) is not the whole catalog.
+                field["options_partial"] = (
+                    not field["options"]
+                    or bool(await el.locator(widgets.SDF_FILTER).count())
+                    or (len(rows) >= 20 and len(catalog) <= len(rows))
+                )
             elif field.get("widget") == "ui5wc-select":
                 field["options"] = [
                     o
@@ -4848,6 +4861,12 @@ class FormSession:
                     problems.append(f"Required field has no verified answer: {f['label']}")
         for q in self.pending:
             problems.append(f"Needs an approved answer: {q['question']}")
+        for b in self.buttons.values():
+            if b.get("partner"):
+                # Oracle shows its inline tax-credit launcher until the assessment is taken, and refuses the submit
+                # with "This info is required. (1 issue)" while it is; the readback held only fields and passed
+                # (Mortenson, 2026-10-27).
+                problems.append(f"Required step incomplete: {b['label']}")
         if (
             not (self.uploaded and self.upload_verified)
             and str((getattr(self.resolver, "job", {}) or {}).get("ats", "")) == "successfactors"
@@ -5109,6 +5128,7 @@ class FormSession:
             # Oracle's required "Take Tax Credit Assessment" (Caesars) opens a screener; it is a
             # section launcher, not the application's final submit.
             and not re.fullmatch(LAUNCHER, button["label"], re.IGNORECASE)
+            and not button.get("partner")
             # iCIMS's email step submits with "I Acknowledge the Privacy Notice" (Schwab 2026-10-18 stalled on it,
             # REA icims.md risk 2). An acknowledgement that names no submission is a step.
             and not (
@@ -5127,7 +5147,7 @@ class FormSession:
 
         opener.on("popup", on_popup)
         el = self.locator(control_id)
-        launcher = launch or bool(re.fullmatch(LAUNCHER, button["label"], re.IGNORECASE))
+        launcher = launch or bool(re.fullmatch(LAUNCHER, button["label"], re.IGNORECASE)) or bool(button.get("partner"))
         # A "Submit" that this guard allowed for a profile/account popup or a tax-credit
         # launcher must also pass the page's own click guard, or the click is silently
         # cancelled (Starbucks "Create your profile": the agent clicked Submit for minutes).

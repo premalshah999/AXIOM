@@ -88,3 +88,55 @@ async def test_a_lazy_filterable_sdf_select_is_filtered_to_the_answer(page):
     assert field["options"] == []  # nothing is rendered before the pane opens
     assert await widgets.sdf_select(page.main_frame, page.locator("#lazy"), "MD") == "Maryland"
     assert await page.evaluate("document.getElementById('lazy').chosen") == "Maryland"
+
+
+# Midco (2026-10-28): State renders a page of 20 and loads the next as its list scrolls; the host toggles closed when
+# clicked open; each item also has an unrendered light-DOM copy; Phone Type's duplicated "Cell" read as ambiguous.
+STATES = ['-', 'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado', 'Connecticut', 'Delaware',
+          'District Of Columbia', 'Florida', 'Georgia', 'Guam', 'Hawaii', 'Idaho', 'Illinois', 'Indiana', 'Iowa',
+          'Kansas', 'Kentucky', 'Louisiana', 'Maine', 'Maryland', 'Massachusetts', 'Michigan', 'Virginia']
+PAGED = """<div class=field><label id=lab3>State *</label><sdf-select-simple id=paged aria-labelledby=lab3></sdf-select-simple></div>
+<script>
+const ALL = %s;
+customElements.define('sdf-select-item', class extends HTMLElement {
+  connectedCallback() { this.style.display = 'block'; this.style.height = '20px';
+    if (this.getRootNode() !== document) this.textContent = this.label; }
+});
+customElements.define('sdf-select-simple', class extends HTMLElement {
+  constructor() { super(); this.value = ''; this.shown = 0;
+    const root = this.attachShadow({mode: 'open'});
+    root.innerHTML = '<div class=shown>Select...</div><div class=pane hidden style="height:120px;overflow:auto">'
+      + '<div role=listbox></div></div>';
+    const pane = root.querySelector('.pane'), box = root.querySelector('[role=listbox]');
+    const more = () => { for (const name of ALL.slice(this.shown, this.shown + 20)) {
+        const item = document.createElement('sdf-select-item'); item.label = name; item.value = 'v' + ALL.indexOf(name);
+        item.addEventListener('click', e => { e.stopPropagation(); this.value = item.value; this.chosen = name;
+          box.querySelectorAll('[selected]').forEach(i => i.removeAttribute('selected')); item.setAttribute('selected', '');
+          root.querySelector('.shown').textContent = name; pane.hidden = true; this.classList.remove('open'); });
+        box.appendChild(item);
+        const copy = document.createElement('sdf-select-item'); copy.label = name; copy.style.display = 'none';
+        this.appendChild(copy);
+      } this.shown += 20; };
+    pane.addEventListener('scroll', () => { if (pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 2) more(); });
+    this.addEventListener('click', () => {
+      if (this.classList.contains('open')) { this.classList.remove('open'); pane.hidden = true; return; }
+      this.classList.add('open'); pane.hidden = false; if (!this.shown) more(); });
+  }
+});
+</script>""" % STATES
+
+
+async def test_a_paged_sdf_select_scrolls_to_the_answer_without_closing_an_open_host(page):
+    await page.set_content(PAGED)
+    host = page.locator("#paged")
+    await host.click()  # The navigator left it open.
+    assert await widgets.sdf_select(page.main_frame, host, "MD") == "Maryland"
+    assert await page.evaluate("document.getElementById('paged').chosen") == "Maryland"
+    texts = widgets.sdf_texts(await host.evaluate(widgets.SDF_ITEMS_JS))
+    assert len(texts) == len(set(texts))
+
+
+def test_one_choice_listed_twice_is_one_choice():
+    from jobpilot.answers.text import option_value
+
+    assert option_value("Cell", ["-", "Cell", "Home", "Work", "-", "Cell", "Home", "Work"]) == "Cell"
