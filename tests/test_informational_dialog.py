@@ -46,3 +46,20 @@ async def test_a_promotional_guide_is_declined(page, tmp_path):
     assert await page.locator("#guide").count() == 0
     assert await page.evaluate("document.body.dataset.tried") is None
     assert any(f["type"] == "email" for f in obs["fields"])
+
+
+async def test_earlier_dialogs_do_not_exhaust_a_new_documents_acknowledgement(page, tmp_path):
+    form = FormSession(page, Resolver(Profile(), None, None), tmp_path / "r.pdf", lambda *a, **k: None)
+    for index in range(4):
+        await page.set_content(PAGE.replace('id=tip', f'id=tip{index}').replace("getElementById('tip')", f"getElementById('tip{index}')"))
+        obs = await form.scan()
+        assert await page.locator(f'#tip{index}').count() == 0
+        assert obs['fields']
+
+
+async def test_an_unchanged_tip_is_attempted_only_three_times(page, tmp_path):
+    await page.set_content(PAGE.replace('onclick="close_()"', 'onclick="window.clicks=(window.clicks||0)+1"'))
+    form = FormSession(page, Resolver(Profile(), None, None), tmp_path / "r.pdf", lambda *a, **k: None)
+    await form.scan()
+    await form.scan()
+    assert await page.evaluate('window.clicks') == 3

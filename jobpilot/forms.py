@@ -1474,7 +1474,13 @@ class FormSession:
         # An informational pop-up over the form ("Quick tip before you begin ... Okay", ADP's tax-credit questionnaire
         # from Workday, 2026-10-23): the page hides its questions behind it, the scan found no fields and the run
         # stalled twice. A dialog with no fields whose only action is an acknowledgement is acknowledged, then rescanned.
-        ack = self.acknowledgement_only(meta) if getattr(self, "_acknowledged", 0) < 3 else None
+        ack = self.acknowledgement_only(meta)
+        acknowledgements = getattr(self, "_acknowledgements", {})
+        self._acknowledgements = acknowledgements
+        # A new document or dialog has its own bounded acknowledgement budget.
+        # Earlier privacy/help popups must not exhaust a later questionnaire's.
+        if ack and acknowledgements.get(ack, 0) >= 3:
+            ack = None
         if ack:
             try:
                 armed = await self.page.evaluate("Boolean(window.__jpArmed)")  # after the submit it may be the receipt
@@ -1482,13 +1488,16 @@ class FormSession:
                 armed = True
             ack = None if armed else ack
         if ack:
-            self._acknowledged = getattr(self, "_acknowledged", 0) + 1
+            acknowledgements[ack] = acknowledgements.get(ack, 0) + 1
             try:
                 await self.locator(ack).click(timeout=4000)
+                self.emit("dialog_acknowledgement", "Clicked the informational dialog's acknowledgement",
+                          {"control": self.buttons[ack]["label"], "attempt": acknowledgements[ack]})
                 await self.settle(timeout=3)
                 return await self.scan()
-            except (PlaywrightError, ValueError):
-                pass
+            except (PlaywrightError, ValueError) as exc:
+                self.emit("dialog_acknowledgement", "Informational dialog acknowledgement failed",
+                          {"error_type": type(exc).__name__, "attempt": acknowledgements[ack]})
         # Every execution route sees the active dialog, never controls behind it.
         dialogs = [d for d in meta["dialogs"] if d.get("field_ids") or d.get("control_ids")]
         if dialogs:
