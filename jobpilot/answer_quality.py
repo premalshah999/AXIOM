@@ -23,7 +23,7 @@ from .schemas import Answer
 from . import phone_fields, widgets
 
 
-VERSION = "quality-v14"
+VERSION = "quality-v15"
 NARRATIVE = re.compile(
     r"why\b|cover.?letter|motivat|describe|description|tell us|achievement|accomplish|experience with|responsibilit|duties",
     re.I,
@@ -211,6 +211,9 @@ def candidates(form, *, current_page=False):
         if previous := logical.get(identity):
             fields.pop(previous, None)
         logical[identity] = key
+    for old_id, old in list(fields.items()):
+        if superseded(old, form.fields.values()):
+            fields.pop(old_id)
     for field in form.fields.values():
         if field.get("type") in {"file", "password", "search", "hidden"} or SECRET.search(field["label"]):
             continue
@@ -240,6 +243,69 @@ def candidates(form, *, current_page=False):
                 fields.pop(old_id)
         fields[field["id"]] = current
     return list(fields.values())
+
+
+def superseded(record, current):
+    """An earlier record of a question the current page shows again in the same section or row group: the page's own
+    control is audited instead. Medpace's iCIMS profile re-rendered its work rows under renumbered sections, and the
+    records of earlier renders (an ongoing role's end day written the day before) were blocked as mismatches that no
+    control on any page could repair; the run stalled on "needs a fresh field observation" (2026-10-27)."""
+    label = normalize(record.get("label", ""))
+    return any(
+        normalize(f.get("label", "")) == label
+        and f.get("type") == record.get("type")
+        and any(
+            normalize(str(record.get(key, ""))) and normalize(str(f.get(key, ""))) == normalize(str(record.get(key, "")))
+            for key in ("section", "group")
+        )
+        for f in current
+    )
+
+
+def ongoing_end(form, known):
+    """True when the confirmed answer is an ongoing role's end date, which the forms write as the day they are filled."""
+    work = getattr(getattr(form.resolver, "profile", None), "work", None) or []
+    for ref in getattr(known, "evidence_ids", None) or []:
+        found = re.fullmatch(r"profile:work\.(\d+)\.end", ref)
+        if found and int(found[1]) < len(work) and getattr(work[int(found[1])], "current", False):
+            return True
+    return False
+
+
+def unplaced_row(form, field, known):
+    """An earlier record from an unnumbered history row whose place was not kept cannot be compared with one row's
+    fact: Belden's second "Institution" was read against the most recent school and blocked (2026-10-27)."""
+    if field.get("editable") is not False or field.get("group") or field.get("history_row"):
+        return False
+    profile = getattr(form.resolver, "profile", None)
+    for ref in getattr(known, "evidence_ids", None) or []:
+        found = re.match(r"profile:(work|education)\.\d+(?:\.|$)", ref)
+        if found and len(getattr(profile, found[1], None) or []) > 1:
+            return True
+    return False
+
+
+def blocked_detail(pending, by_id, corrections):
+    """Which row blocked submission and why: the record's scope, whether it is on this page, and the observed and
+    confirmed values (truncated). Labels alone left Medpace's two "End Date Day" blocks unexplained (2026-10-27)."""
+    rows = []
+    for item in pending[:5]:
+        field = by_id.get(item.get("field_id")) or {}
+        known = (corrections.get(item.get("field_id")) or (None, ""))[0]
+        rows.append(
+            {
+                "label": str(field.get("label") or item.get("question", ""))[:80],
+                "section": str(field.get("section", ""))[:80],
+                "group": str(field.get("group", ""))[:60],
+                "slot": field.get("slot", 0),
+                "on_page": bool(field.get("editable")),
+                "observed": str(field.get("value", ""))[:60],
+                "known": str(getattr(known, "value", "") or "")[:60],
+                "evidence": list(getattr(known, "evidence_ids", None) or [])[:4],
+                "action": item.get("repair_action") or ("exhausted" if item.get("retryable") is False else ""),
+            }
+        )
+    return rows
 
 
 def logical_identity(field):
@@ -558,6 +624,10 @@ def local_corrections(form, fields):
                 and not incomparable_date(field["value"], known.value)
                 and not own_link(form, field)
                 and not displaces_row_fact(field, known)
+                # An earlier step's end date for an ongoing role was "today" on the day it was written; a draft
+                # resumed a day later is not wrong (Belden SuccessFactors "10/25/2026", 2026-10-27).
+                and not (field.get("editable") is False and ongoing_end(form, known))
+                and not unplaced_row(form, field, known)
             ):
                 result[field["id"]] = (known, "confirmed_fact_mismatch")
         if field["type"] in {"text", "textarea", "contenteditable"} and "\u2014" in str(field["value"]):
@@ -947,8 +1017,8 @@ async def audit_form(form, *, current_page=False):
             "blocked": len(pending),
             "advisory": sum(f.get("advisory", False) for f in findings),
             "causes": sorted({f["cause"] for f in findings}),
-            # Labels only (never values): a blocked submit must name what blocked it.
             "blocked_fields": [str(q.get("question", ""))[:80] for q in pending][:5],
+            "blocked_rows": blocked_detail(pending, by_id, corrections),
         },
     )
     return result
