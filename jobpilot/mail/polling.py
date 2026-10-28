@@ -243,6 +243,12 @@ class PollingMixin:
                         else:
                             seen = {m["id"] for m in messages}
                             messages += [m for m in unbranded.get("messages", []) if m["id"] not in seen]
+                    outside = None
+                    if not messages and c["kind"] in {"link", "password_reset"}:
+                        try:
+                            outside = await self.outside_senders(c)
+                        except Exception:
+                            outside = None  # A diagnosis never fails the verification poll.
                     for m in messages[: 20 + UNBRANDED_MAX_CANDIDATES]:
                         with self.db.session() as s:
                             if s.get(MailConsumption, c["mailbox_id"] + ":" + m["id"]):
@@ -296,11 +302,18 @@ class PollingMixin:
                                     "link_hosts": diagnostics.get("link_hosts", []),
                                 }
                     scan_seconds = time.monotonic() - scan_started
+                    seen_outside = self.__dict__.setdefault("outside_seen", {})
+                    if outside is not None:
+                        seen_outside[c["id"]] = outside
+                        while len(seen_outside) > 200:
+                            seen_outside.pop(next(iter(seen_outside)))
+                    outside = seen_outside.get(c["id"], [])
                     counts = (
                         len(messages),
                         len(matches),
                         tuple(sorted(rejections.items())),
                         tuple(sorted(rejected_origins)[:20]),
+                        tuple(outside),
                     )
                     changed = self.poll_diagnostics.get(c["id"]) != counts
                     self.poll_diagnostics[c["id"]] = counts
@@ -320,6 +333,9 @@ class PollingMixin:
                                 # What the last rejected candidate looked like (subject and link hosts, never its token),
                                 # so a new template's format shows in the run without reading the mailbox.
                                 "last_rejected": last_rejected,
+                                # Sender domains (only) of reset/verification mail to this address in this window that
+                                # the sender search did not list; never matched or opened.
+                                "outside_senders": outside,
                             },
                         )
                     matches = latest_employer_code(matches, c)
@@ -432,6 +448,45 @@ class PollingMixin:
                             row.reason = "Mailbox request failed; check the connection"
                             if not box or box.state != "connected":
                                 row.state, row.payload = "failed", ""
+
+    async def outside_senders(self, c):
+        """Diagnosis only, for a link or reset wait whose sender search listed nothing: the sender domains of reset or
+        verification mail that reached this address in the request window. Farmers', Bain's and Intuit's resets "did
+        not arrive" with no candidate on any poll (2026-10-27), and nothing showed whether the mail came from a domain
+        the rule does not name or never came at all. These messages are never matched or opened; at most once a minute
+        per request. None when skipped."""
+        checked = self.__dict__.setdefault("outside_checked", {})
+        if time.monotonic() - checked.get(c["id"], float("-inf")) < 60:
+            return None
+        checked[c["id"]] = time.monotonic()
+        while len(checked) > 200:
+            checked.pop(next(iter(checked)))
+        words = (
+            ["subject:reset", "subject:password"]
+            if c["kind"] == "password_reset"
+            else ["subject:verify", "subject:verification", "subject:confirm", "subject:activate", "subject:sign"]
+        )
+        listed = await self.request(
+            c["mailbox_id"],
+            "/messages",
+            {
+                "q": f"after:{int(c['since'])} to:{c['recipient']} " + "{" + " ".join(words) + "}",
+                "maxResults": 5,
+                "includeSpamTrash": "true",
+            },
+        )
+        domains = []
+        for m in listed.get("messages", [])[:5]:
+            msg = await self.read_message(c["mailbox_id"], m["id"])
+            if msg is None:
+                continue
+            found = getaddresses(
+                [h["value"] for h in msg.get("payload", {}).get("headers", []) if h.get("name", "").lower() == "from"]
+            )
+            domain = found[0][1].rpartition("@")[2].lower() if len(found) == 1 else ""
+            if domain and domain not in domains:
+                domains.append(domain)
+        return domains
 
     async def heal_mailbox(self):
         """Reconnect a .env Gmail mailbox marked reconnect_required once Gmail accepts its login again (checked at
