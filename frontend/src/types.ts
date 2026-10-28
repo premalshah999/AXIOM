@@ -391,6 +391,8 @@ export type PipelinePage = {
   page: number;
   size: number;
   pages: number;
+  // The Pipeline chips' counts, read together with these rows.
+  counts?: { groups: Record<string, number>; pipeline: number };
 };
 // POST /api/jobs/apply-many: one result per job.
 export type ApplyOutcome = "queued" | "waiting" | "preparing" | "already" | "refused";

@@ -1112,8 +1112,9 @@ select {
     flex-direction: row;
     align-items: baseline;
     gap: 8px;
-    max-width: 100%;
+    width: 100%;
     min-width: 0;
+    text-align: left;
   }
   .jobs-table .job-open strong,
   .jobs-table .job-open span,
@@ -1127,11 +1128,13 @@ select {
   }
   .jobs-table .job-open strong,
   .board-table .job-open strong {
-    flex: none;
-    max-width: 45%;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 60%;
   }
   .jobs-table .job-open span,
   .board-table .job-open span {
+    flex: 1 1 auto;
     min-width: 0;
   }
   .jobs-table .cell-job > small,

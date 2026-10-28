@@ -64,6 +64,8 @@ export function usePipelinePage(
   return {
     rows,
     paging,
+    // Counts read with these rows (the snapshot's can lag); undefined until the first page arrives.
+    counts: data?.counts,
     // False until the rows for the current filter, search and page have arrived.
     current,
     loaded: !!data,

@@ -186,7 +186,16 @@ def page(session, group="all", q="", page=1, size=25):
         picked = fetch(page) if total else []
     pages = max(1, -(-total // size))
     pairs = [(row.job_id, row.run_id) for row in picked]
-    return {"rows": rows_for(session, pairs), "total": total, "page": page, "size": size, "pages": pages}
+    # The chips' counts from the same read as the rows: the cached snapshot lagged up to 30 s, so a chip said
+    # "Unconfirmed 4" over a list of three (owner 2026-10-28: "the data on the frontend is not properly synced").
+    return {
+        "rows": rows_for(session, pairs),
+        "total": total,
+        "page": page,
+        "size": size,
+        "pages": pages,
+        "counts": counts(session),
+    }
 
 
 JOB_COLUMNS = tuple(column for column in Job.__table__.columns if column.name != "description")

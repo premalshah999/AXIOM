@@ -28,6 +28,7 @@ export function QueuePanel() {
   const { refresh, counts, go, openJob, markJobs } = useWorkspace();
   const action = useAction();
   const [text, setText] = useState("");
+  const [focused, setFocused] = useState(false);
   const [results, setResults] = useState<LinkResult[]>([]);
   const links = linksIn(text);
   const n = (state: string) => counts.states[state] ?? 0;
@@ -76,11 +77,14 @@ export function QueuePanel() {
         }}
       >
         <label className="field">
-          <span className="field-label">Add job links</span>
+          <span className="sr-only">Add job links</span>
+          {/* One line until used: the box took a fifth of the Pipeline above the list (owner 2026-10-28: "cluttered"). */}
           <textarea
-            rows={2}
-            placeholder="Paste one or more job links. Each goes straight into the queue."
+            rows={text || focused ? 3 : 1}
+            placeholder="Paste job links to add them to the queue"
             value={text}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -89,11 +93,13 @@ export function QueuePanel() {
               }
             }}
           />
-          <span className="field-hint">
-            {links.length
-              ? `${plural(links.length, "link")} found${links.length > 25 ? "; the first 25 are added" : ""}`
-              : "Your own picks: added without the fit check. Duplicates and finished applications are protected."}
-          </span>
+          {(links.length > 0 || focused) && (
+            <span className="field-hint">
+              {links.length
+                ? `${plural(links.length, "link")} found${links.length > 25 ? "; the first 25 are added" : ""}`
+                : "Your own picks: added without the fit check. Duplicates and finished applications are protected."}
+            </span>
+          )}
         </label>
         <button className="btn primary" type="submit" disabled={!links.length || action.pending === "links"}>
           {action.pending === "links" ? "Adding…" : "Add to queue"}

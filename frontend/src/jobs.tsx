@@ -94,9 +94,9 @@ function Pipeline() {
   useEffect(() => {
     if (filter === "new") go({ view: "jobs", tab: "discovered" });
   }, [filter, go]);
-  // Exact group counts from the server; the list is one server page of every matching job.
-  const counts = all.groups;
   const list = usePipelinePage(filter === "new" ? "all" : filter, query);
+  // Exact group counts read together with the rows on screen, so a chip and its list always agree.
+  const counts = list.counts?.groups || all.groups;
   const q = query.trim();
   const shown = list.rows;
   const label = GROUPS.find((g) => g.id === filter)?.label || "All";
