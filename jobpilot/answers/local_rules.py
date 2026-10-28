@@ -74,6 +74,15 @@ RECRUITER_AGENCY = re.compile(
     re.I,
 )
 
+# When the applicant's current contract or assignment ends: for an applicant available immediately, the date they are
+# free to start. OmegaHires' required "Current contract end date" (JazzHR datepicker) took an "N/A" no date box
+# accepts; the owner's own answer was today's date (2026-10-27).
+CONTRACT_END = re.compile(
+    r"\b(?:contract|assignment|engagement)\s+(?:end|expir\w*|completion)\s+date\b|"
+    r"\bwhen (?:does|will) your (?:current )?(?:contract|assignment|engagement) (?:end|expire)",
+    re.I,
+)
+
 
 class LocalRulesMixin:
     def _local(self, f):
@@ -360,7 +369,7 @@ class LocalRulesMixin:
             )
         availability_question = any(
             pattern.search(f["label"]) for pattern, keys in INTENTS if "availability" in keys
-        )
+        ) or bool(CONTRACT_END.search(f["label"]))
         history_context = f.get("history_row") or re.search(
             r"experience|employment|education", (f.get("group") or "") + " " + (f.get("section") or ""), re.I
         )

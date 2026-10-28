@@ -41,3 +41,50 @@ async def test_an_sdf_select_is_a_field_and_commits_its_item(page):
     assert field["options"] == ["Alabama", "Maryland", "Virginia"] and field["value"] == ""
     assert await widgets.sdf_select(page.main_frame, page.locator("#state"), "MD") == "Maryland"  # the profile holds "MD"
     assert await page.evaluate("document.getElementById('state').value") == "MD"
+
+
+# Midco's hosts render their items into the floating pane only once opened, with labels set as properties, and State
+# shows a window of 20 until its filter input is typed into: "Maryland" lies past "Louisiana" (2026-10-27).
+LAZY = """<div class=field><label id=lab2>State *</label><sdf-select-simple id=lazy aria-labelledby=lab2></sdf-select-simple></div>
+<script>
+const NAMES = ['-', 'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado', 'Connecticut', 'Delaware',
+  'Florida', 'Georgia', 'Hawaii', 'Idaho', 'Illinois', 'Indiana', 'Iowa', 'Kansas', 'Kentucky', 'Louisiana', 'Maine',
+  'Maryland', 'Massachusetts', 'Virginia'];
+customElements.define('sdf-select-item', class extends HTMLElement {
+  connectedCallback() { this.style.display = 'block'; this.textContent = this.label; }
+});
+customElements.define('sdf-select-simple', class extends HTMLElement {
+  constructor() { super(); this.value = ''; this.open = false;
+    const root = this.attachShadow({mode: 'open'});
+    root.innerHTML = '<div class=shown>Select...</div><div class=pane hidden><input class=select-filter-input role=combobox>'
+      + '<div role=listbox></div></div>';
+    const render = () => {
+      const box = root.querySelector('[role=listbox]'); box.innerHTML = '';
+      const typed = root.querySelector('input').value.toLowerCase();
+      for (const name of NAMES.filter(n => n.toLowerCase().includes(typed)).slice(0, 20)) {
+        const item = document.createElement('sdf-select-item'); item.label = name; item.value = 'v' + NAMES.indexOf(name);
+        item.addEventListener('click', e => { e.stopPropagation(); this.value = item.value;
+          root.querySelector('.shown').textContent = name; root.querySelector('.pane').hidden = true;
+          this.open = false; this.chosen = name; box.querySelectorAll('[selected]').forEach(i => i.removeAttribute('selected'));
+          item.setAttribute('selected', ''); });
+        box.appendChild(item);
+      }
+      const chosen = [...box.children].find(i => i.label === this.chosen);
+      if (chosen) chosen.setAttribute('selected', '');
+    };
+    root.querySelector('input').addEventListener('input', render);
+    root.querySelector('input').addEventListener('click', e => e.stopPropagation());
+    this.addEventListener('click', () => { if (this.open) return; this.open = true;
+      root.querySelector('.pane').hidden = false; render(); });
+  }
+});
+</script>"""
+
+
+async def test_a_lazy_filterable_sdf_select_is_filtered_to_the_answer(page):
+    await page.set_content(LAZY)
+    data = await page.main_frame.evaluate(SCAN)
+    field = next(f for f in data["fields"] if f.get("widget") == "sdf-select")
+    assert field["options"] == []  # nothing is rendered before the pane opens
+    assert await widgets.sdf_select(page.main_frame, page.locator("#lazy"), "MD") == "Maryland"
+    assert await page.evaluate("document.getElementById('lazy').chosen") == "Maryland"

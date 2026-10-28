@@ -50,10 +50,11 @@
   const nearby = el => {
     let node = el;
     // Rippling nests a custom question's control 5-6 levels below the div that
-    // holds its text. Deeper levels are used only while the ancestor owns no
+    // holds its text, and a searchable select's input 9 (Go Fish Digital's "What is your desired compensation
+    // range?" read "Select", 2026-10-27). Deeper levels are used only while the ancestor owns no
     // other applicant control, so another question's text is never borrowed.
     const CONTROL = 'input:not([type=hidden]),select,textarea,[role=combobox],[role=radiogroup],[role=listbox],[contenteditable=true]';
-    for (let depth = 0; depth < 8 && node; depth++) {
+    for (let depth = 0; depth < 11 && node; depth++) {
       if ((depth >= 3 || el.type === 'file') && [...node.querySelectorAll(CONTROL)].some(x => x !== el && !el.contains(x) && !x.contains(el))) break;
       let prev = node.previousElementSibling;
       while (prev && (!visible(prev) || prev.matches('script,style'))) prev = prev.previousElementSibling;
@@ -384,7 +385,8 @@
     || /\.\s*Required\./i.test(q)
     || [...(el.labels || [])].some(l=>/mandatory|required/i.test(l.title || '') || l.querySelector('img.requiredimg'))
     || !!el.closest('.input-row')?.querySelector('.input-row__label--required');
-  const PLACEHOLDER_VALUE = /^(select( one)?(\.\.\.)?|choose( one)?(\.\.\.)?|-+|--\s*select\s*--|please select|make a selection|none selected|no selection|not specified)$/i;
+  const CALENDAR_POPUP = '.ui-datepicker,.datepicker-dropdown,.flatpickr-calendar,.pika-single';
+  const PLACEHOLDER_VALUE = /^(select( one)?(\.\.\.)?|choose( one)?(\.\.\.)?|-+|[-–—]{1,2}\s*select\s*[-–—]{1,2}|please select|make a selection|none selected|no selection|not specified)$/i;
 
   // Never applicant fields: inert/hidden subtrees, honeypots, CAPTCHA widgets and their responses.
   const HONEYPOT = /honey.?pot|beecatcher|bot.?trap|leave.?(?:this|blank)|^hp_/i;
@@ -514,16 +516,37 @@
   for (const host of all.filter(e => e.matches('sdf-select-simple') && !e.getRootNode().host && visible(e))) {
     if (excluded(host) || consumed.has(host)) continue;
     const items = [...host.querySelectorAll('sdf-select-item'), ...(host.shadowRoot?.querySelectorAll('sdf-select-item') || [])];
-    const itemText = i => clean(i.getAttribute('label') || i.textContent);
+    // Angular sets ADP's item labels as properties, not attributes (Midco 2026-10-27).
+    const itemText = i => clean((typeof i.label === 'string' && i.label) || i.getAttribute('label') || i.textContent);
     const raw = typeof host.value === 'string' ? host.value : (host.value?.label || host.value?.value || '');
     const chosen = items.find(i => i.hasAttribute('selected') || i.getAttribute('aria-selected') === 'true')
-      || items.find(i => raw && (i.getAttribute('value') === raw || itemText(i) === raw));
+      || items.find(i => raw && (i.getAttribute('value') === raw || i.value === raw || itemText(i) === raw));
     const value = chosen ? itemText(chosen) : '';
     const q = label(host, { visibleFirst: true });
     const req = isReq(host, q) || host.hasAttribute('required');
     consumed.add(host);
     push(host, { label: q, type: 'combobox', widget: 'sdf-select', required: req, options: items.map(itemText).filter(Boolean),
       value, valid: !req || !!value, maxlength: -1 });
+  }
+
+  // BambooHR's Fabric pick lists (Performance Software, 2026-10-27): a toggle button[aria-haspopup] opens the menu, and
+  // a zero-size aria-hidden <select> beside it mirrors only the chosen value's id for the form post. Observed as the
+  // select, State/Country/Highest Education offered nothing to pick and stayed empty: the toggle is the field.
+  for (const mirror of all.filter(e => e.matches('select[aria-hidden="true"]:not([multiple])'))) {
+    if (consumed.has(mirror) || excluded(mirror) || mirror.disabled) continue;
+    if ([...mirror.options].filter(o => o.value !== '').length > 1) continue; // a select2/chosen list, not a mirror
+    const toggles = [...(mirror.parentElement?.querySelectorAll('button[aria-haspopup]:not([aria-haspopup="false"])') || [])]
+      .filter(b => visible(b) && !consumed.has(b));
+    if (toggles.length !== 1) continue;
+    const toggle = toggles[0];
+    if (toggle.disabled || toggle.getAttribute('aria-disabled') === 'true') continue;
+    const shown = clean(toggle.innerText);
+    const value = PLACEHOLDER_VALUE.test(shown) ? '' : shown;
+    const q = label(mirror);
+    const req = isReq(mirror, q);
+    consumed.add(mirror);
+    consumed.add(toggle);
+    push(toggle, { label: q, type: 'dropdown', required: req, options: [], value, valid: !req || !!value, maxlength: -1 });
   }
 
   // Ashby gives each checkbox its own name; the fieldset defines the question.
@@ -841,10 +864,15 @@
       if (group.length && [...el.querySelectorAll('[role=radiogroup]')].some(g => visible(g) && group.every(m => g.contains(m)))) continue;
       const nativeMember = x => x.matches('input[type=radio]') ? x :
         x.querySelectorAll('input[type=radio]').length === 1 ? x.querySelector('input[type=radio]') : null;
+      // Rippling's role=radio rows hold a native radio named by aria-labelledby, not a <label>: its value ("true") was
+      // read as the choice instead of "Yes - I consent to receiving text messages" (Go Fish Digital, 2026-10-27).
+      const labelledBy = n => clean((n.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
+        .map(ref => textOf(byId(n, ref))).join(' '));
       const optionLabel = x => {
         if (x.hasAttribute('ui5-radio-button')) return clean(x.text || x.getAttribute('text') || textOf(x));
         const native = nativeMember(x);
-        return native ? clean([...(native.labels || [])].map(textOf).join(' ')) || native.value : clean(x.innerText) || label(x);
+        return native ? clean([...(native.labels || [])].map(textOf).join(' ')) || labelledBy(native)
+          || (native !== x && clean(x.innerText)) || native.value : clean(x.innerText) || label(x);
       };
       options = group.map(optionLabel);
       const chosen = group.find(x => {
@@ -852,6 +880,11 @@
         return native ? native.checked : x.checked === true || x.getAttribute('aria-checked') === 'true';
       });
       value = chosen ? optionLabel(chosen) : '';
+      // A consent group whose long caption is not its label is named by its Yes choice, as a lone radio group is.
+      if ([el.id, el.getAttribute('name'), 'Unlabelled field'].includes(question)
+          && /(?:text messages?|sms|marketing|newsletter)/i.test(options.join(' '))) {
+        question = options.find(o => /^yes\b/i.test(o))?.replace(/^yes\s*[-–:]?\s*/i, '') || question;
+      }
       // Its question is a caption inside the group, before the choices, tied to nothing ("Are you under the age of 40?").
       if (group.length && (question === 'Unlabelled field' || question === el.id || question === el.getAttribute('name'))) {
         question = precedingText(group[0], new Set(options)) || question;
@@ -1043,6 +1076,9 @@
     .filter(el => el.matches('sdf-button') || !composedClosest(el,'sdf-button'))
     .filter(el => !consumed.has(el) && !fieldIds.has(el.dataset.jpId) && visible(el) && !el.disabled
       && !composedClosest(el,'[data-automation-id="languageSelectorButton"],[data-automation-id="settingsSelectorButton"]')
+      // A typed date box's calendar popup (Prev / Next / 1..31) is not page navigation: left open after Axtria's
+      // JazzHR mm/yyyy date, its "Next" was taken for the application's Next 45 times (2026-10-27).
+      && !composedClosest(el, CALENDAR_POPUP)
       && !(el.matches('sdf-button') && ((el.shadowRoot?.querySelector('button') || el.querySelector('button'))?.disabled
         || el.hasAttribute('disabled') && el.getAttribute('disabled') !== 'false'))
       && !el.closest('[inert],[aria-hidden="true"]')
