@@ -1959,10 +1959,27 @@ class Adapter:
                 and reset_proven(record)
                 and not record.get("absent_create_at")
             )
-            if (not known or not_found or absent) and self.accounts.may_create and self.attempts["create"] == 0:
-                if absent:
-                    self.accounts.mark(url, "password_unknown", self.accounts.saved(url) or credentials,
-                                       absent_create_at=now())
+            # The same silence where nothing ever showed that an account exists (no Create, sign-in or "already
+            # registered"): Bain's, EA's and Intuit's career sites answer a reset with "If the email address you entered
+            # is associated with an account in our records, you will receive an email", and four to six confirmed resets
+            # each brought nothing (2026-10-26/27). The email has no account there: create one, once. The record is not
+            # marked as an account (no_account), so the sign-up page is not turned back to sign-in.
+            unproven = (
+                not absent
+                and not record.get("confirmed_at")
+                and not record.get("absent_create_at")
+                and record.get("state") in {"reset_requested", "credentials_rejected"}
+                and reset_proven(record)
+                and time.time() - float(record.get("reset_requested_at") or 0) > UNANSWERED_RESET_SECONDS
+            )
+            if (
+                (not known or not_found or absent or unproven)
+                and self.accounts.may_create
+                and self.attempts["create"] == 0
+            ):
+                if absent or unproven:
+                    self.accounts.mark(url, "password_unknown" if absent else "no_account",
+                                       self.accounts.saved(url) or credentials, absent_create_at=now())
                     self.emit("account", "No reset email ever came, so this employer has no account for this email; "
                               "creating one")
                 if await self.switch(obs, CREATE_LINK):
