@@ -29,7 +29,7 @@ WIDGET = """
 <a id="plain" role="combobox">Pick</a>
 <script>
 window.changes = [];
-function makeDropdown(id, catalog, {ajax = true, delay = 500, search = true, onchange = () => {}, match = (t, q) => t.toLowerCase().includes(q), keep = false} = {}) {
+function makeDropdown(id, catalog, {ajax = true, delay = 500, search = true, onchange = () => {}, match = (t, q) => t.toLowerCase().includes(q), keep = false, first = 0} = {}) {
   document.getElementById('fields').insertAdjacentHTML('beforeend', `
     <select id="${id}" style="display:none">${ajax ? '' : catalog().map((t, i) => `<option value="${i}">${t}</option>`).join('')}</select>
     <a id="${id}_icimsDropdown" class="dropdown-select" role="combobox" tabindex="0"><span class="dropdown-text">— Make a Selection —</span></a>
@@ -41,8 +41,8 @@ function makeDropdown(id, catalog, {ajax = true, delay = 500, search = true, onc
   const ctnr = document.getElementById(id + '_icimsDropdown_ctnr'), box = ctnr.querySelector('input');
   const ul = document.getElementById(id + '_dropdown-results'), status = ctnr.querySelector('[role=status]');
   let words = [], pages = 1, timer;
-  const render = () => {
-    const q = box.value.toLowerCase();
+  const render = (query) => {
+    const q = (query ?? box.value).toLowerCase();
     if (q) (window.searches = window.searches || []).push(id + ':' + q);
     const all = catalog().filter(t => match(t, q));
     words = all.slice(0, 25 * pages);
@@ -50,7 +50,9 @@ function makeDropdown(id, catalog, {ajax = true, delay = 500, search = true, onc
     ul.innerHTML = '<li class="dropdown-result" role="option" dropdown-index="-1" aria-label="— Make a Selection —">— Make a Selection —</li>' +
       words.map((t, i) => `<li class="dropdown-result result-selectable" role="option" dropdown-index="${i}" aria-label="${t}">${t}</li>`).join('');
   };
-  anchor.addEventListener('click', () => { ctnr.classList.remove('dropdown-invisible'); if (!keep) box.value = ''; pages = 1; render(); if (search) box.focus(); });
+  // `first`: the first page (an empty query) answers that long after opening, whatever is typed meanwhile.
+  anchor.addEventListener('click', () => { ctnr.classList.remove('dropdown-invisible'); if (!keep) box.value = ''; pages = 1;
+    if (first) setTimeout(() => render(''), first); else render(); if (search) box.focus(); });
   box.addEventListener('keyup', () => { clearTimeout(timer); timer = setTimeout(() => { pages = 1; render(); }, ajax ? delay : 0); });
   ul.addEventListener('scroll', () => { if (ul.scrollTop + ul.clientHeight >= ul.scrollHeight * 0.75) { pages += 1; render(); } });
   ul.addEventListener('click', e => {
@@ -225,3 +227,19 @@ async def test_a_search_answered_by_the_rows_already_shown_does_not_wait_out_the
     started = time.monotonic()
     rows = await widgets.icims_rows(form.main_frame, "rcf2046", before=before, timeout=6, query="United States")
     assert rows == before and time.monotonic() - started < 3
+
+
+async def test_the_first_page_that_answers_after_opening_is_not_read_as_the_search(form):
+    """Publicis and Medpace (2026-10-26..27): the Country list's first page ("United Kingdom", "Afghanistan", ...)
+    answered while "United States" was being typed and was read as the search's answer; the alias searches then found
+    nothing and the field outlasted its deadline. The first page is awaited before the search is typed."""
+    import time
+
+    catalog = ["United Kingdom"] + [f"Country {i:03d}" for i in range(40)] + ["United States", "Uruguay"]
+    await form.evaluate(
+        f"makeDropdown('-1_PersonProfileFields.AddressCountry2', () => {json.dumps(catalog)}, {{first: 700, delay: 1500}})"
+    )
+    country = form.locator('[id="-1_PersonProfileFields.AddressCountry2_icimsDropdown"]')
+    started = time.monotonic()
+    assert await widgets.combobox(form.main_frame, country, "United States", thorough=False) == "United States"
+    assert time.monotonic() - started < 6  # one search, inside an optional picker's budget
