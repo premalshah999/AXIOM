@@ -59,3 +59,10 @@ def test_openrouter_is_a_connection_provider(service):
     saved = save_connections(service.config, {"llm_provider": "openrouter"})
     assert saved.llm_provider == "openrouter" and saved.llm_model == "deepseek/deepseek-v4.1-flash-1017"
     assert "OPENROUTER_API_KEY" in missing_key_message("openrouter")
+
+
+def test_the_key_is_read_from_either_env_name(monkeypatch):
+    from jobpilot.config import Settings
+
+    monkeypatch.setenv("OPENROUTER_API", "fixture-only")
+    assert Settings(_env_file=None).openrouter_api_key == "fixture-only"

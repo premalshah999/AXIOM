@@ -90,7 +90,9 @@ class Settings(BaseSettings):
     openai_cache_price: float = Field(default=0.01, ge=0)
     # OpenRouter (owner 2026-10-27): DeepSeek V4.1 Flash 1017 served only by Relace, reasoning off. Relace's rates per 1M
     # tokens: $0.07 input, $0.50 output, $0.008 cached input. No fallback to other hosts unless enabled.
-    openrouter_api_key: str = Field(default="", repr=False)
+    openrouter_api_key: str = Field(
+        default="", repr=False, validation_alias=AliasChoices("openrouter_api_key", "openrouter_api")
+    )
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_model: str = "deepseek/deepseek-v4.1-flash-1017"
     openrouter_provider: str = "relace"
