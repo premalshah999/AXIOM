@@ -4258,17 +4258,34 @@ class BrowserEngine:
         }
         return obs
 
+    def evidence_answered(self, field):
+        """The field shows the engine's own verified, evidence-backed answer and the page accepts it."""
+        from .widgets import same_value
+
+        entry = (getattr(self.form, "ledger", None) or {}).get(field["id"]) or {}
+        answer = str(entry.get("answer") or "").strip()
+        return bool(
+            answer
+            and entry.get("verified")
+            and entry.get("evidence_ids")
+            and field.get("valid", True)
+            and not field.get("error")
+            and same_value(field, field.get("value", ""), answer)
+        )
+
     def record_help_reviews(self, proposed):
-        """Validate a field-bound request for facts without another model or page action."""
+        """Validate a field-bound request for facts without another model or page action. Returns the ids of the
+        requested fields that already hold the engine's evidence-backed answer (never asked)."""
         from collections import Counter
         from .answer_quality import SECRET
         from .continuous_agent import evidence_context
 
         form, resolver = self.form, getattr(self.form, "resolver", None)
         if self.armed or resolver is None:
-            return
+            return []
         facts, evidence, learned = evidence_context(resolver)
         counts = Counter(answer.field_id for answer in proposed)
+        answered = []
         for answer in proposed:
             field = form.fields.get(answer.field_id)
             if (
@@ -4280,6 +4297,12 @@ class BrowserEngine:
                 or AUTH.search(field["label"])
                 or SECRET.search(field["label"])
             ):
+                continue
+            if self.evidence_answered(field):
+                # Reply (Lever, 2026-10-27): three Yes/No experience questions held verified "No" answers cited to
+                # the resume, and the navigator still asked the owner "is not established". Its doubt is not a
+                # missing fact; the answer stands.
+                answered.append(field["id"])
                 continue
             packet = resolver.question_context(field)
             field_facts, field_evidence = dict(facts), dict(evidence)
@@ -4311,6 +4334,7 @@ class BrowserEngine:
                 retryable=validated.retryable,
                 supporting_facts=validated.supporting_facts,
             )
+        return answered
 
     def controller_blocker(self, reason="", *, original=None):
         """Keep real answer/control causes when an owned controller stops."""
@@ -5049,8 +5073,25 @@ class BrowserEngine:
                             "receipt": receipt,
                         }
                         return
-                    self.record_help_reviews(decision.reviews)
-                    self.result = self.controller_blocker(decision.reason)
+                    answered = self.record_help_reviews(decision.reviews)
+                    if decision.reviews and set(answered) == {r.field_id for r in decision.reviews}:
+                        # Every field named holds an evidence-backed answer: nothing to ask, keep going.
+                        self.emit(
+                            "help_declined",
+                            "The requested fields already hold evidence-backed answers; the owner is not asked",
+                            {"fields": len(answered)},
+                        )
+                        outcome = json.dumps(
+                            {
+                                "executed": False,
+                                "verified": False,
+                                "reason": "Each field named already holds the applicant's evidence-backed answer; "
+                                "the applicant is not asked about it",
+                                "next": "Continue the application; submit when the page verifies complete",
+                            }
+                        )
+                    else:
+                        self.result = self.controller_blocker(decision.reason)
             except (ValueError, PlaywrightError) as exc:
                 if self.armed:
                     self.result = {

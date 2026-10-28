@@ -684,6 +684,15 @@ async def drive(engine):
                             "reason": "Help refused: required fields are still unfilled or invalid. Fill or inspect them first.",
                         }
                         continue
+                    answered = engine.record_help_reviews(decision.answers)
+                    if decision.answers and set(answered) == {a.field_id for a in decision.answers}:
+                        # Every field named holds the engine's evidence-backed answer (Reply 2026-10-27).
+                        outcome = {
+                            "executed": False,
+                            "reason": "Help refused: each field named already holds the applicant's evidence-backed "
+                            "answer. Continue the application.",
+                        }
+                        continue
                     stop = "help"
                     engine.emit(
                         "continuous_stop",
@@ -694,7 +703,6 @@ async def drive(engine):
                             "unchanged": unchanged,
                         },
                     )
-                    engine.record_help_reviews(decision.answers)
                     engine.result = engine.controller_blocker(decision.reason)
                     return
             except (ValueError, RuntimeError) as exc:

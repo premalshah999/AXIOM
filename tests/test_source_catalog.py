@@ -87,3 +87,27 @@ async def test_navigator_help_preserves_known_source_catalog_blocker(page, servi
     assert result["blocker_type"] == "control_failure"
     assert result["recovery_cause"] == "control_observation"
     assert result["report"]["pending"][0]["supporting_facts"] == ["policy:source"]
+
+
+def test_navigator_help_never_asks_about_an_evidence_answered_field(service):
+    """Reply (Lever, 2026-10-27): three Yes/No experience questions held verified "No" answers cited to the resume; the
+    navigator still asked for help ("is not established") and the owner got three questions."""
+    from types import SimpleNamespace
+
+    resolver = Resolver(Profile(facts={"kb_skill_1": "ML/AI: PyTorch, scikit-learn"}), service.db, service.config)
+    question = {"id": "q", "label": "Have you connected software to industrial hardware or controls (e.g., PLC)?",
+                "type": "radio", "required": True, "options": ["Yes", "No"], "value": "No", "valid": True,
+                "error": "", "section": "", "group": ""}
+    asked = []
+    form = SimpleNamespace(
+        resolver=resolver, fields={"q": question}, pending=[],
+        ledger={"q": {"answer": "No", "evidence_ids": ["fact:kb_skill_1"], "verified": True}},
+        _pending=lambda field, reason, **kw: asked.append(field["id"]),
+    )
+    engine = BrowserEngine(service, "synthetic")
+    engine.form = form
+    request = [Answer(field_id="q", disposition="review", reason="Not established", blocker_type="missing_fact")]
+    assert engine.record_help_reviews(request) == ["q"] and asked == []
+    # A field the engine did not answer with evidence is still asked.
+    form.ledger = {"q": {"answer": "No", "evidence_ids": [], "verified": True}}
+    assert engine.record_help_reviews(request) == [] and asked == ["q"]
