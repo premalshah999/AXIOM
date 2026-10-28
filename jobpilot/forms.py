@@ -5945,6 +5945,11 @@ class FormSession:
             corrections = "correct the error" in match.group().lower()
             phrase = match.group().lower()
             tail = text[match.end() : match.end() + 600]
+            from .adapters.base import ALREADY
+
+            if already := ALREADY.search(tail):
+                return {"type": "explicit_rejection_page", "url": self.page.url,
+                        "category": "already_applied", "evidence": already[0], "missing_fields": []}
             if "expired" in phrase:
                 return {"type": "explicit_rejection_page", "url": self.page.url, "category": "closed",
                         "evidence": text[max(0, match.start() - 20) : match.end() + 200], "missing_fields": []}

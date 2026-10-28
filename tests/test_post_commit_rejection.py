@@ -326,3 +326,31 @@ async def test_smartrecruiters_refusals_end_the_commit_honestly(monkeypatch, cat
     result = await engine.finish(reserved=True)
     assert result["state"] == state and result.get("recovery_cause") == cause, result
     assert engine.armed is False and form.clicks == 1
+
+
+async def test_existing_application_refusal_is_terminal_without_claiming_a_new_submission(monkeypatch):
+    rejection = {"type": "explicit_rejection_page", "category": "already_applied",
+                 "evidence": "We've already received your application for this role"}
+    form = CommitForm(shown=None, after_click=rejection)
+    engine = engine_for(monkeypatch, form)
+    result = await engine.finish(reserved=True)
+    assert result["state"] == "already_applied"
+    assert result["receipt"] == rejection
+    assert form.clicks == 1 and form.repairs == 0
+    assert not engine.armed
+
+
+@pytest.mark.parametrize('apostrophe', ["'", "’"])
+async def test_duplicate_application_banner_is_not_generic_rejection(page, tmp_path, apostrophe):
+    await page.set_content(f"<main><h2>We couldn't submit your application</h2>"
+                           f"<p>We{apostrophe}ve already received your application for this role, "
+                           "so there's no need to apply again.</p></main>")
+    form = FormSession(page, Resolver(Profile(), None, None), tmp_path / "unused.pdf", lambda *a: None)
+    assert (await form.rejection())["category"] == "already_applied"
+
+
+async def test_unrelated_receipt_in_refusal_does_not_prove_this_job_applied(page, tmp_path):
+    await page.set_content("<main><h2>We couldn't submit your application</h2>"
+                           "<p>We've already received your application for another role.</p></main>")
+    form = FormSession(page, Resolver(Profile(), None, None), tmp_path / "unused.pdf", lambda *a: None)
+    assert (await form.rejection())["category"] == "rejection"

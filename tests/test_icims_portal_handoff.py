@@ -89,3 +89,27 @@ def test_a_resumed_tab_finds_the_portal_its_run_adopted(service):
     value = engine(service, page=SimpleNamespace(url=PORTAL))
     value.adopt_handoff("icims", PORTAL)
     assert service.db.get_setting("desktop_job:job-acme")["platform_url"] == POSTING
+
+
+def test_portal_handoff_updates_the_resolvers_receipt_identity(service):
+    from jobpilot.forms import icims_receipt
+
+    value = engine(service, page=SimpleNamespace(url=PORTAL))
+    resolver = SimpleNamespace(job=value.job)
+    value.adopt_handoff("icims", PORTAL)
+    assert resolver.job is value.job
+    assert resolver.job["ats"] == "icims"
+    assert icims_receipt(resolver.job["url"], POSTING,
+                         "Your application was submitted successfully. Thank you for applying.")
+    assert icims_receipt(resolver.job["url"], POSTING.replace('/5080/', '/5081/'),
+                         "Your application was submitted successfully. Thank you for applying.") is None
+
+
+def test_workday_handoff_keeps_shared_job_identity(service):
+    page = SimpleNamespace(url="https://acme.wd1.myworkdayjobs.com/en-US/jobs/job/Analyst_R1/apply")
+    value = engine(service, page=page)
+    resolver = SimpleNamespace(job=value.job)
+    value.adopt_handoff("workday")
+    assert resolver.job is value.job
+    assert resolver.job["ats"] == "workday"
+    assert resolver.job["url"].endswith('/Analyst_R1')

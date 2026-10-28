@@ -2460,7 +2460,9 @@ class BrowserEngine:
         self.handoff_origin = origin(url or self.page.url)
         if target == "workday":
             posting = re.sub(r"/apply(?:/[^?#]*)?(?:[?#].*)?$", "", self.page.url)
-            self.job = {**self.job, "url": posting, "ats": "workday"}
+            # The resolver and form share this run's job identity. Replacing the
+            # dict leaves their account and receipt checks on the wrapper URL.
+            self.job.update(url=posting, ats="workday")
         elif target == "icims":
             self.adopt_icims_portal(url or self.page.url)
 
@@ -2477,7 +2479,7 @@ class BrowserEngine:
             return False
         listing = getattr(self, "listing_url", "") or self.job["url"]
         self.listing_url, self.platform_url = listing, posting
-        self.job = {**self.job, "url": posting, "ats": "icims"}
+        self.job.update(url=posting, ats="icims")
         self.application_entry_url = ICIMS.prepare_url(posting)
         profile = getattr(self, "profile", None)
         if profile is not None and not self.job.get("demo"):
@@ -3841,6 +3843,12 @@ class BrowserEngine:
                 return {"state": "confirmed", "reason": "Website confirmation captured", "receipt": receipt}
             rejection = await self.form.rejection()
             if rejection and rejection != before_rejection:
+                if rejection.get("category") == "already_applied":
+                    self.armed = False
+                    await self.release_reservation()
+                    return {"state": "already_applied",
+                            "reason": "The employer says an application is already on file for this job",
+                            "receipt": rejection}
                 if rejection.get("category") == "validation":
                     repair = await self.form.repair_validation(rejection) if validation_attempt < 2 else None
                     recover = getattr(self.form, "recover_controls", None)
@@ -4571,6 +4579,34 @@ class BrowserEngine:
             "report": {"pending": pending} if pending else original.get("report", {}),
             "retryable": typed.get("retryable", False) if typed else original.get("retryable", False),
         }
+
+    def recovery_exhausted_reason(self, history):
+        """Report the remaining verification problem or the last refused action, without values."""
+        from .failure_reports import clean
+
+        problems = list(getattr(self.form, "last_problems", []) or [])
+        if not problems:
+            for item in reversed(history):
+                outcome = item.get("outcome", "")
+                try:
+                    feedback = json.loads(outcome)
+                except (ValueError, TypeError):
+                    continue
+                if not isinstance(feedback, dict):
+                    continue
+                if feedback.get("ok") or feedback.get("verified"):
+                    break
+                problems = feedback.get("problems") or [
+                    feedback.get("reason") or feedback.get("detail") or feedback.get("failure_category")
+                ]
+                problems = [p for p in problems if p]
+                if problems:
+                    break
+        if not problems:
+            saved = self.form.failed_strategies.get("__recovery_blocker__", {})
+            problems = saved.get("problems") or [saved.get("reason")]
+        detail = "; ".join(dict.fromkeys(clean(str(p)) for p in problems if p))[:600]
+        return "Recovery stopped: " + (detail or "No observed action advanced the application") + "; draft saved."
 
     def answer_verdict(self, decision, target, feedback, rejected):
         """End recovery when the answer, not the control, is what blocks the step."""
@@ -5317,5 +5353,5 @@ class BrowserEngine:
             await self.checkpoint_draft()
         if not self.result:
             self.result = self.controller_blocker(
-                "The browser did not advance within its recovery budget; the draft checkpoint is saved."
+                self.recovery_exhausted_reason(history)
             )

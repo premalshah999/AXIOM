@@ -156,6 +156,16 @@
     }
     if (labels.length) {
       const t = clean(labels.map(textOf).join(' '));
+      if (/^[*✱\s]+$/.test(t) && el.matches('input[type=checkbox],[role=checkbox]')) {
+        // A required-marker-only label can belong to an agreement sentence
+        // printed above it. Never borrow it when multiple checkboxes are visible.
+        const owner = el.closest('form') || el.getRootNode();
+        const boxes = [...owner.querySelectorAll('input[type=checkbox],[role=checkbox]')].filter(visible);
+        if (boxes.length === 1 && boxes[0] === el) {
+          const statement = precedingText(el, new Set(['*', '✱']));
+          if (/^I\s+(?:agree|accept|acknowledge|consent)\b/i.test(statement)) return statement;
+        }
+      }
       if (t) return t;
     }
     // Some nested history widgets have a visible label whose `for` points to

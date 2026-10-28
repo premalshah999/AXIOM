@@ -58,6 +58,7 @@ CONFIRM_TEXT = re.compile(
 )
 # Explicit statements only. "Already applied? Sign in" footers and drafts are not applications.
 ALREADY = re.compile(
+    r"we(?:['’]ve| have) already received your application for this (?:job|position|role)\b|"
     r"you already applied (?:for|to) this (?:job|position)(?:[.!]|$)|"
     r"you(?:'ve| have) already applied|you have previously applied|already submitted an application|"
     r"application for this (?:job|position|role) (?:has )?already been submitted|"
@@ -1718,6 +1719,12 @@ class Adapter:
                 receipt["resume_sha256"] = self.run_record["packet"]["resume_sha"]
                 return {"state": "confirmed", "reason": "Website confirmation captured", "receipt": receipt}
             if rejection := (await self.validation_rejection() or await self.form.rejection()):
+                if rejection.get("category") == "already_applied":
+                    self.e.armed = self.committed = False
+                    await self.e.release_reservation()
+                    return {"state": "already_applied",
+                            "reason": "The employer says an application is already on file for this job",
+                            "receipt": rejection}
                 if rejection.get("category") == "validation":
                     attempts = getattr(self, "validation_attempts", 0)
                     repair = await self.form.repair_validation(rejection) if attempts < 2 else None
