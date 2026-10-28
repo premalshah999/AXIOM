@@ -72,6 +72,27 @@ class AccountStore:
             row = self.service.db.get_setting(legacy, {})
         return row
 
+    def adopt_listing(self, listing_url):
+        """The run moved this job from the employer's career site to its platform's portal (self.job_url), whose host
+        now keys the account. Records saved while the job was keyed by the career site (its own pages, and the Central
+        login, whose tenant was the career site: Noblis's reset-proven login, Rivian, 2026-10-27) are copied under
+        the portal's key when it has none yet, so nothing saved is lost and the direct key reads see it. The career
+        site's record is kept. True when a record was copied."""
+        if not listing_url or origin(listing_url) == origin(self.job_url):
+            return False
+        old = AccountStore(self.service, self.email, listing_url).key(listing_url)
+        new = self.key(self.job_url)
+        if old == new:
+            return False
+        with self.service.db.exclusive() as s:
+            if s.get(Setting, new) is not None or (row := s.get(Setting, old)) is None:
+                return False
+            value = dict(row.value)
+            if value.get("tenant") == "employer:" + origin(listing_url):
+                value["tenant"] = "employer:" + origin(self.job_url)
+            s.add(Setting(key=new, value={**value, "listing_origin": origin(listing_url), "updated_at": now()}))
+        return True
+
     def known(self, url):
         """The employer is known to hold an account for this email on this tenant."""
         record = self.record(url)
