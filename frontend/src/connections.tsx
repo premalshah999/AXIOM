@@ -22,6 +22,8 @@ type ConnectionField = {
   options: string[];
   // Saved but not running yet: the value the next start uses.
   pending: string;
+  // How each choice reads (OpenRouter hosts with their prices).
+  option_labels?: Record<string, string>;
 };
 
 type Connections = { fields: ConnectionField[]; provider: string; model_ready: boolean };
@@ -43,7 +45,7 @@ const PROVIDERS = [
   { id: "haiku", label: "Anthropic Claude Haiku" },
   { id: "mimo", label: "Xiaomi MiMo" },
   { id: "openai", label: "OpenAI GPT-6 Luna (cheapest setting)" },
-  { id: "openrouter", label: "OpenRouter (any model; DeepSeek V4.1 Flash by default)" },
+  { id: "openrouter", label: "OpenRouter: DeepSeek V4.1 Flash (choose its host below)" },
 ];
 
 /** Setup > Connections: every service key and setting is entered here; nothing needs editing in .env. */
@@ -97,7 +99,7 @@ export function ConnectionSettings() {
         >
           {[...new Set([...f.options, f.pending || f.value].filter(Boolean))].map((o) => (
             <option key={o} value={o}>
-              {o}
+              {f.option_labels?.[o] || o}
             </option>
           ))}
         </select>

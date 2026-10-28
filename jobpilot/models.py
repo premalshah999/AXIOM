@@ -364,6 +364,7 @@ class MeteredTransport(httpx.AsyncBaseTransport):
                     raise AnswerModelConnectionError() from None
                 raise AnswerModelUnavailable() from None
             raise
+        completion = {}
         try:
             completion = json.loads(content)
             usage = completion.get("usage", {})
@@ -410,6 +411,7 @@ class MeteredTransport(httpx.AsyncBaseTransport):
                             "cache_hit_tokens": cache_hits(usage) if usage else None,
                             # OpenRouter reports what it billed for this request.
                             **({"billed_usd": usage["cost"]} if openrouter and "cost" in usage else {}),
+                            **({"host": completion.get("provider")} if openrouter and completion.get("provider") else {}),
                             "completion_tokens": usage.get(
                                 "output_tokens" if anthropic else "completion_tokens"
                             ),

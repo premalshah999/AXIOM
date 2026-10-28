@@ -13,6 +13,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 MAX_WORKERS = 32
 MAX_NORMAL_WORKERS = 30
 MAX_SPECIALIST_WORKERS = 4
+# DeepSeek V4.1 Flash 1017 on each OpenRouter host the app offers, USD per 1M tokens: input, output, cached input
+# (openrouter.ai endpoints, 2026-10-28). The owner moved the flow to Sail Research: "it might be slow, but it's very
+# affordable".
+OPENROUTER_HOSTS = {
+    "sail-research": (0.101, 0.15, 0.006735),
+    "deepinfra": (0.098, 0.294, 0.00294),
+    "relace": (0.07, 0.50, 0.008),
+    "wafer": (0.07, 0.50, 0.0069),
+}
 
 
 @dataclass(frozen=True)
@@ -94,19 +103,19 @@ class Settings(BaseSettings):
     openai_input_price: float = Field(default=0.10, ge=0)
     openai_output_price: float = Field(default=0.50, ge=0)
     openai_cache_price: float = Field(default=0.01, ge=0)
-    # OpenRouter (owner 2026-10-27): DeepSeek V4.1 Flash 1017 served only by Relace, reasoning off. Relace's rates per 1M
-    # tokens: $0.07 input, $0.50 output, $0.008 cached input. No fallback to other hosts unless enabled.
+    # OpenRouter: DeepSeek V4.1 Flash 1017 served only by the chosen host (OPENROUTER_HOSTS), reasoning off. No fallback
+    # to other hosts unless enabled. Prices left unset are the host's own rates.
     openrouter_api_key: str = Field(
         default="", repr=False, validation_alias=AliasChoices("openrouter_api_key", "openrouter_api")
     )
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_model: str = "deepseek/deepseek-v4.1-flash-1017"
-    openrouter_provider: str = "relace"
+    openrouter_provider: str = "sail-research"
     openrouter_allow_fallbacks: bool = False
     openrouter_thinking: str = "disabled"
-    openrouter_input_price: float = Field(default=0.07, ge=0)
-    openrouter_output_price: float = Field(default=0.50, ge=0)
-    openrouter_cache_price: float = Field(default=0.008, ge=0)
+    openrouter_input_price: float | None = Field(default=None, ge=0)
+    openrouter_output_price: float | None = Field(default=None, ge=0)
+    openrouter_cache_price: float | None = Field(default=None, ge=0)
     # TypeSafe Jev answers bounded choices (pick one offered option) before DeepSeek; output is free.
     typesafe_api_key: str = Field(default="", repr=False)
     typesafe_base_url: str = "https://api.typesafe.ai"
@@ -279,15 +288,24 @@ class Settings(BaseSettings):
 
     @property
     def llm_input_price(self):
-        return getattr(self, self.llm_provider + "_input_price")
+        return self._host_price(0)
 
     @property
     def llm_output_price(self):
-        return getattr(self, self.llm_provider + "_output_price")
+        return self._host_price(1)
 
     @property
     def llm_cache_price(self):
-        return getattr(self, self.llm_provider + "_cache_price", self.llm_input_price)
+        return self._host_price(2)
+
+    def _host_price(self, part):
+        """The selected provider's rate: input, output or cached input. An OpenRouter rate left unset is its host's."""
+        value = getattr(self, self.llm_provider + ("_input_price", "_output_price", "_cache_price")[part], None)
+        if value is None and self.llm_provider == "openrouter":
+            return OPENROUTER_HOSTS.get(self.openrouter_provider, OPENROUTER_HOSTS["relace"])[part]
+        if value is None and part == 2:
+            return self._host_price(0)  # No separate cache rate: cached input costs the same.
+        return value
 
     def prepare(self):
         self.data_dir = self.data_dir.resolve()

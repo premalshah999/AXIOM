@@ -34,7 +34,8 @@ FIELDS = {
     # Everything else a new owner sets (owner 2026-10-28: "a user should be able to configure API keys, captcha keys,
     # gmail app password, everything through the web interface").
     "openrouter_model": ("Model", "OpenRouter model", False, "Model id on openrouter.ai. Default: deepseek/deepseek-v4.1-flash-1017."),
-    "openrouter_provider": ("Model", "OpenRouter host", False, "The provider that serves it, e.g. relace. Empty lets OpenRouter choose."),
+    "openrouter_provider": ("Model", "OpenRouter host", False,
+                            "Which company runs the model for OpenRouter. Prices per 1M tokens: input / output."),
     "vision_api_key": ("Vision", "Screenshot model key", True, "Optional. Only if your AI model cannot read images."),
     "vision_base_url": ("Vision", "Screenshot model address", False, "OpenAI-compatible base URL, e.g. https://openrouter.ai/api/v1."),
     "vision_model": ("Vision", "Screenshot model", False, "Model id at that address."),
@@ -62,7 +63,18 @@ FIELDS = {
 # Settings read once at startup: saved here, used after the app restarts (the worker queues are sized then).
 RESTART = {"normal_workers", "specialist_workers", "custom_ats_worker", "headless"}
 # Fields the page offers as a fixed choice (owner 2026-10-28: normal 4, 6 or 8; difficult mode 1 or 2).
-OPTIONS = {"normal_workers": ["4", "6", "8"], "specialist_workers": ["1", "2"]}
+OPTIONS = {
+    "normal_workers": ["4", "6", "8"],
+    "specialist_workers": ["1", "2"],
+    "openrouter_provider": ["sail-research", "deepinfra", "relace", "wafer"],
+}
+# How a choice reads on the page.
+OPTION_LABELS = {
+    "sail-research": "Sail Research · $0.10 / $0.15 (most affordable, can be slower)",
+    "deepinfra": "DeepInfra · $0.10 / $0.29",
+    "relace": "Relace · $0.07 / $0.50",
+    "wafer": "Wafer · $0.07 / $0.50",
+}
 PROVIDERS = ("deepseek", "haiku", "mimo", "openai", "openrouter")
 
 
@@ -201,7 +213,8 @@ def status(config):
                 pending = ("true" if want else "false") if kind(name) == "bool" else str(want)
         fields.append({"name": name, "group": group, "label": label, "secret": secret, "help": help_text,
                        "set": bool(value), "source": source, "value": shown, "kind": kind(name),
-                       "restart": name in RESTART, "options": OPTIONS.get(name, []), "pending": pending})
+                       "restart": name in RESTART, "options": OPTIONS.get(name, []), "pending": pending,
+                       "option_labels": {o: OPTION_LABELS[o] for o in OPTIONS.get(name, []) if o in OPTION_LABELS}})
     provider = str(getattr(config, "llm_provider", "deepseek"))
     return {"fields": fields, "provider": provider, "model_ready": bool(getattr(config, provider + "_api_key", ""))}
 

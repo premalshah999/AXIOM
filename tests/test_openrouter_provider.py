@@ -40,13 +40,13 @@ async def test_requests_go_to_relace_with_reasoning_off(service, monkeypatch):
     assert (await models.structured(config, service.db, Probe, "fixture", "fixture", retries=0)).ok
     host, path, body = captured[0]
     assert (host, path, body["model"]) == ("openrouter.ai", "/api/v1/chat/completions", "deepseek/deepseek-v4.1-flash-1017")
-    assert body["provider"] == {"order": ["relace"], "allow_fallbacks": False}
+    assert body["provider"] == {"order": ["sail-research"], "allow_fallbacks": False}
     assert body["reasoning"] == {"enabled": False} and "thinking" not in body and "reasoning_effort" not in body
     assert "max_tokens" in body and "max_completion_tokens" not in body
 
 
 def test_cached_input_is_billed_at_the_cache_rate(service):
-    config = service.config.model_copy(update={"llm_provider": "openrouter"})
+    config = service.config.model_copy(update={"llm_provider": "openrouter", "openrouter_provider": "relace"})
     usage = completion()["usage"]
     assert models.cache_hits(usage) == 800
     cost = models.token_cost(config, 1000, 10, models.cache_hits(usage))
@@ -66,3 +66,26 @@ def test_the_key_is_read_from_either_env_name(monkeypatch):
 
     monkeypatch.setenv("OPENROUTER_API", "fixture-only")
     assert Settings(_env_file=None).openrouter_api_key == "fixture-only"
+
+
+def test_each_host_bills_at_its_own_rate(service):
+    from jobpilot.config import OPENROUTER_HOSTS
+
+    for host, (cin, cout, ccache) in OPENROUTER_HOSTS.items():
+        config = service.config.model_copy(update={"llm_provider": "openrouter", "openrouter_provider": host})
+        assert (config.llm_input_price, config.llm_output_price, config.llm_cache_price) == (cin, cout, ccache)
+    sail = service.config.model_copy(update={"llm_provider": "openrouter", "openrouter_provider": "sail-research"})
+    assert sail.llm_output_price == 0.15
+
+
+def test_the_host_is_a_choice_of_the_four(service):
+    import pytest
+
+    from jobpilot.connections import save, status
+
+    with pytest.raises(ValueError, match="choose"):
+        save(service.config, {"openrouter_provider": "somewhere"})
+    config = save(service.config, {"openrouter_provider": "wafer"})
+    assert config.openrouter_provider == "wafer"
+    field = next(f for f in status(config)["fields"] if f["name"] == "openrouter_provider")
+    assert field["options"] == ["sail-research", "deepinfra", "relace", "wafer"] and "Sail Research" in field["option_labels"]["sail-research"]
