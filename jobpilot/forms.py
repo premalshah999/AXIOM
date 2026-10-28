@@ -448,6 +448,14 @@ PROVIDER_FRAME = re.compile(
     re.I,
 )
 MAX_FRAMES = 12
+# A frame placed wholly outside the page (above or left of it) is a measuring helper, never an application document.
+# FTI's iCIMS career site adds an about:blank "font-resize-helper" frame at top:-9999px per load; eleven of them used up
+# the frame budget, and the Portal Specific Forms frame (fti-net.icims.com, nested in the content frame) was never
+# scanned: the step read as an empty page with no fields or controls (FRONTIER TECHNOLOGY, 2026-10-27).
+OFFSCREEN_FRAME_JS = """e => {
+  const r = e.getBoundingClientRect(), w = e.ownerDocument.defaultView;
+  return r.bottom + (w ? w.scrollY : 0) <= 0 || r.right + (w ? w.scrollX : 0) <= 0;
+}"""
 DEPENDENT_TYPES = {"radio", "radiogroup", "select", "dropdown", "pills", "checkbox", "combobox", "prompt"}
 
 
@@ -1203,7 +1211,7 @@ class FormSession:
                         r"hcaptcha|recaptcha|challenge", identity, re.I
                     ):
                         continue
-                    if not await owner.is_visible():
+                    if not await owner.is_visible() or await owner.evaluate(OFFSCREEN_FRAME_JS):
                         continue
                 if observed_frames >= MAX_FRAMES:
                     break
@@ -4782,7 +4790,7 @@ class FormSession:
                         continue  # An unobserved frame cannot establish application ownership.
                     if PROVIDER_FRAME.search(identity) or re.search(r"captcha|challenge", identity, re.I):
                         continue
-                    if not await owner.is_visible():
+                    if not await owner.is_visible() or await owner.evaluate(OFFSCREEN_FRAME_JS):
                         continue
                 except PlaywrightError:
                     continue

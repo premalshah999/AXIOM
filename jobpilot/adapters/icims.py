@@ -34,6 +34,14 @@ PROFILE_SAVE = re.compile(r"^(?:create|submit|update|save)(?: (?:my|your|a))? pr
 # went to the guided agent, which clicked the site's "Careers" link until it stalled.
 CENTRAL_ENROLLMENT = re.compile(r"^/(?:u/(?:mfa-[a-z-]*enrollment|passkey-enrollment[a-z-]*)|ui/login-continue)$", re.I)
 ENROLLMENT_DECLINES = ("remind me later", "not now", "maybe later", "skip for now", "skip", "no thanks", "not on this device")
+# The same prompt with no way to skip it is the employer's mandatory two-step verification: Live! Casino & Hotel
+# Maryland (2026-10-26..27) offered only Back / Enable two-step verification (an authenticator app or SMS) / Log Out,
+# and Back answered "Two-factor authentication is required to access this application". Read as unknown, the guided
+# agent logged out, wandered into the email step and requested a password reset on every retry.
+MFA_REQUIRED = re.compile(
+    r"you haven'?t enabled two-step verification|two-(?:factor|step) (?:authentication|verification) is required", re.I
+)
+CENTRAL_HOSTS = {"login.icims.com", "login.icims.eu", "login-page.icims.com"}
 # iCIMS writes its progress bar for screen readers: "Step 2 of 4. Voluntary Self-Identification(Current Step)" (ICE
 # 2026-10-19: Candidate Profile, Voluntary Self-Identification, Job Specific Questions, Portal Specific Forms). Only
 # the last step submits the application; an earlier step's "Submit" opens the next one. ICE's run committed on EEO's
@@ -681,7 +689,7 @@ class ICIMS(Adapter):
     def classify_page(self, obs):
         location = urlsplit(obs["url"])
         path = location.path
-        if self.central_enrollment(obs):
+        if self.central_enrollment(obs) or self.central_mfa_required(obs):
             return Step.CONSENT
         if path.rstrip("/").endswith("/jobs/dashboard"):
             return Step.UNKNOWN  # The candidate dashboard: on_unknown reads this job's row (never a confirmation page).
@@ -983,7 +991,7 @@ class ICIMS(Adapter):
         location = urlsplit(obs.get("url", ""))
         if (
             location.scheme != "https"
-            or location.hostname not in {"login.icims.com", "login.icims.eu", "login-page.icims.com"}
+            or location.hostname not in CENTRAL_HOSTS
             or not CENTRAL_ENROLLMENT.match(location.path)
         ):
             return None
@@ -994,12 +1002,41 @@ class ICIMS(Adapter):
         }
         return next((offered[label] for label in ENROLLMENT_DECLINES if label in offered), None)
 
+    def central_mfa_required(self, obs):
+        """Central demands two-step verification for this employer and offers no way to skip it (MFA_REQUIRED)."""
+        location = urlsplit(obs.get("url", ""))
+        said = " ".join(
+            [*map(str, obs.get("headings", [])), *map(str, obs.get("errors", [])), str(obs.get("text", ""))[:4000]]
+        )
+        return bool(
+            location.scheme == "https"
+            and location.hostname in CENTRAL_HOSTS
+            and MFA_REQUIRED.search(said)
+            and not self.central_enrollment(obs)
+        )
+
+    def site_lock(self, obs):
+        # The guided flow meets the same wall (Live!, 2026-10-27: Back, Log Out, then the email step and a reset).
+        if self.central_mfa_required(obs):
+            return self.mfa_wall()
+        return super().site_lock(obs)
+
+    def mfa_wall(self):
+        return self.defer(
+            "The employer requires two-step verification (an authenticator app or SMS code) on its iCIMS account and "
+            "offers no way to skip it; it cannot be enrolled automatically",
+            state="waiting_browser",
+            blocker_type="account",
+        )
+
     async def guided_step(self, obs):
         """Central's passkey prompt while the guided flow drives: its type=submit buttons were refused as application
         submits and iPipeline's run stopped on "Log In Faster on This Device" (2026-10-19)."""
         return bool(self.central_enrollment(obs)) and await self.on_consent(obs) is None
 
     async def on_consent(self, obs):
+        if self.central_mfa_required(obs):
+            return self.mfa_wall()
         if decline := self.central_enrollment(obs):
             self.attempts["central_enrollment"] += 1
             if self.attempts["central_enrollment"] > 3:
@@ -1288,8 +1325,11 @@ class ICIMS(Adapter):
         )
 
     def employer_profile_editor(self, obs):
+        # A refused save leaves the signed-in editor in place with its error ("An unexpected server error occurred").
+        # Read as a session-less page, its Login/Password boxes made it account creation and the run ended "Could not
+        # sign in" (Emory, 2026-10-26..27); the editor stays a form, whose repair reports the employer's refusal.
         return bool(
-            self.employer_session(obs)
+            self.employer_session({**obs, "errors": []})
             and any(
                 not b.get("href")
                 and re.fullmatch(r"(?:update|save)(?: (?:my|your))? profile", b["label"], re.I)
@@ -1297,6 +1337,21 @@ class ICIMS(Adapter):
             )
             and not any(PROFILE_CREATE.fullmatch(b["label"]) for b in obs["controls"])
         )
+
+    def portal_origin(self, obs):
+        """The iCIMS portal that served this step: the frame holding its fields, else the page, else the job's host. A
+        career site can front the portal: Planview's careers.planview.com/jobs/5080 opened careers2-planview.icims.com,
+        and the returning-candidate login built on the job's host landed on careers.planview.com/careers-home/, where
+        the guided agent searched jobs and filled another posting's form (2026-10-27)."""
+        for url in [*(f.get("frame_url") for f in obs.get("fields", [])), obs.get("url")]:
+            location = urlsplit(url or "")
+            if (
+                location.scheme == "https"
+                and location.hostname not in CENTRAL_HOSTS
+                and re.match(r"/jobs/(?:\d+/|login|candidate|search)", location.path)
+            ):
+                return location
+        return urlsplit(self.job["url"])
 
     async def returning_candidate_login(self, obs):
         """The employer already holds this email (and phone): sign in through iCIMS's returning-candidate login instead of
@@ -1321,10 +1376,12 @@ class ICIMS(Adapter):
             return False
         self.attempts["returning_login"] += 1
         self.accounts.mark(self.job["url"], "exists")
-        job = urlsplit(self.job["url"])
+        portal = self.portal_origin(obs)
         self.emit("account", "The employer already holds this email; signing in through its returning-candidate login")
         await self.page.goto(
-            f"{job.scheme}://{job.netloc}/jobs/login?loginOnly=1&in_iframe=1", wait_until="domcontentloaded", timeout=30000
+            f"{portal.scheme}://{portal.netloc}/jobs/login?loginOnly=1&in_iframe=1",
+            wait_until="domcontentloaded",
+            timeout=30000,
         )
         await self.form.settle(timeout=8)
         return True
