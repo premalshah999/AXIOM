@@ -1193,6 +1193,36 @@ class FormSession:
             raise ValueError("Question changed while filling")
         return matches[0]
 
+    async def shorten_refused_prose(self, dom_ids, ratio=0.6):
+        """Shorten the prose the employer refused, keeping whole sentences or words, and remember it as the answer.
+
+        America's Tire's iCIMS profile (2026-10-27/28) refused every work-experience Description of 186-190 characters
+        ("Invalid Data Error", the boxes drawn red) and kept one of 182: the page itself takes 200, so no length was ever
+        shown. Each flagged prose box (at least 120 characters) is cut to about ratio of its length; labels shortened
+        are returned."""
+        from .features.knowledge.writing import fit_length
+
+        shortened = []
+        for field in list(self.fields.values()):
+            if field.get("dom_id") not in dom_ids or field.get("type") not in {"text", "textarea"}:
+                continue
+            kept = " ".join(str(field.get("value") or "").split())
+            if len(kept) < 120 or len(kept.split()) < 8:
+                continue
+            fitted = fit_length(kept, int(len(kept) * ratio))
+            record = next(
+                (r for r in self.ledger.values() if tuple(r.get("field_key", [])) == self.field_key(field)), {}
+            )
+            try:
+                committed = await self.fill(field, fitted)
+            except (ValueError, PlaywrightError):
+                continue
+            self.expected[field["id"]] = committed
+            self.expected_slots[self.field_key(field)] = committed
+            self.record_answer(field, committed, record.get("evidence_ids", []))
+            shortened.append(field["label"])
+        return shortened
+
     def record_answer(self, field, value, evidence_ids, verified=False):
         from .answer_context import digest
 

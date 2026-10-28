@@ -1804,7 +1804,7 @@ class Adapter:
         self.emit("email_wait", f"Waiting for the employer's verification {kind}")
         inline = code_inline_wait(self.id) if kind == "code" else 3
         if getattr(self, "reset_in_progress", False) and (
-            kind == "code" or (kind == "password_reset" and getattr(self, "one_page_confirming", False))
+            kind in {"code", "auto"} or (kind == "password_reset" and getattr(self, "one_page_confirming", False))
         ):
             # A reset's code page cannot be reopened: a parked run's continuation requests another reset, whose new
             # code replaces this one (Amazon 2026-10-27: three resets, each code "Incorrect" in the next run). Its code
@@ -2472,7 +2472,9 @@ class Adapter:
         if not button:
             return self.defer("The password reset step has no submit control")
         self.release_mail()
-        if not await self.arm_mail("password_reset"):
+        # A one-page reset confirms the new password with an emailed code (TikTok, 2026-10-28: "TikTok verification code:
+        # 754570"), which a password_reset window refuses as a malformed reset link; its window takes a code or a link.
+        if not await self.arm_mail("auto" if one_page else "password_reset"):
             return self.lease_busy()
         if not self.challenge:
             return self.defer("The reset email could not be matched safely right now; retry later")
@@ -2559,7 +2561,8 @@ class Adapter:
         page, or a link. Its credentials are saved only after the page took the confirmation."""
         page = await self.form.scan()
         self.one_page_confirming = True
-        token = await self.wait_email("code" if self.code_fields(page) else "password_reset")
+        asks_code = bool(self.code_fields(page) or CODE_TEXT.search(page.get("text", "")))
+        token = await self.wait_email("code" if asks_code else "auto")
         if not token:
             reason = self.inbox.reason(self.challenge)
             self.finish_mail("failed", "No reset email")
@@ -2584,14 +2587,26 @@ class Adapter:
         else:
             page = await self.form.scan()
             codes = self.code_fields(page)
-            if not codes:
-                self.finish_mail("failed", "Code field disappeared")
-                return self.defer("A reset code arrived but the page no longer shows a code field")
+            if not codes and CODE_TEXT.search(page.get("text", "")):
+                # TikTok's "Verify Email Account" shows six bare boxes under "Enter the code in the email sent to …".
+                blank = [f for f in page["fields"] if f["type"] in {"text", "tel", "number"} and not f.get("value")
+                         and not self.is_login_field(f)]
+                codes = blank if len(blank) == 1 or 4 <= len(blank) <= 10 else []
             for f in codes:
                 if not self.accounts.password_allowed(self.id, self.form.frames[f["id"]].url, self.job["url"]):
                     self.finish_mail("failed", "Code field on an unexpected website")
                     return self.defer("The reset code field is on an unexpected website; not entering the code")
-            await enter_code([self.form.locator(f["id"]) for f in codes], token["value"], timeout=4000)
+            if codes:
+                await enter_code([self.form.locator(f["id"]) for f in codes], token["value"], timeout=4000)
+            elif CODE_TEXT.search(page.get("text", "")) and await self.page.evaluate(
+                "() => { const e = document.activeElement; return !!e && e.matches('input,[contenteditable=true]')"
+                " && !/password|email/i.test((e.type || '') + ' ' + (e.name || '') + ' ' + (e.id || '')); }"
+            ):
+                # The boxes draw over one input the scan cannot see; the page keeps it focused for typing.
+                await self.page.keyboard.type(token["value"], delay=80)
+            else:
+                self.finish_mail("failed", "Code field disappeared")
+                return self.defer("A reset code arrived but the page no longer shows a code field")
             await asyncio.sleep(0.3)
             page = await self.form.scan()
             if self.code_fields(page) and (button := self.auth_button(self.dialog_view(page) or page, "reset")):

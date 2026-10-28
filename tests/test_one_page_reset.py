@@ -67,7 +67,7 @@ def adapter(service):
 
     def locator(key):
         return locators.setdefault(key, SimpleNamespace(
-            fill=AsyncMock(), blur=AsyncMock(), press_sequentially=AsyncMock(), evaluate=AsyncMock(),
+            fill=AsyncMock(), blur=AsyncMock(), press_sequentially=AsyncMock(), evaluate=AsyncMock(), click=AsyncMock(),
         ))
 
     form = SimpleNamespace(scan=AsyncMock(), settle=AsyncMock(), locator=locator,
@@ -117,6 +117,8 @@ async def test_the_one_page_reset_sends_the_new_password_and_confirms_it_with_th
     value.locators["pw"].press_sequentially.assert_awaited_with(password, delay=25, timeout=15000)
     value.locators["code"].fill.assert_awaited_with("123456", timeout=4000)
     value.wait_email.assert_awaited_with("code")
+    # The request window takes the emailed code (TikTok, 2026-10-28); a password_reset window refused it.
+    value.arm_mail.assert_awaited_with("auto")
     assert value.click.await_args_list[0].args[0]["label"] == "Continue"
     record = value.accounts.record(SITE + "/reset-password")
     assert record["state"] == "password_reset" and value.finished == ["verified"]
@@ -137,3 +139,27 @@ async def test_a_sign_in_page_is_still_reported_as_a_reset_that_did_not_open(ser
     result = await value.request_reset(SIGN_IN, "Signing in did not succeed")
     assert "did not open" in result["reason"]
     value.click.assert_not_awaited()
+
+
+TIKTOK_CODE = page(
+    "/reset-password",
+    [field(f"d{n}", "") for n in range(6)],
+    [control("resend", "Resend")],
+    "Verify Email Account Enter the code in the email sent to alex@example.test Didn't receive the code? Resend",
+)
+
+
+async def test_bare_digit_boxes_under_enter_the_code_take_the_emailed_code(service):
+    value = adapter(service)
+    for n in range(6):
+        value.form.frames[f"d{n}"] = SimpleNamespace(url=SITE + "/reset-password")
+    pages = [TIKTOK_CODE, TIKTOK_CODE, TIKTOK_CODE, SIGN_IN]
+    value.form.scan.side_effect = lambda: pages.pop(0) if len(pages) > 1 else pages[0]
+    value.wait_email = AsyncMock(return_value={"kind": "code", "value": "754570"})
+    value.auth_outcome = AsyncMock(return_value=("unknown", ""))
+    assert await value.confirm_one_page_reset(SITE + "/reset-password", {"email": "alex@example.test",
+                                                                         "password": "Synthetic9!x"}) is None
+    value.wait_email.assert_awaited_with("code")
+    typed = [value.locators[f"d{n}"].press_sequentially.await_args.args[0] for n in range(6)]
+    assert "".join(typed) == "754570"
+    assert value.accounts.record(SITE + "/login")["state"] == "password_reset"
