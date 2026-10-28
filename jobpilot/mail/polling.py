@@ -31,6 +31,21 @@ from .senders import sender_domains_overlap
 from .senders import tenant_tokens
 
 
+def sf_tenant(session, job):
+    """The SuccessFactors company id serving a job: named in its URL, or learned from its career pages (sf_tenant:)."""
+    if not job or job.ats != "successfactors":
+        return ""
+    from ..accounts.tenants import sf_company
+
+    if named := sf_company(job.url or ""):
+        return named[1]
+    try:
+        row = session.get(Setting, "sf_tenant:" + origin(job.url or ""))
+    except ValueError:
+        return ""
+    return str(((row.value if row else None) or {}).get("company") or "")
+
+
 class PollingMixin:
     @staticmethod
     def end_dead_email_waits(s):
@@ -97,6 +112,7 @@ class PollingMixin:
                     c["tenant_tokens"] = tenant_tokens(
                         (job.url if job else "") or (rule or {}).get("employer_origin", ""),
                         job.company if job else "",
+                        sf_tenant(s, job),
                     )
                     platform = job.ats if job else ""
                     if platform == "custom" and rule:
@@ -132,7 +148,9 @@ class PollingMixin:
                         peer_run = s.get(Run, w.run_id) if w.id != c["id"] else None
                         peer_job = s.get(Job, peer_run.job_id) if peer_run else None
                         if peer_job and peer_job.id != (job.id if job else None):
-                            c["peer_tokens"].append(tenant_tokens(peer_job.url or "", peer_job.company or ""))
+                            c["peer_tokens"].append(
+                                tenant_tokens(peer_job.url or "", peer_job.company or "", sf_tenant(s, peer_job))
+                            )
                     c["oracle_pod"] = oracle_pod(job.url) if job and job.ats == "oracle" else ""
                     c["oracle_peers"] = []
                     if job and job.ats == "oracle":

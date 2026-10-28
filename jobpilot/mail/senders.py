@@ -131,10 +131,25 @@ EMPLOYER_SENDER_FAMILIES = {
 }
 
 
-def tenant_tokens(url, company=""):
-    """Employer identity tokens from the job URL (tenant host/path) and the company name."""
+def sf_tenant_names(tenant):
+    """Names in a SuccessFactors company id (the company= the career pages carry): "Hersheys" -> hersheys,
+    "WestinghouseP" -> westinghousep, westinghouse. A trailing environment marker (P, P2, PRD) is SAP's, not the
+    employer's."""
+    tenant = str(tenant or "")
+    names = [tenant.lower()]
+    if bare := re.sub(r"(?<=[a-z])(?:P\d?|PRD\d*|prd[A-Za-z0-9]*)$", "", tenant):
+        names.append(bare.lower())
+    return [n for n in dict.fromkeys(names) if re.fullmatch(r"[a-z][a-z0-9]{3,}", n)]
+
+
+def tenant_tokens(url, company="", tenant=""):
+    """Employer identity tokens from the job URL (tenant host/path), the company name and, for SuccessFactors, the
+    tenant's company id. Hershey's career site is careers.thehersheycompany.com but its SuccessFactors tenant
+    (company=Hersheys) mails codes and password resets from hersheys.com; no token named that domain, so the sender
+    search never listed them and every reset "did not arrive" (2026-10-27)."""
     p = urlsplit(url)
-    words = re.split(r"[^a-z0-9]+", (p.hostname or "").lower())
+    words = sf_tenant_names(tenant)
+    words += re.split(r"[^a-z0-9]+", (p.hostname or "").lower())
     if re.search(r"myworkdaysite\.com$|myworkdayjobs\.com$", p.hostname or ""):
         # wd1.myworkdaysite.com/recruiting/<tenant>/<site>
         words += re.split(r"[^a-z0-9]+", p.path.lower())[:4]
