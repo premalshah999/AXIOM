@@ -33,3 +33,16 @@ async def test_rippling_deep_select_and_sms_consent_are_labelled(page):
                               "No - I do not consent to receiving text messages"]
     # The caption is longer than a label; the group is named by its Yes choice.
     assert sms["label"] == "I consent to receiving text messages"
+
+
+def test_the_readable_sms_choices_resolve_to_the_decline(service):
+    # TheGuarantors (Rippling, 2026-10-27): Apply stayed disabled while this group was unanswered.
+    from jobpilot.answers import Resolver
+    from jobpilot.schemas import Profile
+
+    field = {"id": "s", "label": "Tick Yes or No to indicate your agreement to receive text message updates from the "
+             "employer regarding your job application.", "type": "radiogroup", "required": False, "value": "",
+             "valid": True, "group": "", "section": "",
+             "options": ["Yes - I consent to receiving text messages", "No - I do not consent to receiving text messages"]}
+    answer = Resolver(Profile(), service.db, service.config).local(field)
+    assert answer.disposition == "answer" and answer.value == "No - I do not consent to receiving text messages"
