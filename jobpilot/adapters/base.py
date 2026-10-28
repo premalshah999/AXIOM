@@ -631,7 +631,8 @@ class Adapter:
         application itself, even under another host of it (Workday's myworkdaysite.com)."""
         from ..ats import detect
 
-        host = getattr(self, "assessment_from", "") or getattr(self.form, "assessment_origin", "")
+        form = getattr(getattr(self, "e", None), "form", None)
+        host = getattr(self, "assessment_from", "") or getattr(form, "assessment_origin", "")
         if not host or getattr(self, "committed", False):
             return False
         url = self.page.url
