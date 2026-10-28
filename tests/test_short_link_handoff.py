@@ -25,3 +25,23 @@ async def test_a_platform_job_is_not_rewritten():
     engine.page = SimpleNamespace(url=POSTING)
     assert await engine.detect_ats(engine.page, "workday") == "workday"
     assert not hasattr(engine, "handoff_origin")
+
+
+async def test_embedded_workday_link_adopts_the_observed_employer_tenant(monkeypatch):
+    from unittest.mock import AsyncMock
+    import jobpilot.browser as browser
+
+    engine = BrowserEngine.__new__(BrowserEngine)
+    engine.job = {'id': 'j', 'url': 'https://careers.example.test/engineer', 'ats': 'custom'}
+    original = engine.job
+    page = SimpleNamespace(url=engine.job['url'], wait_for_load_state=AsyncMock(), evaluate=AsyncMock(return_value=[]))
+    async def goto(url, **kwargs):
+        page.url = POSTING
+    page.goto = AsyncMock(side_effect=goto)
+    engine.page = page
+    engine.emit = lambda *a, **k: None
+    monkeypatch.setattr(browser, 'detect_embedded', lambda _: ('workday', POSTING))
+    assert await engine.detect_ats(page, 'custom') == 'workday'
+    assert engine.job is original
+    assert engine.job['url'] == POSTING
+    assert engine.handoff_origin == 'https://amat.wd1.myworkdayjobs.com'

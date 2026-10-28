@@ -1923,8 +1923,17 @@ class BrowserEngine:
                     await asyncio.wait_for(
                         cdp.send("Page.removeScriptToEvaluateOnNewDocument", {"identifier": identifier}), 2
                     )
+            except (TimeoutError, PlaywrightError) as exc:
+                self.emit("browser_cleanup", "Could not remove the initial route's storage script",
+                          {"stage": "route_script", "error_type": type(exc).__name__})
             finally:
-                await asyncio.wait_for(cdp.detach(), 2)
+                try:
+                    await asyncio.wait_for(cdp.detach(), 2)
+                except (TimeoutError, PlaywrightError) as exc:
+                    # Cleanup must not replace a successful navigation or hide
+                    # its actual failure behind a CDP detach timeout.
+                    self.emit("browser_cleanup", "Route session cleanup did not change the navigation outcome",
+                              {"stage": "route_detach", "error_type": type(exc).__name__})
 
     async def seal_desktop_route(self, page):
         """Private continuation URL, bound to this job and pinned resume."""
@@ -2446,7 +2455,7 @@ class BrowserEngine:
             await page.goto(
                 adapter_class(found).prepare_url(url), wait_until="domcontentloaded", timeout=30000
             )
-            if found == "icims":
+            if found in {"icims", "workday"}:
                 self.adopt_handoff(found, url)
             return found
         return found or ats
