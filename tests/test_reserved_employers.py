@@ -17,7 +17,18 @@ from jobpilot.db import Job, JobListing, Run, Setting
 from jobpilot.jobboard import BoardSettings
 from jobpilot.reserved import Matcher, parse
 
-DEFAULTS = Matcher(parse(None))
+
+@pytest.fixture(autouse=True)
+def reserved_on(monkeypatch):
+    """The hold is off unless the owner turns it on (2026-10-28); these tests are about the hold itself."""
+    from jobpilot import reserved
+
+    monkeypatch.setattr(reserved, "DEFAULT", {**reserved.DEFAULT, "enabled": True})
+    reserved._compiled.cache_clear()  # A matcher compiled with the hold off must not answer for these tests.
+    yield
+    reserved._compiled.cache_clear()
+
+DEFAULTS = Matcher(parse({**reserved.DEFAULT, "enabled": True}))  # The rules as the owner turns them on.
 
 
 def iso(minutes_ago=0):

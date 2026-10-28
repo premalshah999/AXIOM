@@ -103,9 +103,10 @@ class Section(BaseModel):
 
 
 class Rules(BaseModel):
-    """The owner's reserved employers (setting `reserved_employers`)."""
+    """The owner's reserved employers (setting `reserved_employers`). Off unless the owner turns it on in Jobs ›
+    Reserved (owner 2026-10-28: "no blockages till I tell you")."""
 
-    enabled: bool = True
+    enabled: bool = False
     sections: list[Section] = Field(default_factory=list, max_length=12)
 
     @model_validator(mode="after")
@@ -129,7 +130,7 @@ _GOOGLE = {
     ],
 }
 DEFAULT = {
-    "enabled": True,
+    "enabled": False,
     "sections": [
         {
             "id": "faang",

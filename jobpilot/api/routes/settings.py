@@ -11,13 +11,6 @@ class Control(BaseModel):
     auto_submit: bool
 
 
-class NewApplications(BaseModel):
-    """Start new applications while repairs are open; `limit` new ones at most (0: no limit)."""
-
-    allowed: bool
-    limit: int = Field(default=0, ge=0, le=5000)
-
-
 class Limits(BaseModel):
     job_token_cap: int = Field(ge=50_000, le=50_000_000)
     company_limit: int = Field(ge=1, le=25)
@@ -88,21 +81,6 @@ def router(service) -> APIRouter:
             "job_token_cap": int(tiers.get("job_token_cap") or JOB_TOKEN_CAP),
             "company_limit": int(pacing.get("limit") or COMPANY_LIMIT),
         }
-
-    @r.get("/api/new-applications")
-    def get_new_applications():
-        from ...autopilot import new_applications_held, new_applications_started
-
-        allowance = db.get_setting("new_applications", {}) or {}
-        started = new_applications_started(db, allowance["since"]) if allowance.get("since") else 0
-        return {**allowance, "started": started, "held_by_repairs": new_applications_held(db)}
-
-    @r.put("/api/new-applications")
-    def put_new_applications(data: NewApplications):
-        from ...db import now
-
-        db.set_setting("new_applications", {"allowed": data.allowed, "limit": data.limit, "since": now()})
-        return get_new_applications()
 
     @r.post("/api/system/restart")
     async def restart():

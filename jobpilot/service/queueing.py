@@ -277,16 +277,6 @@ class QueueingMixin:
                 if url_identity(candidate.url) == identity or icims_requisition_alias(job, candidate)
             ]
             previous = list(s.scalars(select(Run).where(Run.job_id.in_(aliases))))
-            clearance = s.get(Setting, "failed_application_clearance_gate")
-            if not job.demo and clearance and clearance.value.get("enabled"):
-                allowed = set(clearance.value.get("job_ids", []))
-                if not allowed.intersection(aliases):
-                    raise QueueBlocked(
-                        "New applications are held until the existing failed applications are cleared",
-                        outcome="deferred",
-                        code="clearance_gate",
-                        not_before=temporary_time(),
-                    )
             if any(x.state in ACTIVE for x in previous):
                 raise QueueBlocked(
                     "This job already has an active run", outcome="protected", code="active_run"
