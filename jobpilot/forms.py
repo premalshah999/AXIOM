@@ -4800,6 +4800,12 @@ class FormSession:
                     problems.append(f"Required field has no verified answer: {f['label']}")
         for q in self.pending:
             problems.append(f"Needs an approved answer: {q['question']}")
+        for b in self.buttons.values():
+            if b.get("partner"):
+                # Oracle shows its inline tax-credit launcher until the assessment is taken, and refuses the submit
+                # with "This info is required. (1 issue)" while it is; the readback held only fields and passed
+                # (Mortenson, 2026-10-27).
+                problems.append(f"Required step incomplete: {b['label']}")
         if (
             not (self.uploaded and self.upload_verified)
             and str((getattr(self.resolver, "job", {}) or {}).get("ats", "")) == "successfactors"
@@ -5061,6 +5067,7 @@ class FormSession:
             # Oracle's required "Take Tax Credit Assessment" (Caesars) opens a screener; it is a
             # section launcher, not the application's final submit.
             and not re.fullmatch(LAUNCHER, button["label"], re.IGNORECASE)
+            and not button.get("partner")
             # iCIMS's email step submits with "I Acknowledge the Privacy Notice" (Schwab 2026-10-18 stalled on it,
             # REA icims.md risk 2). An acknowledgement that names no submission is a step.
             and not (
@@ -5079,7 +5086,7 @@ class FormSession:
 
         opener.on("popup", on_popup)
         el = self.locator(control_id)
-        launcher = launch or bool(re.fullmatch(LAUNCHER, button["label"], re.IGNORECASE))
+        launcher = launch or bool(re.fullmatch(LAUNCHER, button["label"], re.IGNORECASE)) or bool(button.get("partner"))
         # A "Submit" that this guard allowed for a profile/account popup or a tax-credit
         # launcher must also pass the page's own click guard, or the click is silently
         # cancelled (Starbucks "Create your profile": the agent clicked Submit for minutes).

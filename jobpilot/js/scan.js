@@ -1090,7 +1090,12 @@
     .map(el => ({
       id: id(el),
       label: historyEditor(el) ? 'Select history row to reveal Edit: ' + clean(textOf(el)).slice(0,140) : clean(textOf(el) || (el.matches('sdf-button') && (textOf(el.shadowRoot?.querySelector('button') || el.querySelector('button')) || clean(el.textContent)))
-        || el.value || el.getAttribute('aria-label') || el.getAttribute('title') || ''),
+        || el.value || el.getAttribute('aria-label') || el.getAttribute('title')
+        // Oracle's refused submit left its tax-credit launcher without text (Mortenson, 2026-10-27): its block names it.
+        || (composedClosest(el, '.inline-partner') && clean(composedClosest(el, '[role=region]')?.getAttribute('aria-label') || ''))
+        || ''),
+      // Oracle's inline partner launcher ("Take Tax Credit Assessment") is shown until its assessment is completed.
+      partner: el.matches('[class*="partner-button"]') && !!composedClosest(el, '.inline-partner'),
       href: el.getAttribute('href') || '', type: historyEditor(el) ? 'history_select' : el.form ? (el.type || '') : '',
       automation_id: el.dataset.automationId || '', aria_label: el.getAttribute('aria-label') || '',
       html_id: el.id || '', section: section(el), group: groupOf(el),
