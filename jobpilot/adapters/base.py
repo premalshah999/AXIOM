@@ -121,6 +121,15 @@ CLOSED = re.compile(
     r"\b(?:that|this|the) (?:job|position|posting|requisition|opening) is not currently (?:active|available|open)",
     re.I,
 )
+# The employer's cap on this applicant's applications. TikTok (2026-10-28): "From 2026-07-01 to 2026-12-31, you can submit
+# up to 2 job applications (including referrals) within the "Bachelor/Master Graduate - 2027 Start" recruitment project.
+# You've reached the application limit." over a full form whose Submit is refused; three runs parked on it for the owner.
+APPLICATION_LIMIT = re.compile(
+    r"\byou(?:'ve| have) reached (?:the|your) (?:\w+ )?(?:job )?(?:application|applications|apply) limit\b|"
+    r"\b(?:reached|exceeded) (?:the|your) (?:maximum|max) (?:number of )?(?:job )?applications\b|"
+    r"\b(?:job )?application limit (?:has been |was |is )?(?:reached|exceeded)\b",
+    re.I,
+)
 CHECK_EMAIL = re.compile(
     r"check your (?:email|inbox)|(?:verification|confirmation|activation) (?:email|link) (?:has been |was )?sent|"
     r"we(?:'ve| have)? (?:just )?sent (?:you )?(?:an? )?(?:email|link|verification email)|verify your (?:email|account)|"
@@ -754,6 +763,8 @@ class Adapter:
             return Step.CONFIRMATION
         if ALREADY.search(text) and not passwords and len(meaningful) <= 1 and not self.find_apply(obs):
             return Step.ALREADY_APPLIED
+        if not self.committed and APPLICATION_LIMIT.search(text):
+            return Step.CLOSED  # The form may still show; the employer refuses any further application (on_closed).
         codes = self.code_fields(obs)
         if codes and (self.committed or dedicated_code_step(obs["fields"], codes)):
             return Step.BLOCKED if SMS.search(text) else Step.EMAIL_CODE
@@ -1482,6 +1493,14 @@ class Adapter:
         }
 
     async def on_closed(self, obs):
+        if limit := APPLICATION_LIMIT.search(obs.get("text", "")):
+            window = " ".join(obs["text"][max(0, limit.start() - 250) : limit.end()].split())
+            notice = " ".join(re.split(r"(?<=[.!?])\s+", window)[-2:])
+            return {
+                "state": "closed",
+                "reason": "The employer's application limit for this applicant is reached, so nothing was submitted: "
+                + notice,
+            }
         return {"state": "closed", "reason": "The posting is closed or no longer available"}
 
     async def on_blocked(self, obs):

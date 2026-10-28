@@ -1838,7 +1838,7 @@ class BrowserEngine:
     async def page_closed(self):
         """A stalled flow that ends on the posting's own "position has been filled" (four runs at one career site,
         2026-10-27, each parked as a repair): no application form is left, so the posting is closed."""
-        from .adapters.base import CLOSED
+        from .adapters.base import APPLICATION_LIMIT, CLOSED
 
         try:
             obs = await self.form.scan()
@@ -1847,6 +1847,10 @@ class BrowserEngine:
         fields = [f for f in obs.get("fields", []) if f["type"] not in {"search", "hidden"}
                   and not re.search(r"search|keyword|location", f.get("label", ""), re.I)]
         text = " ".join([*obs.get("headings", []), *obs.get("errors", []), str(obs.get("text", ""))])
+        if not getattr(self, "armed", False) and (limit := APPLICATION_LIMIT.search(text)):
+            # TikTok's cap notice sits over a full form (see APPLICATION_LIMIT): the form does not make it open.
+            return {"state": "closed", "reason": "The employer's application limit for this applicant is reached, so "
+                    "nothing was submitted: " + limit[0][:120]}
         if fields or not (match := CLOSED.search(text)):
             return None
         return {"state": "closed", "reason": "The posting is closed: " + match[0][:120]}
