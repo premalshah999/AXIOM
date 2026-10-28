@@ -552,6 +552,26 @@ class NavigationDecision(BaseModel):
     reviews: list[Answer] = Field(default_factory=list, max_length=12)
 
 
+EDITOR_COMMIT = re.compile(r"\s*(?:update|save)\s*", re.I)
+
+
+def open_editor_commit(controls, target_id=None):
+    """The one open section editor's own commit (Update/Save directly before its Cancel), never the clicked control.
+
+    Koniag (Dayforce, 2026-10-27): reopened on Candidate Info, its Personal Information section stood in edit mode with
+    Update / Cancel, and the page's Next did nothing until the section was saved; the navigator clicked Next until the
+    recovery budget ran out."""
+    rows = [b for b in controls if not b.get("stepper")]
+    hits = [
+        b
+        for b, after in zip(rows, rows[1:])
+        if EDITOR_COMMIT.fullmatch(b.get("label") or "")
+        and re.fullmatch(r"\s*cancel\s*", after.get("label") or "", re.I)
+        and b.get("id") != target_id
+    ]
+    return hits[0] if len(hits) == 1 else None
+
+
 def bind_navigation_choice(decision, obs):
     """Recover an omitted choice owner only from explicit observed DOM ownership."""
     if decision.action != "choose" or decision.control_id:
@@ -3456,6 +3476,17 @@ class BrowserEngine:
                 + (" but it is still disabled: a required item on this page is unfinished" if still else " and it is enabled now")
             )
         control = target.get("id") if isinstance(target, dict) else None
+        if (
+            control
+            and decision.action == "click"
+            and STEP_ACTION.search(target.get("label") or "")
+            and (commit := open_editor_commit(list(self.form.buttons.values()), control))
+        ):
+            try:
+                await self.form.click(commit["id"])
+                findings.append(f"An open section editor held the page; clicked its '{commit['label'].strip()}' first")
+            except (ValueError, PlaywrightError) as exc:
+                findings.append(f"Saving the open section editor failed: {type(exc).__name__}")
         if control and decision.action == "click":
             from .widgets import ensure_uncovered
 
