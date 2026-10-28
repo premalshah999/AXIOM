@@ -153,6 +153,12 @@ SMS = re.compile(
     r"authenticator app|passkey|security key",
     re.I,
 )
+# A sign-in page's other half for applicants without an account (Avature: "Already registered?" | "First time here?").
+FIRST_TIME = re.compile(
+    r"first time here|new (?:candidate|user|applicant)s?\b(?! (?:sign|log) ?in)|not (?:yet )?registered\b|"
+    r"new to (?:this|our) (?:site|portal|career)",
+    re.I,
+)
 CREATE_LINK = re.compile(
     r"^(?:create (?:an? )?(?:account|profile)|sign up|register|new user|join(?: now)?|new candidate|"
     r"don'?t have an account\??.{0,20}|create account)[!.]?$",  # Deloitte's Avature: "Create profile!" (2026-10-26)
@@ -2014,8 +2020,41 @@ class Adapter:
                               "creating one")
                 if await self.switch(obs, CREATE_LINK):
                     return None
+                if await self.first_time_route(obs, url, credentials):
+                    return None
             return await self.recover(obs, detail)
         return None
+
+    async def first_time_route(self, obs, url, credentials):
+        """A sign-in page whose other half starts a new candidate's application with a resume upload. Intuit's Avature
+        page (2026-10-26/27) reads "Already registered?" beside "First time here?" with only "Without Resume", "Copy &
+        Paste" and "My Computer" under it: no create-account link, so a refused sign-in for an account never seen there
+        went to a password reset that never arrived, on every run. The resume goes into that upload instead; the
+        application creates the account. True when the route was taken (once per run)."""
+        text = " ".join([obs.get("text", ""), *obs.get("headings", [])])
+        if self.attempts["first_time"] or not FIRST_TIME.search(text):
+            return False
+        await self.form.scan()
+        resume_fields = getattr(self.form, "resume_fields", None)
+        uploads = [f for f in (resume_fields() if resume_fields else []) if f.get("widget") != "filechooser"]
+        path = getattr(self.form, "resume_path", None)
+        if len(uploads) != 1 or not path:
+            return False
+        self.attempts["first_time"] += 1
+        if not self.accounts.record(url).get("confirmed_at"):
+            # Not an account here: a later create-password step must not be turned back to this sign-in.
+            self.accounts.mark(url, "no_account", self.accounts.saved(url) or credentials)
+        self.emit("account", "This site starts a new candidate's application with a resume upload beside its sign-in; "
+                  "uploading the resume there")
+        await self.form.locator(uploads[0]["id"]).set_input_files(str(path), timeout=15000)
+        await self.form.wait_upload()
+        self.form.uploaded = True
+        after = await self.form.scan()
+        if self.sign_in_shown(after) and (proceed := self.find_next(after)):
+            # The upload stayed on the page: its own Next/Continue sends it (never the sign-in button).
+            if not re.search(r"\b(?:sign|log) ?in\b", proceed["label"], re.I):
+                await self.click(proceed)
+        return True
 
     def login_value(self, f, credentials):
         """A "User name"/"User ID" field gets the applicant's username when one is configured."""
