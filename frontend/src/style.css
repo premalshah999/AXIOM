@@ -3616,3 +3616,19 @@ details:not(.fold) summary {
 .reserved-editor {
   margin-top: 24px;
 }
+
+/* Setup › Connections: one Gmail row per mailbox; the Save bar stays in view on the long page. */
+.gmail-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.connections-save {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  padding: 12px 0;
+  background: var(--raised);
+  border-top: 1px solid var(--line);
+}
