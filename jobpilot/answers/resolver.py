@@ -441,7 +441,8 @@ class Resolver(
         )
 
     def named_employer_date(self, f):
-        """A start or end date asked of an employer named in the question ("What was your end date at ExampleSoft?"): that work row's own date. Leonardo DRS (2026-10-27) asked the owner although the profile holds it."""
+        """A start or end date asked of an employer named in the question ("What was your end date at ExampleSoft?"):
+        that work row's own date. Leonardo DRS (2026-10-27) asked the owner although the profile holds it."""
         if f.get("options"):
             return None
         match = re.search(r"\b(start|end|starting|ending|from|to)\s+date\b.{0,30}?\b(?:at|with|for)\s+(.+?)\s*\??$",
