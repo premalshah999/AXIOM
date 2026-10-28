@@ -46,7 +46,7 @@ class FlowHandleMixin:
             if f["type"] == "password" and not re.search(r"code|otp|one.time", f["label"], re.I)
         ]
         if not passwords:
-            return await self.open_sign_in_gate(obs)
+            return await self.open_create_account_form(obs) or await self.open_sign_in_gate(obs)
         frame = e.form.frames[passwords[0]["id"]]
         if any(e.form.frames[f["id"]] != frame for f in passwords):
             raise AccountActionError("Account password fields span different frames", "observation_failure")
@@ -326,7 +326,10 @@ class FlowHandleMixin:
                 "reviews": unresolved,
             }
             return True
-        if not report.get("ok", True):
+        # The login identifier is typed with the credentials below; its blank box is no reason to stop (PeopleAdmin's
+        # "Username", NC State 2026-10-26).
+        problems = [p for p in report.get("problems", []) if not re.search(r":\s*(?:user ?name|login)\s*$", str(p), re.I)]
+        if not report.get("ok", True) and (problems or not report.get("problems")):
             e.result = {
                 "state": "waiting_browser",
                 "reason": "Repair required account form values before submitting credentials",
@@ -409,6 +412,20 @@ class FlowHandleMixin:
         ]
         if len(primary) == 1:
             buttons = primary
+        elif len(primary) > 1:
+            # PeopleAdmin keeps its "Create account" link (which opened the form) beside the form's own "Create
+            # account" submit (NC State 2026-10-26): the action is the one that submits the password's form.
+            password = await e.form.locator(passwords[0]["id"]).element_handle()
+            owned = [
+                b
+                for b in primary
+                if await e.form.locator(b["id"]).evaluate(
+                    "(b, p) => Boolean(p.form) && b.form === p.form && /^(?:submit|image)$/i.test(b.type || '')",
+                    password,
+                )
+            ]
+            if len(owned) == 1:
+                buttons = owned
         if not buttons and creating:
             from ..forms import FINAL
 

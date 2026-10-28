@@ -164,9 +164,13 @@ class AccountStore:
         """The recorded account state (created_locally, authenticated, ...), never credentials."""
         return self.record(url).get("state")
 
-    def remember(self, url, **secrets_by_name):
-        """Seal extra account secrets (security answers) into this account's existing record."""
+    def remember(self, url, *, create=False, **secrets_by_name):
+        """Seal extra account secrets (security answers) into this account's existing record. With create, a page that
+        asks them beside the new account's password starts the record; the account's credentials join it on Create."""
         record = self.record(url)
+        if not record and create and account_tenant(self.canonical(url), self.job_url) != "unresolved_shared_tenant":
+            self.observe(url)
+            record = {"origin": origin(self.canonical(url)), "tenant": account_tenant(self.canonical(url), self.job_url)}
         if not record:
             return False
         sealed = {name: self.service.mail.vault.seal(value) for name, value in secrets_by_name.items()}

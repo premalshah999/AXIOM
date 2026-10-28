@@ -122,6 +122,24 @@ def oracle_education_block(fields):
         f["group"] = "Education 1"
 
 
+def mark_account_secrets(fields):
+    """A registration form's challenge question and its answer (PeopleAdmin's "Challenge Question" and "Challenge
+    Question Response" beside the new password, NC State 2026-10-26) are account secrets the account flow chooses and
+    saves, like the password: never applicant questions for the resolver or the owner."""
+    from .accounts.pages import SECURITY_ANSWER, SECURITY_QUESTION
+
+    fields = list(fields)
+    frames = {f.get("frame_url") for f in fields if f.get("type") == "password"}
+    for question, answer in zip(fields, fields[1:]):
+        if (
+            question.get("frame_url") in frames
+            and answer.get("frame_url") == question.get("frame_url")
+            and SECURITY_QUESTION.match(str(question.get("label") or ""))
+            and SECURITY_ANSWER.match(str(answer.get("label") or ""))
+        ):
+            question["site_account"] = answer["site_account"] = True
+
+
 STATUS_DATE = re.compile(r"\*?\s*date (?:obtained|acquired|granted)\s*(\d+)\s*:?\s*\*?", re.I)
 STATUS_ROW = re.compile(r"\*?\s*(?:type of status|country)\s*(\d+)(?: name)?\s*:?\s*\*?", re.I)
 
@@ -1402,6 +1420,7 @@ class FormSession:
         link_companion_text(self.fields.values())
         label_signature_date(list(self.fields.values()), "\n".join(texts))
         label_status_dates(self.fields.values())
+        mark_account_secrets(self.fields.values())
         mark_uppercase_fields(list(self.fields.values()), "\n".join([*texts, *getattr(self, "refusal_notes", [])]))
         icims_protocol.apply(list(self.fields.values()), list(self.buttons.values()), "\n".join(texts))
         numeric_year_counts(self.fields.values())
