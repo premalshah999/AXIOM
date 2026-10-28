@@ -714,7 +714,7 @@
     const q = label(container, { visibleFirst: true });
     const on = group.find(x => x.getAttribute('aria-checked') === 'true');
     push(container, { label: q, type: 'radiogroup', required: isReq(container, q) || /[*✱]/.test(q) || container.getAttribute('aria-invalid') === 'true',
-      options: group.map(x => clean(x.innerText) || label(x)), value: on ? clean(on.innerText) || label(on) : '',
+      options: group.map(x => textOf(x) || label(x)), value: on ? textOf(on) || label(on) : '',
       maxlength: -1, valid: true, members:group });
     consumed.add(container);
   }
@@ -955,7 +955,7 @@
         if (x.hasAttribute('ui5-radio-button')) return clean(x.text || x.getAttribute('text') || textOf(x));
         const native = nativeMember(x);
         return native ? clean([...(native.labels || [])].map(textOf).join(' ')) || labelledBy(native)
-          || (native !== x && clean(x.innerText)) || native.value : clean(x.innerText) || label(x);
+          || (native !== x && textOf(x)) || native.value : labelledBy(x) || clean(x.getAttribute('aria-label')) || textOf(x) || label(x);
       };
       options = group.map(optionLabel);
       const chosen = group.find(x => {
@@ -1208,14 +1208,24 @@
   const busy = [...document.querySelectorAll('[aria-busy=true],[data-automation-id="loadingSpinner"],.oj-progress-circle,.spinner,.loading-spinner,.loader')]
     .some(visible);
   // Open modal dialogs (Workday "Reset Password", terms pop-ups): their controls take precedence.
-  const dialogs = [...document.querySelectorAll('[role=dialog],[role=alertdialog],[aria-modal=true],dialog[open],[data-automation-id="popUpDialog"],[data-automation-id="wd-Popup"]')]
+  // Dialogs and their actions may live in different shadow/slot trees. Use the
+  // composed ancestry so an informational popup does not hide every question
+  // while leaving its acknowledgement undiscovered.
+  const composedContains = (ancestor, node) => {
+    for (let n = node; n; n = n.assignedSlot || n.parentElement || n.getRootNode()?.host) {
+      if (n === ancestor) return true;
+    }
+    return false;
+  };
+  const nodesById = new Map(all.filter(n => n.dataset.jpId).map(n => [n.dataset.jpId, n]));
+  const dialogs = all.filter(d => d.matches('[role=dialog],[role=alertdialog],[aria-modal=true],dialog[open],[data-automation-id="popUpDialog"],[data-automation-id="wd-Popup"]'))
     .filter(d => visible(d) && !d.closest(CAPTCHA_BOX) && d.getBoundingClientRect().width > 120)
     .map(d => ({
       title: clean(d.querySelector('h1,h2,h3,[role=heading]')?.innerText || d.getAttribute('aria-label') || ''),
-      text: clean(d.innerText).slice(0, 4000),
+      text: textOf(d).slice(0, 4000),
       automation: [...new Set([...d.querySelectorAll('[data-automation-id]')].filter(visible).map(x => x.dataset.automationId))].slice(0, 100),
-      field_ids: fields.filter(f => { const n = document.querySelector('[data-jp-id="' + f.id + '"]'); return n && d.contains(n); }).map(f => f.id),
-      control_ids: buttons.filter(b => { const n = document.querySelector('[data-jp-id="' + b.id + '"]'); return n && d.contains(n); }).map(b => b.id),
+      field_ids: fields.filter(f => composedContains(d, nodesById.get(f.id))).map(f => f.id),
+      control_ids: buttons.filter(b => composedContains(d, nodesById.get(b.id))).map(b => b.id),
     }))
     .filter(d => d.field_ids.length || d.control_ids.length);
   return {
