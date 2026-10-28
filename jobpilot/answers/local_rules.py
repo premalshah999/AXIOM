@@ -975,6 +975,23 @@ class LocalRulesMixin:
             home = saved.upper() if saved.upper() in US_STATES else states.get(normalize(saved), "")
             if home and (a := self._ans(f, "Yes" if states[named[1].strip()] == home else "No", ["profile:address.state"])):
                 return a
+        # Deloitte's tax-credit questionnaire (Caesars, 2026-10-27): "State in which you plan to work (choose Unsure if
+        # multiple options exist or are not certain)". The posting's own state; its Unsure choice when it names none.
+        if options and re.search(
+            r"\bstate (?:in which|where) you (?:plan|intend|expect|are going|will) (?:to )?work\b|\bstate of (?:employment|work)\b",
+            label,
+        ):
+            where = str(self.job.get("location") or "")
+            code = re.search(r",\s*([A-Z]{2})\b", where)
+            named = [c for c, name in US_STATES.items() if re.search(r"\b" + re.escape(name) + r"\b", where, re.I)]
+            state = code[1] if code and code[1] in US_STATES else (named[0] if len(named) == 1 else "")
+            if state:
+                choice = next((o for o in options if normalize(o) in {normalize(US_STATES[state]), state.lower()}), None)
+                if choice and (a := self._ans(f, choice, ["job:location"])):
+                    return a
+            unsure = next((o for o in options if re.fullmatch(r"\s*(?:unsure|not sure|unknown|undecided)\W*", o, re.I)), None)
+            if unsure and (a := self._ans(f, unsure, ["job:location"])):
+                return a
         # BNY (Oracle, 2026-10-24): "Salary Expectation in Local Currency" is a currency menu (Euro, US Dollar, ...).
         currencies = [o for o in options if CURRENCY.search(o)]
         if len(currencies) >= 3 and len(currencies) >= len(options) - 1 and re.search(r"currenc|salary|compensation|pay", label):

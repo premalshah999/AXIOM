@@ -140,3 +140,16 @@ def test_age_thresholds_are_read_from_the_date_of_birth():
     assert age_threshold("are you under 25 and living in an empowerment zone", 22) is None
     assert age_threshold("are you under 18 or over 65 years of age", 70) is None
     assert age_threshold("have you worked over 40 hours a week", 31) is None
+
+
+def test_the_state_of_work_is_the_postings_own(service):
+    def ask(location):
+        resolver = Resolver(Profile.model_validate({"facts": FACTS}), service.db, service.config,
+                            job={"ats": "oracle", "url": APPLY, "location": location})
+        return resolver.local({"id": "s", "label": "State in which you plan to work (choose Unsure if multiple options "
+                               "exist or are not certain)", "type": "dropdown", "required": True, "value": "",
+                               "valid": True, "group": "", "section": "",
+                               "options": ["Select one...", "Maryland", "Nevada", "Unsure"]}).value
+
+    assert ask("Las Vegas, NV") == "Nevada"
+    assert ask("Multiple Locations") == "Unsure"
