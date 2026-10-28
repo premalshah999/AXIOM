@@ -273,11 +273,24 @@ def detect_embedded(entries):
     return None, None
 
 
+# Avature on an employer's own domain: its locale-prefixed portal actions (jobs.lenovo.com/en_US/careers/JobDetail,
+# jobs.ea.com/en_US/careers/Login, metlifecareers.com/en_US/ml/ApplicationMethods) or its folder pages
+# (careers.bain.com/jobs/FolderDetail). Read as custom sites, their reset mail from <tenant>.avature.net was never
+# trusted and seven employers' resets "did not arrive" (2026-10-28).
+AVATURE_PATH = re.compile(
+    r"^/(?:[a-z]{2}_[A-Z]{2}/[A-Za-z0-9_-]+/(?:JobDetail|FolderDetail|ApplicationMethods|Login|Register|"
+    r"SearchJobs|PrepareForApply|ProfileForm)\b|[A-Za-z0-9_-]+/(?:FolderDetail|ApplicationMethods)\b)"
+)
+
+
 def detect(url: str) -> ATS:
-    host = (urlsplit(url).hostname or "").lower()
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
     for ats in REGISTRY:
         if any(host == x or host.endswith("." + x) for x in ats.domains):
             return ats
+    if AVATURE_PATH.match(parts.path or ""):
+        return next(ats for ats in REGISTRY if ats.id == "avature")
     return ATS("custom", "Custom career site", (), "Inspect the application flow using observed controls.")
 
 

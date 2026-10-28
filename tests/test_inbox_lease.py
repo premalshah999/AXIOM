@@ -30,7 +30,7 @@ class FakeMail:
         self.begin_calls = 0
 
     def rule_for(self, url):
-        return {"id": "rule-1", "mailbox_id": 1}
+        return {"id": "rule-1", "mailbox_id": 1, "sender_domains": ["oraclecloud.com", "oracle.com"]}
 
     def begin(self, run_id, rule, recipient, kind="auto", *, resume_challenge_id=None):
         self.begin_calls += 1
@@ -60,7 +60,7 @@ async def test_holder_released_within_cap_is_acquired(clock, released_after):
     start = clock.now
     challenge = await inbox.arm("run-1", {"url": "https://x.test"}, "alex@example.test", patience=120)
     assert challenge["id"] == "challenge-1"
-    assert challenge["rule"] == {"id": "rule-1", "mailbox_id": 1}
+    assert challenge["rule"] == {"id": "rule-1", "mailbox_id": 1, "sender_domains": ["oraclecloud.com", "oracle.com"]}
     assert released_after <= clock.now - start < LEASE_WAIT_CAP_SECONDS
     assert mail.begin_calls > 1
 

@@ -60,8 +60,15 @@ class Inbox:
         return bool(self.mailbox())
 
     async def rule(self, job, recipient):
-        """The employer's sender rule: saved, built from the ATS family, or none."""
-        return self.mail.rule_for(job["url"]) or await self.mail.ensure_rule(job, recipient)
+        """The employer's sender rule: saved, built from the ATS family, or none. A saved rule gains the senders of the
+        platform this run found behind the site (ensure_rule): EA's jobs.ea.com rule never learned avature.net."""
+        from .mail.senders import KNOWN_SENDERS
+
+        existing = self.mail.rule_for(job["url"])
+        family = set(KNOWN_SENDERS.get(job.get("ats"), []))
+        if existing is None or (family and not family <= set(existing.get("sender_domains") or [])):
+            return await self.mail.ensure_rule(job, recipient) or existing
+        return existing
 
     async def arm(
         self, run_id, job, recipient, kind="auto", since=None, patience=90, *, resume_challenge_id=None
