@@ -50,10 +50,11 @@
   const nearby = el => {
     let node = el;
     // Rippling nests a custom question's control 5-6 levels below the div that
-    // holds its text. Deeper levels are used only while the ancestor owns no
+    // holds its text, and a searchable select's input 9 (Go Fish Digital's "What is your desired compensation
+    // range?" read "Select", 2026-10-27). Deeper levels are used only while the ancestor owns no
     // other applicant control, so another question's text is never borrowed.
     const CONTROL = 'input:not([type=hidden]),select,textarea,[role=combobox],[role=radiogroup],[role=listbox],[contenteditable=true]';
-    for (let depth = 0; depth < 8 && node; depth++) {
+    for (let depth = 0; depth < 11 && node; depth++) {
       if ((depth >= 3 || el.type === 'file') && [...node.querySelectorAll(CONTROL)].some(x => x !== el && !el.contains(x) && !x.contains(el))) break;
       let prev = node.previousElementSibling;
       while (prev && (!visible(prev) || prev.matches('script,style'))) prev = prev.previousElementSibling;
@@ -833,10 +834,15 @@
       if (!group.length) group = [...el.querySelectorAll('[ui5-radio-button]')];
       const nativeMember = x => x.matches('input[type=radio]') ? x :
         x.querySelectorAll('input[type=radio]').length === 1 ? x.querySelector('input[type=radio]') : null;
+      // Rippling's role=radio rows hold a native radio named by aria-labelledby, not a <label>: its value ("true") was
+      // read as the choice instead of "Yes - I consent to receiving text messages" (Go Fish Digital, 2026-10-27).
+      const labelledBy = n => clean((n.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
+        .map(ref => textOf(byId(n, ref))).join(' '));
       const optionLabel = x => {
         if (x.hasAttribute('ui5-radio-button')) return clean(x.text || x.getAttribute('text') || textOf(x));
         const native = nativeMember(x);
-        return native ? clean([...(native.labels || [])].map(textOf).join(' ')) || native.value : clean(x.innerText) || label(x);
+        return native ? clean([...(native.labels || [])].map(textOf).join(' ')) || labelledBy(native)
+          || (native !== x && clean(x.innerText)) || native.value : clean(x.innerText) || label(x);
       };
       options = group.map(optionLabel);
       const chosen = group.find(x => {
@@ -844,6 +850,11 @@
         return native ? native.checked : x.checked === true || x.getAttribute('aria-checked') === 'true';
       });
       value = chosen ? optionLabel(chosen) : '';
+      // A consent group whose long caption is not its label is named by its Yes choice, as a lone radio group is.
+      if ([el.id, el.getAttribute('name'), 'Unlabelled field'].includes(question)
+          && /(?:text messages?|sms|marketing|newsletter)/i.test(options.join(' '))) {
+        question = options.find(o => /^yes\b/i.test(o))?.replace(/^yes\s*[-–:]?\s*/i, '') || question;
+      }
       // Eightfold's legend says only "Please check one of the boxes"; its options identify the disclosure.
       if (/please check one of the boxes/i.test(question)) {
         const context = options.join(' ');
