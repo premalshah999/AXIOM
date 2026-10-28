@@ -89,3 +89,23 @@ def test_the_host_is_a_choice_of_the_four(service):
     assert config.openrouter_provider == "wafer"
     field = next(f for f in status(config)["fields"] if f["name"] == "openrouter_provider")
     assert field["options"] == ["sail-research", "deepinfra", "relace", "wafer"] and "Sail Research" in field["option_labels"]["sail-research"]
+
+
+async def test_a_hosts_own_service_tier_does_not_break_the_reply(service, monkeypatch):
+    """Sail Research (2026-10-28) answers with a service_tier the OpenAI response model refuses; every run parked as
+    "model provider unavailable". The reply is read without it."""
+    config = service.config.model_copy(update={"llm_provider": "openrouter", "openrouter_api_key": "fixture-only"})
+
+    async def respond(request):
+        return httpx.Response(200, json={**completion(), "service_tier": "standard", "provider": "Sail Research"})
+
+    def client(db, cfg, run_id=None, **kwargs):
+        return httpx.AsyncClient(transport=models.MeteredTransport(
+            db, cfg, inner=httpx.MockTransport(respond), thinking=kwargs["thinking"]))
+
+    monkeypatch.setattr(models, "http_client", client)
+
+    class Probe(BaseModel):
+        ok: bool
+
+    assert (await models.structured(config, service.db, Probe, "fixture", "fixture", retries=0)).ok

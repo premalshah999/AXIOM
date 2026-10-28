@@ -20,6 +20,10 @@ _deadline = ContextVar("model_deadline", default=None)
 _request_sent = ContextVar("model_request_sent", default=None)
 
 
+# The service tiers the OpenAI SDK's ChatCompletion accepts (plus none).
+OPENAI_SERVICE_TIERS = {None, "auto", "default", "flex", "scale", "priority"}
+
+
 def cache_hits(usage):
     """Cached input tokens: DeepSeek's prompt_cache_hit_tokens, or the OpenAI/OpenRouter prompt_tokens_details."""
     return int(usage.get("prompt_cache_hit_tokens") or (usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
@@ -436,6 +440,20 @@ class MeteredTransport(httpx.AsyncBaseTransport):
             raise AnswerModelUnavailable() from None
         if ticket is not None:
             provider_health.finish(self.db, self.config, ticket)
+        if openrouter and response.is_success and completion.get("service_tier") not in OPENAI_SERVICE_TIERS:
+            # A host's own tier name (Sail Research, 2026-10-28) is outside the OpenAI response model's five, so every
+            # reply failed validation and the run parked as "model provider unavailable". The tier is billing detail.
+            completion.pop("service_tier", None)
+            headers = [
+                (k, v) for k, v in response.headers.items() if k.lower() not in {"content-length", "content-encoding"}
+            ]
+            response = httpx.Response(
+                response.status_code,
+                headers=headers,
+                content=json.dumps(completion).encode(),
+                request=request,
+                extensions=response.extensions,
+            )
         return response
 
     async def aclose(self):
