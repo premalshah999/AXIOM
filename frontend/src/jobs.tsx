@@ -1,8 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Download, Search } from "lucide-react";
 import { api, applyJob, approveReserved } from "./api";
 import { routeUrl, useWorkspace } from "./context";
 import { useAction, useDraft, useNow, usePoll } from "./hooks";
+import { useSelection, type Selection } from "./bulk";
 import { DiscoveredJobs } from "./jobboard";
 import {
   appliedState,
@@ -29,6 +30,7 @@ import {
   linkHost,
   plural,
   StatePill,
+  urlRole,
   words,
 } from "./ui";
 
@@ -98,6 +100,9 @@ function Pipeline() {
   const q = query.trim();
   const shown = list.rows;
   const label = GROUPS.find((g) => g.id === filter)?.label || "All";
+  // Tick rows, a page or every match, then act on them together (owner 2026-10-28: "no checkboxes for select all").
+  const selection = useSelection(200);
+  useEffect(() => selection.clear(), [filter, query]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <section aria-label="Application pipeline">
       <QueuePanel />
@@ -136,9 +141,18 @@ function Pipeline() {
         </div>
       </div>
       <ErrorLine error={list.error} retry={list.refresh} />
+      {shown.length > 0 && (
+        <PipelineBulkBar
+          selection={selection}
+          rows={shown}
+          filter={filter === "new" ? "all" : filter}
+          query={q}
+          total={list.paging.total}
+        />
+      )}
       {shown.length ? (
         <>
-          <JobTable rows={shown} />
+          <JobTable rows={shown} selection={selection} />
           <Pagination paging={list.paging} label="Pipeline pages" />
         </>
       ) : !list.loaded || !list.current ? (
@@ -172,14 +186,190 @@ function Pipeline() {
   );
 }
 
-function JobTable({ rows }: { rows: JobRow[] }) {
+// Act on ticked jobs: a page or every match (up to 200), then retry, pause, confirm or remove them together. Each job
+// goes through the same endpoint as its own row button, so every guard still decides each one.
+function PipelineBulkBar({
+  selection,
+  rows,
+  filter,
+  query,
+  total,
+}: {
+  selection: Selection;
+  rows: JobRow[];
+  filter: Group | "all";
+  query: string;
+  total: number;
+}) {
+  const { markJobs, refresh } = useWorkspace();
+  const { pending, run } = useAction();
+  // Job id -> its latest run, for every row seen here (Confirm needs the run).
+  const [known, setKnown] = useState<Record<string, string | undefined>>({});
+  useEffect(() => {
+    setKnown((k) => ({ ...k, ...Object.fromEntries(rows.map((r) => [r.job.id, r.run?.id])) }));
+  }, [rows]);
+  const n = selection.ids.length;
+  const pageIds = rows.map((r) => r.job.id);
+  const busy = pending !== null;
+  const each = async (ids: string[], one: (id: string) => Promise<unknown>) => {
+    let ok = 0;
+    for (let i = 0; i < ids.length; i += 4) {
+      const done = await Promise.allSettled(ids.slice(i, i + 4).map(one));
+      ok += done.filter((d) => d.status === "fulfilled").length;
+    }
+    return ok;
+  };
+  const finish = (ids: string[], state?: string) => {
+    if (state) markJobs(ids, state);
+    selection.clear();
+    void refresh();
+  };
+  const selectMatching = () =>
+    run(
+      "select",
+      async () => {
+        const params = new URLSearchParams({ group: filter, q: query, page: "1", size: "200" });
+        const page = await api<{ rows: { job: { id: string }; run?: { id: string } | null }[] }>(`/jobs?${params}`);
+        setKnown((k) => ({ ...k, ...Object.fromEntries(page.rows.map((r) => [r.job.id, r.run?.id])) }));
+        selection.setMany(page.rows.map((r) => r.job.id), true);
+        return page.rows.length;
+      },
+      (count) => (count ? `Selected ${plural(count, "job")}.` : undefined),
+    );
+  const retry = () =>
+    run(
+      "retry",
+      async () => {
+        const ids = [...selection.ids];
+        let started = 0;
+        for (let i = 0; i < ids.length; i += 50) {
+          const r = await api<{ results: { outcome: string }[] }>("/jobs/apply-many", "POST", {
+            job_ids: ids.slice(i, i + 50),
+          });
+          started += r.results.filter((x) => x.outcome !== "refused").length;
+        }
+        finish(ids, appliedState("queued"));
+        return started;
+      },
+      (started) => `Started ${plural(started ?? 0, "job")} again.`,
+    );
+  const pause = () =>
+    run(
+      "pause",
+      async () => {
+        const ids = [...selection.ids];
+        const ok = await each(ids, (id) => api(`/jobs/${id}/pause`, "POST"));
+        finish(ids, "job:paused");
+        return ok;
+      },
+      (ok) => `Paused ${plural(ok ?? 0, "job")}.`,
+    );
+  const remove = () =>
+    run(
+      "remove",
+      async () => {
+        const ids = [...selection.ids];
+        const ok = await each(ids, (id) => api(`/jobs/${id}`, "DELETE"));
+        finish(ids);
+        return ok;
+      },
+      (ok) => `Removed ${plural(ok ?? 0, "job")}. Their history is kept.`,
+    );
+  const verdict = (submitted: boolean) =>
+    run(
+      submitted ? "confirm" : "unsent",
+      async () => {
+        const ids = selection.ids.filter((id) => known[id]);
+        const ok = await each(ids, (id) => reconcileRun(known[id]!, submitted));
+        finish(ids, submitted ? "confirmed" : "needs_review");
+        return ok;
+      },
+      (ok) => `${submitted ? "Confirmed" : "Marked not sent:"} ${plural(ok ?? 0, "application")}.`,
+    );
+  return (
+    <div className="bulk-bar" role="group" aria-label="Selected jobs">
+      <span className="bulk-count" aria-live="polite">
+        {n ? `${plural(n, "job")} selected` : "None selected"}
+      </span>
+      {pageIds.some((id) => !selection.has(id)) && (
+        <button className="link sm" onClick={() => selection.setMany(pageIds, true)}>
+          Select this page ({pageIds.length})
+        </button>
+      )}
+      {total > pageIds.length && (
+        <button className="link sm" disabled={busy} onClick={selectMatching}>
+          {pending === "select"
+            ? "Selecting…"
+            : `Select all ${total.toLocaleString()} matching${total > 200 ? " (first 200)" : ""}`}
+        </button>
+      )}
+      {n > 0 && (
+        <button className="link sm" onClick={selection.clear}>
+          Clear
+        </button>
+      )}
+      {n > 0 && (
+        <span className="bulk-actions toolbar-end">
+          {filter === "unconfirmed" && (
+            <>
+              <button className="btn sm primary" disabled={busy} onClick={() => verdict(true)}>
+                {pending === "confirm" ? "Confirming…" : "Confirm submitted"}
+              </button>
+              <button className="btn sm" disabled={busy} onClick={() => verdict(false)}>
+                {pending === "unsent" ? "Saving…" : "Not sent"}
+              </button>
+            </>
+          )}
+          <button className="btn sm" disabled={busy} onClick={retry}>
+            {pending === "retry" ? "Starting…" : "Retry"}
+          </button>
+          <button className="btn sm" disabled={busy} onClick={pause}>
+            {pending === "pause" ? "Pausing…" : "Pause"}
+          </button>
+          <Confirm
+            label="Remove"
+            confirm={`Remove ${plural(n, "job")}`}
+            pending={pending === "remove"}
+            disabled={busy && pending !== "remove"}
+            note="Removes them from the pipeline. Sent applications are not withdrawn; history is kept."
+            onConfirm={remove}
+          />
+        </span>
+      )}
+    </div>
+  );
+}
+
+// The owner's own verdict on an application the engine could not confirm (owner 2026-10-28: "a confirm button in
+// unconfirmed applications to manually confirm applications the app was not able to detect").
+function reconcileRun(runId: string, submitted: boolean) {
+  return api(`/runs/${runId}/reconcile`, "POST", {
+    submitted,
+    evidence: submitted
+      ? "Confirmed by the applicant in the dashboard: the employer's receipt, email or account shows this application."
+      : "Marked not submitted by the applicant in the dashboard.",
+  });
+}
+
+function JobTable({ rows, selection }: { rows: JobRow[]; selection?: Selection }) {
   const { openJob, route } = useWorkspace();
   const now = useNow(30000);
+  const ids = rows.map((r) => r.job.id);
   return (
     <div className="table-wrap">
       <table className="table jobs-table">
         <thead>
           <tr>
+            {selection && (
+              <th scope="col" className="cell-check">
+                <input
+                  type="checkbox"
+                  aria-label="Select every job on this page"
+                  checked={!!ids.length && ids.every((id) => selection.has(id))}
+                  onChange={(e) => selection.setMany(ids, e.target.checked)}
+                />
+              </th>
+            )}
             <th scope="col">Job</th>
             <th scope="col">Status</th>
             <th scope="col" className="num">
@@ -194,10 +384,24 @@ function JobTable({ rows }: { rows: JobRow[] }) {
         <tbody>
           {rows.map((r) => (
             <tr key={r.job.id} aria-selected={route.job === r.job.id || undefined}>
+              {selection && (
+                <td className="cell-check">
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${r.job.company || "this job"}`}
+                    checked={selection.has(r.job.id)}
+                    onChange={(e) => selection.toggle(r.job.id, e.target.checked)}
+                  />
+                </td>
+              )}
               <td className="cell-job">
-                <button className="link job-open" onClick={() => openJob(r.job.id, r.run?.id)}>
+                <button
+                  className="link job-open"
+                  title={r.job.url}
+                  onClick={() => openJob(r.job.id, r.run?.id)}
+                >
                   <strong>{r.job.company || linkHost(r.job.url) || "Employer"}</strong>
-                  <span>{r.job.title || r.job.url}</span>
+                  <span>{r.job.title || urlRole(r.job.url)}</span>
                 </button>
                 <small className="muted">
                   {[r.job.location, r.job.ats].filter(Boolean).join(" · ")}
@@ -302,9 +506,29 @@ export function JobControls({
       },
       "Removed from the queue.",
     );
+  const verdict = (submitted: boolean) =>
+    run(
+      submitted ? "confirm" : "unsent",
+      async () => {
+        const r = await reconcileRun(run_!.id, submitted);
+        markJobs([row.job.id], submitted ? "confirmed" : "needs_review");
+        void refresh();
+        return r;
+      },
+      submitted ? "Confirmed as submitted." : "Marked not sent.",
+    );
   const busy = pending !== null;
   const buttons: React.ReactNode[] = [];
-  if (state === "reserved")
+  if (run_?.state === "submission_unknown")
+    buttons.push(
+      <button key="c" className="btn sm primary" disabled={busy} onClick={() => verdict(true)}>
+        {pending === "confirm" ? "Confirming…" : "Confirm"}
+      </button>,
+      <button key="u" className="btn sm" disabled={busy} onClick={() => verdict(false)}>
+        {pending === "unsent" ? "Saving…" : "Not sent"}
+      </button>,
+    );
+  else if (state === "reserved")
     buttons.push(
       <button key="v" className="btn sm primary" disabled={busy} onClick={approve}>
         {pending === "approve" ? "Approving…" : "Approve & apply"}

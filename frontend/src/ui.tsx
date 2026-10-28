@@ -374,6 +374,35 @@ export function External({
 }
 
 /** "examplecorp · boards.greenhouse.io" for a pasted link whose title isn't known until ranking. */
+// A readable role for a job saved as a bare link: the last wordy path segment ("Exton-Associate%2C-Data-Science" ->
+// "Exton Associate, Data Science"), never a 300-character query string in the table (owner 2026-10-28: "cluttered").
+export function urlRole(url?: string) {
+  try {
+    const u = new URL(url || "");
+    const generic = /^(?:jobs?|careers?|details?|apply|en|us|en-us|posting|positions?|openings?|view|search)$/i;
+    const segment = u.pathname
+      .split("/")
+      .filter(Boolean)
+      .map((s) => {
+        try {
+          return decodeURIComponent(decodeURIComponent(s));
+        } catch {
+          return s;
+        }
+      })
+      .reverse()
+      .find((s) => /[a-z]{3,}/i.test(s) && !generic.test(s) && !/^[0-9a-f-]{16,}$/i.test(s));
+    const title = (segment || u.searchParams.get("title") || "")
+      .replace(/[-_+]+/g, " ")
+      .replace(/\b(?=\w*\d)[0-9a-z]{8,}\b/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    return title || "Untitled role";
+  } catch {
+    return "Untitled role";
+  }
+}
+
 export function linkHost(url?: string) {
   try {
     const u = new URL(url || "");

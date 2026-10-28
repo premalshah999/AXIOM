@@ -40,7 +40,8 @@ function fitClass(score: number | null, minimum: number) {
 // receive 500 listings (577 KB) every 20 s and filter them itself, so larger boards showed wrong totals and missed
 // rows (2026-10-22). Below-fit jobs can be ticked, a page or every match selected, and applied to in one request.
 export function DiscoveredJobs() {
-  const { snapshot, route, go, openJob, version, marks } = useWorkspace();
+  const { snapshot, route, go, openJob, version, marks, counts } = useWorkspace();
+  const countsKey = `${counts.discovered}:${counts.pipeline}`;
   const { pending, run } = useAction();
   const now = useNow(30000);
   const [query, setQuery] = useDraft("board-query", "");
@@ -66,8 +67,8 @@ export function DiscoveredJobs() {
   }).toString();
   const board = usePoll<Board>(
     (signal) => api(`/job-board?${key}`, "GET", undefined, signal),
-    20000,
-    [key, version],
+    10000,
+    [key, version, countsKey],
   );
   const selection = useSelection();
   const bulk = useApplyMany();

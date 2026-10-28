@@ -1029,6 +1029,131 @@ select {
   align-items: center;
   gap: 6px;
 }
+.bulk-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Pipeline and Discovered (owner 2026-10-28: "too cluttered", "cannot vertically scroll through each row"):
+   fixed columns, one line per field, and the page is the only vertical scroller. A bare link no longer stretches the
+   Job column until Status, Tries and the actions fall off the right edge; the header stays under the top bar. */
+@media (min-width: 761px) {
+  .table-wrap:has(> .jobs-table),
+  .table-wrap:has(> .board-table) {
+    max-height: none;
+    overflow: clip;
+    overscroll-behavior: auto;
+  }
+  .jobs-table,
+  .board-table {
+    table-layout: fixed;
+    min-width: 0;
+  }
+  .jobs-table thead th,
+  .board-table thead th {
+    top: var(--bar-h);
+  }
+  .jobs-table th:first-child,
+  .jobs-table td:first-child,
+  .board-table th:first-child,
+  .board-table td:first-child {
+    position: static;
+  }
+  .jobs-table td:first-child::after,
+  .jobs-table th:first-child::after,
+  .board-table td:first-child::after,
+  .board-table th:first-child::after {
+    display: none;
+  }
+  .jobs-table td,
+  .board-table td {
+    padding: 8px 12px;
+    vertical-align: middle;
+  }
+  .jobs-table .cell-check,
+  .board-table .cell-check {
+    width: 40px;
+    padding-right: 0;
+  }
+  .jobs-table th:nth-last-child(4) {
+    width: 30%;
+  }
+  .jobs-table .cell-tries,
+  .jobs-table th.num {
+    width: 64px;
+  }
+  .jobs-table th:nth-last-child(2) {
+    width: 96px;
+  }
+  .jobs-table th:last-child {
+    width: 190px;
+  }
+  .board-table th:last-child {
+    width: 104px;
+  }
+  .board-table th:nth-last-child(4) {
+    width: 92px;
+  }
+  .board-table th:nth-last-child(3) {
+    width: 56px;
+  }
+  .board-table th:nth-last-child(2) {
+    width: 140px;
+  }
+  .jobs-table .cell-job,
+  .board-table .cell-job {
+    min-width: 0;
+    overflow: hidden;
+  }
+  .jobs-table .job-open,
+  .board-table .job-open {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 8px;
+    max-width: 100%;
+    min-width: 0;
+  }
+  .jobs-table .job-open strong,
+  .jobs-table .job-open span,
+  .jobs-table .cell-job > small,
+  .board-table .job-open strong,
+  .board-table .job-open span,
+  .board-table .cell-job > small {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .jobs-table .job-open strong,
+  .board-table .job-open strong {
+    flex: none;
+    max-width: 45%;
+  }
+  .jobs-table .job-open span,
+  .board-table .job-open span {
+    min-width: 0;
+  }
+  .jobs-table .cell-job > small,
+  .board-table .cell-job > small {
+    margin-top: 1px;
+    font-size: 12px;
+  }
+  .jobs-table .cell-state,
+  .board-table .cell-state {
+    min-width: 0;
+    max-width: none;
+    overflow: hidden;
+  }
+  .jobs-table .reason {
+    -webkit-line-clamp: 1;
+    margin-top: 3px;
+  }
+  .jobs-table .row-actions,
+  .board-table .row-actions {
+    flex-wrap: nowrap;
+  }
+}
 .fit {
   font-weight: 600;
 }

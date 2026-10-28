@@ -17,7 +17,10 @@ export function usePipelinePage(
   query: string,
   initialSize = 25,
 ) {
-  const { version, marks } = useWorkspace();
+  const { version, marks, counts } = useWorkspace();
+  // The tab and chip counts come from the snapshot; the rows from this page. Re-read the page whenever the counts move,
+  // so a job never shows in one state on the chips and another in the list (owner 2026-10-28: "not properly synced").
+  const countsKey = JSON.stringify(counts.groups);
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(initialSize);
   const [q, setQ] = useState(query.trim());
@@ -38,8 +41,8 @@ export function usePipelinePage(
       ...(await api<PipelinePage>(`/jobs?${key}`, "GET", undefined, signal)),
       key,
     }),
-    15000,
-    [key, version],
+    8000,
+    [key, version, countsKey],
   );
   const data = poll.data;
   const current = data?.key === key;
