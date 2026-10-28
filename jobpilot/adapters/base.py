@@ -551,11 +551,21 @@ class Adapter:
             )
         ]
         if not codes and CODE_TEXT.search(obs["text"]):
-            digits = [
-                f
-                for f in obs["fields"]
-                if f["maxlength"] == 1 and f["type"] in {"text", "tel", "number"} and not embedded(f)
-            ]
+            boxes = [f for f in obs["fields"] if f["type"] in {"text", "tel", "number"} and not embedded(f)]
+            digits = [f for f in boxes if f["maxlength"] == 1]
+            if not 4 <= len(digits) <= 10:
+                # react-code-input lets every box but the last take the whole code, so a paste fills them: TikTok's
+                # six reset-code boxes read maxlength 6,6,6,6,6,1, were never seen as a code step, and the run waited
+                # for a reset link while the code mail sat unmatched (2026-10-28).
+                for size in range(4, 11):
+                    group = [f for f in boxes if f["maxlength"] in {1, size}]
+                    if (
+                        len(group) == size
+                        and sum(f["maxlength"] == 1 for f in group) == 1
+                        and len({f["type"] for f in group}) == 1
+                    ):
+                        digits = group
+                        break
             if 4 <= len(digits) <= 10:
                 codes = digits
         return codes
@@ -1784,10 +1794,13 @@ class Adapter:
         self.service.mail.narrow(self.challenge["id"], kind)
         self.emit("email_wait", f"Waiting for the employer's verification {kind}")
         inline = code_inline_wait(self.id) if kind == "code" else 3
-        if kind == "code" and getattr(self, "reset_in_progress", False):
+        if getattr(self, "reset_in_progress", False) and (
+            kind == "code" or (kind == "password_reset" and getattr(self, "one_page_confirming", False))
+        ):
             # A reset's code page cannot be reopened: a parked run's continuation requests another reset, whose new
             # code replaces this one (Amazon 2026-10-27: three resets, each code "Incorrect" in the next run). Its code
-            # is awaited here, as Oracle's are.
+            # is awaited here, as Oracle's are. A one-page reset waits the same way for its code or link (TikTok
+            # 2026-10-28: the code came 8 s after the run parked).
             inline = max(inline, RESET_CODE_INLINE_WAIT)
         self.e.extend(max(min(self.config.mail_wait_seconds, 120), inline))
         token = await self.inbox.wait(self.challenge, max_wait_seconds=inline)
@@ -2536,6 +2549,7 @@ class Adapter:
         """A one-page reset already holds the new password; the employer confirms it with an emailed code typed on its
         page, or a link. Its credentials are saved only after the page took the confirmation."""
         page = await self.form.scan()
+        self.one_page_confirming = True
         token = await self.wait_email("code" if self.code_fields(page) else "password_reset")
         if not token:
             reason = self.inbox.reason(self.challenge)
@@ -2608,10 +2622,25 @@ class Adapter:
                 state="waiting_browser",
             )
         self.emit("auth", "Employer password reset email received")
-        if token["kind"] != "link":
-            self.finish_mail("failed", "Reset email had no link")
-            return self.defer("The reset email did not contain a usable link")
-        await self.open_link(token["value"])
+        if token["kind"] == "link":
+            await self.open_link(token["value"])
+        else:
+            # The reset is confirmed by an emailed code typed on the page, which then asks for the new password.
+            page = await self.form.scan()
+            codes = self.code_fields(page)
+            if not codes:
+                self.finish_mail("failed", "Reset email had no link")
+                return self.defer("The reset email held a code but the page shows no code field")
+            for f in codes:
+                if not self.accounts.password_allowed(self.id, self.form.frames[f["id"]].url, self.job["url"]):
+                    self.finish_mail("failed", "Code field on an unexpected website")
+                    return self.defer("The reset code field is on an unexpected website; not entering the code")
+            await enter_code([self.form.locator(f["id"]) for f in codes], token["value"], timeout=4000)
+            await asyncio.sleep(0.3)
+            page = await self.form.scan()
+            if self.code_fields(page) and (button := self.auth_button(self.dialog_view(page) or page, "reset")):
+                await self.click(button, auth=True)
+            await self.form.settle(timeout=6)
         obs = await self.form.scan()
         passwords = [f for f in obs["fields"] if f["type"] == "password"]
         if not passwords:
