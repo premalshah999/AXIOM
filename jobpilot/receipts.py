@@ -46,6 +46,7 @@ RECEIPT_SENDERS = [
     "recruitee.com",
     "dayforcehcm.com",
     "dayforce.com",
+    "pinpoint.email",
 ]
 
 
@@ -386,13 +387,14 @@ async def receipt_messages(
             if state.get("page_token"):
                 params["pageToken"] = state["page_token"]
             try:
-                listed = await mail.request(mailbox_id, "/messages", params, background=True)
+                async with asyncio.timeout(max(0, deadline - time.monotonic())):
+                    listed = await mail.request(mailbox_id, "/messages", params, background=True)
             except MailCursorUpgrade:
                 if upgraded:
                     break
                 state, upgraded = {"query_id": query_id}, True
                 continue
-            except (MailTransportError, MailOperationError):
+            except (TimeoutError, MailTransportError, MailOperationError):
                 break  # Keep the cursor; a mailbox transport outage changes no receipt.
             fetched_pages += 1
             ids = [item["id"] for item in listed.get("messages", []) if item.get("id")]
@@ -403,13 +405,14 @@ async def receipt_messages(
                 break
         mid = ids[0]
         try:
-            message = await mail.read_message(mailbox_id, mid, background=True)
+            async with asyncio.timeout(max(0, deadline - time.monotonic())):
+                message = await mail.read_message(mailbox_id, mid, background=True)
         except MailCursorUpgrade:
             if upgraded:
                 break
             state, upgraded = {"query_id": query_id}, True
             continue
-        except (MailTransportError, MailOperationError):
+        except (TimeoutError, MailTransportError, MailOperationError):
             break
         except MailMessageError:
             message = None

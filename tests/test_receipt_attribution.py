@@ -583,7 +583,8 @@ def test_a_short_employer_name_is_matched_only_as_a_word():
     assert acknowledgement(named, {"company": "EY", "title": "Analyst"}, run, allow_missing_title=True)
 
 
-async def test_a_titled_acknowledgement_is_not_ambiguous_with_another_employers_time_window(service, monkeypatch):
+@pytest.mark.parametrize("sender", ["us.greenhouse-mail.io", "pinpoint.email"])
+async def test_a_titled_acknowledgement_is_not_ambiguous_with_another_employers_time_window(service, monkeypatch, sender):
     """Lyft's "Thank you for your application for Data Scientist" also fit LinkedIn's jobs by time alone (the footer
     says "Visit our LinkedIn page"), and every such message was left unassigned (2026-10-25)."""
     at = datetime.now(UTC) - timedelta(hours=1)
@@ -594,8 +595,8 @@ async def test_a_titled_acknowledgement_is_not_ambiguous_with_another_employers_
     msg = receipt("titled", at + timedelta(minutes=5),
                   "Thank you for your application for Engineer at Example. Visit our LinkedIn page.")
     # An ATS sender acknowledges for every employer it hosts, as Greenhouse's did.
-    msg["payload"]["headers"][0]["value"] = "Example <no-reply@us.greenhouse-mail.io>"
-    msg["payload"]["headers"][2]["value"] = "mx.google.com; dkim=pass; dmarc=pass header.from=us.greenhouse-mail.io"
+    msg["payload"]["headers"][0]["value"] = f"Example <no-reply@{sender}>"
+    msg["payload"]["headers"][2]["value"] = f"mx.google.com; dkim=pass; dmarc=pass header.from={sender}"
     mailbox_provider(monkeypatch, service, [msg])
     assert (await check_receipts(service.mail))["emails_confirmed"] == 1
     with service.db.session() as s:
