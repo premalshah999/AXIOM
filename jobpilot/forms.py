@@ -1044,7 +1044,9 @@ def employer_greenhouse_page_owned(page_url, job):
 # Credit Assessment" (Caesars) and Starbucks' "Complete WOTC" (Eightfold; opens a survey tab).
 SURVEY_DONE = re.compile(
     r"thank you|survey (?:is |has been )?(?:complete|submitted)|you have (?:completed|finished)|"
-    r"questionnaire (?:is |has been )?(?:complete|submitted)|you may (?:now )?close this (?:window|tab)",
+    r"questionnaire (?:is |has been )?(?:complete|submitted)|you may (?:now )?close this (?:window|tab)|"
+    # Deloitte's tax-credit questionnaire ends by issuing a "WOTC Control Number" (Caesars, 2026-10-27).
+    r"your (?:wotc )?control number is",
     re.I,
 )
 LAUNCHER = (
