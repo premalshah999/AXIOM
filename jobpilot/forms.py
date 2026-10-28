@@ -2202,10 +2202,19 @@ class FormSession:
         kind = field["type"]
         if (
             re.search(r"\bgpa\b|grade point average", field["label"], re.I)
-            and re.search(r"invalid", str(field.get("error") or ""), re.I)
+            and kind in {"text", "number"}
             and (scale := re.fullmatch(r"\s*(\d(?:\.\d+)?)\s*/\s*\d+(?:\.\d+)?\s*", str(value)))
+            and (
+                re.search(r"invalid", str(field.get("error") or ""), re.I)
+                # A GPA box takes the number unless it shows a "3.5/4.0" format itself: Taleo (Bealls 2026-10-17,
+                # 'contains an invalid value'), Oracle (INTEGRIS 2026-10-23) and iCIMS (Medpace 2026-10-27, "Invalid
+                # Data Error" with GPA flagged) all refused "3.9/4.0" given whole from a remembered answer.
+                or not re.search(
+                    r"\d\s*/\s*\d",
+                    " ".join(str(field.get(k) or "") for k in ("label", "hint", "placeholder")),
+                )
+            )
         ):
-            # Taleo (Bealls 2026-10-17): 'The field "GPA" contains an invalid value' for "3.9/4.0"; it takes 3.9.
             value = scale[1]
         if kind in {"text", "url"} and "linkedin" in field["label"].lower():
             parsed_url = urlsplit(str(value))

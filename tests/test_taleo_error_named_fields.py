@@ -127,3 +127,27 @@ async def test_alert_text_outside_the_scanned_errors_still_names_fields(page, tm
     form.last_observation["errors"] = []
     gpa = next(f for f in form.fields.values() if f["label"] == "GPA")
     assert gpa["id"] in form.error_named_fields(['The field "GPA" contains an invalid value.'])
+
+
+async def test_a_gpa_box_takes_the_number_unless_it_shows_the_scale_format(page, tmp_path):
+    # Medpace (iCIMS 2026-10-27): a remembered "3.9/4.0" was refused as "Invalid Data Error" with GPA flagged.
+    resume = tmp_path / "r.pdf"
+    resume.write_bytes(b"%PDF")
+    await page.set_content("""<label for="gpa">GPA</label><input id="gpa">
+      <label for="scaled">GPA (e.g. 3.5/4.0)</label><input id="scaled">""")
+    form = FormSession(page, Resolver(Profile(), None, None), resume, lambda *a, **k: None)
+    await form.scan()
+    by_label = {f["label"]: f for f in form.fields.values()}
+    await form.fill(by_label["GPA"], "3.9/4.0")
+    await form.fill(by_label["GPA (e.g. 3.5/4.0)"], "3.9/4.0")
+    assert await page.locator("#gpa").input_value() == "3.9"
+    assert await page.locator("#scaled").input_value() == "3.9/4.0"
+
+
+def test_the_gpa_number_matches_its_scaled_fact_in_the_quality_check():
+    from jobpilot.answer_quality import equivalent
+
+    gpa = {"label": "GPA", "type": "text", "options": []}
+    assert equivalent(gpa, "3.9", "3.9/4.0") and equivalent(gpa, "3.90", "3.9")
+    assert not equivalent(gpa, "3.5", "3.9/4.0")
+    assert not equivalent({"label": "Years of experience", "type": "text", "options": []}, "3", "3/4")

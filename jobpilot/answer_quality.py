@@ -265,6 +265,12 @@ def demonym_of(observed, country):
     return len(stem) >= 4 and person.startswith(stem) and len(person) - len(stem) <= 4 and " " not in person[len(stem):]
 
 
+def gpa_number(value):
+    """A GPA's number with or without its scale ("3.9" and "3.9/4.0" -> "3.9"), or ''."""
+    found = re.fullmatch(r"\s*(\d(?:\.\d+)?)\s*(?:/\s*\d+(?:\.\d+)?)?\s*", str(value or ""))
+    return str(float(found[1])) if found else ""
+
+
 def equivalent(field, observed, expected):
     if (
         field.get("type") in {"select", "dropdown", "combobox", "prompt", "pills"}
@@ -287,6 +293,9 @@ def equivalent(field, observed, expected):
     ):
         # The same city with or without its region: iCIMS work rows held "College Park, MD" against the row's city
         # "College Park", and 31 such findings sent a finished application back to its profile page (2026-10-25).
+        return True
+    if re.search(r"\bgpa\b|grade point", field.get("label", ""), re.I) and gpa_number(observed) == gpa_number(expected) != "":
+        # A GPA box holds the number of a "3.9/4.0" fact: the form writes it so (Medpace iCIMS refused the scale).
         return True
     if squash(observed) and squash(observed) == squash(expected):
         # Employer catalogs spell the same choice differently: "Linked-in", "E-mail".
