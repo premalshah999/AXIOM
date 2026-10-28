@@ -99,3 +99,36 @@ async def test_a_gh_jid_job_its_board_no_longer_lists_is_closed(monkeypatch):
 async def test_an_unknown_board_is_no_verdict(monkeypatch):
     monkeypatch.setattr(httpx, "AsyncClient", lambda **k: Paths({}, []))
     assert await browser.posting_gone("https://careers.example.test/jobs?gh_jid=123", "Example Co") == ""
+
+
+class Redirect(Client):
+    """Answers the posting URL itself, as Oracle's career site does."""
+
+    def __init__(self, status, location, seen):
+        self.status, self.location, self.seen = status, location, seen
+
+    async def get(self, url, **kwargs):
+        self.seen.append((url, kwargs.get("follow_redirects")))
+        headers = {"location": self.location} if self.location else {}
+        return httpx.Response(self.status, headers=headers, request=httpx.Request("GET", url))
+
+
+ORACLE = "https://acme.fa.us6.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/2026911"
+
+
+async def test_an_oracle_posting_its_site_redirects_to_page_not_found_is_closed(monkeypatch):
+    # Hearst (2026-10-27): every career site inactive, the link answered 302 /errors/404 in 14 runs.
+    seen = []
+    error = "https://acme.fa.us6.oraclecloud.com/hcmUI/CandidateExperience/errors/404"
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **k: Redirect(302, error, seen))
+    assert "no longer serves it" in await browser.posting_gone(ORACLE) and seen == [(ORACLE, False)]
+
+
+@pytest.mark.parametrize("status,location", [
+    (200, ""),
+    (302, "https://acme.fa.us6.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/2026911/"),
+    (503, ""),
+])
+async def test_a_served_oracle_posting_is_no_verdict(monkeypatch, status, location):
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **k: Redirect(status, location, []))
+    assert await browser.posting_gone(ORACLE) == ""

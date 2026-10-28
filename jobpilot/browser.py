@@ -94,6 +94,15 @@ COMMIT_TRACKING = re.compile(
 # A page load the network refused once and may answer on a second try.
 NET_RETRY = re.compile(r"net::ERR_(?:CONNECTION_(?:CLOSED|RESET|TIMED_OUT)|NETWORK_CHANGED|TIMED_OUT|FAILED|EMPTY_RESPONSE)\b")
 NET_ERROR = re.compile(r"net::ERR_([A-Z_]+)")
+WORKDAY_FAILURE = re.compile(
+    r"something went wrong|unexpected (?:system )?error|session (?:has )?expired|"
+    r"system (?:is )?(?:temporarily )?unavailable|server error",
+    re.I,
+)
+WORKDAY_PAGE_ERROR = re.compile(r"error\W{0,5}page error", re.I)
+STEP_REQUIREMENT = re.compile(
+    r"\byou must\b|\bis required\b|\b(?:answer|complete) all required\b|\bplease (?:complete|enter|select|answer)\b", re.I
+)
 
 
 def current_role_end_date(resolver, field):
@@ -164,6 +173,7 @@ LEVER_JOB = re.compile(r"^https://jobs\.lever\.co/([A-Za-z0-9_.-]+)/([0-9a-f-]{3
 WORKABLE_JOB = re.compile(r"^https://apply\.workable\.com/([A-Za-z0-9_-]+)/j/([0-9A-Za-z]{6,16})(?:[/?#]|$)")
 SMARTRECRUITERS_JOB = re.compile(r"^https://jobs\.smartrecruiters\.com/([A-Za-z0-9_-]+)/(\d{6,})(?:[-/?#]|$)")
 SR_MOVED = re.compile(r"does not match companyIdentifier \(([A-Za-z0-9_-]+)\)")
+ORACLE_JOB = re.compile(r"^https://[a-z0-9.-]+\.oraclecloud\.com/hcmUI/CandidateExperience/[^/?#]+/sites/[^/?#]+/job/\d+", re.I)
 
 
 async def greenhouse_board(url, company=""):
@@ -194,7 +204,8 @@ async def greenhouse_board(url, company=""):
 
 
 async def posting_gone(url, company=""):
-    """Why a Greenhouse, Lever, Workable or SmartRecruiters posting is gone, from the platform's public jobs API, or ''.
+    """Why a Greenhouse, Lever, Workable or SmartRecruiters posting is gone, from the platform's public jobs API (an
+    Oracle posting, from its own link), or ''.
     Dead postings stalled as repairs: Toast's redirected to its careers homepage, Gas South's and Sparksoft's boards no
     longer listed the role (2026-10-26). Any doubt (network, other answers) is no verdict."""
     import httpx
@@ -212,6 +223,19 @@ async def posting_gone(url, company=""):
     elif match := SMARTRECRUITERS_JOB.match(url or ""):
         check = f"https://api.smartrecruiters.com/v1/companies/{match[1]}/postings/{match[2]}"
         platform = "SmartRecruiters"
+    elif ORACLE_JOB.match(url or ""):
+        # Oracle answers a posting its career site no longer serves with a redirect to /errors/404: Hearst's sites are
+        # all inactive, so its link landed on "Page not found" in 14 runs although the requisition API still returns it
+        # (2026-10-27). A live posting answers 200.
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                response = await client.get(url, follow_redirects=False)
+        except httpx.HTTPError:
+            return ""
+        location = urlsplit(response.headers.get("location", "")).path
+        if response.is_redirect and re.search(r"/CandidateExperience/errors?/404\b", location, re.I):
+            return "The posting is closed: Oracle's career site no longer serves it (Page not found), so nothing was submitted"
+        return ""
     else:
         board = await greenhouse_board(url, company)
         return "The posting is closed: Greenhouse no longer lists it, so nothing was submitted" if board and not board[2] else ""
@@ -2749,12 +2773,14 @@ class BrowserEngine:
         if self.job.get("ats") != "workday" or self.armed:
             return False
         text = await self.page.locator("body").inner_text(timeout=3000)
-        if not re.search(
-            r"something went wrong|unexpected (?:system )?error|session (?:has )?expired|system (?:is )?(?:temporarily )?unavailable|server error|error[ -]page error",
-            text,
-            re.I,
-        ):
-            return False
+        if not WORKDAY_FAILURE.search(text):
+            if not (page_error := WORKDAY_PAGE_ERROR.search(text)):
+                return False
+            if STEP_REQUIREMENT.search(text[page_error.end() : page_error.end() + 300]):
+                # Workday's "Error - Page Error" also states what the step still requires: AT&T's "You must complete
+                # the assessment test to continue with your job application" (2026-10-27) read as a server error, and
+                # two draft restarts returned to the same untaken assessment. The step handles its requirement.
+                return False
         attempts = getattr(self, "workday_error_restarts", 0)
         if attempts >= 2:
             self.result = {

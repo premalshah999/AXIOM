@@ -65,6 +65,21 @@
     }
     return '';
   };
+  // A question printed as plain text just before its choices, with no label, legend or ARIA name. The nearest readable
+  // text before the first choice (other than a choice's own caption) is the question.
+  const precedingText = (first, captions) => {
+    const root = first.getRootNode();
+    const walker = document.createTreeWalker(root.body || root, NodeFilter.SHOW_TEXT);
+    walker.currentNode = first;
+    for (let n = walker.previousNode(), steps = 0; n && steps < 40; n = walker.previousNode(), steps++) {
+      const t = clean(n.textContent);
+      const host = n.parentElement;
+      if (!t || !host || host.closest('script,style,noscript,button,a,option') || !visible(host) || captions.has(t)) continue;
+      if (!/[a-z]{3}/i.test(t)) continue;  // "*" or "1." beside the question
+      return t.length <= 300 ? t : '';
+    }
+    return '';
+  };
   const wrapperLabel = el => {
     const ff = el.closest('[data-automation-id^="formField-"],[data-fkit-id],[data-testid="field"],.ashby-application-form-field-entry');
     if (ff && (el.type !== 'file' || ownsFile(ff, el))) {
@@ -643,7 +658,14 @@
 
   const controls = all.filter(e => e.matches(
     'input,select,textarea,[role=combobox],[role=radiogroup],[role=checkbox],[role=switch],' +
-    'button[aria-haspopup=listbox],[role=button][aria-haspopup=listbox]'));
+    'button[aria-haspopup=listbox],[role=button][aria-haspopup=listbox],button[class*=select]:not([aria-haspopup])'));
+  // A plain button standing in for a <select>: Deloitte's tax-credit questionnaire (Caesars, 2026-10-27) renders "State
+  // in which you plan to work" as <button class="wotc-select-input select-btn">Select one... <span arrow-down></button>
+  // with no ARIA popup and role-less rows; the question was never observed and Continue stayed disabled.
+  const selectButton = el => el.matches('button[class*=select]:not([aria-haspopup]):not([role])')
+    && [...el.classList].some(c => /(?:^|[-_])select(?:[-_](?:btn|button|toggle|trigger|input))?$/i.test(c))
+    && !!el.querySelector('[class*=arrow],[class*=caret],[class*=chevron]')
+    && !el.parentElement?.querySelector('select');
   const optionSearch = el => el.matches('input,textarea') && (
     el.id === 'countryCodeSearch' || el.name === 'countryCodeSearch'
     || (composedClosest(el,'[role=listbox],[role=menu],.select2-dropdown,.select2-search,.chosen-search,.chosen-drop')
@@ -662,7 +684,7 @@
     const role = el.getAttribute('role');
     let type = ['combobox', 'radiogroup'].includes(role) ? role : (el.type || el.tagName.toLowerCase());
     if (el.matches('input[aria-autocomplete="list"][aria-haspopup="listbox"]')) type = 'combobox';
-    if (el.matches('[aria-haspopup=listbox]') && !el.matches('input,[role=combobox]')) type = 'dropdown';
+    if (el.matches('[aria-haspopup=listbox]') && !el.matches('input,[role=combobox]') || selectButton(el)) type = 'dropdown';
     if (el.matches('[role=checkbox],[role=switch]') && !el.matches('input')) type = 'checkbox';
     if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
     if (el.readOnly && !['combobox','radio','checkbox'].includes(type)) continue;
@@ -762,17 +784,7 @@
       // MAXIMUS's tax-credit survey (PepsiCo, 2026-10-24) prints "Are you a resident of the State of California?" as
       // plain text above an unlabelled Yes/No pair: the question read as "ctl00$MainContent$multipleChoice...".
       if ((question === el.name || question === 'Unlabelled field') && !/^icims_f_/i.test(el.name || '')) {
-        const captions = new Set(group.map(x => clean(label(x))));
-        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-        walker.currentNode = group[0];
-        for (let n = walker.previousNode(), steps = 0; n && steps < 40; n = walker.previousNode(), steps++) {
-          const t = clean(n.textContent);
-          const host = n.parentElement;
-          if (!t || !host || host.closest('script,style,noscript,button,a,option') || !visible(host) || captions.has(t)) continue;
-          if (!/[a-z]{3}/i.test(t)) continue;  // "*" or "1." beside the question
-          if (t.length <= 300) question = t;
-          break;
-        }
+        question = precedingText(group[0], new Set(group.map(x => clean(label(x))))) || question;
       }
       // iCIMS's self-identification forms (icims2 servlet) give radios no label: every choice and the question read as
       // the field name "icims_f_Veteran" (ICE 2026-10-19). A readable value is the choice; the name names the topic.
@@ -809,6 +821,9 @@
       // UI5 Web Components radio buttons (scoped tags on SuccessFactors, ASSA ABLOY 2026-10-15) keep
       // role=radio and their native input in shadow roots; the host has the option text and checked.
       if (!group.length) group = [...el.querySelectorAll('[ui5-radio-button]')];
+      // Deloitte's tax-credit questionnaire (Caesars, 2026-10-27) nests three role=radiogroup elements around one
+      // Yes/No pair: each was observed as its own unlabelled question. The innermost group holding every choice is it.
+      if (group.length && [...el.querySelectorAll('[role=radiogroup]')].some(g => visible(g) && group.every(m => g.contains(m)))) continue;
       const nativeMember = x => x.matches('input[type=radio]') ? x :
         x.querySelectorAll('input[type=radio]').length === 1 ? x.querySelector('input[type=radio]') : null;
       const optionLabel = x => {
@@ -822,6 +837,10 @@
         return native ? native.checked : x.checked === true || x.getAttribute('aria-checked') === 'true';
       });
       value = chosen ? optionLabel(chosen) : '';
+      // Its question is a caption inside the group, before the choices, tied to nothing ("Are you under the age of 40?").
+      if (group.length && (question === 'Unlabelled field' || question === el.id || question === el.getAttribute('name'))) {
+        question = precedingText(group[0], new Set(options)) || question;
+      }
       // Eightfold's legend says only "Please check one of the boxes"; its options identify the disclosure.
       if (/please check one of the boxes/i.test(question)) {
         const context = options.join(' ');
