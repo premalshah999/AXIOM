@@ -197,20 +197,23 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
             if soup:
                 for a in soup.select("a[href]"):
                     anchor_cue = bool(re.search(link_cue, a.get_text(" "), re.I))
+                    # One href can be both a logo and a button: keep every text it is shown with.
+                    anchor_text[a["href"]] = (anchor_text.get(a["href"], "") + " " + a.get_text(" ", strip=True)).strip()
                     if anchor_cue:
                         cued.add(a["href"])
                     if anchor_cue or message_link_cue:
                         links.append(a["href"])
                     else:
                         plain.append(a["href"])
-                        anchor_text[a["href"]] = a.get_text(" ", strip=True)
             # Workday also sends bare URLs inside HTML, without <a> elements.
             # Require the same nearby reset/verification cue as plain text.
             for match in re.finditer(r"https://[^\s<>\"']+", text):
-                if message_link_cue or re.search(
-                    link_cue, text[max(0, match.start() - 120) : match.end()], re.I
-                ):
+                near = bool(re.search(link_cue, text[max(0, match.start() - 120) : match.end()], re.I))
+                if message_link_cue or near:
                     links.append(match.group().rstrip(".,)"))
+                    if near:
+                        # "Use this link to sign in: https://…" carries its own cue, like an anchor's text.
+                        cued.add(match.group().rstrip(".,)"))
         for child in part.get("parts", [])[:30]:
             walk(child, depth + 1)
 
@@ -407,6 +410,22 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
                 rejected_origins.add(link_origin)
         except ValueError:
             continue
+    if not valid_links and message_link_cue:
+        # ClearCompany's sign-in mail (Allen Institute, 2026-10-27): the subject is the cue ("Sign-in link for your
+        # application at …") and its one button goes through the clrco.com short-link without cue words, so every poll
+        # refused it as token_format. With the subject as the cue, the one tracker link of this platform that has text
+        # and is not a footer link is the button; the visit must still land on the employer's own origin.
+        tracked = {
+            link
+            for link in links
+            if (link_origin := _origin_or_none(link)) in CLICK_TRACKERS
+            and tracker_allowed(link_origin, rule["link_origins"], challenge.get("ats", ""))
+            and anchor_text.get(link)
+            and not FOOTER_TEXT.search(anchor_text[link])
+        }
+        if len(tracked) == 1:
+            valid_links = tracked
+            rejected_origins.discard(_origin_or_none(next(iter(tracked))))
     if diagnostics is not None and rejected_origins:
         diagnostics["rejected_link_origins"] = sorted(rejected_origins)[:20]
     if len(valid_links) > 1:

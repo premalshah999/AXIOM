@@ -27,7 +27,7 @@ from .senders import sender_domains_overlap
 
 # Seconds a password-reset window stays open on a platform that mails every employer from one sender (see begin()).
 CENTRAL_RESET_WAIT = 180
-SHARED_RESET_SENDERS = {"icims.com", "successfactors.com", "successfactors.eu", "sapsf.com"}
+SHARED_RESET_SENDERS = {"icims.com", "successfactors.com", "successfactors.eu", "sapsf.com", "sapsf.eu"}
 
 
 class ChallengesMixin:

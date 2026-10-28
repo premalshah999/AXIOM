@@ -165,6 +165,12 @@ SIGNIN_LINK = re.compile(
 FORGOT = re.compile(
     r"forgot (?:your )?password|reset (?:your )?password|can'?t sign in|trouble signing in", re.I
 )
+# A code step's own "send" control: "Get code" (ByteDance), "Send code", "Send verification code", "Request a code".
+SEND_CODE = re.compile(
+    r"^(?:get|send|request|email)(?: (?:me|a|an|the|my))?(?: (?:new|verification|security|one.time|email|login))*"
+    r" (?:code|passcode|otp|pin)$",
+    re.I,
+)
 CONSENT_MENUS = {"select", "combobox", "dropdown", "radio"}
 CONSENT_LABEL = re.compile(r"acknowledg|agree|consent|accept|privacy|terms", re.I)
 AUTH_BUTTON = re.compile(
@@ -926,6 +932,44 @@ class Adapter:
         if self.classify(obs) in {Step.CONFIRMATION, Step.UNKNOWN, Step.VERIFY_LINK} or not obs["fields"]:
             await self.return_to_application()
 
+    async def request_code(self, obs):
+        """A code step that mails its code on demand: an empty email box beside the code box and a "Get code" button.
+        ByteDance's sign-up (2026-10-27) showed exactly that after "Create account"; its email box was never typed into
+        and "Get code" (disabled until then) never pressed, so each run waited 20 minutes for a code nobody had sent.
+        True when the code was requested, a defer/challenge dict when that could not be done safely, else False."""
+        view = self.dialog_view(obs) or obs
+        codes = {f["id"] for f in self.code_fields(view)}
+        empty = [
+            f for f in view["fields"]
+            if f["id"] not in codes and self.is_login_field(f) and not str(f.get("value") or "").strip()
+        ]
+        disabled = getattr(self.form, "meta", {}).get("disabled_actions", []) or []
+        offered = [b["label"] for b in view["controls"]] + list(disabled)
+        if not codes or not empty or not self.accounts.email or not any(SEND_CODE.search(x.strip()) for x in offered):
+            return False
+        try:
+            for f in empty:
+                await self.form.locator(f["id"]).fill(self.accounts.email, timeout=4000)
+                await self.form.locator(f["id"]).blur()
+        except (PlaywrightError, TimeoutError):
+            return False
+        await self.form.settle(timeout=2)
+        after = await self.form.scan()
+        view = self.dialog_view(after) or after
+        send = [
+            b for b in view["controls"]
+            if SEND_CODE.search(b["label"].strip()) or SEND_CODE.search(str(b.get("aria_label") or "").strip())
+        ]
+        if len(send) != 1:
+            return False
+        if not await self.arm_mail("code"):
+            return self.lease_busy()
+        await self.click(send[0], auth=True)
+        self.emit("email_requested", "Typed the email into the code step and requested its code")
+        if challenge := await self.after_auth_click():
+            return challenge
+        return True
+
     async def on_email_code(self, obs):
         if not self.inbox.configured:
             return self.defer("This employer emailed a one-time code. Connect Gmail (GMAIL_APP_PASSWORD).")
@@ -934,6 +978,11 @@ class Adapter:
         self.attempts["email_code"] += 1
         if self.attempts["email_code"] > 2:
             return self.defer("The verification code was not accepted")
+        requested = await self.request_code(obs)
+        if isinstance(requested, dict):
+            return requested
+        if requested:
+            obs = await self.form.scan()
         # A persisted browser session can reopen an old PIN page without sending
         # another message. A new wait window alone cannot cause delivery, and
         # MailPending would park before the fallback resend below ever executes.
@@ -1938,10 +1987,27 @@ class Adapter:
                 and reset_proven(record)
                 and not record.get("absent_create_at")
             )
-            if (not known or not_found or absent) and self.accounts.may_create and self.attempts["create"] == 0:
-                if absent:
-                    self.accounts.mark(url, "password_unknown", self.accounts.saved(url) or credentials,
-                                       absent_create_at=now())
+            # The same silence where nothing ever showed that an account exists (no Create, sign-in or "already
+            # registered"): Bain's, EA's and Intuit's career sites answer a reset with "If the email address you entered
+            # is associated with an account in our records, you will receive an email", and four to six confirmed resets
+            # each brought nothing (2026-10-26/27). The email has no account there: create one, once. The record is not
+            # marked as an account (no_account), so the sign-up page is not turned back to sign-in.
+            unproven = (
+                not absent
+                and not record.get("confirmed_at")
+                and not record.get("absent_create_at")
+                and record.get("state") in {"reset_requested", "credentials_rejected"}
+                and reset_proven(record)
+                and time.time() - float(record.get("reset_requested_at") or 0) > UNANSWERED_RESET_SECONDS
+            )
+            if (
+                (not known or not_found or absent or unproven)
+                and self.accounts.may_create
+                and self.attempts["create"] == 0
+            ):
+                if absent or unproven:
+                    self.accounts.mark(url, "password_unknown" if absent else "no_account",
+                                       self.accounts.saved(url) or credentials, absent_create_at=now())
                     self.emit("account", "No reset email ever came, so this employer has no account for this email; "
                               "creating one")
                 if await self.switch(obs, CREATE_LINK):

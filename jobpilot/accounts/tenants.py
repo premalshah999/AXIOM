@@ -6,7 +6,9 @@ import re
 from ..mail import origin
 
 
-SF_HOSTS = (".successfactors.com", ".successfactors.eu", ".sapsf.com")
+# sapsf.eu: SAP's newer EU data centres (Wipro's career55.sapsf.eu, 2026-10-27: its passcode box was refused as "an
+# unexpected website" after the code mail had matched).
+SF_HOSTS = (".successfactors.com", ".successfactors.eu", ".sapsf.com", ".sapsf.eu")
 
 
 def sf_company(url):
@@ -84,7 +86,9 @@ AUTH_HOSTS = {
     "taleo": ["taleo.net"],
     # ns2cloud.com: SAP's government cloud serves SuccessFactors sign-in and password pages for employers such as
     # L3Harris (career-hcm20.ns2cloud.com, 2026-10-25); without it the new password of a finished reset was refused.
-    "successfactors": ["successfactors.com", "successfactors.eu", "sapsf.com", "jobs2web.com", "ns2cloud.com"],
+    "successfactors": [
+        "successfactors.com", "successfactors.eu", "sapsf.com", "sapsf.eu", "jobs2web.com", "ns2cloud.com"
+    ],
     "eightfold": ["eightfold.ai"],
     "smartrecruiters": ["smartrecruiters.com"],
     "avature": ["avature.net"],
