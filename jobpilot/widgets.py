@@ -2395,11 +2395,18 @@ async def icims_dropdown_commit(
         )
 
     async def rows_for(query):
+        opened = False
         if not await container.evaluate("c=>!c.classList.contains('dropdown-invisible')&&c.getClientRects().length>0"):
             await el.click(timeout=3000)
             await asyncio.sleep(0.3)
+            opened = True
         if query is not None and await searchable():
             before = await icims_rows_now(frame, select_id)
+            if opened and not before:
+                # Opening requests the list's first page. Typed at once, that page answered during the search and was
+                # read as its answer ("United Kingdom, Afghanistan, ..." for "United States"); every alias search then
+                # found nothing, and Publicis's and Medpace's Country outlasted the field's deadline (2026-10-26..27).
+                before = await icims_rows(frame, select_id, timeout=max(1.0, min(3.0, left() - 4)))
             await box.fill("", timeout=2000)
             await box.press_sequentially(str(query)[:40], delay=35, timeout=6000)
             found = await icims_rows(
@@ -2422,8 +2429,10 @@ async def icims_dropdown_commit(
     if len(str(value).split()) > 1:
         queries.append(str(value).split()[0])
     choice, seen, seen_query = None, [], None
-    for query in list(dict.fromkeys(q for q in queries if q))[: 3 if thorough else 1]:
-        if seen and left() < 2.5:
+    for number, query in enumerate(list(dict.fromkeys(q for q in queries if q))[: 3 if thorough else 1]):
+        if number and left() < 2.5:
+            # Another search cannot finish inside the field's budget: its deadline left the field neither set nor
+            # reported as not offered (Publicis Country, 31 deadline errors 2026-10-26..27).
             break
         found = await rows_for(query)
         if not found and not seen and left() > 3:

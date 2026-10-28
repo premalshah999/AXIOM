@@ -1839,7 +1839,7 @@ class Adapter:
         button = self.auth_button(obs, mode)
         if (
             button
-            and self.final.search(button["label"])
+            and self.embedded_form_submit(button)
             and not getattr(self.form, "uploaded", True)
             and any(f["type"] == "file" for f in obs["fields"])
         ):
@@ -1908,10 +1908,12 @@ class Adapter:
         if not button:
             return {"fallback": True, "reason": "No sign-in control found"}
         resume = any(f["type"] == "file" for f in obs["fields"])
-        if self.final.search(button["label"]) and (resume or len(others) > 6):
+        if self.embedded_form_submit(button) and (resume or len(others) > 6):
             # An application form with an embedded "create a password" section: its Submit is the
-            # application submit, so it goes through review/commit like any other final step.
-            self.accounts.mark(url, "created_locally", credentials)
+            # application submit, so it goes through review/commit like any other final step. A signed-in account
+            # keeps its state: the profile's login boxes are shown to returning candidates too (Rivian 2026-10-27).
+            if not known:
+                self.accounts.mark(url, "created_locally", credentials)
             for f in passwords:
                 await self.form.locator(f["id"]).evaluate("e=>e.dataset.jpEmbeddedAccountReady='true'")
             self.emit("auth", "Account fields are part of the application form")
@@ -2037,6 +2039,10 @@ class Adapter:
             )
             and not re.search(r"first|last|name of|full name", f["label"], re.I)
         )
+
+    def embedded_form_submit(self, button):
+        """The account button submits the application form it sits in (its own Submit), so the form owns the page."""
+        return bool(self.final.search(button["label"]))
 
     def auth_button(self, obs, mode):
         prefer = {

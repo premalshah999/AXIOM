@@ -656,6 +656,12 @@ class ICIMS(Adapter):
         # the candidate profile precedes screening and application submission.
         return not PROFILE_SAVE.fullmatch(button["label"]) and super().is_final_control(button)
 
+    def embedded_form_submit(self, button):
+        # A candidate signed in through Central still gets the profile's "Create a login" boxes, saved by "Update
+        # Profile" (Rivian 2026-10-24..27). Unmatched, the step found "No sign-in control", and the guided agent's
+        # clicks, without the profile's invisible hCaptcha, never posted the form.
+        return bool(PROFILE_SAVE.fullmatch(button["label"].strip())) or super().embedded_form_submit(button)
+
     def auth_button(self, obs, mode):
         if mode == "create":
             creates = [
@@ -664,7 +670,7 @@ class ICIMS(Adapter):
                 if not b.get("disabled")
                 and not b.get("href")
                 and re.fullmatch(
-                    r"(?:create|submit)(?: (?:my|your|a))? profile|"
+                    r"(?:create|submit|update|save)(?: (?:my|your|a))? profile|"
                     r"create(?: (?:an? |your )?account)?|register|sign[ _-]?up",
                     b["label"],
                     re.I,

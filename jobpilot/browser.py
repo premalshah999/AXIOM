@@ -174,6 +174,41 @@ WORKABLE_JOB = re.compile(r"^https://apply\.workable\.com/([A-Za-z0-9_-]+)/j/([0
 SMARTRECRUITERS_JOB = re.compile(r"^https://jobs\.smartrecruiters\.com/([A-Za-z0-9_-]+)/(\d{6,})(?:[-/?#]|$)")
 SR_MOVED = re.compile(r"does not match companyIdentifier \(([A-Za-z0-9_-]+)\)")
 ORACLE_JOB = re.compile(r"^https://[a-z0-9.-]+\.oraclecloud\.com/hcmUI/CandidateExperience/[^/?#]+/sites/[^/?#]+/job/\d+", re.I)
+# An employer career site that lists its iCIMS jobs (careers.<employer>/jobs/<id>?icims=1, the site's own /api/jobs search).
+ICIMS_SITE_JOB = re.compile(r"^https://([^/?#]+)/(?:careers/)?jobs/(\d+)/?\?(?:[^#]*&)?icims=1(?:[&#]|$)", re.I)
+
+
+async def icims_site_posting_gone(url):
+    """True when an iCIMS-backed career site no longer has the job: its page fails and its own job search lacks the id.
+
+    UHS (jobs.uhsinc.com/jobs/368933?icims=1, 2026-10-24..27) answered the posting with HTTP 500 "Oops! An error has
+    occurred." while its search no longer listed the req; every run wandered its careers home page and timed out
+    clicking. A live job's page answers 200 and the search by its id returns it. Any doubt is no verdict."""
+    import httpx
+
+    match = ICIMS_SITE_JOB.match(url or "")
+    if not match:
+        return False
+    host, job_id = match[1], match[2]
+    try:
+        async with httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
+            page = await client.get(url)
+            if page.status_code < 400:
+                return False
+            found = await client.get(f"https://{host}/api/jobs?keywords={job_id}")
+            if found.status_code != 200:
+                return False
+            data = found.json()
+    except (httpx.HTTPError, ValueError):
+        return False
+    jobs = data.get("jobs") if isinstance(data, dict) else None
+    if not isinstance(jobs, list) or not isinstance(data.get("totalCount"), int):
+        return False  # Not the career site's job search.
+    return not any(
+        job_id in {str((j.get("data") or {}).get("slug")), str((j.get("data") or {}).get("req_id"))}
+        for j in jobs
+        if isinstance(j, dict)
+    )
 
 
 async def greenhouse_board(url, company=""):
@@ -235,6 +270,10 @@ async def posting_gone(url, company=""):
         location = urlsplit(response.headers.get("location", "")).path
         if response.is_redirect and re.search(r"/CandidateExperience/errors?/404\b", location, re.I):
             return "The posting is closed: Oracle's career site no longer serves it (Page not found), so nothing was submitted"
+        return ""
+    elif ICIMS_SITE_JOB.match(url or ""):
+        if await icims_site_posting_gone(url):
+            return "The posting is closed: the employer's career site no longer lists it, so nothing was submitted"
         return ""
     else:
         board = await greenhouse_board(url, company)

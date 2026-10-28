@@ -219,3 +219,34 @@ async def test_submit_profile_passes_the_form_guard_as_a_vouched_step(service):
     value.emit = lambda *args, **kwargs: None
     await Adapter.click(value, {"id": "save", "label": "Submit Profile", "href": ""}, step=True)
     assert value.form.click.await_args.kwargs["auth_control"] is True
+
+
+def returning_profile():
+    """A candidate signed in through Central: the profile still shows "Create a login", saved by "Update Profile"."""
+    value = profile()
+    value["fields"].insert(1, {"id": "login", "type": "text", "label": "Login", "required": True, "value": "", "error": "", "automation_id": ""})
+    value["controls"] = [
+        {"id": "later", "label": "Finish Later", "href": "", "aria_label": ""},
+        {"id": "save", "label": "Update Profile", "href": "", "aria_label": ""},
+    ]
+    return value
+
+
+async def test_update_profile_hands_the_embedded_account_form_to_on_form(service):
+    # Rivian 2026-10-24..27: "No sign-in control found", then the guided agent's clicks never posted the profile.
+    from types import SimpleNamespace
+
+    value = flow(service, [returning_profile()] * 3)
+    value.accounts.mark(value.job["url"], "authenticated")
+    value.form.resolver = SimpleNamespace(resolve=AsyncMock(return_value=[]))
+    for key in ("pw", "pw2"):
+        value.locators[key].evaluate = AsyncMock()
+    value.locators["login"] = SimpleNamespace(fill=AsyncMock(), blur=AsyncMock())
+    value.form.frames["login"] = SimpleNamespace(url=PROFILE)
+    value.e.profile = SimpleNamespace(account_username="")
+    value.on_form = AsyncMock(return_value=None)
+    assert value.auth_button(returning_profile(), "create")["label"] == "Update Profile"
+    assert await value.authenticate(returning_profile(), "create") is None
+    value.on_form.assert_awaited_once()
+    value.click.assert_not_awaited()  # never clicked as a sign-in: on_form solves the CAPTCHA and saves the profile
+    assert value.accounts.record(PROFILE)["state"] == "authenticated"  # a signed-in account is not downgraded
