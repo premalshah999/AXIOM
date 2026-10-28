@@ -536,7 +536,10 @@ class HistoryRulesMixin:
                 if attr == "end" and getattr(entry, "current", False):
                     ats = self.job.get("ats")
                     # Workday's "I currently work here" box hides its end date; the box answers it there.
-                    if not ((f.get("required") and ats != "workday") or ats == "icims"):
+                    # An optional end date the page still refuses ("Enter a date after Start Date": Dallas County's
+                    # Oracle row kept a parsed end date beside its Current Job box, 2026-10-25) needs a date too.
+                    refused = bool(f.get("error")) and ats != "workday"
+                    if not ((f.get("required") and ats != "workday") or ats == "icims" or refused):
                         return Answer(
                             field_id=f["id"], disposition="skip", reason="Current role has no end date"
                         )

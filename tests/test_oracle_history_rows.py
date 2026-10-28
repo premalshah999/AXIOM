@@ -142,3 +142,18 @@ def test_a_row_named_by_the_catalogs_other_is_identified_by_its_degree_level(ser
     assert end_month("Bachelor of Engineering").value == "June"
     unknown = end_month("")
     assert unknown is None or unknown.disposition != "answer"
+
+
+def test_a_refused_optional_end_date_of_the_current_role_is_today(service):
+    """Dallas County (Oracle, 2026-10-25): the current role's optional End Date Month kept a parsed date and the page
+    refused it ("Enter a date after Start Date."); skipping it sent the month to the owner."""
+    from datetime import date
+
+    months = ["", *[f"{m:02d}" for m in range(1, 13)]]
+    field = {"id": "x", "label": "End Date Month", "type": "combobox", "group": "Work Experience 1",
+             "required": False, "options": months}
+    profile = Profile(work=[WorkEntry(company="Acme Labs", title="AI Engineer", start="2025-12", current=True)])
+    resolver = Resolver(profile, service.db, service.config, job={"ats": "oracle", "url": "https://example.test/j"})
+    assert resolver.local(field).disposition == "skip"
+    refused = resolver.local({**field, "error": "Enter a date after Start Date."})
+    assert refused.disposition == "answer" and refused.value == f"{date.today().month:02d}"
