@@ -94,6 +94,15 @@ COMMIT_TRACKING = re.compile(
 # A page load the network refused once and may answer on a second try.
 NET_RETRY = re.compile(r"net::ERR_(?:CONNECTION_(?:CLOSED|RESET|TIMED_OUT)|NETWORK_CHANGED|TIMED_OUT|FAILED|EMPTY_RESPONSE)\b")
 NET_ERROR = re.compile(r"net::ERR_([A-Z_]+)")
+WORKDAY_FAILURE = re.compile(
+    r"something went wrong|unexpected (?:system )?error|session (?:has )?expired|"
+    r"system (?:is )?(?:temporarily )?unavailable|server error",
+    re.I,
+)
+WORKDAY_PAGE_ERROR = re.compile(r"error\W{0,5}page error", re.I)
+STEP_REQUIREMENT = re.compile(
+    r"\byou must\b|\bis required\b|\b(?:answer|complete) all required\b|\bplease (?:complete|enter|select|answer)\b", re.I
+)
 
 
 def current_role_end_date(resolver, field):
@@ -164,6 +173,42 @@ LEVER_JOB = re.compile(r"^https://jobs\.lever\.co/([A-Za-z0-9_.-]+)/([0-9a-f-]{3
 WORKABLE_JOB = re.compile(r"^https://apply\.workable\.com/([A-Za-z0-9_-]+)/j/([0-9A-Za-z]{6,16})(?:[/?#]|$)")
 SMARTRECRUITERS_JOB = re.compile(r"^https://jobs\.smartrecruiters\.com/([A-Za-z0-9_-]+)/(\d{6,})(?:[-/?#]|$)")
 SR_MOVED = re.compile(r"does not match companyIdentifier \(([A-Za-z0-9_-]+)\)")
+ORACLE_JOB = re.compile(r"^https://[a-z0-9.-]+\.oraclecloud\.com/hcmUI/CandidateExperience/[^/?#]+/sites/[^/?#]+/job/\d+", re.I)
+# An employer career site that lists its iCIMS jobs (careers.<employer>/jobs/<id>?icims=1, the site's own /api/jobs search).
+ICIMS_SITE_JOB = re.compile(r"^https://([^/?#]+)/(?:careers/)?jobs/(\d+)/?\?(?:[^#]*&)?icims=1(?:[&#]|$)", re.I)
+
+
+async def icims_site_posting_gone(url):
+    """True when an iCIMS-backed career site no longer has the job: its page fails and its own job search lacks the id.
+
+    UHS (jobs.uhsinc.com/jobs/368933?icims=1, 2026-10-24..27) answered the posting with HTTP 500 "Oops! An error has
+    occurred." while its search no longer listed the req; every run wandered its careers home page and timed out
+    clicking. A live job's page answers 200 and the search by its id returns it. Any doubt is no verdict."""
+    import httpx
+
+    match = ICIMS_SITE_JOB.match(url or "")
+    if not match:
+        return False
+    host, job_id = match[1], match[2]
+    try:
+        async with httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
+            page = await client.get(url)
+            if page.status_code < 400:
+                return False
+            found = await client.get(f"https://{host}/api/jobs?keywords={job_id}")
+            if found.status_code != 200:
+                return False
+            data = found.json()
+    except (httpx.HTTPError, ValueError):
+        return False
+    jobs = data.get("jobs") if isinstance(data, dict) else None
+    if not isinstance(jobs, list) or not isinstance(data.get("totalCount"), int):
+        return False  # Not the career site's job search.
+    return not any(
+        job_id in {str((j.get("data") or {}).get("slug")), str((j.get("data") or {}).get("req_id"))}
+        for j in jobs
+        if isinstance(j, dict)
+    )
 
 
 async def greenhouse_board(url, company=""):
@@ -194,7 +239,8 @@ async def greenhouse_board(url, company=""):
 
 
 async def posting_gone(url, company=""):
-    """Why a Greenhouse, Lever, Workable or SmartRecruiters posting is gone, from the platform's public jobs API, or ''.
+    """Why a Greenhouse, Lever, Workable or SmartRecruiters posting is gone, from the platform's public jobs API (an
+    Oracle posting, from its own link), or ''.
     Dead postings stalled as repairs: Toast's redirected to its careers homepage, Gas South's and Sparksoft's boards no
     longer listed the role (2026-10-26). Any doubt (network, other answers) is no verdict."""
     import httpx
@@ -212,6 +258,23 @@ async def posting_gone(url, company=""):
     elif match := SMARTRECRUITERS_JOB.match(url or ""):
         check = f"https://api.smartrecruiters.com/v1/companies/{match[1]}/postings/{match[2]}"
         platform = "SmartRecruiters"
+    elif ORACLE_JOB.match(url or ""):
+        # Oracle answers a posting its career site no longer serves with a redirect to /errors/404: Hearst's sites are
+        # all inactive, so its link landed on "Page not found" in 14 runs although the requisition API still returns it
+        # (2026-10-27). A live posting answers 200.
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                response = await client.get(url, follow_redirects=False)
+        except httpx.HTTPError:
+            return ""
+        location = urlsplit(response.headers.get("location", "")).path
+        if response.is_redirect and re.search(r"/CandidateExperience/errors?/404\b", location, re.I):
+            return "The posting is closed: Oracle's career site no longer serves it (Page not found), so nothing was submitted"
+        return ""
+    elif ICIMS_SITE_JOB.match(url or ""):
+        if await icims_site_posting_gone(url):
+            return "The posting is closed: the employer's career site no longer lists it, so nothing was submitted"
+        return ""
     else:
         board = await greenhouse_board(url, company)
         return "The posting is closed: Greenhouse no longer lists it, so nothing was submitted" if board and not board[2] else ""
@@ -550,6 +613,26 @@ class NavigationDecision(BaseModel):
     direction: Literal["up", "down"] = "down"
     reason: str = ""
     reviews: list[Answer] = Field(default_factory=list, max_length=12)
+
+
+EDITOR_COMMIT = re.compile(r"\s*(?:update|save)\s*", re.I)
+
+
+def open_editor_commit(controls, target_id=None):
+    """The one open section editor's own commit (Update/Save directly before its Cancel), never the clicked control.
+
+    Koniag (Dayforce, 2026-10-27): reopened on Candidate Info, its Personal Information section stood in edit mode with
+    Update / Cancel, and the page's Next did nothing until the section was saved; the navigator clicked Next until the
+    recovery budget ran out."""
+    rows = [b for b in controls if not b.get("stepper")]
+    hits = [
+        b
+        for b, after in zip(rows, rows[1:])
+        if EDITOR_COMMIT.fullmatch(b.get("label") or "")
+        and re.fullmatch(r"\s*cancel\s*", after.get("label") or "", re.I)
+        and b.get("id") != target_id
+    ]
+    return hits[0] if len(hits) == 1 else None
 
 
 def bind_navigation_choice(decision, obs):
@@ -2749,12 +2832,14 @@ class BrowserEngine:
         if self.job.get("ats") != "workday" or self.armed:
             return False
         text = await self.page.locator("body").inner_text(timeout=3000)
-        if not re.search(
-            r"something went wrong|unexpected (?:system )?error|session (?:has )?expired|system (?:is )?(?:temporarily )?unavailable|server error|error[ -]page error",
-            text,
-            re.I,
-        ):
-            return False
+        if not WORKDAY_FAILURE.search(text):
+            if not (page_error := WORKDAY_PAGE_ERROR.search(text)):
+                return False
+            if STEP_REQUIREMENT.search(text[page_error.end() : page_error.end() + 300]):
+                # Workday's "Error - Page Error" also states what the step still requires: AT&T's "You must complete
+                # the assessment test to continue with your job application" (2026-10-27) read as a server error, and
+                # two draft restarts returned to the same untaken assessment. The step handles its requirement.
+                return False
         attempts = getattr(self, "workday_error_restarts", 0)
         if attempts >= 2:
             self.result = {
@@ -3456,6 +3541,17 @@ class BrowserEngine:
                 + (" but it is still disabled: a required item on this page is unfinished" if still else " and it is enabled now")
             )
         control = target.get("id") if isinstance(target, dict) else None
+        if (
+            control
+            and decision.action == "click"
+            and STEP_ACTION.search(target.get("label") or "")
+            and (commit := open_editor_commit(list(self.form.buttons.values()), control))
+        ):
+            try:
+                await self.form.click(commit["id"])
+                findings.append(f"An open section editor held the page; clicked its '{commit['label'].strip()}' first")
+            except (ValueError, PlaywrightError) as exc:
+                findings.append(f"Saving the open section editor failed: {type(exc).__name__}")
         if control and decision.action == "click":
             from .widgets import ensure_uncovered
 

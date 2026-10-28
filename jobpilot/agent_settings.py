@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-Provider = Literal["mimo", "deepseek", "haiku", "openai"]
+Provider = Literal["mimo", "deepseek", "haiku", "openai", "openrouter"]
 
 
 class Helpers(BaseModel):
@@ -33,7 +33,14 @@ class AgentDisabled(RuntimeError):
     pass
 
 
-KEY_NAMES = {"deepseek": "DEEPSEEK_API_KEY", "haiku": "HAIKU_API_KEY", "mimo": "MIMO_API_KEY", "openai": "OPENAI_API_KEY"}
+KEY_NAMES = {
+    "deepseek": "DEEPSEEK_API_KEY",
+    "haiku": "HAIKU_API_KEY",
+    "mimo": "MIMO_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
+PROVIDER_NAMES = tuple(KEY_NAMES)
 
 
 def missing_key_message(provider):
@@ -46,7 +53,7 @@ def missing_key_message(provider):
 
 
 def current(db, config):
-    default = config.llm_provider if config.llm_provider in {"mimo", "deepseek", "haiku", "openai"} else "mimo"
+    default = config.llm_provider if config.llm_provider in PROVIDER_NAMES else "mimo"
     value = db.get_setting("agent_settings", {}) or {}
     return AgentSettings.model_validate(
         {
@@ -80,7 +87,7 @@ def summary(db, config):
                 "available": bool(getattr(config, name + "_api_key")),
                 "model": getattr(config, name + "_model"),
             }
-            for name in ("mimo", "deepseek", "haiku", "openai")
+            for name in PROVIDER_NAMES
         },
     }
 

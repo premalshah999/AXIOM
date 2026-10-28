@@ -165,6 +165,12 @@ SIGNIN_LINK = re.compile(
 FORGOT = re.compile(
     r"forgot (?:your )?password|reset (?:your )?password|can'?t sign in|trouble signing in", re.I
 )
+# A code step's own "send" control: "Get code" (ByteDance), "Send code", "Send verification code", "Request a code".
+SEND_CODE = re.compile(
+    r"^(?:get|send|request|email)(?: (?:me|a|an|the|my))?(?: (?:new|verification|security|one.time|email|login))*"
+    r" (?:code|passcode|otp|pin)$",
+    re.I,
+)
 CONSENT_MENUS = {"select", "combobox", "dropdown", "radio"}
 CONSENT_LABEL = re.compile(r"acknowledg|agree|consent|accept|privacy|terms", re.I)
 AUTH_BUTTON = re.compile(
@@ -221,6 +227,14 @@ LOCKED = re.compile(
     r"can'?t (?:log|sign) ?in right now|(?:due to|after) (?:\w+ )?(?:unsuccessful|failed) (?:log.?in|sign.?in) attempts",
     re.I,
 )
+# A lock that a password reset lifts. Auth0's brute-force block (iCIMS Central) is cleared by changing the password, and
+# its page says so: "... after multiple consecutive login attempts. Reset your password to unblock your account".
+RESET_UNLOCKS = re.compile(
+    r"reset(?:ting)? (?:your |the )?password to (?:unblock|unlock)|"
+    r"(?:unblock|unlock) (?:it|your account) by (?:resetting|changing) (?:your |the )?password|"
+    r"blocked after (?:multiple|several|too many) consecutive (?:log.?in|sign.?in) attempts",
+    re.I,
+)
 PASSWORD_RULES = re.compile(
     r"password (?:must|should|needs to|requirements)|at least \d+ characters|must contain|not meet.{0,40}requirements",
     re.I,
@@ -257,6 +271,12 @@ RESET_SENT = re.compile(
 )
 # How long the page after "Forgot your password?" may take to replace the sign-in form.
 RESET_STEP_SECONDS = 10
+# A reset form that takes the new password beside the email: TikTok's careers site (2026-10-27) opens /reset-password
+# with "Enter your email", "Set your password" and Continue. Its password box read as the sign-in form still shown, so
+# four runs reported that the reset page "did not open". The page names itself a reset by its address or its wording.
+RESET_FORM_PATH = re.compile(r"/(?:reset|forgot|forgotten|recover)[-_]?(?:your[-_]?)?password", re.I)
+RESET_FORM_TEXT = re.compile(r"\b(?:reset|forgot(?:ten)?|recover)\s+(?:your\s+)?password\b", re.I)
+RESET_SUBMIT = re.compile(r"reset(?: (?:my|your))? password", re.I)
 # Reset requests the employer's page never confirmed; after these, the owner resets the password.
 UNCONFIRMED_RESETS = 3
 RESET_UNCONFIRMED = (
@@ -599,6 +619,10 @@ class Adapter:
             and self.auth_button(obs, "reset")
         ):
             return Step.RESET_PASSWORD
+        if len(passwords) == 1 and self.one_page_reset(obs) and self.auth_button(obs, "reset"):
+            # TikTok's /reset-password (2026-10-27): Email, "Set your password", Continue. Read as a sign-in page, a
+            # reopened run typed the old password into it and stopped at the website's picture puzzle.
+            return Step.RESET_PASSWORD
         if passwords:
             # Some real sign-up forms ask once and retain a Sign in link in the header.
             create_path = re.search(
@@ -908,6 +932,44 @@ class Adapter:
         if self.classify(obs) in {Step.CONFIRMATION, Step.UNKNOWN, Step.VERIFY_LINK} or not obs["fields"]:
             await self.return_to_application()
 
+    async def request_code(self, obs):
+        """A code step that mails its code on demand: an empty email box beside the code box and a "Get code" button.
+        ByteDance's sign-up (2026-10-27) showed exactly that after "Create account"; its email box was never typed into
+        and "Get code" (disabled until then) never pressed, so each run waited 20 minutes for a code nobody had sent.
+        True when the code was requested, a defer/challenge dict when that could not be done safely, else False."""
+        view = self.dialog_view(obs) or obs
+        codes = {f["id"] for f in self.code_fields(view)}
+        empty = [
+            f for f in view["fields"]
+            if f["id"] not in codes and self.is_login_field(f) and not str(f.get("value") or "").strip()
+        ]
+        disabled = getattr(self.form, "meta", {}).get("disabled_actions", []) or []
+        offered = [b["label"] for b in view["controls"]] + list(disabled)
+        if not codes or not empty or not self.accounts.email or not any(SEND_CODE.search(x.strip()) for x in offered):
+            return False
+        try:
+            for f in empty:
+                await self.form.locator(f["id"]).fill(self.accounts.email, timeout=4000)
+                await self.form.locator(f["id"]).blur()
+        except (PlaywrightError, TimeoutError):
+            return False
+        await self.form.settle(timeout=2)
+        after = await self.form.scan()
+        view = self.dialog_view(after) or after
+        send = [
+            b for b in view["controls"]
+            if SEND_CODE.search(b["label"].strip()) or SEND_CODE.search(str(b.get("aria_label") or "").strip())
+        ]
+        if len(send) != 1:
+            return False
+        if not await self.arm_mail("code"):
+            return self.lease_busy()
+        await self.click(send[0], auth=True)
+        self.emit("email_requested", "Typed the email into the code step and requested its code")
+        if challenge := await self.after_auth_click():
+            return challenge
+        return True
+
     async def on_email_code(self, obs):
         if not self.inbox.configured:
             return self.defer("This employer emailed a one-time code. Connect Gmail (GMAIL_APP_PASSWORD).")
@@ -916,6 +978,11 @@ class Adapter:
         self.attempts["email_code"] += 1
         if self.attempts["email_code"] > 2:
             return self.defer("The verification code was not accepted")
+        requested = await self.request_code(obs)
+        if isinstance(requested, dict):
+            return requested
+        if requested:
+            obs = await self.form.scan()
         # A persisted browser session can reopen an old PIN page without sending
         # another message. A new wait window alone cannot cause delivery, and
         # MailPending would park before the fallback resend below ever executes.
@@ -1381,7 +1448,9 @@ class Adapter:
         await asyncio.sleep(0.5)
         if await self.captcha_open():
             return await self.solve_captcha()
-        return None
+        # A picture puzzle the website draws itself (TikTok's "Select 2 objects that are the same shape", see
+        # captcha_inpage) has no provider frame for the check above.
+        return await self.solve_inpage_puzzle()
 
     async def commit(self, final):
         if not self.committed and getattr(self.form, "referral_route", lambda: False)():
@@ -1770,7 +1839,7 @@ class Adapter:
         button = self.auth_button(obs, mode)
         if (
             button
-            and self.final.search(button["label"])
+            and self.embedded_form_submit(button)
             and not getattr(self.form, "uploaded", True)
             and any(f["type"] == "file" for f in obs["fields"])
         ):
@@ -1839,10 +1908,12 @@ class Adapter:
         if not button:
             return {"fallback": True, "reason": "No sign-in control found"}
         resume = any(f["type"] == "file" for f in obs["fields"])
-        if self.final.search(button["label"]) and (resume or len(others) > 6):
+        if self.embedded_form_submit(button) and (resume or len(others) > 6):
             # An application form with an embedded "create a password" section: its Submit is the
-            # application submit, so it goes through review/commit like any other final step.
-            self.accounts.mark(url, "created_locally", credentials)
+            # application submit, so it goes through review/commit like any other final step. A signed-in account
+            # keeps its state: the profile's login boxes are shown to returning candidates too (Rivian 2026-10-27).
+            if not known:
+                self.accounts.mark(url, "created_locally", credentials)
             for f in passwords:
                 await self.form.locator(f["id"]).evaluate("e=>e.dataset.jpEmbeddedAccountReady='true'")
             self.emit("auth", "Account fields are part of the application form")
@@ -1867,6 +1938,14 @@ class Adapter:
         self.release_mail()
         if outcome == "locked":
             self.accounts.mark(url, "locked", credentials, error=detail[:200])
+            fresh = await self.form.scan()
+            said = " ".join(fresh.get("errors", [])) + " " + str(fresh.get("text", ""))
+            if RESET_UNLOCKS.search(said) and any(FORGOT.search(b["label"]) for b in fresh["controls"]):
+                # Brute-force protection that a new password lifts: iCIMS Central "Your account has been blocked after
+                # multiple consecutive login attempts. Reset your password to unblock your account" (By Light,
+                # 2026-10-24..27). Parked as "locked", every later run met the same block and nothing ever reset it.
+                self.emit("auth", "The employer unblocks the account through a password reset; resetting it")
+                return await self.recover(fresh, detail)
             return self.defer(
                 "The employer locked the account after failed sign-ins: " + detail,
                 state="waiting_browser",
@@ -1910,10 +1989,27 @@ class Adapter:
                 and reset_proven(record)
                 and not record.get("absent_create_at")
             )
-            if (not known or not_found or absent) and self.accounts.may_create and self.attempts["create"] == 0:
-                if absent:
-                    self.accounts.mark(url, "password_unknown", self.accounts.saved(url) or credentials,
-                                       absent_create_at=now())
+            # The same silence where nothing ever showed that an account exists (no Create, sign-in or "already
+            # registered"): Bain's, EA's and Intuit's career sites answer a reset with "If the email address you entered
+            # is associated with an account in our records, you will receive an email", and four to six confirmed resets
+            # each brought nothing (2026-10-26/27). The email has no account there: create one, once. The record is not
+            # marked as an account (no_account), so the sign-up page is not turned back to sign-in.
+            unproven = (
+                not absent
+                and not record.get("confirmed_at")
+                and not record.get("absent_create_at")
+                and record.get("state") in {"reset_requested", "credentials_rejected"}
+                and reset_proven(record)
+                and time.time() - float(record.get("reset_requested_at") or 0) > UNANSWERED_RESET_SECONDS
+            )
+            if (
+                (not known or not_found or absent or unproven)
+                and self.accounts.may_create
+                and self.attempts["create"] == 0
+            ):
+                if absent or unproven:
+                    self.accounts.mark(url, "password_unknown" if absent else "no_account",
+                                       self.accounts.saved(url) or credentials, absent_create_at=now())
                     self.emit("account", "No reset email ever came, so this employer has no account for this email; "
                               "creating one")
                 if await self.switch(obs, CREATE_LINK):
@@ -1943,6 +2039,10 @@ class Adapter:
             )
             and not re.search(r"first|last|name of|full name", f["label"], re.I)
         )
+
+    def embedded_form_submit(self, button):
+        """The account button submits the application form it sits in (its own Submit), so the form owns the page."""
+        return bool(self.final.search(button["label"]))
 
     def auth_button(self, obs, mode):
         prefer = {
@@ -2152,6 +2252,26 @@ class Adapter:
         view = Adapter.dialog_view(obs)
         return any(f["type"] == "password" for f in (view or obs)["fields"])
 
+    def one_page_reset(self, obs):
+        """A password reset form that asks for the email and the new password together (see RESET_FORM_PATH). The sign-in
+        page never is one: it still offers its "Forgot password?" control. Wording counts only outside the page's
+        controls, so a sign-in page's own "Reset password" link does not name it a reset form."""
+        view = self.dialog_view(obs) or obs
+        fields = view["fields"]
+        if not any(f["type"] == "password" for f in fields) or not any(self.is_login_field(f) for f in fields):
+            return False
+        if any(FORGOT.search(c["label"]) and not RESET_SUBMIT.fullmatch(c["label"].strip()) for c in view["controls"]):
+            return False
+        if any(c.get("href") and RESET_SUBMIT.fullmatch(c["label"].strip()) for c in view["controls"]):
+            return False
+        path = urlsplit(obs.get("url") or getattr(getattr(self, "page", None), "url", "") or "").path
+        if re.search(r"/(?:create[-_]?account|sign[-_]?up|register)(?:/|$)", path, re.I):
+            return False
+        text = " ".join(view.get("headings", [])) + " " + str(view.get("text") or "")
+        for label in {c["label"] for c in view["controls"] if c["label"].strip()}:
+            text = text.replace(label, " ")
+        return bool(RESET_FORM_PATH.search(path) or RESET_FORM_TEXT.search(text))
+
     async def open_reset_step(self, forgot):
         """Click "Forgot your password?" and wait for the page that replaces the sign-in form.
 
@@ -2170,11 +2290,16 @@ class Adapter:
         while True:
             await self.form.settle(timeout=3)
             obs = await self.form.scan()
-            if not self.sign_in_shown(obs) or time.monotonic() >= deadline:
+            if not self.sign_in_shown(obs) or self.one_page_reset(obs) or time.monotonic() >= deadline:
                 break
             await asyncio.sleep(0.5)
         href = str(forgot.get("href") or "").strip()
-        if self.sign_in_shown(obs) and href and not href.lower().startswith(("#", "javascript:")):
+        if (
+            self.sign_in_shown(obs)
+            and not self.one_page_reset(obs)
+            and href
+            and not href.lower().startswith(("#", "javascript:"))
+        ):
             from ..mail import origin
 
             target = urljoin(self.page.url or before, href)
@@ -2195,32 +2320,73 @@ class Adapter:
             return None
         return button
 
-    async def reset_outcome(self, timeout=10):
+    async def reset_outcome(self, timeout=10, *, one_page=False):
         """("sent", "") when the employer's page confirms the reset request, ("refused", its message) when the request
-        form came back with an error, else ("unknown", "")."""
+        form came back with an error, else ("unknown", ""). A one-page reset may instead ask for the code it emailed
+        ("code", ""), or stop on a picture puzzle that was not solved ("puzzle", the blocker's reason)."""
         deadline = time.monotonic() + timeout
         while True:
+            if one_page and (blocked := await self.solve_inpage_puzzle()):
+                return "puzzle", blocked["reason"]
             await self.form.settle(timeout=4)
             obs = await self.form.scan()
             view = self.dialog_view(obs) or obs
             asking = [f for f in view["fields"] if self.is_login_field(f)]
             errors = [str(x) for x in obs.get("errors", []) if str(x).strip()]
+            if one_page and self.code_fields(obs) and not errors:
+                return "code", ""
             if RESET_SENT.search(view.get("text", "") or obs.get("text", "")) and not errors:
                 return "sent", ""
             if asking and errors:
                 return "refused", errors[0][:200]
-            if not asking and not errors and not self.sign_in_shown(obs):
+            if one_page:
+                if not errors and not self.one_page_reset(obs):
+                    return "sent", ""  # The form gave way to the next page (a sign-in page, a confirmation).
+            elif not asking and not errors and not self.sign_in_shown(obs):
                 return "sent", ""  # The request form was replaced by the next page.
             if time.monotonic() >= deadline:
                 return "unknown", ""
             await asyncio.sleep(0.5)
+
+    def new_password(self, url, passwords, obs):
+        """The password a reset sets: the configured login, else the shared one within the form's stated maximum
+        (Westinghouse: 18 characters)."""
+        from ..accounts import PASSWORD_MAXIMUM
+
+        configured = self.accounts.icims_credentials(url)
+        maxima = [f.get("maxlength", -1) for f in passwords if f.get("maxlength", -1) > 0]
+        maxima += [int(n) for n in PASSWORD_MAXIMUM.findall(obs.get("text", "")) if 1 <= int(n) <= 256]
+        credentials = configured or self.accounts.store.shared(max_length=min(maxima) if maxima else None)
+        if maxima and not configured and len(credentials["password"]) > min(maxima):
+            credentials = {**credentials, "password": self.accounts.store.generated(max(12, min(min(maxima), 16)))}
+        return credentials, configured, maxima
+
+    async def solve_inpage_puzzle(self):
+        """None when no website-drawn picture puzzle is open, or once it is solved; a captcha blocker otherwise. Two
+        puzzles per run at most (each bounded by CAPTCHA_IMAGE_ROUNDS paid answers)."""
+        from ..captcha_inpage import find_puzzle, solve_inpage
+
+        try:
+            if not await find_puzzle(self.page):
+                return None
+        except Exception:
+            return None
+        blocker = {"state": "waiting_browser", "blocker_type": "captcha", "recovery_cause": "security_challenge"}
+        if self.attempts["inpage_puzzle"] >= 2:
+            return {**blocker, "reason": "The website's picture puzzle was not accepted twice"}
+        self.attempts["inpage_puzzle"] += 1
+        solved, reason = await solve_inpage(self.config, self.page, self.emit)
+        if solved:
+            return None
+        return {**blocker, "reason": reason + ". The employer page remains open in Chrome."}
 
     async def request_reset(self, obs, detail):
         """Explicit reset-email step: fill the email, open the request window, click, confirm the page took the
         request, then wait for the email."""
         url = self.auth_url(obs) if any(f["type"] == "password" for f in obs["fields"]) else self.page.url
         view = self.dialog_view(obs) or obs
-        if self.sign_in_shown(obs):
+        one_page = self.one_page_reset(obs)
+        if self.sign_in_shown(obs) and not one_page:
             return self.defer(
                 f"Could not sign in ({detail}) and the password reset page did not open",
                 state="waiting_browser",
@@ -2232,6 +2398,15 @@ class Adapter:
         for f in emails:
             await self.form.locator(f["id"]).fill(self.accounts.email, timeout=4000)
             await self.form.locator(f["id"]).blur()
+        credentials = None
+        if one_page:
+            # The new password goes in with the request; the emailed code or link only confirms it.
+            passwords = [f for f in view["fields"] if f["type"] == "password"]
+            credentials, _, _ = self.new_password(url, passwords, view)
+            for f in passwords:
+                if not self.accounts.password_allowed(self.id, self.form.frames[f["id"]].url, self.job["url"]):
+                    return self.defer("The reset page is on an unexpected website; not entering the password")
+                await self.type_password(self.form.locator(f["id"]), credentials["password"])
         button = self.reset_button(view)
         if not button:
             return self.defer("The password reset step has no submit control")
@@ -2247,7 +2422,21 @@ class Adapter:
         await self.click(button, auth=True)
         if challenge := await self.after_auth_click():
             return challenge
-        outcome, refusal = await self.reset_outcome()
+        outcome, refusal = await self.reset_outcome(one_page=one_page)
+        if outcome == "puzzle":
+            self.finish_mail("failed", "Reset puzzle not solved")
+            return self.defer(
+                "The password reset stopped at the website's picture puzzle: " + refusal,
+                state="waiting_browser",
+                blocker_type="captcha",
+            )
+        if one_page and outcome != "refused":
+            confirmed = outcome in {"code", "sent"}
+            self.accounts.mark(url, "reset_requested", previous, reset_requested_at=time.time(),
+                               reset_submitted_at=now() if confirmed else None,
+                               reset_unconfirmed=0 if confirmed else record.get("reset_unconfirmed", 0) + 1)
+            self.emit("auth", "Employer password reset requested", {"confirmed": confirmed, "one_page": True})
+            return await self.confirm_one_page_reset(url, credentials)
         if outcome == "refused":
             self.finish_mail("failed", "Reset request refused")
             return self.defer(
@@ -2304,6 +2493,69 @@ class Adapter:
         except Exception:
             pass
 
+    async def confirm_one_page_reset(self, url, credentials):
+        """A one-page reset already holds the new password; the employer confirms it with an emailed code typed on its
+        page, or a link. Its credentials are saved only after the page took the confirmation."""
+        page = await self.form.scan()
+        token = await self.wait_email("code" if self.code_fields(page) else "password_reset")
+        if not token:
+            reason = self.inbox.reason(self.challenge)
+            self.finish_mail("failed", "No reset email")
+            return self.defer(
+                "The password reset email did not arrive or was not unique" + (f" ({reason})" if reason else ""),
+                state="waiting_browser",
+            )
+        self.emit("auth", "Employer password reset email received")
+        if token["kind"] == "link":
+            await self.open_link(token["value"])
+            page = await self.form.scan()
+            boxes = [f for f in page["fields"] if f["type"] == "password"]
+            if boxes and not any(self.is_login_field(f) for f in page["fields"]):
+                # The link opened a new-password form after all: it takes the same password.
+                for f in boxes:
+                    if not self.accounts.password_allowed(self.id, self.form.frames[f["id"]].url, self.job["url"]):
+                        self.finish_mail("failed", "Reset form on an unexpected website")
+                        return self.defer("The reset page is on an unexpected website; not entering the password")
+                    await self.type_password(self.form.locator(f["id"]), credentials["password"])
+                if button := self.auth_button(page, "reset"):
+                    await self.click(button, auth=True)
+        else:
+            page = await self.form.scan()
+            codes = self.code_fields(page)
+            if not codes:
+                self.finish_mail("failed", "Code field disappeared")
+                return self.defer("A reset code arrived but the page no longer shows a code field")
+            for f in codes:
+                if not self.accounts.password_allowed(self.id, self.form.frames[f["id"]].url, self.job["url"]):
+                    self.finish_mail("failed", "Code field on an unexpected website")
+                    return self.defer("The reset code field is on an unexpected website; not entering the code")
+            await enter_code([self.form.locator(f["id"]) for f in codes], token["value"], timeout=4000)
+            await asyncio.sleep(0.3)
+            page = await self.form.scan()
+            if self.code_fields(page) and (button := self.auth_button(self.dialog_view(page) or page, "reset")):
+                await self.click(button, auth=True)
+        outcome, detail = await self.auth_outcome()
+        page = await self.form.scan()
+        if outcome == "unknown" and not page.get("errors") and not self.code_fields(page) and not self.one_page_reset(page):
+            outcome = "ok"  # Back on the sign-in form: the new password is set; signing in proves it.
+        self.emit("auth", f"reset: {outcome}")
+        if outcome != "ok":
+            from ..runtime import engine_version
+
+            self.finish_mail("failed", "Reset confirmation not accepted")
+            self.accounts.mark(url, self.accounts.record(url).get("state") or "reset_requested", self.accounts.saved(url),
+                               reset_failed_engine=engine_version())
+            return self.defer("The employer did not accept the password reset confirmation: " + (detail or outcome))
+        self.finish_mail("verified", "Employer accepted the password reset")
+        record = self.accounts.record(url)
+        self.accounts.mark(url, "password_reset", credentials, resets=record.get("resets", 0) + 1)
+        self.attempts["sign_in"] = self.attempts["create"] = 0
+        self.emit("auth", "Password reset to the shared account password")
+        await self.form.settle(timeout=6)
+        if self.classify(await self.form.scan()) not in {Step.SIGN_IN, Step.FORM, Step.METHOD}:
+            await self.return_to_application()
+        return None
+
     async def complete_password_reset(self, url):
         """Consume this owner's request; save credentials only after acceptance."""
         token = await self.wait_email("password_reset")
@@ -2326,15 +2578,8 @@ class Adapter:
         if not passwords:
             self.finish_mail("failed", "Reset link did not open a password form")
             return self.defer("The password reset link did not open a new-password form")
-        from ..accounts import PASSWORD_MAXIMUM
-
-        configured = self.accounts.icims_credentials(url)
         # The new password obeys the reset form's stated maximum (Westinghouse: 18 characters).
-        maxima = [f.get("maxlength", -1) for f in passwords if f.get("maxlength", -1) > 0]
-        maxima += [int(n) for n in PASSWORD_MAXIMUM.findall(obs.get("text", "")) if 1 <= int(n) <= 256]
-        credentials = configured or self.accounts.store.shared(max_length=min(maxima) if maxima else None)
-        if maxima and not configured and len(credentials["password"]) > min(maxima):
-            credentials = {**credentials, "password": self.accounts.store.generated(max(12, min(min(maxima), 16)))}
+        credentials, configured, maxima = self.new_password(url, passwords, obs)
         for f in passwords:
             if not self.accounts.password_allowed(self.id, self.form.frames[f["id"]].url, self.job["url"]):
                 self.finish_mail("failed", "Reset form on an unexpected website")

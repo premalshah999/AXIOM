@@ -242,7 +242,10 @@ def site_search(field):
     required "Search for:" in the portal header, 2026-10-19/21). Read as a required application field it blocked the
     email and profile steps; it is never an application question."""
     label = str(field.get("label", "")).strip().rstrip(":").strip()
-    return field.get("type") in {"text", "search"} and bool(SITE_SEARCH.fullmatch(label))
+    if field.get("type") not in {"text", "search"}:
+        return False
+    # scan.js marks a lone text box whose only buttons search ("Search now" beside TikTok's tagline, 2026-10-27).
+    return bool(SITE_SEARCH.fullmatch(label)) or (bool(field.get("search_box")) and not field.get("required"))
 
 
 def link_companion_text(fields):
@@ -263,6 +266,64 @@ def link_companion_text(fields):
             and parent["label"] not in field.get("label", "")
         ):
             field["label"] = f"{parent['label']} {field.get('label', '')}".strip()
+
+
+HISTORY_GROUP_NUMBER = re.compile(r"^(?:Work Experience|Education) (\d+)$")
+
+
+def regroup_history_rows(fields, profile):
+    """Give each repeated history row the profile entry its own Employer/Title (or School/Degree) already names, one
+    entry per row; every other row keeps its place.
+
+    America's Tire's iCIMS profile (2026-10-27) held five required experience rows. Row 3 still carried row 5's employer
+    and title from an earlier fill, so both rows were read as entry 5: row 3 was refilled with the same job, the third
+    job was never written, and every Submit Profile came back "Invalid Data Error" on row 3. An entry claimed by two rows
+    stays with the row in its own place; the other row is answered by position, or by the first entry no row holds."""
+    rows = {}
+    for f in fields:
+        if f.get("history_kind"):
+            identity = tuple(sorted((f.get("history_identity") or {}).items()))
+            rows.setdefault((f.get("frame_url", ""), f["history_kind"], f.get("group", ""), identity), []).append(f)
+    by_kind = {}
+    for (frame, kind, group, _), members in rows.items():
+        number = HISTORY_GROUP_NUMBER.fullmatch(group)
+        position = int(number[1]) - 1 if number else None
+        identity = {k: v for k, v in (members[0].get("history_identity") or {}).items() if v}
+        entries = getattr(profile, kind, []) or []
+        matches = [
+            i
+            for i, entry in enumerate(entries)
+            if identity and all(normalize(str(getattr(entry, k, ""))) == normalize(str(v)) for k, v in identity.items())
+        ]
+        by_kind.setdefault((frame, kind), []).append(
+            {"members": members, "position": position, "match": matches[0] if len(matches) == 1 else None}
+        )
+    for (_, kind), kind_rows in by_kind.items():
+        claimed = {}
+        # A row already in its own entry's place keeps it; then the others claim entries in page order.
+        for in_place in (True, False):
+            for row in kind_rows:
+                if row["match"] is None or row["match"] in claimed or "index" in row:
+                    continue
+                if (row["position"] == row["match"]) == in_place:
+                    claimed[row["match"]] = row
+                    row["index"] = row["match"]
+        left = [row for row in kind_rows if "index" not in row]
+        kept = {row["position"] for row in left if row["position"] is not None and row["position"] not in claimed}
+        taken = set(claimed) | kept
+        for row in left:
+            if row["position"] is None:
+                continue  # An unnumbered group is not a row place; it keeps its own name.
+            if row["position"] in kept:
+                row["index"] = row["position"]
+            else:
+                row["index"] = next(i for i in range(len(kind_rows) + len(taken) + 1) if i not in taken)
+                taken.add(row["index"])
+        for row in kind_rows:
+            if "index" in row:
+                group = ("Work Experience " if kind == "work" else "Education ") + str(row["index"] + 1)
+                for f in row["members"]:
+                    f["group"] = group
 
 
 def mark_history_rows(fields):
@@ -491,6 +552,19 @@ PROVIDER_FRAME = re.compile(
     re.I,
 )
 MAX_FRAMES = 12
+# A frame placed wholly outside the page (above or left of it) is a measuring helper, never an application document.
+# FTI's iCIMS career site adds an about:blank "font-resize-helper" frame at top:-9999px per load; eleven of them used up
+# the frame budget, and the Portal Specific Forms frame (fti-net.icims.com, nested in the content frame) was never
+# scanned: the step read as an empty page with no fields or controls (FRONTIER TECHNOLOGY, 2026-10-27).
+OFFSCREEN_FRAME_JS = """e => {
+  const r = e.getBoundingClientRect(), w = e.ownerDocument.defaultView;
+  return r.bottom + (w ? w.scrollY : 0) <= 0 || r.right + (w ? w.scrollX : 0) <= 0;
+}"""
+# A frame is known by its title, id and src without the query. iCIMS keeps its email step's GET submission in the content
+# iframe's src ("/jobs/login?step=email&h-captcha-response=P1_..."); that query read as a CAPTCHA frame dropped Noblis's
+# whole profile from uploads and page evidence, so the renamed resume never verified and every pass uploaded it again
+# (2026-10-26..27). CAPTCHA frames name their provider in the host or path.
+FRAME_IDENTITY_JS = "e=>[e.title,e.id,(e.src||'').split(/[?#]/)[0].slice(0,200)].join(' ')"
 DEPENDENT_TYPES = {"radio", "radiogroup", "select", "dropdown", "pills", "checkbox", "combobox", "prompt"}
 
 
@@ -1239,14 +1313,14 @@ class FormSession:
                     if frame.is_detached() or PROVIDER_FRAME.search(frame.url or ""):
                         continue
                     owner = await frame.frame_element()
-                    identity = await owner.evaluate("e=>[e.title,e.id,e.src?.slice(0,200)].join(' ')")
+                    identity = await owner.evaluate(FRAME_IDENTITY_JS)
                     # CAPTCHA widgets (Skip, Refresh Challenge, accessibility) are never applicant
                     # fields or navigation; the CAPTCHA solver owns them.
                     if PROVIDER_FRAME.search(identity) or re.search(
                         r"hcaptcha|recaptcha|challenge", identity, re.I
                     ):
                         continue
-                    if not await owner.is_visible():
+                    if not await owner.is_visible() or await owner.evaluate(OFFSCREEN_FRAME_JS):
                         continue
                 if observed_frames >= MAX_FRAMES:
                     break
@@ -1306,23 +1380,6 @@ class FormSession:
                         # SAP job postings embed a required alert subscription beside Apply.
                         # Its frequency is not an applicant fact or an application field.
                         continue
-                    if kind == "fields" and item.get("history_kind"):
-                        history_kind = item["history_kind"]
-                        entries = getattr(self.resolver.profile, history_kind, [])
-                        identity = {k: v for k, v in item.get("history_identity", {}).items() if v}
-                        matches = [
-                            i
-                            for i, entry in enumerate(entries)
-                            if identity
-                            and all(
-                                normalize(str(getattr(entry, k, ""))) == normalize(str(v))
-                                for k, v in identity.items()
-                            )
-                        ]
-                        if len(matches) == 1:
-                            item["group"] = (
-                                "Work Experience " if history_kind == "work" else "Education "
-                            ) + str(matches[0] + 1)
                     if kind == "fields" and AUTH.search(item.get("label", "")) and item.get("value"):
                         # Codes and passwords never leave the page through an observation (model
                         # prompts, agent tools, traces); only that a value is present.
@@ -1392,6 +1449,8 @@ class FormSession:
                 if current := values.get(field["dom_id"]):
                     field["value"] = current["value"]
                     field["provider_combo"] = current["family"]
+        if (profile := getattr(getattr(self, "resolver", None), "profile", None)) is not None:
+            regroup_history_rows(list(self.fields.values()), profile)
         # Checkbox lists answer one question; peers give context ("I do not want to answer" -> disability).
         boxes = {}
         for f in self.fields.values():
@@ -2242,10 +2301,19 @@ class FormSession:
         kind = field["type"]
         if (
             re.search(r"\bgpa\b|grade point average", field["label"], re.I)
-            and re.search(r"invalid", str(field.get("error") or ""), re.I)
+            and kind in {"text", "number"}
             and (scale := re.fullmatch(r"\s*(\d(?:\.\d+)?)\s*/\s*\d+(?:\.\d+)?\s*", str(value)))
+            and (
+                re.search(r"invalid", str(field.get("error") or ""), re.I)
+                # A GPA box takes the number unless it shows a "3.5/4.0" format itself: Taleo (Bealls 2026-10-17,
+                # 'contains an invalid value'), Oracle (INTEGRIS 2026-10-23) and iCIMS (Medpace 2026-10-27, "Invalid
+                # Data Error" with GPA flagged) all refused "3.9/4.0" given whole from a remembered answer.
+                or not re.search(
+                    r"\d\s*/\s*\d",
+                    " ".join(str(field.get(k) or "") for k in ("label", "hint", "placeholder")),
+                )
+            )
         ):
-            # Taleo (Bealls 2026-10-17): 'The field "GPA" contains an invalid value' for "3.9/4.0"; it takes 3.9.
             value = scale[1]
         if kind in {"text", "url"} and "linkedin" in field["label"].lower():
             parsed_url = urlsplit(str(value))
@@ -2919,11 +2987,12 @@ class FormSession:
         try:
             await widgets.dismiss_pickers(frame)
             if field.get("widget") == "sdf-select":
-                # ADP's sdf-select-simple lists every item in its own children: no popup is opened to read them.
+                # ADP's sdf-select-simple lists its items in its own children: no popup is opened to read them. Midco's
+                # render only once opened, and a filterable one shows a window of 20 (State): neither is the catalog.
                 field["options"] = [
                     text for _, text in await el.evaluate(widgets.SDF_ITEMS_JS) if text and not widgets.placeholder_option(text)
                 ][:400]
-                field["options_partial"] = False
+                field["options_partial"] = not field["options"] or bool(await el.locator(widgets.SDF_FILTER).count())
             elif field.get("widget") == "ui5wc-select":
                 field["options"] = [
                     o
@@ -4822,12 +4891,12 @@ class FormSession:
             if frame != self.page.main_frame:
                 try:
                     owner = await frame.frame_element()
-                    identity = await owner.evaluate("e=>[e.title,e.id,e.src].join(' ')")
+                    identity = await owner.evaluate(FRAME_IDENTITY_JS)
                     if not isinstance(identity, str):
                         continue  # An unobserved frame cannot establish application ownership.
                     if PROVIDER_FRAME.search(identity) or re.search(r"captcha|challenge", identity, re.I):
                         continue
-                    if not await owner.is_visible():
+                    if not await owner.is_visible() or await owner.evaluate(OFFSCREEN_FRAME_JS):
                         continue
                 except PlaywrightError:
                     continue

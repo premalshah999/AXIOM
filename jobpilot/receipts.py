@@ -37,6 +37,7 @@ RECEIPT_SENDERS = [
     "successfactors.com",
     "successfactors.eu",
     "sapsf.com",
+    "sapsf.eu",
     "eightfold.ai",
     "avature.net",
     "phenompeople.com",

@@ -216,6 +216,7 @@ REGISTRY = [
             "successfactors.com",
             "successfactors.eu",
             "sapsf.com",
+            "sapsf.eu",
             "jobs2web.com",
             *SUCCESSFACTORS_CAREER_SITES,
         ),

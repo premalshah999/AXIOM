@@ -20,7 +20,9 @@ OPTION_SELECTOR = (
     ".chosen-results li,.ui-menu-item,.pac-item,.oj-listbox-result,.dropdown-location,[data-automation-id=promptOption],"
     "[data-automation-id=menuItem],.cx-select__list-item[role=gridcell],"
     # Older react-select rows carry no role, only their generated id (Pinpoint's Country, Kenway 2026-10-27).
-    '[id^="react-select-"][id*="-option-"]'
+    '[id^="react-select-"][id*="-option-"],'
+    # Deloitte's tax-credit questionnaire lists a menu's choices as role-less rows (Caesars, 2026-10-27).
+    ".wotc-select-option"
 )
 
 VISIBLE_OPTIONS = r"""(args) => {
@@ -2083,39 +2085,85 @@ async def ui5wc_select_options(el):
     )
 
 
-SDF_ITEMS_JS = """h => [...h.querySelectorAll('sdf-select-item'), ...(h.shadowRoot?.querySelectorAll('sdf-select-item') || [])]
-  .map((item, i) => { item.dataset.jpSdf = String(i); return [String(i), (item.getAttribute('label') || item.textContent || '')
-    .replace(/\\s+/g, ' ').trim()]; })"""
-SDF_SELECTED_JS = """h => { const items = [...h.querySelectorAll('sdf-select-item'), ...(h.shadowRoot?.querySelectorAll('sdf-select-item') || [])];
-  const text = i => (i.getAttribute('label') || i.textContent || '').replace(/\\s+/g, ' ').trim();
+# An item's text is its label property, its label attribute, or its text. Angular sets ADP's labels as properties.
+SDF_TEXT = "(i => ((typeof i.label === 'string' && i.label) || i.getAttribute('label') || i.textContent || '').replace(/\\s+/g, ' ').trim())"
+SDF_ITEMS_JS = (
+    """h => [...h.querySelectorAll('sdf-select-item'), ...(h.shadowRoot?.querySelectorAll('sdf-select-item') || [])]
+  .map((item, i) => { item.dataset.jpSdf = String(i); return [String(i), """
+    + SDF_TEXT
+    + """(item)]; })"""
+)
+SDF_SELECTED_JS = (
+    """h => { const items = [...h.querySelectorAll('sdf-select-item'), ...(h.shadowRoot?.querySelectorAll('sdf-select-item') || [])];
+  const text = """
+    + SDF_TEXT
+    + """;
   const raw = typeof h.value === 'string' ? h.value : (h.value?.label || h.value?.value || '');
   const chosen = items.find(i => i.hasAttribute('selected') || i.getAttribute('aria-selected') === 'true')
-    || items.find(i => raw && (i.getAttribute('value') === raw || text(i) === raw));
+    || items.find(i => raw && (i.getAttribute('value') === raw || i.value === raw || text(i) === raw));
   return chosen ? text(chosen) : ''; }"""
+)
+# The rendered (visible) item of that text is the one a person clicks; ADP keeps an unrendered copy in light DOM.
+SDF_PICK_JS = (
+    """(h, want) => { const items = [...h.querySelectorAll('sdf-select-item'), ...(h.shadowRoot?.querySelectorAll('sdf-select-item') || [])];
+  const text = """
+    + SDF_TEXT
+    + """;
+  items.forEach(i => delete i.dataset.jpSdfPick);
+  const hit = items.find(i => text(i) === want && i.getClientRects().length) || items.find(i => text(i) === want);
+  if (hit) hit.dataset.jpSdfPick = '1';
+  return !!hit; }"""
+)
+SDF_FILTER = "input.select-filter-input, input[role=combobox]"
 
 
 async def sdf_select(frame, el, value, choose=None):
     """ADP MyJobs' sdf-select-simple (Phone Type, State; 2026-10-27): open the host, click the offered item, and read the
-    host's own selection back."""
-    items = await el.evaluate(SDF_ITEMS_JS)
-    texts = [text for _, text in items if text and not placeholder_option(text)]
-    offered = [{"text": t, "disabled": False} for t in texts]
-    target = (best_option(offered, value) or {}).get("text")
-    for alias in sorted(_alias_group(value) - {norm(value)}, key=len, reverse=True):
+    host's own selection back.
+
+    Midco's items render only once the pane opens, and State shows a window of 20 until its filter is typed into
+    ("Maryland" is past "Louisiana"); the item read before opening was empty and every fill was refused."""
+
+    async def offered():
+        return [text for _, text in await el.evaluate(SDF_ITEMS_JS) if text and not placeholder_option(text)]
+
+    aliases = sorted(_alias_group(value) - {norm(value)}, key=len, reverse=True)
+
+    def match(texts):
+        options = [{"text": t, "disabled": False} for t in texts]
         # A profile's "MD" for State's "Maryland", "Mobile" for Phone Type's "Cell" (Midco 2026-10-27).
-        if target:
-            break
-        target = (best_option(offered, alias) or {}).get("text")
-    if target is None and choose:
-        target = await choose(texts)
-    if not target:
-        raise ValueError("No matching option is offered")
-    if norm(await el.evaluate(SDF_SELECTED_JS)) == norm(target):
+        for want in [value, *aliases]:
+            if hit := best_option(options, want):
+                return hit["text"]
+        return None
+
+    texts = await offered()
+    target = match(texts)
+    if target and norm(await el.evaluate(SDF_SELECTED_JS)) == norm(target):
         return target
     await el.click(timeout=3000)
     await asyncio.sleep(0.4)
-    index = next(i for i, text in items if text == target)
-    await frame.locator(f'sdf-select-item[data-jp-sdf="{index}"]').first.click(timeout=3000)
+    if not target:
+        texts = await offered() or texts
+        target = match(texts)
+    search = el.locator(SDF_FILTER).first
+    if not target and await search.count():
+        for typed in [*aliases, str(value)][:4]:
+            await search.fill("", timeout=2000)
+            await search.press_sequentially(typed[:24], delay=15)
+            await asyncio.sleep(0.5)
+            if target := match(await offered()):
+                break
+        if not target:
+            await search.fill("", timeout=2000)
+            await asyncio.sleep(0.3)
+            texts = await offered() or texts
+    if target is None and choose and texts:
+        target = await choose(texts)
+    if not target or not await el.evaluate(SDF_PICK_JS, target):
+        await frame.page.keyboard.press("Escape")
+        raise ValueError("No matching option is offered")
+    await el.locator('sdf-select-item[data-jp-sdf-pick="1"]').first.click(timeout=3000)
     for _ in range(12):
         await asyncio.sleep(0.25)
         if norm(await el.evaluate(SDF_SELECTED_JS)) == norm(target):
@@ -2393,11 +2441,18 @@ async def icims_dropdown_commit(
         )
 
     async def rows_for(query):
+        opened = False
         if not await container.evaluate("c=>!c.classList.contains('dropdown-invisible')&&c.getClientRects().length>0"):
             await el.click(timeout=3000)
             await asyncio.sleep(0.3)
+            opened = True
         if query is not None and await searchable():
             before = await icims_rows_now(frame, select_id)
+            if opened and not before:
+                # Opening requests the list's first page. Typed at once, that page answered during the search and was
+                # read as its answer ("United Kingdom, Afghanistan, ..." for "United States"); every alias search then
+                # found nothing, and Publicis's and Medpace's Country outlasted the field's deadline (2026-10-26..27).
+                before = await icims_rows(frame, select_id, timeout=max(1.0, min(3.0, left() - 4)))
             await box.fill("", timeout=2000)
             await box.press_sequentially(str(query)[:40], delay=35, timeout=6000)
             found = await icims_rows(
@@ -2420,8 +2475,10 @@ async def icims_dropdown_commit(
     if len(str(value).split()) > 1:
         queries.append(str(value).split()[0])
     choice, seen, seen_query = None, [], None
-    for query in list(dict.fromkeys(q for q in queries if q))[: 3 if thorough else 1]:
-        if seen and left() < 2.5:
+    for number, query in enumerate(list(dict.fromkeys(q for q in queries if q))[: 3 if thorough else 1]):
+        if number and left() < 2.5:
+            # Another search cannot finish inside the field's budget: its deadline left the field neither set nor
+            # reported as not offered (Publicis Country, 31 deadline errors 2026-10-26..27).
             break
         found = await rows_for(query)
         if not found and not seen and left() > 3:

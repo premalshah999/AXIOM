@@ -601,6 +601,7 @@ const AGENT_PROVIDERS: { value: AgentModelProvider; label: string }[] = [
   { value: "mimo", label: "MiMo" },
   { value: "deepseek", label: "DeepSeek" },
   { value: "openai", label: "OpenAI GPT-6 Luna" },
+  { value: "openrouter", label: "OpenRouter DeepSeek V4.1 Flash (Relace)" },
 ];
 
 function AgentControls() {

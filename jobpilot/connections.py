@@ -24,13 +24,15 @@ FIELDS = {
     "haiku_api_key": ("Model", "Anthropic API key", True, "console.anthropic.com > API keys (Claude Haiku)."),
     "mimo_api_key": ("Model", "Xiaomi MiMo API key", True, "Optional third provider."),
     "openai_api_key": ("Model", "OpenAI API key", True, "platform.openai.com > API keys. GPT-6 Luna at its cheapest setting."),
+    "openrouter_api_key": ("Model", "OpenRouter API key", True,
+                           "openrouter.ai > Keys. DeepSeek V4.1 Flash 1017 served by Relace, reasoning off."),
     "typesafe_api_key": ("Model", "TypeSafe Jev key", True, "Optional. Answers multiple-choice questions first."),
     "telegram_bot_token": ("Telegram", "Telegram bot token", True, "From @BotFather in Telegram: /newbot."),
     "telegram_user_id": ("Telegram", "Your Telegram user ID", False, "A number, from @userinfobot in Telegram."),
     "twocaptcha_api_key": ("Captcha", "2Captcha API key", True, "Optional, paid per solve. 2captcha.com > Dashboard."),
     "serper_api_key": ("Discovery", "Serper API key", True, "Optional. Adds Google results to job discovery (serper.dev)."),
 }
-PROVIDERS = ("deepseek", "haiku", "mimo", "openai")
+PROVIDERS = ("deepseek", "haiku", "mimo", "openai", "openrouter")
 
 
 def _cipher(config):
@@ -79,7 +81,7 @@ def save(config, updates):
             raise ValueError(f"Unknown connection: {name}")
         value = str(value or "").strip()
         if name == "llm_provider" and value and value not in PROVIDERS:
-            raise ValueError("Choose deepseek, haiku, mimo or openai")
+            raise ValueError("Choose deepseek, haiku, mimo, openai or openrouter")
         if name == "telegram_user_id" and value and not value.lstrip("-").isdigit():
             raise ValueError("The Telegram user ID is a number (ask @userinfobot), not an @username")
         if value:
@@ -118,7 +120,11 @@ async def test(config, name):
         return {"ok": False, "message": "Nothing is saved for this yet."}
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            if name in {"deepseek_api_key", "mimo_api_key", "openai_api_key"}:
+            if name == "openrouter_api_key":
+                # /key checks the key itself (its limit and usage); /models answers without one.
+                base = getattr(config, "openrouter_base_url").rstrip("/")
+                response = await client.get(base + "/key", headers={"Authorization": f"Bearer {key}"})
+            elif name in {"deepseek_api_key", "mimo_api_key", "openai_api_key"}:
                 base = getattr(config, name.replace("_api_key", "_base_url")).rstrip("/")
                 response = await client.get(base + "/models", headers={"Authorization": f"Bearer {key}"})
             elif name == "haiku_api_key":

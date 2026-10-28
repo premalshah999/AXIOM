@@ -50,10 +50,11 @@
   const nearby = el => {
     let node = el;
     // Rippling nests a custom question's control 5-6 levels below the div that
-    // holds its text. Deeper levels are used only while the ancestor owns no
+    // holds its text, and a searchable select's input 9 (Go Fish Digital's "What is your desired compensation
+    // range?" read "Select", 2026-10-27). Deeper levels are used only while the ancestor owns no
     // other applicant control, so another question's text is never borrowed.
     const CONTROL = 'input:not([type=hidden]),select,textarea,[role=combobox],[role=radiogroup],[role=listbox],[contenteditable=true]';
-    for (let depth = 0; depth < 8 && node; depth++) {
+    for (let depth = 0; depth < 11 && node; depth++) {
       if ((depth >= 3 || el.type === 'file') && [...node.querySelectorAll(CONTROL)].some(x => x !== el && !el.contains(x) && !x.contains(el))) break;
       let prev = node.previousElementSibling;
       while (prev && (!visible(prev) || prev.matches('script,style'))) prev = prev.previousElementSibling;
@@ -62,6 +63,21 @@
         if (t && t.length <= 250) return t;
       }
       node = node.parentElement;
+    }
+    return '';
+  };
+  // A question printed as plain text just before its choices, with no label, legend or ARIA name. The nearest readable
+  // text before the first choice (other than a choice's own caption) is the question.
+  const precedingText = (first, captions) => {
+    const root = first.getRootNode();
+    const walker = document.createTreeWalker(root.body || root, NodeFilter.SHOW_TEXT);
+    walker.currentNode = first;
+    for (let n = walker.previousNode(), steps = 0; n && steps < 40; n = walker.previousNode(), steps++) {
+      const t = clean(n.textContent);
+      const host = n.parentElement;
+      if (!t || !host || host.closest('script,style,noscript,button,a,option') || !visible(host) || captions.has(t)) continue;
+      if (!/[a-z]{3}/i.test(t)) continue;  // "*" or "1." beside the question
+      return t.length <= 300 ? t : '';
     }
     return '';
   };
@@ -204,6 +220,21 @@
       || deepQuery(first,'input,select,textarea,[role=combobox],[role=listbox]').length)return '';
     const header=textOf(first);
     return header && header.length<=160 ? header : '';
+  };
+  // A career site's own search box: one text box whose only buttons search ("Search now"). TikTok's job page
+  // (2026-10-27) shows "Discover a career that energizes and excites you every day." beside "Search now" under its
+  // Apply button; read as an application question, the job page became a form with no way forward.
+  const searchBox = el => {
+    if (!(el.tagName === 'INPUT' && /^(?:text|search|)$/i.test(el.getAttribute('type') || ''))) return false;
+    for (let box = el.parentElement, depth = 0; box && depth < 4; box = box.parentElement, depth++) {
+      const actions = [...box.querySelectorAll('button,[role=button],input[type=submit]')].filter(visible);
+      if (!actions.length) continue;
+      const inputs = [...box.querySelectorAll('input,select,textarea')].filter(visible)
+        .filter(e => !['hidden','submit','button'].includes((e.type || '').toLowerCase()));
+      return inputs.length === 1 && actions.every(b => /^(?:search(?: now| jobs)?|find jobs)$/i
+        .test(clean(b.innerText || b.value || b.getAttribute('aria-label') || '')));
+    }
+    return false;
   };
   const historyMemo = new WeakMap();
   const historyRow = el => {
@@ -354,7 +385,8 @@
     || /\.\s*Required\./i.test(q)
     || [...(el.labels || [])].some(l=>/mandatory|required/i.test(l.title || '') || l.querySelector('img.requiredimg'))
     || !!el.closest('.input-row')?.querySelector('.input-row__label--required');
-  const PLACEHOLDER_VALUE = /^(select( one)?(\.\.\.)?|choose( one)?(\.\.\.)?|-+|--\s*select\s*--|please select|make a selection|none selected|no selection|not specified)$/i;
+  const CALENDAR_POPUP = '.ui-datepicker,.datepicker-dropdown,.flatpickr-calendar,.pika-single';
+  const PLACEHOLDER_VALUE = /^(select( one)?(\.\.\.)?|choose( one)?(\.\.\.)?|-+|[-–—]{1,2}\s*select\s*[-–—]{1,2}|please select|make a selection|none selected|no selection|not specified)$/i;
 
   // Never applicant fields: inert/hidden subtrees, honeypots, CAPTCHA widgets and their responses.
   const HONEYPOT = /honey.?pot|beecatcher|bot.?trap|leave.?(?:this|blank)|^hp_/i;
@@ -413,7 +445,7 @@
       valid: (f.valid ?? ((el.validity ? el.validity.valid : true) && el.getAttribute('aria-invalid') !== 'true'))
         && !error && !composedClosest(el,'spl-internal-form-field')?.hasAttribute('errorstate'),
       name: el.getAttribute('name') || '', html_id: el.id || '', automation_id: el.dataset.automationId || '',
-      placeholder: el.getAttribute('placeholder') || '', error, widget: f.widget || '',
+      placeholder: el.getAttribute('placeholder') || '', error, widget: f.widget || '', search_box: searchBox(el),
       parts: f.parts || [], accept: el.getAttribute('accept') || '', hint: clean([f.hint || '', help, description].join(' ')).slice(0,2500),
       date_format: f.date_format || '',
       members: (f.members || []).map(id),
@@ -484,16 +516,37 @@
   for (const host of all.filter(e => e.matches('sdf-select-simple') && !e.getRootNode().host && visible(e))) {
     if (excluded(host) || consumed.has(host)) continue;
     const items = [...host.querySelectorAll('sdf-select-item'), ...(host.shadowRoot?.querySelectorAll('sdf-select-item') || [])];
-    const itemText = i => clean(i.getAttribute('label') || i.textContent);
+    // Angular sets ADP's item labels as properties, not attributes (Midco 2026-10-27).
+    const itemText = i => clean((typeof i.label === 'string' && i.label) || i.getAttribute('label') || i.textContent);
     const raw = typeof host.value === 'string' ? host.value : (host.value?.label || host.value?.value || '');
     const chosen = items.find(i => i.hasAttribute('selected') || i.getAttribute('aria-selected') === 'true')
-      || items.find(i => raw && (i.getAttribute('value') === raw || itemText(i) === raw));
+      || items.find(i => raw && (i.getAttribute('value') === raw || i.value === raw || itemText(i) === raw));
     const value = chosen ? itemText(chosen) : '';
     const q = label(host, { visibleFirst: true });
     const req = isReq(host, q) || host.hasAttribute('required');
     consumed.add(host);
     push(host, { label: q, type: 'combobox', widget: 'sdf-select', required: req, options: items.map(itemText).filter(Boolean),
       value, valid: !req || !!value, maxlength: -1 });
+  }
+
+  // BambooHR's Fabric pick lists (Performance Software, 2026-10-27): a toggle button[aria-haspopup] opens the menu, and
+  // a zero-size aria-hidden <select> beside it mirrors only the chosen value's id for the form post. Observed as the
+  // select, State/Country/Highest Education offered nothing to pick and stayed empty: the toggle is the field.
+  for (const mirror of all.filter(e => e.matches('select[aria-hidden="true"]:not([multiple])'))) {
+    if (consumed.has(mirror) || excluded(mirror) || mirror.disabled) continue;
+    if ([...mirror.options].filter(o => o.value !== '').length > 1) continue; // a select2/chosen list, not a mirror
+    const toggles = [...(mirror.parentElement?.querySelectorAll('button[aria-haspopup]:not([aria-haspopup="false"])') || [])]
+      .filter(b => visible(b) && !consumed.has(b));
+    if (toggles.length !== 1) continue;
+    const toggle = toggles[0];
+    if (toggle.disabled || toggle.getAttribute('aria-disabled') === 'true') continue;
+    const shown = clean(toggle.innerText);
+    const value = PLACEHOLDER_VALUE.test(shown) ? '' : shown;
+    const q = label(mirror);
+    const req = isReq(mirror, q);
+    consumed.add(mirror);
+    consumed.add(toggle);
+    push(toggle, { label: q, type: 'dropdown', required: req, options: [], value, valid: !req || !!value, maxlength: -1 });
   }
 
   // Ashby gives each checkbox its own name; the fieldset defines the question.
@@ -643,7 +696,14 @@
 
   const controls = all.filter(e => e.matches(
     'input,select,textarea,[role=combobox],[role=radiogroup],[role=checkbox],[role=switch],' +
-    'button[aria-haspopup=listbox],[role=button][aria-haspopup=listbox]'));
+    'button[aria-haspopup=listbox],[role=button][aria-haspopup=listbox],button[class*=select]:not([aria-haspopup])'));
+  // A plain button standing in for a <select>: Deloitte's tax-credit questionnaire (Caesars, 2026-10-27) renders "State
+  // in which you plan to work" as <button class="wotc-select-input select-btn">Select one... <span arrow-down></button>
+  // with no ARIA popup and role-less rows; the question was never observed and Continue stayed disabled.
+  const selectButton = el => el.matches('button[class*=select]:not([aria-haspopup]):not([role])')
+    && [...el.classList].some(c => /(?:^|[-_])select(?:[-_](?:btn|button|toggle|trigger|input))?$/i.test(c))
+    && !!el.querySelector('[class*=arrow],[class*=caret],[class*=chevron]')
+    && !el.parentElement?.querySelector('select');
   const optionSearch = el => el.matches('input,textarea') && (
     el.id === 'countryCodeSearch' || el.name === 'countryCodeSearch'
     || (composedClosest(el,'[role=listbox],[role=menu],.select2-dropdown,.select2-search,.chosen-search,.chosen-drop')
@@ -662,7 +722,7 @@
     const role = el.getAttribute('role');
     let type = ['combobox', 'radiogroup'].includes(role) ? role : (el.type || el.tagName.toLowerCase());
     if (el.matches('input[aria-autocomplete="list"][aria-haspopup="listbox"]')) type = 'combobox';
-    if (el.matches('[aria-haspopup=listbox]') && !el.matches('input,[role=combobox]')) type = 'dropdown';
+    if (el.matches('[aria-haspopup=listbox]') && !el.matches('input,[role=combobox]') || selectButton(el)) type = 'dropdown';
     if (el.matches('[role=checkbox],[role=switch]') && !el.matches('input')) type = 'checkbox';
     if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
     if (el.readOnly && !['combobox','radio','checkbox'].includes(type)) continue;
@@ -762,17 +822,7 @@
       // MAXIMUS's tax-credit survey (PepsiCo, 2026-10-24) prints "Are you a resident of the State of California?" as
       // plain text above an unlabelled Yes/No pair: the question read as "ctl00$MainContent$multipleChoice...".
       if ((question === el.name || question === 'Unlabelled field') && !/^icims_f_/i.test(el.name || '')) {
-        const captions = new Set(group.map(x => clean(label(x))));
-        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-        walker.currentNode = group[0];
-        for (let n = walker.previousNode(), steps = 0; n && steps < 40; n = walker.previousNode(), steps++) {
-          const t = clean(n.textContent);
-          const host = n.parentElement;
-          if (!t || !host || host.closest('script,style,noscript,button,a,option') || !visible(host) || captions.has(t)) continue;
-          if (!/[a-z]{3}/i.test(t)) continue;  // "*" or "1." beside the question
-          if (t.length <= 300) question = t;
-          break;
-        }
+        question = precedingText(group[0], new Set(group.map(x => clean(label(x))))) || question;
       }
       // iCIMS's self-identification forms (icims2 servlet) give radios no label: every choice and the question read as
       // the field name "icims_f_Veteran" (ICE 2026-10-19). A readable value is the choice; the name names the topic.
@@ -809,12 +859,20 @@
       // UI5 Web Components radio buttons (scoped tags on SuccessFactors, ASSA ABLOY 2026-10-15) keep
       // role=radio and their native input in shadow roots; the host has the option text and checked.
       if (!group.length) group = [...el.querySelectorAll('[ui5-radio-button]')];
+      // Deloitte's tax-credit questionnaire (Caesars, 2026-10-27) nests three role=radiogroup elements around one
+      // Yes/No pair: each was observed as its own unlabelled question. The innermost group holding every choice is it.
+      if (group.length && [...el.querySelectorAll('[role=radiogroup]')].some(g => visible(g) && group.every(m => g.contains(m)))) continue;
       const nativeMember = x => x.matches('input[type=radio]') ? x :
         x.querySelectorAll('input[type=radio]').length === 1 ? x.querySelector('input[type=radio]') : null;
+      // Rippling's role=radio rows hold a native radio named by aria-labelledby, not a <label>: its value ("true") was
+      // read as the choice instead of "Yes - I consent to receiving text messages" (Go Fish Digital, 2026-10-27).
+      const labelledBy = n => clean((n.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
+        .map(ref => textOf(byId(n, ref))).join(' '));
       const optionLabel = x => {
         if (x.hasAttribute('ui5-radio-button')) return clean(x.text || x.getAttribute('text') || textOf(x));
         const native = nativeMember(x);
-        return native ? clean([...(native.labels || [])].map(textOf).join(' ')) || native.value : clean(x.innerText) || label(x);
+        return native ? clean([...(native.labels || [])].map(textOf).join(' ')) || labelledBy(native)
+          || (native !== x && clean(x.innerText)) || native.value : clean(x.innerText) || label(x);
       };
       options = group.map(optionLabel);
       const chosen = group.find(x => {
@@ -822,6 +880,15 @@
         return native ? native.checked : x.checked === true || x.getAttribute('aria-checked') === 'true';
       });
       value = chosen ? optionLabel(chosen) : '';
+      // A consent group whose long caption is not its label is named by its Yes choice, as a lone radio group is.
+      if ([el.id, el.getAttribute('name'), 'Unlabelled field'].includes(question)
+          && /(?:text messages?|sms|marketing|newsletter)/i.test(options.join(' '))) {
+        question = options.find(o => /^yes\b/i.test(o))?.replace(/^yes\s*[-–:]?\s*/i, '') || question;
+      }
+      // Its question is a caption inside the group, before the choices, tied to nothing ("Are you under the age of 40?").
+      if (group.length && (question === 'Unlabelled field' || question === el.id || question === el.getAttribute('name'))) {
+        question = precedingText(group[0], new Set(options)) || question;
+      }
       // Eightfold's legend says only "Please check one of the boxes"; its options identify the disclosure.
       if (/please check one of the boxes/i.test(question)) {
         const context = options.join(' ');
@@ -1009,6 +1076,9 @@
     .filter(el => el.matches('sdf-button') || !composedClosest(el,'sdf-button'))
     .filter(el => !consumed.has(el) && !fieldIds.has(el.dataset.jpId) && visible(el) && !el.disabled
       && !composedClosest(el,'[data-automation-id="languageSelectorButton"],[data-automation-id="settingsSelectorButton"]')
+      // A typed date box's calendar popup (Prev / Next / 1..31) is not page navigation: left open after Axtria's
+      // JazzHR mm/yyyy date, its "Next" was taken for the application's Next 45 times (2026-10-27).
+      && !composedClosest(el, CALENDAR_POPUP)
       && !(el.matches('sdf-button') && ((el.shadowRoot?.querySelector('button') || el.querySelector('button'))?.disabled
         || el.hasAttribute('disabled') && el.getAttribute('disabled') !== 'false'))
       && !el.closest('[inert],[aria-hidden="true"]')

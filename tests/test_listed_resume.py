@@ -98,3 +98,36 @@ async def test_a_capitalised_listed_resume_is_attached(page, tmp_path):
             "<input type=hidden name='application_form[application][cv]' value='token'>")
     report = await verify_page(page, tmp_path, body)
     assert report["resume_attached"] is True
+
+
+async def test_the_icims_frame_whose_src_keeps_the_email_steps_captcha_token_is_read(page, tmp_path):
+    """Noblis 2026-10-26..27: the content iframe's src kept the email step's "h-captcha-response=..." query, so the frame
+    was taken for a CAPTCHA and left out of the page evidence: the renamed resume never verified and was uploaded again
+    on every pass. A real CAPTCHA frame (provider host and path) stays out."""
+    resume = tmp_path / "Alex_Doe_Resume.pdf"
+    resume.write_bytes(b"%PDF-1.4")
+    outer = "https://careers-acme.icims.com/jobs/5186/engineer/candidate?mode=apply"
+    inner = "https://careers-acme.icims.com/jobs/login?step=email&accept_gdpr=1&h-captcha-response=P1_synthetic&in_iframe=1"
+    widget = "https://newassets.hcaptcha.com/captcha/v1/x/static/hcaptcha.html#frame=checkbox"
+    pages = {
+        outer: (f"<html><body><h1>Careers</h1><iframe id='icims_content_iframe' title='iCIMS Content iFrame' "
+                f"src='{inner}' style='width:100%;height:400px'></iframe>"
+                f"<iframe title='hCaptcha' src='{widget}' style='width:300px;height:80px'></iframe></body></html>"),
+        inner: (f"<html><body><label>Name<input value='Alex Doe'></label>"
+                f"{ICIMS_PAGE.format(name='Resume202610260542.pdf')}</body></html>"),
+        widget.split("#")[0]: "<html><body><button>I am human</button></body></html>",
+    }
+
+    async def serve(route):
+        await route.fulfill(body=pages[route.request.url.split("#")[0]], content_type="text/html")
+
+    for url in pages:
+        await page.route(url, serve)
+    await page.goto(outer)
+    await page.wait_for_load_state("load")
+    form = FormSession(page, Resolver(Profile(), None, None), resume, lambda *a: None)
+    urls = [frame.url for frame in await form.application_frames()]
+    assert inner in urls and not any("hcaptcha.com" in url for url in urls)
+    await form.scan()
+    form.uploaded = True
+    assert (await form.verify())["resume_attached"] is True

@@ -101,6 +101,8 @@ def vision_config(config):
         )
     if config.llm_provider == "openai" and config.openai_api_key:
         return config  # GPT-6 Luna reads images at the same cheapest setting.
+    if config.llm_provider == "openrouter" and config.openrouter_api_key:
+        return config  # DeepSeek V4.1 Flash 1017 takes text and images.
     if (
         config.llm_provider == "deepseek"
         and config.deepseek_api_key

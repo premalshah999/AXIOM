@@ -20,6 +20,11 @@ _deadline = ContextVar("model_deadline", default=None)
 _request_sent = ContextVar("model_request_sent", default=None)
 
 
+def cache_hits(usage):
+    """Cached input tokens: DeepSeek's prompt_cache_hit_tokens, or the OpenAI/OpenRouter prompt_tokens_details."""
+    return int(usage.get("prompt_cache_hit_tokens") or (usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
+
+
 def token_cost(config, input_tokens, output_tokens, cache_hit_tokens=0):
     # Haiku 5.5 charges five times its base rate above 100k input tokens.
     # Reservations use serialized bytes as a conservative token upper bound.
@@ -157,7 +162,7 @@ async def model_deadline(timeout):
 
 def effective_thinking(db, config, thinking=None):
     """Apply the selected provider's runtime preference even to older callers."""
-    if config.llm_provider in {"haiku", "openai", "deepseek"}:
+    if config.llm_provider in {"haiku", "openai", "deepseek", "openrouter"}:
         # OpenAI's effort is its own parameter (openai_reasoning_effort), not a thinking switch. DeepSeek never reasons
         # (owner 2026-10-27): its non-thinking mode answers as well here and keeps the cached prefix cheap.
         return "disabled"
@@ -233,6 +238,7 @@ class MeteredTransport(httpx.AsyncBaseTransport):
             args["response_format"] = {"type": "json_object"}
         deepseek = request.url.host == "api.deepseek.com"
         use_openai = self.config.llm_provider == "openai"
+        openrouter = request.url.host == "openrouter.ai"
         # Applicant directive (2026-10-08): DeepSeek reasons at maximum effort. The deployment
         # .env stays untouched; the `model_reasoning` setting overrides it at runtime.
         override = self.db.get_setting("model_reasoning", {}) or {}
@@ -250,7 +256,15 @@ class MeteredTransport(httpx.AsyncBaseTransport):
             args.pop("reasoning_effort", None)
         args.pop("frequency_penalty", None)
         # Thinking is on by default for MiMo v2.6 and shares the completion budget with the JSON.
-        if self.thinking in {"enabled", "disabled"} and not use_openai:
+        if openrouter:
+            # OpenRouter's own switches: reasoning off, and only the configured host (Relace) serves the request.
+            args["reasoning"] = {"enabled": False}
+            if self.config.openrouter_provider:
+                args["provider"] = {
+                    "order": [self.config.openrouter_provider],
+                    "allow_fallbacks": bool(self.config.openrouter_allow_fallbacks),
+                }
+        elif self.thinking in {"enabled", "disabled"} and not use_openai:
             args["thinking"] = {"type": self.thinking}
         if self.thinking == "enabled" or anthropic or use_openai:
             # MiMo's deep-thinking endpoint rejects sampling overrides.
@@ -264,7 +278,7 @@ class MeteredTransport(httpx.AsyncBaseTransport):
             from .tiers import token_floor
 
             max_tokens = max(int(max_tokens), token_floor(self.tier))
-        args["max_tokens" if deepseek or anthropic else "max_completion_tokens"] = max_tokens
+        args["max_tokens" if deepseek or anthropic or openrouter else "max_completion_tokens"] = max_tokens
         body = json.dumps(args).encode()
         headers = dict(request.headers)
         headers.pop("content-length", None)
@@ -362,7 +376,7 @@ class MeteredTransport(httpx.AsyncBaseTransport):
                 self.config,
                 usage["input_tokens"] if anthropic else usage["prompt_tokens"],
                 usage["output_tokens"] if anthropic else usage["completion_tokens"],
-                0 if anthropic else usage.get("prompt_cache_hit_tokens", 0),
+                0 if anthropic else cache_hits(usage),
             )
         except (ValueError, KeyError, TypeError):
             usage = {}
@@ -393,7 +407,9 @@ class MeteredTransport(httpx.AsyncBaseTransport):
                             "provider": self.config.llm_provider,
                             "prompt_tokens": usage.get("input_tokens" if anthropic else "prompt_tokens"),
                             # DeepSeek bills cached input at a fraction; record it to see real spend.
-                            "cache_hit_tokens": usage.get("prompt_cache_hit_tokens"),
+                            "cache_hit_tokens": cache_hits(usage) if usage else None,
+                            # OpenRouter reports what it billed for this request.
+                            **({"billed_usd": usage["cost"]} if openrouter and "cost" in usage else {}),
                             "completion_tokens": usage.get(
                                 "output_tokens" if anthropic else "completion_tokens"
                             ),
