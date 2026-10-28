@@ -616,10 +616,21 @@ def open_repairs(db):
         ) or 0
 
 
+def new_applications_started(db, since):
+    """Jobs whose first application run started at or after `since` (an ISO time): new applications, not retries."""
+    with db.session() as s:
+        first = select(Run.job_id, func.min(Run.created_at).label("at")).group_by(Run.job_id).subquery()
+        return s.scalar(select(func.count()).select_from(first).where(first.c.at >= since)) or 0
+
+
 def new_applications_held(db):
     """Owner rule (2026-10-27): no new applications while any application is repairing, unless the owner allows them
-    (setting new_applications.allowed). The number of repairs holding them, or 0."""
-    if (db.get_setting("new_applications", {}) or {}).get("allowed"):
+    (setting new_applications.allowed). An allowance with a `limit` (owner 2026-10-28: "try 100 new applications")
+    lapses once that many new applications started after its `since`. The number of repairs holding them, or 0."""
+    allowance = db.get_setting("new_applications", {}) or {}
+    if allowance.get("allowed") and not (
+        allowance.get("limit") and new_applications_started(db, allowance.get("since", "")) >= int(allowance["limit"])
+    ):
         return 0
     return open_repairs(db)
 
