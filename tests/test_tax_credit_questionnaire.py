@@ -153,3 +153,9 @@ def test_the_state_of_work_is_the_postings_own(service):
 
     assert ask("Las Vegas, NV") == "Nevada"
     assert ask("Multiple Locations") == "Unsure"
+
+
+async def test_an_oracle_partner_button_named_by_its_block_is_the_launcher():
+    # Mortenson (2026-10-27): after a refused submit the launcher had no text; the scan names it by its block.
+    adapter = Oracleish(APPLY, [{"id": "take", "label": "Tax Credits", "automation_id": "", "partner": True}], "")
+    assert await adapter.launch_assessment(adapter.obs) and adapter.launched == [("take", True)]

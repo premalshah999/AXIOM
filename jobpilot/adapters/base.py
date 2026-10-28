@@ -646,7 +646,11 @@ class Adapter:
             return None
         for control in obs.get("controls", []):
             label = control["label"].strip()
-            if control.get("automation_id") == "inlineAssessmentButton" or re.fullmatch(LAUNCHER, label, re.I):
+            if (
+                control.get("automation_id") == "inlineAssessmentButton"
+                or control.get("partner")  # Oracle's inline partner button, named by its block when it has no text
+                or re.fullmatch(LAUNCHER, label, re.I)
+            ):
                 if TAX_CREDIT.search(label) or TAX_CREDIT.search(obs.get("text", "")):
                     return control
         return None
@@ -1271,6 +1275,10 @@ class Adapter:
             return await self.on_assessment()
         report = await self.fill_page()
         if isinstance(report, dict) and report.get("state"):
+            # The readback reports an untaken launcher as an incomplete required step (Mortenson, Oracle 2026-10-27):
+            # the questionnaire is taken first, whatever else the page still needs.
+            if await self.launch_assessment(await self.form.scan()):
+                return None
             return report
         obs = await self.form.scan()
         if await self.launch_assessment(obs):
