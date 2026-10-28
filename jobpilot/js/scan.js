@@ -60,7 +60,9 @@
       while (prev && (!visible(prev) || prev.matches('script,style'))) prev = prev.previousElementSibling;
       if (prev && !prev.matches('input,select,textarea,button') && !prev.querySelector('input,select,textarea,button')) {
         const t = textOf(prev);
-        if (t && t.length <= 250) return t;
+        // A long question is still the question when it ends asking one: Collier Aerospace's Rippling citizenship
+        // radio group (2026-10-27) read "field-44" behind 330 characters of context ending "...through US citizenship?".
+        if (t && (t.length <= 250 || (t.length <= 700 && /\?\s*[*✱]?\s*$/.test(t)))) return t;
       }
       node = node.parentElement;
     }

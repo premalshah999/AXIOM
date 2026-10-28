@@ -46,3 +46,26 @@ def test_the_readable_sms_choices_resolve_to_the_decline(service):
              "options": ["Yes - I consent to receiving text messages", "No - I do not consent to receiving text messages"]}
     answer = Resolver(Profile(), service.db, service.config).local(field)
     assert answer.disposition == "answer" and answer.value == "No - I do not consent to receiving text messages"
+
+
+COLLIER = """<form><div>
+<div><div><div><p>Due to the nature of our collaboration and consulting services with various secure and restricted
+  company projects, this position requires that all applicable candidates can verify they are eligible to work in the US.
+  At this time, we cannot sponsor US work visas. Can you confirm you are eligible to work in the US through US
+  citizenship?<span></span></p></div></div>
+<div data-testid="field"><div><div data-testid="customQuestions.q2" id="field-44" role="radiogroup">
+  <div data-value="Yes" role="radio" tabindex="0" aria-checked="false"><div><input aria-labelledby="label-47" type="radio"
+    value="Yes" name="customQuestions.q2"></div><div id="label-47"><p>Yes</p></div></div>
+  <div data-value="No" role="radio" tabindex="-1" aria-checked="false"><div><input aria-labelledby="label-48" type="radio"
+    value="No" name="customQuestions.q2"></div><div id="label-48"><p>No</p></div></div>
+</div></div></div></div></form>"""
+
+
+async def test_a_long_question_before_a_rippling_radio_group_is_its_label(page):
+    """Collier Aerospace (Rippling, 2026-10-27): the custom question's text is 330 characters long, so the group read
+    "field-44", the engine could not answer it, and the owner was asked about "field-44"."""
+    await page.set_content(COLLIER)
+    data = await page.main_frame.evaluate(SCAN)
+    group = next(f for f in data["fields"] if f["type"] == "radiogroup")
+    assert group["label"].endswith("Can you confirm you are eligible to work in the US through US citizenship?")
+    assert group["options"] == ["Yes", "No"]
