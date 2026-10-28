@@ -2455,8 +2455,7 @@ class BrowserEngine:
             await page.goto(
                 adapter_class(found).prepare_url(url), wait_until="domcontentloaded", timeout=30000
             )
-            if found in {"icims", "workday"}:
-                self.adopt_handoff(found, url)
+            self.adopt_handoff(found, url)
             return found
         return found or ats
 
@@ -2474,6 +2473,10 @@ class BrowserEngine:
             self.job.update(url=posting, ats="workday")
         elif target == "icims":
             self.adopt_icims_portal(url or self.page.url)
+        else:
+            # The observed ATS owns the account and verification mail. Keeping
+            # a short-link host here selects that host's unrelated sender rule.
+            self.job.update(url=url or self.page.url, ats=target)
 
     def adopt_icims_portal(self, url):
         """A career site that hands off to its iCIMS portal (Planview's careers.planview.com/jobs/5080 opened

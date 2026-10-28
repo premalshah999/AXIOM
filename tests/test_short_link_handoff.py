@@ -45,3 +45,19 @@ async def test_embedded_workday_link_adopts_the_observed_employer_tenant(monkeyp
     assert engine.job is original
     assert engine.job['url'] == POSTING
     assert engine.handoff_origin == 'https://amat.wd1.myworkdayjobs.com'
+
+
+async def test_avature_redirect_rekeys_the_shared_mail_identity():
+    engine = BrowserEngine.__new__(BrowserEngine)
+    engine.job = {'id': 'j', 'url': 'https://short.example.test/job/1', 'ats': 'custom'}
+    original = engine.job
+    portal = 'https://example.avature.net/en_US/careers/JobApplication?pipelineId=42'
+    engine.page = SimpleNamespace(url=portal)
+    engine.emit = lambda *a, **k: None
+    assert await engine.detect_ats(engine.page, 'custom') == 'avature'
+    assert original == {'id': 'j', 'url': portal, 'ats': 'avature'}
+    from jobpilot.adapters.base import Adapter
+    adapter = Adapter.__new__(Adapter)
+    adapter.e = SimpleNamespace(job=original)
+    adapter.job = original
+    assert adapter.mail_job('password_reset')['url'] == portal

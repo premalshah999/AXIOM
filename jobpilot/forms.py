@@ -1475,6 +1475,18 @@ class FormSession:
         # from Workday, 2026-10-23): the page hides its questions behind it, the scan found no fields and the run
         # stalled twice. A dialog with no fields whose only action is an acknowledgement is acknowledged, then rescanned.
         ack = self.acknowledgement_only(meta)
+        if meta["dialogs"] and not ack:
+            active_dialog = meta["dialogs"][-1]
+            summary = {
+                "title": active_dialog.get("title", "")[:120],
+                "field_count": len(active_dialog.get("field_ids", [])),
+                "controls": [b["label"][:80] for b in self.buttons.values()
+                             if b["id"] in active_dialog.get("control_ids", [])],
+                "protected_wording": bool(INFORMATIONAL_DIALOG_REFUSES.search(active_dialog.get("text", ""))),
+            }
+            if summary != getattr(self, "_last_dialog_block", None):
+                self._last_dialog_block = summary
+                self.emit("dialog_acknowledgement", "Dialog needs an explicit action", summary)
         acknowledgements = getattr(self, "_acknowledgements", {})
         self._acknowledgements = acknowledgements
         # A new document or dialog has its own bounded acknowledgement budget.
@@ -1486,6 +1498,8 @@ class FormSession:
                 armed = await self.page.evaluate("Boolean(window.__jpArmed)")  # after the submit it may be the receipt
             except PlaywrightError:
                 armed = True
+            if armed:
+                self.emit("dialog_acknowledgement", "Preserved the dialog after the page was armed for submission")
             ack = None if armed else ack
         if ack:
             acknowledgements[ack] = acknowledgements.get(ack, 0) + 1

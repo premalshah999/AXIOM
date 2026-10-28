@@ -2227,7 +2227,7 @@ class Adapter:
         text = " ".join([obs.get("text", ""), *obs.get("headings", [])])
         if self.attempts["first_time"] or not FIRST_TIME.search(text):
             return False
-        await self.form.scan()
+        current = await self.form.scan()
         resume_fields = getattr(self.form, "resume_fields", None)
         uploads = [f for f in (resume_fields() if resume_fields else []) if f.get("widget") != "filechooser"]
         path = getattr(self.form, "resume_path", None)
@@ -2239,6 +2239,18 @@ class Adapter:
             self.accounts.mark(url, "no_account", self.accounts.saved(url) or credentials)
         self.emit("account", "This site starts a new candidate's application with a resume upload beside its sign-in; "
                   "uploading the resume there")
+        # Some registration pages expose the file input while its panel and
+        # Continue action are still hidden. Choose the observed local-file
+        # route before attaching; setting the input alone cannot open it.
+        local_upload = [c for c in current.get("controls", []) if re.fullmatch(
+            r"(?:my computer|from (?:my |your )?computer|upload (?:a |your )?resume)", c["label"].strip(), re.I
+        )]
+        if len(local_upload) == 1:
+            await self.form.locator(local_upload[0]["id"]).click(timeout=4000)
+            await self.form.scan()
+            uploads = [f for f in resume_fields() if f.get("widget") != "filechooser"]
+            if len(uploads) != 1:
+                return False
         await self.form.locator(uploads[0]["id"]).set_input_files(str(path), timeout=15000)
         await self.form.wait_upload()
         self.form.uploaded = True

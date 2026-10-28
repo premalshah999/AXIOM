@@ -112,3 +112,17 @@ async def test_legacy_unused_create_flag_does_not_block_resume_first_route(servi
     upload.assert_awaited_once()
     value.switch.assert_not_awaited()
     recover.assert_not_awaited()
+
+
+async def test_local_upload_panel_is_opened_before_attaching_resume(service, monkeypatch):
+    obs = page()
+    obs['controls'].append({'id': 'local', 'label': 'My Computer', 'aria_label': '', 'automation_id': '', 'href': ''})
+    value, upload, recover = sign_in(service, monkeypatch, obs)
+    original = value.e.form.locator
+    opened = AsyncMock()
+    value.e.form.locator = lambda key: SimpleNamespace(click=opened) if key == 'local' else original(key)
+    value.e.form.scan = AsyncMock(return_value=obs)
+    value.find_next = lambda _: None
+    assert await value.first_time_route(obs, URL, LOGIN)
+    opened.assert_awaited_once_with(timeout=4000)
+    upload.assert_awaited_once()
