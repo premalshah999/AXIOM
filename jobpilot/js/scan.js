@@ -205,6 +205,21 @@
     const header=textOf(first);
     return header && header.length<=160 ? header : '';
   };
+  // A career site's own search box: one text box whose only buttons search ("Search now"). TikTok's job page
+  // (2026-10-27) shows "Discover a career that energizes and excites you every day." beside "Search now" under its
+  // Apply button; read as an application question, the job page became a form with no way forward.
+  const searchBox = el => {
+    if (!(el.tagName === 'INPUT' && /^(?:text|search|)$/i.test(el.getAttribute('type') || ''))) return false;
+    for (let box = el.parentElement, depth = 0; box && depth < 4; box = box.parentElement, depth++) {
+      const actions = [...box.querySelectorAll('button,[role=button],input[type=submit]')].filter(visible);
+      if (!actions.length) continue;
+      const inputs = [...box.querySelectorAll('input,select,textarea')].filter(visible)
+        .filter(e => !['hidden','submit','button'].includes((e.type || '').toLowerCase()));
+      return inputs.length === 1 && actions.every(b => /^(?:search(?: now| jobs)?|find jobs)$/i
+        .test(clean(b.innerText || b.value || b.getAttribute('aria-label') || '')));
+    }
+    return false;
+  };
   const historyMemo = new WeakMap();
   const historyRow = el => {
     for(let p=parentOf(el),depth=0;p && depth<20 && p.tagName!=='BODY';p=parentOf(p),depth++) {
@@ -413,7 +428,7 @@
       valid: (f.valid ?? ((el.validity ? el.validity.valid : true) && el.getAttribute('aria-invalid') !== 'true'))
         && !error && !composedClosest(el,'spl-internal-form-field')?.hasAttribute('errorstate'),
       name: el.getAttribute('name') || '', html_id: el.id || '', automation_id: el.dataset.automationId || '',
-      placeholder: el.getAttribute('placeholder') || '', error, widget: f.widget || '',
+      placeholder: el.getAttribute('placeholder') || '', error, widget: f.widget || '', search_box: searchBox(el),
       parts: f.parts || [], accept: el.getAttribute('accept') || '', hint: clean([f.hint || '', help, description].join(' ')).slice(0,2500),
       date_format: f.date_format || '',
       members: (f.members || []).map(id),

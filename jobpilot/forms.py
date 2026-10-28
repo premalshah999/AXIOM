@@ -199,7 +199,10 @@ def site_search(field):
     required "Search for:" in the portal header, 2026-10-19/21). Read as a required application field it blocked the
     email and profile steps; it is never an application question."""
     label = str(field.get("label", "")).strip().rstrip(":").strip()
-    return field.get("type") in {"text", "search"} and bool(SITE_SEARCH.fullmatch(label))
+    if field.get("type") not in {"text", "search"}:
+        return False
+    # scan.js marks a lone text box whose only buttons search ("Search now" beside TikTok's tagline, 2026-10-27).
+    return bool(SITE_SEARCH.fullmatch(label)) or (bool(field.get("search_box")) and not field.get("required"))
 
 
 def link_companion_text(fields):
