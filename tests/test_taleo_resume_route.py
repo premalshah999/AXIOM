@@ -33,3 +33,12 @@ def test_a_parked_error_page_is_never_reopened():
     assert route_for("https://jobs.example.test/apply/404", ats="custom") is None
     assert route_for("https://jobs.example.test/error", ats="custom") is None
     assert route_for("https://jobs.example.test/apply/errors-and-omissions-analyst", ats="custom") is not None
+
+
+def test_a_smartrecruiters_one_click_step_is_never_reopened():
+    """AbbVie, Versant Media, SBT Global (2026-10-26..28): reopened at /screening after tab cleanup, the one-click form
+    had lost its applicant step and no Submit ever posted the application."""
+    screening = "https://jobs.smartrecruiters.com/oneclick-ui/company/Acme/publication/0000-1111/screening?dcr_ci=Acme"
+    assert route_for(screening, ats="smartrecruiters") is None
+    posting = "https://jobs.smartrecruiters.com/Acme/744000000000001-data-engineer"
+    assert route_for(posting, ats="smartrecruiters") == posting

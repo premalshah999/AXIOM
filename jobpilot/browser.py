@@ -1962,6 +1962,12 @@ class BrowserEngine:
             # A saved Workday step (/apply/applyManually) is not a posting. Reopened after
             # cleanup it renders blank or "does not exist", which marked live postings gone.
             return None
+        if self.job.get("ats") == "smartrecruiters" and "/oneclick-ui/" in urlsplit(state.get("url", "")).path:
+            # SmartRecruiters' one-click application keeps the applicant step (name, contact, resume) in the tab's
+            # memory. Reopened at /screening after cleanup it looked complete, yet no Submit ever posted the application
+            # (AbbVie, Versant Media, SBT Global, LLNL 2026-10-26..28: four commits each, no write, then the time
+            # budget ran out). Every confirmed SmartRecruiters run had started from the posting.
+            return None
         if re.search(r"/errors?(?:/|$)|/(?:404|not-?found|page-?not-?found)(?:/|\.|$)", urlsplit(state.get("url", "")).path, re.I):
             # The tab was parked on the site's error page (Hearst's Oracle /hcmUI/CandidateExperience/errors/404 while its
             # posting was live, 2026-10-27). Reopened, it became the entry, and "return to job" went back to the 404.
