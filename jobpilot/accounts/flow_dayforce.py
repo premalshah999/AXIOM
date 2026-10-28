@@ -271,23 +271,36 @@ class FlowDayforceMixin:
                 return False
             pairs.append((field, answer))
         frame = e.form.frames.get(pairs[0][0]["id"]) if pairs else None
+        # PeopleAdmin (NC State's jobs.ncsu.edu/user/new, 2026-10-26) asks its "Challenge Question" on the registration
+        # form itself, beside the new password: those answers are typed here and the account's Create sends them.
+        combined = bool(frame) and any(
+            f["type"] == "password" and e.form.frames.get(f["id"]) == frame for f in fields
+        )
+        if combined:
+            pairs = [(q, a) for q, a in pairs if not str(a.get("value") or "").strip()]
         # Only an identity/account page: an application's own questions never reach this shortcut.
         if (
             not pairs
             or ("security_questions", frame.url) in self.attempts
-            or not re.search(r"account|regist|sign.?up|identity|security", urlsplit(frame.url).path, re.I)
+            or not (
+                combined or re.search(r"account|regist|sign.?up|identity|security", urlsplit(frame.url).path, re.I)
+            )
         ):
             return False
-        self.attempts.add(("security_questions", frame.url))
+        if not combined:
+            self.attempts.add(("security_questions", frame.url))
         chosen, answers = set(), {}
         for question, answer in pairs:
-            observed = await e.form.inspect_control_options(question)
-            await close_picker(e.form.locator(question["id"]), frame)
-            options = [
-                o["text"]
-                for o in observed.get("options", [])
-                if o.get("text") and not o.get("disabled") and not placeholder_option(o["text"])
-            ]
+            if question["type"] == "select" and question.get("options"):
+                options = [o for o in map(str, question["options"]) if o.strip() and not placeholder_option(o)]
+            else:
+                observed = await e.form.inspect_control_options(question)
+                await close_picker(e.form.locator(question["id"]), frame)
+                options = [
+                    o["text"]
+                    for o in observed.get("options", [])
+                    if o.get("text") and not o.get("disabled") and not placeholder_option(o["text"])
+                ]
             pick = next((o for o in options if o not in chosen), None)
             if pick is None:
                 raise AccountActionError(
@@ -301,9 +314,12 @@ class FlowDayforceMixin:
             await el.fill(value)
             await el.evaluate("e=>e.blur()")
             answers[pick] = value
-        if not self.store.remember(frame.url, security_answers=answers):
+        if not self.store.remember(frame.url, create=combined, security_answers=answers):
             # The answers must outlive the run; never submit questions nobody could answer again.
             raise AccountActionError("Security answers have no account record to be saved with", "account")
+        if combined:
+            e.emit("account", "Answered the account's challenge question; the answer is saved with the account")
+            return False  # The registration's own Create sends them with the credentials.
         nexts = [
             b
             for b in obs["controls"]

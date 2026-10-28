@@ -231,9 +231,11 @@ OTHER_COUNTRY = re.compile(
 
 
 # A compensation question about pay already earned, not the applicant's expectation. "Current Salary Expectation"
-# asks the expectation (Prosidian 2026-10-25 reached the owner as "current salary").
+# asks the expectation (Prosidian 2026-10-25 reached the owner as "current salary"), and so do "current compensation
+# requirements" (Peraton's iCIMS number box, 2026-10-26, twice parked on the owner) and a "target"/"asking" salary.
 NOT_DESIRED = re.compile(
-    r"^(?!.*\b(?:expect\w*|desired)\b).*\b(?:current|previous|present|last|prior|most recent|past)\b",
+    r"^(?!.*\b(?:expect\w*|desired?|requirements?|target(?:ed|ing)?|asking|seeking)\b)"
+    r".*\b(?:current|previous|present|last|prior|most recent|past)\b",
     re.I | re.S,
 )
 

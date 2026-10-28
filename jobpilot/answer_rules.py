@@ -192,8 +192,11 @@ STOP = {"of", "the", "and", "in", "a", "an", "at", "for", "degree", "i", "am", "
 NEGATION = re.compile(r"\b(?:not|no|non|none|never|without|don't|dont|do not)\b", re.I)
 OTHER = re.compile(
     r"^\s*(?:other|others|not listed|my (?:school|university|college|degree|major) is not listed|"
-    r"(?:school|university|college|degree|major|field) not listed|prefer to self.describe|self.describe|"
-    r"other \(please specify\)|other - please specify|other: please specify)\s*$",
+    r"(?:school|university|college|degree|major|field(?: of study)?) not listed|prefer to self.describe|self.describe|"
+    r"other \(please specify\)|other - please specify|other: please specify|"
+    # Dell's Oracle major catalog (2026-10-25): "Other - Field of Study Not Listed" went to the owner.
+    r"other\s*[-–:(]\s*(?:(?:school|university|college|institution|degree|major|field(?: of study)?|program)\s+)?"
+    r"not listed\)?)\s*$",
     re.I,
 )
 

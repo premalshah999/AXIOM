@@ -93,7 +93,11 @@ SECURITY_QUESTION = re.compile(
 )
 
 
-SECURITY_ANSWER = re.compile(r"^\s*(?:security |secret )?answer(?:\s*(?:#|no\.?)?\s*\d+)?\s*\*?\s*$", re.I)
+# "Challenge Question Response" (PeopleAdmin's account form, NC State 2026-10-26).
+SECURITY_ANSWER = re.compile(
+    r"^\s*(?:(?:security|secret|challenge) )?(?:question )?(?:answer|response)(?:\s*(?:#|no\.?)?\s*\d+)?\s*\*?\s*$",
+    re.I,
+)
 
 
 GUEST = re.compile(

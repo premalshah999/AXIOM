@@ -1378,6 +1378,14 @@ class BrowserEngine:
                 else await self.detect_ats(page, job["ats"])
             )
             self.observed_ats = ats
+            if (
+                resumed
+                and ats == "icims"
+                and job["ats"] == "custom"
+                and (platform := (pending or {}).get("platform_url"))
+            ):
+                # The resumed tab is already on the portal this job's career site handed off to.
+                self.adopt_handoff("icims", platform)
             if not job["demo"] and job["ats"] == "custom" and ats != "custom":
                 # The rule built above names the career site's own domain; the platform behind it mails from its
                 # own senders.
@@ -1385,11 +1393,17 @@ class BrowserEngine:
 
                 if ats in KNOWN_SENDERS:
                     await self.service.mail.ensure_rule({**job, "ats": ats}, self.profile.email)
-                if ats in {"icims", "successfactors", "taleo"} and self.job is job:
+                    if getattr(self, "platform_url", None) == self.job["url"] and (
+                        rule := await self.service.mail.ensure_rule(self.job, self.profile.email)
+                    ):
+                        # The adopted portal's own rule: its emailed links lead to the portal, not the career site.
+                        self.email_verification.rule = rule
+                if ats in {"icims", "successfactors", "taleo"}:
                     # The platform's own rules apply to its forms (this record is the resolver's and the engine's):
                     # iCIMS refuses a current role without an end date as "Invalid Data Error", and Medpace's and
                     # America's Tire's profiles failed so while their jobs read as custom career sites (2026-10-27).
-                    job["ats"] = ats
+                    # An adopted iCIMS portal gave the engine its own copy, which already names the platform.
+                    job["ats"] = self.job["ats"] = ats
             adapters = self.use_adapters(ats)
             budget = (
                 self.config.multipage_timeout
@@ -2423,19 +2437,53 @@ class BrowserEngine:
             await page.goto(
                 adapter_class(found).prepare_url(url), wait_until="domcontentloaded", timeout=30000
             )
+            if found == "icims":
+                self.adopt_handoff(found, url)
             return found
         return found or ats
 
-    def adopt_handoff(self, target):
+    def adopt_handoff(self, target, url=None):
         """The employer's site led to this platform: its own posting becomes the run's job URL in memory (Workday's
         account, recovery and receipt checks key on it; Morgan Stanley Eightfold -> Workday was refused as "account
         origin does not match this employer"). The job row keeps the career site's URL."""
         from .mail import origin
 
-        self.handoff_origin = origin(self.page.url)
+        self.handoff_origin = origin(url or self.page.url)
         if target == "workday":
             posting = re.sub(r"/apply(?:/[^?#]*)?(?:[?#].*)?$", "", self.page.url)
             self.job = {**self.job, "url": posting, "ats": "workday"}
+        elif target == "icims":
+            self.adopt_icims_portal(url or self.page.url)
+
+    def adopt_icims_portal(self, url):
+        """A career site that hands off to its iCIMS portal (Planview's careers.planview.com/jobs/5080 opened
+        careers2-planview.icims.com; Noblis, Rivian and America's Tire alike, 2026-10-27): the portal's posting becomes
+        the run's job URL and its entry, as for Workday. Keyed by the career site, the signed-in-session checks never
+        matched the portal, the returning-candidate login and the candidate dashboard opened on the career site, and
+        "return to job" left the portal. Records saved under the career site are copied to the portal's key."""
+        from .adapters.icims import ICIMS
+
+        posting = ICIMS.posting_url(url)
+        if not posting or posting == self.job.get("url"):
+            return False
+        listing = getattr(self, "listing_url", "") or self.job["url"]
+        self.listing_url, self.platform_url = listing, posting
+        self.job = {**self.job, "url": posting, "ats": "icims"}
+        self.application_entry_url = ICIMS.prepare_url(posting)
+        profile = getattr(self, "profile", None)
+        if profile is not None and not self.job.get("demo"):
+            from .accounts import Accounts
+
+            store = Accounts(self.service, profile, posting).store
+            if store and store.adopt_listing(listing):
+                self.emit("account", "Carried the employer account saved under its career site over to its iCIMS portal")
+        if flow := getattr(self, "account_flow", None):
+            flow.store.job_url = posting
+        key = "desktop_job:" + self.job["id"]
+        if (saved := self.db.get_setting(key, {})).get("target_id"):
+            # A resumed tab skips the career site; its run adopts the same portal from here.
+            self.db.set_setting(key, {**saved, "platform_url": posting})
+        return True
 
     async def clear_platform_identity(self, page, entry_url, ats):
         """Start each iCIMS or ADP application like a browser with no stored sign-in state for that platform.
@@ -4360,17 +4408,34 @@ class BrowserEngine:
         }
         return obs
 
+    def evidence_answered(self, field):
+        """The field shows the engine's own verified, evidence-backed answer and the page accepts it."""
+        from .widgets import same_value
+
+        entry = (getattr(self.form, "ledger", None) or {}).get(field["id"]) or {}
+        answer = str(entry.get("answer") or "").strip()
+        return bool(
+            answer
+            and entry.get("verified")
+            and entry.get("evidence_ids")
+            and field.get("valid", True)
+            and not field.get("error")
+            and same_value(field, field.get("value", ""), answer)
+        )
+
     def record_help_reviews(self, proposed):
-        """Validate a field-bound request for facts without another model or page action."""
+        """Validate a field-bound request for facts without another model or page action. Returns the ids of the
+        requested fields that already hold the engine's evidence-backed answer (never asked)."""
         from collections import Counter
         from .answer_quality import SECRET
         from .continuous_agent import evidence_context
 
         form, resolver = self.form, getattr(self.form, "resolver", None)
         if self.armed or resolver is None:
-            return
+            return []
         facts, evidence, learned = evidence_context(resolver)
         counts = Counter(answer.field_id for answer in proposed)
+        answered = []
         for answer in proposed:
             field = form.fields.get(answer.field_id)
             if (
@@ -4382,6 +4447,12 @@ class BrowserEngine:
                 or AUTH.search(field["label"])
                 or SECRET.search(field["label"])
             ):
+                continue
+            if self.evidence_answered(field):
+                # Reply (Lever, 2026-10-27): three Yes/No experience questions held verified "No" answers cited to
+                # the resume, and the navigator still asked the owner "is not established". Its doubt is not a
+                # missing fact; the answer stands.
+                answered.append(field["id"])
                 continue
             packet = resolver.question_context(field)
             field_facts, field_evidence = dict(facts), dict(evidence)
@@ -4413,6 +4484,7 @@ class BrowserEngine:
                 retryable=validated.retryable,
                 supporting_facts=validated.supporting_facts,
             )
+        return answered
 
     def controller_blocker(self, reason="", *, original=None):
         """Keep real answer/control causes when an owned controller stops."""
@@ -5151,8 +5223,25 @@ class BrowserEngine:
                             "receipt": receipt,
                         }
                         return
-                    self.record_help_reviews(decision.reviews)
-                    self.result = self.controller_blocker(decision.reason)
+                    answered = self.record_help_reviews(decision.reviews)
+                    if decision.reviews and set(answered) == {r.field_id for r in decision.reviews}:
+                        # Every field named holds an evidence-backed answer: nothing to ask, keep going.
+                        self.emit(
+                            "help_declined",
+                            "The requested fields already hold evidence-backed answers; the owner is not asked",
+                            {"fields": len(answered)},
+                        )
+                        outcome = json.dumps(
+                            {
+                                "executed": False,
+                                "verified": False,
+                                "reason": "Each field named already holds the applicant's evidence-backed answer; "
+                                "the applicant is not asked about it",
+                                "next": "Continue the application; submit when the page verifies complete",
+                            }
+                        )
+                    else:
+                        self.result = self.controller_blocker(decision.reason)
             except (ValueError, PlaywrightError) as exc:
                 if self.armed:
                     self.result = {

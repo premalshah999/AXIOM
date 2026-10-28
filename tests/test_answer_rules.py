@@ -27,6 +27,10 @@ def test_other_is_found_only_when_unique():
     assert other_option(["Harvard University", "Other"]) == "Other"
     assert other_option(["My school is not listed", "Stanford"]) == "My school is not listed"
     assert other_option(["Other", "Others"]) is None
+    # Dell (Oracle, 2026-10-25): its major catalog's Other.
+    assert other_option(["Information Technology", "Other - Field of Study Not Listed"]) == (
+        "Other - Field of Study Not Listed")
+    assert other_option(["Other (Not Listed)", "Physics"]) == "Other (Not Listed)"
 
 
 def test_defaults_follow_the_profile_decline_switch_until_rules_are_saved():

@@ -502,6 +502,17 @@ class ICIMS(Adapter):
         return await super().complete_password_reset(url)
 
     @staticmethod
+    def posting_url(url):
+        """This requisition's posting on the iCIMS portal serving `url` (https://<portal>/jobs/<id>/job; the title
+        segment is optional), or None when `url` is not a portal page that names a requisition."""
+        p = urlsplit(url or "")
+        host = (p.hostname or "").lower()
+        number = re.match(r"/jobs/(\d+)(?:/|$)", p.path)
+        if p.scheme != "https" or not host.endswith(".icims.com") or host in CENTRAL_HOSTS or not number:
+            return None
+        return f"https://{p.netloc}/jobs/{number[1]}/job"
+
+    @staticmethod
     def prepare_url(url):
         p = urlsplit(url)
         if not (p.hostname or "").endswith("icims.com") or "/jobs/" not in p.path:
@@ -1096,6 +1107,19 @@ class ICIMS(Adapter):
                 continue
         return flagged
 
+    async def employer_flagged_ids(self):
+        """The scanner ids of the inputs employer_flagged marked."""
+        ids = []
+        for frame in self.page.frames:
+            try:
+                ids += await frame.evaluate(
+                    "() => [...document.querySelectorAll('[data-jp-employer-flagged]')].map(e => e.dataset.jpId)"
+                    ".filter(Boolean)"
+                )
+            except Exception:
+                continue
+        return set(ids)
+
     async def describe_refusal(self, refused, flagged):
         """One masked screenshot at the first refused field, read by the configured vision model, for the report."""
         from ..vision import available, inspect_masked
@@ -1131,6 +1155,15 @@ class ICIMS(Adapter):
         if refused and urlsplit(self.page.url).hostname not in {"login.icims.com", "login.icims.eu"}:
             flagged = await self.employer_flagged()
             self.emit("employer_refused", "The employer refused the profile", {"error": refused[:200], "flagged": flagged[:20]})
+            shorten = getattr(self.form, "shorten_refused_prose", None)
+            if callable(shorten) and self.attempts["shorten_prose"] < 2 and (ids := await self.employer_flagged_ids()):
+                # The refused boxes hold our own prose: shorter prose gets its own Submit Profile (see
+                # FormSession.shorten_refused_prose).
+                await self.form.scan()
+                if shortened := await shorten(ids):
+                    self.attempts["shorten_prose"] += 1
+                    self.attempts["create"] = min(self.attempts["create"], 1)
+                    self.emit("validation_repair", "Shortened the prose the employer refused", {"fields": shortened[:6]})
             if self.attempts["create"] >= 2:
                 # A third Submit Profile would only repeat the refusal; it is not a failed sign-in.
                 seen = await self.describe_refusal(refused, flagged)

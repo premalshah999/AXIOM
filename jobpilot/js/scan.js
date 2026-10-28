@@ -60,7 +60,9 @@
       while (prev && (!visible(prev) || prev.matches('script,style'))) prev = prev.previousElementSibling;
       if (prev && !prev.matches('input,select,textarea,button') && !prev.querySelector('input,select,textarea,button')) {
         const t = textOf(prev);
-        if (t && t.length <= 250) return t;
+        // A long question is still the question when it ends asking one: Collier Aerospace's Rippling citizenship
+        // radio group (2026-10-27) read "field-44" behind 330 characters of context ending "...through US citizenship?".
+        if (t && (t.length <= 250 || (t.length <= 700 && /\?\s*[*✱]?\s*$/.test(t)))) return t;
       }
       node = node.parentElement;
     }
@@ -525,7 +527,12 @@
     const q = label(host, { visibleFirst: true });
     const req = isReq(host, q) || host.hasAttribute('required');
     consumed.add(host);
-    push(host, { label: q, type: 'combobox', widget: 'sdf-select', required: req, options: items.map(itemText).filter(Boolean),
+    // Each item is listed twice (a light-DOM copy and the rendered one); duplicates made "Cell" ambiguous (Midco
+    // 2026-10-28). The host's items property can name choices beyond the rendered page.
+    const catalog = (Array.isArray(host.items) ? host.items : []).flatMap(i => Array.isArray(i?.items) ? i.items : [i])
+      .map(i => clean(String(i?.label ?? '')));
+    push(host, { label: q, type: 'combobox', widget: 'sdf-select', required: req,
+      options: [...new Set([...catalog, ...items.map(itemText)].filter(Boolean))],
       value, valid: !req || !!value, maxlength: -1 });
   }
 
@@ -719,6 +726,14 @@
       const proxy = byId(el, el.id + '_icimsDropdown');
       if (proxy?.matches('[role=combobox]') && visible(proxy)) continue;
     }
+    // Pinpoint (Wolverine Trading, Kenway Consulting 2026-10-27) follows each react-select with a nameless native
+    // <select> for small screens. The widget's hidden input carries the submitted value; the mirror submits nothing,
+    // was named after the section ("1.Personal Details … Apply with LinkedIn") and its readback stopped the run.
+    if (el.matches('select:not([name])')) {
+      const widget = el.previousElementSibling;
+      if (widget && [...widget.querySelectorAll('[role=combobox]')].some(visible)
+          && widget.querySelector('input[type=hidden][name]')) continue;
+    }
     const role = el.getAttribute('role');
     let type = ['combobox', 'radiogroup'].includes(role) ? role : (el.type || el.tagName.toLowerCase());
     if (el.matches('input[aria-autocomplete="list"][aria-haspopup="listbox"]')) type = 'combobox';
@@ -731,6 +746,7 @@
     let widget = '';
     let dateFormat = '';
     let dateParts = [];
+    let radioCaptionRequired = false;
     if (type === 'text' && el.matches('input')) {
       const placeholder = el.getAttribute('placeholder') || '';
       const dateClass = /(?:^|[\s_-])(?:datepicker|date-picker|input-date)(?:$|[\s_-])/i.test(el.className || '');
@@ -816,6 +832,23 @@
       // Lever wraps radios in .application-question with an .application-label (no fieldset).
       const parent = el.closest('fieldset,[role=radiogroup],.application-question');
       question = parent ? (parent.querySelector('legend,.application-label,.ashby-application-form-question-title')?.innerText || label(parent)) : '';
+      // Pinpoint (Kenway Consulting, Wolverine Trading 2026-10-27) puts every Yes/No question of a section in one
+      // <fieldset> ("3.Questions"); each question has its own <label for="…_boolean_answer"> over radios
+      // "…_boolean_answer_true"/"…_false". Named by the section legend and read as optional, the required work
+      // authorization and sponsorship answers were left blank and the server refused the application. A label whose
+      // `for` names the whole group (every member's id starts with it, or it is the group's name) is its question.
+      const groupCaption = (root.querySelectorAll ? [...root.querySelectorAll('label[for]')] : []).find(l => {
+        const f = l.getAttribute('for');
+        return f && f.length >= 3 && !group.some(x => x.id === f) && !l.contains(el)
+          && (group.every(x => x.id && x.id.startsWith(f)) || f === el.name);
+      });
+      const captionText = groupCaption && clean(textOf(groupCaption));
+      if (captionText) {
+        question = captionText;
+        const cls = n => typeof n.className === 'string' ? n.className : '';
+        radioCaptionRequired = /[*✱]/.test(captionText) || [groupCaption, ...groupCaption.querySelectorAll('*')]
+          .some(n => /required/i.test(cls(n)) && !/not[-_ ]?required|optional/i.test(cls(n)));
+      }
       if (!question || question === 'Unlabelled field' || question === parent?.id) {
         question = wrapperLabel(el) || (parent && nearby(parent)) || nearby(el.parentElement || el) || el.name || label(el);
       }
@@ -840,6 +873,16 @@
         question = el.name.replace(/^icims_f_/i, '').replace(/_/g, ' ') + ' status';
       }
       options = group.map(radioText);
+      // Pinpoint names each choice by a hidden "<question> yes" text; the choice is its own visible label ("Yes").
+      const asked = clean(question).toLowerCase();
+      if (asked.length >= 8) {
+        options = options.map((o, i) => {
+          const t = clean(o);
+          if (!t.toLowerCase().startsWith(asked) || t.length <= asked.length) return o;
+          const own = group[i].id && root.querySelector && root.querySelector('label[for="' + CSS.escape(group[i].id) + '"]');
+          return clean(own ? textOf(own) : '') || clean(t.slice(asked.length));
+        });
+      }
       // iCIMS's Forms module (Cooper Health's employment application, 2026-10-22) prints "(o) Yes (o) No" after the
       // question in one cell: each radio read its neighbour's caption, giving [question, "Yes"] or ["Yes", "Yes"],
       // and no choice matched. Readable values ("Yes"/"No") are the choices then.
@@ -999,7 +1042,7 @@
         question = t.replace(/\s*[*✱]+\s*$/, '').trim();
       }
     }
-    const req = isReq(el, question) || uploadRequired || questionRequired || (group && group.some(x => x.required || x.getAttribute('aria-required') === 'true'));
+    const req = isReq(el, question) || uploadRequired || questionRequired || radioCaptionRequired || (group && group.some(x => x.required || x.getAttribute('aria-required') === 'true'));
     push(el, { label: question, type, required: req, options, value, widget, date_format: dateFormat, parts:dateParts, members:['radio','radiogroup'].includes(type) ? group : [],
       valid: (el.validity ? el.validity.valid : true) && el.getAttribute('aria-invalid') !== 'true' });
   }
@@ -1090,7 +1133,12 @@
     .map(el => ({
       id: id(el),
       label: historyEditor(el) ? 'Select history row to reveal Edit: ' + clean(textOf(el)).slice(0,140) : clean(textOf(el) || (el.matches('sdf-button') && (textOf(el.shadowRoot?.querySelector('button') || el.querySelector('button')) || clean(el.textContent)))
-        || el.value || el.getAttribute('aria-label') || el.getAttribute('title') || ''),
+        || el.value || el.getAttribute('aria-label') || el.getAttribute('title')
+        // Oracle's refused submit left its tax-credit launcher without text (Mortenson, 2026-10-27): its block names it.
+        || (composedClosest(el, '.inline-partner') && clean(composedClosest(el, '[role=region]')?.getAttribute('aria-label') || ''))
+        || ''),
+      // Oracle's inline partner launcher ("Take Tax Credit Assessment") is shown until its assessment is completed.
+      partner: el.matches('[class*="partner-button"]') && !!composedClosest(el, '.inline-partner'),
       href: el.getAttribute('href') || '', type: historyEditor(el) ? 'history_select' : el.form ? (el.type || '') : '',
       automation_id: el.dataset.automationId || '', aria_label: el.getAttribute('aria-label') || '',
       html_id: el.id || '', section: section(el), group: groupOf(el),

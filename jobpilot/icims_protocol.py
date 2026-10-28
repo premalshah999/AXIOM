@@ -74,6 +74,27 @@ FORM_SCHOOL = {
     "schoolmajor": "Major",
     "schooldegree": "Degree",
 }
+# The Forms module's repeating employer rows (OSF HealthCare's "Application_iForm", 2026-10-27) prefix every name with a
+# 0-based row: icims_0_EmpName ... icims_4_EmpDescription, icims_2_EmpStart_Month. Captions read "EmpName", "Month" or
+# nothing, no row was a history row, and the third row's description went to the owner.
+FORM_ROW = re.compile(r"^icims_(?P<row>\d+)_(?P<name>Emp[A-Za-z]+)(?:_(?P<part>Month|Date|Year))?$")
+FORM_ROW_LABELS = {
+    "empname": "Employer Name",
+    "empadd": "Street Address",
+    "empcity": "City",
+    "empstate": "State",
+    "empzip": "Zip Code",
+    "empcountry": "Country",
+    "empphone": "Phone",
+    "emptitle": "Job Title",
+    "empsupname": "Supervisor Name",
+    "empsuptitle": "Supervisor Title",
+    "empdescription": "Description of Duties",
+    "empduties": "Description of Duties",
+    "empreasonleaving": "Reason for Leaving",
+    "empstart": "Start Date",
+    "empend": "End Date",
+}
 # Form-module dates: icims_f_<base>_Month / _Date / _Year ("Emp1From", "DateAvailableToStart").
 FORM_DATE = re.compile(r"^icims_f_(?P<base>[A-Za-z][A-Za-z0-9]*)_(?P<part>Month|Date|Year)$")
 FORM_DATE_ROW = re.compile(r"^Emp(?P<row>\d)(?P<side>From|To)$", re.I)
@@ -162,9 +183,16 @@ def apply(fields, controls, text=""):
     """Name standard iCIMS fields by protocol, in place. Other platforms' fields are untouched."""
     own = [f for f in fields if ICIMS_FRAME.search(f.get("frame_url") or "")]
     server_limits(own, text)
-    dates, form_dates = {}, {}
+    dates, form_dates, row_dates = {}, {}, {}
     for f in own:
         f["icims_name"] = name = protocol_name(f)
+        if (row := FORM_ROW.match(name)) and (key := row["name"].lower()) in FORM_ROW_LABELS:
+            f["group"] = f"Work Experience {int(row['row']) + 1}"
+            if row["part"]:
+                row_dates.setdefault((f.get("frame_url"), row["row"], key), []).append((f, row["part"]))
+            elif squash(f.get("label")) in {"", squash(name), squash(row["name"])}:
+                f["label"] = FORM_ROW_LABELS[key]  # The scan found no caption of the employer's own.
+            continue
         name_form_field(f, name)
         if form := FORM_DATE.match(name):
             form_dates.setdefault((f.get("frame_url"), f.get("group"), form["base"]), []).append((f, form["part"]))
@@ -188,6 +216,11 @@ def apply(fields, controls, text=""):
             # ("Please fill in all date fields"), so the parts are answered together or not at all.
             if caption:
                 f["label"] = f"{caption} {PART_WORD[part]}"
+            f["date_parts"] = present
+    for (_, _, key), parts in row_dates.items():
+        present = sorted(PART_WORD[part] for _, part in parts)
+        for f, part in parts:
+            f["label"] = f"{FORM_ROW_LABELS[key]} {PART_WORD[part]}"
             f["date_parts"] = present
     # A bare "Date" beside the form's e-signature is the signing date (Schwab's self-identification packet,
     # 2026-10-23: icims_f_Date_Month/Date/Year next to icims_f_signature went to the owner as "Date Year").

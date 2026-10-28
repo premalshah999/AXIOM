@@ -365,7 +365,16 @@ def fit_length(text: str, max_chars: int) -> str:
     if kept:
         return kept
     cut = text[: max_chars - 1].rsplit(" ", 1)[0].rstrip(",;:-")
+    # A cut sentence never ends on a joining word ("compliance teams, researchers, and.", America's Tire 2026-10-27).
+    while (shorter := TRAILING_JOINER.sub("", cut)) != cut:
+        cut = shorter.rstrip(",;:-")
     return cut + "."
+
+
+TRAILING_JOINER = re.compile(
+    r"\s+(?:and|or|but|nor|with|into|onto|to|of|for|the|a|an|in|on|by|as|at|from|so|that|which|while|via|over|across)$",
+    re.I,
+)
 
 
 async def write_answer(

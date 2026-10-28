@@ -57,6 +57,31 @@ class FlowGatesMixin:
             return True
         return False
 
+    async def open_create_account_form(self, obs):
+        """PeopleAdmin (NC State's jobs.ncsu.edu/user/new, 2026-10-26) shows "Create an Account" with its whole form
+        hidden behind a "Create account" link, and the navigator asked the owner about the challenge question instead
+        of opening it. A registration page with no visible password, whose one create control is that link, opens
+        it once; an employer known to hold this email's account is signed in to instead."""
+        e = self.e
+        if ("gate", "create_form") in self.attempts or any(f["type"] == "password" for f in obs["fields"]):
+            return False
+        if not any(
+            re.fullmatch(r"create (?:an? |your )?account", str(h).strip(), re.I) for h in obs.get("headings", [])
+        ):
+            return False
+        creates = [b for b in obs["controls"] if re.fullmatch(r"\s*create (?:an? |your )?account\s*", b["label"], re.I)]
+        url = getattr(e.form.page, "url", "") or ""
+        if len(creates) != 1 or getattr(self.store, "known", lambda _url: False)(url):
+            return False
+        self.attempts.add(("gate", "create_form"))
+        e.emit("account", "Opened the employer's account registration form")
+        await e.form.click(creates[0]["id"], auth_control=True)
+        settle = getattr(e.form, "settle", None)
+        if settle:
+            await settle(timeout=4)
+        e.page = e.form.page
+        return True
+
     async def open_sign_in_gate(self, obs):
         """SuccessFactors' career site answers Apply with a landing page whose only action is Sign In
         (Capgemini 2026-10-16; the navigator went back instead). Open its login once per run."""

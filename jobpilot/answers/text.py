@@ -28,7 +28,8 @@ def option_value(value, options):
     if not options:
         return None
     matches = [x for x in options if semantic_text(x) == semantic_text(str(value))]
-    if len(matches) == 1:
+    if len(set(matches)) == 1:
+        # One choice listed twice is one choice to a person (ADP's "Cell" in its light and rendered lists, 2026-10-28).
         return matches[0]
     if matches:
         return None

@@ -39,6 +39,15 @@ from .text import yes_no
 HISTORY_ROW = re.compile(r"(?:work experience|experience|education|employment|language)s?\s*\d+\b", re.I)
 
 
+# A history row's group: numbered ("Education 2", "Work Experience 1") or, on Oracle, named by its school or employer
+# ("Education at Other", HEXAWARE 2026-10-26: old answers and evidence conflicts reached its End Date Month first).
+HISTORY_GROUP = re.compile(
+    r"(?:work experience|experience|employment|education)\s*\d+|"
+    r"^\s*(?:education|experience|work experience|employment)\s+at\s+\S",
+    re.I,
+)
+
+
 class Resolver(
     DemographicRulesMixin,
     HistoryRulesMixin,
@@ -146,8 +155,8 @@ class Resolver(
         # A generic remembered "Degree" or "Field of Study" cannot answer a
         # numbered history row. The row's saved facts precede old question memory.
         row = " ".join(str(field.get(k) or "") for k in ("group", "section"))
-        if re.search(r"(?:work experience|experience|employment|education)\s*\d+", row, re.I):
-            patterns = EDUCATION if re.search(r"education\s*\d+", row, re.I) else WORK
+        if HISTORY_GROUP.search(row):
+            patterns = EDUCATION if re.match(r"\s*education\s+at\b|.*\beducation\s*\d+", row, re.I) else WORK
             if any(pattern.search(field["label"]) for pattern in patterns.values()):
                 return None
         if self.context_blockers.get(field["id"]):
@@ -449,6 +458,38 @@ class Resolver(
             return None
         return self._ans(f, value, [f"profile:work.{rows[0]}"], "The named employer's row in the work history")
 
+    def citizenship_obtained_date(self, f):
+        """The date a citizenship was obtained, for an applicant whose recorded citizenship was acquired at birth and
+        who records no other status (permanent residency, naturalization): the date of birth. Westinghouse's
+        SuccessFactors citizenship table (2026-10-27) asked the owner for "Date Obtained 1" three times."""
+        label = str(f.get("label") or "")
+        if (
+            f.get("options")
+            or not re.search(r"\b(?:citizenship|nationality)\b", label, re.I)
+            or not re.search(r"\bdate\b.{0,40}\b(?:obtained|acquired|granted)\b|\b(?:obtained|acquired)\b.{0,40}\bdate\b",
+                             label, re.I)
+            or re.search(r"\b(?:[2-9]|second|third)\b", label, re.I)  # A further row holds another status.
+        ):
+            return None
+        facts = self.profile.facts
+        births = [
+            k for k, v in facts.items()
+            if (re.search(r"(?:citizenship|nationality)_acquired$", k, re.I)
+                and re.search(r"\b(?:at|by|since|from) birth\b|\bbirthright\b", str(v), re.I))
+            or (re.search(r"(?:citizenship|nationality)_acquired_at_birth$", k, re.I) and v is True)
+        ]
+        other = any(
+            re.search(r"permanent_resid|green_card|naturali[sz]|refugee|asylee", k, re.I)
+            and (v is True or str(v).strip().casefold() in {"true", "yes"})
+            for k, v in facts.items()
+        )
+        dob = next((k for k in facts if k.casefold() in {"date_of_birth", "dob", "birth_date"} and facts[k]), None)
+        if not births or other or not dob:
+            return None
+        return self._ans(
+            f, str(facts[dob]), [f"fact:{births[0]}", f"fact:{dob}"], "Citizenship acquired at birth: the date of birth"
+        )
+
     def local(self, f):
         if answer := self.repair_override(f):
             return answer
@@ -495,6 +536,8 @@ class Resolver(
             return answer
         if answer := self.named_employer_date(f):
             return answer
+        if answer := self.citizenship_obtained_date(f):
+            return answer
         if f.get("type") == "checkbox":
             # A single checkbox's caption is a proposition, not an offered
             # answer value. Current consent/fact policy precedes old caption
@@ -521,8 +564,8 @@ class Resolver(
             return self._local(f)
         packet = self.question_context(f)
         row = " ".join(str(f.get(k) or "") for k in ("group", "section"))
-        if re.search(r"(?:work experience|experience|employment|education)\s*\d+", row, re.I):
-            patterns = EDUCATION if re.search(r"education\s*\d+", row, re.I) else WORK
+        if HISTORY_GROUP.search(row):
+            patterns = EDUCATION if re.match(r"\s*education\s+at\b|.*\beducation\s*\d+", row, re.I) else WORK
             if (
                 any(pattern.search(f["label"]) for pattern in patterns.values())
                 # The row's own location (or nothing) answers its address/region boxes, never retrieval guesses.

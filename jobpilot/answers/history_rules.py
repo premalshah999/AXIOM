@@ -426,6 +426,14 @@ class HistoryRulesMixin:
             names = [normalize(getattr(e, "school" if education else "company", "") or "") for e in entries]
             wanted = normalize(named[2])
             matches = [i for i, n in enumerate(names) if n and (n == wanted or n in wanted or wanted in n)]
+            if not matches and education:
+                from ..widgets import school_other_option
+
+                if school_other_option(named[2]):
+                    # The catalog's Other names a school it does not list (HEXAWARE's "Education at Other", Oracle
+                    # 2026-10-26: its End Date Month went to the owner). The row's own degree level identifies it.
+                    level = degree_level((f.get("history_identity") or {}).get("degree", ""))
+                    matches = [i for i, e in enumerate(entries) if level and degree_level(e.degree or "") == level]
             if len(matches) == 1:
                 row = {"kind": "education" if education else "work", "index": matches[0]}
         if not m and not row:
@@ -528,7 +536,10 @@ class HistoryRulesMixin:
                 if attr == "end" and getattr(entry, "current", False):
                     ats = self.job.get("ats")
                     # Workday's "I currently work here" box hides its end date; the box answers it there.
-                    if not ((f.get("required") and ats != "workday") or ats == "icims"):
+                    # An optional end date the page still refuses ("Enter a date after Start Date": Dallas County's
+                    # Oracle row kept a parsed end date beside its Current Job box, 2026-10-25) needs a date too.
+                    refused = bool(f.get("error")) and ats != "workday"
+                    if not ((f.get("required") and ats != "workday") or ats == "icims" or refused):
                         return Answer(
                             field_id=f["id"], disposition="skip", reason="Current role has no end date"
                         )
