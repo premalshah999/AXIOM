@@ -984,6 +984,15 @@ class Adapter:
         self.emit("email_requested", "Typed the email into the code step and requested its code")
         if challenge := await self.after_auth_click():
             return challenge
+        # ByteDance's "Get code" opens its picture puzzle ("Select 2 objects that are the same shape", 2026-10-28) and
+        # mails the code only once it is solved; the run waited for a code that was never sent.
+        solved = self.attempts["inpage_puzzle"]
+        for _ in range(4):
+            if blocked := await self.solve_inpage_puzzle():
+                return blocked
+            if self.attempts["inpage_puzzle"] != solved:
+                break
+            await asyncio.sleep(0.75)
         return True
 
     async def on_email_code(self, obs):
