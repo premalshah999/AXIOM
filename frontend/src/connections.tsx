@@ -18,6 +18,10 @@ type ConnectionField = {
   kind: "secret" | "bool" | "number" | "text";
   // Read once at startup: saved now, used after the app restarts.
   restart: boolean;
+  // A fixed choice (normal workers 4, 6 or 8; difficult mode 1 or 2).
+  options: string[];
+  // Saved but not running yet: the value the next start uses.
+  pending: string;
 };
 
 type Connections = { fields: ConnectionField[]; provider: string; model_ready: boolean };
@@ -85,10 +89,23 @@ export function ConnectionSettings() {
           ))}
         </select>
       );
+    if (f.options.length)
+      return (
+        <select
+          value={draft[f.name] ?? (f.pending || f.value)}
+          onChange={(e) => setDraft({ ...draft, [f.name]: e.target.value })}
+        >
+          {[...new Set([...f.options, f.pending || f.value].filter(Boolean))].map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+      );
     if (f.kind === "bool")
       return (
         <select
-          value={draft[f.name] ?? (f.value === "true" ? "true" : "false")}
+          value={draft[f.name] ?? ((f.pending || f.value) === "true" ? "true" : "false")}
           onChange={(e) => setDraft({ ...draft, [f.name]: e.target.value })}
         >
           <option value="true">On</option>
@@ -127,7 +144,7 @@ export function ConnectionSettings() {
   const hint = (f: ConnectionField) => (
     <>
       {f.help}{" "}
-      {f.kind === "bool" || f.name === "llm_provider" ? null : f.set ? (
+      {f.kind === "bool" || f.options.length || f.name === "llm_provider" ? null : f.set ? (
         <strong>
           {f.kind === "secret" ? `Saved ${f.value}` : `Now: ${f.value}`}
           {f.source === "env" ? " (from the .env file)" : ""}.
@@ -135,7 +152,15 @@ export function ConnectionSettings() {
       ) : (
         "Not set."
       )}
-      {f.restart && draft[f.name] !== undefined && <strong> Applies after a restart.</strong>}
+      {f.pending ? (
+        <strong>
+          {" "}
+          Running {f.kind === "bool" ? (f.value === "true" ? "on" : "off") : f.value}; saved{" "}
+          {f.kind === "bool" ? (f.pending === "true" ? "on" : "off") : f.pending}, used after a restart.
+        </strong>
+      ) : (
+        f.restart && draft[f.name] !== undefined && <strong> Applies after a restart.</strong>
+      )}
       {results[f.name] && (
         <span className={results[f.name].ok ? "ok-text" : "error-text"}> {results[f.name].message}</span>
       )}
@@ -168,6 +193,19 @@ export function ConnectionSettings() {
               <p className="muted small">{group.note}</p>
               {group.id === "Email" ? (
                 <GmailConnection />
+              ) : group.id === "Workers" ? (
+                <>
+                  <div className="form-grid">
+                    {data.fields
+                      .filter((f) => f.group === group.id)
+                      .map((f) => (
+                        <Field key={f.name} label={f.label} hint={hint(f)}>
+                          {editor(f)}
+                        </Field>
+                      ))}
+                  </div>
+                  <RestartBar pending={data.fields.some((f) => f.pending)} />
+                </>
               ) : (
                 <div className="form-grid">
                   {data.fields
@@ -194,6 +232,48 @@ export function ConnectionSettings() {
         )}
       </div>
     </section>
+  );
+}
+
+// Worker counts are sized when the app starts: saving keeps them for the next start, and this restarts now. New
+// starts pause, a final submit in progress finishes, then the app restarts on its own in under a minute.
+function RestartBar({ pending }: { pending: boolean }) {
+  const { pending: busy, run } = useAction();
+  const [restarting, setRestarting] = useState(false);
+  const restart = () =>
+    run(
+      "restart",
+      async () => {
+        await api("/system/restart", "POST");
+        setRestarting(true);
+        // Reload once the app answers again.
+        const started = Date.now();
+        const wait = async () => {
+          await new Promise((r) => setTimeout(r, 4000));
+          try {
+            await api("/runtime-health", "GET");
+            if (Date.now() - started > 8000) return location.reload();
+          } catch {
+            /* still restarting */
+          }
+          if (Date.now() - started < 180000) void wait();
+        };
+        void wait();
+      },
+      "Restarting. Running applications resume after the restart.",
+    );
+  if (!pending && !restarting) return null;
+  return (
+    <p className="callout restart-bar">
+      {restarting
+        ? "Restarting… this page reloads when the app is back (under a minute)."
+        : "New worker settings are saved. They take effect when the app restarts."}{" "}
+      {!restarting && (
+        <button className="btn sm primary" disabled={busy !== null} onClick={restart}>
+          {busy === "restart" ? "Restarting…" : "Restart now"}
+        </button>
+      )}
+    </p>
   );
 }
 

@@ -644,9 +644,9 @@ async def retry_due(service):
     if not provider_room:
         return []
     with service.db.session() as s:
-        from .pipeline_comparison import NORMAL, SPECIALIST, pool_capacity
+        from .pipeline_comparison import POOLS, SPECIALIST, pool_capacity
 
-        pools = {pool: pool_capacity(s, pool, service.config.topology) for pool in (NORMAL, SPECIALIST)}
+        pools = {pool: pool_capacity(s, pool, service.config.topology) for pool in POOLS}
         occupied = sum(pool.occupied for pool in pools.values())
         room = max(0, provider_room - occupied)
         employers = set().union(*(pool.employers for pool in pools.values()))

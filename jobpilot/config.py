@@ -17,21 +17,27 @@ MAX_SPECIALIST_WORKERS = 4
 
 @dataclass(frozen=True)
 class Topology:
-    """How many browser owners run, split into ATS workers and specialists.
+    """How many browser owners run, split into ATS workers, specialists and the custom-site worker.
 
-    Slots are numbered ATS workers 1..N, then specialists N+1..N+S (six and two by default: 1-6 and 7-8).
+    Slots are numbered ATS workers 1..N, then specialists N+1..N+S, then the custom-site worker (four, one and one by
+    default: 1-4, 5 and 6).
     """
 
     normal: int = 6
     specialist: int = 2
+    # Jobs on a site with no known ATS ("custom") run only here (owner 2026-10-28: "Custom ATS: 1 worker, can turn it
+    # off"), so their slow, unfamiliar pages never hold an ATS worker. 0: custom-site applications wait.
+    custom: int = 0
 
     @property
     def total(self) -> int:
-        return self.normal + self.specialist
+        return self.normal + self.specialist + self.custom
 
     def slot_ids(self, pool: str) -> list[int]:
         if pool == "specialist":
-            return list(range(self.normal + 1, self.total + 1))
+            return list(range(self.normal + 1, self.normal + self.specialist + 1))
+        if pool == "custom":
+            return list(range(self.normal + self.specialist + 1, self.total + 1))
         return list(range(1, self.normal + 1))
 
 
@@ -168,8 +174,11 @@ class Settings(BaseSettings):
     mail_durable_wait_seconds: int = Field(default=1200, ge=300, le=1800)
     # Worker topology (docs/INFRA.md). ATS workers take every new application and run that platform's own flow. Specialists
     # take difficult or already-failed ones (the SPECIALIST_* rules below) and get a somewhat larger budget.
-    normal_workers: int = Field(default=6, ge=1, le=MAX_NORMAL_WORKERS)
-    specialist_workers: int = Field(default=2, ge=0, le=MAX_SPECIALIST_WORKERS)
+    # The web app offers 4, 6 or 8 ATS workers and 1 or 2 specialists (owner 2026-10-28); .env may set others.
+    normal_workers: int = Field(default=4, ge=1, le=MAX_NORMAL_WORKERS)
+    specialist_workers: int = Field(default=1, ge=0, le=MAX_SPECIALIST_WORKERS)
+    # One worker for jobs on custom career sites (Topology.custom); off: those applications wait.
+    custom_ats_worker: bool = True
     # Deprecated single knob for the total. While set it keeps the old implied layout (see legacy_topology).
     workers: int = Field(default=0, ge=0, le=MAX_WORKERS)
     # Wall-clock time, model calls and the per-job token cap are this many times larger on a specialist.
@@ -241,14 +250,16 @@ class Settings(BaseSettings):
                 stacklevel=2,
             )
             self.normal_workers, self.specialist_workers = layout.normal, layout.specialist
-        if self.normal_workers + self.specialist_workers > MAX_WORKERS:
-            raise ValueError(f"NORMAL_WORKERS + SPECIALIST_WORKERS may not exceed {MAX_WORKERS}")
-        self.workers = self.normal_workers + self.specialist_workers
+            if "custom_ats_worker" not in self.model_fields_set:
+                self.custom_ats_worker = False  # WORKERS keeps meaning the whole fleet.
+        if self.normal_workers + self.specialist_workers + int(self.custom_ats_worker) > MAX_WORKERS:
+            raise ValueError(f"NORMAL_WORKERS + SPECIALIST_WORKERS + the custom-site worker may not exceed {MAX_WORKERS}")
+        self.workers = self.normal_workers + self.specialist_workers + int(self.custom_ats_worker)
         return self
 
     @property
     def topology(self) -> Topology:
-        return Topology(self.normal_workers, self.specialist_workers)
+        return Topology(self.normal_workers, self.specialist_workers, int(bool(self.custom_ats_worker)))
 
     @property
     def llm_api_key(self):

@@ -3632,3 +3632,10 @@ details:not(.fold) summary {
   background: var(--raised);
   border-top: 1px solid var(--line);
 }
+.restart-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}

@@ -104,6 +104,30 @@ def router(service) -> APIRouter:
         db.set_setting("new_applications", {"allowed": data.allowed, "limit": data.limit, "since": now()})
         return get_new_applications()
 
+    @r.post("/api/system/restart")
+    async def restart():
+        """Apply startup-only settings (worker counts): stop admitting new starts, let a final submit finish, then exit
+        so the container restarts (compose restart: unless-stopped). Running drafts resume after the restart."""
+        import asyncio
+        import os
+        import time
+
+        from sqlalchemy import func, select
+
+        from ...db import Run, now
+
+        hold = "execution_v2_deployment_hold"
+        db.set_setting(hold, {"at": now(), "stage": "draining", "reason": "restart from Setup", "updated_at": now()})
+        deadline = time.monotonic() + 180
+        while time.monotonic() < deadline:
+            with db.session() as s:
+                if not s.scalar(select(func.count()).select_from(Run).where(Run.state == "submitting")):
+                    break
+            await asyncio.sleep(2)
+        db.set_setting(hold, {"at": now(), "stage": "complete", "reason": "restart from Setup", "updated_at": now()})
+        asyncio.get_running_loop().call_later(1.0, os._exit, 0)
+        return {"restarting": True}
+
     @r.put("/api/limits")
     def put_limits(data: Limits):
         from ...application_pacing import LIMIT_KEY

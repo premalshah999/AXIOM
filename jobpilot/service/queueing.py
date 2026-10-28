@@ -495,8 +495,16 @@ class QueueingMixin:
                 s.get(Run, recovery_source_run) if recovery_source_run else None
             )
             assigned_pool = worker_pool = assign_pool(s, job, pipeline_source)
+            if worker_pool == "custom" and not self.config.topology.custom:
+                raise QueueBlocked(
+                    "Applications on custom career sites are turned off (Setup › Connections › Workers); this one "
+                    "waits until the custom-site worker is on",
+                    outcome="deferred",
+                    code="custom_off",
+                    not_before=temporary_time(),
+                )
             if (
-                worker_pool != "normal"
+                worker_pool == "specialist"
                 and pool_capacity(s, worker_pool, self.config.topology).available <= 0
                 and pool_capacity(s, "normal", self.config.topology).available > 0
             ):

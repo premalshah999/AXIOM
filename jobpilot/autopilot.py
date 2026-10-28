@@ -729,9 +729,11 @@ async def tick(service):
             )
             slots = capacity(s, service.config.workers)
             occupied_slots = slots.occupied
-            from .pipeline_comparison import NORMAL, pool_capacity
+            from .pipeline_comparison import CUSTOM, NORMAL, pool_capacity
 
             normal_room = pool_capacity(s, NORMAL, service.config.topology).available
+            # Custom-site jobs take only the custom-site worker's slot (Topology.custom), never an ATS worker's.
+            custom_room = pool_capacity(s, CUSTOM, service.config.topology).available
             today = datetime.now(ZoneInfo(service.config.timezone)).date().isoformat()
             budget = s.get(Budget, today)
             available_submissions = service.config.daily_application_limit - (
@@ -756,7 +758,7 @@ async def tick(service):
         room = max(
             0,
             min(
-                normal_room,
+                normal_room + custom_room,
                 provider_room - occupied_slots,
                 batch["target"] - confirmed - active,
                 available_submissions - active,
@@ -867,12 +869,18 @@ async def tick(service):
         with db.session() as s:
             occupied_employers = set(capacity(s, service.config.workers).employers)
         queued_now = 0
+        rooms = {"custom": custom_room, "normal": normal_room}
 
         async def dispatch_ready(jobs):
             nonlocal queued_now
+            from .pipeline_comparison import custom_site
+
             for job in jobs:
                 if queued_now >= room:
                     break
+                lane = "custom" if custom_site(job) else "normal"
+                if rooms[lane] <= 0:
+                    continue  # That pool is full (or the custom-site worker is off); the other may still have room.
                 if job.get("score") is None and job["status"] != "ready":
                     continue
                 jid = job["id"]
@@ -937,6 +945,7 @@ async def tick(service):
                     considered.add(jid)
                     batch["queued"] += 1
                     queued_now += 1
+                    rooms[lane] -= 1
                     occupied_employers.add(employer)
                     deferred.pop(jid, None)
                 except (ValueError, RuntimeError) as exc:

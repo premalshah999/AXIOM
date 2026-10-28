@@ -50,13 +50,19 @@ FIELDS = {
     "daily_budget_usd": ("Limits", "AI spending per day (USD)", False, "Model calls stop for the day at this amount."),
     "max_model_calls": ("Limits", "AI calls per application", False, "A run that needs more stops and is repaired later."),
     "timezone": ("Limits", "Time zone", False, "For dates on forms and the daily limits, e.g. America/New_York."),
-    "normal_workers": ("Workers", "Application workers", False,
-                       "Applications running at once. Each uses a Chrome tab and memory. Applies after a restart."),
-    "specialist_workers": ("Workers", "Repair workers", False, "Extra workers for hard retries. Applies after a restart."),
-    "headless": ("Workers", "Hide the browser", False, "Run Chrome without a window. Applies after a restart."),
+    "normal_workers": ("Workers", "Normal workers", False,
+                       "Applications on known platforms running at once. Each uses a Chrome tab and about 0.8 GB of "
+                       "memory: 4 suits a 16 GB computer."),
+    "specialist_workers": ("Workers", "Difficult-mode workers", False,
+                           "Retries of applications that failed on a normal worker, with a larger budget."),
+    "custom_ats_worker": ("Workers", "Custom-site worker", False,
+                          "One worker for career sites with no known platform. Off: those applications wait."),
+    "headless": ("Workers", "Hide the browser", False, "Run Chrome without a window."),
 }
-# Settings read once at startup: saved here, used after the app restarts.
-RESTART = {"normal_workers", "specialist_workers", "headless"}
+# Settings read once at startup: saved here, used after the app restarts (the worker queues are sized then).
+RESTART = {"normal_workers", "specialist_workers", "custom_ats_worker", "headless"}
+# Fields the page offers as a fixed choice (owner 2026-10-28: normal 4, 6 or 8; difficult mode 1 or 2).
+OPTIONS = {"normal_workers": ["4", "6", "8"], "specialist_workers": ["1", "2"]}
 PROVIDERS = ("deepseek", "haiku", "mimo", "openai", "openrouter")
 
 
@@ -117,11 +123,14 @@ def stored(config):
     return {k: str(v) for k, v in values.items() if k in FIELDS and str(v).strip()}
 
 
-def apply(config):
-    """Lay the saved values over the environment's, remembering the environment's for status and clearing."""
+def apply(config, live=False):
+    """Lay the saved values over the environment's, remembering the environment's for status and clearing. `live`: the
+    app is running, so startup-only settings (RESTART) keep their running value until the next start."""
     env = _ENV.setdefault(id(config), {name: str(getattr(config, name, "") or "") for name in FIELDS})
     saved = stored(config)
     for name in FIELDS:
+        if live and name in RESTART:
+            continue
         value = saved.get(name, env.get(name, ""))
         if name == "llm_provider" and value not in PROVIDERS:
             value = env.get(name) or "deepseek"
@@ -130,6 +139,13 @@ def apply(config):
         except ValueError:
             value = typed(name, env[name]) if env.get(name) not in (None, "") else getattr(config, name)
         object.__setattr__(config, name, value)
+    if not live and hasattr(config, "normal_workers"):
+        # The total the validator computed before these values were laid over the environment.
+        object.__setattr__(
+            config,
+            "workers",
+            config.normal_workers + config.specialist_workers + int(bool(getattr(config, "custom_ats_worker", False))),
+        )
     return config
 
 
@@ -144,6 +160,8 @@ def save(config, updates):
             raise ValueError("Choose deepseek, haiku, mimo, openai or openrouter")
         if name == "telegram_user_id" and value and not value.lstrip("-").isdigit():
             raise ValueError("The Telegram user ID is a number (ask @userinfobot), not an @username")
+        if value and name in OPTIONS and value not in OPTIONS[name]:
+            raise ValueError(f"{FIELDS[name][1]}: choose {' or '.join(OPTIONS[name])}")
         if value:
             typed(name, value)  # Refuses a value outside the setting's type or limits before it is saved.
         if name == "application_password" and value:
@@ -162,7 +180,7 @@ def save(config, updates):
     with os.fdopen(fd, "wb") as f:
         f.write(data)
     os.replace(tmp, path)
-    return apply(config)
+    return apply(config, live=True)
 
 
 def status(config):
@@ -175,9 +193,15 @@ def status(config):
         value = ("true" if current else "false") if kind(name) == "bool" else str(current if current is not None else "")
         source = "app" if name in saved else "env" if env.get(name) else ""
         shown = ("••••" + value[-4:] if len(value) > 8 else "••••") if secret and value else value
+        pending = ""
+        if name in RESTART and (name in saved or env.get(name)):
+            # Saved, not yet running: the next start uses it.
+            want = typed(name, saved.get(name, env.get(name, "")))
+            if want != current:
+                pending = ("true" if want else "false") if kind(name) == "bool" else str(want)
         fields.append({"name": name, "group": group, "label": label, "secret": secret, "help": help_text,
                        "set": bool(value), "source": source, "value": shown, "kind": kind(name),
-                       "restart": name in RESTART})
+                       "restart": name in RESTART, "options": OPTIONS.get(name, []), "pending": pending})
     provider = str(getattr(config, "llm_provider", "deepseek"))
     return {"fields": fields, "provider": provider, "model_ready": bool(getattr(config, provider + "_api_key", ""))}
 

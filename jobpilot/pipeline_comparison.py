@@ -17,7 +17,8 @@ EXPERIMENTAL = {LEGACY, REASONING, AGENTIC}
 KEY = "pipeline_comparison"
 NORMAL = "normal"
 SPECIALIST = "specialist"
-POOLS = (NORMAL, SPECIALIST)
+CUSTOM = "custom"
+POOLS = (NORMAL, SPECIALIST, CUSTOM)
 MAX_SLOTS = MAX_WORKERS
 
 
@@ -45,8 +46,15 @@ def pool_for(run):
     return value if value in POOLS else NORMAL
 
 
+def custom_site(job):
+    """A job on a career site with no known ATS: it runs on the custom-site worker (Topology.custom)."""
+    return normalize_ats(_get(job, "ats") or "") == "custom"
+
+
 def assign_pool(session, job, source=None):
     """The durable scheduler owns eligibility; assignment itself creates no handoff."""
+    if custom_site(job):
+        return CUSTOM  # Never an ATS worker or a specialist, whatever the earlier run was given.
     packet = _packet(source)
     if packet.get("specialist_escalation", {}).get("eligible") is True:
         return SPECIALIST
@@ -174,9 +182,10 @@ def snapshot(db, limit=8, rows=None):
         workers = []
         topology = as_topology(limit)
         specialist_slots = set(topology.slot_ids(SPECIALIST))
+        custom_slots = set(topology.slot_ids(CUSTOM))
         for slot in range(1, topology.total + 1):
             owner = active.get(slot)
-            lane = SPECIALIST if slot in specialist_slots else NORMAL
+            lane = SPECIALIST if slot in specialist_slots else CUSTOM if slot in custom_slots else NORMAL
             ats = normalize_ats(owner[1].ats) if owner else "general"
             workers.append(
                 {
@@ -194,6 +203,7 @@ def snapshot(db, limit=8, rows=None):
         return {
             "normal_workers": capacities[NORMAL]["limit"],
             "specialist_workers": capacities[SPECIALIST]["limit"],
+            "custom_workers": capacities[CUSTOM]["limit"],
             "assignments": workers,
             "pools": capacities,
             "workers": workers,

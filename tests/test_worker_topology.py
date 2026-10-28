@@ -1,4 +1,5 @@
-"""Six ATS workers plus two specialists, configurable, with the legacy WORKERS number still meaning what it did."""
+"""Four ATS workers, one specialist and one custom-site worker by default (owner 2026-10-28), configurable, with the
+legacy WORKERS number still meaning the whole fleet."""
 
 import pytest
 
@@ -20,24 +21,25 @@ def settings(**values):
     return Settings(_env_file=None, **values)
 
 
-def test_default_is_six_ats_workers_and_two_specialists():
+def test_default_is_four_ats_workers_one_specialist_and_the_custom_site_worker():
     config = settings()
-    assert (config.normal_workers, config.specialist_workers, config.workers) == (6, 2, 8)
-    assert pool_slot_ids(NORMAL, config.topology) == [1, 2, 3, 4, 5, 6]
-    assert pool_slot_ids(SPECIALIST, config.topology) == [7, 8]
+    assert (config.normal_workers, config.specialist_workers, config.workers) == (4, 1, 6)
+    assert pool_slot_ids(NORMAL, config.topology) == [1, 2, 3, 4]
+    assert pool_slot_ids(SPECIALIST, config.topology) == [5]
+    assert pool_slot_ids("custom", config.topology) == [6]
 
 
 def test_the_split_is_configurable_through_the_environment(monkeypatch):
     monkeypatch.setenv("NORMAL_WORKERS", "4")
     monkeypatch.setenv("SPECIALIST_WORKERS", "1")
-    config = settings()
+    config = settings(custom_ats_worker=False)
     assert config.workers == 5
     assert pool_slot_ids(NORMAL, config.topology) == [1, 2, 3, 4]
     assert pool_slot_ids(SPECIALIST, config.topology) == [5]
 
 
 def test_specialists_can_be_switched_off():
-    config = settings(specialist_workers=0)
+    config = settings(specialist_workers=0, normal_workers=6, custom_ats_worker=False)
     assert pool_slot_ids(SPECIALIST, config.topology) == []
     assert config.workers == 6
 
