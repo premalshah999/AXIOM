@@ -502,6 +502,17 @@ class ICIMS(Adapter):
         return await super().complete_password_reset(url)
 
     @staticmethod
+    def posting_url(url):
+        """This requisition's posting on the iCIMS portal serving `url` (https://<portal>/jobs/<id>/job; the title
+        segment is optional), or None when `url` is not a portal page that names a requisition."""
+        p = urlsplit(url or "")
+        host = (p.hostname or "").lower()
+        number = re.match(r"/jobs/(\d+)(?:/|$)", p.path)
+        if p.scheme != "https" or not host.endswith(".icims.com") or host in CENTRAL_HOSTS or not number:
+            return None
+        return f"https://{p.netloc}/jobs/{number[1]}/job"
+
+    @staticmethod
     def prepare_url(url):
         p = urlsplit(url)
         if not (p.hostname or "").endswith("icims.com") or "/jobs/" not in p.path:

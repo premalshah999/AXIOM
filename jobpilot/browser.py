@@ -1378,6 +1378,14 @@ class BrowserEngine:
                 else await self.detect_ats(page, job["ats"])
             )
             self.observed_ats = ats
+            if (
+                resumed
+                and ats == "icims"
+                and job["ats"] == "custom"
+                and (platform := (pending or {}).get("platform_url"))
+            ):
+                # The resumed tab is already on the portal this job's career site handed off to.
+                self.adopt_handoff("icims", platform)
             if not job["demo"] and job["ats"] == "custom" and ats != "custom":
                 # The rule built above names the career site's own domain; the platform behind it mails from its
                 # own senders.
@@ -1385,11 +1393,17 @@ class BrowserEngine:
 
                 if ats in KNOWN_SENDERS:
                     await self.service.mail.ensure_rule({**job, "ats": ats}, self.profile.email)
-                if ats in {"icims", "successfactors", "taleo"} and self.job is job:
+                    if getattr(self, "platform_url", None) == self.job["url"] and (
+                        rule := await self.service.mail.ensure_rule(self.job, self.profile.email)
+                    ):
+                        # The adopted portal's own rule: its emailed links lead to the portal, not the career site.
+                        self.email_verification.rule = rule
+                if ats in {"icims", "successfactors", "taleo"}:
                     # The platform's own rules apply to its forms (this record is the resolver's and the engine's):
                     # iCIMS refuses a current role without an end date as "Invalid Data Error", and Medpace's and
                     # America's Tire's profiles failed so while their jobs read as custom career sites (2026-10-27).
-                    job["ats"] = ats
+                    # An adopted iCIMS portal gave the engine its own copy, which already names the platform.
+                    job["ats"] = self.job["ats"] = ats
             adapters = self.use_adapters(ats)
             budget = (
                 self.config.multipage_timeout
@@ -2417,19 +2431,53 @@ class BrowserEngine:
             await page.goto(
                 adapter_class(found).prepare_url(url), wait_until="domcontentloaded", timeout=30000
             )
+            if found == "icims":
+                self.adopt_handoff(found, url)
             return found
         return found or ats
 
-    def adopt_handoff(self, target):
+    def adopt_handoff(self, target, url=None):
         """The employer's site led to this platform: its own posting becomes the run's job URL in memory (Workday's
         account, recovery and receipt checks key on it; Morgan Stanley Eightfold -> Workday was refused as "account
         origin does not match this employer"). The job row keeps the career site's URL."""
         from .mail import origin
 
-        self.handoff_origin = origin(self.page.url)
+        self.handoff_origin = origin(url or self.page.url)
         if target == "workday":
             posting = re.sub(r"/apply(?:/[^?#]*)?(?:[?#].*)?$", "", self.page.url)
             self.job = {**self.job, "url": posting, "ats": "workday"}
+        elif target == "icims":
+            self.adopt_icims_portal(url or self.page.url)
+
+    def adopt_icims_portal(self, url):
+        """A career site that hands off to its iCIMS portal (Planview's careers.planview.com/jobs/5080 opened
+        careers2-planview.icims.com; Noblis, Rivian and America's Tire alike, 2026-10-27): the portal's posting becomes
+        the run's job URL and its entry, as for Workday. Keyed by the career site, the signed-in-session checks never
+        matched the portal, the returning-candidate login and the candidate dashboard opened on the career site, and
+        "return to job" left the portal. Records saved under the career site are copied to the portal's key."""
+        from .adapters.icims import ICIMS
+
+        posting = ICIMS.posting_url(url)
+        if not posting or posting == self.job.get("url"):
+            return False
+        listing = getattr(self, "listing_url", "") or self.job["url"]
+        self.listing_url, self.platform_url = listing, posting
+        self.job = {**self.job, "url": posting, "ats": "icims"}
+        self.application_entry_url = ICIMS.prepare_url(posting)
+        profile = getattr(self, "profile", None)
+        if profile is not None and not self.job.get("demo"):
+            from .accounts import Accounts
+
+            store = Accounts(self.service, profile, posting).store
+            if store and store.adopt_listing(listing):
+                self.emit("account", "Carried the employer account saved under its career site over to its iCIMS portal")
+        if flow := getattr(self, "account_flow", None):
+            flow.store.job_url = posting
+        key = "desktop_job:" + self.job["id"]
+        if (saved := self.db.get_setting(key, {})).get("target_id"):
+            # A resumed tab skips the career site; its run adopts the same portal from here.
+            self.db.set_setting(key, {**saved, "platform_url": posting})
+        return True
 
     async def clear_platform_identity(self, page, entry_url, ats):
         """Start each iCIMS or ADP application like a browser with no stored sign-in state for that platform.
