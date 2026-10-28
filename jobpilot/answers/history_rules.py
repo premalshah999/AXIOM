@@ -7,6 +7,7 @@ from ..knowledge import topic
 from ..schemas import Answer
 from .history import EDUCATION
 from .history import HISTORY_CONTACT
+from .history import HISTORY_PERIOD
 from .history import HISTORY_REGION
 from .history import HISTORY_UNKNOWN
 from .history import WORK
@@ -517,6 +518,14 @@ class HistoryRulesMixin:
                 reason=f"No {region[1]} is recorded for {kind} {index + 1}",
                 blocker_type="missing_fact",
             )
+        if HISTORY_PERIOD.fullmatch(re.sub(r"\s*[*✱:]+\s*$", "", f["label"].strip())) and f.get("type") == "text":
+            # One box for the row's whole period (TikTok's "Start & end date", 2026-10-28) takes both of its dates.
+            begin = month_year(entry.start) if entry.start else ""
+            close = "Present" if getattr(entry, "current", False) else (month_year(entry.end) if entry.end else "")
+            if begin and close:
+                return self._ans(
+                    f, f"{begin} - {close}", [f"profile:{kind}.{index}.start", f"profile:{kind}.{index}.end"]
+                )
         for attr, pattern in patterns.items():
             if not pattern.search(f["label"]):
                 continue

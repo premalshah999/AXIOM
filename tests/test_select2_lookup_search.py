@@ -37,7 +37,11 @@ function openMenu() {
   t.setAttribute('aria-expanded', 'true');
   t.setAttribute('aria-owns', 'select2-country-results');
   const box = drop.querySelector('input');
-  box.oninput = () => setTimeout(() => render(box.value), 150);  // the next page arrives from the server
+  box.oninput = () => {  // the next page arrives from the server, after a "Searching…" row
+    const list = document.getElementById('select2-country-results');
+    list.innerHTML = '<li role=alert aria-live=assertive class="select2-results__option loading-results">Searching…</li>';
+    setTimeout(() => render(box.value), window.searchDelay || 150);
+  };
   render('');
   box.focus();
 }
@@ -72,3 +76,40 @@ async def test_a_value_the_lookup_does_not_have_is_still_refused(page):
     with pytest.raises(ValueError):
         await widgets.combobox(page.main_frame, page.locator("#trigger"), "Atlantis", choose=AsyncMock(return_value=None))
     assert await page.locator("#shown").inner_text() == "Select an option"
+
+
+async def test_a_searching_row_is_not_the_search_result(page):
+    # Electronic Arts 2026-10-28: the "Searching…" row was read as the whole result and United States as not offered.
+    import json
+
+    await page.set_content(SELECT2 % json.dumps(COUNTRIES))
+    await page.evaluate("window.searchDelay = 1500")
+    choose = AsyncMock(return_value=None)
+    chosen = await widgets.combobox(page.main_frame, page.locator("#trigger"), "United States", choose=choose)
+    assert chosen == "United States"
+    choose.assert_not_called()
+
+
+LABELLED = """<span id=lbl>Mobile Country Code *</span>
+<select id=cc aria-hidden=true tabindex=-1 class=select2-hidden-accessible><option value=""></option>
+  <option value="us" selected>United States (+1)</option></select>
+<span class="select2 select2-container"><span class="select2-selection select2-selection--single" role=combobox
+  tabindex=0 aria-labelledby="lbl select2-cc-container"><span class=select2-selection__rendered id=select2-cc-container
+  role=textbox aria-readonly=true>United States (+1)</span></span></span>"""
+
+
+async def test_a_select2_trigger_is_not_labelled_by_its_own_choice(page):
+    from jobpilot.forms import SCAN
+
+    await page.set_content(LABELLED)
+    data = await page.main_frame.evaluate(SCAN)
+    combo = [f for f in data["fields"] if f["type"] == "combobox"]
+    assert [f["label"] for f in combo] == ["Mobile Country Code *"]
+    assert combo[0]["value"] == "United States (+1)"
+
+
+def test_a_shown_calling_code_satisfies_the_country_answer():
+    field = {"type": "combobox", "label": "Mobile Country Code *", "options": []}
+    assert widgets.same_value(field, "United States (+1)", "United States of America")
+    assert not widgets.same_value(field, "American Samoa (+1)", "United States of America")
+    assert not widgets.same_value(field, "Canada (+1)", "United States")

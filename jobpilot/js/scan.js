@@ -131,7 +131,10 @@
     }
     const aria = el.getAttribute('aria-labelledby');
     if (aria) {
-      const t = clean(aria.split(/\s+/).map(x => textOf(byId(el, x))).join(' '));
+      // A select2 trigger names its own shown choice among its labels: Electronic Arts' "Mobile Country Code" read as
+      // "Mobile Country Code * United States (+1)", a question that changed with every answer (2026-10-28).
+      const t = clean(aria.split(/\s+/).map(x => byId(el, x)).filter(n => !n?.matches?.('.select2-selection__rendered'))
+        .map(n => textOf(n)).join(' '));
       if (t) return t;
     }
     // Rippling custom questions: <span id="field-12-label"> labels the control
@@ -238,6 +241,8 @@
     }
     return false;
   };
+  // One box for a whole period ("Start & end date", "Dates of employment", "From - To").
+  const DATE_RANGE = /^(?:start\s*(?:&|and|\/|-|–)\s*end dates?|dates? of (?:employment|attendance)|employment dates|(?:time )?period|from\s*[-–]\s*to)$/i;
   const historyMemo = new WeakMap();
   const historyRow = el => {
     for(let p=parentOf(el),depth=0;p && depth<20 && p.tagName!=='BODY';p=parentOf(p),depth++) {
@@ -247,7 +252,8 @@
         const companies=labelled.filter(x=>/^(?:company(?: name)?|employer(?: name)?)$/i.test(x.label));
         const titles=labelled.filter(x=>/^(?:(?:job|position) )?title$/i.test(x.label));
         const schools=labelled.filter(x=>/^(?:school|university|college|institution)(?: name)?$/i.test(x.label));
-        const dates=labelled.filter(x=>/^(?:from|to|(?:start|end) date(?: (?:year|month))?)$/i.test(x.label));
+        // TikTok's rows (2026-10-28) date themselves with one "Start & end date" period picker.
+        const dates=labelled.filter(x=>/^(?:from|to|(?:start|end) date(?: (?:year|month))?)$/i.test(x.label) || DATE_RANGE.test(x.label));
         // A whole application can contain one history row. Its contact and
         // narrative controls must not inherit that row when climbing ancestors.
         const outsideHistory=labelled.some(x=>/first name|last name|email|phone|hiring team|message to|why (?:us|this)|cover letter/i.test(x.label));
@@ -749,7 +755,9 @@
     let radioCaptionRequired = false;
     if (type === 'text' && el.matches('input')) {
       const placeholder = el.getAttribute('placeholder') || '';
-      const dateClass = /(?:^|[\s_-])(?:datepicker|date-picker|input-date)(?:$|[\s_-])/i.test(el.className || '');
+      // A period box takes two dates ("07/2025 - 05/2026"), never one date-text value.
+      const dateClass = /(?:^|[\s_-])(?:datepicker|date-picker|input-date)(?:$|[\s_-])/i.test(el.className || '')
+        && !DATE_RANGE.test(clean(label(el)).replace(/\s*[*✱]\s*$/, ''));
       const picker = composedClosest(el,'spl-date-picker');
       if (picker?.getAttribute('type') === 'month-year' || /^(?:mm[\/.-]yyyy|yyyy[\/.-]mm)$/i.test(placeholder.trim())) {
         widget = 'date-text';
@@ -764,6 +772,26 @@
         if (!placeholder.trim() && /(?:^|[^\w\/.-])mm\s*[\/.-]\s*yyyy\b/i.test(clean(label(el)))) {
           dateFormat = 'month-year';
           dateParts = [{kind:'month'},{kind:'year'}];
+        }
+      }
+      // A jQuery UI datepicker's own format is the one its form accepts: Axtria's JazzHR "Completion date of your
+      // highest degree (mm/yyyy)" is a yy-mm-dd picker, and the server refused "05/2026" with "Your answer must be a
+      // date" (2026-10-28). The picker's format outranks the label's.
+      let pickerFormat = '';
+      try {
+        if (el.classList.contains('hasDatepicker') && window.jQuery?.fn?.datepicker) {
+          pickerFormat = String(window.jQuery(el).datepicker('option', 'dateFormat') || '');
+        }
+      } catch (e) { pickerFormat = ''; }
+      const at = c => pickerFormat.search(new RegExp(c, 'i'));
+      if (at('y') >= 0 && at('m') >= 0) {
+        widget = 'date-text';
+        if (at('d') < 0) {
+          dateFormat = 'month-year';
+          dateParts = [{kind:'month'},{kind:'year'}];
+        } else {
+          dateFormat = at('y') < at('m') ? 'ymd' : at('d') < at('m') ? 'dmy' : 'mdy';
+          dateParts = [];
         }
       }
     }

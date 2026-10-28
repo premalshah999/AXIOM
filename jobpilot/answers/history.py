@@ -29,6 +29,13 @@ HISTORY_CONTACT = re.compile(
 
 
 HISTORY_REGION = re.compile(r"(state|province|state province|region|country)")
+# One box for a history row's whole period: "Start & end date", "Dates of employment", "From - To" (the scanner's
+# DATE_RANGE).
+HISTORY_PERIOD = re.compile(
+    r"start\s*(?:&|and|/|-|–)\s*end dates?|dates? of (?:employment|attendance)|employment dates|(?:time )?period|"
+    r"from\s*[-–]\s*to",
+    re.I,
+)
 
 
 HISTORY_UNKNOWN = "policy:history-contact-unknown"

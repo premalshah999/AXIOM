@@ -57,6 +57,10 @@ VISIBLE_OPTIONS = r"""(args) => {
     const words = text.split(' '), mid = words.length / 2;
     if (Number.isInteger(mid) && words.slice(0, mid).join(' ') === words.slice(mid).join(' ')) text = words.slice(0, mid).join(' ');
     if (!text) continue;
+    // A server search's progress row is not a choice: Electronic Arts' select2 lookups show "Searching…" until the
+    // results arrive, and that row was read as the whole result (2026-10-28).
+    if (el.matches('.loading-results,.select2-results__option--load-more')
+        || /^(?:searching|loading)(?: more(?: results)?)?\s*(?:…|\.{3})?$/i.test(text)) continue;
     el.dataset.jpOpt = el.dataset.jpOpt || ('o' + Math.random().toString(36).slice(2, 10));
     const popup = el.closest('[role=listbox],[role=menu]');
     if (popup?.id && !owners.has(popup.id)) owners.set(popup.id, controls.filter(control => {
@@ -454,6 +458,7 @@ def same_value(field, actual, expected):
     code_label = re.split(r"\s*[—–]\s*", label, maxsplit=1)
     if len(code_label) == 2 and placeholder_option(code_label[1]):
         label = code_label[0].strip()
+    label = re.sub(r"^[\s*]+|[\s*:]+$", "", str(label))  # "Mobile Country Code *": the required marker is no word
     if (
         norm(label) == "country"
         and kind == "combobox"
@@ -461,6 +466,8 @@ def same_value(field, actual, expected):
     ):
         label = "Country phone code"
     if re.fullmatch(
+        # "Mobile Country Code" (Electronic Arts' Avature registration, 2026-10-28) names the same calling code.
+        r"(?:(?:mobile|cell(?:ular)?|home|work|primary|secondary|telephone)\s+)?"
         r"(?:country(?:\s*(?:/|or)\s*(?:region|territory))?(?: phone)?|phone country) code"
         r"|l(?:ä|ae|a)ndercode|landesvorwahl|indicatif(?: du pays| pays)?|c[oó]digo de pa[ií]s|prefisso(?: internazionale)?",
         label,
@@ -1450,13 +1457,22 @@ async def dismiss_pickers(frame):
 SCHOOL_NOT_LISTED_QUERIES = ("Other", "Not Listed")
 
 
+def listed_name(offered):
+    """An option's name without the marks a catalog puts before it to sort it first: Rivian's iCIMS school list opens
+    with "*N/A" and "*Other" (2026-10-28)."""
+    marks = r"[*\u2022\u00b7\-\u2013\u2014~#<>\s]+"
+    return re.sub(rf"^{marks}|{marks}$", "", str(offered)).strip()
+
+
 def school_other_option(offered):
+    # "*Other" was not read as the list's Other, so a school missing from Rivian's catalog failed "No matching option is
+    # offered" on every pass until the run's recovery budget ran out (2026-10-28).
     return bool(
         re.fullmatch(
             r"other(?: school| institution| university| college)?(?: please specify| not listed)?|"
             r"(?:school|institution|university|college) not (?:listed|mentioned|found)|not listed|"
             r"other\s*\([^)]*(?:school|institution|university|college|list|specify)[^)]*\)",
-            str(offered).strip(),
+            listed_name(offered),
             re.I,
         )
     )
@@ -1468,7 +1484,7 @@ def employer_other_option(offered):
         re.fullmatch(
             r"other(?: employer| company| organi[sz]ation| firm)?(?: please specify| not listed)?|"
             r"(?:employer|company|organi[sz]ation|firm) not (?:listed|found|mentioned)|not listed|none of the above",
-            str(offered).strip(),
+            listed_name(offered),
             re.I,
         )
     )
@@ -2882,7 +2898,7 @@ async def combobox(
                 await box.fill("")
                 await box.press_sequentially(query, delay=12, timeout=4000)
                 found = await wait_options(
-                    frame, scope, timeout=4, query=query, owner=el, changed_from=shown, stable_for=0.6, empty_after=1.2
+                    frame, scope, timeout=6, query=query, owner=el, changed_from=shown, stable_for=0.6, empty_after=1.2
                 )
                 if found:
                     opts = found
