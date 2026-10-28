@@ -1338,6 +1338,21 @@ class ICIMS(Adapter):
             and not any(PROFILE_CREATE.fullmatch(b["label"]) for b in obs["controls"])
         )
 
+    def portal_origin(self, obs):
+        """The iCIMS portal that served this step: the frame holding its fields, else the page, else the job's host. A
+        career site can front the portal: Planview's careers.planview.com/jobs/5080 opened careers2-planview.icims.com,
+        and the returning-candidate login built on the job's host landed on careers.planview.com/careers-home/, where
+        the guided agent searched jobs and filled another posting's form (2026-10-27)."""
+        for url in [*(f.get("frame_url") for f in obs.get("fields", [])), obs.get("url")]:
+            location = urlsplit(url or "")
+            if (
+                location.scheme == "https"
+                and location.hostname not in CENTRAL_HOSTS
+                and re.match(r"/jobs/(?:\d+/|login|candidate|search)", location.path)
+            ):
+                return location
+        return urlsplit(self.job["url"])
+
     async def returning_candidate_login(self, obs):
         """The employer already holds this email (and phone): sign in through iCIMS's returning-candidate login instead of
         registering again. Eide Bailly's email step answered "The email address and phone number are already in use.
@@ -1361,10 +1376,12 @@ class ICIMS(Adapter):
             return False
         self.attempts["returning_login"] += 1
         self.accounts.mark(self.job["url"], "exists")
-        job = urlsplit(self.job["url"])
+        portal = self.portal_origin(obs)
         self.emit("account", "The employer already holds this email; signing in through its returning-candidate login")
         await self.page.goto(
-            f"{job.scheme}://{job.netloc}/jobs/login?loginOnly=1&in_iframe=1", wait_until="domcontentloaded", timeout=30000
+            f"{portal.scheme}://{portal.netloc}/jobs/login?loginOnly=1&in_iframe=1",
+            wait_until="domcontentloaded",
+            timeout=30000,
         )
         await self.form.settle(timeout=8)
         return True
