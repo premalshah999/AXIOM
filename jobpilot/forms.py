@@ -1193,6 +1193,9 @@ class FormSession:
                     "context",
                     "related_question",
                     "maxlength",
+                    # An unnumbered row's place (mark_history_rows): the quality check of this record must read the
+                    # same history entry the form wrote, not the most recent one (Belden 2026-10-27).
+                    "history_row",
                 )
                 if key in field
             }
