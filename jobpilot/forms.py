@@ -1123,6 +1123,8 @@ class FormSession:
         self.control_recoveries = {}
         self.control_choices = {}
         self.optional_picker_omissions = set()
+        # Workday history rows deleted because the employer cannot list their answer, by kind ("education").
+        self.dropped_rows = {}
         self.document_uploads = {}
         self.owner_id = uuid.uuid4().hex
         self.revision = 0
@@ -2337,6 +2339,46 @@ class FormSession:
                     await self.page.wait_for_timeout(200)
         if await el.is_checked() != checked:
             raise ValueError("Checkbox or radio selection was not accepted")
+
+    async def drop_unlisted_school_row(self, field, exc):
+        """Delete an added Workday education row whose school the employer's list does not offer (nor an Other).
+
+        The first row (the highest degree) stays and the resume carries the rest. Jefferson Health's search-only school
+        list had neither Example Technical University nor an Other entry, and every rerun stalled on that row
+        (2026-10-28)."""
+        row = re.fullmatch(r"(education) (\d+)", str(field.get("group") or "").strip(), re.I)
+        if not (
+            self.workday
+            and row
+            and int(row[2]) > 1
+            and SCHOOL_LABEL.search(field.get("label") or "")
+            and widgets.interaction_failure(exc) == "unsupported_choice"
+        ):
+            return False
+        frame = self.frames[field["id"]]
+        heading = await frame.evaluate(
+            """group => [...document.querySelectorAll('[role=group][aria-labelledby]')]
+                .map(g => g.getAttribute('aria-labelledby'))
+                .find(id => (document.getElementById(id)?.textContent || '').trim().toLowerCase() === group)""",
+            field["group"].strip().lower(),
+        )
+        if not heading:
+            return False
+        delete = frame.locator(f'[role=group][aria-labelledby="{heading}"]').get_by_role(
+            "button", name="Delete", exact=True
+        )
+        if await delete.count() != 1:
+            return False
+        await delete.click(timeout=4000)
+        await self.settle(timeout=2)
+        kind = row[1].lower()
+        self.dropped_rows[kind] = self.dropped_rows.get(kind, 0) + 1
+        self.emit(
+            "history_row_dropped",
+            "Removed an education row whose school this employer does not list",
+            {"group": field["group"], "offered": getattr(exc, "offered", None)},
+        )
+        return True
 
     async def fill(self, field, value):
         # Measure the driver: Workday history rows took ~95 s per 4-6 fields with almost no
@@ -4126,6 +4168,9 @@ class FormSession:
                                 "Left an optional picker empty after its offered choices did not support the answer",
                                 {"field": field["label"]},
                             )
+                        if field["required"] and await self.drop_unlisted_school_row(field, exc):
+                            changed = True
+                            continue
                         if field["required"]:
                             interaction = widgets.interaction_failure(exc)
                             reason = (

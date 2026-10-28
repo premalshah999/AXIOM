@@ -211,6 +211,8 @@ class Workday(Adapter):
             if not entries:
                 continue
             label = "work experience" if kind == "work" else "education"
+            # A row deleted because the employer cannot list its answer is not added again.
+            wanted = len(entries) - getattr(self.form, "dropped_rows", {}).get(kind, 0)
             for _ in range(len(entries)):
                 obs = await self.form.scan()
                 groups = {
@@ -218,7 +220,7 @@ class Workday(Adapter):
                     for f in obs["fields"]
                     if re.match(label + r" \d+$", (f["group"] or "").lower())
                 }
-                if len(groups) >= len(entries):
+                if len(groups) >= wanted:
                     break
                 add = [b for b in obs["controls"] if ADD[kind].search(b["aria_label"] or b["label"])]
                 if not add:
