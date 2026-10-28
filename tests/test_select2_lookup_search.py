@@ -104,7 +104,7 @@ async def test_a_select2_trigger_is_not_labelled_by_its_own_choice(page):
     await page.set_content(LABELLED)
     data = await page.main_frame.evaluate(SCAN)
     combo = [f for f in data["fields"] if f["type"] == "combobox"]
-    assert [f["label"] for f in combo] == ["Mobile Country Code *"]
+    assert [f["label"] for f in combo] == ["Mobile Country Code"]  # The required marker is not part of the question.
     assert combo[0]["value"] == "United States (+1)"
 
 
