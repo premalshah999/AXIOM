@@ -2059,7 +2059,15 @@ class FormSession:
                 await self.locator(control_id).evaluate(
                     r"""b => {
                       const f = b.form || b.closest('form');
-                      if (!f || f.querySelector('input[type=file]')) return false;
+                      if (!f) return false;
+                      // Upstart (2026-10-23/25): its closed Greenhouse posting led to the career site's job search, whose
+                      // talent-network form (resume, standard questions, "Please choose the category/categories" and
+                      // "location(s)") was submitted as the application. On a job search page, a form asking for
+                      // job-alert categories is a signup, whatever else it asks.
+                      if (/\/(?:jobs?[\/-])?search(?:-jobs)?\/?$|\/job-search\/?$/i.test(location.pathname)
+                        && /choose the (?:job )?categor(?:y|ies)|categor(?:y|ies)\s*\/\s*categor|job alerts?|talent (?:community|network|pool)/i
+                          .test((f.innerText || '').slice(0, 20000))) return true;
+                      if (f.querySelector('input[type=file]')) return false;
                       // Greenhouse drops the file input once the resume is attached, and Braze's application asks
                       // "join Braze's Talent Community?" (2026-10-23): a resume or a long questionnaire is the job's.
                       if (/\b(?:resume|résumé|cv)\b/i.test(f.innerText || '')
