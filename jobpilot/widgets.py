@@ -2921,15 +2921,13 @@ async def combobox(
     if not choice and school_scope:
         # Search the actual institution first. Its absence is a reason to use
         # the applicant's explicit Other preference, never another institution.
-        for query in SCHOOL_NOT_LISTED_QUERIES if editable else ("",):
-            if editable:
-                await el.fill("")
-                await el.press_sequentially(query, delay=12, timeout=4000)
-                opts = await wait_options(frame, scope, timeout=2, query=query, owner=el)
-            others = [o for o in opts if not o["disabled"] and school_other_option(o["text"])]
-            if len(others) == 1:
-                choice = others[0]
-                break
+        if editable:
+            await el.fill("")
+            await el.press_sequentially("Other", delay=12, timeout=4000)
+            opts = await wait_options(frame, scope, timeout=2, query="Other", owner=el)
+        others = [o for o in opts if not o["disabled"] and school_other_option(o["text"])]
+        if len(others) == 1:
+            choice = others[0]
     if not choice and employer_scope:
         # A fixed employer list without the applicant's employer (Goldman Sachs' Oracle "Name of Latest Employer",
         # 2026-10-18). Only its own Other / not listed choice is truthful; a similar name never is.
