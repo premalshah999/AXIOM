@@ -17,7 +17,7 @@ from playwright.async_api import Error as PlaywrightError
 from ..service import Service
 from ..accounts import Accounts
 from ..captcha_observation import ARM_JS
-from ..forms import AUTH, FINAL
+from ..forms import AUTH, FINAL, LAUNCHER, SURVEY_DONE
 from ..privacy import acknowledge_privacy_notice, dismiss_cookies
 from ..mail_errors import MailPending, code_inline_wait
 
@@ -91,6 +91,24 @@ COOKIE_NOTICE = re.compile(
     r"\bcookies?\b.{0,240}\b(?:privacy|preferences|statement|policy|consent|settings)\b|\bcookie (?:settings|preferences)\b",
     re.I | re.S,
 )
+# A tax-credit (WOTC) questionnaire the application requires: Workday's "Take Assessment" step (ADP for Rentokil,
+# TaxCreditCo for Tyson Foods), Oracle's "Tax Credits" section (EY for Community Health Systems, Deloitte for Caesars).
+# AT&T's Workday step says only "This information is for tax purposes and will not be shared with AT&T" (2026-10-27).
+TAX_CREDIT = re.compile(r"tax credit|work opportunity|\bwotc\b|\bfor tax purposes\b", re.I)
+# Its forward controls finish only that questionnaire. EY's entry page says "Take Survey" (2026-10-27), Deloitte's
+# "Agree", TaxCreditCo's last page "Submit form". Exits ("Finish later", "Save and exit") never continue it.
+ASSESSMENT_FORWARD = re.compile(
+    r"\s*(?:next|continue|submit|finish|done|complete|proceed|take|start|begin|agree|i agree|accept)\b.{0,30}", re.I
+)
+ASSESSMENT_RETURN = re.compile(r"\s*(?:return|back|go back) to (?:the |your )?(?:application|workday|job)\W*", re.I)
+ASSESSMENT_EXIT = re.compile(r"\blater\b|\bexit\b|\bcancel\b|\bquit\b|\bclose\b|\bwithout\b|\bdecline\b|\bdisagree\b", re.I)
+
+
+def question_set(obs):
+    """What a questionnaire page asks: its address and its questions (labels with their options)."""
+    return (obs.get("url", ""), tuple((f["label"], tuple(f.get("options") or [])) for f in obs.get("fields", [])))
+
+
 CLOSED = re.compile(
     r"no longer (?:accepting (?:applications)?|available|active|open)|position has been filled|"
     # Phenom (PwC 2026-10-27): "We're sorry… the job you are trying to apply for has been filled."
@@ -421,6 +439,8 @@ class Adapter:
         from ..ats import detect
         from . import REGISTRY
 
+        if self.in_assessment():
+            return None  # A questionnaire "Secured by ADP" on adp.com is not a handoff to the ADP application adapter.
         current = detect(url).id
         if current != self.id and current in REGISTRY and not self.committed:
             return current
@@ -590,7 +610,115 @@ class Adapter:
             "dialog": True,
         }
 
+    def in_assessment(self):
+        """The tab left the application for the tax-credit questionnaire its launcher opened. Any page of this ATS is the
+        application itself, even under another host of it (Workday's myworkdaysite.com)."""
+        from ..ats import detect
+
+        host = getattr(self, "assessment_from", "") or getattr(self.form, "assessment_origin", "")
+        if not host or getattr(self, "committed", False):
+            return False
+        url = self.page.url
+        if (urlsplit(url).hostname or "") == host:
+            return False
+        return self.id == "custom" or detect(url).id != self.id
+
+    def assessment_launcher(self, obs):
+        """The control that opens the tax-credit questionnaire this application requires, once per run."""
+        attempts = getattr(self, "attempts", None)
+        if getattr(self, "committed", False) or attempts is None or attempts["assessment"] >= 1:
+            return None
+        for control in obs.get("controls", []):
+            label = control["label"].strip()
+            if control.get("automation_id") == "inlineAssessmentButton" or re.fullmatch(LAUNCHER, label, re.I):
+                if TAX_CREDIT.search(label) or TAX_CREDIT.search(obs.get("text", "")):
+                    return control
+        return None
+
+    async def launch_assessment(self, obs):
+        """Open the questionnaire before the application's own submit: Rentokil's Workday answered Save and Continue
+        past an untaken one with a server error (2026-10-24), and Community Health Systems' Oracle refused Submit with
+        "This info is required" while its Tax Credits section was untaken (2026-10-28)."""
+        take = self.assessment_launcher(obs)
+        if not take:
+            return False
+        self.attempts["assessment"] += 1
+        self.assessment_from = urlsplit(self.page.url).hostname or ""
+        self.emit("assessment", "Opening the employer's tax-credit questionnaire", {"control": take["label"][:40]})
+        await self.dismiss_overlays()
+        # A launcher by its automation id or label: the run returns to this tab when a survey tab closes itself, and to
+        # this address when the questionnaire replaced the page.
+        await self.form.click(take["id"], step_control=True, launch=True)
+        await self.form.settle(timeout=6)
+        return True
+
+    async def on_assessment(self):
+        """One page of the tax-credit questionnaire: fill it from the profile, then its own Next/Submit/Finish."""
+        self.attempts["assessment_pages"] += 1
+        if self.attempts["assessment_pages"] > 40:
+            return {
+                "state": "waiting_browser",
+                "reason": "The tax-credit questionnaire did not return to the application",
+                "blocker_type": "control_failure",
+                "recovery_cause": "control_observation",
+            }
+        before = await self.form.scan()
+        report = await self.fill_page()
+        if isinstance(report, dict) and report.get("state"):
+            return report
+        obs = await self.form.scan()
+        controls = [c for c in obs["controls"] if not ASSESSMENT_EXIT.search(c["label"])]
+        forward = next((c for c in controls if ASSESSMENT_FORWARD.fullmatch(c["label"].strip())), None) or next(
+            (c for c in controls if ASSESSMENT_RETURN.fullmatch(c["label"].strip())), None
+        )
+        if not forward and question_set(obs) != question_set(before):
+            # An answer that posts the page back moves the questionnaire on by itself: MAXIMUS's survey loads its next
+            # question when a radio is clicked and never shows Next (Allison Transmission, PepsiCo 2026-10-25).
+            self.emit("assessment", "The questionnaire moved to its next question")
+            return None
+        if not forward and not obs["fields"] and SURVEY_DONE.search(obs.get("text", "")):
+            # Finished on its own host ("Thank you ... you may close this window"): back to the application.
+            if await self.form.return_from_questionnaire():
+                return None
+        if not forward:
+            return {"fallback": True, "reason": "No way forward in the tax-credit questionnaire"}
+        self.emit("assessment", "Continuing the tax-credit questionnaire", {"control": forward["label"][:40]})
+        # Not the application's submit: the tab is on the questionnaire's own host, which classify_page and commit
+        # never treat as the application. Its "Submit form" passes the page guard like an account control.
+        await self.dismiss_overlays()
+        try:
+            await self.form.click(forward["id"], auth_control=True, step_control=True)
+            await self.form.settle(timeout=6)
+        except PlaywrightError:
+            if not self.form.page.is_closed():
+                raise
+        if self.form.page.is_closed():
+            # TaxCreditCo closes its own tab after the final submit (Tyson Foods 2026-10-24).
+            await self.form.return_to_opener()
+            await self.form.settle(timeout=6)
+        return None
+
+    async def intermediate_submit(self):
+        """The guided flow's submit while the questionnaire is open finishes the questionnaire, not the application.
+        Tyson Foods (2026-10-24): it committed on the questionnaire's "Submit form", the survey tab closed, and the
+        unsubmitted application was recorded as an unverifiable submission."""
+        import json
+
+        if not self.in_assessment():
+            return None
+        result = await self.on_assessment()
+        outcome = {"executed": result is None, "intermediate_step": True, "label": "tax-credit questionnaire"}
+        if isinstance(result, dict):
+            outcome["reason"] = str(result.get("reason", ""))[:200]
+            if result.get("state"):
+                # A terminal outcome (questions for the owner, the page limit) ends the run like any other; the guided
+                # flow stops on the engine's result at its next step.
+                self.e.result = result
+        return json.dumps(outcome)
+
     def classify_page(self, obs):
+        if self.in_assessment():
+            return Step.FORM  # Its Submit and thank-you page belong to the questionnaire, never the application.
         text = obs["text"]
         fields = self.app_fields(obs)
         passwords = [f for f in obs["fields"] if f["type"] == "password"]
@@ -1114,10 +1242,14 @@ class Adapter:
     async def on_form(self, obs):
         from ..browser_contracts import semantic_state
 
+        if self.in_assessment():
+            return await self.on_assessment()
         report = await self.fill_page()
         if isinstance(report, dict) and report.get("state"):
             return report
         obs = await self.form.scan()
+        if await self.launch_assessment(obs):
+            return None
         # authenticate() hands over application forms that embed account fields; those classify as account steps
         # (iCIMS's candidate profile: password boxes beside the resume and name fields, saved by Submit Profile).
         # Only those two steps extend what this handler owns: a page that became an emailed-code step, a review or a

@@ -25,6 +25,8 @@ class Oracle(Adapter):
     next_ids = ("apply-flow-next", "next-button")
 
     async def on_form(self, obs):
+        if self.in_assessment():
+            return await self.on_assessment()
         saved_resume = self.page.locator(".attachment-upload-button__filled").filter(
             has=self.page.get_by_role("button", name=re.compile(r"^Remove Resume$", re.I))
         )

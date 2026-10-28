@@ -198,7 +198,10 @@ class ValidateMixin:
             # past employers supports only a question about the applicant's own past employment, and never a Yes.
             valid_evidence = False
         if any("date_of_birth" in x or x.endswith(":dob") for x in a.evidence_ids) and not re.search(
-            r"birth|\bdob\b|\bborn\b|\bage\b|citizenship|nationality|permanent residency|year acquired", field["label"], re.I
+            r"birth|\bdob\b|\bborn\b|\bages?\b|years? old|years of age|citizenship|nationality|permanent residency|"
+            r"year acquired",
+            field["label"],
+            re.I,
         ):
             # The applicant's date of birth answered a bare "Date:" (a signature date) and, saved, every "End Date"
             # (Supermicro, Cintas 2026-10-27). It answers only a question about birth or age.

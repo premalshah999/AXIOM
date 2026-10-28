@@ -83,6 +83,48 @@ CONTRACT_END = re.compile(
     re.I,
 )
 
+# An age-threshold question: Deloitte's tax-credit questionnaire asks "Are you under the age of 40?" (Caesars, 2026-10-27).
+AGE_FILLER = re.compile(
+    r"\b(?:are|is|you|your|the|applicant|candidate|currently|now|age|ages|of|years?|old|or|and|than|at|least|between|"
+    r"under|over|younger|older|less|more|above|below|to)\b|\d+|[^\w]+",
+    re.I,
+)
+
+
+def age_threshold(label, age):
+    """True/False for a question that asks only whether the applicant's age passes a threshold, else None."""
+    text = str(label or "").lower()
+    if not re.search(r"\bages?\b|\byears? old\b|\byears of age\b", text) or AGE_FILLER.sub("", text).strip():
+        return None  # Not about age, or more than age ("... and live in an Empowerment Zone?").
+    if len(re.findall(r"\d{1,2}", text)) > 1 and "between" not in text:
+        return None  # Two thresholds ("under 18 or over 65") are two questions.
+    if m := re.search(r"\bbetween (?:the ages? of )?(\d{1,2}) (?:and|to) (\d{1,2})\b", text):
+        return int(m[1]) <= age <= int(m[2])
+    if m := re.search(r"\b(?:under|younger than|less than|below)(?: the)?(?: ages?(?: of)?)? (\d{1,2})\b", text):
+        return age < int(m[1])
+    if m := re.search(r"\b(\d{1,2})(?: years)?(?: old| of age)? or (older|over|above|younger|under)\b", text):
+        return age >= int(m[1]) if m[2] in {"older", "over", "above"} else age <= int(m[1])
+    if m := re.search(r"\b(?:over|older than|more than|above|at least)(?: the)?(?: ages?(?: of)?)? (\d{1,2})\b", text):
+        return age >= int(m[1])
+    return None
+
+
+def applicant_age(facts, today=None):
+    """(age in years, evidence) from the recorded date of birth, else the recorded age."""
+    born = str((facts or {}).get("date_of_birth") or "").strip()
+    match = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4})", born) or re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", born)
+    if match:
+        if "/" in born:
+            month, day, year = (int(x) for x in match.groups())
+        else:
+            year, month, day = (int(x) for x in match.groups())
+        today = today or datetime.now().date()
+        return today.year - year - ((today.month, today.day) < (month, day)), "fact:date_of_birth"
+    age = (facts or {}).get("age")
+    if isinstance(age, int) or (isinstance(age, str) and age.strip().isdigit()):
+        return int(age), "fact:age"
+    return None, None
+
 
 class LocalRulesMixin:
     def _local(self, f):
@@ -412,6 +454,11 @@ class LocalRulesMixin:
                         return self._ans(f, choice, ["fact:" + fact])
                     if not options and f.get("type") != "checkbox":
                         return self._ans(f, "No", ["fact:" + fact])
+        yes_no_options = {str(o).strip().casefold(): o for o in options}
+        if {"yes", "no"} <= set(yes_no_options) and len(yes_no_options) <= 3:
+            age, source = applicant_age(p.facts)
+            if age is not None and (passes := age_threshold(label, age)) is not None:
+                return self._ans(f, yes_no_options["yes" if passes else "no"], [source])
         if re.fullmatch(r"(?:your )?age(?: in years)?|how old are you", label) and "age" in p.facts:
             return self._ans(f, p.facts["age"], ["fact:age"])
         if (

@@ -1213,6 +1213,38 @@ class FormSession:
             )
             return report
 
+    def on_questionnaire(self):
+        """The page is the tax-credit questionnaire a launcher opened: another host than the application's, and not
+        another host of the same ATS."""
+        from .ats import detect
+
+        origin = getattr(self, "assessment_origin", "")
+        try:
+            url = self.page.url
+        except Exception:
+            return False
+        host = urlsplit(url or "").hostname or ""
+        if not origin or not host or host == origin:
+            return False
+        application = detect("https://" + origin + "/").id
+        return application == "custom" or detect(url).id != application
+
+    async def return_from_questionnaire(self):
+        """Back to the application once the questionnaire is finished: its tab, or the address it replaced."""
+        if getattr(self, "openers", None):
+            return await self.return_to_opener()
+        url = getattr(self, "assessment_return", "")
+        if not url or not self.on_questionnaire():
+            return False
+        await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        self.emit("survey_returned", "Returned to the application after the tax-credit questionnaire")
+        await self.settle(timeout=8)
+        try:
+            await self.fill_current()
+        except Exception:
+            pass  # The owned navigator observes and repairs anything still incomplete.
+        return True
+
     async def return_to_opener(self):
         """Back to the application tab once a launched survey tab is closed or finished."""
         openers = getattr(self, "openers", [])
@@ -4964,6 +4996,11 @@ class FormSession:
                     control_id, button = matches[0]["id"], matches[0]
         if not button:
             raise ValueError("Control is stale; inspect again")
+        if self.on_questionnaire():
+            # The tab is on the tax-credit questionnaire its launcher opened; nothing on that host is the application.
+            # EY's "Take Survey" (Community Health Systems on Oracle, 2026-10-28) was refused here as a possible
+            # submission five times, and the required Tax Credits section kept the application from submitting.
+            auth_control = True
         if re.fullmatch(
             r"(?:explore|view|browse|search|see)(?: all| available)? jobs(?: emphasized)?|careers home|job search|create (?:job )?alert",
             button["label"].strip(),
@@ -5080,6 +5117,11 @@ class FormSession:
         opener.on("popup", on_popup)
         el = self.locator(control_id)
         launcher = launch or bool(re.fullmatch(LAUNCHER, button["label"], re.IGNORECASE))
+        if launcher and not self.on_questionnaire():
+            # Where the application is: Oracle's partner button replaces this page with the questionnaire (EY, Deloitte),
+            # Workday's may open it in a tab. Either way the run comes back here when it is finished.
+            self.assessment_origin = urlsplit(opener.url).hostname or ""
+            self.assessment_return = opener.url
         # A "Submit" that this guard allowed for a profile/account popup or a tax-credit
         # launcher must also pass the page's own click guard, or the click is silently
         # cancelled (Starbucks "Create your profile": the agent clicked Submit for minutes).
@@ -5204,6 +5246,15 @@ class FormSession:
         ):
             await self.return_to_opener()
             await self.settle(timeout=8)
+            after = await self.scan()
+        elif (
+            self.on_questionnaire()
+            and not after["fields"]
+            and SURVEY_DONE.search(after.get("text", ""))
+            and not any(re.search(r"\b(?:take|start|begin|next|continue)\b", b["label"], re.I) for b in after["controls"])
+        ):
+            # The questionnaire replaced the application page and ended on its own thank-you page.
+            await self.return_from_questionnaire()
             after = await self.scan()
         education_saved(education_context, after)
         self.last_action = action_result("click", before, after)
