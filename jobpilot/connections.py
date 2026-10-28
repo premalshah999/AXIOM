@@ -36,6 +36,9 @@ FIELDS = {
     "openrouter_model": ("Model", "OpenRouter model", False, "Model id on openrouter.ai. Default: deepseek/deepseek-v4.1-flash-1017."),
     "openrouter_provider": ("Model", "OpenRouter host", False,
                             "Which company runs the model for OpenRouter. Prices per 1M tokens: input / output."),
+    "openrouter_fallback_hosts": ("Model", "Use other hosts when busy", False,
+                                  "When the chosen host is rate limited, OpenRouter tries the other DeepSeek hosts above "
+                                  "instead of pausing applications."),
     "vision_api_key": ("Vision", "Screenshot model key", True, "Optional. Only if your AI model cannot read images."),
     "vision_base_url": ("Vision", "Screenshot model address", False, "OpenAI-compatible base URL, e.g. https://openrouter.ai/api/v1."),
     "vision_model": ("Vision", "Screenshot model", False, "Model id at that address."),

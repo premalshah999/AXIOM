@@ -24,7 +24,7 @@ from .history import EDUCATION
 from .history import degree_level
 from .history import degree_status_options
 from .history import major_equivalent
-from .history import major_part
+from .history import major_option, major_part
 from .sources import INTENT_SOURCE
 from .sources import source_choice
 from .text import first_matching
@@ -237,7 +237,7 @@ class PolicyRulesMixin:
         entry = p.education[int(row[1]) - 1] if row and 0 < int(row[1]) <= len(p.education) else None
         if EDUCATION["field_of_study"].search(label):
             entry = entry or p.education[0]
-            if entry.field_of_study and (hit := option_value(entry.field_of_study, options)):
+            if entry.field_of_study and (hit := major_option(entry.field_of_study, options)):
                 return hit
             if entry.field_of_study and (hit := major_part(entry.field_of_study, options)):
                 return hit

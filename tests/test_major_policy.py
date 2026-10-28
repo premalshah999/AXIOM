@@ -129,3 +129,12 @@ async def test_a_catalog_without_either_major_never_lets_a_model_pick_from_its_f
     with pytest.raises(ValueError):
         await form.fill(field, "Data Science")
     assert await page.locator("[data-automation-id=selectedItem]").count() == 0
+
+
+def test_a_bare_generic_word_is_not_the_recorded_major():
+    from jobpilot.answers.history import major_option
+
+    options = ["Actuarial Science", "Computer Science", "Data Processing", "Science"]
+    assert major_option("Data Science", options) is None  # Ensemble's Workday catalog, 2026-10-28.
+    assert major_option("Data Science", [*options, "Data Science"]) == "Data Science"
+    assert major_option("Data Science", ["Data Science & Analytics", "Science"]) == "Data Science & Analytics"

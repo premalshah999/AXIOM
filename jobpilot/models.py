@@ -264,10 +264,13 @@ class MeteredTransport(httpx.AsyncBaseTransport):
             # OpenRouter's own switches: reasoning off, and only the configured host (Relace) serves the request.
             args["reasoning"] = {"enabled": False}
             if self.config.openrouter_provider:
-                args["provider"] = {
-                    "order": [self.config.openrouter_provider],
-                    "allow_fallbacks": bool(self.config.openrouter_allow_fallbacks),
-                }
+                from .config import OPENROUTER_HOSTS
+
+                order = [self.config.openrouter_provider]
+                if self.config.openrouter_fallback_hosts:
+                    # The other offered hosts of the same model, cheapest output first, only when the chosen one fails.
+                    order += sorted((h for h in OPENROUTER_HOSTS if h not in order), key=lambda h: OPENROUTER_HOSTS[h][1])
+                args["provider"] = {"order": order, "allow_fallbacks": bool(self.config.openrouter_allow_fallbacks)}
         elif self.thinking in {"enabled", "disabled"} and not use_openai:
             args["thinking"] = {"type": self.thinking}
         if self.thinking == "enabled" or anthropic or use_openai:

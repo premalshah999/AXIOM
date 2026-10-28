@@ -40,7 +40,10 @@ async def test_requests_go_to_relace_with_reasoning_off(service, monkeypatch):
     assert (await models.structured(config, service.db, Probe, "fixture", "fixture", retries=0)).ok
     host, path, body = captured[0]
     assert (host, path, body["model"]) == ("openrouter.ai", "/api/v1/chat/completions", "deepseek/deepseek-v4.1-flash-1017")
-    assert body["provider"] == {"order": ["sail-research"], "allow_fallbacks": False}
+    assert body["provider"] == {
+        "order": ["sail-research", "deepinfra", "relace", "wafer"],  # Sail first; the others only when it is busy.
+        "allow_fallbacks": False,  # Never a host outside those four.
+    }
     assert body["reasoning"] == {"enabled": False} and "thinking" not in body and "reasoning_effort" not in body
     assert "max_tokens" in body and "max_completion_tokens" not in body
 

@@ -2,7 +2,7 @@
 
 import re
 from .eligibility import US_STATES
-from .text import normalize
+from .text import normalize, option_value
 
 
 WORK = {
@@ -138,6 +138,18 @@ def major_part(recorded, options):
         o for o in options if len(words := set(normalize(str(o)).split()) - MAJOR_STOP) >= 2 and words <= have
     ]
     return hits[0] if len(hits) == 1 else None
+
+
+def major_option(recorded, options):
+    """The offered name of the recorded major. A shorter name counts only with two of its words, as in major_part:
+    Ensemble's Workday catalog lists a bare "Science", which "Data Science" matched by containment, and its search
+    never showed that row among dozens of "... Science" results (2026-10-28)."""
+    hit = option_value(recorded, options)
+    if hit is None:
+        return None
+    want = set(normalize(recorded).split()) - MAJOR_STOP
+    have = set(normalize(str(hit)).split()) - MAJOR_STOP
+    return None if have < want and len(have) < 2 else hit
 
 
 DEGREE_IN_PROGRESS = re.compile(

@@ -78,3 +78,14 @@ def test_major_equivalence_accepts_only_the_catalogs_name_for_the_same_major():
     assert major_equivalent("Computer Science", ["Computer and Information Sciences"]) == "Computer and Information Sciences"
     assert major_equivalent("Computer Science", ["Computer Science & Information Tech"]) is None
     assert major_equivalent("Computer Science", ["Computer Engineering", "Data Processing"]) is None
+
+
+async def test_a_bare_generic_name_in_the_catalog_is_not_the_recorded_major(page):
+    # Ensemble's catalog (2026-10-28) lists "Science" beside "Computer Science"; "Data Science" matched the bare word
+    # and its search never rendered that row among dozens of "... Science" results.
+    catalog = ["Accounting", "Actuarial Science", "Computer Science", "Data Processing", "Science", "Statistics"]
+    container = await open_prompt(page, catalog)
+    committed = await widgets.prompt(page.main_frame, container, ["Data Science", "Computer Science"],
+                                     choose=policy, catalog=catalog)
+    assert committed == "Computer Science"
+    assert await page.evaluate("window.SEARCHES") == ["Computer Science"]

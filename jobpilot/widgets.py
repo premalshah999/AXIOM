@@ -3251,11 +3251,13 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
     searches committed whatever single result they found ("Data" -> "Data Processing")."""
     candidates = [str(v) for v in value] if isinstance(value, (list, tuple)) else [str(value)]
     if catalog:
+        from .answers.history import major_option
+
         names = [name for name in dict.fromkeys(catalog) if name and not placeholder_option(name)]
         target = None
         for want in candidates:
             pool = [name for name in names if not school_scope or school_option_matches(want, name)]
-            if target := best_option(pool, want):
+            if target := best_option(pool, want) if school_scope else major_option(want, pool):
                 break
         if not target and choose:
             picked = await choose(names)

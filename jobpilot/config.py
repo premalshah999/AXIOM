@@ -112,6 +112,9 @@ class Settings(BaseSettings):
     openrouter_model: str = "deepseek/deepseek-v4.1-flash-1017"
     openrouter_provider: str = "sail-research"
     openrouter_allow_fallbacks: bool = False
+    # When the chosen host is busy, OpenRouter tries the other DeepSeek hosts above, cheapest output first, and nothing
+    # else: Sail Research answered 429 and every run waited out the provider cooldown (2026-10-28).
+    openrouter_fallback_hosts: bool = True
     openrouter_thinking: str = "disabled"
     openrouter_input_price: float | None = Field(default=None, ge=0)
     openrouter_output_price: float | None = Field(default=None, ge=0)
