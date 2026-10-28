@@ -199,7 +199,10 @@ def site_search(field):
     required "Search for:" in the portal header, 2026-10-19/21). Read as a required application field it blocked the
     email and profile steps; it is never an application question."""
     label = str(field.get("label", "")).strip().rstrip(":").strip()
-    return field.get("type") in {"text", "search"} and bool(SITE_SEARCH.fullmatch(label))
+    if field.get("type") not in {"text", "search"}:
+        return False
+    # scan.js marks a lone text box whose only buttons search ("Search now" beside TikTok's tagline, 2026-10-27).
+    return bool(SITE_SEARCH.fullmatch(label)) or (bool(field.get("search_box")) and not field.get("required"))
 
 
 def link_companion_text(fields):
@@ -220,6 +223,64 @@ def link_companion_text(fields):
             and parent["label"] not in field.get("label", "")
         ):
             field["label"] = f"{parent['label']} {field.get('label', '')}".strip()
+
+
+HISTORY_GROUP_NUMBER = re.compile(r"^(?:Work Experience|Education) (\d+)$")
+
+
+def regroup_history_rows(fields, profile):
+    """Give each repeated history row the profile entry its own Employer/Title (or School/Degree) already names, one
+    entry per row; every other row keeps its place.
+
+    America's Tire's iCIMS profile (2026-10-27) held five required experience rows. Row 3 still carried row 5's employer
+    and title from an earlier fill, so both rows were read as entry 5: row 3 was refilled with the same job, the third
+    job was never written, and every Submit Profile came back "Invalid Data Error" on row 3. An entry claimed by two rows
+    stays with the row in its own place; the other row is answered by position, or by the first entry no row holds."""
+    rows = {}
+    for f in fields:
+        if f.get("history_kind"):
+            identity = tuple(sorted((f.get("history_identity") or {}).items()))
+            rows.setdefault((f.get("frame_url", ""), f["history_kind"], f.get("group", ""), identity), []).append(f)
+    by_kind = {}
+    for (frame, kind, group, _), members in rows.items():
+        number = HISTORY_GROUP_NUMBER.fullmatch(group)
+        position = int(number[1]) - 1 if number else None
+        identity = {k: v for k, v in (members[0].get("history_identity") or {}).items() if v}
+        entries = getattr(profile, kind, []) or []
+        matches = [
+            i
+            for i, entry in enumerate(entries)
+            if identity and all(normalize(str(getattr(entry, k, ""))) == normalize(str(v)) for k, v in identity.items())
+        ]
+        by_kind.setdefault((frame, kind), []).append(
+            {"members": members, "position": position, "match": matches[0] if len(matches) == 1 else None}
+        )
+    for (_, kind), kind_rows in by_kind.items():
+        claimed = {}
+        # A row already in its own entry's place keeps it; then the others claim entries in page order.
+        for in_place in (True, False):
+            for row in kind_rows:
+                if row["match"] is None or row["match"] in claimed or "index" in row:
+                    continue
+                if (row["position"] == row["match"]) == in_place:
+                    claimed[row["match"]] = row
+                    row["index"] = row["match"]
+        left = [row for row in kind_rows if "index" not in row]
+        kept = {row["position"] for row in left if row["position"] is not None and row["position"] not in claimed}
+        taken = set(claimed) | kept
+        for row in left:
+            if row["position"] is None:
+                continue  # An unnumbered group is not a row place; it keeps its own name.
+            if row["position"] in kept:
+                row["index"] = row["position"]
+            else:
+                row["index"] = next(i for i in range(len(kind_rows) + len(taken) + 1) if i not in taken)
+                taken.add(row["index"])
+        for row in kind_rows:
+            if "index" in row:
+                group = ("Work Experience " if kind == "work" else "Education ") + str(row["index"] + 1)
+                for f in row["members"]:
+                    f["group"] = group
 
 
 def mark_history_rows(fields):
@@ -1271,23 +1332,6 @@ class FormSession:
                         # SAP job postings embed a required alert subscription beside Apply.
                         # Its frequency is not an applicant fact or an application field.
                         continue
-                    if kind == "fields" and item.get("history_kind"):
-                        history_kind = item["history_kind"]
-                        entries = getattr(self.resolver.profile, history_kind, [])
-                        identity = {k: v for k, v in item.get("history_identity", {}).items() if v}
-                        matches = [
-                            i
-                            for i, entry in enumerate(entries)
-                            if identity
-                            and all(
-                                normalize(str(getattr(entry, k, ""))) == normalize(str(v))
-                                for k, v in identity.items()
-                            )
-                        ]
-                        if len(matches) == 1:
-                            item["group"] = (
-                                "Work Experience " if history_kind == "work" else "Education "
-                            ) + str(matches[0] + 1)
                     if kind == "fields" and AUTH.search(item.get("label", "")) and item.get("value"):
                         # Codes and passwords never leave the page through an observation (model
                         # prompts, agent tools, traces); only that a value is present.
@@ -1357,6 +1401,8 @@ class FormSession:
                 if current := values.get(field["dom_id"]):
                     field["value"] = current["value"]
                     field["provider_combo"] = current["family"]
+        if (profile := getattr(getattr(self, "resolver", None), "profile", None)) is not None:
+            regroup_history_rows(list(self.fields.values()), profile)
         # Checkbox lists answer one question; peers give context ("I do not want to answer" -> disability).
         boxes = {}
         for f in self.fields.values():
