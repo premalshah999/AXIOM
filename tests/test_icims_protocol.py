@@ -200,3 +200,41 @@ def test_a_bare_date_beside_the_signature_is_todays_date(service):
     resolver = Resolver(Profile(), service.db, service.config)
     year = resolver.local({**fields[2], "id": "y", "options": [], "required": True})
     assert year.value == str(date.today().year)
+
+
+def test_the_forms_modules_repeating_employer_rows_are_history_rows(service):
+    """OSF HealthCare (2026-10-27): rows named icims_<row>_Emp* with captions "EmpName", "Month" or none; the third row's
+    "icims_2_EmpDescription" went to the owner although the profile holds that role's description."""
+    from jobpilot.answers import Resolver
+    from jobpilot.schemas import Profile, WorkEntry
+
+    iform = "https://example.icims.com/forms?module=Forms&action=showForm&form=Application_iForm&isPacket=1"
+    fields = []
+    for row in range(3):
+        fields += [
+            field("EmpName", f"icims_{row}_EmpName", frame_url=iform),
+            field("EmpTitle", f"icims_{row}_EmpTitle", frame_url=iform),
+            field("Month", f"icims_{row}_EmpStart_Month", type_="select", frame_url=iform),
+            field("Day", f"icims_{row}_EmpStart_Date", type_="select", frame_url=iform),
+            field("Year", f"icims_{row}_EmpStart_Year", frame_url=iform),
+            field(f"icims_{row}_EmpDescription", f"icims_{row}_EmpDescription", type_="textarea", frame_url=iform),
+            field("", f"icims_{row}_EmpReasonLeaving", type_="textarea", frame_url=iform),
+        ]
+    apply(fields, [])
+    named = {f["name"]: (f["label"], f.get("group", "")) for f in fields}
+    assert named["icims_2_EmpName"] == ("Employer Name", "Work Experience 3")
+    assert named["icims_2_EmpDescription"] == ("Description of Duties", "Work Experience 3")
+    assert named["icims_0_EmpReasonLeaving"] == ("Reason for Leaving", "Work Experience 1")
+    assert [named[f"icims_1_EmpStart_{p}"] for p in ("Month", "Date", "Year")] == [
+        ("Start Date Month", "Work Experience 2"), ("Start Date Day", "Work Experience 2"),
+        ("Start Date Year", "Work Experience 2")]
+
+    work = [WorkEntry(company=f"Acme {i}", title="Engineer", start=f"202{4 - i}-07", end=f"202{5 - i}-06",
+                      description=f"Built pipeline {i}.") for i in range(3)]
+    resolver = Resolver(Profile(work=work), service.db, service.config,
+                        job={"ats": "icims", "url": "https://example.icims.com/jobs/1/job"})
+    by_name = {f["name"]: {**f, "id": f["name"], "required": True, "options": [], "valid": True, "section": ""}
+               for f in fields}
+    description = resolver.local(by_name["icims_2_EmpDescription"])
+    assert description.value == "Built pipeline 2." and description.evidence_ids == ["profile:work.2.description"]
+    assert resolver.local(by_name["icims_2_EmpName"]).value == "Acme 2"
