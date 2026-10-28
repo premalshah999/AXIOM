@@ -547,3 +547,25 @@ async def test_a_school_missing_from_the_list_commits_the_offered_other(page):
     )
     assert chosen == "Other"
     assert (await page.evaluate("window.queries"))[-1] == "Other"
+
+
+async def test_a_school_list_without_other_commits_its_not_listed_choice(page):
+    # Lennar (Workday 2026-10-27): "If your school does not populate, please type School Not Listed". Searches for the
+    # school and for "Other" returned "No Items." and the education row stalled.
+    await page.set_content("""<div data-automation-id=multiSelectContainer>
+      <div data-automation-id=multiselectInputContainer id=school>
+        <input onclick="search()" onkeydown="if(event.key==='Enter'){search();event.preventDefault()}">
+      </div></div><div id=menu role=listbox hidden></div>
+      <script>
+      function search(){let m=document.getElementById('menu');m.hidden=false;
+        const q=document.querySelector('input').value.toLowerCase();
+        m.innerHTML=q && 'school not listed'.includes(q) && q.length>3
+          ? '<div role=option data-automation-id=promptOption onclick="pick(this)">School Not Listed</div>'
+          : '<div role=option data-automation-id=promptOption>No Items.</div>';
+      }
+      function pick(e){document.getElementById('school').insertAdjacentHTML('beforeend',
+        '<span data-automation-id=selectedItem>'+e.textContent+'</span>');e.parentElement.hidden=true;}
+      </script>""")
+    committed = await widgets.prompt(page.main_frame, page.locator("#school"), "Example Technological University",
+                                     school_scope=True)
+    assert committed == "School Not Listed"

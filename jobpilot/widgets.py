@@ -1415,6 +1415,11 @@ async def dismiss_pickers(frame):
         raise ValueError("Previous dropdown remains open; its choices cannot be reused")
 
 
+# An unlisted school's own choice is found by searching it. Lennar's Workday list (2026-10-27) offers "School Not
+# Listed" ("If your school does not populate, please type School Not Listed"), which a search for "Other" never returns.
+SCHOOL_NOT_LISTED_QUERIES = ("Other", "Not Listed")
+
+
 def school_other_option(offered):
     return bool(
         re.fullmatch(
@@ -2829,13 +2834,15 @@ async def combobox(
     if not choice and school_scope:
         # Search the actual institution first. Its absence is a reason to use
         # the applicant's explicit Other preference, never another institution.
-        if editable:
-            await el.fill("")
-            await el.press_sequentially("Other", delay=12, timeout=4000)
-            opts = await wait_options(frame, scope, timeout=2, query="Other", owner=el)
-        others = [o for o in opts if not o["disabled"] and school_other_option(o["text"])]
-        if len(others) == 1:
-            choice = others[0]
+        for query in SCHOOL_NOT_LISTED_QUERIES if editable else ("",):
+            if editable:
+                await el.fill("")
+                await el.press_sequentially(query, delay=12, timeout=4000)
+                opts = await wait_options(frame, scope, timeout=2, query=query, owner=el)
+            others = [o for o in opts if not o["disabled"] and school_other_option(o["text"])]
+            if len(others) == 1:
+                choice = others[0]
+                break
     if not choice and employer_scope:
         # A fixed employer list without the applicant's employer (Goldman Sachs' Oracle "Name of Latest Employer",
         # 2026-10-18). Only its own Other / not listed choice is truthful; a similar name never is.
@@ -3279,20 +3286,22 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
     if not choice and school_scope:
         # School prompts use the same applicant preference as comboboxes:
         # search the real institution first, then an offered Other fallback.
-        await inp.fill("")
-        await inp.press_sequentially("Other", delay=10)
-        await inp.press("Enter")
-        opts = await wait_options(
-            frame,
-            None,
-            timeout=3,
-            selector="[data-automation-id=promptOption],[role=option]",
-            query="Other",
-            owner=container,
-        )
-        others = [o for o in opts if o["leaf"] and not o["disabled"] and school_other_option(o["text"])]
-        if len(others) == 1:
-            choice = others[0]
+        for query in SCHOOL_NOT_LISTED_QUERIES:
+            await inp.fill("")
+            await inp.press_sequentially(query, delay=10)
+            await inp.press("Enter")
+            opts = await wait_options(
+                frame,
+                None,
+                timeout=3,
+                selector="[data-automation-id=promptOption],[role=option]",
+                query=query,
+                owner=container,
+            )
+            others = [o for o in opts if o["leaf"] and not o["disabled"] and school_other_option(o["text"])]
+            if len(others) == 1:
+                choice = others[0]
+                break
     if not choice:
         # Browse from the top: the value can be a leaf under a category ("Job Board" > "LinkedIn").
         await inp.fill("")
