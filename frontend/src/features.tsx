@@ -1057,7 +1057,12 @@ export function TailoredResumes() {
                   header: "Job",
                   cell: (a) => (
                     <>
-                      {a.employer_id && <strong title={a.artifact_id}>{employerLabel(a.employer_id)} </strong>}
+                      {a.employer_id && (
+                        <>
+                          <strong title={a.artifact_id}>{employerLabel(a.employer_id)}</strong>
+                          <span className="ax-hint"> · </span>
+                        </>
+                      )}
                       {a.job_id ? (
                         <button className="link" onClick={() => openJob(a.job_id!)}>
                           Open job
