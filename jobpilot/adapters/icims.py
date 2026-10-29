@@ -1660,11 +1660,11 @@ class ICIMS(Adapter):
             return True
         return False
 
-    async def auth_outcome(self, timeout=12):
+    async def auth_outcome(self, timeout=12, *, forced_ok=False):
         obs = await self.form.scan()
         if self.employer_session(obs):
             return "ok", ""
-        return await super().auth_outcome(timeout=timeout)
+        return await super().auth_outcome(timeout=timeout, forced_ok=forced_ok)
 
     async def retry_email_step(self, obs):
         """A twin-minted token is sometimes still scored low, and iCIMS answers the email step with its returning-
