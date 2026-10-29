@@ -11,7 +11,7 @@ from sqlalchemy import func, select, update
 
 from .db import Budget, Job, Run, Source, Setting, latest_runs, now
 from .discovery import rank_batch
-from .jobboard import FITS, LOCKED, board_snapshot, fit_of, settings
+from .jobboard import FITS, FOREIGN, LOCKED, board_snapshot, fit_of, settings
 from .service import ACTIVE
 from .admission import active_runs, capacity, employer_partition, outcome_for
 
@@ -356,6 +356,27 @@ def replenish_discovery(service, unattempted):
     return min(60, len(rows))
 
 
+# Why a candidate waited in a tick rather than being refused (autopilot.screen), shown beside the refusals.
+WAITING = {
+    "focus": "The job's platform is set aside by the saved platform focus",
+    "busy": "Another application at this employer is running or queued; this one starts when it ends",
+    "tailoring": "Preparing a tailored resume; it starts when ready",
+}
+REJECTIONS_KEPT = 400
+
+
+def remember_rejection(batch, job_id, reason, code="", outcome="", at=None):
+    """The latest reason each job was not started, bounded to the newest REJECTIONS_KEPT jobs.
+
+    `skipped` kept only the last 100 refusals and a waiting job left none, so 143 Ready jobs the owner's own Apply
+    then started had no recorded reason (2026-10-29)."""
+    kept = batch.setdefault("rejections", {})
+    kept.pop(job_id, None)  # Re-insert last: the oldest reasons go first.
+    kept[job_id] = {"reason": str(reason)[:240], "code": code, "outcome": outcome, "at": at or now()}
+    while len(kept) > REJECTIONS_KEPT:
+        kept.pop(next(iter(kept)))
+
+
 # How often an autopilot rejection of a Ready job is reconsidered (see the tick's admission_state).
 RECONSIDER_SECONDS = 1800
 
@@ -654,11 +675,23 @@ def unlisted_ready(db, cfg, listed):
     """Ranked-ready jobs with no live discovery listing: postings imported directly (job board APIs, pasted links)
     and listings a sweep has not re-seen yet. 122 such jobs above the fit threshold sat unseen while six of eight
     workers idled (2026-10-24). Each was added within the board's age window and has never been attempted; the
-    dispatch guards (roles, discovery gate, fit, employer limits) still decide."""
+    dispatch guards (roles, discovery gate, fit, employer limits) still decide.
+
+    A listing the board left out (not re-seen in six hours) still knows the posting's country, level and place: without
+    them the discovery gate read "Remote-MO" with no country as non-US and refused 24 ready jobs for good (2026-10-29).
+    A listing its source marked inactive means the posting was taken down; that job is not a candidate."""
+    from .db import JobListing
+
     cutoff = (datetime.now(UTC) - timedelta(hours=cfg.max_age_hours)).isoformat()
     with db.session() as s:
         rows = s.execute(
-            select(Job.id, Job.title, Job.company, Job.location, Job.status, Job.score, Job.created_at).where(
+            select(
+                Job.id, Job.title, Job.company, Job.location, Job.status, Job.score, Job.created_at, Job.ats,
+                JobListing.location.label("listing_location"), JobListing.country, JobListing.career_level,
+                JobListing.active,
+            )
+            .outerjoin(JobListing, JobListing.job_id == Job.id)
+            .where(
                 Job.status == "ready",
                 Job.demo.is_(False),
                 Job.created_at >= cutoff,
@@ -670,14 +703,18 @@ def unlisted_ready(db, cfg, listed):
             "id": row.id,
             "title": row.title,
             "company": row.company,
-            "location": row.location,
+            "location": row.listing_location or row.location,
+            "country": row.country or "",
+            # The lane (dispatch_ready: custom_site) reads the ATS: a row without one counted as a custom site, so every
+            # listing-less job waited for the single custom-site worker, or for ever when it is off (2026-10-29).
+            "ats": row.ats,
             "status": row.status,
             "score": row.score,
             "posted_at": row.created_at or "",
-            "career_level": "Imported",
+            "career_level": row.career_level or "Imported",
         }
         for row in rows
-        if row.id not in listed
+        if row.id not in listed and row.active is not False
     ]
 
 
@@ -804,11 +841,13 @@ async def tick(service):
                             "location": row.location,
                             "status": row.status,
                             "score": row.score,
+                            "ats": row.ats,
                             "posted_at": "",
                             "career_level": "Manual link",
                         }
                     )
         board["jobs"].extend(await asyncio.to_thread(unlisted_ready, db, cfg, {j["id"] for j in board["jobs"]}))
+        board_ids = {j["id"] for j in board["jobs"]}
         considered_state = batch.setdefault("considered_state", {})
         policy_revision = admission_revision(db, cfg)
         # A rejection is looked at again every RECONSIDER_SECONDS: a job turned away while a pool, an employer or a
@@ -868,6 +907,66 @@ async def tick(service):
         queued_now = 0
         rooms = {"custom": custom_room, "normal": normal_room}
 
+        def screen(job, busy):
+            """The job's admission screen, on a worker thread: its row, the profile's roles, fit, the discovery gate and
+            the tailored resume. Every step used to read the database on the event loop that drives the browsers, once per
+            job, for each of the ~1,100 Ready jobs a reconsideration window brings back (2026-10-29).
+            Returns ("previous" | "focus" | "busy" | "tailoring", employer, None) or ("ok", employer, artifact_id);
+            a rejection raises ValueError."""
+            jid = job["id"]
+            with db.session() as s:
+                if s.scalar(select(Run.id).where(Run.job_id == jid)):
+                    return "previous", None, None
+                current = s.get(Job, jid)
+                # Owner focus: platforms set aside for now are not dispatched.
+                if current.ats in set(db.get_setting("ats_focus", {}).get("exclude", [])):
+                    return "focus", None, None
+                from .features.discovery.roles import matching_role
+
+                if target_roles and not matching_role(current.title, target_roles):
+                    # Ranked before the profile's roles changed (2026-10-17); its search filters apply here too.
+                    raise ValueError("Outside the profile's target roles: " + current.title[:120])
+                employer = employer_partition(current)
+                if employer in busy:
+                    return "busy", employer, None  # Reconsider later; another employer can use this slot.
+                if current.status != "ready":
+                    raise ValueError(current.reason or "Resume fit did not meet your saved criteria")
+                if (current.score or 0) < cfg.minimum_auto_fit and not title_admits(
+                    owner_profile, current.title, current.reason
+                ):
+                    raise ValueError(
+                        f"Resume fit {current.score or 0}/100 is below the unattended threshold {cfg.minimum_auto_fit}"
+                    )
+                # The board these jobs came from, refreshed whenever it is read again below: a job the second read
+                # added was refused "aged out" by the first read's list (2026-10-29).
+                if jid not in board_ids:
+                    raise ValueError("Posting aged out before submission")
+                if not integrated:
+                    return "ok", employer, None
+                from .features.discovery import gate, policy_for
+
+                data = {
+                    **job,
+                    "url": current.url,
+                    "title": current.title,
+                    "location": current.location,
+                    "description": current.description,
+                }
+                if not data.get("country"):
+                    # A posting with no listing says only "Remote" or "2 Locations": no place is not a foreign place. The
+                    # ranker and the board import already screened it; only a stated foreign location refuses it, as the
+                    # owner's own Apply does (22 Ready jobs were refused non_us_or_unknown for good, 2026-10-29).
+                    data["country"] = "" if FOREIGN.search(current.location or "") else "US"
+                if reason := gate(data, policy_for(db)):
+                    raise ValueError(reason)
+            if use_master:
+                return "ok", employer, None
+            from .execution_services import ready_for_job
+
+            artifact = ready_for_job(db, jid, service.config.data_dir)
+            # Tailoring owns its own durable queue; no browser slot is held.
+            return ("ok", employer, artifact.artifact_id) if artifact else ("tailoring", employer, None)
+
         async def dispatch_ready(jobs):
             nonlocal queued_now
             from .pipeline_comparison import custom_site
@@ -881,57 +980,18 @@ async def tick(service):
                 if job.get("score") is None and job["status"] != "ready":
                     continue
                 jid = job["id"]
-                with db.session() as s:
-                    previous = s.scalar(select(Run.id).where(Run.job_id == jid))
-                # This batch never blindly retries jobs from earlier testing or unknown commits.
-                if previous:
-                    batch["considered_ids"].append(jid)
-                    considered_state[jid] = admission_state(job)
-                    continue
                 try:
-                    with db.session() as s:
-                        current = s.get(Job, jid)
-                        # Owner focus: platforms set aside for now are not dispatched.
-                        if current.ats in set(db.get_setting("ats_focus", {}).get("exclude", [])):
-                            continue
-                        from .features.discovery.roles import matching_role
-
-                        if target_roles and not matching_role(current.title, target_roles):
-                            # Ranked before the profile's roles changed (2026-10-17); its search filters apply here too.
-                            raise ValueError("Outside the profile's target roles: " + current.title[:120])
-                        employer = employer_partition(current)
-                        if employer in occupied_employers:
-                            continue  # Reconsider later; another employer can use this slot.
-                        if current.status != "ready":
-                            raise ValueError(current.reason or "Resume fit did not meet your saved criteria")
-                        if (current.score or 0) < cfg.minimum_auto_fit and not title_admits(
-                            owner_profile, current.title, current.reason
-                        ):
-                            raise ValueError(
-                                f"Resume fit {current.score or 0}/100 is below the unattended threshold {cfg.minimum_auto_fit}"
-                            )
-                    if jid not in {j["id"] for j in board["jobs"]}:
-                        raise ValueError("Posting aged out before submission")
-                    artifact_id = None
-                    if integrated:
-                        from .features.discovery import gate, policy_for
-                        from .execution_services import ready_for_job
-
-                        data = {
-                            **job,
-                            "url": current.url,
-                            "title": current.title,
-                            "location": current.location,
-                            "description": current.description,
-                        }
-                        reason = gate(data, policy_for(db))
-                        if reason:
-                            raise ValueError(reason)
-                        if not use_master:
-                            artifact = ready_for_job(db, jid, service.config.data_dir)
-                            if not artifact:
-                                continue  # Tailoring owns its own durable queue; no browser slot is held.
-                            artifact_id = artifact.artifact_id
+                    verdict, employer, artifact_id = await asyncio.to_thread(screen, job, frozenset(occupied_employers))
+                    if verdict != "ok":
+                        if verdict == "previous":
+                            # This batch never blindly retries jobs from earlier testing or unknown commits.
+                            batch["considered_ids"].append(jid)
+                            considered_state[jid] = admission_state(job)
+                            remember_rejection(batch, jid, "An earlier application exists for this job", "previous_run")
+                        else:
+                            # Reconsidered next tick; the reason stays visible meanwhile.
+                            remember_rejection(batch, jid, WAITING[verdict], verdict)
+                        continue
                     run = await service.queue(
                         jid,
                         "submit",
@@ -945,12 +1005,17 @@ async def tick(service):
                     rooms[lane] -= 1
                     occupied_employers.add(employer)
                     deferred.pop(jid, None)
+                    batch.get("rejections", {}).pop(jid, None)
                 except (ValueError, RuntimeError) as exc:
                     outcome = outcome_for(exc)
+                    remember_rejection(batch, jid, str(exc), outcome["code"], outcome["outcome"])
                     if outcome["outcome"] == "deferred":
-                        deferred[jid] = {**outcome, "reason": str(exc)[:240]}
-                        batch["deferred"] = deferred
-                        persist_batch(db, batch)
+                        from .owner_apply import FREES_UP
+
+                        if outcome["code"] not in FREES_UP:
+                            deferred[jid] = {**outcome, "reason": str(exc)[:240]}
+                        if outcome["code"] == "worker_capacity":
+                            rooms[lane] = 0  # The pool filled meanwhile: asking again for each remaining job only costs locks.
                         continue
                     batch["skipped"] = [
                         *batch["skipped"],
@@ -959,12 +1024,14 @@ async def tick(service):
                 except Exception as exc:
                     # Transient model/transport failures can be reconsidered on the next scheduled tick.
                     batch["last_error"] = type(exc).__name__
-                    persist_batch(db, batch)
+                    await asyncio.to_thread(persist_batch, db, batch)
                     continue  # Failure of one job never stops dispatching other jobs.
                 batch["considered_ids"].append(jid)
                 considered_state[jid] = admission_state(job)
                 batch["deferred"] = deferred
-                persist_batch(db, batch)
+            # One write per pass: the whole batch (~225 KB) was rewritten after every one of ~1,100 refused jobs.
+            batch["deferred"] = deferred
+            await asyncio.to_thread(persist_batch, db, batch)
 
         from .owner_apply import due as owner_requests
 
@@ -986,9 +1053,11 @@ async def tick(service):
                 else:
                     await rank_batch(db, service.config, unranked)
                 batch.pop("last_error", None)
+                fresh_board = (await asyncio.to_thread(board_snapshot, db, limit=None))["jobs"]
+                board_ids.update(j["id"] for j in fresh_board)
                 jobs = [
                     j
-                    for j in (await asyncio.to_thread(board_snapshot, db, limit=None))["jobs"]
+                    for j in fresh_board
                     if (j["id"] not in considered or reconsider(j))
                     and j["id"] not in attempted
                     and j["id"] not in reserved

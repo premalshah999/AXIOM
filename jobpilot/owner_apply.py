@@ -31,6 +31,18 @@ def _later(not_before):
     return not_before or (datetime.now(UTC) + timedelta(seconds=60)).isoformat()
 
 
+# Refusals that end when a slot, a worker or a mail sender frees: tried again on the next autopilot tick (a few
+# seconds), not after a fixed wait. The 60-second not_before admission gives them made a freed slot idle until the
+# request's turn came round; with 140 requests waiting, 4 of 9 workers sat idle (2026-10-29).
+FREES_UP = frozenset({"worker_capacity", "employer_busy", "sender_busy"})
+# Admissions one pass tries: each takes the app lock, and a full pool refuses all the rest alike.
+TRIES = 12
+
+
+def _retry_at(exc):
+    return now() if exc.code in FREES_UP else _later(exc.not_before)
+
+
 async def apply(service, job_id):
     """Approve and start one job, or remember it until admission allows."""
     answered = await off_loop(_approve, service, job_id)
@@ -122,7 +134,7 @@ async def start(service, job_id, mode="submit", **queue_options):
         await off_loop(
             service.db.set_setting,
             KEY + job_id,
-            {"at": now(), "code": exc.code, "reason": str(exc)[:300], "not_before": _later(exc.not_before)},
+            {"at": now(), "code": exc.code, "reason": str(exc)[:300], "not_before": _retry_at(exc)},
         )
         return {
             "job_id": job_id,
@@ -158,21 +170,26 @@ async def due(service, limit, retries=None):
         )) if waiting else set()
     # 247 resumed repeat-failures queued ahead of fresh postings filled every worker on 2026-10-24; their retries
     # succeed about one time in eight, first attempts far more often.
-    rows = sorted(waiting, key=lambda item: (item[0] in attempted, item[1].get("at", "")))
-    started = retried = 0
+    # Least recently tried first within each group, so a few jobs that stay blocked (one busy employer) never keep
+    # the ones behind them from being tried.
+    rows = sorted(waiting, key=lambda item: (item[0] in attempted, item[1].get("tried", ""), item[1].get("at", "")))
+    started = retried = tries = 0
     for job_id, value in rows:
-        if started >= limit:
+        if started >= limit or tries >= max(TRIES, 3 * limit):
             break
         if job_id in attempted and retries is not None and retried >= retries:
             break  # the rest are retries too
         if (value.get("not_before") or "") > now():
             continue
+        tries += 1
         try:
             await service.queue(job_id, "submit", owner_pick=True)
         except QueueBlocked as exc:
             if exc.outcome == "deferred":
-                service.db.set_setting(KEY + job_id, {**value, "code": exc.code, "reason": str(exc)[:300],
-                                                      "not_before": _later(exc.not_before)})
+                await off_loop(service.db.set_setting, KEY + job_id, {
+                    **value, "code": exc.code, "reason": str(exc)[:300], "not_before": _retry_at(exc), "tried": now()})
+                if exc.code == "worker_capacity":
+                    break  # The pool is full: every other request would be refused the same way.
                 continue
             _forget(service.db, job_id)  # A permanent refusal (closed, protected, excluded) ends the request.
             continue
