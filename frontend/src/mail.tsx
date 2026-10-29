@@ -1,18 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
+import { Search } from "lucide-react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useDraft, useNotify, usePoll } from "./hooks";
-import type { MailStatus } from "./types";
-import {
-  Confirm,
-  Empty,
-  ErrorLine,
-  Field,
-  Loading,
-  stamp,
-  StatePill,
-  words,
-} from "./ui";
+import { Pagination, usePagination } from "./pagination";
+import { Actions, ConfirmButton, FormGrid, Lede, SecretInput } from "./setup-kit";
+import type { MailChallenge, MailRule, MailStatus } from "./types";
+import { stamp, words } from "./ui";
+import { Button, Empty, Input, Panel, Pill, Select, Table, type PillTone } from "./ui/index";
 
 const LIVE = new Set(["pending", "matched", "consumed"]);
 const split = (value: string) =>
@@ -21,13 +16,12 @@ const split = (value: string) =>
     .map((x) => x.trim())
     .filter(Boolean);
 
+const challengeTone = (state: string): PillTone => (state === "verified" ? "ok" : LIVE.has(state) ? "info" : "neutral");
+
 export function MailSettings() {
   const { snapshot, rows, openJob } = useWorkspace();
   const notify = useNotify();
-  const mail = usePoll<MailStatus>(
-    (signal) => api("/mail", "GET", undefined, signal),
-    15000,
-  );
+  const mail = usePoll<MailStatus>((signal) => api("/mail", "GET", undefined, signal), 15000);
   const { pending, run } = useAction();
   const [mailbox, setMailbox] = useState("");
   const [adding, setAdding] = useState(false);
@@ -35,6 +29,8 @@ export function MailSettings() {
   const [employer, setEmployer] = useDraft("mail-employer", "");
   const [senders, setSenders] = useDraft("mail-senders", "");
   const [origins, setOrigins] = useDraft("mail-origins", "");
+  const [ruleQuery, setRuleQuery] = useState("");
+  const passwordId = useId();
 
   // Google redirects back with ?gmail=connected|error.
   useEffect(() => {
@@ -51,6 +47,21 @@ export function MailSettings() {
     history.replaceState(null, "", url);
   }, [notify]);
 
+  const data = mail.data;
+  const mailboxes = data?.mailboxes || [];
+  const rules: MailRule[] = data?.rules || [];
+  const challenges: MailChallenge[] = data?.challenges || [];
+  const q = ruleQuery.trim().toLowerCase();
+  const shownRules = rules.filter(
+    (r) =>
+      !q ||
+      `${r.employer_origin}${r.employer_path || ""} ${(r.sender_domains || []).join(" ")} ${(r.link_origins || []).join(" ")}`
+        .toLowerCase()
+        .includes(q),
+  );
+  const rulePaging = usePagination(shownRules, q, 25);
+  const challengePaging = usePagination(challenges, "", 10);
+
   const change = (key: string, fn: () => Promise<unknown>, success?: string) =>
     run(
       key,
@@ -61,105 +72,99 @@ export function MailSettings() {
       },
       success,
     );
-  const data = mail.data;
   if (!data)
-    return mail.error ? (
-      <ErrorLine error={mail.error} retry={mail.refresh} />
-    ) : (
-      <Loading />
+    return (
+      <Panel title="Mailbox">
+        {mail.error ? (
+          <Empty
+            title="Could not load the mailbox"
+            hint={mail.error.message}
+            action={
+              <Button size="sm" onClick={mail.refresh}>
+                Try again
+              </Button>
+            }
+          />
+        ) : (
+          <p className="ax-hint" role="status">
+            Loading…
+          </p>
+        )}
+      </Panel>
     );
-  const selected = data.mailboxes.some((m) => m.id === mailbox)
-    ? mailbox
-    : data.mailboxes[0]?.id || "";
+  const selected = mailboxes.some((m) => m.id === mailbox) ? mailbox : mailboxes[0]?.id || "";
+  const profileEmail = snapshot.profile?.email || "";
   const jobFor = (runId: string) =>
-    rows.find(
-      (r) =>
-        r.run?.id === runId ||
-        snapshot.runs.some((x) => x.id === runId && x.job_id === r.job.id),
+    (rows || []).find(
+      (r) => r.run?.id === runId || (snapshot.runs || []).some((x) => x.id === runId && x.job_id === r.job.id),
     );
   return (
     <>
-      <section className="panel">
-        <header className="panel-head">
-          <h2>Mailbox</h2>
-          <p className="muted">
-            Used for one-time codes, activation and reset links, and employer
-            receipts. Access is read-only; each message is checked for
-            recipient, sender, time and allowed link destinations. Codes and
-            links never reach this page.
-          </p>
-        </header>
-        <ul className="list">
-          {data.mailboxes.map((box) => (
-            <li key={box.id}>
-              <span>
-                <strong>{box.email}</strong>
-                <small className="muted">
-                  {box.provider === "gmail_imap"
-                    ? "Gmail app password"
-                    : "Google sign-in"}
-                  {box.error ? ` · ${box.error}` : ""}
-                </small>
-              </span>
-              <StatePill
-                state={
-                  box.state === "connected" ? "confirmed" : "waiting_browser"
-                }
-                label={words(box.state)}
-              />
-              <span className="row-actions">
-                <button
-                  className="btn sm"
-                  disabled={pending !== null}
-                  onClick={() =>
-                    change(
-                      "check" + box.id,
-                      () => api(`/mail/${box.id}/check`, "POST"),
-                      "Mailbox checked.",
-                    )
-                  }
-                >
-                  Check
-                </button>
-                <Confirm
-                  label="Disconnect"
-                  confirm="Disconnect"
-                  pending={pending === "dis" + box.id}
-                  onConfirm={() =>
-                    run(
-                      "dis" + box.id,
-                      async () => {
-                        const r = await api<{
-                          revoked?: boolean;
-                          message?: string;
-                        }>(`/mail/${box.id}`, "DELETE");
-                        await mail.refresh();
-                        return r;
-                      },
-                      (r) =>
-                        r?.message ||
-                        (r?.revoked
-                          ? "Mailbox disconnected and Google access revoked."
-                          : "Disconnected locally. Revoking Google access failed; remove it in your Google account."),
-                    )
-                  }
-                />
-              </span>
-            </li>
-          ))}
-        </ul>
-        {data.mailboxes.length === 0 || adding ? (
+      <Panel title="Mailbox">
+        <Lede>
+          Used for one-time codes, activation and reset links, and employer receipts. Access is read-only; each message
+          is checked for recipient, sender, time and allowed link destinations. Codes and links never reach this page.
+        </Lede>
+        {mailboxes.length > 0 && (
+          <ul className="ax-rows">
+            {mailboxes.map((box) => (
+              <li className="ax-row" key={box.id}>
+                <span className="ax-row-main">
+                  <strong>{box.email}</strong>
+                  <small>
+                    {box.provider === "gmail_imap" ? "Gmail app password" : "Google sign-in"}
+                    {box.error ? ` · ${box.error}` : ""}
+                  </small>
+                </span>
+                <span className="ax-row-end">
+                  <Pill tone={box.state === "connected" ? "ok" : "warn"} dot>
+                    {words(box.state || "unknown")}
+                  </Pill>
+                  <Button
+                    size="sm"
+                    loading={pending === "check" + box.id}
+                    disabled={pending !== null && pending !== "check" + box.id}
+                    onClick={() =>
+                      change("check" + box.id, () => api(`/mail/${box.id}/check`, "POST"), "Mailbox checked.")
+                    }
+                  >
+                    Check
+                  </Button>
+                  <ConfirmButton
+                    label="Disconnect"
+                    confirm="Disconnect"
+                    note="Applications can no longer read codes from it."
+                    pending={pending === "dis" + box.id}
+                    onConfirm={() =>
+                      run(
+                        "dis" + box.id,
+                        async () => {
+                          const r = await api<{ revoked?: boolean; message?: string }>(`/mail/${box.id}`, "DELETE");
+                          await mail.refresh();
+                          return r;
+                        },
+                        (r) =>
+                          r?.message ||
+                          (r?.revoked
+                            ? "Mailbox disconnected and Google access revoked."
+                            : "Disconnected locally. Revoking Google access failed; remove it in your Google account."),
+                      )
+                    }
+                  />
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {mailboxes.length === 0 || adding ? (
           <form
-            className="form-grid"
+            style={mailboxes.length ? { marginTop: "var(--space-4)" } : undefined}
             onSubmit={(e) => {
               e.preventDefault();
               change(
                 "imap",
                 async () => {
-                  await api("/mail/imap", "POST", {
-                    ...imap,
-                    email: imap.email || snapshot.profile.email,
-                  });
+                  await api("/mail/imap", "POST", { ...imap, email: imap.email || profileEmail });
                   setImap({ email: "", app_password: "" });
                   setAdding(false);
                 },
@@ -167,108 +172,97 @@ export function MailSettings() {
               );
             }}
           >
-            <Field
-              label="Gmail address"
-              hint="The address on your profile: employers send codes there."
-            >
-              <input
+            <FormGrid>
+              <Input
+                label="Gmail address"
+                hint="The address on your profile: employers send codes there."
                 type="email"
-                value={imap.email || snapshot.profile.email}
-                onChange={(e) =>
-                  setImap((v) => ({ ...v, email: e.target.value }))
-                }
+                value={imap.email || profileEmail}
+                onChange={(e) => setImap((v) => ({ ...v, email: e.target.value }))}
                 required
                 autoComplete="email"
               />
-            </Field>
-            <Field
-              label="App password"
-              hint={
-                <>
+              <div className="ax-field">
+                <label className="ax-label" htmlFor={passwordId}>
+                  App password
+                </label>
+                <SecretInput
+                  id={passwordId}
+                  label="app password"
+                  describedBy={passwordId + "-msg"}
+                  placeholder="xxxx xxxx xxxx xxxx"
+                  value={imap.app_password}
+                  onChange={(v) => setImap((s) => ({ ...s, app_password: v }))}
+                />
+                <p className="ax-hint" id={passwordId + "-msg"}>
                   16 letters from{" "}
-                  <a
-                    href="https://myaccount.google.com/apppasswords"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
+                  <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer">
                     myaccount.google.com/apppasswords
                   </a>{" "}
                   (needs 2-Step Verification). Read-only use; stored encrypted.
-                </>
-              }
-            >
-              <input
-                type="password"
-                value={imap.app_password}
-                onChange={(e) =>
-                  setImap((v) => ({ ...v, app_password: e.target.value }))
-                }
-                required
-                autoComplete="off"
-                placeholder="xxxx xxxx xxxx xxxx"
-              />
-            </Field>
-            <div className="form-actions start wide">
-              <button className="btn primary" disabled={pending !== null}>
-                {pending === "imap" ? "Checking…" : "Connect Gmail"}
-              </button>
+                </p>
+              </div>
+            </FormGrid>
+            <Actions>
               {adding && (
-                <button
-                  type="button"
-                  className="btn quiet"
-                  onClick={() => setAdding(false)}
-                >
+                <Button variant="ghost" onClick={() => setAdding(false)}>
                   Cancel
-                </button>
+                </Button>
               )}
-            </div>
+              <Button
+                type="submit"
+                variant="primary"
+                loading={pending === "imap"}
+                disabled={!imap.app_password.trim() || (pending !== null && pending !== "imap")}
+              >
+                Connect Gmail
+              </Button>
+            </Actions>
           </form>
         ) : (
-          <div className="form-actions start">
-            <button
-              type="button"
-              className="btn"
-              onClick={() => setAdding(true)}
-            >
-              Connect another Gmail
-            </button>
-          </div>
+          <Actions start>
+            <Button onClick={() => setAdding(true)}>Connect another Gmail</Button>
+            {data.configured && (
+              <Button
+                loading={pending === "connect"}
+                disabled={pending !== null && pending !== "connect"}
+                onClick={() =>
+                  run("connect", async () => {
+                    const r = await api<{ authorization_url: string }>("/mail/connect", "POST");
+                    window.location.assign(r.authorization_url);
+                  })
+                }
+              >
+                Connect Gmail with Google
+              </Button>
+            )}
+          </Actions>
         )}
-        {data.configured && (
-          <div className="form-actions start">
-            <button
-              className="btn"
-              disabled={pending !== null}
+        {(mailboxes.length === 0 || adding) && data.configured && (
+          <Actions start>
+            <Button
+              loading={pending === "connect"}
+              disabled={pending !== null && pending !== "connect"}
               onClick={() =>
                 run("connect", async () => {
-                  const r = await api<{ authorization_url: string }>(
-                    "/mail/connect",
-                    "POST",
-                  );
+                  const r = await api<{ authorization_url: string }>("/mail/connect", "POST");
                   window.location.assign(r.authorization_url);
                 })
               }
             >
-              {pending === "connect"
-                ? "Opening Google…"
-                : "Connect Gmail with Google"}
-            </button>
-          </div>
+              Connect Gmail with Google
+            </Button>
+          </Actions>
         )}
-      </section>
+      </Panel>
 
-      <section className="panel">
-        <header className="panel-head">
-          <h2>Employer rules</h2>
-          <p className="muted">
-            Only needed for employers outside the built-in rules. Use the
-            employer's path on shared ATS domains, exact sender domains and any
-            extra verification origins.
-          </p>
-        </header>
-        {data.mailboxes.length > 0 ? (
+      <Panel title={`Employer rules · ${rules.length}`}>
+        <Lede>
+          Only needed for employers outside the built-in rules. Use the employer's path on shared ATS domains, exact
+          sender domains and any extra verification origins.
+        </Lede>
+        {mailboxes.length > 0 ? (
           <form
-            className="form-grid"
             onSubmit={(e) => {
               e.preventDefault();
               change(
@@ -288,158 +282,171 @@ export function MailSettings() {
               );
             }}
           >
-            <Field label="Mailbox">
-              <select
-                value={selected}
-                onChange={(e) => setMailbox(e.target.value)}
-              >
-                {data.mailboxes.map((box) => (
+            <FormGrid>
+              <Select label="Mailbox" value={selected} onChange={(e) => setMailbox(e.target.value)}>
+                {mailboxes.map((box) => (
                   <option key={box.id} value={box.id}>
                     {box.email}
                   </option>
                 ))}
-              </select>
-            </Field>
-            <Field label="Employer URL or path prefix">
-              <input
+              </Select>
+              <Input
+                label="Employer URL or path prefix"
                 type="url"
                 required
                 value={employer}
                 onChange={(e) => setEmployer(e.target.value)}
                 placeholder="https://careers.example.com/company"
               />
-            </Field>
-            <Field
-              label="Trusted sender domains"
-              hint="Exact domains, comma separated. No wildcards."
-            >
-              <input
+              <Input
+                label="Trusted sender domains"
+                hint="Exact domains, comma separated. No wildcards."
                 required
                 value={senders}
                 onChange={(e) => setSenders(e.target.value)}
                 placeholder="notifications.example.com"
               />
-            </Field>
-            <Field
-              label="Extra verification origins"
-              hint="Optional. The employer origin is already allowed."
-            >
-              <input
+              <Input
+                label="Extra verification origins"
+                hint="Optional. The employer origin is already allowed."
                 value={origins}
                 onChange={(e) => setOrigins(e.target.value)}
                 placeholder="https://login.example.com"
               />
-            </Field>
-            <div className="form-actions wide">
-              <button className="btn" disabled={pending !== null}>
-                {pending === "rule" ? "Saving…" : "Save rule"}
-              </button>
-            </div>
+            </FormGrid>
+            <Actions>
+              <Button
+                type="submit"
+                variant="primary"
+                loading={pending === "rule"}
+                disabled={pending !== null && pending !== "rule"}
+              >
+                Save rule
+              </Button>
+            </Actions>
           </form>
         ) : (
-          <p className="muted sm">
-            Connect a Google mailbox to add custom rules. The IMAP adapters
-            don't need them.
-          </p>
+          <p className="ax-hint">Connect a Google mailbox to add custom rules. The IMAP adapters don't need them.</p>
         )}
-        {data.rules.length > 0 && (
-          <ul className="list">
-            {data.rules.map((rule) => (
-              <li key={rule.id}>
-                <span>
-                  <strong>
-                    {rule.employer_origin}
-                    {rule.employer_path === "/" ? "" : rule.employer_path}
-                  </strong>
-                  <small className="muted">
-                    From {rule.sender_domains.join(", ")}
-                    {rule.link_origins.length
-                      ? ` · links to ${rule.link_origins.join(", ")}`
-                      : ""}
-                  </small>
-                </span>
-                <Confirm
-                  label="Remove"
-                  confirm="Remove rule"
-                  pending={pending === "rm" + rule.id}
-                  onConfirm={() =>
-                    change(
-                      "rm" + rule.id,
-                      () => api(`/mail-rules/${rule.id}`, "DELETE"),
-                      "Rule removed.",
-                    )
-                  }
+        {rules.length > 0 && (
+          <div className="ax-stack" style={{ marginTop: "var(--space-5)" }}>
+            <div className="ax-toolbar">
+              <label className="search">
+                <Search size={15} aria-hidden="true" />
+                <input
+                  type="search"
+                  aria-label="Search rules"
+                  placeholder="Search rules"
+                  value={ruleQuery}
+                  onChange={(e) => setRuleQuery(e.target.value)}
                 />
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="panel">
-        <header className="panel-head">
-          <h2>Recent verifications</h2>
-          <p className="muted">
-            The latest 50 email challenges requested by applications.
-          </p>
-        </header>
-        {data.challenges.length ? (
-          <ul className="list">
-            {data.challenges.map((c) => {
-              const row = jobFor(c.run_id);
-              return (
-                <li key={c.id}>
-                  <span>
-                    {row ? (
-                      <button
-                        className="link"
-                        onClick={() => openJob(row.job.id, c.run_id)}
-                      >
-                        <strong>{row.job.company}</strong> — {row.job.title}
-                      </button>
-                    ) : (
-                      <strong>Attempt {c.run_id.slice(0, 8)}</strong>
-                    )}
-                    <small className="muted">
-                      {c.kind === "auto" ? "Email verification" : words(c.kind)}{" "}
-                      · {stamp(c.created_at)}
-                      {c.reason ? ` · ${c.reason}` : ""}
-                    </small>
-                  </span>
-                  <StatePill
-                    state={
-                      c.state === "verified"
-                        ? "confirmed"
-                        : LIVE.has(c.state)
-                          ? "queued"
-                          : "cancelled"
-                    }
-                    label={words(c.state)}
-                  />
-                  {LIVE.has(c.state) && (
-                    <Confirm
-                      label="Cancel"
-                      confirm="Cancel wait"
-                      pending={pending === "c" + c.id}
-                      onConfirm={() =>
-                        change(
-                          "c" + c.id,
-                          () => api(`/mail-challenges/${c.id}/cancel`, "POST"),
-                          "Verification cancelled.",
-                        )
-                      }
+              </label>
+            </div>
+            <Table
+              label="Employer rules"
+              rows={rulePaging.items}
+              rowKey={(r) => r.id}
+              minWidth={640}
+              empty={<Empty title="No rules match" hint="Try a shorter search." />}
+              columns={[
+                {
+                  key: "employer",
+                  header: "Employer",
+                  truncate: true,
+                  width: 320,
+                  cell: (r) => (
+                    <span title={`${r.employer_origin}${r.employer_path === "/" ? "" : r.employer_path || ""}`}>
+                      {r.employer_origin}
+                      {r.employer_path === "/" ? "" : r.employer_path}
+                    </span>
+                  ),
+                },
+                {
+                  key: "from",
+                  header: "Trusted senders",
+                  truncate: true,
+                  width: 260,
+                  cell: (r) => (r.sender_domains || []).join(", ") || "—",
+                },
+                {
+                  key: "links",
+                  header: "Extra link origins",
+                  truncate: true,
+                  width: 220,
+                  cell: (r) => (r.link_origins || []).join(", ") || "—",
+                },
+                {
+                  key: "act",
+                  header: <span className="sr-only">Remove</span>,
+                  cell: (r) => (
+                    <ConfirmButton
+                      label="Remove"
+                      confirm="Remove rule"
+                      pending={pending === "rm" + r.id}
+                      onConfirm={() => change("rm" + r.id, () => api(`/mail-rules/${r.id}`, "DELETE"), "Rule removed.")}
                     />
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        ) : (
-          <Empty title="No email verifications yet">
-            They appear when an application asks for a code or link.
-          </Empty>
+                  ),
+                },
+              ]}
+            />
+            <Pagination paging={rulePaging} label="Rule pages" />
+          </div>
         )}
-      </section>
+      </Panel>
+
+      <Panel title="Recent verifications">
+        <Lede>The latest 50 email challenges requested by applications.</Lede>
+        {challenges.length ? (
+          <>
+            <ul className="ax-rows">
+              {challengePaging.items.map((c) => {
+                const row = jobFor(c.run_id);
+                return (
+                  <li className="ax-row" key={c.id}>
+                    <span className="ax-row-main">
+                      {row ? (
+                        <button
+                          className="link"
+                          style={{ textAlign: "left" }}
+                          onClick={() => openJob(row.job.id, c.run_id)}
+                        >
+                          <strong>{row.job.company}</strong> — {row.job.title}
+                        </button>
+                      ) : (
+                        <strong>Attempt {(c.run_id || "").slice(0, 8)}</strong>
+                      )}
+                      <small>
+                        {c.kind === "auto" ? "Email verification" : words(c.kind || "")} · {stamp(c.created_at)}
+                        {c.reason ? ` · ${c.reason}` : ""}
+                      </small>
+                    </span>
+                    <span className="ax-row-end">
+                      <Pill tone={challengeTone(c.state)}>{words(c.state || "unknown")}</Pill>
+                      {LIVE.has(c.state) && (
+                        <ConfirmButton
+                          label="Cancel"
+                          confirm="Cancel wait"
+                          pending={pending === "c" + c.id}
+                          onConfirm={() =>
+                            change(
+                              "c" + c.id,
+                              () => api(`/mail-challenges/${c.id}/cancel`, "POST"),
+                              "Verification cancelled.",
+                            )
+                          }
+                        />
+                      )}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+            <Pagination paging={challengePaging} label="Verification pages" sizes={false} />
+          </>
+        ) : (
+          <Empty title="No email verifications yet" hint="They appear when an application asks for a code or link." />
+        )}
+      </Panel>
     </>
   );
 }
