@@ -484,6 +484,31 @@ def receipt_claimed(session, message, receipt):
     return False
 
 
+# {run_id: (recipient, match_approved)}. Both are written once, when the run is queued, and never change, yet
+# reading them with Run.packet[...] made Postgres parse every ~320 KB packet: 25 s per call, once a minute, 34% of
+# the database's active samples; the recipient query of the poll added another 17% (py-spy/pg_stat, 2026-10-29).
+# A packet is read once per run per process; the lists below then need only narrow columns.
+_PACKET_FACTS: dict = {}
+_PACKET_FACTS_LIMIT = 200_000
+
+
+def packet_facts(session, run_ids):
+    """{run_id: (recipient email or "", match_approved)}; only uncached runs touch their packets."""
+    missing = [i for i in run_ids if i not in _PACKET_FACTS]
+    for start in range(0, len(missing), 200):
+        if len(_PACKET_FACTS) > _PACKET_FACTS_LIMIT:
+            _PACKET_FACTS.clear()
+        for rid, recipient, approved in session.execute(
+            select(
+                Run.id,
+                Run.packet["profile"]["email"].as_string(),
+                Run.packet["match_approved"].as_boolean(),
+            ).where(Run.id.in_(missing[start : start + 200]))
+        ):
+            _PACKET_FACTS[rid] = (recipient or "", approved is True)
+    return {i: _PACKET_FACTS[i] for i in run_ids if i in _PACKET_FACTS}
+
+
 async def check_receipts(mail, run_id=None):
     from .agent_settings import enabled
 
@@ -555,10 +580,10 @@ async def check_receipts(mail, run_id=None):
         if owned:
             addresses = sorted({recipient} | {r["packet"]["profile"]["email"].lower() for r in owned})
             with mail.db.session() as session:
-                earliest = session.scalar(
-                    select(func.min(Run.created_at)).where(
+                # Window and state in SQL; the recipient comes from the cached packet facts, not a packet scan.
+                rows = session.execute(
+                    select(Run.id, Run.created_at).where(
                         Run.state.in_(["confirmed", "submission_unknown"]),
-                        Run.packet["profile"]["email"].as_string().in_(addresses),
                         unmatched,
                         or_(
                             and_(Run.state == "submission_unknown", Run.created_at > unknown_since),
@@ -566,7 +591,9 @@ async def check_receipts(mail, run_id=None):
                             Run.receipt["evidence_reconciliation"].as_string() == "pending",
                         ),
                     )
-                )
+                ).all()
+                facts = packet_facts(session, [rid for rid, _ in rows])
+                earliest = min((at for rid, at in rows if facts.get(rid, ("",))[0] in addresses), default=None)
             if run_id:
                 earliest = min(r["created_at"] for r in owned)
             since = datetime.fromisoformat(earliest or min(r["created_at"] for r in owned)).timestamp()
@@ -587,36 +614,33 @@ async def check_receipts(mail, run_id=None):
         with mail.db.session() as s:
             # Only identity, timing and recipient are needed. Loading every full run
             # packet (hundreds of MB in total) each minute stalled the shared event loop.
-            competitors = [
-                (
-                    {
-                        "id": rid,
-                        "job_id": job_id,
-                        "state": state,
-                        "created_at": created_at,
-                        "packet": {"profile": {"email": recipient or ""}},
-                    },
-                    record(j),
-                )
-                for rid, job_id, state, created_at, recipient, j in s.execute(
-                    select(
-                        Run.id,
-                        Run.job_id,
-                        Run.state,
-                        Run.created_at,
-                        Run.packet["profile"]["email"].as_string(),
-                        Job,
-                    )
-                    .join(Job, Run.job_id == Job.id)
-                    .where(
-                        Job.demo.is_(False),
-                        or_(
-                            Run.state.in_(["confirmed", "submission_unknown"]),
-                            Run.packet["match_approved"].as_boolean().is_(True),
-                        ),
+            # Job columns without the description: nothing here reads it, and it is most of the row.
+            job_columns = [c for c in Job.__table__.columns if c.name != "description"]
+            rows = s.execute(
+                select(Run.id, Run.job_id, Run.state, Run.created_at, *job_columns)
+                .join(Job, Run.job_id == Job.id)
+                .where(Job.demo.is_(False))
+            ).all()
+            facts = packet_facts(s, [row[0] for row in rows])
+            competitors = []
+            for rid, job_id, state, created_at, *values in rows:
+                recipient, approved = facts.get(rid, ("", False))
+                if state not in {"confirmed", "submission_unknown"} and not approved:
+                    continue
+                job = dict(zip((c.name for c in job_columns), values))
+                job["description"] = ""
+                competitors.append(
+                    (
+                        {
+                            "id": rid,
+                            "job_id": job_id,
+                            "state": state,
+                            "created_at": created_at,
+                            "packet": {"profile": {"email": recipient}},
+                        },
+                        job,
                     )
                 )
-            ]
             submit_times = dict(
                 s.execute(
                     select(Event.run_id, func.min(Event.created_at))
