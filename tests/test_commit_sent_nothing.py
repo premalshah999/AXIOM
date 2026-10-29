@@ -166,3 +166,17 @@ async def test_a_commit_that_sent_nothing_stops_waiting_before_the_slow_confirma
     result = await BrowserEngine.watch_submission(eng, None, None)
     assert result["state"] == "waiting_browser" and "accepted nothing" in result["reason"]
     assert len(scans) < browser.POST_SUBMIT_POLLS * 3
+
+
+@pytest.mark.parametrize("status,expected", [(400, True), (200, False), (500, False), (0, False)])
+async def test_eightfold_telemetry_cannot_mask_the_application_response(status, expected):
+    requests = [
+        {"method": "POST", "host": "careers.example.test", "path": "/api/application/v2/submit", "status": status},
+        {"method": "POST", "host": "careers.example.test", "path": "/vslog", "status": 200},
+    ]
+    assert await BrowserEngine.commit_sent_nothing(engine(requests=requests)) is expected
+
+
+async def test_arbitrary_log_suffix_is_not_assumed_to_be_telemetry():
+    request = {"method": "POST", "host": "careers.example.test", "path": "/applicationlog", "status": 200}
+    assert await BrowserEngine.commit_sent_nothing(engine(requests=[request])) is False
