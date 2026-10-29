@@ -14,6 +14,9 @@ from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from jobpilot.api import create_app
 from jobpilot.config import Settings
+from jobpilot.db import Database
+from jobpilot.features._store import create_tables
+from jobpilot.service import Service
 
 
 @pytest.fixture(autouse=True)
@@ -69,13 +72,26 @@ def config(tmp_path):
 
 
 @pytest.fixture
-def app(config):
-    return create_app(config)
+def service(config):
+    """The Service on a fresh database, without the API.
+
+    Building the app's ~130 routes was about 0.1 s of every test that only needed the service (794 of them,
+    2026-10-29); the `app` fixture hands this same service to create_app instead. The feature tables are created
+    here because create_app's install_features does it and the service-only tests have always had them.
+    """
+    db = Database(config.database_url)
+    created = Service(db, config)
+    create_tables(db.engine)
+    return created
 
 
 @pytest.fixture
-def service(app):
-    return app.state.service
+def app(config, service, monkeypatch):
+    # create_app builds its own Database and Service from the config; both must be this test's, so
+    # app.state.service is the `service` fixture.
+    monkeypatch.setattr("jobpilot.api.app.Database", lambda url: service.db)
+    monkeypatch.setattr("jobpilot.api.app.Service", lambda db, cfg: service)
+    return create_app(config)
 
 
 @pytest.fixture
