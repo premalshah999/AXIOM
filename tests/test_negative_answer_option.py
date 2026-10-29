@@ -17,3 +17,10 @@ from jobpilot.widgets import best_option
 ])
 def test_a_negative_answer_never_takes_the_affirmative_label(options, value, expected):
     assert best_option(options, value) == expected
+
+
+def test_a_review_answer_that_ends_with_the_choice_takes_that_choice():
+    """IDT (2026-10-29): the review offered "Military Service yes/no"; the field offers Yes/No."""
+    assert best_option(["Yes", "No"], "Military Service no") == "No"
+    assert best_option(["Yes", "No"], "Military Service yes") == "Yes"
+    assert best_option(["Yes", "No"], "I know") is None

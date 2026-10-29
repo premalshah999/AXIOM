@@ -306,6 +306,9 @@ def best_option(options, value):
     binary = [i for i, x in enumerate(labels) if norm(x) in {"yes", "no"}]
     if {norm(labels[i]) for i in binary} == {"yes", "no"}:
         first = re.match(r"^(yes|no)\b(?:\s|[,.:;!?]|$)", str(value).strip(), re.I)
+        # A review option shows the field's label before the choice ("Military Service no", IDT 2026-10-29); the
+        # answer saved from it ends with the choice.
+        first = first or re.search(r"(?:^|\s)(yes|no)[.!]?$", str(value).strip(), re.I)
         if first:
             return options[next(i for i in binary if norm(labels[i]) == first[1].lower())]
     group = _alias_group(value)
