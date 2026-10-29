@@ -208,8 +208,11 @@ class AccountStore:
             current.pop("previous_credentials", None)  # The employer settled which login is current.
         # Proof that the account exists outlives later states: AMETEK's and Westinghouse's records said "signing_in"
         # after a failed retry, and the next pass created a second account (2026-10-16..18).
+        # "password_unknown" is an inference from a reset that went unanswered, not proof: stamped as confirmed it
+        # barred the create-once routes for accounts that never existed (Textron, Lenovo, 2026-10-29).
+        proof = CONFIRMED_ACCOUNT - {"password_unknown"}
         confirmed = current.get("confirmed_at") or (
-            now() if state in CONFIRMED_ACCOUNT or current.get("state") in CONFIRMED_ACCOUNT else None
+            now() if state in proof or current.get("state") in proof else None
         )
         self.service.db.set_setting(
             self.key(url),
