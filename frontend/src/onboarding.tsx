@@ -329,7 +329,8 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
       if (completed) onDone();
       else {
         setStep(nextStep);
-        window.scrollTo({ top: 0 });
+        // The setup guide is its own scroll region (.ax-screen); the document never scrolls.
+        document.querySelector(".ax-screen")?.scrollTo({ top: 0 });
       }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : (e as Error).message);
