@@ -42,3 +42,10 @@
 .ax-kn .ax-panel .statement {
   margin: var(--space-3) 0 var(--space-2);
 }
+/* On a phone the fact table scrolls inside its panel at a readable width, instead of squeezing the value column. */
+.ax-kn .ax-panel .table-wrap > table.table {
+  min-width: 640px;
+}
+.ax-kn .ax-panel .table td.wrap {
+  min-width: 180px;
+}
