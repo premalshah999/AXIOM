@@ -2828,6 +2828,23 @@ class Adapter:
         """Explicit reset-email step: fill the email, open the request window, click, confirm the page took the
         request, then wait for the email."""
         url = self.auth_url(obs) if any(f["type"] == "password" for f in obs["fields"]) else self.page.url
+        def cooling_down():
+            try:
+                requested = float(self.accounts.record(url).get("reset_requested_at") or 0)
+            except (TypeError, ValueError):
+                return True  # An unreadable timestamp cannot safely establish that a new request is due.
+            return bool(requested and time.time() - requested < RESET_RETRY_SECONDS)
+
+        def cooldown_result():
+            return self.defer(
+                "A password reset was requested recently; no additional reset will be requested during the cooldown",
+                state="waiting_browser", blocker_type="email_wait",
+            )
+
+        # Resumed mail is reclaimed by _drive before this request path. This guard covers both a fresh recovery and a
+        # run reopened directly on the reset page, including requests whose page did not confirm submission.
+        if cooling_down():
+            return cooldown_result()
         view = self.dialog_view(obs) or obs
         one_page = self.one_page_reset(obs)
         if self.sign_in_shown(obs) and not one_page:
@@ -2861,6 +2878,10 @@ class Adapter:
             return self.lease_busy()
         if not self.challenge:
             return self.defer("The reset email could not be matched safely right now; retry later")
+        # A sibling may have sent the reset while this run waited for the sender lease.
+        if cooling_down():
+            self.release_mail()
+            return cooldown_result()
         previous = self.accounts.saved(url)
         record = self.accounts.record(url)
         self.accounts.mark(url, "reset_requested", previous, reset_requested_at=time.time())
