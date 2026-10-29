@@ -50,6 +50,11 @@ def context_from(item):
         "type": item.get("type") or extra.get("type") or "",
         "section": scope.get("section") or extra.get("section") or "",
         "group": scope.get("group") or extra.get("group") or "",
+        # The question printed above a control that carries only a generic caption ("None of the Above", "Make
+        # Selection Here"), and the heading it sits under (forms.enrich_pending).
+        "caption": str(extra.get("caption") or "")[:300],
+        "heading": str(extra.get("heading") or "")[:160],
+        "row_index": extra.get("row_index") if isinstance(extra.get("row_index"), int) else 0,
         "hint": str(extra.get("hint") or "")[:600],
         "accept": str(extra.get("accept") or "")[:200],
         "history_kind": extra.get("history_kind") or "",
@@ -103,9 +108,27 @@ def where(context):
     return f"{label}: {detail}" if detail else label
 
 
+# A caption that is no question: it names a choice or a control, and the question is printed above it.
+GENERIC = re.compile(
+    r"none of the above|none|make selection here|(?:please )?select(?: one| an option| here)?|choose(?: one| here)?|"
+    r"other(?: free text)?|please specify|specify|yes|no|n a|not applicable|"
+    r"(?:start|begin|from)? ?(?:(?:and|&)? ?(?:end|to)?)? ?dates?|start end date|begin date"
+)
+
+
+def generic(question):
+    """A caption that only names a control or a choice, never the question."""
+    return bool(GENERIC.fullmatch(normalize(tidy(question)))) or bare_label(question)
+
+
 def display(question, context=None):
-    """The complete question: the form's own wording with the section or history row it sits in."""
+    """The complete question: the form's own wording with the section or history row it sits in, and the question
+    printed above a generic caption ("None of the Above" under "Do you have any of the following…")."""
+    context = context or {}
     text = tidy(question)
+    caption = " ".join(str(context.get("caption") or "").split())
+    if caption and normalize(caption) not in normalize(text) and (generic(question) or len(normalize(text).split()) <= 4):
+        text = f"{caption} › {text}"
     place = where(context)
     if place and normalize(place) not in normalize(text):
         return f"{place} › {text}"
@@ -213,10 +236,18 @@ def defect(question, options=(), context=None, reason=""):
     if SITE_CHROME.fullmatch(text):
         return "This is the website's search box, not an application question"
     located = any(
-        _human(context.get(k)) for k in ("section", "group")
-    ) or bool(context.get("history_identity"))
-    if FRAGMENT.fullmatch(normalize(text)) and not located:
+        _human(context.get(k)) for k in ("section", "group", "heading")
+    ) or bool(context.get("history_identity") or context.get("caption"))
+    if (FRAGMENT.fullmatch(normalize(text)) or GENERIC.fullmatch(normalize(text))) and not located:
+        # "None of the Above" with no group, "Make Selection Here" with no instruction, "Start & end date" with no row
+        # (Smithfield, Westinghouse, TikTok 2026-10-29): there is no question to ask.
         return "The field was read without the question or history row it belongs to"
+    if (
+        not options
+        and context.get("type") in {"dropdown", "select", "radiogroup", "radio", "checkboxgroup", "select-multiple", "pills"}
+        and context.get("source") != "repair"
+    ):
+        return "The choices were never read, so the question cannot be shown with its options"
     if options and not choices(options):
         return "The list's options were never loaded"
     if re.fullmatch(r"field[\s_-]*\d+", text, re.I):
