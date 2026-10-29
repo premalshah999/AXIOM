@@ -192,8 +192,10 @@ FIRST_TIME = re.compile(
     re.I,
 )
 CREATE_LINK = re.compile(
-    r"^(?:create (?:an? )?(?:account|profile)|sign up|register|new user|join(?: now)?|new candidate|"
-    r"don'?t have an account\??.{0,20}|create account)[!.]?$",  # Deloitte's Avature: "Create profile!" (2026-10-26)
+    r"^(?:create (?:an? |your |my )?(?:new )?(?:candidate |applicant )?(?:account|profile)|sign up|register|"
+    r"new user|join(?: now)?|new candidate|don'?t have an account\??.{0,20}|create account)[!.]?$",
+    # Deloitte's Avature: "Create profile!" (2026-10-26). Textron's Taleo: "Create a New Account" (2026-10-29), which
+    # the pattern missed: the one registration after an unanswered reset was never opened, and the reset was repeated.
     re.I,
 )
 SIGNIN_LINK = re.compile(
@@ -333,6 +335,15 @@ def reset_proven(record):
     (SuccessFactors, 2026-10-21..25) recorded resets that the sign-in page never sent, and every later run stopped
     for an owner action built on that silence."""
     return bool((record or {}).get("reset_submitted_at"))
+
+
+def unanswered_reset_record(record):
+    """A reset the employer's page confirmed that nothing answered in UNANSWERED_RESET_SECONDS."""
+    return bool(
+        (record or {}).get("state") in {"reset_requested", "credentials_rejected", "password_unknown"}
+        and reset_proven(record)
+        and time.time() - float(record.get("reset_requested_at") or 0) > UNANSWERED_RESET_SECONDS
+    )
 
 
 # The one Create after unanswered resets is offered again after this long: Lenovo's (2026-10-28 22:43) was spent by a
@@ -2134,6 +2145,16 @@ class Adapter:
                     }
                 ],
             )
+        # The one registration after an unanswered reset: this sign-up page was opened for it (create_spent, state
+        # password_unknown), or an account never confirmed reaches it with the unanswered reset on record.
+        registering = mode == "create" and (
+            (create_spent(record) and record.get("state") == "password_unknown")
+            or (not create_spent(record) and not record.get("confirmed_at") and unanswered_reset_record(record))
+        )
+        if registering and not create_spent(record):
+            self.accounts.mark(url, "no_account", self.accounts.saved(url) or self.accounts.credentials(url),
+                               absent_create_at=now())
+            self.emit("account", "The reset went unanswered; registering this email once")
         self.attempts[mode] += 1
         if self.attempts[mode] > 2 or self.attempts["sign_in"] + self.attempts["create"] > 4:
             problems = [p for p in getattr(self.form, "last_problems", []) if not p.startswith("Needs an approved answer")]
@@ -2162,6 +2183,9 @@ class Adapter:
         if (
             mode == "create"
             and known
+            # The one registration after an unanswered reset stays on its sign-up page: Simplify's /auth/register was
+            # opened for it and turned back to sign-in at once because the record read "reset_requested" (2026-10-29).
+            and not registering
             and not self.attempts["signin_switch"]
             and await self.switch(obs, SIGNIN_LINK)
         ):
@@ -2296,7 +2320,16 @@ class Adapter:
         if outcome == "bad_credentials" and mode == "sign_in":
             # An unanswered reset stays settled: overwriting it with "credentials_rejected" requested another reset on
             # every run (L3Harris, 2026-10-21..23: four resets, none delivered).
-            unknown = record.get("state") == "password_unknown"
+            # A confirmed reset that nothing answered settles the same way. Textron, Lenovo, Publicis and Simplify
+            # (2026-10-28/29): the refused sign-in overwrote "reset_requested" with "credentials_rejected", recover()
+            # never saw the reset as unanswered, and another reset (6 a day per job, none ever delivered) was requested
+            # on every run instead of every RESET_RETRY_SECONDS.
+            unanswered_reset = (
+                record.get("state") == "reset_requested"
+                and reset_proven(record)
+                and time.time() - float(record.get("reset_requested_at") or 0) > UNANSWERED_RESET_SECONDS
+            )
+            unknown = record.get("state") == "password_unknown" or unanswered_reset
             self.accounts.mark(
                 url,
                 "password_unknown" if unknown else "credentials_rejected",
@@ -2304,6 +2337,7 @@ class Adapter:
                 rejected_credentials=self.accounts.credential_fingerprint(url, credentials),
                 rejected_login_context=context,
                 rejected_at=now(),
+                **({"password_unknown_at": now()} if unanswered_reset else {}),
             )
             if alternate and not using_alternate and self.attempts[mode] < 2:
                 self.attempts[alternate_key] += 1
@@ -2320,6 +2354,8 @@ class Adapter:
                 unknown
                 and reset_proven(record)
                 and not create_spent(record)
+                # iCIMS Central's signup is owned by its adapter (try_central_signup keeps the transaction).
+                and not (unanswered_reset and getattr(self, "central_transaction", lambda *_: None)(self.page.url))
             )
             # The same silence where nothing ever showed that an account exists (no Create, sign-in or "already
             # registered"): Bain's, EA's and Intuit's career sites answer a reset with "If the email address you entered
@@ -2341,9 +2377,20 @@ class Adapter:
                 # Only spend the one registration attempt when a route was
                 # actually taken. Older runs set this flag even when no link
                 # existed, permanently blocking a later resume-first route.
-                if not create_spent(record) and await self.switch(obs, CREATE_LINK):
+                routed = not create_spent(record) and await self.switch(obs, CREATE_LINK)
+                if not routed and (absent or unproven) and not create_spent(record):
+                    # The registration route is the only way out of a reset that never arrives; name what the page
+                    # offered so a wording the pattern misses (Textron's "Create a New Account") shows in the trail.
+                    seen = [str(c.get("label") or "")[:40] for c in (await self.form.scan()).get("controls", [])
+                            if c.get("label")]
+                    self.emit("account", "The reset went unanswered but the page offers no registration link I "
+                              "recognize", {"controls": seen[:15]})
+                if routed:
                     if absent or unproven:
-                        self.accounts.mark(url, "password_unknown" if absent else "no_account",
+                        # Nothing proves an account here when none was ever confirmed: the sign-up page is not turned
+                        # back to sign-in (no_account).
+                        never_seen = unproven or (unanswered_reset and not record.get("confirmed_at"))
+                        self.accounts.mark(url, "no_account" if never_seen else "password_unknown",
                                            self.accounts.saved(url) or credentials, absent_create_at=now())
                         self.emit("account", "The reset went unanswered; opened the registration route once")
                     return None
@@ -2725,6 +2772,7 @@ class Adapter:
             view = self.dialog_view(obs) or obs
             asking = [f for f in view["fields"] if self.is_login_field(f)]
             errors = [str(x) for x in obs.get("errors", []) if str(x).strip()]
+            self.reset_seen = obs  # the page the employer answered with, for the "Reset request page" event
             if one_page and self.code_fields(obs) and not errors:
                 return "code", ""
             if RESET_SENT.search(view.get("text", "") or obs.get("text", "")) and not errors:
@@ -2817,6 +2865,18 @@ class Adapter:
         if challenge := await self.after_auth_click():
             return challenge
         outcome, refusal = await self.reset_outcome(one_page=one_page)
+        # What was asked and what the page answered, without values: six confirmed resets a day for Textron, Lenovo and
+        # Farmers (2026-10-29) brought no mail, and nothing recorded which fields the page offered or what it said.
+        after = getattr(self, "reset_seen", None)
+        after = after if isinstance(after, dict) else {}
+        said = re.sub(r"\S+@\S+", "<email>", " ".join([*map(str, after.get("headings", [])), str(after.get("text") or "")]))
+        self.emit("auth", "Reset request page", {
+            "fields": [{"label": str(f["label"])[:40],
+                        "filled_with": "username" if self.login_value(f, {"email": self.accounts.email})
+                        != self.accounts.email else "email"} for f in emails],
+            "outcome": outcome,
+            "page_said": said[:240],
+        })
         if outcome == "puzzle":
             self.finish_mail("failed", "Reset puzzle not solved")
             return self.defer(
