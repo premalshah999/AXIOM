@@ -383,12 +383,12 @@ function EmployerBoards({ board: b, reload }: { board: Board; reload: () => Prom
                   : !s.enabled
                     ? "Turned off"
                     : failed
-                      ? `${s.scan?.error || shortError(s.error) || "Couldn't read this board"}${
+                      ? `${(s.scan?.error || shortError(s.error) || "Couldn't read this board").replace(/\s*\(\w*Error\)/, "")}${
                           (s.health?.failures ?? 0) > 1
-                            ? ` · failed ${s.health!.failures} checks in a row · next try ${until(s.next_run, now)}`
+                            ? ` · ${s.health!.failures} failed checks in a row, next try ${until(s.next_run, now)}`
                             : ""
                         }`
-                      : `${s.scan?.matched ?? 0} matches · ${s.scan?.checked ?? 0} postings checked`;
+                      : `${plural(s.scan?.matched ?? 0, "match", "matches")} · ${plural(s.scan?.checked ?? 0, "posting")} checked`;
                 return (
                   <span title={text} style={{ color: failed && s.enabled && !checking ? "var(--warn)" : undefined }}>
                     {text}
