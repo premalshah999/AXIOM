@@ -85,3 +85,9 @@ def test_the_answer_audit_never_treats_the_applicants_address_as_an_employers_fa
     for label, section in (("Employer City", ""), ("City", "Previous Employer"), ("Zip Code", "Supervisor")):
         known = answer_quality.supported_local(form, field(label, section))
         assert known.disposition != "answer" and known.value is None, label
+
+
+def test_a_long_question_that_mentions_a_state_or_an_organization_is_not_a_contact_field():
+    question = ("To the best of your knowledge, are you a current or former employee of an organization that is a state, "
+                "local or non-U.S. government client?")
+    assert third_party(field(question)) == ""

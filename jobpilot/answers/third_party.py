@@ -48,8 +48,8 @@ def third_party(f):
     if f.get("history_kind") or f.get("history_row") or NUMBERED_ROW.search(f"{f.get('group') or ''} {f.get('section') or ''}"):
         return ""  # A placed history row is answered from its own profile entry (history_rules).
     label = str(f.get("label") or "")
-    if not PART.search(label):
-        return ""
+    if not PART.search(label) or len(label.split()) > 8 or "?" in label:
+        return ""  # A contact field's label is a few words; a long question merely mentions a state or an organization.
     if OWN.search(label) and not OWNER_IN_LABEL.search(label):
         return ""
     own = OWNER_IN_LABEL.search(label)
