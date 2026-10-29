@@ -359,20 +359,13 @@ def best_option(options, value):
             i for i, label in enumerate(labels) if norm(re.sub(r"\(?\+\s*\d{1,4}\)?", "", label)) in group
         ]
         return options[decorated[0]] if len(decorated) == 1 else None
-    # "United States of America (+1)" for "+1"; "Mobile" for "Mobile Phone". A label inside a negative answer is not
-    # that answer: "I am not a protected veteran" is not the bare option "Veteran", nor "No, I do not have a
-    # disability" the option "Disability" (forms audit, 2026-10-29).
-    negative = bool(NEGATION.search(want))
+    # Match an offered label containing the complete answer. Dropping words from an answer can change its meaning
+    # ("Data Science" is not "Science", and "Other Asian" is not "Other").
     contained = [
-        i
-        for i, x in enumerate(labels)
-        if re.search(r"(^|\s)" + re.escape(want) + r"($|\s)", norm(x))
-        or (
-            norm(x)
-            and re.search(r"(^|\s)" + re.escape(norm(x)) + r"($|\s)", want)
-            and len(norm(x)) > 2
-            and (not negative or NEGATION.search(norm(x)))
-        )
+        i for i, x in enumerate(labels)
+        if (bool(NEGATION.search(want)) == bool(NEGATION.search(norm(x)))
+            and re.search(r"(^|\s)" + re.escape(want) + r"($|\s)", norm(x)))
+        or (want == "mobile phone" and norm(x) == "mobile")
     ]
     if len(contained) == 1:
         return options[contained[0]]
@@ -520,7 +513,7 @@ def same_value(field, actual, expected):
             return True
         return norm(a) == norm(e) or (bool(norm(e)) and norm(a) in _alias_group(e))
     if kind == "prompt":
-        return bool(norm(e)) and norm(e) in norm(a)
+        return bool(norm(e)) and any(norm(item) in _alias_group(e) for item in str(actual).splitlines())
     if kind == "text" and re.search(r"\bdate\b", label, re.I):
         # A UI5 date picker shows a month-only fact ("12/2025") as its first day ("Dec 1, 2025").
         try:
@@ -3285,7 +3278,8 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
         target = None
         for want in candidates:
             pool = [name for name in names if not school_scope or school_option_matches(want, name)]
-            if target := best_option(pool, want) if school_scope else major_option(want, pool):
+            target = (pool[0] if len(pool) == 1 else best_option(pool, want)) if school_scope else major_option(want, pool)
+            if target:
                 break
         if not target and choose:
             picked = await choose(names)
@@ -3309,7 +3303,7 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
             and not option["disabled"]
             and (not school_scope or school_option_matches(value, option["text"]))
         ]
-        choice = best_option(leaves, value)
+        choice = leaves[0] if school_scope and len(leaves) == 1 else best_option(leaves, value)
         if not choice and leaves and choose and interpretations < 2:
             interpretations += 1
             selected = await choose(list(dict.fromkeys(option["text"] for option in leaves)))
