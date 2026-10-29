@@ -181,4 +181,45 @@ INTENTS = [
         ["application_source"],
     ),
     (re.compile(r"pronoun", re.I), ["pronouns"]),
+    # Questionnaire answers (Knowledge › Frequently asked): the questions applications most often stopped on
+    # (production Needs-you statistics, 2026-10-29). Each reads the fact the applicant saved, never a guess.
+    (re.compile(r"nicotine|tobacco|e-?cigarette|\bvap(?:e|ing)\b|\bsmok(?:e|er|ing)\b", re.I), ["uses_nicotine"]),
+    (
+        re.compile(
+            r"(?:do you|have you|will you).{0,60}\bintellectual property\b|"
+            r"(?:own|control|economic interest).{0,60}intellectual property",
+            re.I,
+        ),
+        ["has_intellectual_property"],
+    ),
+    (re.compile(r"refused.{0,20}bond|bond.{0,30}(?:refused|denied|revoked|cancel)", re.I), ["ever_refused_bond"]),
+    (re.compile(r"\b(?:been|ever) bonded\b|\bbonded\b.{0,20}\?", re.I), ["ever_bonded"]),
+    (
+        re.compile(r"(?:criminal )?(?:charges?|indictments?)\b.{0,30}\bpending|pending\b.{0,20}(?:criminal )?charges?", re.I),
+        ["has_pending_charges"],
+    ),
+    (
+        re.compile(
+            r"professional misconduct|(?:suspended|barred|disciplined|sanctioned).{0,80}(?:regulat|licen[sc]|FINRA|"
+            r"securities|association|profession)|found responsible of",
+            re.I,
+        ),
+        ["professional_sanctions"],
+    ),
+    (
+        re.compile(
+            r"(?:consent|agree|permission).{0,60}\b(?:AI|artificial intelligence)\b|"
+            r"\b(?:AI|artificial intelligence)\b.{0,60}(?:evaluat|screen|assess|review).{0,40}(?:candidacy|application)",
+            re.I,
+        ),
+        ["ai_screening_consent"],
+    ),
+    (
+        re.compile(
+            r"(?:prior|previous|current|any) (?:u\.?s\.? )?(?:military|armed forces) service|"
+            r"service in the (?:u\.?s\.?|united states) armed forces",
+            re.I,
+        ),
+        ["prior_military_service"],
+    ),
 ]

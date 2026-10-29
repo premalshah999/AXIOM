@@ -136,6 +136,20 @@ class IntentRulesMixin:
                 return self._ans(
                     f, f"{int(str(value).strip()):,} USD", [f"fact:{key}" if key else "fact:desired_salary"]
                 )
+            if (
+                "start_date" in keys
+                and (f.get("type") in {"date", "date_parts", "month"} or f.get("widget") == "date-text")
+                and re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(facts.get("start_date") or ""))
+            ):
+                # The earliest start date the applicant saved (Knowledge › Frequently asked), while it is still ahead.
+                today = datetime.now(ZoneInfo(self.config.timezone)).date()
+                try:
+                    chosen = datetime.strptime(facts["start_date"], "%Y-%m-%d").date()
+                except ValueError:
+                    chosen = None
+                if chosen and chosen >= today:
+                    if answer := self._ans(f, chosen.strftime("%m/%d/%Y"), ["fact:start_date"]):
+                        return answer
             if "availability" in keys and str(value).casefold() == "immediately":
                 part = re.search(r"\b(month|day|year)\s*$", f["label"], re.I)
                 if part and f.get("type") in {"select", "combobox", "text", "number"}:

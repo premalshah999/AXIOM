@@ -253,9 +253,18 @@ def router(service, sessions, throttle) -> APIRouter:
         sessions.clear(response)
         return response
 
+    def onboarding_view():
+        from ...features.knowledge import questionnaires
+
+        # Voluntary: never part of "completed", and never blocks applying.
+        return {
+            **onboarding_state(db),
+            "questionnaires": questionnaires.summary(db.get_setting("profile", {}) or {}),
+        }
+
     @r.get("/api/onboarding")
     def onboarding_read():
-        return onboarding_state(db)
+        return onboarding_view()
 
     @r.put("/api/onboarding")
     def onboarding_write(data: OnboardingUpdate):
@@ -268,6 +277,6 @@ def router(service, sessions, throttle) -> APIRouter:
             updated_at=datetime.now(UTC).isoformat(),
         )
         db.set_setting(ONBOARDING_KEY, state)
-        return state
+        return onboarding_view()
 
     return r

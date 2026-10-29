@@ -83,8 +83,7 @@ class PolicyRulesMixin:
                     )
         facts = self.profile.facts or {}
         if (
-            facts.get("tax_credit_screening_no") is True
-            and WOTC.search(label)
+            WOTC.search(label)
             and not DEMOGRAPHIC.search(label)
             and not re.search(
                 r"\b(?:not|never|neither|without|if|indicated above|as you indicated)\b|n['’]t\b", label, re.I
@@ -94,14 +93,25 @@ class PolicyRulesMixin:
                 label, re.I,
             )
         ):
-            if (no := [o for o in options if NO_OPTION.search(str(o))]) and len(no) == 1:
-                return Answer(
-                    field_id=f["id"],
-                    value=no[0],
-                    disposition="answer",
-                    evidence_ids=["fact:tax_credit_screening_no"],
-                    reason="Confirmed No (tax-credit screener)",
+            from ..features.knowledge.questionnaires import wotc_value
+
+            # The question's own saved answer (Knowledge › Tax-credit screening), else the whole-screener No.
+            if (saved := wotc_value(facts, label)) is not None:
+                value, evidence = saved
+                pattern = r"^\s*yes\b" if value else None
+                chosen = (
+                    [o for o in options if re.match(pattern, str(o), re.I)]
+                    if pattern
+                    else [o for o in options if NO_OPTION.search(str(o))]
                 )
+                if len(chosen) == 1:
+                    return Answer(
+                        field_id=f["id"],
+                        value=chosen[0],
+                        disposition="answer",
+                        evidence_ids=[evidence],
+                        reason=f"Confirmed {'Yes' if value else 'No'} (tax-credit screener)",
+                    )
         if facts.get("excluded_from_federal_healthcare_programs") is False and HEALTHCARE_EXCLUSION.search(
             label
         ):

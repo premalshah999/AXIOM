@@ -4648,10 +4648,7 @@ class FormSession:
 
     def wotc_answer(self, field):
         """Apply the recorded screener answer only to identifiable statutory screening questions."""
-        if (
-            not self.resolver
-            or (self.resolver.profile.facts or {}).get("tax_credit_screening_no") is not True
-        ):
+        if not self.resolver:
             return None
         if field.get("type") not in {"radio", "radiogroup"} or not field.get("required"):
             return None
@@ -4681,14 +4678,19 @@ class FormSession:
             return None
         if assistance and not re.search(r"\bTANF\b|temporary assistance for needy", label + " " + text, re.I):
             return None
+        from .features.knowledge.questionnaires import wotc_value
         from .schemas import Answer
 
+        # The question's own saved answer (Knowledge › Tax-credit screening), else the whole-screener No.
+        if (saved := wotc_value(self.resolver.profile.facts, label)) is None:
+            return None
+        value, evidence = saved
         return Answer(
             field_id=field["id"],
-            value=next(o for o in options if o.casefold() == "no"),
+            value=next(o for o in options if o.casefold() == ("yes" if value else "no")),
             disposition="answer",
-            evidence_ids=["fact:tax_credit_screening_no"],
-            reason="Confirmed No (tax-credit screener)",
+            evidence_ids=[evidence],
+            reason=f"Confirmed {'Yes' if value else 'No'} (tax-credit screener)",
         )
 
     async def refresh_greenhouse_phone(self):

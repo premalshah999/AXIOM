@@ -4,6 +4,7 @@ from .demographic_rules import DemographicRulesMixin
 from .history_rules import HistoryRulesMixin
 from .consent_rules import ConsentRulesMixin
 from .policy_rules import PolicyRulesMixin
+from .people_rules import PeopleRulesMixin
 from .intent_rules import IntentRulesMixin
 from .model_batch import ModelBatchMixin
 from .validate import ValidateMixin
@@ -53,6 +54,7 @@ class Resolver(
     HistoryRulesMixin,
     ConsentRulesMixin,
     PolicyRulesMixin,
+    PeopleRulesMixin,
     IntentRulesMixin,
     ModelBatchMixin,
     ValidateMixin,
@@ -531,6 +533,9 @@ class Resolver(
             )
         f = {**f, "label": screening_text(f)}
         if answer := self.demographic_decline(f):
+            return answer
+        # Supervisors and references the applicant saved in Knowledge; nothing saved means the question stays open.
+        if answer := self.people_answer(f):
             return answer
         # A question that defines its own answer for the applicant's recorded status is the most specific signal.
         if answer := self.status_answer(f):

@@ -45,6 +45,7 @@ ONBOARDING_STEPS = (
     "background",
     "identity",
     "permissions",
+    "questionnaires",
     "review",
 )
 # Shown before the owner types, and enforced by password_problem: keep the two in step.
