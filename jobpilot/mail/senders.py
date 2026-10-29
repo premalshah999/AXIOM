@@ -381,14 +381,15 @@ def authenticated_sender(receiving_auth, domain):
     if re.search(r"\bheader\.from=" + re.escape(domain) + r"(?:\s|;|$)", receiving_auth, re.I):
         return True
     # Workday's receiving result names workday.com for From: otp.workday.com.
-    # Accept this parent alignment only with a passing DKIM signature for the
-    # exact sender domain; a sibling/look-alike signature is insufficient.
+    # Gmail can report the authenticated parent domain for a subdomain From address.
+    # Require passing DKIM for either that same parent or the exact sender, never a sibling.
     parent = re.search(r"\bheader\.from=([a-z0-9.-]+)(?:\s|;|$)", receiving_auth, re.I)
     return bool(
         parent
         and domain.endswith("." + parent[1].lower())
         and re.search(
-            r"\bdkim=pass\b[^;]*\bheader\.i=@" + re.escape(domain) + r"(?:\s|;|$)",
+            r"\bdkim=pass\b[^;]*\bheader\.i=@(?:" + re.escape(domain) + "|"
+            + re.escape(parent[1]) + r")(?:\s|;|$)",
             receiving_auth,
             re.I,
         )
