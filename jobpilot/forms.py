@@ -17,6 +17,7 @@ from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from . import icims_protocol, phone_fields, taleo_protocol, widgets
+from . import profile_photo
 from .answers import HISTORY_UNKNOWN, WOTC, answer_key, job_catalog_search_box, normalize
 from .answers.text import strip_catalog_code
 from .knowledge import topic
@@ -2350,7 +2351,7 @@ class FormSession:
             return sorted(named, key=rank)[:1]
         unnamed = [f for f in files if not NOT_RESUME.search(f["label"])]
         if len(files) == 1:
-            return unnamed[:1]
+            return [f for f in unnamed[:1] if not profile_photo.wants_photo(f)]  # A lone "Photo" is not the resume.
         # Generic "Upload a file" inputs named by their section (Jabil: Resume/CV/... beside Additional Attachments).
         grouped = [f for f in unnamed if RESUME.search(f.get("group") or "")]
         if len(grouped) == 1:
@@ -3535,9 +3536,23 @@ class FormSession:
         from .owner_questions import document_for
 
         attached = False
+        photo = profile_photo.path_for(resolver.db, resolver.config.data_dir)
+        for field in list(self.fields.values()):
+            if not (photo and profile_photo.wants_photo(field)) or field["value"] or self.field_key(field) in self.document_uploads:
+                continue
+            # The profile photo (Setup › Profile) goes to any photo upload, required or not.
+            try:
+                await self.locator(field["id"]).set_input_files(str(photo), timeout=15000)
+                await self.wait_upload()
+            except (PlaywrightError, ValueError):
+                continue
+            self.document_uploads[self.field_key(field)] = photo.name
+            attached = True
+            self.emit("document_upload", "Attached the profile photo", {"field": field["label"]})
         for field in list(self.fields.values()):
             if (
                 field["type"] != "file"
+                or profile_photo.wants_photo(field)
                 or not field["required"]
                 or field["value"]
                 or self.field_key(field) in self.document_uploads
@@ -5318,6 +5333,11 @@ class FormSession:
                     problems.append(f"Required document missing: {f['label']}")
                     if not any(p.get("field_id") == f["id"] for p in self.pending):
                         self._pending(f, "Required document upload")
+                        if profile_photo.wants_photo(f):
+                            # One clear question that names where the photo is kept; the owner's file also fills Setup.
+                            self.pending[-1].update(
+                                key=profile_photo.KEY, owner_question=profile_photo.QUESTION, reason="Required profile photo"
+                            )
                 continue
             empty = not f["value"] or (f["type"] == "checkbox" and f["value"] != "true")
             if f["required"] and f["type"] != "file" and (not f["valid"] or empty):

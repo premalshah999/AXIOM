@@ -351,7 +351,7 @@ class CompletionMixin:
                 s.add(
                     Review(
                         run_id=run_id,
-                        question=q["question"][:8000],
+                        question=(q.get("owner_question") or q["question"])[:8000],
                         options=q.get("options", []),
                         key=q.get("key", "manual"),
                         reason=q.get("reason", ""),

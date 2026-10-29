@@ -7,6 +7,7 @@ from sqlalchemy.orm import aliased
 
 from ..db import Job, MailChallenge, Review, Run, Setting, now
 from ..knowledge import learned_answer
+from .. import profile_photo
 from ..admission import QueueBlocked, temporary_time, require_intake
 from ..runtime import engine_version
 
@@ -324,7 +325,11 @@ class ReviewsMixin:
                     continue
                 if oq.kind(question, options or [], context or {}, reason or "") == "upload":
                     # A document the owner sent answers every open question asking for that kind of document.
-                    path = oq.document_for(self.db, self.config.data_dir, question, company or "")
+                    path = (
+                        profile_photo.path_for(self.db, self.config.data_dir)
+                        if key == profile_photo.KEY
+                        else oq.document_for(self.db, self.config.data_dir, question, company or "")
+                    )
                     if path is not None and only is None:
                         found.append((rid, run_id, question, "File: " + path.name, True))
                     continue
@@ -490,6 +495,16 @@ class ReviewsMixin:
             run = s.get(Run, review.run_id)
             job = s.get(Job, run.job_id) if run else None
             question, employer = review.question, (job.company or "") if job else ""
+            is_photo = review.key == profile_photo.KEY
+        if is_photo:
+            # The profile photo is kept with the profile, and every photo upload takes it from there.
+            name = profile_photo.save(self.db, self.config.data_dir, filename, content)["name"]
+            result = await self.resolve_review(review_id, "File: " + name, document=True)
+            try:
+                await self.settle_open_questions(documents_only=True)
+            except Exception:
+                pass
+            return result
         entry = oq.save_document(self.db, self.config.data_dir, question, filename, content, employer)
         result = await self.resolve_review(review_id, "File: " + entry["name"], document=True)
         try:
