@@ -51,6 +51,8 @@ class Accounts:
         from ..agent_settings import require
 
         require(self.service.db, "accounts")
+        if temporary := self.store.temporary(url):
+            return temporary  # The employer's emailed temporary password: the very next sign-in uses it.
         saved = self.saved(url)
         if (
             saved
