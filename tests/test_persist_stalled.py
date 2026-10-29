@@ -135,3 +135,38 @@ async def test_a_paused_job_is_never_resumed_automatically(service, monkeypatch)
     with pytest.raises(ValueError, match="only the owner"):
         await manage(service, paused, "resume", actor="autopilot")
     assert service.db.get_setting("job_control:" + paused)["state"] == "paused"
+
+
+async def test_retries_stop_after_three_runs_on_the_same_blocker_until_something_changes(service, monkeypatch):
+    """A job re-run 14 times on one stalled form (2026-10-29): runs 4+ took 63% of the worker minutes for 7-15% confirmed."""
+    resumed = []
+
+    async def fake_manage(service, job_id, action, **kwargs):
+        resumed.append(job_id)
+        return {"run_id": "r"}
+
+    monkeypatch.setattr("jobpilot.job_control.manage", fake_manage)
+    monkeypatch.setattr("jobpilot.autopilot.datetime", type("D", (), {"now": staticmethod(lambda tz=None: datetime(2026, 10, 19, 9, tzinfo=UTC))}))
+    from jobpilot.autopilot import SAME_STALL_RUNS, stall_key
+
+    assert stall_key("Step 3 of 7 did not advance after 42s") == stall_key("Step 5 of 7 did not advance after 9s")
+
+    def stalled(n, engines, reasons):
+        with service.db.exclusive() as s:
+            job = Job(identity=f"loop-{n}", url=f"https://example.test/loop{n}", company=f"Loop{n}",
+                      title="Software Engineer", ats="workday", status="ready")
+            s.add(job)
+            s.flush()
+            for i, (engine, reason) in enumerate(zip(engines, reasons)):
+                s.add(Run(job_id=job.id, state="waiting_browser", mode="submit", packet={"engine_version": engine},
+                          reason=reason, created_at=datetime(2026, 10, 17, 1, i, tzinfo=UTC).isoformat()))
+            return job.id
+
+    n = SAME_STALL_RUNS
+    looping = stalled(1, ["v1"] * n, [f"Step {i} did not advance"for i in range(n)])
+    new_build = stalled(2, ["v1"] * (n - 1) + ["v2"], ["did not advance"] * n)
+    other_blocker = stalled(3, ["v1"] * n, ["did not advance"] * (n - 1) + ["field required"])
+    # The daily cap (PERSIST_DAILY) is a separate guard: these runs are over a day old.
+    await persist_stalled(service, 10, [], {})
+    assert looping not in resumed
+    assert {new_build, other_blocker} <= set(resumed)

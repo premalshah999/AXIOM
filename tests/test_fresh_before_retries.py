@@ -110,4 +110,4 @@ def test_classification_takes_the_planners_inventory_not_only_recently_listed_jo
 
     work = SimpleNamespace(classify=[["a", "b", "c"], ["d", "e"]])
     assert classification_ids(work, attempted={"b"}) == ["a", "c", "d", "e"]
-    assert len(classification_ids(SimpleNamespace(classify=[[str(n) for n in range(30)]]), set())) == 24
+    assert len(classification_ids(SimpleNamespace(classify=[[str(n) for n in range(100)]]), set())) == 72

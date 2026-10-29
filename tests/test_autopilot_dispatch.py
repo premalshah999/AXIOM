@@ -188,3 +188,39 @@ async def test_owner_requests_blocked_by_one_employer_do_not_starve_the_rest(ser
     for _ in range(2):  # The first pass tries TRIES requests; the least recently tried go last on the next.
         await owner_apply.due(service, 1)
     assert started == [free]
+
+
+async def test_the_threshold_readmission_runs_once_per_policy_revision(service, monkeypatch):
+    import jobpilot.discovery as discovery
+
+    calls = []
+    monkeypatch.setattr(discovery, "readmit_by_threshold", lambda db: calls.append(1) or 0)
+
+    async def queue(job_id, *args, **kwargs):
+        return {"id": "run-" + job_id}
+
+    await run_tick(service, monkeypatch, queue)
+    await autopilot.tick(service)
+    assert calls == [1]
+    service.db.set_setting("profile", {"minimum_fit": 40})
+    await autopilot.tick(service)
+    assert calls == [1, 1]
+
+
+async def test_fresh_ready_jobs_take_the_slots_before_retries_of_failed_jobs(service, monkeypatch):
+    from jobpilot import owner_apply
+
+    seen = {}
+
+    async def due(service, free, retries=None):
+        seen.setdefault("retries", retries)  # The first call is the one ahead of the fresh jobs.
+        return 0
+
+    monkeypatch.setattr(owner_apply, "due", due)
+
+    async def queue(job_id, *args, **kwargs):
+        return {"id": "run-" + job_id}
+
+    add_job(service, "fresh1")
+    await run_tick(service, monkeypatch, queue)
+    assert seen["retries"] == 0  # With a fresh job waiting, no retry starts ahead of it.

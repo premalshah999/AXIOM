@@ -434,6 +434,17 @@ PERSIST_DAILY = 3  # Initial attempt plus two retries; application_budget also e
 MAINTENANCE = re.compile(r"maintenance|temporarily unavailable|scheduled outage|service unavailable", re.I)
 
 
+# Automatic retries of a job stop after this many runs in a row that ended on the same blocker under the same build:
+# runs 4+ took 63% of 72 hours of worker minutes for 7-15% confirmations, and automatic retries confirmed none of 93
+# (2026-10-29). A new build, a different blocker or the owner's answer or Apply (a new run in between) starts it afresh.
+SAME_STALL_RUNS = 3
+
+
+def stall_key(reason):
+    """A run's blocker without the numbers (counts, field indexes, durations) that differ between identical stalls."""
+    return re.sub(r"\d+", "#", (reason or "").strip().lower())[:80]
+
+
 def persist_wait(runs_today, reason):
     seconds = min(60, 30 * max(1, runs_today))
     if MAINTENANCE.search(reason or ""):
@@ -524,10 +535,16 @@ async def persist_stalled(service, slots, roles, batch):
         # Saved packets are hundreds of KB each; retry scheduling needs only metadata.
         from .application_budget import nothing_sent
 
+        streaks = {}
         for run in s.execute(select(
-            Run.id, Run.job_id, Run.state, Run.reason, Run.created_at, Run.finished_at
+            Run.id, Run.job_id, Run.state, Run.reason, Run.created_at, Run.finished_at,
+            Run.packet["engine_version"].as_string().label("engine"),
         ).where(Run.created_at >= since).order_by(Run.created_at)):
             latest[run.job_id] = run
+            # Runs in a row that ended on the same blocker under the same build: a retry with nothing new repeats it.
+            key = (run.engine, stall_key(run.reason))
+            streak = streaks.get(run.job_id)
+            streaks[run.job_id] = (key, streak[1] + 1 if streak and streak[0] == key else 1)
             # Deployment interruptions and sender waits sent nothing; they are not one of the day's retries
             # (Goldman Sachs' fixed job sat out its quota on two interrupted runs, 2026-10-18).
             if run.created_at >= day and not nothing_sent(run.state, run.reason):
@@ -547,6 +564,7 @@ async def persist_stalled(service, slots, roles, batch):
                 or run.id in asking
                 or PERSIST_SKIP.search(run.reason or "")
                 or runs_today >= PERSIST_DAILY
+                or streaks[job_id][1] >= SAME_STALL_RUNS
                 or (run.finished_at or run.created_at) > (current - persist_wait(runs_today, run.reason)).isoformat()
             ):
                 continue
@@ -617,6 +635,8 @@ def admission_revision(db, cfg):
         "admit_by_title": bool(db.get_setting("profile", {}).get("admit_by_title")),
         "excluded_ats": sorted(db.get_setting("ats_focus", {}).get("exclude") or []),
         "minimum_auto_fit": cfg.minimum_auto_fit,
+        # readmit_by_threshold's upper bound: lowering the profile's fit must revisit the jobs it ranked skipped.
+        "minimum_fit": db.get_setting("profile", {}).get("minimum_fit"),
     }
     return hashlib.sha256(json.dumps(policy, sort_keys=True).encode()).hexdigest()[:16]
 
@@ -661,13 +681,17 @@ async def owner_requests_only(service):
     return await due(service, room)
 
 
-def classification_ids(due_work, attempted, limit=24):
+def classification_ids(due_work, attempted, limit=None):
     """The planner's unclassified inventory to rank next, minus jobs already attempted.
 
     It was also limited to postings re-seen in the last five hours. Discovery pauses while unclassified inventory is
     high, so no posting was re-seen: 5 of 53 planned jobs passed, classification ran about 10 an hour, and Workday's
     1,216 sources went unscanned for 41 hours (2026-10-25). The planner already excludes gated, skipped and cooling
     jobs."""
+    from .features.discovery.policy import DiscoveryPolicy
+
+    # The planner returns up to three model batches a tick; a 24-job cap here dropped two thirds of its plan.
+    limit = limit or DiscoveryPolicy().classify_batch * 3
     return [jid for group in due_work.classify for jid in group if jid not in attempted][:limit]
 
 
@@ -807,6 +831,10 @@ async def tick(service):
             from .discovery import readmit_by_title
 
             count = await asyncio.to_thread(readmit_by_title, db, [j["id"] for j in board["jobs"]])
+            # Jobs ranked skipped only by the profile's higher minimum_fit, once per policy revision like the titles.
+            from .discovery import readmit_by_threshold
+
+            count += await asyncio.to_thread(readmit_by_threshold, db)
             db.set_setting("title_readmit_revision", {"revision": revision, "readmitted": count, "at": now()})
             if count:
                 board = await asyncio.to_thread(board_snapshot, db, limit=None)
@@ -1036,10 +1064,11 @@ async def tick(service):
         from .owner_apply import due as owner_requests
 
         # The owner's own Apply clicks go first; each one waits only for admission to allow it. Retries of earlier
-        # attempts take at most half of the free slots while fresh ready postings are waiting (2026-10-24).
+        # attempts wait for the slots fresh ready postings leave (2026-10-29; before, up to half of the free slots).
         fresh = any(j.get("status") == "ready" for j in jobs)
         free = room - queued_now
-        queued_now += await owner_requests(service, free, retries=max(1, free // 2) if fresh else None)
+        # Retries wait for what no fresh job can use: first attempts confirm two in three, a third run one in eight.
+        queued_now += await owner_requests(service, free, retries=0 if fresh else None)
         await dispatch_ready(jobs)
         unranked = [j["id"] for j in candidates[:24] if j.get("score") is None and j["status"] != "ready"]
         if integrated:
