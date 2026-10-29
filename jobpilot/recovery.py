@@ -7,7 +7,7 @@ import re
 
 from sqlalchemy import select
 
-from .application_budget import BROWSER_OUTAGE, HOST_OVERLOADED
+from .application_budget import BROWSER_OUTAGE, HOST_OVERLOADED, nothing_sent
 from .db import Event, Job, Review, Run, Setting, now
 from .admission import employer_partition, outcome_for
 from .specialist import handoff_threshold, handoff_trigger
@@ -31,9 +31,50 @@ CAUSES = {
 }
 SENDER_BUSY = "Another application kept the same email sender busy"
 BROWSER_UNAVAILABLE = "Open the ApplyPilot Chrome window"
-SENDER_WAITS = 2  # Back-to-back lease waits; the start limit also caps all browser retries.
 # Lease waits more than an hour apart are separate attempts: Ford's two waits on 10-17 exhausted its 10-18 retry.
 SENDER_CHAIN_SECONDS = 3600
+# Waits that sent nothing: (first delay, longest delay, waits before giving up; None = never). Each wait doubles the
+# delay. A busy sender used to give up after two 15-30 s waits and land in Repairing with "Requeue this job" although
+# the lease frees by itself (retry_due starts nothing while it is held); a model outage requeued every 1-2 minutes
+# for as long as it lasted, one job eight times in 12 minutes (2026-10-28, 102 runs on 50 jobs).
+WAIT_BACKOFF = {
+    "sender_busy": (15, 300, 40),
+    "browser_unavailable": (30, 600, 20),
+    "host_overloaded": (30, 600, 20),
+    "provider_unavailable": (60, 1800, None),
+}
+
+
+def backoff_seconds(waits, first, longest):
+    """Delay before the next try after `waits` consecutive waits: first, 2x, 4x ... up to longest."""
+    return min(longest, first * 2 ** max(0, waits - 1))
+
+
+def nothing_sent_streak(rows):
+    """Trailing runs (oldest first, (state, reason)) that stopped on the app's own infrastructure, newest backwards."""
+    streak = 0
+    for state, reason in reversed(list(rows)):
+        if not nothing_sent(state, reason):
+            break
+        streak += 1
+    return streak
+
+
+# A deterministic stall (a control or an answer the engine could not get past) repeats exactly while the code is the same.
+STALLED = re.compile(r"^(?:Recovery stopped:|The browser did not advance)")
+
+
+def repeats_unchanged(rows, repeats=2):
+    """True when the last `repeats` runs (oldest first, (reason, engine_version)) stalled for the same reason on the same
+    engine: another try runs the same failing step. The Required-field and Country stalls repeated 9-14 times over
+    three days (2026-10-26..28) because the autopilot's daily retry ignored the recovery signature."""
+    tail = [tuple(row) for row in list(rows)[-repeats:]]
+    return (
+        len(tail) == repeats
+        and bool(tail[0][1])
+        and all(STALLED.match(reason or "") for reason, _ in tail)
+        and len(set(tail)) == 1
+    )
 REPAIR_STRATEGY_VERSION = "owned-review-repair-observation-v4"
 SPECIALIST_LIMIT = 2  # default of the SPECIALIST_ATTEMPTS setting; the code reads config.specialist_attempts
 # Browser/control repairs have only eight minutes including all waits. Provider
@@ -274,7 +315,11 @@ def _eligible_specialist_history(session, run, result):
 def failure_signature(run, result):
     checkpoint = result.get("browser_checkpoint") or run.packet.get("browser_checkpoint", {})
     strategies = checkpoint.get("failed_strategies", {})
-    states = sorted(
+    reason = re.sub(r"\s+", " ", result.get("reason", "").casefold()).strip()
+    # "Recovery stopped: <the field or answer that blocks>" already names the blocker; the last state of each strategy
+    # then only varies between attempts (a different refused click) and hid a repeated stall from the unchanged-failure
+    # check: one job stopped 14 times on the same blocker (2026-10-26..28).
+    states = [] if reason.startswith("recovery stopped:") else sorted(
         (key, attempts[-1].get("state", ""))
         for key, value in strategies.items()
         if isinstance(value, dict) and (attempts := value.get("attempts"))
@@ -284,7 +329,7 @@ def failure_signature(run, result):
             {
                 "cause": result.get("recovery_cause"),
                 "blocker": result.get("blocker_type"),
-                "reason": re.sub(r"\s+", " ", result.get("reason", "").casefold()).strip(),
+                "reason": reason,
                 "states": states,
             },
             sort_keys=True,
@@ -417,15 +462,17 @@ def schedule_recovery(session, config, run, result):
             datetime.now(UTC) - timedelta(seconds=SENDER_CHAIN_SECONDS)
         ).isoformat()
         waits = (previous.get("sender_waits", 0) if chained else 0) + 1
+        first, longest, limit = WAIT_BACKOFF[cause]
+        keep = limit is None or waits <= limit
         value = {
             **previous,
             "source_run_id": run.id,
             "cause": cause,
             "sender_waits": waits,
             "mail_request_kind": result.get("mail_request_kind", previous.get("mail_request_kind", "auto")),
-            "scheduled": waits <= SENDER_WAITS,
-            "status": cause if waits <= SENDER_WAITS else cause + "_exhausted",
-            "not_before": (datetime.now(UTC) + timedelta(seconds=15 * min(waits, 2))).isoformat(),
+            "scheduled": keep,
+            "status": cause if keep else cause + "_exhausted",
+            "not_before": (datetime.now(UTC) + timedelta(seconds=backoff_seconds(waits, first, longest))).isoformat(),
             "updated_at": now(),
         }
         if row:
@@ -527,6 +574,8 @@ def schedule_recovery(session, config, run, result):
         "failure_engine_version": run.packet.get("engine_version"),
         "scheduled": not exhausted and not unchanged,
         "status": "exhausted" if exhausted else "unchanged_failure" if unchanged else "scheduled",
+        # What stopped it, in the stop's own words, for the status page and the owner (not the generic "did not advance").
+        **({"blocker": (result.get("reason") or "")[:300]} if exhausted or unchanged else {}),
         "not_before": (
             datetime.now(UTC) + timedelta(seconds=(
                 config.recovery_delay_seconds if cause == "site_temporary"
@@ -638,6 +687,7 @@ async def retry_due(service):
     control = service.db.get_setting("control", {})
     if control.get("paused") or not control.get("auto_submit") or not service.dispatch:
         return []
+    from . import provider_health
     from .provider_health import dispatch_limit
 
     provider_room = dispatch_limit(service.db, service.config)
@@ -653,14 +703,29 @@ async def retry_due(service):
         due = [
             (r.key.removeprefix("draft_recovery:"), dict(r.value))
             for r in s.scalars(select(Setting).where(Setting.key.like("draft_recovery:%")))
-            if r.value.get("scheduled") and r.value.get("not_before", "") <= now()
+            if r.value.get("scheduled")
         ]
+    # A parked model outage does not wait out its timer once the provider is back (provider_health.recovered_since):
+    # every one resumes after a success; while only the cooldown has ended, one run probes it with real work.
+    cooled = provider_health.status(service.db, service.config)["state"] == "recovery_ready"
+    ripe = []
+    for job_id, value in due:
+        if value.get("not_before", "") <= now():
+            ripe.append((job_id, value))
+        elif value.get("cause") == "provider_unavailable":
+            if provider_health.recovered_since(service.db, service.config, value.get("updated_at", "")):
+                ripe.append((job_id, {**value, "early": "recovered"}))
+            elif cooled:
+                ripe.append((job_id, {**value, "early": "probe"}))
+    due, probes = ripe, 0
     queued = []
     for job_id, recovery in sorted(due, key=lambda r: r[1]["not_before"]):
         if canary_ids is not None and job_id not in canary_ids:
             continue
         if len(queued) >= room:
             break
+        if recovery.get("early") == "probe" and probes:
+            continue
         if service.db.get_setting("control", {}).get("paused"):
             break
         try:
@@ -693,6 +758,7 @@ async def retry_due(service):
                 job_id, "submit", retry=True, recovery_source_run=recovery["source_run_id"]
             )
             queued.append(run["id"])
+            probes += recovery.get("early") == "probe"
             employers.add(employer)
             service.db.event(
                 run["id"],

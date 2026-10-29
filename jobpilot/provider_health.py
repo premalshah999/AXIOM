@@ -51,7 +51,9 @@ def finish(db, config, ticket, *, failure=None, retry_after=None):
             return
         if failure is None:
             if row:
-                row.value = {"generation": generation, "failures": 0}
+                # A success that ends a cooldown is the signal parked runs wait for (recovery.retry_due): 35 of 45
+                # jobs parked on "model provider unavailable" finished later, but only after their own 1-2 minute timer.
+                row.value = {"generation": generation, "failures": 0, **({"recovered_at": time.time()} if value.get("retry_at") else {k: v for k, v in value.items() if k == "recovered_at"})}
             return
         failures = value.get("failures", 0) + 1
         value = {"generation": generation, "failures": failures, "last_error": failure}
@@ -139,3 +141,12 @@ def dispatch_gate(db, config):
 
 def dispatch_limit(db, config):
     return dispatch_gate(db, config).limit
+
+
+def recovered_since(db, config, iso):
+    """True when a request succeeded after a cooldown, later than the ISO time `iso`."""
+    value = db.get_setting(key(config), {}) or {}
+    try:
+        return float(value.get("recovered_at", 0)) > datetime.fromisoformat(iso).timestamp()
+    except (TypeError, ValueError):
+        return False
