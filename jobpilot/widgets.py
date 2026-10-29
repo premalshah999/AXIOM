@@ -1689,8 +1689,11 @@ async def _rcm_owned_select(frame, el, text, targets, base, longest, full_list_o
         key=len,
         reverse=True,
     ) or [max(re.findall(r"[A-Za-z]{4,}", longest) or [longest[:4]], key=len)]
-    # Then the caller's own searches: the profile's fallback major when the recorded one is not offered.
-    searches = list(dict.fromkeys([*words[:2], *(q for q in queries if q and norm(q) != norm(text))]))
+    # Then the caller's own searches: the profile's fallback major when the recorded one is not offered. When the caller
+    # has such searches they come before the single words: Hershey's Major/Field of Study searched "Science" and "Data"
+    # (3.5 s each) and spent the 12 s field budget before the fallback "Computer Science" was typed (2026-10-29).
+    own = [q for q in queries if q and norm(q) != norm(text)]
+    searches = list(dict.fromkeys([text, *own, *words[:2]] if own else words[:2]))
     for word in searches if not pick and not complete and not full_list_only else []:
         before = [o["id"] for o in state["options"]]
         await el.fill("")

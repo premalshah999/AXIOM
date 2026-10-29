@@ -18,6 +18,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from . import icims_protocol, phone_fields, taleo_protocol, widgets
 from .answers import HISTORY_UNKNOWN, WOTC, answer_key, job_catalog_search_box, normalize
+from .answers.text import strip_catalog_code
 from .knowledge import topic
 from .browser_contracts import ActionResult, action_result, field_identity, fingerprint
 from .models import AnswerModelUnavailable
@@ -29,6 +30,23 @@ from .privacy import dismiss_cookies
 install_playwright_fast()
 
 SCAN = (Path(__file__).parent / "js" / "scan.js").read_text()
+
+
+def major_by_name(value, fallback):
+    """A picker of the offered major named exactly as the recorded major, else as the fallback major: never a guess.
+    The name is compared without the catalog code Hershey's SuccessFactors majors carry ("Computer Science (00123)",
+    2026-10-29)."""
+
+    def pick(texts):
+        for wanted in (value, fallback):
+            named = [t for t in texts if normalize(strip_catalog_code(t)) == normalize(wanted)]
+            if len(named) == 1:
+                return named[0]
+        return None
+
+    return pick
+
+
 FIELD_WRITE_SECONDS = 12
 # A school search that finds nothing falls back to shorter searches and then "Other"; each empty result can wait out
 # its option wait. On slow Workday tenants the chain outlasted 12 s and the field never committed (Lennar's
@@ -2727,12 +2745,7 @@ class FormSession:
                 # outran the 12 s write budget on every attempt, and the run stalled (2026-10-21).
                 search_queries = [*search_queries, fallback]
 
-                def major_pick(texts):
-                    for wanted in (value, fallback):
-                        named = [t for t in texts if normalize(t) == normalize(wanted)]
-                        if len(named) == 1:
-                            return named[0]
-                    return None
+                major_pick = major_by_name(value, fallback)
 
                 async def no_guess(texts):
                     return None
