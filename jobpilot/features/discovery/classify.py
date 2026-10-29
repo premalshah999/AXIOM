@@ -49,10 +49,13 @@ def cache_key(job: dict, pversion: str) -> str:
 
 def existing_rank_adapter(db, config) -> ClassifyFn:
     """Uses the application's batch ranker (which also writes Job.status/score)."""
-    from ...discovery import rank_batch
+    import asyncio
+
+    from ...discovery import rank_batch_in_thread
 
     async def run(job_ids):
-        rows = await rank_batch(db, config, job_ids)
+        # Off the shared loop: a batch reads every resume, fetches postings and writes 24 rows synchronously.
+        rows = await asyncio.to_thread(rank_batch_in_thread, db, config, job_ids)
         return {r["job_id"]: r for r in rows}
 
     return run
@@ -96,6 +99,10 @@ async def classify(db, jobs: list[dict], fn: ClassifyFn, policy: DiscoveryPolicy
         batch = [job["id"] for job, _ in rankable[i : i + policy.classify_batch]]
         report["model_batches"] += 1
         ok, bad = await _bisect(fn, batch)
+        # A posting that cannot be fetched right now comes back flagged: it is retried later with its own reason,
+        # not recorded as "model omitted this job" (the real blocker was hidden).
+        for jid in [j for j, r in ok.items() if r.get("deferred")]:
+            bad[jid] = ok.pop(jid)["deferred"]
         results.update(ok)
         errors.update(bad)
     with db.exclusive() as s:

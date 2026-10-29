@@ -8,7 +8,7 @@ from urllib.parse import urljoin, urlsplit
 from typing import Literal
 
 from bs4 import BeautifulSoup
-from httpx import HTTPError
+from httpx import HTTPError, HTTPStatusError
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -464,6 +464,74 @@ async def enrich(db, config, job_id):
     return details
 
 
+PROTECTED = {"queued", "running", "submitting", "confirmed", "submission_unknown", "archived"}
+GONE_STATUS = {404, 410}
+
+
+def posting_gone(exc):
+    """The employer's page answered 404/410: the posting was taken down (not a transient outage)."""
+    return isinstance(exc, HTTPStatusError) and exc.response.status_code in GONE_STATUS
+
+
+def close_gone_posting(db, job_id, exc):
+    """A posting the employer removed becomes status 'closed' with the reason, never a 500 from rank. Ranking
+    returned HTTP 500 for omegahires.applytojob.com, jobs.ascension.org and externalcareers-ohsu.icims.com postings
+    that no longer exist (2026-10-28); each retry fetched the dead page again."""
+    reason = f"The posting is no longer available: the employer's page answered HTTP {exc.response.status_code}"
+    with db.exclusive() as s:
+        item = s.get(Job, job_id)
+        if item and item.status not in PROTECTED:
+            item.status, item.score, item.reason = "closed", 0, reason
+    return reason
+
+
+def fetch_failure(exc):
+    """A real message for a posting fetch that failed for a reason other than being gone."""
+    if isinstance(exc, HTTPStatusError):
+        return f"The employer's site answered HTTP {exc.response.status_code} for this posting; try again later"
+    if isinstance(exc, (TimeoutError, asyncio.TimeoutError)) or type(exc).__name__.endswith("Timeout"):
+        return "The employer's site did not answer in time for this posting; try again later"
+    return f"The posting could not be fetched ({type(exc).__name__}); try again later"
+
+
+def model_failure(exc):
+    """AnswerModelTimeout/ConnectionError/Unavailable carry no text, so the API answered 409 with an empty detail
+    (several ranking clicks, 2026-10-28). Name what happened."""
+    from .models import AnswerModelConnectionError, AnswerModelTimeout
+
+    if isinstance(exc, AnswerModelTimeout):
+        return "The ranking model timed out; try again in a minute"
+    if isinstance(exc, AnswerModelConnectionError):
+        return "The ranking model could not be reached; try again in a minute"
+    return f"The ranking model was unavailable ({type(exc).__name__}); try again in a minute"
+
+
+async def ranking_model(*args, **kwargs):
+    """`structured`, with a non-empty message on every RuntimeError the API turns into a 409."""
+    try:
+        return await structured(*args, **kwargs)
+    except RuntimeError as exc:
+        if str(exc).strip():
+            raise
+        raise RuntimeError(model_failure(exc)) from exc
+
+
+def board_floor(db):
+    """The autopilot's minimum_auto_fit (job board settings), or None when the board has none."""
+    value = (db.get_setting("job_board_settings", {}) or {}).get("minimum_auto_fit")
+    return value if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 100 else None
+
+
+def ranking_threshold(db, profile):
+    """The score at which ranking marks a posting ready: the LOWER of the profile's minimum_fit and the board's
+    minimum_auto_fit. Two settings answered the same question: with the board at 45 and the profile at 54 every
+    45-53 posting was ranked 'skipped' although the autopilot would have applied (2026-10-28). Ranking marks the
+    postings either setting would take; the autopilot's own floor still decides what is started, and no stored
+    setting changes."""
+    floor = board_floor(db)
+    return profile.minimum_fit if floor is None else min(profile.minimum_fit, floor)
+
+
 def rank_in_thread(db, config, job_id):
     """Run `rank` on its own event loop; call it through asyncio.to_thread.
 
@@ -480,7 +548,7 @@ async def rank(db, config, job_id):
         row = s.get(Job, job_id)
         if not row:
             raise ValueError("Job not found")
-        if row.status in {"queued", "running", "submitting", "confirmed", "submission_unknown", "archived"}:
+        if row.status in PROTECTED:
             raise ValueError("Cannot classify an active or submitted job")
         job = record(row)
         resumes = [record(x) for x in s.scalars(select(Resume).where(Resume.demo.is_(False)))]
@@ -489,7 +557,13 @@ async def rank(db, config, job_id):
     from .features.discovery.postings import MIN_TEXT
 
     if not job["description"]:
-        await enrich(db, config, job_id)
+        try:
+            await enrich(db, config, job_id)
+        except HTTPError as exc:
+            if posting_gone(exc):
+                reason = close_gone_posting(db, job_id, exc)
+                return FitResult(score=0, eligible=False, resume_id=None, reason=reason).model_dump()
+            raise RuntimeError(fetch_failure(exc)) from exc
         with db.session() as s:
             job = record(s.get(Job, job_id))
     elif len(job["description"].strip()) < MIN_TEXT and await posting_api_text(db, job_id, job["url"]):
@@ -508,7 +582,7 @@ async def rank(db, config, job_id):
     ):
         result = FitResult(score=0, eligible=False, resume_id=None, reason="Excluded title keyword")
     else:
-        result = await structured(
+        result = await ranking_model(
             config,
             db,
             ClassifiedFit,
@@ -538,14 +612,14 @@ async def rank(db, config, job_id):
         raise ValueError("Classifier returned an unknown resume")
     ready = (
         result.eligible
-        and result.score >= profile.minimum_fit
+        and result.score >= ranking_threshold(db, profile)
         and (not result.uncertainties or profile.autonomous)
         and result.resume_id
     )
     by_title = not ready and title_admits_job(db, profile, job, result.reason)
     with db.exclusive() as s:
         item = s.get(Job, job_id)
-        if item.status in {"queued", "running", "submitting", "confirmed", "submission_unknown", "archived"}:
+        if item.status in PROTECTED:
             raise ValueError("Job became active or protected during classification")
         item.score, item.reason, item.resume_id = result.score, result.reason, result.resume_id
         item.reason += (" | Unresolved: " + "; ".join(result.uncertainties)) if result.uncertainties else ""
@@ -615,6 +689,51 @@ def readmit_by_title(db, live_ids):
     return readmitted
 
 
+def readmit_by_threshold(db):
+    """Return postings ranked 'skipped' only by the profile's higher minimum_fit to 'ready' under ranking_threshold.
+
+    With the board at 45 and the profile at 54, every 45-53 posting was ranked skipped (132 never-attempted jobs,
+    2026-10-28). Only a posting whose current-version classification says eligible, with no unresolved blocker,
+    inside the deterministic gate and never attempted is readmitted; a posting without a classification row has no
+    eligibility on record and is left alone."""
+    from .db import Run
+    from .features.discovery import gate, policy_for
+    from .features.discovery.classify import outcomes
+    from .features.discovery.graduation import graduation_gate
+
+    raw = db.get_setting("profile", {}) or {}
+    profile = Profile.model_validate(raw)
+    low, high = ranking_threshold(db, profile), profile.minimum_fit
+    if low >= high:
+        return 0
+    policy = policy_for(db)
+    with db.session() as s:
+        attempted = set(s.scalars(select(Run.job_id).distinct()))
+        rows = [
+            record(j) for j in s.scalars(
+                select(Job).where(Job.status == "skipped", Job.demo.is_(False), Job.score >= low, Job.score < high)
+            )
+            if j.id not in attempted and j.resume_id
+        ]
+    found = outcomes(db, rows, raw)
+    ids = []
+    for job in rows:
+        got = found.get(job["id"])
+        result = (got or {}).get("result") or {}
+        if (
+            got and got["status"] == "ok" and result.get("eligible")
+            and (profile.autonomous or not result.get("uncertainties"))
+            and not gate(job, policy) and not graduation_gate(job, raw)
+        ):
+            ids.append(job["id"])
+    if not ids:
+        return 0
+    with db.exclusive() as s:
+        for item in s.scalars(select(Job).where(Job.id.in_(ids), Job.status == "skipped")):
+            item.status = "ready"
+    return len(ids)
+
+
 class RankedJob(ClassifiedFit):
     job_id: str
 
@@ -623,13 +742,23 @@ class RankedBatch(BaseModel):
     jobs: list[RankedJob] = Field(max_length=24)
 
 
+def rank_batch_in_thread(db, config, job_ids):
+    """`rank_batch` on a private event loop, through asyncio.to_thread. It reads every resume, fetches postings,
+    validates eligibility and writes 24 rows synchronously around one model call; on the shared loop that starved
+    the browser owners exactly as single-job ranking did (rank_in_thread, 2026-10-15)."""
+    return asyncio.run(rank_batch(db, config, job_ids))
+
+
 async def rank_batch(db, config, job_ids):
-    """One shared profile/resume context for up to 24 independent jobs."""
+    """One shared profile/resume context for up to 24 independent jobs.
+
+    A posting the employer removed becomes 'closed' and a posting that cannot be fetched right now is deferred
+    (its entry carries `deferred`), each without failing the other jobs: one dead page used to fail all 24."""
     ids = list(dict.fromkeys(job_ids))
     if not ids or len(ids) > 24:
         raise ValueError("Classification batches require 1–24 jobs")
     profile = Profile.model_validate(db.get_setting("profile", {}))
-    protected = {"queued", "running", "submitting", "confirmed", "submission_unknown", "archived"}
+    protected = PROTECTED
     with db.session() as s:
         jobs = [record(j) for j in s.scalars(select(Job).where(Job.id.in_(ids)))]
         resumes = [record(r) for r in s.scalars(select(Resume).where(Resume.demo.is_(False)))]
@@ -638,6 +767,7 @@ async def rank_batch(db, config, job_ids):
     if not resumes:
         raise ValueError("Upload a resume before classifying jobs")
     missing = [j["id"] for j in jobs if not (j.get("description") or "").strip()]
+    closed, deferred = {}, {}
     if missing:
         slots = asyncio.Semaphore(4)
 
@@ -653,6 +783,9 @@ async def rank_batch(db, config, job_ids):
                     if not row or not (row.description or "").strip():
                         raise ValueError("Posting description is unavailable")
             except Exception as exc:
+                if posting_gone(exc):
+                    closed[jid] = close_gone_posting(db, jid, exc)
+                    return
                 db.set_setting(
                     key,
                     {
@@ -660,30 +793,34 @@ async def rank_batch(db, config, job_ids):
                         "retry_at": (datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
                     },
                 )
-                raise ValueError("Posting text is unavailable; classification is deferred") from None
+                detail = fetch_failure(exc) if isinstance(exc, (HTTPError, TimeoutError)) else type(exc).__name__
+                raise ValueError(f"Posting text is unavailable ({detail}); classification is deferred") from None
 
         results = await asyncio.gather(*(load_description(jid) for jid in missing), return_exceptions=True)
-        if any(isinstance(result, BaseException) for result in results):
-            raise ValueError("Some posting text is unavailable; classification is deferred")
+        for jid, outcome in zip(missing, results):
+            if isinstance(outcome, BaseException):
+                deferred[jid] = str(outcome)[:240] or "Posting text is unavailable; classification is deferred"
         with db.session() as session:
             jobs = [record(j) for j in session.scalars(select(Job).where(Job.id.in_(ids)))]
         if any(j["status"] in protected for j in jobs):
             raise ValueError("A job became active while its posting was fetched")
+    # Only jobs with posting text enter the model call; the rest report their own outcome.
+    ranked = [j for j in jobs if j["id"] not in closed and j["id"] not in deferred]
     with db.session() as session:
         eligibility = {
             j["id"]: eligibility_for_job(session, session.get(Job, j["id"]), profile, config.data_dir)
-            for j in jobs
+            for j in ranked
         }
-    model_jobs = [j for j in jobs if not eligibility[j["id"]].conflicts]
+    model_jobs = [j for j in ranked if not eligibility[j["id"]].conflicts]
     rejected_jobs = [
         RankedJob(
             job_id=j["id"], score=0, eligible=False, resume_id=None, reason="Explicit hiring restriction"
         )
-        for j in jobs
+        for j in ranked
         if eligibility[j["id"]].conflicts
     ]
     result = (
-        await structured(
+        await ranking_model(
             config,
             db,
             RankedBatch,
@@ -730,13 +867,15 @@ async def rank_batch(db, config, job_ids):
         else RankedBatch(jobs=[])
     )
     result.jobs.extend(rejected_jobs)
-    if len(result.jobs) != len(ids) or {r.job_id for r in result.jobs} != set(ids):
+    wanted = [j["id"] for j in ranked]
+    if len(result.jobs) != len(wanted) or {r.job_id for r in result.jobs} != set(wanted):
         raise ValueError("Classifier did not return exactly the requested jobs")
     if any(r.resume_id and r.resume_id not in {x["id"] for x in resumes} for r in result.jobs):
         raise ValueError("Classifier selected an unknown resume")
     job_by_id = {j["id"]: j for j in jobs}
     for r in result.jobs:
         validate_classification(r, job_by_id[r.job_id], profile, eligibility[r.job_id])
+    threshold = ranking_threshold(db, profile)
     with db.exclusive() as s:
         for r in result.jobs:
             j = s.get(Job, r.job_id)
@@ -749,7 +888,7 @@ async def rank_batch(db, config, job_ids):
             ready = (
                 not excluded
                 and r.eligible
-                and r.score >= profile.minimum_fit
+                and r.score >= threshold
                 and r.resume_id
                 and (profile.autonomous or not r.uncertainties)
             )
@@ -758,7 +897,16 @@ async def rank_batch(db, config, job_ids):
                 j.reason = TITLE_ADMITTED + (j.reason or "")
                 ready = bool(j.resume_id)
             j.status = "ready" if ready else "skipped"
-    return [r.model_dump() for r in result.jobs]
+    out = [r.model_dump() for r in result.jobs]
+    out += [
+        {"job_id": jid, "score": 0, "eligible": False, "resume_id": None, "reason": reason, "closed": True}
+        for jid, reason in closed.items()
+    ]
+    out += [
+        {"job_id": jid, "score": 0, "eligible": False, "resume_id": None, "reason": reason, "deferred": reason}
+        for jid, reason in deferred.items()
+    ]
+    return out
 
 
 async def discover(source, db, config):
