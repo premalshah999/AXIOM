@@ -105,9 +105,12 @@ async def test_legacy_unused_create_flag_does_not_block_resume_first_route(servi
 
     obs = page()
     value, upload, recover = sign_in(service, monkeypatch, obs)
+    from datetime import UTC, datetime, timedelta
+
+    # A recent flag: one older than ABSENT_CREATE_RETRY_SECONDS offers the Create again before this route.
     value.accounts.mark(URL, "reset_requested", LOGIN, reset_requested_at=time.time() - 1200,
                         reset_submitted_at="2026-10-27T00:00:00+00:00",
-                        absent_create_at="2026-10-27T00:01:00+00:00")
+                        absent_create_at=(datetime.now(UTC) - timedelta(minutes=10)).isoformat())
     assert await value.on_sign_in(obs) is None
     upload.assert_awaited_once()
     value.switch.assert_not_awaited()
