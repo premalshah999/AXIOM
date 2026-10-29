@@ -452,9 +452,23 @@ select.ax-control {
   accent-color: var(--brand);
 }
 @container ax-table (max-width: 859px) {
-  .ax-table .is-secondary {
+  .ax-table .is-hide-860 {
     display: none;
   }
+}
+@container ax-table (max-width: 599px) {
+  .ax-table .is-hide-600 {
+    display: none;
+  }
+}
+.ax-table .is-pin {
+  position: sticky;
+  right: 0;
+  background: var(--card);
+}
+.ax-table thead .is-pin {
+  z-index: 3;
+  background: var(--surface);
 }
 .ax-table-state {
   padding: var(--space-6) var(--space-4);

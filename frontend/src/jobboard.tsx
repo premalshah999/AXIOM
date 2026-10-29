@@ -156,12 +156,13 @@ export function DiscoveredJobs() {
         />
       ),
     },
-    { key: "where", header: "Location", width: 200, truncate: true, cell: (j) => <Note>{j.location || "United States"}</Note> },
-    { key: "level", header: "Level", secondary: true, cell: (j) => <Note>{j.career_level}</Note> },
-    { key: "ats", header: "Platform", secondary: true, cell: (j) => <Note>{j.ats}</Note> },
+    { key: "where", header: "Location", hideBelow: 600, width: 200, truncate: true, cell: (j) => <Note>{j.location || "United States"}</Note> },
+    { key: "level", header: "Level", hideBelow: 860, cell: (j) => <Note>{j.career_level}</Note> },
+    { key: "ats", header: "Platform", hideBelow: 860, cell: (j) => <Note>{j.ats}</Note> },
     {
       key: "posted",
       header: "Posted",
+      hideBelow: 600,
       cell: (j) => (
         <time dateTime={j.posted_at} title={`${j.date_basis || "posted"} ${stamp(j.posted_at)}`}>
           {ago(j.posted_at, now)}
@@ -196,6 +197,7 @@ export function DiscoveredJobs() {
       key: "act",
       header: <span className="sr-only">Actions</span>,
       width: "1%",
+      pin: true,
       cell: (j) =>
         locked(j.status) ? null : (
           <Button size="sm" disabled={!canApply || bulk.applying} onClick={() => bulk.apply([j.id])}>

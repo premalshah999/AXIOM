@@ -90,6 +90,7 @@ function Pipeline() {
       {
         key: "detail",
         header: "Detail",
+        hideBelow: 600,
         width: 300,
         truncate: true,
         cell: (r) => {
@@ -98,18 +99,19 @@ function Pipeline() {
           return text ? <Note>{text}</Note> : null;
         },
       },
-      { key: "ats", header: "Platform", secondary: true, cell: (r) => <Note>{r.job.ats}</Note> },
-      { key: "tries", header: "Tries", num: true, secondary: true, cell: (r) => r.attempts || "—" },
+      { key: "ats", header: "Platform", hideBelow: 860, cell: (r) => <Note>{r.job.ats}</Note> },
+      { key: "tries", header: "Tries", num: true, hideBelow: 860, cell: (r) => r.attempts || "—" },
       {
         key: "updated",
         header: "Updated",
+        hideBelow: 600,
         cell: (r) => (
           <time dateTime={r.updated} title={new Date(r.updated).toLocaleString()}>
             {ago(r.updated, now)}
           </time>
         ),
       },
-      { key: "act", header: <span className="sr-only">Actions</span>, width: "1%", cell: (r) => <RowActions row={r} /> },
+      { key: "act", header: <span className="sr-only">Actions</span>, width: "1%", pin: true, cell: (r) => <RowActions row={r} /> },
     ],
     [now, openJob],
   );

@@ -114,7 +114,7 @@ function Confirmed() {
       truncate: true,
       cell: (r) => <JobCell company={r.company} role={r.title} onOpen={() => openJob(r.job_id, r.run_id)} />,
     },
-    { key: "ats", header: "Platform", secondary: true, cell: (r) => <Note>{r.ats}</Note> },
+    { key: "ats", header: "Platform", hideBelow: 860, cell: (r) => <Note>{r.ats}</Note> },
     {
       key: "applied",
       header: "Applied",
@@ -124,7 +124,7 @@ function Confirmed() {
         </time>
       ),
     },
-    { key: "evidence", header: "Evidence", cell: (r) => <StatusPill state="confirmed" label={evidenceLabel(r)} /> },
+    { key: "evidence", header: "Evidence", hideBelow: 600, cell: (r) => <StatusPill state="confirmed" label={evidenceLabel(r)} /> },
     {
       key: "posting",
       header: <span className="sr-only">Posting</span>,
@@ -223,18 +223,19 @@ function Unconfirmed() {
       ),
     },
     { key: "status", header: "Status", cell: (r) => <StatusPill state={r.state} /> },
-    { key: "detail", header: "Detail", width: 300, truncate: true, cell: (r) => (r.run?.reason ? <Note>{r.run.reason}</Note> : null) },
-    { key: "ats", header: "Platform", secondary: true, cell: (r) => <Note>{r.job.ats}</Note> },
+    { key: "detail", header: "Detail", hideBelow: 600, width: 300, truncate: true, cell: (r) => (r.run?.reason ? <Note>{r.run.reason}</Note> : null) },
+    { key: "ats", header: "Platform", hideBelow: 860, cell: (r) => <Note>{r.job.ats}</Note> },
     {
       key: "updated",
       header: "Updated",
+      hideBelow: 600,
       cell: (r) => (
         <time dateTime={r.updated} title={stamp(r.updated)}>
           {ago(r.updated, now)}
         </time>
       ),
     },
-    { key: "act", header: <span className="sr-only">Actions</span>, width: "1%", cell: (r) => <RowActions row={r} promote="confirm" /> },
+    { key: "act", header: <span className="sr-only">Actions</span>, width: "1%", pin: true, cell: (r) => <RowActions row={r} promote="confirm" /> },
   ];
   return (
     <>

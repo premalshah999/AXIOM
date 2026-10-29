@@ -14,9 +14,11 @@ export type Column<T> = {
   truncate?: boolean;
   /** The narrowest a truncating column gets before the table scrolls sideways (default 160). */
   min?: number;
-  /** Dropped when the table's panel is narrow (under 860px), so the job, its status and its actions stay in view.
-   *  Everything dropped is in the job's drawer. */
-  secondary?: boolean;
+  /** Dropped when the table's panel is narrower than this (a panel under 860px, or under 600px), so the job, its
+   *  status and its actions stay in view. Everything dropped is in the job's drawer. */
+  hideBelow?: 860 | 600;
+  /** Stays in view at the panel's right edge while the rest scrolls sideways (the row's actions). */
+  pin?: boolean;
   /** Let the cell wrap onto several lines (rows grow past 40px). */
   wrap?: boolean;
 };
@@ -113,7 +115,7 @@ export function Table<T>({
                 </th>
               )}
               {columns.map((c) => (
-                <th key={c.key} scope="col" className={[c.num ? "is-num" : "", c.secondary ? "is-secondary" : ""].filter(Boolean).join(" ") || undefined} style={c.width ? { width: c.width } : undefined}>
+                <th key={c.key} scope="col" className={[c.num ? "is-num" : "", c.hideBelow ? "is-hide-" + c.hideBelow : "", c.pin ? "is-pin" : ""].filter(Boolean).join(" ") || undefined} style={c.width ? { width: c.width } : undefined}>
                   {c.header}
                 </th>
               ))}
@@ -146,7 +148,7 @@ export function Table<T>({
                       return (
                         <td
                           key={c.key}
-                          className={[c.num ? "is-num" : "", c.truncate ? "is-trunc" : "", c.wrap ? "is-wrap" : "", c.secondary ? "is-secondary" : ""].filter(Boolean).join(" ") || undefined}
+                          className={[c.num ? "is-num" : "", c.truncate ? "is-trunc" : "", c.wrap ? "is-wrap" : "", c.hideBelow ? "is-hide-" + c.hideBelow : "", c.pin ? "is-pin" : ""].filter(Boolean).join(" ") || undefined}
                           style={style}
                         >
                           {c.cell(row)}

@@ -274,7 +274,8 @@ function BatchStatus() {
             <>
               <span className="ov-n">{confirmed.toLocaleString()}</span>
               <span className="ov-of">
-                of {target.toLocaleString()} confirmed<span className="sr-only"> in this batch</span>
+                {confirmed > target ? `confirmed · target of ${target.toLocaleString()} reached` : `of ${target.toLocaleString()} confirmed`}
+                <span className="sr-only"> in this batch</span>
               </span>
             </>
           ) : (

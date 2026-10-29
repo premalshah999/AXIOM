@@ -263,7 +263,10 @@ function App() {
   const sched = rt.scheduler || snapshot.scheduler_health || {};
   const pool = rt.application_workers;
   const workers = pool ? pool.normal_workers + pool.specialist_workers : 0;
-  const progress = `${rt.confirmed ?? 0}/${rt.target ?? 100} confirmed`;
+  const done = rt.confirmed ?? 0;
+  const goal = rt.target ?? 100;
+  // Applications you started yourself count too, so a batch can finish above its target ("560/477" read as a mistake).
+  const progress = done > goal ? `${done} confirmed · target ${goal}` : `${done}/${goal} confirmed`;
   // The sidebar's status dot: the worst thing true right now, in plain words.
   const status: Status =
     snap.failures >= 2

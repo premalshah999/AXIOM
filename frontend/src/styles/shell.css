@@ -73,8 +73,19 @@
   gap: var(--space-2);
   flex: none;
 }
-.ax-top-actions:empty {
+.ax-top-actions:empty,
+.ax-top-row:empty {
   display: none;
+}
+.ax-top-row {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
 }
 .ax-top-actions:empty + .ax-top-end {
   margin-left: auto;
