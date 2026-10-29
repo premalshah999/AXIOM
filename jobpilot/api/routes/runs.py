@@ -29,7 +29,7 @@ def router(service) -> APIRouter:
     r = APIRouter()
 
     @r.post("/api/runs/{run_id}/cancel")
-    async def cancel(run_id: str):
+    def cancel(run_id: str):
         with db.exclusive() as s:
             row = s.get(Run, run_id)
             if not row or row.state != "queued":
@@ -99,7 +99,7 @@ def router(service) -> APIRouter:
         return FileResponse(path, media_type="image/png")
 
     @r.post("/api/runs/{run_id}/reconcile")
-    async def reconcile(run_id: str, data: Reconcile):
+    def reconcile(run_id: str, data: Reconcile):
         service.reconcile(
             run_id, data.submitted, data.evidence, submitted_by_owner=data.submitted_by_owner, final_page=data.final_page
         )

@@ -20,7 +20,7 @@ def router(service) -> APIRouter:
     r = APIRouter()
 
     @r.get("/api/mail")
-    async def status():
+    def status():
         return mail.summary()
 
     @r.post("/api/mail/connect")
@@ -73,7 +73,7 @@ def router(service) -> APIRouter:
         return await mail.save_rule(data)
 
     @r.delete("/api/mail-rules/{rule_id}")
-    async def remove_rule(rule_id: str):
+    def remove_rule(rule_id: str):
         with service.db.exclusive() as s:
             row = s.get(MailRule, rule_id)
             if not row:
@@ -90,7 +90,7 @@ def router(service) -> APIRouter:
         return {"removed": True}
 
     @r.post("/api/mail-challenges/{challenge_id}/cancel")
-    async def cancel(challenge_id: str):
+    def cancel(challenge_id: str):
         with service.db.session() as s:
             row = s.get(MailChallenge, challenge_id)
             if not row or row.state not in LIVE:

@@ -42,6 +42,10 @@ def router(service) -> APIRouter:
 
         return await apply_many(service, data.job_ids)
 
+    def saved_job(job_id):
+        with db.session() as s:
+            return record(s.get(Job, job_id))
+
     @r.post("/api/jobs")
     async def import_job(data: JobInput):
         await public_url(data.url, config.allow_private_urls)
@@ -49,11 +53,11 @@ def router(service) -> APIRouter:
         row, created = await asyncio.to_thread(add_job, db, data, origin="manual")
         result = {"job": row, "created": created}
         profile = await asyncio.to_thread(db.get_setting, "profile", {})
-        if created and profile.get("autonomous") and db.get_setting("control", {}).get("auto_submit"):
+        control = await asyncio.to_thread(db.get_setting, "control", {})
+        if created and profile.get("autonomous") and control.get("auto_submit"):
             try:
                 await asyncio.to_thread(rank_in_thread, db, config, row["id"])
-                with db.session() as s:
-                    result["job"] = record(s.get(Job, row["id"]))
+                result["job"] = await asyncio.to_thread(saved_job, row["id"])
                 if result["job"]["status"] == "ready":
                     result["run"] = await service.queue(row["id"], "submit")
             except QueueBlocked as exc:
@@ -63,8 +67,7 @@ def router(service) -> APIRouter:
                 # Import already committed. A downstream employer/provider outage
                 # must not turn a saved job into a failed import or expose a URL,
                 # credential or provider response through its exception text.
-                with db.session() as s:
-                    result["job"] = record(s.get(Job, row["id"]))
+                result["job"] = await asyncio.to_thread(saved_job, row["id"])
                 result["notice"] = (
                     "Job saved. Automatic classification or queueing could not finish. You can retry from this job."
                 )

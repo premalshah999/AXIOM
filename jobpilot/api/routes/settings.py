@@ -1,5 +1,7 @@
 """Owner-adjustable settings: global switches, spending and pacing limits, model providers."""
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -179,7 +181,7 @@ def router(service) -> APIRouter:
         return summary(db, config)
 
     @r.put("/api/agents")
-    async def put_agents(data: AgentSettings):
+    def put_agents(data: AgentSettings):
         from ...agent_settings import save
 
         try:
@@ -189,7 +191,7 @@ def router(service) -> APIRouter:
 
     @r.put("/api/control")
     async def control(data: Control):
-        db.set_setting("control", data.model_dump())
+        await asyncio.to_thread(db.set_setting, "control", data.model_dump())
         if not data.paused and service.dispatch:
             from ...workers import resume
 
