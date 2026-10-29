@@ -155,12 +155,12 @@ def role_matches(title, description, profile):
         return False
     if not profile.include_internships and re.search(r"\bintern(?:ship)?\b", title, re.I):
         return False
-    from .features.discovery.roles import matching_role
+    from .features.discovery.roles import matching_role, related_role
 
     roles = profile.target_roles  # A profile with no roles matches nothing: the applicant sets them in Setup.
     # Synonym-aware: "Software Development Engineer" also matches "Software Engineer II" and "SDE". A profile's
     # own role wins over the generic exclusions below (a product manager's profile targets "Product Manager").
-    if matching_role(title, roles):
+    if matching_role(title, roles) or related_role(title, roles):
         return True
     if re.search(r"\b(?:sales|recruiter|account executive|product manager)\b", title, re.I):
         return False

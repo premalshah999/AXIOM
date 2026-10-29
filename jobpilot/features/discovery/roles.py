@@ -63,6 +63,56 @@ def matching_role(title, roles):
     return None
 
 
+# A profile that names one role also fits the specialisations of its family. "Software Engineer" matched "Software
+# Engineer I" but not "Front End Engineer II", "Android Engineer" or "Associate Programmer", and "AI Engineer" /
+# "Machine Learning Scientist" missed "Research Scientist New Grad - Conversational AI": 360 of 1,198 curated postings
+# were counted off_role in one sweep (2026-10-29) and the titles above were among them.
+CRAFT = r"(?:engineer|engineers|developer|programmer|scientist|researcher|swe|sde)"
+NOISE = re.compile(
+    r"annotat|\blabel(?:er|ing)\b|\btrainer\b|data (?:collect|entry)|teleoperat|\bsales\b|marketing|recruit|postdoc|"
+    r"\bscout|\blegal\b|\beditor\b|journalis|clinical|\bconsultant\b|\bsupport\b|\btester\b|\bwriter\b",
+    re.I,
+)
+SOFTWARE_FAMILY = frozenset({
+    "software", "developer", "swe", "sde", "backend", "frontend", "fullstack", "stack", "programmer", "application",
+})
+INFRA_FAMILY = frozenset({"platform", "infrastructure", "cloud", "devops", "sre", "reliability"})
+DATA_FAMILY = frozenset({"machine", "learning", "ai", "ml", "data", "scientist", "analytics", "analyst", "research", "llm"})
+SOFTWARE_TITLE = re.compile(
+    r"\b(?:front[- ]?end|back[- ]?end|full[- ]?stack|mobile|ios|android|web|application development|application|software)\b"
+    r".*\b" + CRAFT + r"\b|\b(?:programmer|programmer analyst)\b|\b" + CRAFT + r"\b.*\b(?:front[- ]?end|back[- ]?end|full[- ]?stack|ios|android)\b",
+    re.I,
+)
+INFRA_TITLE = re.compile(
+    r"\b(?:devops|dev ops|sre|site reliability|cloud|platform|infrastructure)\b.*\b" + CRAFT + r"\b", re.I
+)
+AI_TITLE = re.compile(
+    r"\b(?:ai|ml|machine learning|deep learning|nlp|computer vision|llm|generative|genai)\b.*\b" + CRAFT + r"\b|"
+    r"\b" + CRAFT + r"\b.*\b(?:ai|ml|machine learning|deep learning|nlp|computer vision|llm|generative|genai)\b",
+    re.I,
+)
+INFRA_OUTSIDE = re.compile(r"hardware|silicon|security|cyber", re.I)  # "Cloud Hardware Development Engineer"
+BI_TITLE = re.compile(r"\b(?:business intelligence|bi) analyst\b", re.I)
+
+
+def related_role(title, roles):
+    """The target role a title fits as a specialisation of that role's family (see above), or None. It never
+    overrides matching_role and needs an engineer/developer/scientist-type noun, so an "AI Data Annotator" or an "AI
+    Video Creator" stays out."""
+    title = str(title or "")
+    if NOISE.search(title):
+        return None
+    for role in roles:
+        family = set(words(role))
+        if family & SOFTWARE_FAMILY and SOFTWARE_TITLE.search(title):
+            return role
+        if family & INFRA_FAMILY and INFRA_TITLE.search(title) and not INFRA_OUTSIDE.search(title):
+            return role
+        if family & DATA_FAMILY and (AI_TITLE.search(title) or ({"analyst", "analytics", "data"} & family and BI_TITLE.search(title))):
+            return role
+    return None
+
+
 def search_terms(roles, limit=6):
     """Search phrases for the profile's roles: each role plus its most common alternate title."""
     terms = []

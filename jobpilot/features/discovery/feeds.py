@@ -553,13 +553,13 @@ def ingest(db, postings: list[Posting], source_id="feed:new-grad") -> dict:
     from .policy import protected, register
 
     from ...schemas import Profile
-    from .roles import matching_role
+    from .roles import matching_role, related_role
 
     counts = {"created": 0, "existing": 0, "duplicate": 0, "protected": 0, "invalid": 0, "off_role": 0}
     # Each profile's target roles decide which curated postings become jobs (no target roles: all of them).
     roles = Profile.model_validate(db.get_setting("profile", {}) or {}).target_roles
     for p in postings:
-        if roles and not matching_role(p.title, roles):
+        if roles and not (matching_role(p.title, roles) or related_role(p.title, roles)):
             counts["off_role"] += 1
             continue
         try:
