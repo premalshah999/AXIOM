@@ -45,6 +45,14 @@ def router(service) -> APIRouter:
             stored = dict(row.value) if row else {}
             # Keys this dashboard does not edit (or does not know yet) are kept, never dropped.
             value = {**stored, **data.model_dump()}
+            # A profile page loaded before a questionnaire save sends facts without those answers: a missing
+            # questionnaire answer is kept, never deleted by the stale copy (questionnaires are saved on their own API).
+            from ...features.knowledge.questionnaires import owned_fact_keys
+
+            stored_facts, facts = stored.get("facts") or {}, dict(value.get("facts") or {})
+            for key in owned_fact_keys() & set(stored_facts) - set(facts):
+                facts[key] = stored_facts[key]
+            value["facts"] = facts
             if row:
                 # Learned answers are server-owned (reviews, Telegram, /api/knowledge): a stale
                 # dashboard copy can neither drop new answers nor restore corrected/forgotten ones.

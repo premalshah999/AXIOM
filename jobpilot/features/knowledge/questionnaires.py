@@ -252,6 +252,11 @@ MODULES = (WOTC, CONTACTS, FAQ)
 BY_ID = {m.id: m for m in MODULES}
 
 
+def owned_fact_keys():
+    """Profile fact keys the questionnaires write."""
+    return {question.key for module in MODULES for question in module.questions}
+
+
 def question_for(module, key):
     return next((x for x in module.questions if x.key == key), None)
 

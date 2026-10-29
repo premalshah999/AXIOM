@@ -308,3 +308,15 @@ def test_a_saved_start_date_answers_a_date_box_and_unanswered_still_asks(service
     for label in ("Do you currently use nicotine products?", "Have you ever been bonded?"):
         a = empty.local(field(label, ["Yes", "No"], kind="select"))
         assert a is None or a.disposition != "answer"
+
+
+def test_a_stale_profile_save_keeps_questionnaire_answers(client, service):
+    """A profile page loaded before a questionnaire save must not delete the saved answers."""
+    from jobpilot.features.knowledge.questionnaires import owned_fact_keys
+
+    key = sorted(owned_fact_keys())[0]
+    profile = service.db.get_setting("profile", {}) or {}
+    stale = client.get("/api/profile").json()
+    service.db.set_setting("profile", {**profile, "facts": {**(profile.get("facts") or {}), key: True}})
+    assert client.put("/api/profile", json=stale).status_code == 200
+    assert (service.db.get_setting("profile", {}).get("facts") or {}).get(key) is True
