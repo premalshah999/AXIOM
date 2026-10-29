@@ -36,7 +36,7 @@ jobs:
       # tests/conftest.py marks every test that uses the `page` or `twin_chrome` fixture `browser`; the rest never
       # launch Chromium (checked 2026-10-20), so this job does not install it. The marked tests run in the next job.
       - name: Tests, everything not marked browser
-        run: uv run pytest -q -m "not browser"
+        run: uv run pytest -q -m "not browser" -n 4 --dist loadfile
 
   browser:
     name: Tests that drive a real browser

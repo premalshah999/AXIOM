@@ -93,7 +93,8 @@ Haiku uses the native Anthropic Messages SDK, with JSON validated against the re
 Use isolated fixture databases and fake credentials. Local browser fixtures are headless and do not activate desktop Chrome.
 
 ```sh
-uv run pytest -q                      # full suite, about six minutes
+scripts/dev/pytest-locked.sh -m "not browser" -q   # the gate: about two minutes on four workers (PYTEST_WORKERS=0: one process, eight)
+uv run pytest -q                      # everything, browser suites included, one process
 uv run ruff check jobpilot tests && uv run ruff format --check jobpilot tests
 npm run build --prefix frontend
 ```
