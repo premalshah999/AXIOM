@@ -30,6 +30,10 @@ install_playwright_fast()
 
 SCAN = (Path(__file__).parent / "js" / "scan.js").read_text()
 FIELD_WRITE_SECONDS = 12
+# The same write failing the same way on an unchanged page is not tried a third time. Production 10-26..28: Avature's
+# "Country" was written ~32 times per run, iCIMS "Phone Country Code" 25, Workday "Field of Study" 8-10, each failure
+# costing up to 12 s and a model decision; 178 min in 3 days were third-or-later tries of one field in one run.
+REPEATED_WRITE_FAILURES = 2
 # A school search that finds nothing falls back to shorter searches and then "Other"; each empty result can wait out
 # its option wait. On slow Workday tenants the chain outlasted 12 s and the field never committed (Lennar's
 # "Nanyang Technological University", 27 deadline failures on school fields since 10-16).
@@ -1141,6 +1145,8 @@ class FormSession:
         self.control_recoveries = {}
         self.control_choices = {}
         self.optional_picker_omissions = set()
+        # Field key -> the last identical write failure (count, signature, page context); see record_write_failure.
+        self.field_failures = {}
         # Workday history rows deleted because the employer cannot list their answer, by kind ("education").
         self.dropped_rows = {}
         self.document_uploads = {}
@@ -1172,6 +1178,104 @@ class FormSession:
             field.get("automation_id", ""),
             cls.frame_key(field),
         )
+
+    @staticmethod
+    def _digest(value):
+        return hashlib.sha256(str(value).encode()).hexdigest()[:16]
+
+    def write_context(self):
+        """Where a failed write happened: the step and the other fields' values. A field's own value is compared
+        separately; a changed page, a new field or a changed neighbour makes the earlier failure stale."""
+        obs = self.last_observation or {}
+        parsed = urlsplit(obs.get("url", ""))
+        return {
+            "page": (parsed.hostname, parsed.path),
+            "step": list(obs.get("headings", [])[:12]),
+            "dialogs": [(d.get("title", ""), d.get("text", "")[:300]) for d in obs.get("dialogs", [])],
+            "fields": sorted(field_identity(f) for f in self.fields.values()),
+            "values": {repr(self.field_key(f)): str(f.get("value", ""))[:200] for f in self.fields.values()},
+        }
+
+    @staticmethod
+    def same_context(old, new, ignore):
+        if any(old[k] != new[k] for k in ("page", "step", "dialogs", "fields")):
+            return False
+        return all(
+            old["values"].get(k) == new["values"].get(k)
+            for k in old["values"].keys() | new["values"].keys()
+            if k not in ignore
+        )
+
+    def record_write_failure(self, field, value, exc):
+        """Remember a failed write. True once the same write (field, value, interaction, offered choices) has failed
+        REPEATED_WRITE_FAILURES times on a page that did not change in between. A changed page, new offered choices
+        or a different value start the count again, so those retries still run."""
+        key = self.field_key(field)
+        offered = json.dumps(getattr(exc, "offered", None), sort_keys=True, default=str)
+        signature = (self._digest(value), widgets.interaction_failure(exc), self._digest(offered))
+        failing = frozenset(repr(k) for k in [*self.field_failures, key])
+        context = self.write_context()
+        entry = self.field_failures.get(key)
+        if (
+            entry
+            and entry["signature"] == signature
+            and self.same_context(entry["context"], context, failing | entry["failing"])
+        ):
+            entry.update(count=entry["count"] + 1, context=context, failing=failing)
+        else:
+            entry = self.field_failures[key] = {
+                "signature": signature,
+                "count": 1,
+                "context": context,
+                "failing": failing,
+                "announced": False,
+            }
+        return entry["count"] >= REPEATED_WRITE_FAILURES
+
+    def stuck_write(self, field):
+        """The failure entry when this field's write already failed REPEATED_WRITE_FAILURES times the same way on
+        the page as it is now; None otherwise (a stale entry is dropped)."""
+        key = self.field_key(field)
+        entry = self.field_failures.get(key)
+        if not entry or entry["count"] < REPEATED_WRITE_FAILURES:
+            return None
+        failing = frozenset(repr(k) for k in self.field_failures)
+        if not self.same_context(entry["context"], self.write_context(), failing | entry["failing"]):
+            del self.field_failures[key]
+            return None
+        return entry
+
+    def stuck_fields(self):
+        """Labels of the fields whose write is currently held back (the navigator refuses to fill them again)."""
+        return [
+            f["label"] for f in self.fields.values() if self.field_failures and self.stuck_write(f) is not None
+        ]
+
+    def hold_stuck_write(self, field, entry):
+        """Report a held-back field as a concrete blocker instead of writing it a third time."""
+        interaction = entry["signature"][1]
+        if not entry["announced"]:
+            entry["announced"] = True
+            self.emit(
+                "field_retry_skipped",
+                f"Did not write {field['label']} again",
+                {"interaction": interaction, "failures": entry["count"]},
+            )
+        satisfied = has_value(field) and field.get("valid", True) and not field.get("error")
+        if field.get("required") and not satisfied and not any(
+            self.field_key(
+                {**p.get("scope", {}), "id": p["field_id"], "label": p["question"], "type": p["type"], "slot": p.get("slot", 0)}
+            )
+            == self.field_key(field)
+            for p in self.pending
+        ):
+            self._pending(
+                field,
+                f"Could not commit the answer: {interaction}; the same write failed {entry['count']} times on "
+                "an unchanged page, so it was not tried again",
+                blocker_type="control_failure",
+                retryable=True,
+            )
 
     @staticmethod
     def question_shape(field):
@@ -3982,6 +4086,22 @@ class FormSession:
             ]
             # Calling-code and phone-type selectors commit before the phone number is typed.
             ask = phone_fields.order_phone_fields(ask)
+            # A write that already failed the same way on this unchanged page is reported, not repeated: no model
+            # call, no 12 s wait. A different local answer is a different write and still runs.
+            held = []
+            for x in ask:
+                if self.field_failures and (entry := self.stuck_write(x)):
+                    local_answer = self.resolver.local(x)
+                    if (
+                        local_answer
+                        and local_answer.disposition == "answer"
+                        and self._digest(local_answer.value) != entry["signature"][0]
+                    ):
+                        del self.field_failures[self.field_key(x)]
+                        continue
+                    self.hold_stuck_write(x, entry)
+                    held.append(x["id"])
+            ask = [x for x in ask if x["id"] not in held]
             # An address country controls the child widget implementations.
             # Oracle replaces them when it changes. Commit a supported country
             # before opening or reasoning over those obsolete child catalogs.
@@ -4132,6 +4252,7 @@ class FormSession:
                 else:
                     try:
                         committed = await self.fill(field, answer.value)
+                        self.field_failures.pop(self.field_key(field), None)
                         changed = changed or field["type"] in DEPENDENT_TYPES
                     except AnswerModelUnavailable:
                         raise
@@ -4188,6 +4309,7 @@ class FormSession:
                                 },
                             },
                         )
+                        repeated_failure = self.record_write_failure(field, answer.value, exc)
                         if (
                             not field["required"]
                             and not has_value(field)
@@ -4214,6 +4336,11 @@ class FormSession:
                                 + "; the saved history has insufficient date precision"
                                 if interaction == "date_precision"
                                 else f"Could not commit the answer: {interaction}"
+                                + (
+                                    "; the same write failed twice on an unchanged page, so it will not be tried again"
+                                    if repeated_failure
+                                    else ""
+                                )
                             )
                             self._pending(
                                 field,
