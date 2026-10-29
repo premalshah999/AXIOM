@@ -144,10 +144,12 @@ class HistoryRulesMixin:
                 day and datetime(int(year), int(month), int(day)).date() <= today
             )
             label = normalize(str(value))
-            if re.fullmatch(r"(?:i have |have |i )?(?:already )?graduated", label):
+            # normalize() turns the contraction into "i ve": DV Trading's Greenhouse "I've already graduated" read as no
+            # category, so a date was typed into its menu on every run (2026-10-29).
+            if re.fullmatch(r"(?:i ve |i have |have |i )?(?:already )?graduated", label):
                 return True if completed else False if known > (today.year, today.month) else None
             if completed and re.search(
-                r"\b(?:i graduate after|i will graduate|i expect to graduate)\b", label
+                r"\b(?:i graduate after|i (?:will|ll) graduate|i expect to graduate)\b", label
             ):
                 return False
             bounds = re.split(r"\s+(?:-|–|to|through)\s+", str(value), maxsplit=1)
