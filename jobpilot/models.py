@@ -24,6 +24,27 @@ _request_sent = ContextVar("model_request_sent", default=None)
 OPENAI_SERVICE_TIERS = {None, "auto", "default", "flex", "scale", "priority"}
 
 
+# Observation-only calls: their failure must never park the application's other model work. Sixty-five runs on
+# 2026-10-28 stopped with "model provider unavailable"; the vision endpoint's 404s (no image-capable host, 25 in 3 hours)
+# were counted as provider failures and opened the shared five-minute cooldown.
+OPTIONAL_PURPOSES = {"browser_vision"}
+
+# Calls whose answer depends only on their prompt: the same question on the same facts again within a run (Avature's
+# country-code picker looped 84 identical AnswerBatch calls, 2026-10-28) returns the earlier answer instead of paying
+# for it. Decision loops (Navigation, Control) are excluded: the page state they react to is in the prompt anyway, but
+# a repeated identical prompt there is a stuck loop the call limit must still bound.
+REUSABLE_PURPOSES = {"AnswerBatch", "Inference", "AnswerQualityAudit", "EvidenceEquivalence", "RoleBrief"}
+REUSE_TTL = 900
+REUSE_PER_RUN = 48
+_reuse: dict = {}
+
+
+def reuse_key(purpose, run_id, instructions, prompt):
+    import hashlib
+
+    return run_id, purpose, hashlib.sha256((str(instructions) + "\0" + str(prompt)).encode()).hexdigest()
+
+
 def cache_hits(usage):
     """Cached input tokens: DeepSeek's prompt_cache_hit_tokens, or the OpenAI/OpenRouter prompt_tokens_details."""
     return int(usage.get("prompt_cache_hit_tokens") or (usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
@@ -217,7 +238,7 @@ class MeteredTransport(httpx.AsyncBaseTransport):
             limit=self.config.model_request_concurrency,
             background_limit=self.config.model_background_concurrency,
         ):
-            if priority(self.purpose, self.run_id) == 3:
+            if priority(self.purpose, self.run_id) == 3 or self.purpose in OPTIONAL_PURPOSES:
                 # Optional advice has a shorter deadline and cannot establish
                 # application-provider health or consume its recovery request.
                 if provider_health.status(self.db, self.config)["state"] != "ready":
@@ -483,10 +504,33 @@ async def structured(*args, **kwargs):
     Every attempt goes through admission and budget reservation again. A retry
     only regenerates a model decision; it never repeats a browser action.
     """
-    from sqlalchemy import func, select
-
     db = args[1] if len(args) > 1 else kwargs["db"]
     run_id = args[5] if len(args) > 5 else kwargs.get("run_id")
+    output_type = args[2] if len(args) > 2 else kwargs.get("output_type")
+    purpose = getattr(output_type, "__name__", "")
+    key = None
+    if run_id and purpose in REUSABLE_PURPOSES:
+        key = reuse_key(purpose, run_id, args[3] if len(args) > 3 else kwargs.get("instructions"),
+                        args[4] if len(args) > 4 else kwargs.get("prompt"))
+        hit = _reuse.get(key)
+        if hit and time.monotonic() - hit[0] < REUSE_TTL:
+            db.event(run_id, "model_reuse", "Reused this run's earlier answer to an identical request", {"purpose": purpose})
+            return hit[1].model_copy(deep=True)
+    result = await _structured_with_retry(db, run_id, args, kwargs)
+    if key is not None and hasattr(result, "model_copy"):
+        now = time.monotonic()
+        for old in [k for k, (at, _) in _reuse.items() if now - at > REUSE_TTL]:
+            del _reuse[old]
+        mine = sorted((v[0], k) for k, v in _reuse.items() if k[0] == run_id)
+        for _, old in mine[: max(0, len(mine) - REUSE_PER_RUN + 1)]:
+            del _reuse[old]
+        _reuse[key] = (time.monotonic(), result.model_copy(deep=True))
+    return result
+
+
+async def _structured_with_retry(db, run_id, args, kwargs):
+    from sqlalchemy import func
+
     for attempt in range(2):
         try:
             return await _structured(*args, **kwargs)
