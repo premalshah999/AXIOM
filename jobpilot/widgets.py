@@ -1411,9 +1411,13 @@ OPEN_LISTS = (
 
 # Whether a matched list is an open picker. A menu without items is an action bar: Workable's uploaded-resume card
 # keeps its view/delete links in a permanent role=menu, and every dropdown after the upload was refused as "Previous
-# dropdown remains open" (Thorlabs, Saalex, TMEIC 2026-10-27).
+# dropdown remains open" (Thorlabs, Saalex, TMEIC 2026-10-27). A site's navigation menu is no picker either: IXL's
+# header is a visible role=menu of links inside a <nav>, so every education picker after the first read "Previous
+# dropdown remains open" and never opened (2026-10-29).
 OPEN_LIST_SHOWN = """e=>e.getClientRects().length && getComputedStyle(e).visibility!=='hidden'
-      && !(e.matches('[role=menu]') && !e.querySelector('[role^=menuitem],[role=option]'))"""
+      && !(e.matches('[role=menu]') && (!e.querySelector('[role^=menuitem],[role=option]')
+        || e.closest('nav,[role=navigation],[role=menubar]')
+        || [...e.querySelectorAll('[role^=menuitem]')].every(i => i.matches('a[href]:not([href^="#"]):not([href^="javascript"])'))))"""
 COUNT_OPEN_LISTS_JS = f"() => [...document.querySelectorAll('{OPEN_LISTS}')].filter({OPEN_LIST_SHOWN}).length"
 NO_OPEN_LISTS_JS = f"() => !({COUNT_OPEN_LISTS_JS})()"
 
