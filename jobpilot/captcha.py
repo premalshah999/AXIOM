@@ -572,8 +572,10 @@ class CaptchaSolver:
             )
             started, before = time.monotonic(), frame.url
             try:
+                page_clock, document = await frame.evaluate("[Date.now(), performance.timeOrigin]")
                 user_agent = await frame.evaluate("navigator.userAgent")
             except PlaywrightError:
+                page_clock = document = None
                 user_agent = ""
             result = await solve_token(
                 self.config.twocaptcha_api_key,
@@ -595,23 +597,29 @@ class CaptchaSolver:
                 )
                 return False
             try:
-                current = await frame.evaluate(DETECT, pre_submit)
+                current = await frame.evaluate(DETECT, True)
                 # Same widget, not a byte-identical snapshot: pending/delivered timestamps move while a
                 # 15-100 s solve runs, and an exact comparison discarded valid tokens (Commvault 2026-10-14).
                 same = ("kind", "key", "id", "generation", "enterprise", "invisible")
                 unchanged = (
                     not frame.is_detached()
                     and frame.url == before
+                    and document is not None
+                    and await frame.evaluate("performance.timeOrigin") == document
                     and isinstance(current, dict)
                     and all(current.get(k) == info.get(k) for k in same)
                 )
-                applied = unchanged and await frame.evaluate(
-                    DELIVER, {"token": result["token"], "info": info}
+                native_pass = bool(
+                    unchanged and page_clock is not None and current.get("delivered")
+                    and (current.get("delivered_at") or 0) >= page_clock
                 )
+                applied = native_pass or (unchanged and await frame.evaluate(
+                    DELIVER, {"token": result["token"], "info": info}
+                ))
             except PlaywrightError:
                 applied = False
             self.last_reason = (
-                "Token delivered to website callback"
+                ("Website delivered its own CAPTCHA token" if native_pass else "Token delivered to website callback")
                 if applied
                 else "CAPTCHA changed or has no owned callback"
             )

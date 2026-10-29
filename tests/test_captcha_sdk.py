@@ -428,3 +428,27 @@ async def test_removed_successful_widget_is_not_a_token_for_new_pending_widget(p
       hcaptcha.render('new',{sitekey:'new',callback:()=>{}});
     }""")
     assert not await CaptchaSolver(None, None).token_present(page)
+
+
+@pytest.mark.parametrize("replace", [False, True])
+async def test_native_pass_during_purchase_requires_same_widget(page, config, monkeypatch, replace):
+    config.twocaptcha_api_key = "fake-key"
+    await page.set_content("<div id=widget class=g-recaptcha data-sitekey=owned-key></div>")
+    await page.evaluate(HOOK)
+    await page.evaluate("""() => {
+      grecaptcha={render:(node,opts)=>{window.nativeCallback=opts.callback;return 1;}};
+      grecaptcha.render('widget',{sitekey:'owned-key',callback:()=>window.calls=(window.calls||0)+1});
+    }""")
+
+    async def solve(*args, **kwargs):
+        await page.evaluate("""replace => {
+          if (replace) __jpTokenCaptcha.entries[0].generation++;
+          nativeCallback('native-token');
+        }""", replace)
+        return {"token": "purchased-token"}
+
+    monkeypatch.setattr("jobpilot.captcha.solve_token", solve)
+    solver = CaptchaSolver(config, lambda *a: None)
+    assert await solver.solve(page) is (not replace)
+    assert await page.evaluate("window.calls") == 1
+    assert solver.challenge_unverified is replace
