@@ -38,6 +38,12 @@ class ModelBatchMixin:
                     )
                 )
                 continue
+            from .third_party import guard
+
+            if answer := guard(self, f):
+                # Also before retrieval and the model: they were handed the applicant's own address and phone.
+                resolved.append(answer)
+                continue
             if use_local:
                 ans = self.local(f)
             else:

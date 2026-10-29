@@ -502,6 +502,10 @@ class Resolver(
         )
 
     def local(self, f):
+        from .third_party import guard
+
+        if answer := guard(self, f):
+            return answer  # An employer's, supervisor's or reference's contact detail is never the applicant's own.
         if answer := self.repair_override(f):
             return answer
         if answer := self.signature_block(f):
