@@ -68,7 +68,7 @@ export function QueuePanel() {
           className="ax-control"
           aria-label="Job links to add to the queue"
           rows={text || focused ? 3 : 1}
-          placeholder="Paste job links to add them to the queue"
+          placeholder="Paste job links to queue"
           value={text}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}

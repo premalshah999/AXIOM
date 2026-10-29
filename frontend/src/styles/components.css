@@ -361,6 +361,7 @@ select.ax-control {
 
 /* ---------- Table ---------- */
 .ax-table-wrap {
+  container: ax-table / inline-size;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -449,6 +450,11 @@ select.ax-control {
   min-height: 0;
   padding: 0;
   accent-color: var(--brand);
+}
+@container ax-table (max-width: 859px) {
+  .ax-table .is-secondary {
+    display: none;
+  }
 }
 .ax-table-state {
   padding: var(--space-6) var(--space-4);

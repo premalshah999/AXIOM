@@ -44,7 +44,7 @@ export function ArchiveList() {
         ),
     },
     { key: "reason", header: "Detail", width: 300, truncate: true, cell: (a) => (a.reason ? <Note>{a.reason}</Note> : null) },
-    { key: "tries", header: "Tries", num: true, cell: (a) => a.attempts },
+    { key: "tries", header: "Tries", num: true, secondary: true, cell: (a) => a.attempts },
     { key: "archived", header: "Archived", cell: (a) => day(a.archived_at) },
     {
       key: "log",

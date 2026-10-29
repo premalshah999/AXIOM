@@ -213,7 +213,7 @@ export const STATES: Record<string, StateInfo> = {
 export const GROUPS: { id: Group | "all"; label: string }[] = [
   { id: "all", label: "All" },
   { id: "active", label: "In progress" },
-  { id: "needs", label: "Needs you" },
+  { id: "needs", label: "Needs an answer" },
   { id: "repair", label: "Repairing" },
   { id: "unconfirmed", label: "Unconfirmed" },
   { id: "paused", label: "Paused" },

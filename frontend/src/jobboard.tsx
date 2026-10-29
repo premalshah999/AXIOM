@@ -157,8 +157,8 @@ export function DiscoveredJobs() {
       ),
     },
     { key: "where", header: "Location", width: 200, truncate: true, cell: (j) => <Note>{j.location || "United States"}</Note> },
-    { key: "level", header: "Level", cell: (j) => <Note>{j.career_level}</Note> },
-    { key: "ats", header: "Platform", cell: (j) => <Note>{j.ats}</Note> },
+    { key: "level", header: "Level", secondary: true, cell: (j) => <Note>{j.career_level}</Note> },
+    { key: "ats", header: "Platform", secondary: true, cell: (j) => <Note>{j.ats}</Note> },
     {
       key: "posted",
       header: "Posted",

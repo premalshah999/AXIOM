@@ -11,7 +11,7 @@ import { usePipelinePage } from "./pipeline";
 import { QueuePanel } from "./queue";
 import { ReservedJobs } from "./reserved";
 import { LedgerView } from "./ledger";
-import { ago, linkHost, urlRole } from "./ui";
+import { ago, linkHost, plural, urlRole } from "./ui";
 import { Button, Empty, RouteTabs, Table, type Column } from "./ui/index";
 import { Chips, JobCell, Notice, Note, SearchBox, StatusPill } from "./worktools";
 
@@ -98,8 +98,8 @@ function Pipeline() {
           return text ? <Note>{text}</Note> : null;
         },
       },
-      { key: "ats", header: "Platform", cell: (r) => <Note>{r.job.ats}</Note> },
-      { key: "tries", header: "Tries", num: true, cell: (r) => r.attempts || "—" },
+      { key: "ats", header: "Platform", secondary: true, cell: (r) => <Note>{r.job.ats}</Note> },
+      { key: "tries", header: "Tries", num: true, secondary: true, cell: (r) => r.attempts || "—" },
       {
         key: "updated",
         header: "Updated",
@@ -126,6 +126,17 @@ function Pipeline() {
           onChange={(id) => go({ view: "jobs", tab: "pipeline", filter: id === "all" ? undefined : id })}
         />
       </div>
+      {filter === "needs" && !!(counts.needs ?? 0) && (
+        <Notice
+          action={
+            <Button size="sm" onClick={() => go({ view: "needs" })}>
+              Open Needs you
+            </Button>
+          }
+        >
+          {plural(counts.needs ?? 0, "application")} {(counts.needs ?? 0) === 1 ? "is" : "are"} waiting for an answer. Answer the questions on Needs you.
+        </Notice>
+      )}
       {list.error && (
         <Notice
           tone="bad"

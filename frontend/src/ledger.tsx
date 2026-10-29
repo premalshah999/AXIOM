@@ -114,7 +114,7 @@ function Confirmed() {
       truncate: true,
       cell: (r) => <JobCell company={r.company} role={r.title} onOpen={() => openJob(r.job_id, r.run_id)} />,
     },
-    { key: "ats", header: "Platform", cell: (r) => <Note>{r.ats}</Note> },
+    { key: "ats", header: "Platform", secondary: true, cell: (r) => <Note>{r.ats}</Note> },
     {
       key: "applied",
       header: "Applied",
@@ -224,7 +224,7 @@ function Unconfirmed() {
     },
     { key: "status", header: "Status", cell: (r) => <StatusPill state={r.state} /> },
     { key: "detail", header: "Detail", width: 300, truncate: true, cell: (r) => (r.run?.reason ? <Note>{r.run.reason}</Note> : null) },
-    { key: "ats", header: "Platform", cell: (r) => <Note>{r.job.ats}</Note> },
+    { key: "ats", header: "Platform", secondary: true, cell: (r) => <Note>{r.job.ats}</Note> },
     {
       key: "updated",
       header: "Updated",
