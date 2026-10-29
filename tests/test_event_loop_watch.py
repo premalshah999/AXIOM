@@ -34,7 +34,7 @@ def _engine(armed=False):
 
 def test_watch_keeps_event_loop_responsive_during_slow_db_reads():
     async def scenario():
-        db = SlowDB("running", None)
+        db = SlowDB("running", None, read_seconds=0.4)
         execution = asyncio.ensure_future(asyncio.sleep(30))
         gaps = []
 
@@ -48,7 +48,7 @@ def test_watch_keeps_event_loop_responsive_during_slow_db_reads():
 
         tick = asyncio.create_task(ticker())
         monitor = asyncio.create_task(watch(SimpleNamespace(db=db), _engine(), execution, "run-1"))
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(2.5)  # two polls: a read, a 1 s pause, a read
         monitor.cancel()
         tick.cancel()
         execution.cancel()
@@ -58,7 +58,9 @@ def test_watch_keeps_event_loop_responsive_during_slow_db_reads():
     db, gaps = asyncio.run(scenario())
     assert len(db.threads) >= 2, "watch() should have polled the database repeatedly"
     assert not any(db.threads), "DB reads must run in a worker thread, not on the event loop"
-    assert max(gaps) < 0.1, f"event loop stalled for {max(gaps):.3f}s during a DB read"
+    # A read on the loop would stall it for the whole 0.4 s; a margin that wide keeps scheduler jitter under four
+    # test workers and production from failing it.
+    assert max(gaps) < 0.3, f"event loop stalled for {max(gaps):.3f}s during a DB read"
 
 
 def test_owner_pause_interrupts_unarmed_run_and_releases_writer():

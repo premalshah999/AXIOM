@@ -23,4 +23,22 @@ while ! mkdir "$LOCK" 2>/dev/null; do
 done
 trap 'rm -rf "$LOCK"' EXIT INT TERM
 printf '%s (%s)\n' "$PWD" "$$" > "$LOCK/owner"
-UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-$PWD/.venv}" taskpolicy -b nice -n 19 uv run --frozen python -m pytest "$@"
+export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-$PWD/.venv}"
+
+# The whole non-browser suite (no test path given, `-m "not browser"`) runs in PYTEST_WORKERS processes (default 4,
+# 0 = off): every test has its own temp database, so files are independent, and 2,376 tests went from 506 s to about
+# 150 s (2026-10-29). Four workers use about 1.5 GB and leave cores to production; browser runs and targeted runs
+# stay in one process (a browser per worker is the memory incident above; xdist start-up costs more than a few files).
+workers="${PYTEST_WORKERS:-4}"
+whole=0
+case " $* " in *"not browser"*) whole=1 ;; esac
+for arg in "$@"; do
+  case "$arg" in
+    -n | -n* | --numprocesses* | *.py | *::* | tests | tests/ | tests/*) whole=0 ;;
+  esac
+done
+if [ "$whole" -eq 1 ] && [ "$workers" -gt 0 ] 2>/dev/null &&
+  taskpolicy -b nice -n 19 uv run --frozen python -c "import xdist" 2>/dev/null; then
+  set -- -n "$workers" --dist loadfile "$@"
+fi
+taskpolicy -b nice -n 19 uv run --frozen python -m pytest "$@"

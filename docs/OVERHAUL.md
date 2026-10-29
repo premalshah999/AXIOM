@@ -35,7 +35,8 @@ to resume is either here or linked from here. Update the **Status board** whenev
   - Never close them.
   - Never launch another Chrome on those ports.
 - **Tests run one at a time on this machine.** Use `scripts/dev/pytest-locked.sh`, which holds a machine-wide lock at
-  background priority. Prefer targeted test files. Never run browser suites in parallel.
+  background priority. Prefer targeted test files. Never run browser suites in parallel. The whole `-m "not browser"` run
+  uses four pytest-xdist workers by itself (`PYTEST_WORKERS=0` turns that off); targeted and browser runs stay in one process.
 - **Production is touched only by the orchestrator.** That means deploying, restarting containers, changing settings or
   writing to the production database.
   - Agents may read the production database through `codex-handoff/bin/q.sh` (read-only SQL).

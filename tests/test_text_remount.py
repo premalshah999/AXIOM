@@ -73,7 +73,7 @@ async def test_diagnostic_deadline_also_bounds_unresponsive_renderer():
     form.locator = lambda control_id: SimpleNamespace(evaluate=hung)
     start = time.monotonic()
     assert await form.control_structure('old') == {}
-    assert time.monotonic() - start < 1.3
+    assert time.monotonic() - start < 5  # the renderer sleeps 30 s
 
 
 async def test_phone_blur_remount_checks_live_value_without_retyping(page, service, tmp_path):
