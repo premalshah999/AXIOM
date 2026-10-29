@@ -47,6 +47,17 @@ export type Module = {
 };
 export type Questionnaires = { modules: Module[]; completion: { answered: number; total: number; percent: number } };
 
+/** Later answers win; a supervisor card sent twice keeps the fields of both. */
+function mergeAnswers(before: Record<string, unknown> | undefined, next: Record<string, unknown>) {
+  const out: Record<string, unknown> = { ...(before || {}) };
+  for (const [key, value] of Object.entries(next)) {
+    const old = out[key];
+    const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+    out[key] = object(old) && object(value) ? { ...old, ...value } : value;
+  }
+  return out;
+}
+
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const fail = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : "Could not save");
 
@@ -242,7 +253,9 @@ function initial(module: Module): Local {
     else if (q.type === "references")
       local[q.key] = ((q.answer as Record<string, string>[]) || []).map((r) => entryOf(q.fields, r));
     else if (q.type === "yes_no") local[q.key] = q.answer ?? undefined;
-    // Stored text can be a number (a notice period saved by the setup guide): the inputs always hold strings.
+    // Stored text can be a number (a notice period in days, saved by the setup guide): show it as words, since the
+    // field asks for "Immediately, 2 weeks, 1 month". Showing it changes nothing until the person edits it.
+    else if (typeof q.answer === "number") local[q.key] = q.answer === 0 ? "Immediately" : `${q.answer} day${q.answer === 1 ? "" : "s"}`;
     else local[q.key] = q.answer === null || q.answer === undefined ? "" : String(q.answer);
   }
   return local;
@@ -277,6 +290,8 @@ export function ModuleForm({
   // Saves go one at a time and in order, so a slow answer never lands after a newer one.
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   const sent = useRef<Record<string, string>>({});
+  // Answers the server has not accepted yet. Every save sends them again with the new one, so one failure is never
+  // forgotten when a later answer saves, and Retry resends all of them.
   const failed = useRef<{ answers: Record<string, unknown>; accept: boolean } | null>(null);
   const timer = useRef(0);
   useEffect(() => () => window.clearTimeout(timer.current), []);
@@ -290,14 +305,15 @@ export function ModuleForm({
     (answers: Record<string, unknown>, accept = false) => {
       setStatus({ state: "saving" });
       const run = async () => {
+        const body = { answers: mergeAnswers(failed.current?.answers, answers), accept: accept || !!failed.current?.accept };
         try {
           const res = await api<{ module: Module }>(`/knowledge/questionnaires/${module.id}`, "PUT", {
-            answers,
-            accept_suggestions: accept,
+            answers: body.answers,
+            accept_suggestions: body.accept,
           });
           failed.current = null;
           onModule(res.module);
-          if (accept) {
+          if (body.accept) {
             setLocal(initial(res.module));
             sent.current = seed(res.module);
           }
@@ -305,7 +321,7 @@ export function ModuleForm({
           window.clearTimeout(timer.current);
           timer.current = window.setTimeout(() => setStatus((s) => (s.state === "saved" ? { state: "idle" } : s)), 2600);
         } catch (e) {
-          failed.current = { answers, accept };
+          failed.current = body;
           setStatus({ state: "error", message: fail(e) });
         }
       };
@@ -315,7 +331,7 @@ export function ModuleForm({
     [module.id, onModule],
   );
 
-  const retry = () => failed.current && put(failed.current.answers, failed.current.accept);
+  const retry = () => failed.current && put({});
 
   // Save one question when its value really changed since the last save.
   const commit = (key: string, value: unknown, payload: unknown = value) => {
