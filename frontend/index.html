@@ -1,14 +1,27 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="navy">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <meta name="theme-color" content="#111917" />
-    <meta
-      name="description"
-      content="Your private job application control room."
-    />
-    <title>ApplyPilot · Control room</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#070b14" />
+    <meta name="description" content="AXIOM: your autonomous job application engine." />
+    <title>AXIOM</title>
+    <!-- Applies the saved theme before first paint so a reload never flashes the default. Keep the id list in step
+         with THEMES in src/shell/prefs.ts. -->
+    <script>
+      (function () {
+        var ground = { navy: "#070b14", maroon: "#f8f6f5", slate: "#0a0d10", ivory: "#faf8f3" };
+        var t = "navy";
+        try {
+          var v = localStorage.getItem("axiom.theme");
+          if (v === "system" || ground[v]) t = v;
+        } catch (e) {}
+        document.documentElement.setAttribute("data-theme", t);
+        var dark = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches;
+        var c = t === "system" ? (dark ? ground.navy : ground.maroon) : ground[t];
+        document.querySelector('meta[name="theme-color"]').setAttribute("content", c);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
