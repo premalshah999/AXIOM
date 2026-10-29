@@ -117,7 +117,7 @@ export function Brand() {
         <rect x="8" y="3" width="4" height="14" rx="1" className="mark-on" />
         <rect x="14" y="3" width="4" height="14" rx="1" className="mark-off" />
       </svg>
-      <span>ApplyPilot</span>
+      <span>AXIOM</span>
     </div>
   );
 }

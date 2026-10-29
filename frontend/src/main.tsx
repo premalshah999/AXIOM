@@ -58,7 +58,8 @@ function App() {
 
   const notify = useCallback((tone: Toast["tone"], text: string) => {
     const id = Date.now() + Math.random();
-    setToasts((list) => [...list.slice(-3), { id, tone, text }]);
+    // The same message twice (a bulk action whose every job fails the same way) shows once.
+    setToasts((list) => (list.some((t) => t.tone === tone && t.text === text) ? list : [...list.slice(-3), { id, tone, text }]));
     if (tone !== "error")
       window.setTimeout(
         () => setToasts((list) => list.filter((t) => t.id !== id)),

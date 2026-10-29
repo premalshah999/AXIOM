@@ -148,12 +148,13 @@ export function useAction() {
   const notify = useNotify();
   const [pending, setPending] = useState<string | null>(null);
   const live = useRef(true);
-  useEffect(
-    () => () => {
+  // Set true again on mount: StrictMode mounts, cleans up and mounts again, and a cleanup alone left it false.
+  useEffect(() => {
+    live.current = true;
+    return () => {
       live.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
   const run = useCallback(
     async <T>(
       key: string,

@@ -146,6 +146,12 @@ textarea::placeholder {
   outline-offset: 2px;
 }
 
+/* Containers that take focus only from code (a drawer on open, the page after "Skip to content") need no ring. */
+.ax-drawer:focus-visible,
+.main:focus-visible {
+  outline: none;
+}
+
 ::selection {
   background: var(--brand-soft);
   color: var(--ink);

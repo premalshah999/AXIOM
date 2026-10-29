@@ -191,7 +191,7 @@ export const STATES: Record<string, StateInfo> = {
     tone: "ask",
     group: "reserved",
     explain:
-      "A reserved employer. ApplyPilot finds and ranks these jobs but applies only after you approve the job in Jobs › Reserved.",
+      "A reserved employer. AXIOM finds and ranks these jobs but applies only after you approve the job in Jobs › Reserved.",
   },
   // Shown right after an Apply click until the next poll confirms what the server did (optimistic marks).
   "pending:waiting": {

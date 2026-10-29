@@ -56,7 +56,7 @@ function csv(rows: Success[]) {
   );
   const a = document.createElement("a");
   a.href = href;
-  a.download = "ApplyPilot-successful-applications.csv";
+  a.download = "AXIOM-confirmed-applications.csv";
   document.body.append(a);
   a.click();
   a.remove();
