@@ -5,23 +5,18 @@ import { useAction, useDraft, useNow, usePoll } from "./hooks";
 import { appliedState, STATES } from "./model";
 import { Pagination, usePagination } from "./pagination";
 import { OPEN_JOB_LINK } from "./jobintake";
-import { groupQuestions, QuestionCard } from "./questions";
+import { countQuestions } from "./questions";
 import type { ApplicationWorkers, MailStatus, RuntimeHealth, Snapshot } from "./types";
-import {
-  ago,
-  clock,
-  day,
-  Dot,
-  elapsed,
-  Empty,
-  KeyValues,
-  plural,
-  StatePill,
-  Tape,
-} from "./ui";
+import { ago, clock, day, elapsed, plural } from "./ui";
+import { Button, Empty, Panel, Table, type Column } from "./ui/index";
+import { Notice, Note, StatusPill } from "./worktools";
+import "./styles/work.css";
 
 const LIVE_MAIL = new Set(["pending", "matched", "consumed"]);
+const LANE: Record<string, string> = { normal: "Regular", specialist: "Difficult-flow", custom: "Custom-site" };
 
+// The home page: is the batch running, what is happening now, what needs you. The questions themselves are on Needs
+// you (they were repeated here as cards, which is why this page was long: owner 2026-10-29).
 export function BatchView() {
   const { snapshot } = useWorkspace();
   const health = usePoll<RuntimeHealth>(
@@ -33,25 +28,39 @@ export function BatchView() {
     30000,
   );
   return (
-    <div className="batch">
+    <div className="ax-page ov">
       <BatchStatus />
-      <div className="batch-grid">
-        <div className="batch-main">
-          <FirstRun mail={mail.data} />
-          <Owners mail={mail.data} workers={health.data?.application_workers} />
-          <Outcomes />
+      <NeedsLine />
+      <FirstRun mail={mail.data} />
+      <div className="ov-cols">
+        <div className="ov-main">
+          <Workers mail={mail.data} workers={health.data?.application_workers} />
+          <Activity />
         </div>
-        <aside className="batch-side" aria-label="Attention and system">
-          <NeedsYou />
-          <SystemStatus
-            snapshot={snapshot}
-            health={health.data}
-            healthError={health.error}
-            mail={mail.data}
-          />
+        <aside className="ov-side" aria-label="System">
+          <SystemStatus snapshot={snapshot} health={health.data} healthError={health.error} mail={mail.data} />
         </aside>
       </div>
     </div>
+  );
+}
+
+// One line, not the questions: they are on the Needs you page.
+function NeedsLine() {
+  const { snapshot, go } = useWorkspace();
+  const n = countQuestions(snapshot.reviews);
+  if (!n) return null;
+  return (
+    <Notice
+      tone="warn"
+      action={
+        <Button size="sm" onClick={() => go({ view: "needs" })}>
+          Open
+        </Button>
+      }
+    >
+      <strong>{plural(n, "question")}</strong> {n === 1 ? "needs" : "need"} you. Other applications keep going while they wait.
+    </Notice>
   );
 }
 
@@ -138,28 +147,22 @@ function FirstRun({ mail }: { mail: MailStatus | null }) {
     },
   ];
   return (
-    <section className="block firstrun" aria-labelledby="firstrun-title">
-      <header className="block-head">
-        <h2 id="firstrun-title">Get started</h2>
-        <span className="muted">
-          {steps.filter((s) => s.done).length} of {steps.length} done
-        </span>
-      </header>
-      <ol className="firstrun-steps">
+    <Panel title="Get started" actions={<span className="ax-note">{steps.filter((s) => s.done).length} of {steps.length} done</span>}>
+      <ol className="ov-steps">
         {steps.map((s) => (
-          <li key={s.title} className={s.done ? "done" : ""}>
-            <Dot tone={s.done ? "ok" : "idle"} />
+          <li key={s.title} className={s.done ? "is-done" : ""}>
+            <i className={"ov-dot" + (s.done ? " is-ok" : "")} aria-hidden="true" />
             <span>
               <strong>{s.title}</strong>
-              <small className="muted">{s.detail}</small>
+              <small className="ax-note">{s.detail}</small>
             </span>
-            <button className={s.done ? "btn sm quiet" : "btn sm"} onClick={s.onClick} disabled={pending !== null}>
+            <Button size="sm" variant={s.done ? "ghost" : "secondary"} onClick={s.onClick} disabled={pending !== null}>
               {s.action}
-            </button>
+            </Button>
           </li>
         ))}
       </ol>
-    </section>
+    </Panel>
   );
 }
 
@@ -177,35 +180,21 @@ function BatchStatus() {
   const workers = snapshot.config.workers_enabled;
   const noResume = snapshot.resumes.length === 0;
   const paused = snapshot.control.paused;
-  const degraded = !!(
-    rt.scheduler?.degraded || snapshot.scheduler_health?.degraded
-  );
+  const degraded = !!(rt.scheduler?.degraded || snapshot.scheduler_health?.degraded);
   const reason = paused
     ? "Paused"
-    : rt.intake_reason ||
-      (active ? "Held" : state === "complete" ? "Complete" : "Not started");
-  const tone = paused
-    ? "idle"
-    : state === "complete"
-      ? "ok"
-      : rt.intake_enabled
-        ? "run"
-        : active
-          ? "fix"
-          : "idle";
+    : rt.intake_reason || (active ? "Held" : state === "complete" ? "Complete" : "Not started");
+  const tone = paused ? "idle" : state === "complete" ? "ok" : rt.intake_enabled ? "run" : active ? "fix" : "idle";
   const next =
     paused && active
       ? "Saved progress is kept. Resuming continues this batch; individual jobs stay controllable."
-      : rt.next_action ||
-        "Start a batch to discover, rank and apply automatically.";
+      : rt.next_action || "Start a batch to discover, rank and apply automatically.";
 
   const start = (value: number) =>
     run(
       "start",
       async () => {
-        const result = await api("/job-board/autopilot/start", "POST", {
-          target: value,
-        });
+        const result = await api("/job-board/autopilot/start", "POST", { target: value });
         await refresh();
         return result;
       },
@@ -225,22 +214,18 @@ function BatchStatus() {
       "New applications paused. Progress is kept, and you can still manage each job.",
     );
 
-  const controls = !workers ? (
-    <p className="status-warn">
-      Application workers are disabled in this installation's configuration, so
-      a batch can't run. Enable workers on the server and restart.
-    </p>
-  ) : !active ? (
+  const controls = !workers ? null : !active ? (
     <form
-      className="start"
+      className="ov-start"
       onSubmit={(e) => {
         e.preventDefault();
         start(Math.max(1, Math.min(500, Math.round(goal || 25))));
       }}
     >
-      <label className="start-target">
+      <label className="ov-target">
         <span>Apply until</span>
         <input
+          className="ax-control"
           type="number"
           min={1}
           max={500}
@@ -252,99 +237,91 @@ function BatchStatus() {
         />
         <span>are confirmed</span>
       </label>
-      <button className="btn primary" disabled={pending !== null || noResume}>
-        {pending === "start" ? "Starting…" : "Start batch"}
-      </button>
-      <small id="target-hint" className="muted">
+      <Button type="submit" variant="primary" loading={pending === "start"} disabled={pending !== null || noResume}>
+        Start batch
+      </Button>
+      <span id="target-hint" className="sr-only">
         Up to 500 confirmed applications.
-      </small>
+      </span>
     </form>
   ) : paused || (!rt.intake_enabled && reason === "Paused") ? (
-    <button
-      className="btn primary"
-      disabled={pending !== null}
-      onClick={() => start(target)}
-    >
-      {pending === "start" ? "Resuming…" : "Resume batch"}
-    </button>
+    <Button variant="primary" loading={pending === "start"} disabled={pending !== null} onClick={() => start(target)}>
+      Resume batch
+    </Button>
   ) : (
-    <div className="status-buttons">
+    <div className="ov-buttons">
       {degraded && (
-        <button
-          className="btn"
-          disabled={pending !== null}
-          onClick={() => start(target)}
-        >
-          {pending === "start" ? "Reconnecting…" : "Restart automation"}
-        </button>
+        <Button loading={pending === "start"} disabled={pending !== null} onClick={() => start(target)}>
+          Restart automation
+        </Button>
       )}
-      <button
-        className="btn"
-        disabled={pending !== null}
-        onClick={pause}
-        aria-describedby="pause-hint"
-      >
-        {pending === "pause" ? "Pausing…" : "Pause new applications"}
-      </button>
+      <Button loading={pending === "pause"} disabled={pending !== null} onClick={pause} aria-describedby="pause-hint">
+        Pause new applications
+      </Button>
       <span id="pause-hint" className="sr-only">
-        Stops new applications and holds running ones before their final submit.
-        Progress is kept.
+        Stops new applications and holds running ones before their final submit. Progress is kept.
       </span>
     </div>
   );
+  const shown = active || state === "complete";
+  const pct = Math.min(100, Math.round((confirmed / Math.max(1, target)) * 100));
 
   return (
-    <section className="status" aria-labelledby="batch-title">
-      <div className="status-head">
-        <h1 id="batch-title" className="count">
-          {active || state === "complete" ? (
+    <section className="ov-status" aria-label="Batch">
+      <div className="ov-head">
+        <p className="ov-count" aria-live="polite">
+          {shown ? (
             <>
-              <span className="count-n">{confirmed}</span>
-              <span className="count-of">
-                of {target} confirmed
-                <span className="sr-only"> in this batch</span>
+              <span className="ov-n">{confirmed.toLocaleString()}</span>
+              <span className="ov-of">
+                of {target.toLocaleString()} confirmed<span className="sr-only"> in this batch</span>
               </span>
             </>
           ) : (
-            <span className="count-idle">No batch running</span>
+            <span className="ov-idle">No batch running</span>
           )}
-        </h1>
-        <div className="status-controls">{controls}</div>
+        </p>
+        <div className="ov-controls">{controls}</div>
       </div>
-      <Tape
-        confirmed={active || state === "complete" ? confirmed : 0}
-        target={active || state === "complete" ? target : goal || 25}
-      />
-      <p className="status-line">
-        <Dot tone={tone} />
+      {shown && (
+        <div className="ov-bar" role="progressbar" aria-label="Batch progress" aria-valuemin={0} aria-valuemax={target} aria-valuenow={Math.min(confirmed, target)}>
+          <span style={{ width: pct + "%" }} className={state === "complete" ? "is-done" : ""} />
+        </div>
+      )}
+      <p className="ov-line">
+        <i className={"ov-dot is-" + tone} aria-hidden="true" />
         <strong>{reason}</strong>
         <span>{next}</span>
       </p>
+      {!workers && (
+        <Notice tone="warn">
+          Application workers are disabled in this installation's configuration, so a batch can't run. Enable workers on
+          the server and restart.
+        </Notice>
+      )}
       {active && (
-        <p className="status-meta">
+        <p className="ax-note ov-meta">
           {batch.started_at && <>Started {day(batch.started_at)} · </>}
           {!!rt.confirmed_by_owner && (
             <>
-              {rt.confirmed_by_batch ?? 0} by the batch, {rt.confirmed_by_owner}{" "}
-              you started ·{" "}
+              {rt.confirmed_by_batch ?? 0} by the batch, {rt.confirmed_by_owner} you started ·{" "}
             </>
           )}
-          {plural(rt.attempted_jobs ?? 0, "job")} attempted ·{" "}
-          {rt.remaining ?? Math.max(0, target - confirmed)} to go
+          {plural(rt.attempted_jobs ?? 0, "job")} attempted · {rt.remaining ?? Math.max(0, target - confirmed)} to go
           {rt.last_tick && <> · checked {ago(rt.last_tick, now)}</>}
         </p>
       )}
       {!active && noResume && workers && (
-        <p className="status-warn">
-          Upload a resume first: ranking selects one of your resumes for each
-          job.{" "}
-          <button
-            className="link"
-            onClick={() => go({ view: "setup", tab: "resumes" })}
-          >
-            Add a resume
-          </button>
-        </p>
+        <Notice
+          tone="warn"
+          action={
+            <Button size="sm" onClick={() => go({ view: "setup", tab: "resumes" })}>
+              Add a resume
+            </Button>
+          }
+        >
+          Upload a resume first: ranking selects one of your resumes for each job.
+        </Notice>
       )}
       {active && <Tallies />}
     </section>
@@ -358,84 +335,59 @@ function Tallies() {
   // The Discovered tab's own numbers (the same jobs and fit filters), so each link opens a list of that size.
   // The Batch page showed three different "fresh" figures from three computations (2026-10-23).
   const fits = inv.fits || {};
-  const link = (filter: string, n: number, label: string, tone: string) => (
-    <button
-      className={"tally" + (n ? "" : " zero")}
-      onClick={() => go({ view: "jobs", tab: "pipeline", filter })}
-    >
-      <Dot tone={n ? tone : "idle"} />
+  const link = (filter: string, n: number, label: string) => (
+    <button type="button" className={"ov-tally" + (n ? "" : " is-zero")} onClick={() => go({ view: "jobs", tab: "pipeline", filter })}>
       <b>{n}</b> {label}
     </button>
   );
   const exhausted = (inv.unattempted ?? 0) === 0;
   return (
-    <div className="tallies">
-      <div className="tally-row" aria-label="This batch">
-        <span className="tally-label">This batch</span>
-        {link("needs", rt.awaiting_answer ?? 0, "need your answer", "ask")}
-        {link("repair", rt.blocked ?? 0, "blocked or unconfirmed", "fix")}
-        {link("repair", rt.failed ?? 0, "not submitted", "bad")}
-        {link("active", rt.queued ?? 0, "queued", "run")}
-        {!!rt.waiting_email && link("active", rt.waiting_email, "waiting for an email", "hold")}
+    <div className="ov-tallies">
+      <div className="ov-tally-row" role="group" aria-label="This batch">
+        <span className="ov-tally-label">This batch</span>
+        {link("needs", rt.awaiting_answer ?? 0, "need your answer")}
+        {link("repair", rt.blocked ?? 0, "blocked or unconfirmed")}
+        {link("repair", rt.failed ?? 0, "not submitted")}
+        {link("active", rt.queued ?? 0, "queued")}
+        {!!rt.waiting_email && link("active", rt.waiting_email, "waiting for an email")}
       </div>
-      <div className="tally-row" aria-label="Inventory">
-        <span className="tally-label">Inventory</span>
+      <div className="ov-tally-row" role="group" aria-label="Inventory">
+        <span className="ov-tally-label">Inventory</span>
         {exhausted ? (
-          <span className="tally-text">
-            No eligible jobs waiting. Discovery continues and the batch picks up
-            new postings automatically.
-          </span>
+          <span className="ax-note">No eligible jobs waiting. Discovery continues and the batch picks up new postings automatically.</span>
         ) : (
           <>
-            <button
-              className="tally"
-              onClick={() =>
-                go({ view: "jobs", tab: "discovered", filter: "eligible" })
-              }
-            >
+            <button type="button" className="ov-tally" onClick={() => go({ view: "jobs", tab: "discovered", filter: "eligible" })}>
               <b>{fits.eligible ?? 0}</b> eligible
             </button>
-            <button
-              className="tally"
-              onClick={() =>
-                go({ view: "jobs", tab: "discovered", filter: "unranked" })
-              }
-            >
+            <button type="button" className="ov-tally" onClick={() => go({ view: "jobs", tab: "discovered", filter: "unranked" })}>
               <b>{fits.unranked ?? 0}</b> awaiting ranking
             </button>
           </>
         )}
-        <button
-          className="tally"
-          onClick={() => go({ view: "jobs", tab: "discovered" })}
-        >
+        <button type="button" className="ov-tally" onClick={() => go({ view: "jobs", tab: "discovered" })}>
           <b>{counts.discovered ?? inv.discovered ?? 0}</b> discovered, not applied to
         </button>
-        {!!inv.sources_due && (
-          <span className="tally-text">
-            {plural(inv.sources_due, "source")} due for a check
-          </span>
-        )}
+        {!!inv.sources_due && <span className="ax-note">{plural(inv.sources_due, "source")} due for a check</span>}
       </div>
     </div>
   );
 }
 
-function Owners({ mail, workers }: { mail: MailStatus | null; workers?: ApplicationWorkers }) {
+// Only the workers that are doing something get a row; the idle ones are one count. Nine rows of "Status unavailable"
+// said nothing (owner 2026-10-29).
+function Workers({ mail, workers }: { mail: MailStatus | null; workers?: ApplicationWorkers }) {
   const { snapshot, rows, counts, openJob, go, refresh, markJobs } = useWorkspace();
   const { pending, run } = useAction();
   const now = useNow(1000);
   const runtimeWorkers = snapshot.autopilot_runtime?.application_workers || workers;
-  const limit = runtimeWorkers
-    ? runtimeWorkers.normal_workers + runtimeWorkers.specialist_workers
+  const lanes = runtimeWorkers as (ApplicationWorkers & { custom_workers?: number }) | undefined;
+  const limit = lanes
+    ? lanes.normal_workers + lanes.specialist_workers + (lanes.custom_workers ?? 0)
     : Math.max(0, snapshot.config.workers || 0);
   const owners = rows
     .filter((r) => r.run && ["running", "submitting"].includes(r.run.state))
-    .sort((a, b) =>
-      (a.run!.started_at || a.run!.created_at).localeCompare(
-        b.run!.started_at || b.run!.created_at,
-      ),
-    );
+    .sort((a, b) => (a.run!.started_at || a.run!.created_at).localeCompare(b.run!.started_at || b.run!.created_at));
   const assignments = runtimeWorkers?.assignments || [];
   const assignedRuns = new Set(assignments.map((assignment) => assignment.run_id).filter(Boolean));
   // The snapshot carries every running and submitting application, so this is exact; a run without a slot still
@@ -451,153 +403,129 @@ function Owners({ mail, workers }: { mail: MailStatus | null; workers?: Applicat
   const emailWaits = (mail?.challenges || [])
     .filter((c) => LIVE_MAIL.has(c.state))
     .map((c) => ({ c, job: jobs.get(runJob.get(c.run_id) || "") }));
-  const idle = { regular: 0, specialist: 0 };
+  const idle: Record<string, number> = {};
+  let unknown = 0;
+  const busy: React.ReactNode[] = [];
+  Array.from({ length: limit }, (_, i) => {
+    const assignment = assignments.find((worker) => worker.slot === i + 1);
+    const row = assignment?.run_id
+      ? rows.find((owner) => owner.run?.id === assignment.run_id)
+      : runtimeWorkers
+        ? undefined
+        : owners.find((owner) => owner.run?.worker_slot === i + 1);
+    const lane = LANE[assignment?.lane || ""] || "Worker";
+    if (!row && !assignment?.run_id) {
+      // A slot that reports something other than idle (paused, cooling down…) is worth a row.
+      const status = assignment?.state && assignment.state !== "idle" ? assignment.state.replaceAll("_", " ") : "";
+      if (status)
+        busy.push(
+          <li className="ov-worker is-quiet" key={"free" + i}>
+            <span className="ov-slot">{i + 1}</span>
+            <span className="ov-w-job">
+              {lane} · {status}
+            </span>
+          </li>,
+        );
+      else if (runtimeWorkers && !assignment) unknown += 1;
+      else idle[lane] = (idle[lane] || 0) + 1;
+      return;
+    }
+    if (!row && assignment) {
+      const job = assignment.job_id ? jobs.get(assignment.job_id) : undefined;
+      busy.push(
+        <li className="ov-worker" key={"assigned" + assignment.slot}>
+          <span className="ov-slot">{assignment.slot}</span>
+          <span className="ov-w-job">
+            <strong>{job?.company || "Assigned application"}</strong> <span>{job?.title || "Application details loading"}</span>
+          </span>
+          <span className="ax-note ov-w-meta">
+            {lane} · {assignment.ats}
+            {assignment.phase && ` · ${assignment.phase.replaceAll("_", " ")}`}
+          </span>
+          <StatusPill state={assignment.state || "assigned"} label={assignment.state ? undefined : "Assigned"} />
+          <span />
+        </li>,
+      );
+      return;
+    }
+    if (!row) return;
+    const r = row.run!;
+    const pausing = row.state === "pausing";
+    busy.push(
+      <li className="ov-worker" key={r.id}>
+        <span className="ov-slot">{i + 1}</span>
+        <button type="button" className="ov-w-job ax-job" onClick={() => openJob(row.job.id, r.id)}>
+          <strong>{row.job.company || "Employer"}</strong>
+          <span>{row.job.title}</span>
+        </button>
+        <span className="ax-note ov-w-meta">
+          {lane} · {assignment?.ats || row.job.ats} · {elapsed(r.started_at || r.created_at, now)}
+          {assignment?.phase && ` · ${assignment.phase.replaceAll("_", " ")}`}
+        </span>
+        <StatusPill state={row.state} />
+        <span className="ov-w-act">
+          {r.state === "running" && !pausing && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={pending !== null}
+              loading={pending === r.id}
+              onClick={() =>
+                run(
+                  r.id,
+                  async () => {
+                    const res = await api<{ message: string; state?: string }>(`/jobs/${row.job.id}/pause`, "POST");
+                    // Reads as pausing at once; the next poll confirms.
+                    const shown = appliedState(res.state || "");
+                    if (shown in STATES) markJobs([row.job.id], shown);
+                    void refresh();
+                    return res;
+                  },
+                  (res) => res?.message,
+                )
+              }
+            >
+              Pause
+            </Button>
+          )}
+        </span>
+      </li>,
+    );
+  });
+  const idleTotal = Object.values(idle).reduce((n, x) => n + x, 0);
+  const idleText = Object.entries(idle)
+    .map(([lane, n]) => `${n} ${lane.toLowerCase()}`)
+    .join(", ");
 
   return (
-    <section className="block" aria-labelledby="owners-title">
-      <header className="block-head">
-        <h2 id="owners-title">Applying now</h2>
-        <span className="muted">
-          {activeCount} of {limit} in progress
-          {runtimeWorkers && ` · ${runtimeWorkers.normal_workers} regular + ${runtimeWorkers.specialist_workers} difficult-flow`}
+    <Panel
+      title="Applying now"
+      actions={
+        <span className="ax-note">
+          {activeCount} of {limit} working
         </span>
-      </header>
-      <ol className="owners">
-        {Array.from({ length: limit }, (_, i) => {
-          const assignment = assignments.find((worker) => worker.slot === i + 1);
-          const row = assignment?.run_id
-            ? rows.find((owner) => owner.run?.id === assignment.run_id)
-            : runtimeWorkers
-              ? undefined
-              : owners.find((owner) => owner.run?.worker_slot === i + 1);
-          const lane = assignment?.lane === "specialist"
-            ? "Difficult-flow"
-            : assignment?.lane === "normal"
-              ? "Regular"
-              : "Worker";
-          if (!row && !assignment?.run_id) {
-            const status =
-              assignment?.state && assignment.state !== "idle"
-                ? assignment.state.replaceAll("_", " ")
-                : runtimeWorkers && !assignment
-                  ? "Status unavailable"
-                  : "";
-            // Idle slots are summarized in one line below; only slots doing something get a row.
-            if (!status) {
-              idle[lane === "Difficult-flow" ? "specialist" : "regular"] += 1;
-              return null;
-            }
-            return (
-              <li className="owner free" key={"free" + i}>
-                <span className="owner-n">{i + 1}</span>
-                <span className="owner-free">
-                  {lane} · {status}
-                </span>
-              </li>
-            );
-          }
-          if (!row && assignment)
-            return (
-              <li className="owner busy" key={"assigned" + assignment.slot}>
-                <span className="owner-n">{assignment.slot}</span>
-                <span className="owner-job">
-                  <strong>{assignment.job_id ? jobs.get(assignment.job_id)?.company || "Assigned application" : "Assigned application"}</strong>
-                  <span>{assignment.job_id ? jobs.get(assignment.job_id)?.title || "Application details loading" : "Application details loading"}</span>
-                </span>
-                <span className="owner-meta">
-                  {lane} · {assignment.ats}
-                  {assignment.phase && ` · ${assignment.phase.replaceAll("_", " ")}`}
-                </span>
-                <StatePill state={assignment.state || "assigned"} label={assignment.state ? undefined : "Assigned"} />
-              </li>
-            );
-          if (!row) return null;
-          const r = row.run!;
-          const pausing = row.state === "pausing";
-          return (
-            <li className="owner busy" key={r.id}>
-              <span className="owner-n">{i + 1}</span>
-              <button
-                className="owner-job link"
-                onClick={() => openJob(row.job.id, r.id)}
-              >
-                <strong>{row.job.company || "Employer"}</strong>
-                <span>{row.job.title}</span>
-              </button>
-              <span className="owner-meta">
-                {lane} · {assignment?.ats || row.job.ats} · {elapsed(r.started_at || r.created_at, now)}
-                {assignment?.phase && ` · ${assignment.phase.replaceAll("_", " ")}`}
-              </span>
-              <StatePill state={row.state} />
-              <span className="owner-actions">
-                {r.state === "running" && !pausing && (
-                  <button
-                    className="btn sm"
-                    disabled={pending !== null}
-                    onClick={() =>
-                      run(
-                        r.id,
-                        async () => {
-                          const res = await api<{ message: string; state?: string }>(
-                            `/jobs/${row.job.id}/pause`,
-                            "POST",
-                          );
-                          // Reads as pausing at once; the next poll confirms.
-                          const shown = appliedState(res.state || "");
-                          if (shown in STATES) markJobs([row.job.id], shown);
-                          void refresh();
-                          return res;
-                        },
-                        (res) => res?.message,
-                      )
-                    }
-                  >
-                    {pending === r.id ? "Pausing…" : "Pause"}
-                  </button>
-                )}
-              </span>
-            </li>
-          );
-        })}
-        {idle.regular + idle.specialist > 0 && (
-          <li className="owner free">
-            <span className="owner-n" aria-hidden="true">
-              ·
-            </span>
-            <span className="owner-free">
-              {idle.regular + idle.specialist === limit ? `All ${limit} slots idle` : `${idle.regular + idle.specialist} more idle`}
-              {runtimeWorkers &&
-                activeCount > 0 &&
-                ` · ${[idle.regular && `${idle.regular} regular`, idle.specialist && `${idle.specialist} difficult-flow`].filter(Boolean).join(", ")}`}
-              {activeCount === 0 && ". Slots pick up work when a batch runs or you add a job link."}
-            </span>
-          </li>
-        )}
-      </ol>
-      <p className="released">
-        <span className="muted">Waiting:</span>{" "}
-        <button
-          className="link"
-          onClick={() =>
-            go({ view: "jobs", tab: "pipeline", filter: "active" })
-          }
-        >
+      }
+    >
+      {busy.length > 0 && <ol className="ov-workers">{busy}</ol>}
+      <p className="ax-note ov-idle-line">
+        {idleTotal > 0 &&
+          (busy.length === 0 && unknown === 0
+            ? `All ${limit} workers are idle. They pick up work when a batch runs or you add a job link.`
+            : `${idleTotal} idle (${idleText}).`)}
+        {unknown > 0 && ` Status unavailable for ${unknown}.`}
+        {idleTotal === 0 && unknown === 0 && busy.length === 0 && "No workers are configured."}
+      </p>
+      <p className="ov-waiting">
+        <span className="ax-note">Waiting:</span>{" "}
+        <button type="button" className="ax-link" onClick={() => go({ view: "jobs", tab: "pipeline", filter: "active" })}>
           {queued} queued{starting ? ` · ${starting} waiting to start` : ""}
-        </button>{" "}
-        ·{" "}
-        <button
-          className="link"
-          onClick={() =>
-            go({ view: "jobs", tab: "pipeline", filter: "repair" })
-          }
-        >
+        </button>
+        {" · "}
+        <button type="button" className="ax-link" onClick={() => go({ view: "jobs", tab: "pipeline", filter: "repair" })}>
           {repairing} being fixed
-        </button>{" "}
-        ·{" "}
-        <button
-          className="link"
-          onClick={() => go({ view: "jobs", tab: "pipeline", filter: "needs" })}
-        >
+        </button>
+        {" · "}
+        <button type="button" className="ax-link" onClick={() => go({ view: "jobs", tab: "pipeline", filter: "needs" })}>
           {answers} waiting for your answer
         </button>
         {/* Runs parked on an emailed code or link (server count, as in the Queue line); the list below names them. */}
@@ -605,144 +533,109 @@ function Owners({ mail, workers }: { mail: MailStatus | null; workers?: Applicat
         {counts.states.waiting_email ?? emailWaits.length} waiting for email
       </p>
       {emailWaits.length > 0 && (
-        <ul className="waits" aria-label="Waiting for email">
-          {emailWaits.map(({ c, job }) => {
+        <ul className="ov-waits" aria-label="Waiting for email">
+          {emailWaits.slice(0, 5).map(({ c, job }) => {
             const minutes = (now - new Date(c.created_at).getTime()) / 60000;
             return (
               <li key={c.id}>
-                <Dot tone={minutes > 10 ? "fix" : "run"} />
                 {job ? (
-                  <button
-                    className="link"
-                    onClick={() => openJob(job.id, c.run_id)}
-                  >
+                  <button type="button" className="ax-link" onClick={() => openJob(job.id, c.run_id)}>
                     {job.company} — {job.title}
                   </button>
                 ) : (
                   <span>Run {c.run_id.slice(0, 8)}</span>
                 )}
-                <span className="muted">
-                  {c.kind === "auto"
-                    ? "email verification"
-                    : c.kind.replaceAll("_", " ")}{" "}
-                  · {minutes > 10 ? "delayed, " : ""}waiting{" "}
-                  {Math.round(minutes)}m
+                <span className="ax-note">
+                  {c.kind === "auto" ? "email verification" : c.kind.replaceAll("_", " ")} · {minutes > 10 ? "delayed, " : ""}
+                  waiting {Math.round(minutes)}m
                 </span>
               </li>
             );
           })}
+          {emailWaits.length > 5 && <li className="ax-note">and {emailWaits.length - 5} more</li>}
         </ul>
       )}
-    </section>
+    </Panel>
   );
 }
 
-function Outcomes() {
+// Finished applications, newest first, ten to a page. The snapshot carries the live rows only, so this is the recent
+// activity; every application is under Applications.
+function Activity() {
   const { rows, openJob, go } = useWorkspace();
   const now = useNow();
   const recent = useMemo(
     () =>
       rows
         .filter((r) => r.run?.finished_at && r.state !== "paused")
-        .sort((a, b) => b.run!.finished_at!.localeCompare(a.run!.finished_at!))
-        .slice(0, 10),
+        .sort((a, b) => b.run!.finished_at!.localeCompare(a.run!.finished_at!)),
     [rows],
   );
+  const paging = usePagination(recent, "", 10);
+  const columns: Column<(typeof recent)[number]>[] = [
+    {
+      key: "time",
+      header: "When",
+      cell: (r) => {
+        const finished = r.run!.finished_at!;
+        const today = new Date(finished).toDateString() === new Date(now).toDateString();
+        return (
+          <time dateTime={finished} title={new Date(finished).toLocaleString()}>
+            {today ? clock(finished) : day(finished)}
+          </time>
+        );
+      },
+    },
+    { key: "status", header: "Status", cell: (r) => <StatusPill state={r.state} /> },
+    {
+      key: "job",
+      header: "Job",
+      width: 380,
+      truncate: true,
+      cell: (r) => (
+        <button
+          type="button"
+          className="ax-job"
+          onClick={(e) => {
+            e.stopPropagation();
+            openJob(r.job.id, r.run!.id);
+          }}
+        >
+          <strong>{r.job.company}</strong>
+          <span>{r.job.title}</span>
+        </button>
+      ),
+    },
+    {
+      key: "reason",
+      header: "Detail",
+      width: 320,
+      truncate: true,
+      cell: (r) => (r.state !== "confirmed" && r.run!.reason ? <Note>{r.run!.reason}</Note> : null),
+    },
+  ];
   return (
-    <section className="block" aria-labelledby="outcomes-title">
-      <header className="block-head">
-        <h2 id="outcomes-title">Latest outcomes</h2>
-        <span className="block-links">
-          <button className="link" onClick={() => go({ view: "jobs" })}>
+    <section className="ov-activity" aria-labelledby="activity-title">
+      <header className="ov-sec-head">
+        <h2 id="activity-title">Latest activity</h2>
+        <span className="ov-links">
+          <button type="button" className="ax-link" onClick={() => go({ view: "jobs" })}>
             All jobs
           </button>
-          <button className="link" onClick={() => go({ view: "ledger" })}>
-            Ledger
+          <button type="button" className="ax-link" onClick={() => go({ view: "ledger" })}>
+            Applications
           </button>
         </span>
       </header>
-      {recent.length ? (
-        <ul className="feed">
-          {recent.map((r) => {
-            const finished = r.run!.finished_at!;
-            const today =
-              new Date(finished).toDateString() ===
-              new Date(now).toDateString();
-            return (
-              <li key={r.run!.id}>
-                <time
-                  dateTime={finished}
-                  title={new Date(finished).toLocaleString()}
-                >
-                  {today ? clock(finished) : day(finished)}
-                </time>
-                <StatePill state={r.state} />
-                <button
-                  className="feed-job link"
-                  onClick={() => openJob(r.job.id, r.run!.id)}
-                >
-                  <strong>{r.job.company}</strong>
-                  <span>{r.job.title}</span>
-                </button>
-                {r.state !== "confirmed" && r.run!.reason && (
-                  <span className="feed-reason">{r.run!.reason}</span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      ) : (
-        <Empty title="No finished applications yet">
-          Confirmed, unconfirmed and stopped applications appear here as they
-          finish them.
-        </Empty>
-      )}
-    </section>
-  );
-}
-
-function NeedsYou() {
-  const { snapshot } = useWorkspace();
-  const jobFor = useMemo(() => {
-    const runs = new Map(snapshot.runs.map((r) => [r.id, r.job_id]));
-    const jobs = new Map(snapshot.jobs.map((j) => [j.id, j]));
-    return (runId: string) => jobs.get(runs.get(runId) || "");
-  }, [snapshot]);
-  const groups = groupQuestions(snapshot.reviews, jobFor);
-  const paging = usePagination(groups, "", 3);
-  const [expanded] = useState(true);
-  return (
-    <section
-      className={"block needs" + (groups.length ? " has" : "")}
-      aria-labelledby="needs-title"
-      id="questions"
-    >
-      <header className="block-head">
-        <h2 id="needs-title">Needs you</h2>
-        <span className="muted">
-          {groups.length
-            ? plural(groups.length, "question")
-            : "Nothing waiting"}
-        </span>
-      </header>
-      {groups.length ? (
-        <>
-          <p className="block-note">
-            You're asked only for personal details your profile doesn't have. Other applications keep going while these wait.
-          </p>
-          {expanded &&
-            paging.items.map((g) => (
-              <QuestionCard key={g.review.id} group={g} />
-            ))}
-          <Pagination paging={paging} label="Question pages" sizes={false} />
-        </>
-      ) : (
-        <p className="block-note">
-          If an application is missing a required personal fact, it appears here
-          with the page it came from. Site and control problems are repaired
-          automatically and never turned into questions.
-        </p>
-      )}
+      <Table
+        label="Latest activity"
+        columns={columns}
+        rows={paging.items}
+        rowKey={(r) => r.run!.id}
+        onRowClick={(r) => openJob(r.job.id, r.run!.id)}
+        empty={<Empty title="No finished applications yet" hint="Confirmed, unconfirmed and stopped applications appear here as they finish." />}
+      />
+      <Pagination paging={paging} label="Activity pages" sizes={false} />
     </section>
   );
 }
@@ -763,15 +656,14 @@ function SystemStatus({
   const scheduler = health?.scheduler || snapshot.scheduler_health || {};
   const beat = health?.heartbeat?.at || snapshot.scheduler_heartbeat?.at;
   const telegram = snapshot.telegram_health?.state;
-  const boxes =
-    mail?.mailboxes.filter((m) => m.state === "connected").length ?? 0;
+  const boxes = mail?.mailboxes.filter((m) => m.state === "connected").length ?? 0;
   const cfg = snapshot.config;
   const items: [React.ReactNode, React.ReactNode][] = [
     [
       "Automation",
-      <span className={scheduler.degraded ? "warn-text" : ""}>
+      <span className={scheduler.degraded ? "ax-warn" : ""}>
         {scheduler.degraded ? "Needs a restart" : scheduler.state === "active" ? "Running" : scheduler.state || "Unknown"}
-        {beat && <span className="muted"> · checked {ago(beat, now)}</span>}
+        {beat && <span className="ax-note"> · checked {ago(beat, now)}</span>}
       </span>,
     ],
     [
@@ -783,9 +675,9 @@ function SystemStatus({
           "Clear"
         )
       ) : healthError ? (
-        <span className="muted">Unavailable</span>
+        <span className="ax-note">Unavailable</span>
       ) : (
-        <span className="muted">Checking…</span>
+        <span className="ax-note">Checking…</span>
       ),
     ],
     [
@@ -798,7 +690,7 @@ function SystemStatus({
           .filter(Boolean)
           .join(" · ")
       ) : (
-        <span className="warn-text">Not connected</span>
+        <span className="ax-warn">Not connected</span>
       ),
     ],
     [
@@ -806,7 +698,7 @@ function SystemStatus({
       cfg.telegram ? (
         telegram || "Configured"
       ) : (
-        <span className="muted">Off (optional)</span>
+        <span className="ax-note">Off (optional)</span>
       ),
     ],
     [
@@ -815,17 +707,22 @@ function SystemStatus({
     ],
   ];
   return (
-    <section className="block system" aria-labelledby="system-title">
-      <header className="block-head">
-        <h2 id="system-title">System</h2>
-        <button
-          className="link"
-          onClick={() => go({ view: "setup", tab: "system" })}
-        >
+    <Panel
+      title="System"
+      actions={
+        <button type="button" className="ax-link" onClick={() => go({ view: "setup", tab: "system" })}>
           Details
         </button>
-      </header>
-      <KeyValues items={items} />
-    </section>
+      }
+    >
+      <dl className="ov-sys">
+        {items.map(([k, v], i) => (
+          <div key={i}>
+            <dt>{k}</dt>
+            <dd>{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </Panel>
   );
 }
