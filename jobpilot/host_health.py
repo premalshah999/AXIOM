@@ -91,6 +91,7 @@ class HostLoad:
         self.wall = wall
         self.lock = threading.Lock()
         self.samples = deque()  # (wall time, seconds late)
+        self.first = None  # wall time of the first sample this process took
         self.intervals = []  # [start, end or None] of overloaded periods, wall time
         self.state = "unknown"
         self.config = {"enabled": True, "loaded_p95": LOADED_P95, "overloaded_p95": OVERLOADED_P95}
@@ -112,6 +113,8 @@ class HostLoad:
         """Add one sample (seconds a timer fired late) and return the state it leaves the host in."""
         at = self.wall() if at is None else at
         with self.lock:
+            if self.first is None:
+                self.first = at
             self.samples.append((at, max(0.0, float(lag))))
             while self.samples and self.samples[0][0] < at - WINDOW_SECONDS:
                 self.samples.popleft()
@@ -140,9 +143,19 @@ class HostLoad:
             return "unknown"
         if lags[-1] >= SEVERE_SECONDS:
             return "overloaded"
-        if len(lags) < MIN_SAMPLES:
+        last = self.samples[-1][0]
+        settled = last - self.first >= MIN_SAMPLES * SAMPLE_SECONDS
+        if len(lags) < MIN_SAMPLES and not (settled and len(lags) >= 3):
             return "unknown"
         p95 = self._percentile(lags, 0.95)
+        if len(lags) < MIN_SAMPLES:
+            # A loop that runs late also takes fewer samples: the timer fires once per (lateness + interval). With
+            # fewer than MIN_SAMPLES in a window that has had time to fill, that gap is the lateness. It read
+            # "unknown" there, and an unknown host runs every worker: the gate opened exactly when the loop was
+            # slowest. Production on 2026-10-29 held 27-35 samples at p95 1.6-2.1 s; a loop 1.5 s later still
+            # would have fallen under 20 and ungated itself.
+            gap = (last - self.samples[0][0]) / (len(lags) - 1)
+            p95 = max(p95, gap - SAMPLE_SECONDS)
         if p95 >= self.config["overloaded_p95"]:
             return "overloaded"
         return "loaded" if p95 >= self.config["loaded_p95"] else "ok"
