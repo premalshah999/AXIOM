@@ -19,6 +19,24 @@ from .admission import active_runs, capacity, employer_partition, outcome_for
 PRODUCTION_TARGET = "production:100_new_confirmed_20261012"
 
 
+# A confirmed run's resume hash never changes, and reading it parses the run's whole ~320 KB json packet in PostgreSQL.
+# /api/runtime-health read it for every confirmed run on each poll: 2,536 packets, 4-6 s of database CPU a call, from
+# the Batch and Setup pages every 30 s (2026-10-29). Read once per run, then remembered.
+_RESUME_SHA = {}
+
+
+def _resume_shas(session, run_ids):
+    missing = [rid for rid in run_ids if rid not in _RESUME_SHA]
+    for offset in range(0, len(missing), 200):
+        chunk = missing[offset : offset + 200]
+        for rid, sha in session.execute(
+            select(Run.id, Run.packet["resume_sha"].as_string()).where(Run.id.in_(chunk))
+        ):
+            if sha:  # an absent hash is asked again next time
+                _RESUME_SHA[rid] = sha
+    return {rid: _RESUME_SHA.get(rid) for rid in run_ids}
+
+
 def production_progress(db):
     """Count new, evidenced submissions since the applicant's explicit baseline."""
     goal = db.get_setting(PRODUCTION_TARGET, {})
@@ -28,22 +46,18 @@ def production_progress(db):
     previous = set(goal.get("baseline_run_ids", []))
     confirmed = set()
     with db.session() as session:
-        # Four columns only: full Run rows carry ~320 KB packets each, and loading every confirmed
+        # Light columns only: full Run rows carry ~320 KB packets each, and loading every confirmed
         # run per /api/runtime-health call blocked the loop and bloated the process (2026-10-15).
         runs = session.execute(
-            select(
-                Run.id,
-                Run.job_id,
-                Run.receipt,
-                Run.packet["resume_sha"].as_string().label("resume_sha"),
-            )
+            select(Run.id, Run.job_id, Run.receipt)
             .join(Job, Job.id == Run.job_id)
             .where(
                 Run.state == "confirmed",
                 Job.demo.is_(False),
                 Run.created_at >= goal["started_at"],
             )
-        )
+        ).all()
+        website_proof = []
         for run in runs:
             receipt = run.receipt or {}
             if (
@@ -69,8 +83,7 @@ def production_progress(db):
                 and receipt.get("evidence_selector")
                 and receipt.get("status_region")
                 and receipt.get("confirmation")
-                and receipt.get("resume_sha256") == run.resume_sha
-                and bool(run.resume_sha)
+                and receipt.get("resume_sha256")
             )
             email = receipt.get("email") or {}
             email_proof = (
@@ -81,7 +94,14 @@ def production_progress(db):
                 and email.get("job_id") == run.job_id
                 and not email.get("matched_existing_application")
             )
-            if website or email_proof:
+            if email_proof:
+                confirmed.add(run.job_id)
+            elif website:
+                website_proof.append((run, receipt))
+        # The packet is read only for a run whose receipt claims a website confirmation and nothing else proves it.
+        shas = _resume_shas(session, [run.id for run, _ in website_proof])
+        for run, receipt in website_proof:
+            if shas[run.id] and receipt.get("resume_sha256") == shas[run.id]:
                 confirmed.add(run.job_id)
     return {
         "started_at": goal["started_at"],

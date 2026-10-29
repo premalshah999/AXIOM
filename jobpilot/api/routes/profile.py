@@ -36,7 +36,7 @@ def router(service) -> APIRouter:
         )
 
     @r.put("/api/profile")
-    async def profile(data: Profile):
+    def profile(data: Profile):
         # Do not replace exact answers added concurrently by Telegram reviews.
         with db.exclusive() as s:
             from ...db import Setting

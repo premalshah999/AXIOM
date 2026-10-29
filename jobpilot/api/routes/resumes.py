@@ -76,7 +76,7 @@ def router(service) -> APIRouter:
         return FileResponse(path, media_type="application/pdf", filename="resume.pdf")
 
     @r.delete("/api/resumes/{resume_id}")
-    async def delete_resume(resume_id: str):
+    def delete_resume(resume_id: str):
         with db.exclusive() as s:
             row = s.get(Resume, resume_id)
             if not row:

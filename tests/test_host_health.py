@@ -442,3 +442,34 @@ def test_runtime_health_reports_the_host_gates(client, service):
     )
     host = client.get("/api/runtime-health").json()["host"]
     assert host["browser_failures_in_a_row"] == 3 and host["browser_paused_until"]
+
+
+# --- a loop so late that it takes few samples (2026-10-29) ----------------------------------------------------------
+
+
+def test_a_loop_so_late_that_it_takes_few_samples_is_overloaded_not_unknown():
+    """Every timer fired 2.5 s late, so a 30 s window held 10 samples, under MIN_SAMPLES: it read "unknown" and the
+    gate let every worker start while the host was at its worst."""
+    load, _ = fed([2.5] * 40, step=3.0)
+    assert len(load.samples) < host_health.MIN_SAMPLES
+    assert load.current() == "overloaded" and load.limit(6) == 1
+
+
+def test_sparse_samples_of_a_barely_late_loop_are_loaded_not_overloaded():
+    load, _ = fed([0.8] * 30, step=1.3)  # 23 samples of 30 s, then fewer as the window slides: gap 1.3 s, late 0.8 s
+    assert load.current() == "loaded"
+
+
+def test_a_new_monitor_still_waits_before_judging():
+    """Fewer samples than MIN_SAMPLES in a monitor younger than ten seconds is still too little to judge."""
+    load, _ = fed([0.9] * 8, step=1.0)
+    assert load.current() == "unknown" and load.limit(6) == 6
+
+
+def test_a_quiet_window_after_a_silent_gap_is_not_blamed_on_the_gap():
+    load, clock = fed([0.01] * 60)
+    clock["t"] += 31.0  # nothing reported for a window, then the loop resumes at its normal pace
+    for _ in range(5):
+        clock["t"] += 0.5
+        load.record(0.01)
+    assert load.current() == "ok"  # judged by the pace since the gap, not by the gap

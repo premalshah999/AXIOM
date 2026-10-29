@@ -79,7 +79,7 @@ def router(service) -> APIRouter:
         return {"ok": True, "run_id": result.get("run_id", run_id), "state": result.get("state", "queued")}
 
     @r.delete("/api/accounts/{account_id}")
-    async def account_forget(account_id: str):
+    def account_forget(account_id: str):
         # Forgetting a record makes the next run sign in again or create the account; the
         # shared login itself is kept.
         if not account_id.startswith("employer_account:"):

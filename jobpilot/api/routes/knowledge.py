@@ -16,13 +16,13 @@ def router(service) -> APIRouter:
         return {"entries": search(db, q[:200], limit=500)}
 
     @r.post("/api/knowledge")
-    async def knowledge_add(data: KnowledgeInput):
+    def knowledge_add(data: KnowledgeInput):
         from ...knowledge import save
 
         return save(db, data.question, data.answer, data.options, data.employer, data.scope)
 
     @r.delete("/api/knowledge/{entry_id}")
-    async def knowledge_delete(entry_id: str):
+    def knowledge_delete(entry_id: str):
         from ...knowledge import forget
 
         forget(db, entry_id)

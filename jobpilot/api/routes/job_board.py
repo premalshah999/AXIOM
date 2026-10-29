@@ -1,5 +1,6 @@
 """Authenticated job board routes; manual application clicks use normal queue protections."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
@@ -128,7 +129,7 @@ def router(service) -> APIRouter:
         }
 
     @r.put("/api/job-board/settings")
-    async def update(data: BoardSettings):
+    def update(data: BoardSettings):
         if data.auto_apply:
             from ...autopilot import start_batch
 
@@ -139,30 +140,35 @@ def router(service) -> APIRouter:
     @r.post("/api/job-board/sources")
     async def add_source(data: SourceInput):
         await public_url(data.url, config.allow_private_urls)
-        ids = managed_ids(db)
-        cfg = settings(db)
-        with db.exclusive() as s:
-            row = s.scalar(select(Source).where(Source.url == data.url))
-            if row and row.id not in ids:
-                raise HTTPException(
-                    409,
-                    "This board is already configured in Sources. Remove that entry before adding it here.",
-                )
-            if not row:
-                row = Source(
-                    **{
-                        **data.model_dump(),
-                        "auto_queue": False,
-                        "enabled": data.enabled and cfg.enabled,
-                        "cron": f"0 */{cfg.interval_hours} * * *",
-                        "next_run": (datetime.now(UTC) + timedelta(hours=cfg.interval_hours)).isoformat(),
-                    }
-                )
-                s.add(row)
-                s.flush()
-            ids.add(row.id)
-        db.set_setting("job_board_sources", {"ids": sorted(ids)})
-        return {"added": True, "id": row.id}
+
+        def save():
+            ids = managed_ids(db)
+            cfg = settings(db)
+            with db.exclusive() as s:
+                row = s.scalar(select(Source).where(Source.url == data.url))
+                if row and row.id not in ids:
+                    raise HTTPException(
+                        409,
+                        "This board is already configured in Sources. Remove that entry before adding it here.",
+                    )
+                if not row:
+                    row = Source(
+                        **{
+                            **data.model_dump(),
+                            "auto_queue": False,
+                            "enabled": data.enabled and cfg.enabled,
+                            "cron": f"0 */{cfg.interval_hours} * * *",
+                            "next_run": (datetime.now(UTC) + timedelta(hours=cfg.interval_hours)).isoformat(),
+                        }
+                    )
+                    s.add(row)
+                    s.flush()
+                ids.add(row.id)
+            db.set_setting("job_board_sources", {"ids": sorted(ids)})
+            return row.id
+
+        row_id = await asyncio.to_thread(save)
+        return {"added": True, "id": row_id}
 
     @r.post("/api/job-board/scrape")
     async def scrape_now():
@@ -170,75 +176,81 @@ def router(service) -> APIRouter:
             raise HTTPException(409, "Start application workers before scraping")
         if not settings(db).enabled:
             raise HTTPException(409, "Enable job discovery first")
-        setup_sources(db)
-        ids = managed_ids(db)
-        with db.session() as s:
-            ids = list(s.scalars(select(Source.id).where(Source.id.in_(ids), Source.enabled.is_(True))))
         from ...workers import enqueue_source
 
         started = now()
+
+        def claim_scans():
+            # Every source's scan flag is a read and a locked write; hundreds of boards ran them one by one on the
+            # event loop (2026-10-29). One thread does them all.
+            setup_sources(db)
+            with db.session() as s:
+                wanted = Source.id.in_(managed_ids(db))
+                ids = list(s.scalars(select(Source.id).where(wanted, Source.enabled.is_(True))))
+            claimed = []
+            for sid in ids:
+                scan = db.get_setting("job_board_scan:" + sid, {})
+                if scan.get("state") in {"queued", "running"} and datetime.now(UTC) - datetime.fromisoformat(
+                    scan.get("started_at", started)
+                ) < timedelta(hours=6):
+                    continue
+                db.set_setting("job_board_scan:" + sid, {"state": "queued", "started_at": started})
+                claimed.append(sid)
+            return ids, claimed
+
+        ids, claimed = await asyncio.to_thread(claim_scans)
         queued = 0
-        for sid in ids:
-            scan = db.get_setting("job_board_scan:" + sid, {})
-            if scan.get("state") in {"queued", "running"} and datetime.now(UTC) - datetime.fromisoformat(
-                scan.get("started_at", started)
-            ) < timedelta(hours=6):
-                continue
-            db.set_setting("job_board_scan:" + sid, {"state": "queued", "started_at": started})
+        for sid in claimed:
             try:
                 queued += bool(await enqueue_source(sid))
             except Exception:
-                db.set_setting(
+                await asyncio.to_thread(
+                    db.set_setting,
                     "job_board_scan:" + sid,
                     {"state": "error", "started_at": started, "error": "Could not queue this source"},
                 )
-        db.set_setting("job_board_requested", {"at": started})
+        await asyncio.to_thread(db.set_setting, "job_board_requested", {"at": started})
         return {"queued_sources": queued, "total_sources": len(ids)}
 
     @r.post("/api/job-board/apply")
     async def apply_selection(data: ApplySelection):
         if not service.dispatch:
             raise HTTPException(409, "Application workers are disabled")
-        control = db.get_setting("control", {})
+        control = await asyncio.to_thread(db.get_setting, "control", {})
         if not control.get("auto_submit") or control.get("paused"):
             raise HTTPException(409, "Enable automatic submission and resume workers in Settings first")
-        fresh_ids = {j["id"] for j in board_snapshot(db)["jobs"]}
         queued, skipped = [], []
-        with db.session() as s:
-            attempted = set(
-                s.scalars(
-                    select(Run.job_id).where(
-                        Run.state.in_(ACTIVE | {"confirmed", "submission_unknown", "already_applied"})
-                    )
-                )
-            )
-            unranked = [
-                jid
-                for jid in dict.fromkeys(data.job_ids)
-                if jid in fresh_ids and jid not in attempted and s.get(Job, jid).status != "ready"
-            ]
+        blocking = ACTIVE | {"confirmed", "submission_unknown", "already_applied"}
+
+        def read_selection():
+            # One thread for every read: board_snapshot scans the whole board (~0.5 s) and it ran on the event loop
+            # once per selected job, up to 51 times a click, while the browser owners waited (2026-10-29).
+            fresh = {j["id"] for j in board_snapshot(db)["jobs"]}
+            with db.session() as s:
+                busy = set(s.scalars(select(Run.job_id).where(Run.state.in_(blocking))))
+                unranked = [
+                    jid
+                    for jid in dict.fromkeys(data.job_ids)
+                    if jid in fresh and jid not in busy and s.get(Job, jid).status != "ready"
+                ]
+            return fresh, busy, unranked
+
+        fresh_ids, busy, unranked = await asyncio.to_thread(read_selection)
         for offset in range(0, len(unranked), 24):
             await rank_batch(db, config, unranked[offset : offset + 24])
+        if unranked:
+            # Recheck expiry and activity after classification, which may take several seconds.
+            fresh_ids, busy, _ = await asyncio.to_thread(read_selection)
         for jid in dict.fromkeys(data.job_ids):
             if jid not in fresh_ids:
                 skipped.append({"job_id": jid, "reason": "No longer a fresh US listing"})
                 continue
-            with db.session() as s:
-                blocked = s.scalar(
-                    select(Run.id).where(
-                        Run.job_id == jid,
-                        Run.state.in_(ACTIVE | {"confirmed", "submission_unknown", "already_applied"}),
-                    )
-                )
-            if blocked:
+            if jid in busy:
                 skipped.append(
                     {"job_id": jid, "reason": "Already active, submitted or awaiting confirmation"}
                 )
                 continue
             try:
-                # Recheck expiry after classification, which may take several seconds.
-                if jid not in {j["id"] for j in board_snapshot(db)["jobs"]}:
-                    raise ValueError("Posting aged out during classification")
                 run = await service.queue(jid, "submit", owner_pick=True)  # The owner's own selection.
                 queued.append({"job_id": jid, "run_id": run["id"]})
             except (ValueError, RuntimeError) as exc:
