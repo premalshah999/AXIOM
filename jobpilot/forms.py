@@ -2344,7 +2344,7 @@ class FormSession:
         """Delete an added Workday education row whose school the employer's list does not offer (nor an Other).
 
         The first row (the highest degree) stays and the resume carries the rest. Jefferson Health's search-only school
-        list had neither Example Technical University nor an Other entry, and every rerun stalled on that row
+        list had neither the applicant's overseas university nor an Other entry, and every rerun stalled on that row
         (2026-10-28)."""
         row = re.fullmatch(r"(education) (\d+)", str(field.get("group") or "").strip(), re.I)
         if not (

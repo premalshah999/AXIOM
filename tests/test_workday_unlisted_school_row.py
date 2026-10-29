@@ -1,4 +1,4 @@
-"""Jefferson Health's Workday school list is search-only and has neither Example Technical University nor an Other
+"""Jefferson Health's Workday school list is search-only and has neither the applicant's overseas university nor an Other
 entry (2026-10-28): every rerun stalled on Education 2's required school. That added row is deleted with its own Delete
 button, and the first row (the highest degree) is never touched."""
 
