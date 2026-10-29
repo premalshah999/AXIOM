@@ -238,6 +238,29 @@ async def greenhouse_board(url, company=""):
     return None
 
 
+def unavailable_posting_redirect(source, destination):
+    """An Avature job detail redirected to its own unfiltered catalogue is no longer served."""
+    left, right = urlsplit(source), urlsplit(destination)
+    detail = re.fullmatch(r"(/(?:[a-z]{2}_[A-Z]{2}/)?[A-Za-z0-9_-]+)/(?:JobDetail|FolderDetail)/[^?#]+/\d+/?", left.path)
+    return bool(
+        detail and left.scheme == right.scheme == "https" and left.netloc == right.netloc
+        and right.path.rstrip("/") == detail[1] + "/SearchJobs" and not right.query
+    )
+
+
+def unavailable_posting_response(response):
+    """Follow only the initial document's actual HTTP redirect chain, including short links."""
+    if response is None or response.status != 200:
+        return False
+    request = response.request
+    while request.redirected_from is not None:
+        previous = request.redirected_from
+        if unavailable_posting_redirect(previous.url, request.url):
+            return request.url == response.url
+        request = previous
+    return False
+
+
 async def posting_gone(url, company=""):
     """Why a Greenhouse, Lever, Workable or SmartRecruiters posting is gone, from the platform's public jobs API (an
     Oracle posting, from its own link), or ''.
@@ -270,6 +293,16 @@ async def posting_gone(url, company=""):
         location = urlsplit(response.headers.get("location", "")).path
         if response.is_redirect and re.search(r"/CandidateExperience/errors?/404\b", location, re.I):
             return "The posting is closed: Oracle's career site no longer serves it (Page not found), so nothing was submitted"
+        return ""
+    elif detect(url).id == "avature" and re.search(r"/(?:JobDetail|FolderDetail)/", urlsplit(url).path):
+        from urllib.parse import urljoin
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                response = await client.get(url, follow_redirects=False)
+        except httpx.HTTPError:
+            return ""
+        if response.is_redirect and unavailable_posting_redirect(url, urljoin(url, response.headers.get("location", ""))):
+            return "The posting is closed: the employer redirects its job detail to the job catalogue, so nothing was submitted"
         return ""
     elif ICIMS_SITE_JOB.match(url or ""):
         if await icims_site_posting_gone(url):
@@ -1261,15 +1294,22 @@ class BrowserEngine:
             if job["ats"] in CLEAN_IDENTITY and not resumed:
                 await self.clear_platform_identity(page, entry_url, job["ats"])
                 identity_cleared = True
+            landing_response = None
             for attempt in range(0 if resumed else 2):
                 try:
-                    await self.open_application_route(page, entry_url, saved_state)
+                    landing_response = await self.open_application_route(page, entry_url, saved_state)
                     break
                 except PlaywrightError as exc:
                     if attempt or not NET_RETRY.search(str(exc)):
                         raise
                     self.emit("browser_retry", "Retrying the job page after a connection interruption")
                     await asyncio.sleep(1)
+            if not reopened_route and unavailable_posting_response(landing_response):
+                self.result = {
+                    "state": "closed",
+                    "reason": "The posting is closed: the employer redirects its job detail to the job catalogue, so nothing was submitted",
+                }
+                return self.result
             if (
                 (job["ats"] == "greenhouse" or "gh_jid" in parse_qs(urlsplit(job["url"]).query))
                 and not resumed
