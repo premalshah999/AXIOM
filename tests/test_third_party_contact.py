@@ -72,3 +72,16 @@ def test_a_placed_history_row_keeps_its_own_rules(service):
     assert third_party(g) == "work experience"
     g["history_kind"] = "work"
     assert third_party(g) == ""
+
+
+def test_the_answer_audit_never_treats_the_applicants_address_as_an_employers_fact(service):
+    """Two applications were blocked on "Employer City" (confirmed_fact_mismatch): the audit's known answer was the
+    applicant's own city, so a correct employer city counted as the mismatch."""
+    from types import SimpleNamespace
+
+    from jobpilot import answer_quality
+
+    form = SimpleNamespace(resolver=Resolver(profile(), service.db, service.config))
+    for label, section in (("Employer City", ""), ("City", "Previous Employer"), ("Zip Code", "Supervisor")):
+        known = answer_quality.supported_local(form, field(label, section))
+        assert known.disposition != "answer" and known.value is None, label
