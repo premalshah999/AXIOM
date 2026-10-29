@@ -75,6 +75,15 @@ def context_from(item):
     return {k: v for k, v in value.items() if v not in ("", {}, False, 0, None)}
 
 
+def row_for(profile, kind, identity):
+    """The index of the one profile work/education entry that a block's own company (or school) names, else None."""
+    entries = getattr(profile, kind, None) or []
+    key = "company" if kind == "work" else "school"
+    wanted = normalize(str((identity or {}).get(key, "")))
+    found = [i for i, e in enumerate(entries) if wanted and normalize(str(getattr(e, key, "") or "")) == wanted]
+    return found[0] if len(found) == 1 else None
+
+
 def tidy(question):
     """The question as the form asks it: upload-widget text and required markers removed."""
     original = " ".join(str(question or "").split())

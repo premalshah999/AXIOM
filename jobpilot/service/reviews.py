@@ -358,7 +358,7 @@ class ReviewsMixin:
         import asyncio
 
         from .. import owner_questions as oq
-        from ..answers import Resolver, protected_status_missing, residence_outside
+        from ..answers import Resolver, normalize, protected_status_missing, residence_outside
         from ..jobboard import GERMAN_ROLE
         from ..db import record
         from ..schemas import Profile
@@ -379,11 +379,18 @@ class ReviewsMixin:
                     )
                 ).all()
 
-        outcome = {"closed": 0, "recovered": 0, "answered": 0}
-        moved = set()
+        outcome = {"closed": 0, "recovered": 0, "answered": 0, "merged": 0}
+        moved, seen, duplicates = set(), set(), []
         for rid, run_id, question, options, context, reason, key, packet, job in await asyncio.to_thread(candidates):
             if run_id in moved or key in {"manual", "session"}:
                 continue
+            # The same question asked twice in one run (Bosch's two "Other (free text)", NCSU's fourteen rows of three
+            # questions, 2026-10-29): one is enough. A block that differs (another employer's row) is another question.
+            signature = (run_id, key, normalize(oq.display(question, context or {})), tuple(str(o) for o in options or []))
+            if signature in seen:
+                duplicates.append(rid)
+                continue
+            seen.add(signature)
             options, context, profile = options or [], context or {}, (packet or {}).get("profile") or {}
             outside = residence_outside(question, options, profile.get("facts"), profile.get("location", ""))
             from ..sensitive_ids import sensitive_field
@@ -431,9 +438,20 @@ class ReviewsMixin:
                     "required": True,
                     "section": context.get("section", ""),
                     "group": context.get("group", ""),
+                    "hint": context.get("hint", ""),
+                    "widget": context.get("widget", ""),
+                    "date_format": context.get("date_format", ""),
+                    "slot": context.get("slot", 0),
                     "value": "",
                     "valid": True,
                 }
+                if context.get("history_kind"):
+                    # The block the question sat in, so the row's own profile entry answers its dates and location.
+                    field["history_kind"] = context["history_kind"]
+                    field["history_identity"] = context.get("history_identity") or {}
+                    index = oq.row_for(resolver.profile, context["history_kind"], field["history_identity"])
+                    if index is not None:
+                        field["history_row"] = {"kind": context["history_kind"], "index": index}
                 answer = await asyncio.to_thread(resolver.local, field)
             except Exception:
                 continue  # The question stays asked.
@@ -445,6 +463,13 @@ class ReviewsMixin:
                 self.db.event(run_id, "answer_inferred", "Answered an open question from the saved profile",
                               {"question": oq.tidy(question)[:200], "evidence": list(answer.evidence_ids or [])[:4]})
                 outcome["answered"] += 1
+        if duplicates:
+            with self.db.exclusive() as s:
+                for rid in duplicates:
+                    row = s.get(Review, rid)
+                    if row is not None and row.answer is None:
+                        s.delete(row)
+                        outcome["merged"] += 1
         return outcome
 
     async def resolve_review_file(self, review_id, filename, content):

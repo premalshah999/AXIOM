@@ -364,13 +364,10 @@ def apply_row_hints(fields, hints, profile):
         hint = hints.get(f.get("dom_id"))
         if not hint or f.get("history_row") or f.get("history_kind"):
             continue
-        kind = hint["kind"]
-        entries = getattr(profile, kind, []) or []
-        key = "company" if kind == "work" else "school"
-        wanted = normalize(str(hint["identity"].get(key, "")))
-        found = [i for i, e in enumerate(entries) if wanted and normalize(str(getattr(e, key, "") or "")) == wanted]
-        if len(found) == 1:
-            f["history_row"] = {"kind": kind, "index": found[0]}
+        from .owner_questions import row_for
+
+        if (index := row_for(profile, hint["kind"], hint["identity"])) is not None:
+            f["history_row"] = {"kind": hint["kind"], "index": index}
 
 
 HISTORY_GROUP_NUMBER = re.compile(r"^(?:Work Experience|Education) (\d+)$")

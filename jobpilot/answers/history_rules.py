@@ -521,7 +521,13 @@ class HistoryRulesMixin:
                 reason=f"No {region[1]} is recorded for {kind} {index + 1}",
                 blocker_type="missing_fact",
             )
-        if HISTORY_PERIOD.fullmatch(re.sub(r"\s*[*✱:]+\s*$", "", f["label"].strip())) and f.get("type") == "text":
+        period = HISTORY_PERIOD.fullmatch(re.sub(r"\s*[*✱:]+\s*$", "", f["label"].strip()))
+        if period and (f.get("widget") == "date-text" or f.get("type") in {"date", "date_parts"}):
+            # A range picker made of two date boxes that both read "Start & end date" (TikTok, 2026-10-29): the first is the
+            # row's start, the second its end (the scanner numbers identical fields by occurrence).
+            f = {**f, "label": "End date" if f.get("slot", 0) >= 1 else "Start date"}
+            label = normalize(f["label"])
+        elif period and f.get("type") == "text":
             # One box for the row's whole period (TikTok's "Start & end date", 2026-10-28) takes both of its dates.
             begin = month_year(entry.start) if entry.start else ""
             close = "Present" if getattr(entry, "current", False) else (month_year(entry.end) if entry.end else "")
