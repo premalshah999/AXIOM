@@ -157,6 +157,32 @@ async def test_a_write_that_succeeds_clears_the_failure(page, tmp_path, service)
     assert await page.locator("#p").input_value() != ""
 
 
+async def test_an_unchanged_clean_page_is_read_back_twice_not_a_third_time(page, tmp_path, service):
+    form, events = await session(page, tmp_path, service, html="<h1>Review</h1><p>Nothing to answer.</p>")
+    scans = []
+    original = form.scan
+
+    async def scan(*args, **kwargs):
+        scans.append(1)
+        return await original(*args, **kwargs)
+
+    form.scan = scan
+    reports = [await form.fill_current() for _ in range(2)]
+    if not reports[0].get("ok"):
+        pytest.skip("a page without a resume is not a clean read-back in this fixture")
+    before = len(scans)
+    third = await form.fill_current()
+    fourth = await form.fill_current()
+    assert [e[0] for e in events].count("verification") == 2
+    assert third == fourth == reports[1]
+    assert len(scans) - before == 2, "only the page look, no second scan per call"
+    assert [e[0] for e in events].count("verification_unchanged") == 1
+    # The page changes: it is read back again.
+    await page.evaluate("document.body.insertAdjacentHTML('beforeend', '<h2>Next step</h2>')")
+    await form.fill_current()
+    assert [e[0] for e in events].count("verification") == 3
+
+
 class Engine:
     """Just enough of BrowserEngine for run_desktop_navigator: every method the loop calls does nothing."""
 
@@ -249,3 +275,46 @@ async def test_the_navigator_stops_choosing_a_fill_that_cannot_write(
     assert len(asked) == decisions, (len(asked), [e[0] for e in engine.events])
     assert len(fills) == (1 if held_back else 2)
     assert "navigation_stalled" in [e[0] for e in engine.events]
+
+
+async def test_a_page_that_alternates_between_a_few_states_is_not_driven_to_the_step_limit():
+    """JazzHR (10-27): steps 3-45 hashed to four observations, so no state repeated consecutively."""
+    from collections import Counter
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from jobpilot.adapters.base import Adapter, Step
+
+    def observation(marker):
+        return {"url": "https://jobs.example.test/apply/1", "headings": ["Apply"], "errors": [], "controls": [],
+                "fields": [{"id": "a", "label": "Name", "type": "text", "value": marker, "valid": True}]}
+
+    states = [observation(m) for m in "ABAB"]
+    visits = []
+
+    async def scan():
+        return states[len(visits) % 4]
+
+    adapter = object.__new__(Adapter)
+    form = SimpleNamespace(settle=AsyncMock(), scan=scan)
+    adapter.e = SimpleNamespace(result=None, form=form, trace=AsyncMock(), redact=lambda u: u,
+                           refresh_expired_entry=AsyncMock(return_value=False))
+    adapter.job = {"url": "https://jobs.example.test/apply/1"}
+    adapter.id, adapter.name = "custom", "Custom"
+    adapter.config = SimpleNamespace(browser_cdp_url="")
+    adapter.committed, adapter.post_commit_steps, adapter.step_no = False, 0, 0
+    adapter.last_step = None
+    adapter.signatures, adapter.sig_visits, adapter.attempts = Counter(), Counter(), Counter()
+    adapter.dismiss_overlays = AsyncMock()
+    adapter.captcha_open = AsyncMock(return_value=False)
+    adapter.emit = lambda *a, **k: None
+    adapter.reset_mail_continuation = lambda: False
+    adapter.classify_page = lambda obs: Step.FORM
+
+    async def on_form(obs):
+        visits.append(1)
+
+    adapter.on_form = on_form
+    result = await adapter._drive()
+    assert result["state"] == "needs_review" and result["reason"].startswith("No progress on the form step")
+    assert len(visits) < adapter.max_steps, len(visits)

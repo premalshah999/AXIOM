@@ -34,6 +34,8 @@ FIELD_WRITE_SECONDS = 12
 # "Country" was written ~32 times per run, iCIMS "Phone Country Code" 25, Workday "Field of Study" 8-10, each failure
 # costing up to 12 s and a model decision; 178 min in 3 days were third-or-later tries of one field in one run.
 REPEATED_WRITE_FAILURES = 2
+# A page read back clean twice with nothing written is not read back again (JazzHR read the same 441 fields 48 times).
+CLEAN_READBACKS = 2
 # A school search that finds nothing falls back to shorter searches and then "Other"; each empty result can wait out
 # its option wait. On slow Workday tenants the chain outlasted 12 s and the field never committed (Lennar's
 # "Nanyang Technological University", 27 deadline failures on school fields since 10-16).
@@ -1147,6 +1149,8 @@ class FormSession:
         self.optional_picker_omissions = set()
         # Field key -> the last identical write failure (count, signature, page context); see record_write_failure.
         self.field_failures = {}
+        # Page fingerprint -> clean fill_current read-backs with no write in between; see fill_current.
+        self.clean_readbacks = {}
         # Workday history rows deleted because the employer cannot list their answer, by kind ("education").
         self.dropped_rows = {}
         self.document_uploads = {}
@@ -1177,6 +1181,16 @@ class FormSession:
             field.get("name", ""),
             field.get("automation_id", ""),
             cls.frame_key(field),
+        )
+
+    def readback_key(self):
+        """The page as fill_current sees it: its fingerprint, how prefilled values are treated and which resolver
+        (an owner's proposed answers replace resolve) would answer."""
+        resolve = getattr(getattr(self, "resolver", None), "resolve", None)
+        return (
+            (self.last_observation or {}).get("progress_fingerprint", ""),
+            self.accept_prefilled,
+            id(getattr(resolve, "__func__", resolve)),
         )
 
     @staticmethod
@@ -3893,6 +3907,17 @@ class FormSession:
             self.accept_prefilled = accept_prefilled
         if not await self.accept_terms_dialog():
             await self.scan()
+        readback_start = self.readback_key()
+        if readback_start[0] and self.clean_readbacks.get(readback_start, [0])[0] >= CLEAN_READBACKS:
+            # JazzHR (10-27): the adapter read the same clean page back 48 times, 3 s apart, alternating between
+            # two page states, and ended at its step limit. This page was read back clean twice with nothing
+            # written; a third read of it says nothing new.
+            seen = self.clean_readbacks[readback_start]
+            if not seen[2]:
+                seen[2] = True
+                self.emit("verification_unchanged", "Reused the clean read-back of an unchanged page")
+            self.pending = []
+            return deepcopy(seen[1])
         self.pending = []
         self.expected = {}
         self.expected_labels = {}
@@ -4487,6 +4512,20 @@ class FormSession:
                 )
         report = await self.verify()
         self.emit("verification", "Read back the form after filling", report)
+        readback_end = self.readback_key()
+        if (
+            readback_end[0]
+            and report.get("ok")
+            and not report.get("pending")
+            and not unavailable_fields
+            and readback_end == readback_start
+        ):
+            seen = self.clean_readbacks.get(readback_end, [0, None, False])
+            self.clean_readbacks[readback_end] = [seen[0] + 1, deepcopy(report), seen[2]]
+            while len(self.clean_readbacks) > 16:
+                self.clean_readbacks.pop(next(iter(self.clean_readbacks)))
+        else:
+            self.clean_readbacks.pop(readback_start, None)
         if checkpoint := getattr(self, "on_checkpoint", None):
             await checkpoint()
         for original in unavailable_fields:

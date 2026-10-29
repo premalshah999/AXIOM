@@ -418,6 +418,7 @@ class Adapter:
         self.accounts = Accounts(self.service, engine.profile, self.job["url"])
         self.inbox = self.service.inbox
         self.signatures = Counter()
+        self.sig_visits = Counter()
         self.attempts = Counter()
         self.step_no = 0
         self.challenge_since = time.time() - 90
@@ -935,7 +936,10 @@ class Adapter:
             self.last_signature = sig
             self.step_no += 1
             await self.e.trace(self.step_no, step.value, obs)
-            if self.signatures[sig] > 3:
+            # JazzHR (10-27): the page alternated between three or four states (steps 3-45 hashed to four
+            # observations), so the consecutive count never passed 1 and the loop ran all 45 steps over 160 s.
+            self.sig_visits[sig] += 1
+            if self.signatures[sig] > 3 or self.sig_visits[sig] > 6:
                 return self.defer(
                     f"No progress on the {step.value.replace('_', ' ')} step: " + "; ".join(obs["errors"][:3])
                 )
