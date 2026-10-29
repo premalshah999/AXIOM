@@ -58,3 +58,7 @@ close, focus moved in and returned on close, Tab kept inside.
 ## Toast
 `ToastStack { toasts, onDismiss }` is rendered once by `main.tsx`. Pages raise toasts with `useNotify()` from
 `src/hooks.ts`: `notify("ok" | "info" | "error", "text")`. Errors announce as alerts and stay until dismissed.
+
+### Table extras (work pages)
+`canSelect(row)` disables a row's checkbox and leaves it out of select-all; `busy` dims the rows that are shown while the
+next page or filter loads (the table keeps its size, so nothing jumps); `rowLabel(row)` names each row's checkbox.

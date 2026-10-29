@@ -21,6 +21,7 @@ import { deriveRows, withMarks, type Marks } from "./model";
 import type { Snapshot } from "./types";
 import { ago, Loading } from "./ui";
 import { NeedsView } from "./needs";
+import { countQuestions } from "./questions";
 import { Shell } from "./shell/Shell";
 import { BrandMark } from "./shell/Brand";
 import { CommandPalette } from "./shell/CommandPalette";
@@ -256,7 +257,8 @@ function App() {
 
   const { snapshot } = workspace;
   const rt = snapshot.autopilot_runtime || {};
-  const questions = snapshot.reviews.length;
+  // The Needs you badge counts what the page shows: one card per distinct question, not one per application.
+  const questions = countQuestions(snapshot.reviews);
   const sched = rt.scheduler || snapshot.scheduler_health || {};
   const pool = rt.application_workers;
   const workers = pool ? pool.normal_workers + pool.specialist_workers : 0;

@@ -9,7 +9,9 @@ import { useWorkspace } from "./context";
 import { useAction } from "./hooks";
 import { appliedState } from "./model";
 import type { ApplyManyResult, ApplyOutcome } from "./types";
-import { plural, shortId, StatePill } from "./ui";
+import { plural, shortId } from "./ui";
+import { Panel } from "./ui/index";
+import { StatusPill } from "./worktools";
 
 // The server applies to at most this many jobs per request (owner_apply.MANY).
 export const MAX_SELECTED = 50;
@@ -44,8 +46,12 @@ export function useSelection(limit = MAX_SELECTED) {
     [limit],
   );
   const clear = useCallback(() => setIds([]), []);
+  // The table's own checkboxes hand over the whole new selection; it is cut to the limit.
+  const replace = useCallback((next: ReadonlySet<string>) => setIds([...next].slice(0, limit)), [limit]);
   return {
     ids,
+    chosen,
+    replace,
     has: (id: string) => chosen.has(id),
     toggle,
     setMany,
@@ -111,69 +117,6 @@ export function useApplyMany() {
   };
 }
 
-// "N selected · Select all M · Clear · Apply to selected".
-export function BulkBar({
-  selection,
-  pageIds,
-  matchingIds,
-  matchingTotal,
-  disabled,
-  applying,
-  onApply,
-}: {
-  selection: Selection;
-  pageIds: string[];
-  // Every selectable job matching the filter (may be capped by the server), when known.
-  matchingIds?: string[];
-  matchingTotal?: number;
-  disabled?: boolean;
-  applying: boolean;
-  onApply: () => void;
-}) {
-  const n = selection.ids.length;
-  const more = (matchingIds || []).filter((id) => !selection.has(id));
-  const total = matchingTotal ?? matchingIds?.length ?? 0;
-  return (
-    <div className="bulk-bar" role="group" aria-label="Selected jobs">
-      <span className="bulk-count" aria-live="polite">
-        {n ? `${plural(n, "job")} selected` : "None selected"}
-        {selection.full && (
-          <span className="muted"> · {selection.limit} at a time</span>
-        )}
-      </span>
-      {pageIds.some((id) => !selection.has(id)) && !selection.full && (
-        <button
-          className="link sm"
-          onClick={() => selection.setMany(pageIds, true)}
-        >
-          Select this page ({pageIds.length})
-        </button>
-      )}
-      {more.length > 0 && !selection.full && total > pageIds.length && (
-        <button
-          className="link sm"
-          onClick={() => selection.setMany(matchingIds || [], true)}
-        >
-          Select all {total.toLocaleString()} matching
-          {total > selection.limit ? ` (first ${selection.limit})` : ""}
-        </button>
-      )}
-      {n > 0 && (
-        <button className="link sm" onClick={selection.clear}>
-          Clear
-        </button>
-      )}
-      <button
-        className="btn primary sm toolbar-end"
-        disabled={!n || disabled || applying}
-        onClick={onApply}
-      >
-        {applying ? "Applying…" : `Apply to selected (${n})`}
-      </button>
-    </div>
-  );
-}
-
 // What a waiting job waits for, by the admission code that deferred it (owner_apply.start).
 const WAITS_FOR: Record<string, string> = {
   worker_capacity: "a free worker",
@@ -206,66 +149,52 @@ export function ApplyOutcomes({
       waits.set(what, (waits.get(what) || 0) + 1);
     }
   const row = (r: ApplyManyResult["results"][number]) => (
-    <li key={r.job_id}>
+    <li key={r.job_id} className="ax-outcome">
       <span>
-        <button className="link job-open" onClick={() => openJob(r.job_id)}>
+        <button type="button" className="ax-link" onClick={() => openJob(r.job_id)}>
           <strong>
             {r.company || r.title
               ? `${r.company || "Employer"} · ${r.title || ""}`
               : shortId(r.job_id)}
           </strong>
         </button>
-        <span className="muted">{r.message}</span>
+        <span className="ax-note"> {r.message}</span>
       </span>
-      <StatePill
-        state={
-          r.outcome === "refused"
-            ? "failed"
-            : r.outcome === "already"
-              ? r.state
-              : appliedState(r.outcome)
-        }
+      <StatusPill
+        state={r.outcome === "refused" ? "failed" : r.outcome === "already" ? r.state : appliedState(r.outcome)}
         label={r.outcome === "refused" ? "Not applied" : undefined}
       />
     </li>
   );
   return (
-    <section
-      className="block bulk-outcomes"
-      aria-labelledby="bulk-outcomes-title"
-    >
-      <header className="block-head">
-        <h2 id="bulk-outcomes-title">
-          Applied to {plural(result.results.length, "job")}
-        </h2>
-        <span className="block-links">
-          <span className="muted">{summarize(result.summary)}</span>
-          <button
-            className="icon-btn"
-            aria-label="Dismiss the results"
-            onClick={onClose}
-          >
+    <Panel
+      title={`Applied to ${plural(result.results.length, "job")}`}
+      actions={
+        <>
+          <span className="ax-note">{summarize(result.summary)}</span>
+          <button type="button" className="ax-icon-btn" aria-label="Dismiss the results" onClick={onClose}>
             <X size={16} />
           </button>
-        </span>
-      </header>
+        </>
+      }
+    >
       {waits.size > 0 && (
-        <p className="block-note">
-          {[...waits].map(([what, n]) => `${n} wait for ${what}`).join(" · ")}. They start on their own, in
-          Pipeline › In progress.
+        <p className="ax-note">
+          {[...waits].map(([what, n]) => `${n} wait for ${what}`).join(" · ")}. They start on their own, in Jobs ›
+          In progress.
         </p>
       )}
       {refused.length > 0 && (
-        <ul className="list" aria-label="Jobs not applied to">
+        <ul className="ax-outcomes" aria-label="Jobs not applied to">
           {refused.map(row)}
         </ul>
       )}
       {others.length > 0 && (
-        <details className="bulk-each">
+        <details className="ax-fold">
           <summary>Show each job ({others.length})</summary>
-          <ul className="list">{others.map(row)}</ul>
+          <ul className="ax-outcomes">{others.map(row)}</ul>
         </details>
       )}
-    </section>
+    </Panel>
   );
 }

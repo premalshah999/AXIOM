@@ -370,6 +370,8 @@ select.ax-control {
   overflow: hidden;
 }
 .ax-table-scroll {
+  /* A positioned ancestor, so a visually hidden (absolute) span in a cell is clipped here instead of stretching the document. */
+  position: relative;
   min-height: 0;
   overflow-x: auto;
   overflow-y: hidden;

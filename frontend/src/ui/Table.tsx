@@ -34,6 +34,9 @@ export function Table<T>({
   empty,
   fill,
   minWidth,
+  canSelect,
+  busy,
+  rowLabel,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -52,10 +55,16 @@ export function Table<T>({
   empty?: ReactNode;
   fill?: boolean;
   minWidth?: number;
+  /** Rows this returns false for show a disabled checkbox and are left out of select-all. */
+  canSelect?: (row: T) => boolean;
+  /** A new page or filter is loading over the rows shown: they dim and stay in place, so the table never jumps. */
+  busy?: boolean;
+  /** Accessible name for a row's checkbox ("Select ExampleSoft"). */
+  rowLabel?: (row: T) => string;
 }) {
   const selectable = !!onSelectedChange;
   const chosen = selected ?? new Set<string>();
-  const keys = rows.map(rowKey);
+  const keys = rows.filter((r) => !canSelect || canSelect(r)).map(rowKey);
   const all = keys.length > 0 && keys.every((k) => chosen.has(k));
   const toggle = (k: string) => {
     const next = new Set(chosen);
@@ -78,7 +87,12 @@ export function Table<T>({
         </div>
       )}
       <div className="ax-table-scroll">
-        <table className="ax-table" aria-label={label} aria-busy={loading || undefined} style={minWidth ? { minWidth } : undefined}>
+        <table
+          className={"ax-table" + (busy ? " is-busy" : "")}
+          aria-label={label}
+          aria-busy={loading || busy || undefined}
+          style={minWidth ? { minWidth } : undefined}
+        >
           <thead>
             <tr>
               {selectable && (
@@ -86,6 +100,7 @@ export function Table<T>({
                   <input
                     type="checkbox"
                     aria-label="Select all rows"
+                    disabled={keys.length === 0}
                     checked={all}
                     onChange={() => onSelectedChange?.(all ? new Set() : new Set(keys))}
                   />
@@ -111,7 +126,13 @@ export function Table<T>({
                   >
                     {selectable && (
                       <td className="is-check" onClick={(e) => e.stopPropagation()}>
-                        <input type="checkbox" aria-label="Select row" checked={chosen.has(k)} onChange={() => toggle(k)} />
+                        <input
+                          type="checkbox"
+                          aria-label={rowLabel ? "Select " + rowLabel(row) : "Select row"}
+                          disabled={!!canSelect && !canSelect(row)}
+                          checked={chosen.has(k)}
+                          onChange={() => toggle(k)}
+                        />
                       </td>
                     )}
                     {columns.map((c) => {

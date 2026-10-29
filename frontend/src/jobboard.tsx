@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { RefreshCw, Search } from "lucide-react";
 import { api } from "./api";
-import { ApplyOutcomes, BulkBar, useApplyMany, useSelection } from "./bulk";
+import { ApplyOutcomes, useApplyMany, useSelection } from "./bulk";
 import { useWorkspace } from "./context";
 import { useAction, useDraft, useNow, usePoll } from "./hooks";
 import { Pagination, usePagination, type Paging } from "./pagination";
+import { TopActions } from "./shell/Shell";
 import type { Board, BoardSettings, Listing } from "./types";
 import {
   ago,
@@ -15,9 +16,10 @@ import {
   Field,
   Loading,
   plural,
-  StatePill,
   stamp,
 } from "./ui";
+import { Button, Empty as EmptyState, Table, type Column } from "./ui/index";
+import { JobCell, Notice, Note, StatusPill, Chips, SearchBox } from "./worktools";
 
 // A listing in any of these states is already owned or protected.
 const LOCKED = new Set([
@@ -30,11 +32,25 @@ const LOCKED = new Set([
   "already_applied",
   "archived",
 ]);
+// A listing in one of these states is already owned or protected; "pending:" is an Apply just made.
+const locked = (status: string) => LOCKED.has(status) || status.startsWith("pending:");
+const RUN_STATES = new Set(["queued", "running", "submitting", "confirmed", "submission_unknown", "already_applied"]);
 
-function fitClass(score: number | null, minimum: number) {
-  if (score == null) return "fit none";
-  return score >= minimum ? "fit good" : "fit low";
+// "Why isn't this applying?": the batch's last reason for a Ready job it did not start. The server keeps codes such
+// as `generic_careers_page` as the reason for some guards, so they are read as words.
+function whyNot(r: NonNullable<Listing["rejection"]>) {
+  const text = /\s/.test(r.reason) ? r.reason : r.reason.replace(/_/g, " ");
+  const label = r.outcome === "deferred" || !r.outcome ? "Waiting" : "Not started";
+  return `${label}: ${text.charAt(0).toLowerCase()}${text.slice(1)}`;
 }
+
+const FITS = [
+  ["all", "Any fit"],
+  ["eligible", "Eligible"],
+  ["uncertain", "Uncertain"],
+  ["unranked", "Not ranked"],
+  ["below", "Below fit"],
+] as const;
 
 // Jobs › Discovered pages, filters and counts come from the server (GET /api/job-board?page=): the dashboard used to
 // receive 500 listings (577 KB) every 20 s and filter them itself, so larger boards showed wrong totals and missed
@@ -65,8 +81,8 @@ export function DiscoveredJobs() {
     page: String(page),
     size: String(size),
   }).toString();
-  const board = usePoll<Board>(
-    (signal) => api(`/job-board?${key}`, "GET", undefined, signal),
+  const board = usePoll<Board & { key: string }>(
+    async (signal) => ({ ...(await api<Board>(`/job-board?${key}`, "GET", undefined, signal)), key }),
     10000,
     [key, version, countsKey],
   );
@@ -92,13 +108,10 @@ export function DiscoveredJobs() {
     setPage,
     setSize,
   };
-  const pageIds = jobs.filter((j) => !locked(j.status)).map((j) => j.id);
   const blockers = [
     !snapshot.config.workers_enabled && "application workers are disabled",
-    !snapshot.control.auto_submit &&
-      "automatic submission is off (Setup › System)",
-    snapshot.control.paused &&
-      "new applications are paused (resume them on Batch)",
+    !snapshot.control.auto_submit && "automatic submission is off (Setup › System)",
+    snapshot.control.paused && "new applications are paused (resume them on Overview)",
   ].filter(Boolean) as string[];
   const canApply = blockers.length === 0;
 
@@ -118,10 +131,7 @@ export function DiscoveredJobs() {
     run(
       "scan",
       async () => {
-        const r = await api<{ queued_sources: number; total_sources: number }>(
-          "/job-board/scrape",
-          "POST",
-        );
+        const r = await api<{ queued_sources: number; total_sources: number }>("/job-board/scrape", "POST");
         await api("/v2/discovery/feeds/refresh", "POST").catch(() => undefined);
         await Promise.all([board.refresh(), sweep.refresh()]);
         return r;
@@ -131,87 +141,120 @@ export function DiscoveredJobs() {
         `Searching ${plural(r.queued_sources, "employer board")} and the new-grad lists. New jobs appear here as they arrive.`,
     );
 
-  if (!board.data)
-    return board.error ? (
-      <ErrorLine error={board.error} retry={board.refresh} />
-    ) : (
-      <Loading label="Loading fresh listings…" />
-    );
-  const b = board.data;
-  const fresh = b.fresh_total ?? b.jobs.length;
-  const span = b.max_age_hours === 720 ? "30 days" : b.max_age_hours === 168 ? "7 days" : "48 hours";
-  const platforms = b.platforms || [...new Set(b.jobs.map((j) => j.ats))].sort();
-  const fits = [
-    ["all", "Any fit"],
-    ["eligible", "Eligible"],
-    ["uncertain", "Uncertain"],
-    ["unranked", "Not ranked"],
-    ["below", "Below fit"],
-  ] as const;
-  return (
-    <section aria-label="Discovered jobs">
-      <div className="board-status">
-        <p>
-          <strong>{plural(fresh, "job")} not applied to yet</strong>, US roles posted in the last {span}
-          {searching ? (
-            <> · searching now</>
-          ) : (
-            b.last_requested_at && (
-              <> · last search {ago(b.last_requested_at, now)}</>
-            )
+  const columns: Column<Listing>[] = [
+    {
+      key: "job",
+      header: "Job",
+      width: 400,
+      truncate: true,
+      cell: (j) => (
+        <JobCell
+          company={j.company}
+          role={j.title}
+          title={j.rejection && j.status === "ready" ? whyNot(j.rejection) : undefined}
+          onOpen={() => openJob(j.id)}
+        />
+      ),
+    },
+    { key: "where", header: "Location", width: 200, truncate: true, cell: (j) => <Note>{j.location || "United States"}</Note> },
+    { key: "level", header: "Level", cell: (j) => <Note>{j.career_level}</Note> },
+    { key: "ats", header: "Platform", cell: (j) => <Note>{j.ats}</Note> },
+    {
+      key: "posted",
+      header: "Posted",
+      cell: (j) => (
+        <time dateTime={j.posted_at} title={`${j.date_basis || "posted"} ${stamp(j.posted_at)}`}>
+          {ago(j.posted_at, now)}
+        </time>
+      ),
+    },
+    {
+      key: "fit",
+      header: "Fit",
+      num: true,
+      cell: (j) => (
+        <span className={"ax-fit " + (j.score == null ? "is-none" : j.score >= minimum ? "is-good" : "is-low")} title={j.reason || j.match_reason}>
+          {j.score == null ? "—" : j.score}
+        </span>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      cell: (j) => (
+        <>
+          <StatusPill state={RUN_STATES.has(j.status) || j.status.startsWith("pending:") ? j.status : "job:" + j.status} />
+          {j.rejection && j.status === "ready" && (
+            <span className="ax-whynot" title={`${j.rejection.code || "reason"} · ${stamp(j.rejection.at)} · ${whyNot(j.rejection)}`}>
+              held
+            </span>
           )}
+        </>
+      ),
+    },
+    {
+      key: "act",
+      header: <span className="sr-only">Actions</span>,
+      width: "1%",
+      cell: (j) =>
+        locked(j.status) ? null : (
+          <Button size="sm" disabled={!canApply || bulk.applying} onClick={() => bulk.apply([j.id])}>
+            Apply
+          </Button>
+        ),
+    },
+  ];
+
+  const b = board.data;
+  const fresh = b ? (b.fresh_total ?? b.jobs.length) : 0;
+  const span = b?.max_age_hours === 720 ? "30 days" : b?.max_age_hours === 168 ? "7 days" : "48 hours";
+  const platforms = b?.platforms || [...new Set((b?.jobs || []).map((j) => j.ats))].sort();
+  const chips = FITS.filter(([id]) => id === "all" || b?.fits?.[id] !== 0 || fit === id).map(([id, label]) => ({
+    id,
+    label,
+    count: b?.fits?.[id],
+  }));
+  const current = !!b && b.key === key;
+  return (
+    <>
+      <TopActions>
+        <Button
+          size="sm"
+          disabled={pending !== null || searching || !settings?.enabled}
+          onClick={scan}
+          icon={<RefreshCw size={14} aria-hidden="true" className={searching ? "spin" : ""} />}
+        >
+          {searching ? "Searching…" : "Search now"}
+        </Button>
+      </TopActions>
+      {b && (
+        <p className="ax-lede">
+          <strong>{plural(fresh, "job")} not applied to yet</strong>, US roles posted in the last {span}
+          {searching ? " · searching now" : b.last_requested_at ? ` · last search ${ago(b.last_requested_at, now)}` : ""}.{" "}
           {settings?.auto_apply
-            ? ". The batch applies to eligible ones automatically; pick any others below."
-            : ". Automatic applications are off; pick jobs below or start a batch."}
-        </p>
-        <div className="board-actions">
-          <button
-            className="btn sm"
-            disabled={pending !== null || searching || !settings?.enabled}
-            onClick={scan}
-          >
-            <RefreshCw
-              size={14}
-              aria-hidden="true"
-              className={searching ? "spin" : ""}
-            />
-            {searching ? "Searching…" : "Search now"}
-          </button>
-          <button
-            className="link sm"
-            onClick={() => go({ view: "setup", tab: "discovery" })}
-          >
+            ? "The batch applies to eligible ones automatically; pick any others below."
+            : "Automatic applications are off; pick jobs below or start a batch."}{" "}
+          <button type="button" className="ax-link" onClick={() => go({ view: "setup", tab: "discovery" })}>
             Discovery settings
-          </button>
-        </div>
-      </div>
-      {!settings?.enabled && (
-        <p className="inline-warn">
-          Discovery is off, so no new listings arrive.{" "}
-          <button
-            className="link"
-            onClick={() => go({ view: "setup", tab: "discovery" })}
-          >
-            Turn it on in Setup
           </button>
         </p>
       )}
-      <div className="toolbar">
-        <label className="search">
-          <Search size={15} aria-hidden="true" />
-          <input
-            type="search"
-            aria-label="Search discovered jobs"
-            placeholder="Role, company or city"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </label>
-        <select
-          aria-label="Platform"
-          value={ats}
-          onChange={(e) => setAts(e.target.value)}
+      {b && !settings?.enabled && (
+        <Notice
+          tone="warn"
+          action={
+            <Button size="sm" onClick={() => go({ view: "setup", tab: "discovery" })}>
+              Turn it on
+            </Button>
+          }
         >
+          Discovery is off, so no new listings arrive.
+        </Notice>
+      )}
+      {!canApply && <Notice tone="warn">Applying from this list is unavailable: {blockers.join("; ")}.</Notice>}
+      <div className="ax-toolbar">
+        <SearchBox value={query} onChange={setQuery} label="Search discovered jobs" placeholder="Role, company or city" />
+        <select className="ax-control ax-inline-select" aria-label="Platform" value={ats} onChange={(e) => setAts(e.target.value)}>
           <option value="all">All platforms</option>
           {platforms.map((a) => (
             <option key={a} value={a}>
@@ -219,234 +262,80 @@ export function DiscoveredJobs() {
             </option>
           ))}
         </select>
-        <select
-          aria-label="Career level"
-          value={level}
-          onChange={(e) => setLevel(e.target.value)}
-        >
+        <select className="ax-control ax-inline-select" aria-label="Career level" value={level} onChange={(e) => setLevel(e.target.value)}>
           <option value="all">All levels</option>
           <option>New grad</option>
           <option>Early career</option>
           <option>Experience unspecified</option>
         </select>
-        <div className="chips" role="group" aria-label="Filter by fit">
-          {fits.map(([id, label]) => {
-            const n = b.fits?.[id];
-            if (id !== "all" && n === 0 && fit !== id) return null;
-            return (
-              <button
-                key={id}
-                className="chip"
-                aria-pressed={fit === id}
-                onClick={() =>
-                  go({
-                    view: "jobs",
-                    tab: "discovered",
-                    filter: id === "all" ? undefined : id,
-                  })
-                }
-              >
-                {label}
-                {n !== undefined && <span className="chip-n">{n}</span>}
-              </button>
-            );
-          })}
-        </div>
+        <Chips
+          items={chips}
+          value={fit}
+          label="Filter by fit"
+          onChange={(id) => go({ view: "jobs", tab: "discovered", filter: id === "all" ? undefined : id })}
+        />
       </div>
       {bulk.last && <ApplyOutcomes result={bulk.last} onClose={bulk.dismiss} />}
-      {jobs.length > 0 && (
-        <BulkBar
-          selection={selection}
-          pageIds={pageIds}
-          matchingIds={b.selectable_ids}
-          matchingTotal={b.selectable_total}
-          disabled={!canApply}
-          applying={bulk.applying}
-          onApply={applySelected}
-        />
-      )}
-      {!canApply && (
-        <p className="muted sm apply-why">
-          Applying from this list is unavailable: {blockers.join("; ")}.
-        </p>
-      )}
-      {jobs.length ? (
-        <>
-          <div className="table-wrap">
-            <table className="table board-table">
-              <thead>
-                <tr>
-                  <th scope="col" className="cell-check">
-                    <input
-                      type="checkbox"
-                      aria-label="Select the open jobs on this page"
-                      disabled={!pageIds.length}
-                      checked={
-                        !!pageIds.length &&
-                        pageIds.every((id) => selection.has(id))
-                      }
-                      onChange={(e) => selection.setMany(pageIds, e.target.checked)}
-                    />
-                  </th>
-                  <th scope="col">Job</th>
-                  <th scope="col">Posted</th>
-                  <th scope="col" className="num">
-                    Fit
-                  </th>
-                  <th scope="col">Status</th>
-                  <th scope="col">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {jobs.map((j) => (
-                  <BoardRow
-                    key={j.id}
-                    job={j}
-                    minimum={minimum}
-                    now={now}
-                    checked={selection.has(j.id)}
-                    limitReached={selection.full}
-                    toggle={(on) => selection.toggle(j.id, on)}
-                    canApply={canApply}
-                    applying={bulk.applying}
-                    apply={() => bulk.apply([j.id])}
-                    open={() => openJob(j.id)}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <Pagination paging={paging} label="Listing pages" />
-        </>
-      ) : (
-        <Empty
-          title={
-            fresh
-              ? "No jobs match these filters"
-              : searching
-                ? "Searching for new jobs"
-                : "Nothing new to apply to right now"
+      {board.error && !b && (
+        <Notice
+          tone="bad"
+          action={
+            <Button size="sm" onClick={() => board.refresh()}>
+              Try again
+            </Button>
           }
         >
-          {fresh
-            ? "Clear a filter to see more."
-            : searching
-              ? "Employer boards and new-grad lists are being checked. Jobs appear as they arrive."
-              : `Jobs you applied to are in Pipeline. Only US roles posted in the last ${span} with a known date are listed; the next scheduled search checks again.`}
-        </Empty>
+          {board.error.message}
+        </Notice>
       )}
-    </section>
-  );
-}
-
-// A listing in one of these states is already owned or protected; "pending:" is an Apply just made.
-const locked = (status: string) => LOCKED.has(status) || status.startsWith("pending:");
-
-// "Why isn't this applying?": the batch's last reason for a Ready job it did not start. The server keeps codes such
-// as `generic_careers_page` as the reason for some guards, so they are read as words.
-function whyNot(r: NonNullable<Listing["rejection"]>) {
-  const text = /\s/.test(r.reason) ? r.reason : r.reason.replace(/_/g, " ");
-  const label = r.outcome === "deferred" || !r.outcome ? "Waiting" : "Not started";
-  return `${label}: ${text.charAt(0).toLowerCase()}${text.slice(1)}`;
-}
-
-function BoardRow({
-  job: j,
-  minimum,
-  now,
-  checked,
-  limitReached,
-  toggle,
-  canApply,
-  applying,
-  apply,
-  open,
-}: {
-  job: Listing;
-  minimum: number;
-  now: number;
-  checked: boolean;
-  limitReached: boolean;
-  toggle: (on: boolean) => void;
-  canApply: boolean;
-  applying: boolean;
-  apply: () => void;
-  open: () => void;
-}) {
-  const closed = locked(j.status);
-  const runState = [
-    "queued",
-    "running",
-    "submitting",
-    "confirmed",
-    "submission_unknown",
-    "already_applied",
-  ].includes(j.status) || j.status.startsWith("pending:");
-  return (
-    <tr>
-      <td className="cell-check">
-        <input
-          type="checkbox"
-          aria-label={`Select ${j.title} at ${j.company}`}
-          disabled={closed || (!checked && limitReached)}
-          checked={checked && !closed}
-          onChange={(e) => toggle(e.target.checked)}
-        />
-      </td>
-      <td className="cell-job">
-        <button className="link job-open" onClick={open}>
-          <strong>{j.company}</strong>
-          <span>{j.title}</span>
-        </button>
-        <small className="muted">
-          {[j.location || "United States", j.career_level, j.ats]
-            .filter(Boolean)
-            .join(" · ")}
-        </small>
-        {j.rejection && j.status === "ready" && (
-          <small
-            className="why-not"
-            title={`${j.rejection.code || "reason"} · ${stamp(j.rejection.at)}`}
-          >
-            {whyNot(j.rejection)}
-          </small>
-        )}
-      </td>
-      <td data-label="Posted">
-        <time
-          dateTime={j.posted_at}
-          title={`${j.date_basis || "posted"} ${stamp(j.posted_at)}`}
-        >
-          {ago(j.posted_at, now)}
-        </time>
-      </td>
-      <td className="num" data-label="Fit">
-        <span
-          className={fitClass(j.score, minimum)}
-          title={j.reason || j.match_reason}
-        >
-          {j.score == null ? "—" : j.score}
-        </span>
-      </td>
-      <td data-label="Status">
-        <StatePill state={runState ? j.status : "job:" + j.status} />
-      </td>
-      <td className="cell-actions">
-        {!closed && (
-          <div className="row-actions">
-            <button
-              className="btn sm"
-              disabled={!canApply || applying}
-              onClick={apply}
-            >
-              Apply
-            </button>
-          </div>
-        )}
-      </td>
-    </tr>
+      <Table
+        fill
+        label="Discovered jobs"
+        columns={columns}
+        rows={jobs}
+        rowKey={(j) => j.id}
+        onRowClick={(j) => openJob(j.id)}
+        selected={selection.chosen}
+        onSelectedChange={selection.replace}
+        canSelect={(j) => !locked(j.status)}
+        rowLabel={(j) => `${j.title} at ${j.company}`}
+        loading={!b && !board.error}
+        busy={!!b && !current}
+        bulk={
+          <>
+            {(b?.selectable_total ?? 0) > jobs.length && (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={selection.full}
+                onClick={() => selection.setMany(b?.selectable_ids || [], true)}
+              >
+                {`Select all ${(b?.selectable_total ?? 0).toLocaleString()} matching${(b?.selectable_total ?? 0) > selection.limit ? ` (first ${selection.limit})` : ""}`}
+              </Button>
+            )}
+            {selection.full && <span className="ax-note">{selection.limit} at a time</span>}
+            <Button variant="primary" size="sm" disabled={!canApply} loading={bulk.applying} onClick={applySelected}>
+              {`Apply to selected (${selection.ids.length})`}
+            </Button>
+          </>
+        }
+        empty={
+          <EmptyState
+            title={
+              fresh ? "No jobs match these filters" : searching ? "Searching for new jobs" : "Nothing new to apply to right now"
+            }
+            hint={
+              fresh
+                ? "Clear a filter to see more."
+                : searching
+                  ? "Employer boards and new-grad lists are being checked. Jobs appear as they arrive."
+                  : `Jobs you applied to are in Pipeline. Only US roles posted in the last ${span} with a known date are listed; the next scheduled search checks again.`
+            }
+          />
+        }
+      />
+      <Pagination paging={paging} label="Listing pages" />
+    </>
   );
 }
 
