@@ -79,7 +79,7 @@ EMBED_FRAME = re.compile(
     re.I,
 )
 PASSWORD_HISTORY = re.compile(
-    r"(?:same as|match(?:es)?|reuse|re-use|used) (?:(?:one of )?(?:your|a|the) )?(?:previous|last|old|recent|prior)\w* "
+    r"(?:same as|different from|match(?:es)?|reuse|re-use|used) (?:(?:one of )?(?:your|a|the) )?(?:previous|last|old|recent|prior)\w* "
     r"(?:\d+ )?passwords?|password (?:has been|was) used (?:before|recently|previously)|password history",
     re.I,
 )
@@ -382,6 +382,7 @@ class Step(StrEnum):
     VERIFY_LINK = "verify_link"
     EMAIL_CODE = "email_code"
     RESET_PASSWORD = "reset_password"
+    NEW_PASSWORD = "new_password"
     CONSENT = "consent"
     FORM = "form"
     REVIEW = "review"
@@ -817,6 +818,8 @@ class Adapter:
             # TikTok's /reset-password (2026-10-27): Email, "Set your password", Continue. Read as a sign-in page, a
             # reopened run typed the old password into it and stopped at the website's picture puzzle.
             return Step.RESET_PASSWORD
+        if self.new_password_step(obs):
+            return Step.NEW_PASSWORD
         if passwords:
             # Some real sign-up forms ask once and retain a Sign in link in the header.
             create_path = re.search(
@@ -1353,6 +1356,23 @@ class Adapter:
             self.emit("account", "The reset went unanswered; opened the registration route once")
             return None
         return await self.request_reset(obs, "The password reset was requested from this page")
+
+    def new_password_step(self, obs):
+        """An explicit password change page, distinguished from account registration."""
+        passwords = [f for f in obs["fields"] if f["type"] == "password"]
+        text = " ".join([str(obs.get("text") or ""), *obs.get("headings", [])])
+        return bool(
+            len(passwords) == 2
+            and any(re.search(r"\bnew password\b", f.get("label", ""), re.I) for f in passwords)
+            and not any(self.is_login_field(f) for f in obs["fields"])
+            and re.search(
+                r"\b(?:reset|change)\b.{0,50}\b(?:new )?password\b|"
+                r"\bset up (?:your )?new credentials\b.{0,60}\b(?:log|sign) ?in\b", text, re.I
+            )
+        )
+
+    async def on_new_password(self, obs):
+        return await self.set_new_password(self.auth_url(obs), obs, forced=True)
 
     async def on_form(self, obs):
         from ..browser_contracts import semantic_state
@@ -2394,6 +2414,8 @@ class Adapter:
             # Taleo's "Forgot your password?" page (User Name, Email Address) submits with "OK" beside "Cancel"; the reset
             # step found no submit and the fallback model pressed Cancel (Textron, 2026-10-27).
             hits = [b for b in obs["controls"] if re.fullmatch(r"\s*ok\s*", b["label"], re.I)]
+        if not hits and mode == "reset" and self.new_password_step(obs):
+            hits = [b for b in obs["controls"] if re.fullmatch(r"\s*next\s*", b["label"], re.I)]
         # Workday overlays the real button with a click_filter that must receive the click.
         filters = [b for b in hits if b["automation_id"] == "click_filter"]
         primary = [b for b in hits if "submit" in b["automation_id"].lower()]
@@ -2897,7 +2919,7 @@ class Adapter:
         record = self.accounts.record(url)
         self.accounts.mark(url, "password_reset", credentials, resets=record.get("resets", 0) + 1)
         self.attempts["sign_in"] = self.attempts["create"] = 0
-        self.emit("auth", "Password reset to the shared account password")
+        self.emit("auth", "Employer accepted the new account password")
         await self.form.settle(timeout=6)
         if self.classify(await self.form.scan()) not in {Step.SIGN_IN, Step.FORM, Step.METHOD}:
             await self.return_to_application()
@@ -2936,17 +2958,29 @@ class Adapter:
                 await self.click(button, auth=True)
             await self.form.settle(timeout=6)
         obs = await self.form.scan()
+        return await self.set_new_password(url, obs)
+
+    async def set_new_password(self, url, obs, *, forced=False):
+        """Complete an observed new-password page; persist its credential only on acceptance."""
         passwords = [f for f in obs["fields"] if f["type"] == "password"]
         if not passwords:
             self.finish_mail("failed", "Reset link did not open a password form")
             return self.defer("The password reset link did not open a new-password form")
         # The new password obeys the reset form's stated maximum (Westinghouse: 18 characters).
         credentials, configured, maxima = self.new_password(url, passwords, obs)
+        if forced and not configured and PASSWORD_HISTORY.search(obs.get("text", "")):
+            # An explicit history rule makes reusing the account password inappropriate. Keep this value local until
+            # the employer accepts the change, so a refused action never replaces the saved credential.
+            credentials = {**credentials, "password": self.accounts.store.generated(
+                max(12, min(min(maxima), 16)) if maxima else 16)}
         for f in passwords:
             if not self.accounts.password_allowed(self.id, self.form.frames[f["id"]].url, self.job["url"]):
                 self.finish_mail("failed", "Reset form on an unexpected website")
                 return self.defer("The reset page is on an unexpected website; not entering the password")
             await self.type_password(self.form.locator(f["id"]), credentials["password"])
+        if forced:
+            # Disabled Next is omitted by the scanner until both fields satisfy the page's checks.
+            obs = await self.form.scan()
         button = self.auth_button(obs, "reset")
         if not button:
             self.finish_mail("failed", "No new-password submit control")
@@ -2995,7 +3029,7 @@ class Adapter:
         record = self.accounts.record(url)
         self.accounts.mark(url, "password_reset", credentials, resets=record.get("resets", 0) + 1)
         self.attempts["sign_in"] = self.attempts["create"] = 0
-        self.emit("auth", "Password reset to the shared account password")
+        self.emit("auth", "Employer accepted the new account password")
         await self.form.settle(timeout=6)
         obs = await self.form.scan()
         if self.classify(obs) not in {Step.SIGN_IN, Step.FORM, Step.METHOD}:

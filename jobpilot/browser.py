@@ -80,7 +80,7 @@ CLEAN_IDENTITY = {
     "icims": (r"(?:^|\.)icims\.com$", ("https://login.icims.com",)),
     "adp": (r"(?:^|\.)adp\.com$", ("https://workforcenow.adp.com",)),
 }
-SENSITIVE_STEPS = {"sign_in", "create_account", "email_code", "verify_link", "reset_password", "email_entry"}
+SENSITIVE_STEPS = {"sign_in", "create_account", "email_code", "verify_link", "reset_password", "new_password", "email_entry"}
 # Post-commit observation: 60 polls of the receipt/rejection/challenge checks, then a bounded
 # extra window for Greenhouse's emailed-code step, which can render after the receipt window.
 # Analytics and telemetry hosts are not part of an application's commit.
