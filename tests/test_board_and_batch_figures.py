@@ -258,3 +258,12 @@ def test_a_board_the_owner_switched_off_stays_off_after_a_settings_save(service)
     setup_sources(service.db, BoardSettings(enabled=True))
     with service.db.session() as s:
         assert s.get(Source, "src0").enabled is True
+
+
+def test_a_target_raised_during_a_tick_survives_the_ticks_save(service):
+    from jobpilot.autopilot import persist_batch, start_batch
+
+    stale = dict(start_batch(service.db, 320))
+    start_batch(service.db, 477)  # The owner raises the goal while a tick holds its copy.
+    persist_batch(service.db, stale)
+    assert service.db.get_setting("job_board_autopilot")["target"] == 477

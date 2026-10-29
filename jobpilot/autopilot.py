@@ -457,6 +457,9 @@ def persist_batch(db, batch):
         # queue() committed these IDs before dispatch; never overwrite its durable outbox on an error.
         batch["run_ids"] = list(dict.fromkeys([*current.get("run_ids", []), *batch["run_ids"]]))
         batch["queued"] = len(batch["run_ids"])
+        # A goal the owner raised while this tick ran is kept: the tick wrote back its stale copy and the raise to 477
+        # was lost (2026-10-29).
+        batch["target"] = max(batch.get("target", 0), current.get("target", 0))
     db.set_setting("job_board_autopilot", batch)
 
 
