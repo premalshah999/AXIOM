@@ -15,6 +15,17 @@ COOLDOWN_SECONDS = 300
 QUOTA_COOLDOWN_SECONDS = 1800
 
 
+# Replies with HTTP 200 that are not readable completions (Sail Research's own service_tier, 2026-10-28) leave no mark on
+# the cooldown: the transport counted every one a success, so parked runs retried every 1-2 minutes against a provider
+# that answered each of them unreadably. This many in a row (a reply that reads cancels the count) open the cooldown.
+INVALID_AFTER = 3
+INVALID_WINDOW_SECONDS = 180
+# A provider that just "recovered" on a probe and answers unreadably again is not recovered.
+RECOVERY_GRACE_SECONDS = 90
+INVALID = "invalid_response"
+_invalid: dict[str, list[float]] = {}
+
+
 def key(config):
     identity = f"{config.llm_provider}:{config.llm_base_url}:{config.llm_model}"
     return "provider_health:" + hashlib.sha256(identity.encode()).hexdigest()
@@ -72,6 +83,40 @@ def finish(db, config, ticket, *, failure=None, retry_after=None):
             s.add(Setting(key=key(config), value=value))
 
 
+def note_invalid_response(db, config) -> bool:
+    """Count an unreadable HTTP 200 reply; the third in a row inside three minutes (the first, straight after a probe
+    reported recovery) opens the cooldown. True when the cooldown is open."""
+    k, at = key(config), time.time()
+    hits = [t for t in _invalid.get(k, []) if t > at - INVALID_WINDOW_SECONDS] + [at]
+    _invalid[k] = hits
+    with db.exclusive() as s:
+        row = s.get(Setting, k)
+        value = dict(row.value) if row else {}
+        if value.get("retry_at", 0) > at:
+            return True
+        probed = at - float(value.get("recovered_at", 0) or 0) <= RECOVERY_GRACE_SECONDS
+        if len(hits) < INVALID_AFTER and not probed:
+            return False
+        value = {
+            "generation": value.get("generation", 0) + 1,
+            "failures": len(hits),
+            "last_error": INVALID,
+            "retry_at": at + COOLDOWN_SECONDS,
+        }
+        if row:
+            row.value = value
+        else:
+            s.add(Setting(key=k, value=value))
+    _invalid.pop(k, None)
+    return True
+
+
+def note_readable_response(config):
+    """A reply that read ends the run of unreadable ones."""
+    if _invalid:
+        _invalid.pop(key(config), None)
+
+
 async def wait_out_short_cooldown(db, config, limit=90):
     """Wait through a cooldown that ends within `limit` seconds instead of parking the run for it.
 
@@ -125,12 +170,15 @@ def selected(db, config):
 
 def dispatch_gate(db, config):
     """Whether, and how widely, new work may start: the model's cooldown first, then the host (host_health.check)."""
-    states = [s["state"] for s in selected(db, config).values()]
-    if any(state in {"cooldown", "recovering"} for state in states):
+    chosen = selected(db, config).values()
+    if any(s["state"] in {"cooldown", "recovering"} for s in chosen):
+        unreadable = any(s["state"] in {"cooldown", "recovering"} and s.get("last_error") == INVALID for s in chosen)
         return host_health.Gate(
             0,
             "provider_unavailable",
-            "The selected model is cooling down after failed requests; saved work is retained",
+            "The selected model keeps answering with replies that cannot be read (invalid response); saved work is retained"
+            if unreadable
+            else "The selected model is cooling down after failed requests; saved work is retained",
         )
     # HTTP acquire() already allows exactly one productive recovery request.
     # A browser can spend time on local fields/mail before needing the model;

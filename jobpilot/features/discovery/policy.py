@@ -93,10 +93,25 @@ YEARS = re.compile(
 )
 
 
+# A description shorter than this was never fetched (a feed's label, a page title, 6-27 characters on short-link URLs).
+UNFETCHED_CHARS = 50
+
+
+def unfetched(description) -> bool:
+    return len((description or "").strip()) < UNFETCHED_CHARS
+
+
 def gate(job: dict, policy: DiscoveryPolicy) -> str | None:
-    """Reason a listing can never be a suitable application, or None."""
+    """Reason a listing can never be a suitable application, or None.
+
+    A posting whose text was never fetched says nothing about its page: "no job id in the URL and under 400 characters"
+    refused short-link postings for good because the description fetch (ranking's) never ran for a refused job
+    (2026-10-29). Ranking fetches the text, defers the posting while it cannot, and the shape check runs on what it got.
+    """
     title, url, description = job.get("title", ""), job.get("url", ""), job.get("description", "") or ""
-    if GENERIC_TITLE.match(title or "") or (not JOB_ID_IN_URL.search(url) and len(description) < 400):
+    if GENERIC_TITLE.match(title or "") or (
+        not JOB_ID_IN_URL.search(url) and not unfetched(description) and len(description) < 400
+    ):
         return "generic_careers_page"
     if CLOSED.search(description[:3000]) or CLOSED.search(title):
         return "closed"

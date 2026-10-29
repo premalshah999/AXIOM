@@ -766,7 +766,13 @@ async def rank_batch(db, config, job_ids):
         raise ValueError("Batch includes missing, active, archived or submitted jobs")
     if not resumes:
         raise ValueError("Upload a resume before classifying jobs")
-    missing = [j["id"] for j in jobs if not (j.get("description") or "").strip()]
+    from .features.discovery.policy import JOB_ID_IN_URL, unfetched
+
+    # Empty or a stub under 50 characters: the text was never fetched, and the discovery gate no longer refuses such a
+    # posting for its shape, so the fetch is made here. A stub whose fetch fails is ranked as before when its URL names
+    # a job; a posting that names none and has no text stays deferred rather than being ranked as a careers page.
+    missing = [j["id"] for j in jobs if unfetched(j.get("description"))]
+    named = {j["id"] for j in jobs if (j.get("description") or "").strip() and JOB_ID_IN_URL.search(j["url"] or "")}
     closed, deferred = {}, {}
     if missing:
         slots = asyncio.Semaphore(4)
@@ -780,11 +786,13 @@ async def rank_batch(db, config, job_ids):
                     await asyncio.wait_for(enrich(db, config, jid), timeout=20)
                 with db.session() as session:
                     row = session.get(Job, jid)
-                    if not row or not (row.description or "").strip():
+                    if not row or (jid not in named and unfetched(row.description)):
                         raise ValueError("Posting description is unavailable")
             except Exception as exc:
                 if posting_gone(exc):
                     closed[jid] = close_gone_posting(db, jid, exc)
+                    return
+                if jid in named:
                     return
                 db.set_setting(
                     key,

@@ -47,16 +47,45 @@ def test_a_quiet_loop_is_ok_and_keeps_every_worker():
     assert load.current() == "ok" and load.limit(6) == 6
 
 
-def test_a_loop_that_is_often_late_halves_the_workers():
+def test_a_loop_that_is_often_late_gives_up_one_worker():
     # One sample in six is 0.6 s late: the 95th percentile of the window is 0.6 s.
     load, _ = fed(([0.01] * 5 + [0.6]) * 10)
     assert load.current() == "loaded"
-    assert load.limit(6) == 3 and load.limit(1) == 1
+    assert load.limit(6) == 5 and load.limit(1) == 1
 
 
-def test_a_loop_that_is_a_second_late_runs_one_application_at_a_time():
+def test_a_loop_that_is_a_second_late_halves_the_workers_and_still_admits_work():
+    """A limit of 1 left the autopilot no room (limit - occupied) while one run was active (2026-10-29)."""
     load, _ = fed(([0.01] * 5 + [1.4]) * 10)
-    assert load.current() == "overloaded" and load.limit(6) == 1
+    assert load.current() == "overloaded" and load.limit(6) == 3 and load.limit(1) == 1
+    assert load.limit(6) - 1 > 0  # with one run active the autopilot still has room
+
+
+def test_a_loop_that_is_seconds_late_runs_one_application_at_a_time():
+    load, _ = fed([3.4] * 60, step=0.5)
+    assert load.current() == "overloaded" and load.limit(6) == 1 and load.snapshot()["severe"] is True
+    load, _ = fed([0.01, 0.01, 6.0])  # one stall beyond SEVERE_SECONDS is as deep
+    assert load.limit(6) == 1
+
+
+def test_a_brief_spike_does_not_hold_the_window_once_the_loop_is_back():
+    """38 overloaded periods in 6 h, each one shutting the gate for the whole 30 s window (2026-10-29)."""
+    load, clock = fed([0.01] * 40 + [1.5] * 6)
+    assert load.current() == "overloaded"
+    for _ in range(25):  # 12.5 s of a quiet loop: the spike is still inside the 30 s window
+        clock["t"] += 0.5
+        load.record(0.01)
+    assert load.current() == "ok" and load.limit(6) == 6
+    assert load.intervals[0][1] is not None
+
+
+def test_a_sustained_overload_keeps_its_gate_in_both_windows():
+    load, clock = fed([0.01] * 40 + [1.5] * 60)
+    assert load.current() == "overloaded"
+    for _ in range(10):  # the loop is still late ten seconds on
+        clock["t"] += 0.5
+        load.record(1.5)
+    assert load.current() == "overloaded" and load.limit(6) == 3
 
 
 def test_one_long_stall_counts_at_once_without_waiting_for_a_full_window():
@@ -154,7 +183,7 @@ def test_a_drain_stops_everything(service):
 def test_an_overloaded_host_limits_admission_but_never_blocks_it(service):
     load, _ = fed([1.5] * 60)
     gate = host_health.check(6, db=service.db, load=load, at=datetime.fromtimestamp(1030.0, UTC))
-    assert gate.limit == 1 and gate.code == "host_overloaded"
+    assert gate.limit == 3 and gate.code == "host_overloaded"
 
 
 def test_dispatch_limit_follows_the_host_and_keeps_the_model_cooldown_first(service, monkeypatch):
@@ -162,7 +191,7 @@ def test_dispatch_limit_follows_the_host_and_keeps_the_model_cooldown_first(serv
     monkeypatch.setattr(host_health, "monitor", load)
     monkeypatch.setattr(host_health.HostLoad, "current", lambda self, at=None: "loaded")
     workers = service.config.workers
-    assert provider_health.dispatch_limit(service.db, service.config) == max(1, workers // 2)
+    assert provider_health.dispatch_limit(service.db, service.config) == max(1, workers - 1)
     monkeypatch.setattr(
         provider_health, "selected", lambda db, config: {"answers": {"state": "cooldown"}}
     )
@@ -193,7 +222,7 @@ def test_the_tightest_gate_wins(service):
         {"failures": 3, "last_at": iso(1000), "until": iso(1010)},
     )
     gate = host_health.check(8, db=service.db, load=load, at=now)
-    assert gate.limit == 1 and gate.code in {"browser_probe", "host_overloaded"}
+    assert gate.limit == 1 and gate.code == "browser_probe"
 
 
 async def test_a_queue_request_during_a_browser_outage_is_deferred_with_its_own_reason(service):
@@ -452,7 +481,7 @@ def test_a_loop_so_late_that_it_takes_few_samples_is_overloaded_not_unknown():
     gate let every worker start while the host was at its worst."""
     load, _ = fed([2.5] * 40, step=3.0)
     assert len(load.samples) < host_health.MIN_SAMPLES
-    assert load.current() == "overloaded" and load.limit(6) == 1
+    assert load.current() == "overloaded" and load.limit(6) == 3
 
 
 def test_sparse_samples_of_a_barely_late_loop_are_loaded_not_overloaded():

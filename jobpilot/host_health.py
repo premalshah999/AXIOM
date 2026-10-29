@@ -40,6 +40,12 @@ MIN_SAMPLES = 20
 LOADED_P95 = 0.4
 OVERLOADED_P95 = 1.0
 SEVERE_SECONDS = 5.0
+# A p95 this many times the overloaded threshold is overload that more workers cannot be trusted with (3 s late).
+SEVERE_FACTOR = 3.0
+# The host counts as recovered once this much of the newest samples is quiet, without waiting for the spike to leave the
+# 30 s window: production logged 38 overloaded periods in 6 h (2026-10-29), most of them the engine's own blocking
+# work, and each one shut the gate to a single application for the full window after the loop was back.
+RECENT_SECONDS = 10.0
 # A monitor that stopped reporting says nothing about the host.
 STALE_SECONDS = 10.0
 HISTORY_SECONDS = 6 * 3600
@@ -94,6 +100,7 @@ class HostLoad:
         self.first = None  # wall time of the first sample this process took
         self.intervals = []  # [start, end or None] of overloaded periods, wall time
         self.state = "unknown"
+        self.severe = False  # an overload so deep that one application at a time is all the host can carry
         self.config = {"enabled": True, "loaded_p95": LOADED_P95, "overloaded_p95": OVERLOADED_P95}
 
     def configure(self, value):
@@ -137,16 +144,17 @@ class HostLoad:
     def _percentile(self, lags, share):
         return lags[max(0, math.ceil(share * len(lags)) - 1)]
 
-    def _classify(self):
-        lags = sorted(lag for _, lag in self.samples)
+    def _level(self, samples):
+        """0 ok, 1 loaded, 2 overloaded, 3 severely overloaded for `samples`; None when there are too few to judge."""
+        lags = sorted(lag for _, lag in samples)
         if not lags:
-            return "unknown"
+            return None
         if lags[-1] >= SEVERE_SECONDS:
-            return "overloaded"
-        last = self.samples[-1][0]
+            return 3
+        last = samples[-1][0]
         settled = last - self.first >= MIN_SAMPLES * SAMPLE_SECONDS
         if len(lags) < MIN_SAMPLES and not (settled and len(lags) >= 3):
-            return "unknown"
+            return None
         p95 = self._percentile(lags, 0.95)
         if len(lags) < MIN_SAMPLES:
             # A loop that runs late also takes fewer samples: the timer fires once per (lateness + interval). With
@@ -154,11 +162,29 @@ class HostLoad:
             # "unknown" there, and an unknown host runs every worker: the gate opened exactly when the loop was
             # slowest. Production on 2026-10-29 held 27-35 samples at p95 1.6-2.1 s; a loop 1.5 s later still
             # would have fallen under 20 and ungated itself.
-            gap = (last - self.samples[0][0]) / (len(lags) - 1)
+            gap = (last - samples[0][0]) / (len(lags) - 1)
             p95 = max(p95, gap - SAMPLE_SECONDS)
         if p95 >= self.config["overloaded_p95"]:
-            return "overloaded"
-        return "loaded" if p95 >= self.config["loaded_p95"] else "ok"
+            return 3 if p95 >= SEVERE_FACTOR * self.config["overloaded_p95"] else 2
+        return 1 if p95 >= self.config["loaded_p95"] else 0
+
+    def _classify(self):
+        """The state of the window, and whether an overload is severe (`self.severe`, which `limit` reads).
+
+        The 30 s window has to say so, and so does the newest 10 s when it holds enough to judge: a spike that has
+        passed stays in the window for 30 s but not in the recent samples, so a brief stall ends within ten seconds
+        and a real overload (both windows late) keeps its gate.
+        """
+        samples = list(self.samples)
+        level = self._level(samples)
+        self.severe = False
+        if level is None:
+            return "unknown"
+        recent = self._level([x for x in samples if x[0] >= samples[-1][0] - RECENT_SECONDS])
+        if recent is not None:
+            level = min(level, recent)
+        self.severe = level == 3
+        return ("ok", "loaded", "overloaded", "overloaded")[level]
 
     def current(self, at=None):
         """ok, loaded, overloaded, or unknown (no monitor, or it stopped reporting). A disabled gate is always ok."""
@@ -171,11 +197,14 @@ class HostLoad:
             return self.state
 
     def limit(self, workers, at=None):
+        """Applications allowed at once. Proportional: the autopilot admits `limit - occupied`, so a limit of 1 admitted
+        nothing while one run was active and a host that was merely late (an overload of a few seconds, usually the
+        engine's own blocking work) drained to a single worker for the window. Only a severe overload keeps one."""
         state = self.current(at)
         if state == "overloaded":
-            return min(1, workers)
+            return 1 if self.severe else max(1, workers // 2)
         if state == "loaded":
-            return max(1, workers // 2)
+            return max(1, workers - 1)
         return workers
 
     def overloaded_seconds(self, start, end=None):
@@ -195,6 +224,7 @@ class HostLoad:
             state = "unknown" if not fresh else self.state if self.config["enabled"] else "ok"
             return {
                 "state": state,
+                "severe": bool(self.severe and state == "overloaded"),
                 "enabled": self.config["enabled"],
                 "p95_seconds": round(self._percentile(lags, 0.95), 3) if lags else None,
                 "max_seconds": round(lags[-1], 3) if lags else None,
