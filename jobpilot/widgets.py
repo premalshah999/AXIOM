@@ -2556,6 +2556,8 @@ async def icims_dropdown_commit(
             "b=>!b.classList.contains('dropdown-invisible')&&b.getAttribute('aria-hidden')!=='true'"
         )
 
+    observed_rows = []
+
     async def rows_for(query):
         opened = False
         if not await container.evaluate("c=>!c.classList.contains('dropdown-invisible')&&c.getClientRects().length>0"):
@@ -2578,7 +2580,11 @@ async def icims_dropdown_commit(
             found = await icims_rows(frame, select_id, timeout=max(1.5, min(8, left() - 1)))
         # Lists without a search box, and searches that answer a page at a time, load more rows on scroll.
         pages = int(max(0, left() - 1) // 1.5) if thorough else 0
-        return await icims_more_rows(frame, select_id, value, pages=min(10, pages)) if found and pages else found
+        found = await icims_more_rows(frame, select_id, value, pages=min(10, pages)) if found and pages else found
+        # Record visible labels, not the search terms, which may contain applicant information.
+        if len(observed_rows) < 4:
+            observed_rows.append([text[:120] for _, text in found[:20]])
+        return found
 
     # Searches whose results hold the value's own rows (a degree's level) go first: "Master of Science" found nothing in
     # Emory's catalog, whose row is "Master's Level Degree", and each empty search cost the field 2-4 s (2026-10-25).
@@ -2636,7 +2642,9 @@ async def icims_dropdown_commit(
         choice = others[0] if len(others) == 1 else None
     if not choice:
         await el.press("Escape")
-        raise ValueError("No matching option is offered")
+        error = ValueError("No matching option is offered")
+        error.offered = {"search_rows": observed_rows, "catalog": static[:20]}
+        raise error
     await frame.locator(
         f'[id="{select_id}_dropdown-results"] {ICIMS_ROWS}[dropdown-index="{choice["index"]}"]'
     ).click(timeout=3000)

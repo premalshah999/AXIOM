@@ -88,3 +88,19 @@ async def test_a_click_on_a_row_with_an_apostrophe_reads_back_as_committed(page)
     picked = await widgets.combobox(page.main_frame, page.locator(ANCHOR), "Associate Degree", choose=choose)
     assert picked == "Associate's Degree"
     assert json.loads(await page.evaluate("JSON.stringify(window.changes)")) == [f"v{CATALOG.index(picked)}"]
+
+
+async def test_failed_search_reports_visible_rows_without_search_terms(page):
+    await load(page, search=True, latency=100)
+    with pytest.raises(ValueError, match="No matching option") as caught:
+        await widgets.icims_dropdown_commit(page.main_frame, page.locator(ANCHOR), "Unlisted credential", thorough=False)
+    assert caught.value.offered["catalog"] == []
+    assert caught.value.offered["search_rows"]
+    assert all(rows == [] for rows in caught.value.offered["search_rows"])
+
+
+async def test_failed_unsearchable_picker_reports_observed_rows(page):
+    await load(page, search=False, latency=100)
+    with pytest.raises(ValueError, match="No matching option") as caught:
+        await widgets.icims_dropdown_commit(page.main_frame, page.locator(ANCHOR), "Unlisted credential", thorough=False)
+    assert caught.value.offered["search_rows"][0] == FIRST_PAGE[:20]
