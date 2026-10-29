@@ -284,7 +284,7 @@ function Workbench({
         }
       } catch (e) {
         if ((e as Error).name !== "AbortError")
-          setProblem("Can't reach ApplyPilot to build the preview.");
+          setProblem("Can't reach AXIOM to build the preview.");
       } finally {
         if (inflight.current === controller) {
           inflight.current = null;
@@ -489,7 +489,7 @@ function Workbench({
             )}
             {dirty && (
               <p className="muted sm editor-note">
-                Unsaved changes are kept while you move around ApplyPilot.
+                Unsaved changes are kept while you move around.
                 Saving creates a new version; the original stays.
               </p>
             )}
