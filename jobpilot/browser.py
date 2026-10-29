@@ -3318,6 +3318,26 @@ class BrowserEngine:
             visible_challenge = await challenge_frame(self.page) or await checkbox_frame(self.page)
             if self.captcha.challenge_unverified and not await self.captcha.token_present(self.page):
                 visible_challenge = True
+        if (
+            visible_challenge
+            and adapter is not None
+            and self.captcha.continued.get(self.page.url, 0) < 3
+            and self.captcha.fresh_token()
+            and await self.captcha.token_held(self.page)
+        ):
+            # A provider frame stays drawn after a delivered token (reCAPTCHA's challenge overlay, hCaptcha's
+            # frame, iCIMS's embedded widget) whether or not the page accepted it. The token is in the widget and
+            # its response field and is not yet stale, so the page's own forward control is pressed by the caller
+            # (Ring Power 2026-10-28: the third token of the profile step was delivered, nothing pressed Submit
+            # Profile, and the run parked; Vigil Labs 2026-10-29 likewise). Bounded per page: a frame that is
+            # still there after three such passes without the page moving is a refusal.
+            self.captcha.continued[self.page.url] = self.captcha.continued.get(self.page.url, 0) + 1
+            self.emit(
+                "captcha",
+                "Token is held by the widget; the page's own control continues",
+                {"pass": self.captcha.continued[self.page.url]},
+            )
+            return None
         if visible_challenge:
             # The solver already owns its bounded multi-round loop. Calling it
             # again here buys another answer after a stale/unsolvable result.

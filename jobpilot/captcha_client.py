@@ -65,7 +65,23 @@ def sdk_result(request):
     return {"token": code} if isinstance(code, str) and code else {"error": "INVALID_SOLVER_RESULT"}
 
 
+# A refused connection to the solver is not an answer about the CAPTCHA (TikTok 2026-10-28, five runs parked on
+# SOLVER_CONNECTION_ERROR): the request is repeated with growing pauses before the run gives up on it.
+TRANSIENT_ERRORS = {"SOLVER_CONNECTION_ERROR"}
+RETRY_DELAYS = (3, 9, 20)
+
+
 async def solve_token(key, info, url, timeout, user_agent=""):
+    result = await solve_token_once(key, info, url, timeout, user_agent)
+    for delay in RETRY_DELAYS:
+        if result.get("error") not in TRANSIENT_ERRORS:
+            break
+        await asyncio.sleep(delay)
+        result = await solve_token_once(key, info, url, timeout, user_agent)
+    return result
+
+
+async def solve_token_once(key, info, url, timeout, user_agent=""):
     process = await asyncio.create_subprocess_exec(
         sys.executable,
         "-m",

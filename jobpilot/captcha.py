@@ -259,6 +259,7 @@ class CaptchaSolver:
         self.twin_delivered_at = None  # monotonic time of the last twin token handed to a site
         self.last_twin = None  # (host, kind, key) of the widget that last received a twin token
         self.twin_rejected = set()
+        self.continued = {}  # page URL -> times the page was left to act on a delivered token with its frame still drawn
         # (kind, sitekey) of widgets the site executes itself; a token bought on the solver's IP is never theirs.
         self.site_executed = set()
         self.last_reason = ""
@@ -300,6 +301,28 @@ class CaptchaSolver:
             except PlaywrightError:
                 continue
         return False
+
+    def fresh_token(self, seconds=85):
+        """A token was handed to a site within `seconds`: the 90 s refresh rule in solve() has not yet claimed it."""
+        return bool(self.token_delivered_at) and time.monotonic() - max(self.token_delivered_at.values()) < seconds
+
+    async def token_held(self, page):
+        """The delivered token is still in the page: its widget reports delivered, and no response field that the
+        delivery filled was emptied again (a re-render that clears the field has dropped the token)."""
+        if not await self.token_present(page):
+            return False
+        for frame in page.frames:
+            try:
+                emptied = await frame.evaluate(
+                    """()=>{const f=[...document.querySelectorAll(
+                      '[name="h-captcha-response"],[name="g-recaptcha-response"],[name="cf-turnstile-response"]')];
+                      return f.length>0&&f.every(e=>!e.value);}"""
+                )
+            except PlaywrightError:
+                continue
+            if emptied:
+                return False
+        return True
 
     async def passed_natively(self, frame, info, since_ms):
         """Whether the website's own widget delivered a token for this challenge after since_ms (page clock):
@@ -596,19 +619,20 @@ class CaptchaSolver:
                     },
                 )
                 return False
+            why = []
             try:
                 current = await frame.evaluate(DETECT, True)
                 # Same widget, not a byte-identical snapshot: pending/delivered timestamps move while a
                 # 15-100 s solve runs, and an exact comparison discarded valid tokens (Commvault 2026-10-14).
                 same = ("kind", "key", "id", "generation", "enterprise", "invisible")
-                unchanged = (
-                    not frame.is_detached()
-                    and frame.url == before
-                    and document is not None
-                    and await frame.evaluate("performance.timeOrigin") == document
-                    and isinstance(current, dict)
-                    and all(current.get(k) == info.get(k) for k in same)
+                # The same document is the same page even when a single-page app moved its URL meanwhile (Vigil
+                # Labs on Simplify, 2026-10-29: a 20-90 s purchase outlived the route change and was thrown away).
+                same_document = document is not None and await frame.evaluate("performance.timeOrigin") == document
+                changed = (
+                    [k for k in same if current.get(k) != info.get(k)] if isinstance(current, dict) else ["gone"]
                 )
+                why = (["detached"] if frame.is_detached() else []) + ([] if same_document else ["document"]) + changed
+                unchanged = not why
                 native_pass = bool(
                     unchanged and page_clock is not None and current.get("delivered")
                     and (current.get("delivered_at") or 0) >= page_clock
@@ -616,14 +640,21 @@ class CaptchaSolver:
                 applied = native_pass or (unchanged and await frame.evaluate(
                     DELIVER, {"token": result["token"], "info": info}
                 ))
+                if unchanged and not applied:
+                    why = ["no owned callback"]
             except PlaywrightError:
                 applied = False
+                why = ["frame lost"]
             self.last_reason = (
                 ("Website delivered its own CAPTCHA token" if native_pass else "Token delivered to website callback")
                 if applied
                 else "CAPTCHA changed or has no owned callback"
             )
-            self.emit("captcha", self.last_reason, {"elapsed_seconds": round(time.monotonic() - started, 2)})
+            self.emit(
+                "captcha",
+                self.last_reason,
+                {"elapsed_seconds": round(time.monotonic() - started, 2), **({"why": why} if why and not applied else {})},
+            )
             if applied:
                 self.token_delivered_at[signature] = time.monotonic()
                 self.token_refresh_required = self.challenge_unverified = False

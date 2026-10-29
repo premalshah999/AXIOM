@@ -89,13 +89,30 @@ DELIVER = r"""({token,info}) => {
 }"""
 
 
+RETRY_DELAYS = (2, 6, 15)
+
+
+async def post(client, path, body):
+    """One solver request. A dropped connection or a 5xx is repeated with growing pauses (TikTok 2026-10-28: the
+    image fallback parked on SOLVER_CONNECTION_ERROR after a single failed request); a 4xx is an answer."""
+    for delay in (*RETRY_DELAYS, None):
+        try:
+            response = await client.post(path, json=body)
+            if response.status_code < 500 or delay is None:
+                response.raise_for_status()
+                return response
+        except httpx.TransportError:
+            if delay is None:
+                raise
+        await asyncio.sleep(delay)
+
+
 async def task_result(base, key, task, timeout, emit):
     """Keep credentials, task bodies and provider error descriptions out of logs."""
     try:
         async with asyncio.timeout(timeout):
             async with httpx.AsyncClient(base_url=base, timeout=15) as client:
-                response = await client.post("/createTask", json={"clientKey": key, "task": task})
-                response.raise_for_status()
+                response = await post(client, "/createTask", {"clientKey": key, "task": task})
                 result = response.json()
                 task_id = result.get("taskId")
                 emit(
@@ -112,8 +129,7 @@ async def task_result(base, key, task, timeout, emit):
                     if not task_id:
                         return None, "MISSING_TASK_ID"
                     await asyncio.sleep(3)
-                    response = await client.post("/getTaskResult", json={"clientKey": key, "taskId": task_id})
-                    response.raise_for_status()
+                    response = await post(client, "/getTaskResult", {"clientKey": key, "taskId": task_id})
                     result = response.json()
     except TimeoutError:
         return None, "SOLVER_TIMEOUT"
