@@ -18,6 +18,7 @@ How a row reads mirrors `frontend/src/model.ts` (`displayState`, `STATES[...].gr
 """
 
 from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy.orm import aliased
 
 from ..application_budget import NOTHING_SENT
 from ..db import Job, Review, Run, Setting, bytewise, latest_runs
@@ -79,8 +80,10 @@ def classified(*where, reserved=()):
     latest = latest_runs()
     held = Job.id.in_(held_jobs())
     state = latest.c.state
-    # The latest run's reason, by primary key (latest_runs carries no text columns).
-    why = func.lower(select(Run.reason).where(Run.id == latest.c.id).scalar_subquery())
+    # The latest run's reason, joined by primary key (latest_runs carries no text columns). As a correlated subquery
+    # it ran once per pattern per row: 235 subplans, and 4-11 s for one Pipeline page (2026-10-29).
+    last = aliased(Run, name="last_run")
+    why = func.lower(last.reason)
     owner_only = and_(state.in_(STOPPED), or_(*[why.like(pattern) for pattern in OWNER_ONLY]))
     # A bot-check pause (bot_wall) is not an automatic retry.
     retrying = and_(
@@ -128,6 +131,7 @@ def classified(*where, reserved=()):
         )
         .select_from(Job)
         .outerjoin(latest, latest.c.job_id == Job.id)
+        .outerjoin(last, last.id == latest.c.id)
         .where(Job.demo.is_(False), Job.status != "archived", *where)
         .subquery("classified")
     )
