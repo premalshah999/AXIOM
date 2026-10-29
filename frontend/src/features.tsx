@@ -1217,7 +1217,7 @@ export function JobResume({
   const { go } = useWorkspace();
   const { pending, run } = useAction();
   const master = useMasterStatus();
-  const masterOnly = master.data?.policy.mode === "master";
+  const masterOnly = master.data?.policy?.mode === "master";
   const list = useFeature<Page<Artifact>>(
     "resumes",
     (signal) =>
@@ -1231,7 +1231,7 @@ export function JobResume({
     [jobId],
   );
   if (list.unavailable || (!list.data && !list.error)) return null;
-  const a = list.data?.items[0];
+  const a = list.data?.items?.[0];
   const [tone, label] = a
     ? ARTIFACT_TONE[a.status] || ["idle", a.status]
     : ["idle", "None yet"];
