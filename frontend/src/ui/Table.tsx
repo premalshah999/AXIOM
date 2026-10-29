@@ -7,10 +7,13 @@ export type Column<T> = {
   cell: (row: T) => ReactNode;
   /** Right-align (numbers). */
   num?: boolean;
-  /** CSS width for the column (and the truncation width). */
+  /** CSS width for the column. For a truncating column it is the share of the spare room the column asks for. */
   width?: number | string;
-  /** One line, ellipsis at `width` (default 280px). Without it the cell is nowrap and sizes to its content. */
+  /** One line with an ellipsis. The column takes the room left over (in proportion to `width`) down to `min`, so a
+   *  table fits its panel instead of sliding sideways. Without it the cell is nowrap and sizes to its content. */
   truncate?: boolean;
+  /** The narrowest a truncating column gets before the table scrolls sideways (default 160). */
+  min?: number;
   /** Let the cell wrap onto several lines (rows grow past 40px). */
   wrap?: boolean;
 };
@@ -136,7 +139,7 @@ export function Table<T>({
                       </td>
                     )}
                     {columns.map((c) => {
-                      const style: CSSProperties | undefined = c.truncate ? { maxWidth: c.width ?? 280 } : undefined;
+                      const style: CSSProperties | undefined = c.truncate ? { width: c.width ?? 280, minWidth: c.min ?? 160 } : undefined;
                       return (
                         <td
                           key={c.key}

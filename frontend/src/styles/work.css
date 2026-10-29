@@ -1150,6 +1150,6 @@ details.ax-dr-sec[open] > summary {
 @media (max-width: 700px) {
   /* A phone shows the job, its status and the menu without sliding the table far sideways. */
   .ax-table td.is-trunc {
-    max-width: 190px !important;
+    min-width: 190px !important;
   }
 }

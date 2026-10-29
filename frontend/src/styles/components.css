@@ -411,8 +411,10 @@ select.ax-control {
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
 }
-/* A column with truncate keeps one line and ends in an ellipsis at its width (default 280px). */
+/* A column with truncate keeps one line and ends in an ellipsis. max-width 0 takes it out of the table's size
+   calculation, so it gets what is left after the other columns (shared by each one's width), never more. */
 .ax-table td.is-trunc {
+  max-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
