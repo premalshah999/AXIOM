@@ -8,7 +8,8 @@ import { DiscoverySettings } from "./jobboard";
 import { MailSettings } from "./mail";
 import { ConnectionSettings } from "./connections";
 import { SignInSettings } from "./account";
-import { KnowledgeSection, TailoredResumes } from "./features";
+import { TailoredResumes } from "./features";
+import { KnowledgeView } from "./knowledge";
 import { Pagination, usePagination } from "./pagination";
 import type {
   AgentModelProvider,
@@ -78,7 +79,7 @@ export function SetupView() {
           <h2 className="setup-title">{section.label}</h2>
           {section.id === "connections" && <ConnectionSettings />}
           {section.id === "profile" && <ProfileSettings />}
-          {section.id === "answers" && <KnowledgeSection />}
+          {section.id === "answers" && <KnowledgeView />}
           {section.id === "resumes" && (
             <>
               <Resumes />
