@@ -83,6 +83,36 @@
     }
     return '';
   };
+  // The document a file input asks for, read from the visible text just before it back to the previous file input.
+  // ClearCompany's attachment page (Allen Institute 2026-10-28) prints "Upload your most recent Resume." and "Please
+  // upload your Cover Letter ... *" as plain text above two identical "File name / Date submitted" tables, so both
+  // inputs were labelled by that table header and the resume was never attached. The nearest naming phrase wins.
+  const uploadContext = el => {
+    const root = el.getRootNode();
+    const files = [...root.querySelectorAll('input[type=file]')];
+    if (files.length < 2) return null;  // A lone upload is the resume by elimination (resume_fields).
+    const prev = files[files.indexOf(el) - 1];
+    const walker = document.createTreeWalker(root.body || root, NodeFilter.SHOW_TEXT);
+    walker.currentNode = el;
+    const parts = [];
+    let length = 0;
+    for (let n = walker.previousNode(), steps = 0; n && steps < 120 && length < 700; n = walker.previousNode(), steps++) {
+      if (prev && (prev.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_PRECEDING)) break;
+      const t = clean(n.textContent);
+      const host = n.parentElement;
+      if (!t || !host || host.closest('script,style,noscript,option') || !visible(host)) continue;
+      parts.unshift(t);
+      length += t.length;
+    }
+    const text = parts.join(' ');
+    const last = re => { let at = -1; for (const m of text.matchAll(re)) at = m.index; return at; };
+    const resume = last(/resume|\bcv\b|curriculum/gi), other = last(/cover letter|transcript|portfolio|writing sample/gi);
+    if (resume < 0 && other < 0) return null;
+    // "Resume/CV/Cover Letter/Supporting Documents" names a section for several uploads, not this one (Jabil's Workday).
+    if (resume >= 0 && other >= 0 && Math.abs(resume - other) < 60) return null;
+    const from = Math.max(resume, other);
+    return {kind: resume > other ? 'Resume/CV' : 'Cover Letter', required: /[*✱]/.test(text.slice(from, from + 500))};
+  };
   const wrapperLabel = el => {
     const ff = el.closest('[data-automation-id^="formField-"],[data-fkit-id],[data-testid="field"],.ashby-application-form-field-entry');
     if (ff && (el.type !== 'file' || ownsFile(ff, el))) {
@@ -1127,6 +1157,11 @@
           if (/resume|\bcv\b|curriculum/i.test(t)) hint = 'Resume/CV';
         }
         if (!hint && /resume|cv/i.test((el.dataset.automationId || '') + identifier)) hint = 'Resume/CV';
+        // A caption that names no document (a table header like "File name Date submitted") is read from the text above.
+        if (!hint && !/documents?|portfolio|letter|transcript|photo|picture|writing|sample|certificat|licen[cs]e|recommend|reference|passport|identification/i.test(question)) {
+          const context = uploadContext(el);
+          if (context) { hint = context.kind; uploadRequired = uploadRequired || context.required; }
+        }
         // A generic visible label ("Attach", "Upload") is replaced; a specific one is kept as context.
         if (hint) question = genericUploadQuestion && !uploadGroup ? hint :
           (GENERIC_UPLOAD.test(question) || question === el.id || question === el.name ? hint : hint + ' (' + question + ')');

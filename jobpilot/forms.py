@@ -3828,6 +3828,11 @@ class FormSession:
                 # Re-upload only after explicit validation rejection, through
                 # replace_workday_resume; the generic fill pass never appends.
                 continue
+            # Greenhouse keeps the file in its input while the widget never listed it (see upload_greenhouse_resume).
+            greenhouse_retry = False
+            if await self.greenhouse_resume_listed() is False:
+                self.greenhouse_upload_passes = getattr(self, "greenhouse_upload_passes", 0) + 1
+                greenhouse_retry = self.greenhouse_upload_passes <= 4
             # Some ATSs clear the input after upload and list the file instead.
             if field.get("error") or (
                 not field["value"]
@@ -3835,7 +3840,7 @@ class FormSession:
                 # iCIMS lists our upload as "Resume<timestamp>.pdf"; each upload reloads the profile and clears the
                 # passwords typed into it, so uploading again looped until "Password: required" (Iridium 2026-10-21).
                 and not self.icims_renamed_resume(page_text)
-            ):
+            ) or greenhouse_retry:
                 if field.get("widget") == "filechooser":
                     before = set(self.buttons)
                     before_fields = set(self.fields)
@@ -3883,6 +3888,8 @@ class FormSession:
                             chooser = await pending.value
                     if chooser is not None:
                         await chooser.set_files(str(self.resume_path), timeout=15000)
+                elif await self.greenhouse_uploads():
+                    await self.upload_greenhouse_resume(field["id"])
                 else:
                     await self.locator(field["id"]).set_input_files(str(self.resume_path), timeout=15000)
                 await self.wait_upload()
@@ -4935,14 +4942,9 @@ class FormSession:
             # "No Response" (Jabil Workday) does not name the file and stays unverified. Pinpoint prints the name in
             # capitals and swaps its file input for a hidden one (Kenway 2026-10-27).
             self.uploaded = self.upload_verified = True
-        greenhouse_uploads = await self.greenhouse_uploads()
-        if greenhouse_uploads:
-            filenames = [
-                name
-                for widget in greenhouse_uploads
-                for name in await widget.locator(".file-upload__filename").all_text_contents()
-            ]
-            self.upload_verified = any(self.resume_path.name in name for name in filenames)
+        listed = await self.greenhouse_resume_listed()
+        if listed is not None:
+            self.upload_verified = listed
             if not self.upload_verified:
                 problems.append("Resume upload has not been accepted by the website")
         elif self.uploaded and self.workday:
@@ -5132,6 +5134,56 @@ class FormSession:
             if await widget.count():
                 uploads.append(widget)
         return uploads
+
+    async def greenhouse_resume_listed(self):
+        """None without a Greenhouse resume widget; else whether the widget lists our file as attached."""
+        uploads = await self.greenhouse_uploads()
+        if not uploads:
+            return None
+        names = [
+            name for widget in uploads for name in await widget.locator(".file-upload__filename").all_text_contents()
+        ]
+        return any(self.resume_path.name in name for name in names)
+
+    async def clear_resume_input(self, field_id):
+        """Empty a rejected resume input. Greenhouse's React widget crashes on the empty change event that
+        set_input_files([]) dispatches (its own "Cannot read properties of undefined (reading 'uploadFile')" under the
+        Resume/CV label, 66degrees/ALTEN/OneImaging 2026-10-29), so there the value is reset without an event."""
+        if await self.greenhouse_uploads():
+            try:
+                await self.locator(field_id).evaluate("e => { e.value = '' }", timeout=5000)
+            except PlaywrightError:
+                pass  # The widget drops its input once it lists a file: nothing is left to clear.
+        else:
+            await self.locator(field_id).set_input_files([], timeout=5000)
+
+    async def upload_greenhouse_resume(self, field_id):
+        """Attach the resume to Greenhouse's React upload widget and wait until the widget lists it.
+
+        The server-rendered file input is live before React hydrates it. A file set in that window shows in
+        input.files but React never sees a change, and after hydration React's value tracker treats the same file as
+        unchanged, so a second set_input_files of it is ignored too: the widget showed only Attach/Dropbox/Drive and
+        verify() said "Resume upload has not been accepted" on every pass (66degrees, ALTEN, OneImaging, Perpay
+        2026-10-29). Wait for hydration, and reset the input's value silently before each set so the tracker sees a
+        change."""
+        locator = self.locator(field_id)
+        for _ in range(3):
+            try:
+                await locator.evaluate(
+                    "async e => { for (let i = 0; i < 40; i++) {"
+                    " if (Object.keys(e).some(k => k.startsWith('__reactProps$') || k.startsWith('__reactFiber$'))) return;"
+                    " await new Promise(r => setTimeout(r, 100)); } }",
+                    timeout=6000,
+                )
+                await locator.evaluate("e => { e.value = '' }", timeout=5000)
+            except PlaywrightError:
+                pass  # A replaced input is found again by the next attempt's set_input_files.
+            await locator.set_input_files(str(self.resume_path), timeout=15000)
+            if await self.greenhouse_resume_listed():
+                return
+            await self.page.wait_for_timeout(1500)
+            if await self.greenhouse_resume_listed():
+                return
 
     async def intermediate_submit(self, control_id, before):
         """Classify the action's own fields/dialog, not its Submit label alone.
@@ -6207,7 +6259,7 @@ class FormSession:
                 if any(f["id"] == target["id"] for f in self.resume_fields()):
                     self.uploaded = self.upload_verified = self.workday_resume_replaced = False
                     if not self.workday:
-                        await self.locator(target["id"]).set_input_files([], timeout=5000)
+                        await self.clear_resume_input(target["id"])
                     resume_rejected = True
                 continue  # File uploads are handled by fill_current, never answer resolution.
             answers = await self.resolver.resolve([target])
