@@ -4,6 +4,7 @@ The model is used only to answer questions the profile/knowledge base cannot. Na
 email verification and submission are code paths with explicit success checks."""
 
 import asyncio
+import hashlib
 import re
 from ..db import now
 import time
@@ -2137,6 +2138,22 @@ class Adapter:
             self.emit("auth", "Trying the configured password for this existing account")
         using_alternate = bool(alternate and self.attempts[alternate_key])
         credentials = alternate if using_alternate else self.accounts.credentials(url)
+        # Only skip a recently and explicitly rejected login for a known account. The identifier is included in
+        # the opaque context so changing a configured username permits a fresh attempt. Legacy records lack this
+        # context and are not assumed to refer to the identifier currently shown on the page.
+        identifiers = [self.login_value(f, credentials) for f in obs["fields"] if self.is_login_field(f)]
+        context = hashlib.sha256("\0".join(identifiers).encode()).hexdigest()
+        try:
+            rejection_age = (datetime.now(UTC) - datetime.fromisoformat(record.get("rejected_at", ""))).total_seconds()
+        except (ValueError, TypeError):
+            rejection_age = -1
+        if (mode == "sign_in" and record.get("confirmed_at")
+                and record.get("state") == "credentials_rejected" and 0 <= rejection_age < 3600
+                and record.get("rejected_login_context") == context
+                and record.get("rejected_credentials") == self.accounts.credential_fingerprint(url, credentials)
+                and not alternate):
+            self.emit("auth", "This account recently rejected the same login; using password recovery")
+            return await self.recover(obs, "The employer recently rejected the saved login")
         # Identity fields on sign-up forms (name, country, consent) come from the profile.
         others = [
             f
@@ -2238,6 +2255,7 @@ class Adapter:
                 "password_unknown" if unknown else "credentials_rejected",
                 self.accounts.saved(url) or credentials,
                 rejected_credentials=self.accounts.credential_fingerprint(url, credentials),
+                rejected_login_context=context,
                 rejected_at=now(),
             )
             if alternate and not using_alternate and self.attempts[mode] < 2:
