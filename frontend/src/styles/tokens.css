@@ -1,0 +1,218 @@
+/* AXIOM design tokens (DESIGN.md §1).
+
+   Every colour is defined once per theme on :root[data-theme=…]. Components never use a literal colour.
+   Themes: navy (default, dark), maroon (light), slate (dark), ivory (light), system (navy when the OS is dark,
+   maroon when it is light). An unknown or missing data-theme is navy, so a first paint without the inline script in
+   index.html is still correct.
+
+   Status colours stay distinguishable from the accent: maroon's --bad is a clear red, navy's --info is cyan not blue.
+   --hold, --fix and --idle are extra tokens the legacy style.css tones need (purple, orange, grey). */
+
+:root,
+:root[data-theme="navy"],
+:root[data-theme="system"] {
+  --ground: #070b14;
+  --surface: #0b1020;
+  --surface-hover: rgba(255, 255, 255, 0.05);
+  --raised: #131a2b;
+  --card: #0e1424;
+  --field: #0a0f1c;
+  --chip: #1a2236;
+  --line: rgba(255, 255, 255, 0.085);
+  --line-strong: rgba(255, 255, 255, 0.17);
+  --ink: #eef1f8;
+  --ink-2: #a8b1c6;
+  --ink-3: #7e889f;
+  --brand: #5b8cff;
+  --brand-soft: rgba(91, 140, 255, 0.16);
+  --brand-ink: #050b1a;
+  --accent-text: #93b3ff;
+  --ok: #3ddc97;
+  --ok-soft: rgba(61, 220, 151, 0.13);
+  --warn: #f0b429;
+  --warn-soft: rgba(240, 180, 41, 0.13);
+  --bad: #ff6b7a;
+  --bad-soft: rgba(255, 107, 122, 0.13);
+  --info: #3cc8e0;
+  --info-soft: rgba(60, 200, 224, 0.13);
+  --hold: #b79cff;
+  --fix: #f59a6c;
+  --idle: #8b95ab;
+  --glow: rgba(91, 140, 255, 0.1);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 24px 48px -12px rgba(0, 0, 0, 0.7);
+  --scrim: rgba(2, 4, 10, 0.62);
+  color-scheme: dark;
+}
+
+:root[data-theme="maroon"] {
+  --ground: #f8f6f5;
+  --surface: #ffffff;
+  --surface-hover: rgba(40, 18, 24, 0.05);
+  --raised: #ffffff;
+  --card: #ffffff;
+  --field: #ffffff;
+  --chip: #efebea;
+  --line: rgba(40, 18, 24, 0.11);
+  --line-strong: rgba(40, 18, 24, 0.22);
+  --ink: #1c1517;
+  --ink-2: #50464a;
+  --ink-3: #6f6469;
+  --brand: #8c1d40;
+  --brand-soft: rgba(140, 29, 64, 0.09);
+  --brand-ink: #ffffff;
+  --accent-text: #8c1d40;
+  --ok: #0c7a53;
+  --ok-soft: rgba(12, 122, 83, 0.11);
+  --warn: #a35a05;
+  --warn-soft: rgba(163, 90, 5, 0.12);
+  --bad: #d23c3c;
+  --bad-soft: rgba(210, 60, 60, 0.1);
+  --info: #2160c4;
+  --info-soft: rgba(33, 96, 196, 0.1);
+  --hold: #6b4bb8;
+  --fix: #b8541f;
+  --idle: #7a6f74;
+  --glow: rgba(140, 29, 64, 0.05);
+  --shadow: 0 1px 2px rgba(40, 18, 24, 0.07), 0 16px 40px -12px rgba(40, 18, 24, 0.2);
+  --scrim: rgba(28, 16, 20, 0.34);
+  color-scheme: light;
+}
+
+/* system, with the OS in light mode: the same values as maroon. */
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] {
+    --ground: #f8f6f5;
+    --surface: #ffffff;
+    --surface-hover: rgba(40, 18, 24, 0.05);
+    --raised: #ffffff;
+    --card: #ffffff;
+    --field: #ffffff;
+    --chip: #efebea;
+    --line: rgba(40, 18, 24, 0.11);
+    --line-strong: rgba(40, 18, 24, 0.22);
+    --ink: #1c1517;
+    --ink-2: #50464a;
+    --ink-3: #6f6469;
+    --brand: #8c1d40;
+    --brand-soft: rgba(140, 29, 64, 0.09);
+    --brand-ink: #ffffff;
+    --accent-text: #8c1d40;
+    --ok: #0c7a53;
+    --ok-soft: rgba(12, 122, 83, 0.11);
+    --warn: #a35a05;
+    --warn-soft: rgba(163, 90, 5, 0.12);
+    --bad: #d23c3c;
+    --bad-soft: rgba(210, 60, 60, 0.1);
+    --info: #2160c4;
+    --info-soft: rgba(33, 96, 196, 0.1);
+    --hold: #6b4bb8;
+    --fix: #b8541f;
+    --idle: #7a6f74;
+    --glow: rgba(140, 29, 64, 0.05);
+    --shadow: 0 1px 2px rgba(40, 18, 24, 0.07), 0 16px 40px -12px rgba(40, 18, 24, 0.2);
+    --scrim: rgba(28, 16, 20, 0.34);
+    color-scheme: light;
+  }
+}
+
+:root[data-theme="slate"] {
+  --ground: #0a0d10;
+  --surface: #0f1317;
+  --surface-hover: rgba(255, 255, 255, 0.05);
+  --raised: #171c22;
+  --card: #12171c;
+  --field: #0d1115;
+  --chip: #1d242c;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --ink: #eceff2;
+  --ink-2: #a4aeb8;
+  --ink-3: #818c97;
+  --brand: #2dd4bf;
+  --brand-soft: rgba(45, 212, 191, 0.14);
+  --brand-ink: #031411;
+  --accent-text: #5eead4;
+  --ok: #4ade80;
+  --ok-soft: rgba(74, 222, 128, 0.13);
+  --warn: #f5b83d;
+  --warn-soft: rgba(245, 184, 61, 0.13);
+  --bad: #ff6b6b;
+  --bad-soft: rgba(255, 107, 107, 0.13);
+  --info: #6aa8ff;
+  --info-soft: rgba(106, 168, 255, 0.13);
+  --hold: #b9a3e8;
+  --fix: #f59a6c;
+  --idle: #8b959f;
+  --glow: rgba(45, 212, 191, 0.07);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 24px 48px -12px rgba(0, 0, 0, 0.7);
+  --scrim: rgba(2, 4, 6, 0.62);
+  color-scheme: dark;
+}
+
+:root[data-theme="ivory"] {
+  --ground: #faf8f3;
+  --surface: #fffefb;
+  --surface-hover: rgba(40, 36, 20, 0.05);
+  --raised: #ffffff;
+  --card: #fffefb;
+  --field: #ffffff;
+  --chip: #f0ede3;
+  --line: rgba(40, 36, 20, 0.11);
+  --line-strong: rgba(40, 36, 20, 0.22);
+  --ink: #1d1c18;
+  --ink-2: #504d44;
+  --ink-3: #6b675d;
+  --brand: #2f6f4e;
+  --brand-soft: rgba(47, 111, 78, 0.1);
+  --brand-ink: #ffffff;
+  --accent-text: #2a6445;
+  --ok: #14803f;
+  --ok-soft: rgba(20, 128, 63, 0.11);
+  --warn: #a35a05;
+  --warn-soft: rgba(163, 90, 5, 0.12);
+  --bad: #c93838;
+  --bad-soft: rgba(201, 56, 56, 0.1);
+  --info: #2160c4;
+  --info-soft: rgba(33, 96, 196, 0.1);
+  --hold: #6b4bb8;
+  --fix: #b8541f;
+  --idle: #78746a;
+  --glow: rgba(47, 111, 78, 0.05);
+  --shadow: 0 1px 2px rgba(40, 36, 20, 0.07), 0 16px 40px -12px rgba(40, 36, 20, 0.2);
+  --scrim: rgba(30, 28, 16, 0.34);
+  color-scheme: light;
+}
+
+/* Scale, radii, motion (DESIGN.md §2). */
+:root {
+  --text-micro: 11px;
+  --text-meta: 12px;
+  --text-ui: 13.5px;
+  --text-emphasis: 15px;
+  --text-display: 22px;
+  --text-title: 24px;
+
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur: 160ms;
+  --dur-slow: 200ms;
+
+  --font-sans: "Geist Variable", "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-code: "Geist Mono Variable", "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --side-w: 240px;
+  --side-w-collapsed: 64px;
+  --top-h: 56px;
+}

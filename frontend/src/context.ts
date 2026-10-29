@@ -2,7 +2,17 @@ import { createContext, useContext } from "react";
 import type { JobRow, Marks } from "./model";
 import type { Counts, Snapshot } from "./types";
 
-export type View = "batch" | "jobs" | "ledger" | "setup" | "editor";
+// needs and soon-* are the sidebar's own pages (Needs you; the calm coming-soon pages for Axe, Network and Emails).
+export type View =
+  | "batch"
+  | "jobs"
+  | "ledger"
+  | "setup"
+  | "editor"
+  | "needs"
+  | "soon-axe"
+  | "soon-network"
+  | "soon-emails";
 export type Route = {
   view: View;
   tab?: string;
@@ -15,7 +25,9 @@ export type Route = {
 // Earlier dashboard links (?view=Applications, ?page=job-board, ?gmail=…) keep working.
 const LEGACY: Record<string, Route> = {
   overview: { view: "batch" },
-  "needs help": { view: "batch" },
+  "needs help": { view: "needs" },
+  "needs you": { view: "needs" },
+  questions: { view: "needs" },
   applications: { view: "jobs", tab: "pipeline" },
   "job board": { view: "jobs", tab: "discovered" },
   archive: { view: "jobs", tab: "archive" },
@@ -26,7 +38,17 @@ const LEGACY: Record<string, Route> = {
   sources: { view: "setup", tab: "discovery" },
   settings: { view: "setup", tab: "system" },
 };
-const VIEWS: View[] = ["batch", "jobs", "ledger", "setup", "editor"];
+const VIEWS: View[] = [
+  "batch",
+  "jobs",
+  "ledger",
+  "setup",
+  "editor",
+  "needs",
+  "soon-axe",
+  "soon-network",
+  "soon-emails",
+];
 
 export function parseRoute(href = location.href): Route {
   const url = new URL(href);

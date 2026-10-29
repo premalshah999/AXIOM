@@ -1,22 +1,33 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { X } from "lucide-react";
-import "@fontsource-variable/dm-sans/opsz.css";
+import "@fontsource-variable/geist/index.css";
+import "@fontsource-variable/geist-mono/index.css";
+import "./styles/tokens.css";
+import "./styles/base.css";
 import "./style.css";
-import { api, ApiError, SIGNED_OUT } from "./api";
+import "./styles/components.css";
+import "./styles/shell.css";
+import { api, ApiError, SIGNED_OUT, signedOut } from "./api";
 import {
   NO_COUNTS,
   parseRoute,
   routeUrl,
   WorkspaceContext,
   type Route,
-  type View,
   type Workspace,
 } from "./context";
 import { ToastContext, usePoll, type Toast } from "./hooks";
 import { deriveRows, withMarks, type Marks } from "./model";
 import type { Snapshot } from "./types";
 import { ago, Loading } from "./ui";
+import { NeedsView } from "./needs";
+import { Shell } from "./shell/Shell";
+import { BrandMark } from "./shell/Brand";
+import { CommandPalette } from "./shell/CommandPalette";
+import { ComingSoon } from "./shell/ComingSoon";
+import { ALL_ITEMS, titleFor } from "./shell/nav";
+import type { Status } from "./shell/Sidebar";
+import { ToastStack } from "./ui/index";
 import { BatchView } from "./batch";
 import { JobsView } from "./jobs";
 import { LedgerView } from "./ledger";
@@ -32,24 +43,6 @@ const ResumeEditor = lazy(() => import("./editor").then((m) => ({ default: m.Res
 const AuthScreen = lazy(() => import("./account").then((m) => ({ default: m.AuthScreen })));
 const Onboarding = lazy(() => import("./onboarding").then((m) => ({ default: m.Onboarding })));
 
-const NAV: { view: View; label: string }[] = [
-  { view: "batch", label: "Batch" },
-  { view: "jobs", label: "Jobs" },
-  { view: "ledger", label: "Ledger" },
-  { view: "setup", label: "Setup" },
-];
-
-export function Mark() {
-  // Three cells of the progress tape: the product's one recurring motif.
-  return (
-    <svg className="mark" viewBox="0 0 20 20" aria-hidden="true">
-      <rect x="2" y="3" width="4" height="14" rx="1" className="mark-on" />
-      <rect x="8" y="3" width="4" height="14" rx="1" className="mark-on" />
-      <rect x="14" y="3" width="4" height="14" rx="1" className="mark-off" />
-    </svg>
-  );
-}
-
 const unfinished = () => (guideLater() ? "later" : "needed");
 
 function App() {
@@ -59,6 +52,8 @@ function App() {
   const [setupGuide, setSetupGuide] = useState<"unknown" | "needed" | "done" | "later">("unknown");
   const [route, setRoute] = useState<Route>(() => parseRoute());
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [who, setWho] = useState<{ name?: string; email?: string }>({});
+  const [palette, setPalette] = useState(false);
 
   const notify = useCallback((tone: Toast["tone"], text: string) => {
     const id = Date.now() + Math.random();
@@ -89,10 +84,8 @@ function App() {
   }, []);
 
   const go = useCallback((next: Route) => {
-    const sameView = next.view === parseRoute().view;
     history.pushState(null, "", routeUrl(next));
     setRoute(next);
-    if (!sameView) window.scrollTo({ top: 0 });
   }, []);
 
   // Ask the public account endpoint first, so a signed-out visit shows sign-in without a failed request.
@@ -103,6 +96,7 @@ function App() {
       .then((s) => {
         if (!current) return;
         setAuth(s.signed_in ? "in" : "out");
+        if (s.signed_in) setWho({ name: s.name, email: s.email });
         if (s.signed_in && s.onboarding)
           setSetupGuide((g) => (g === "unknown" ? (s.onboarding!.completed ? "done" : unfinished()) : g));
       })
@@ -180,137 +174,130 @@ function App() {
 
   useEffect(() => {
     const rt = snap.data?.autopilot_runtime;
-    const label = NAV.find((n) => n.view === route.view)?.label || "";
+    const label = titleFor(route);
     document.title =
       rt?.state === "active"
-        ? `${rt.confirmed ?? 0}/${rt.target ?? 100} · ${label} · ApplyPilot`
-        : `${label} · ApplyPilot`;
-  }, [snap.data, route.view]);
+        ? `${rt.confirmed ?? 0}/${rt.target ?? 100} · ${label} · AXIOM`
+        : `${label} · AXIOM`;
+  }, [snap.data, route]);
 
+  // ⌘K / Ctrl-K opens the command palette from anywhere once the workspace is up.
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPalette((open) => !open);
+      }
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, []);
+
+  // Screens outside the shell (sign-in, the setup guide, boot) are their own scroll region: the document never scrolls.
   if (auth === "out")
     return (
-      <Suspense fallback={<Loading label="Opening sign-in…" />}>
-        <AuthScreen
-          notice={signOutReason}
-          onSignedIn={async () => {
-            setSignOutReason("");
-            setAuth("unknown");
-            setSetupGuide("unknown");
-            await snap.refresh();
-          }}
-        />
-      </Suspense>
+      <div className="ax-screen">
+        <Suspense fallback={<Loading label="Opening sign-in…" />}>
+          <AuthScreen
+            notice={signOutReason}
+            onSignedIn={async () => {
+              setSignOutReason("");
+              setAuth("unknown");
+              setSetupGuide("unknown");
+              await snap.refresh();
+            }}
+          />
+        </Suspense>
+      </div>
     );
 
   if (setupGuide === "needed")
     return (
-      <Suspense fallback={<Loading label="Opening the setup guide…" />}>
-        <Onboarding
-          onDone={() => {
-            guideLater(false);
-            setSetupGuide("done");
-            snap.refresh();
-            go({ view: "batch" });
-            // go() keeps the scroll position within a view; the guide's long review page is not Batch.
-            window.scrollTo({ top: 0 });
-          }}
-          onExit={() => {
-            guideLater(true);
-            setSetupGuide("later");
-            window.scrollTo({ top: 0 });
-          }}
-        />
-      </Suspense>
+      <div className="ax-screen">
+        <Suspense fallback={<Loading label="Opening the setup guide…" />}>
+          <Onboarding
+            onDone={() => {
+              guideLater(false);
+              setSetupGuide("done");
+              snap.refresh();
+              go({ view: "batch" });
+            }}
+            onExit={() => {
+              guideLater(true);
+              setSetupGuide("later");
+            }}
+          />
+        </Suspense>
+      </div>
     );
 
   if (!workspace)
     return (
-      <div className="boot">
-        <div className="brand">
-          <Mark />
-          <span>ApplyPilot</span>
-        </div>
-        {snap.error &&
-        !(snap.error instanceof ApiError && snap.error.status === 401) ? (
-          <div className="boot-error" role="alert">
-            <p>{snap.error.message}</p>
-            <button className="btn" onClick={() => snap.refresh()}>
-              Try again
-            </button>
+      <div className="ax-screen">
+        <div className="boot">
+          <div className="brand">
+            <BrandMark size={22} />
+            <span>AXIOM</span>
           </div>
-        ) : (
-          <Loading label="Opening your workspace…" />
-        )}
+          {snap.error &&
+          !(snap.error instanceof ApiError && snap.error.status === 401) ? (
+            <div className="boot-error" role="alert">
+              <p>{snap.error.message}</p>
+              <button className="btn" onClick={() => snap.refresh()}>
+                Try again
+              </button>
+            </div>
+          ) : (
+            <Loading label="Opening your workspace…" />
+          )}
+        </div>
       </div>
     );
 
   const { snapshot } = workspace;
   const rt = snapshot.autopilot_runtime || {};
   const questions = snapshot.reviews.length;
-  const intake = snapshot.control.paused
-    ? { tone: "idle", text: "Paused" }
-    : rt.state === "complete"
-      ? { tone: "ok", text: "Target reached" }
-      : rt.intake_enabled
-        ? { tone: "run", text: rt.intake_reason || "Running" }
-        : rt.state === "active"
-          ? { tone: "fix", text: rt.intake_reason || "Held" }
-          : { tone: "idle", text: "No batch" };
+  const sched = rt.scheduler || snapshot.scheduler_health || {};
+  const pool = rt.application_workers;
+  const workers = pool ? pool.normal_workers + pool.specialist_workers : 0;
+  const progress = `${rt.confirmed ?? 0}/${rt.target ?? 100} confirmed`;
+  // The sidebar's status dot: the worst thing true right now, in plain words.
+  const status: Status =
+    snap.failures >= 2
+      ? { tone: "bad", text: "Connection lost", sub: `Showing data from ${ago(snap.updatedAt)}` }
+      : sched.degraded
+        ? { tone: "bad", text: "Needs a restart", sub: "Automation is degraded" }
+        : snapshot.control.paused
+          ? { tone: "warn", text: "Paused", sub: "New applications are paused" }
+          : rt.state === "complete"
+            ? { tone: "ok", text: "Target reached", sub: progress }
+            : rt.intake_enabled
+              ? { tone: "ok", text: "Running", sub: workers ? `${progress} · ${workers} workers` : progress }
+              : rt.state === "active"
+                ? { tone: "warn", text: "Held", sub: rt.intake_reason || progress }
+                : { tone: "idle", text: "No batch", sub: workers ? `${workers} workers ready` : "Start one on Overview" };
+  const soon = ALL_ITEMS.find((i) => i.route.view === route.view && i.soon);
 
   return (
     <ToastContext.Provider value={notify}>
       <WorkspaceContext.Provider value={workspace}>
-        <a className="skip" href="#main">
-          Skip to content
-        </a>
-        <header className="bar">
-          <a
-            className="brand"
-            href={routeUrl({ view: "batch" })}
-            onClick={(e) => {
-              e.preventDefault();
-              go({ view: "batch" });
-            }}
-          >
-            <Mark />
-            <span>ApplyPilot</span>
-          </a>
-          <nav className="nav" aria-label="Main navigation">
-            {NAV.map((n) => (
-              <a
-                key={n.view}
-                href={routeUrl({ view: n.view })}
-                aria-current={
-                  route.view === n.view || (route.view === "editor" && n.view === "setup")
-                    ? "page"
-                    : undefined
-                }
-                onClick={(e) => {
-                  e.preventDefault();
-                  go({ view: n.view });
-                }}
-              >
-                <span>{n.label}</span>
-                {n.view === "batch" && questions > 0 && (
-                  <b className="nav-count">
-                    {questions}
-                    <span className="sr-only">
-                      {" "}
-                      question{questions === 1 ? "" : "s"} need you
-                    </span>
-                  </b>
-                )}
-              </a>
-            ))}
-          </nav>
-          <div className="bar-end">
-            <button
-              className={"intake-chip tone-" + intake.tone}
-              onClick={() => go({ view: "batch" })}
-            >
-              <i aria-hidden="true" />
-              <span>{intake.text}</span>
-            </button>
+        <Shell
+          route={route}
+          go={go}
+          needs={questions}
+          status={status}
+          who={who}
+          paletteOpen={palette}
+          onSearch={() => setPalette(true)}
+          onSignOut={async () => {
+            try {
+              await api("/logout", "POST");
+              signedOut("You signed out.");
+            } catch (e) {
+              notify("error", (e as Error).message);
+            }
+          }}
+          end={
             <div className="intake-slot">
               <JobLinkIntake
                 request={api}
@@ -326,39 +313,44 @@ function App() {
                 }}
               />
             </div>
-          </div>
-        </header>
-        {setupGuide === "later" && (
-          <div className="setup-banner" role="status">
-            <span>Your profile setup isn't finished. ApplyPilot answers applications from it.</span>
-            <button
-              className="btn sm primary"
-              onClick={() => {
-                guideLater(false);
-                setSetupGuide("needed");
-              }}
-            >
-              Continue setup
-            </button>
-          </div>
-        )}
-        {snap.failures >= 2 && (
-          <div className="conn" role="status">
-            <span>
-              Connection lost{snap.error ? ` (${snap.error.message})` : ""}.
-              Showing data from {ago(snap.updatedAt)}; retrying automatically.
-            </span>
-          </div>
-        )}
-        <main id="main" className={"main view-" + route.view} tabIndex={-1}>
+          }
+          banners={
+            <>
+              {setupGuide === "later" && (
+                <div className="setup-banner" role="status">
+                  <span>Your profile setup isn't finished. AXIOM answers applications from it.</span>
+                  <button
+                    className="btn sm primary"
+                    onClick={() => {
+                      guideLater(false);
+                      setSetupGuide("needed");
+                    }}
+                  >
+                    Continue setup
+                  </button>
+                </div>
+              )}
+              {snap.failures >= 2 && (
+                <div className="conn" role="status">
+                  <span>
+                    Connection lost{snap.error ? ` (${snap.error.message})` : ""}.
+                    Showing data from {ago(snap.updatedAt)}; retrying automatically.
+                  </span>
+                </div>
+              )}
+            </>
+          }
+        >
           {route.view === "batch" && <BatchView />}
           {route.view === "jobs" && <JobsView />}
           {route.view === "ledger" && <LedgerView />}
+          {route.view === "needs" && <NeedsView />}
+          {soon && <ComingSoon item={soon} />}
           <Suspense fallback={<Loading />}>
             {route.view === "setup" && <SetupView />}
             {route.view === "editor" && <ResumeEditor />}
           </Suspense>
-        </main>
+        </Shell>
         {route.job && (
           <JobPanel
             key={route.job + (route.run || "")}
@@ -367,35 +359,8 @@ function App() {
             close={() => go({ ...route, job: undefined, run: undefined })}
           />
         )}
-        <div className="toasts">
-          <div aria-live="polite" role="status" className="toast-stack">
-            {toasts
-              .filter((t) => t.tone !== "error")
-              .map((t) => (
-                <div key={t.id} className={"toast " + t.tone}>
-                  {t.text}
-                </div>
-              ))}
-          </div>
-          <div role="alert" className="toast-stack">
-            {toasts
-              .filter((t) => t.tone === "error")
-              .map((t) => (
-                <div key={t.id} className="toast error">
-                  <span>{t.text}</span>
-                  <button
-                    className="icon-btn"
-                    aria-label="Dismiss message"
-                    onClick={() =>
-                      setToasts((list) => list.filter((x) => x.id !== t.id))
-                    }
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
-              ))}
-          </div>
-        </div>
+        <CommandPalette open={palette} onClose={() => setPalette(false)} />
+        <ToastStack toasts={toasts} onDismiss={(id) => setToasts((list) => list.filter((x) => x.id !== id))} />
       </WorkspaceContext.Provider>
     </ToastContext.Provider>
   );
