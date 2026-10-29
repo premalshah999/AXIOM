@@ -90,6 +90,8 @@ def tidy(question):
     text = UPLOAD_NOISE.sub("", original)
     text = re.sub(r"^\s*[*✱]\s*", "", text)
     text = re.sub(r"\s*(?:\*|✱|\(required\))\s*$", "", text, flags=re.I).strip()
+    # A label read once per nested wrapper: "Company Name * Company Name * Company Name" (ClearCompany, 2026-10-29).
+    text = re.sub(r"^(.{3,80}?)(?:\s*[*✱]?\s+\1)+$", r"\1", text)
     return text or original
 
 

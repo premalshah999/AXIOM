@@ -73,3 +73,10 @@ def test_a_choice_question_is_never_asked_without_its_choices():
     assert oq.defect("Which office?", ["Austin", "Remote"], {"type": "dropdown"}) is None
     assert oq.defect("Which office?", [], {"type": "combobox"}) is None  # searchable: typed
     assert oq.defect("Which office?", [], {"type": "dropdown", "source": "repair"}) is None
+
+
+def test_a_label_read_once_per_nested_wrapper_is_shown_once():
+    assert oq.tidy("Company Name * Company Name * Company Name * Company Name * Company Name") == "Company Name"
+    assert oq.tidy("Type of Business * Type of Business") == "Type of Business"
+    assert oq.tidy("What is your name? What is your name?") == "What is your name?"
+    assert oq.tidy("Do you agree? Yes, I agree") == "Do you agree? Yes, I agree"
