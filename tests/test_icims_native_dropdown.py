@@ -6,7 +6,7 @@ click on a row writes the select (a server-searched select then holds only the p
 collapses, and runs the field's onchange (Country -> State).
 
 Atlassian's profile (2026-10-19) read the first 25 rows as the whole catalog, and then read the old first page as the
-answer to a search that had not come back yet, so Country=India and State=Maryland were "not offered"."""
+answer to a search that had not come back yet, so the country and state were "not offered"."""
 
 import json
 

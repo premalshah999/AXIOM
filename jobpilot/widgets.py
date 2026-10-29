@@ -701,7 +701,7 @@ async def wait_options(
     replaced it is that search's result even when no option repeats the query text.
 
     accept(options) -> truthy ends the wait on a settled list the caller can already use (an option that names the
-    query's place differently: "City, MD" against "City, Maryland, United States").
+    query's place differently: "City, OH" against "City, Ohio, United States").
     stable_for: how long a changed list must stay unchanged to count as the search's result (default: two reads).
     empty_after: seconds a menu must keep saying "No options" before the wait gives up; a search that found nothing
     otherwise burned the whole timeout."""
@@ -1686,7 +1686,7 @@ async def _rcm_owned_select(frame, el, text, targets, base, longest, full_list_o
         chosen = await choose([o["text"] for o in options])
         pick = next((o for o in options if o["text"] == chosen), None) if chosen else None
     # The search word is the answer's most distinctive word: "University" (the longest) matched hundreds of schools at
-    # Hyundai (2026-10-27) and "University of Maryland, College Park" never loaded; "Maryland" finds it.
+    # Hyundai (2026-10-27) and "University of Example, North Campus" never loaded; its distinctive word finds it.
     words = sorted(
         (w for w in dict.fromkeys(re.findall(r"[A-Za-z]{4,}", longest)) if w.lower() not in CATALOG_GENERIC_WORDS),
         key=len,
@@ -2251,7 +2251,7 @@ async def sdf_select(frame, el, value, choose=None):
     """ADP MyJobs' sdf-select-simple (Phone Type, State; 2026-10-27): open the host, click the offered item, and read the
     host's own selection back.
 
-    Midco's items render only once the pane opens, and State shows a page of 20 (Alabama..Louisiana): "Maryland" is
+    Midco's items render only once the pane opens, and State shows a page of 20 (Alabama..Louisiana): "Ohio" is
     reached by typing into the list's filter, when it has one, or by scrolling the list until it loads (2026-10-28: a
     0.5 s wait after typing missed the filtered items, and clicking the already open host closed it)."""
 
@@ -2413,7 +2413,7 @@ async def ui5_uncommitted(el, expected):
 # aria-label is the option text. The catalog is searched: a keyup in the search box runs a server (AJAX) search after
 # 0.5-1.5 s, or filters the select's own options; rows render 25 at a time. A click on a row runs optionSelected
 # (writes the select, collapses, then the field's onchange such as Country -> State). Reading the first 25 rows as
-# the whole catalog made Country=India and State=Maryland "not offered" at Atlassian, and about 30 retries tripped
+# the whole catalog made the applicant's country and state "not offered" at Atlassian, and about 30 retries tripped
 # iCIMS's CloudFront rate limit (403).
 ICIMS_DROPDOWN = (
     "e=>e.tagName==='A'&&/_icimsDropdown$/.test(e.id||'')&&"
@@ -2475,7 +2475,7 @@ async def icims_rows_now(frame, select_id):
 async def icims_rows(frame, select_id, *, before=None, timeout=8.0, query=None):
     """The rows once they settle (unchanged for 0.5 s). After a search (`before` = the rows shown before typing)
     they must first change, or the widget must say there are no results: a server search answers 0.5-1.5 s after
-    the last key plus the network, and reading the old first page as its answer made India "not offered"."""
+    the last key plus the network, and reading the old first page as its answer made the country "not offered"."""
     results = frame.locator(f'[id="{select_id}_dropdown-results"]')
 
     async def status():

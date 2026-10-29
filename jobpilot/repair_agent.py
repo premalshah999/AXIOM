@@ -413,7 +413,7 @@ async def _repair_run(service, run_id):
     if state == "submission_unknown" and not (Path(config.data_dir) / "runs" / run_id / "final_outline.txt").exists():
         return {"skipped": "no final page to read"}
     if state != "submission_unknown" and (where := hires_elsewhere(db, job_id, db.get_setting("profile", {}) or {})):
-        # Jerry (Ashby 2026-10-27): its question listed the states it hires in, Maryland not among them, and four runs
+        # Jerry (Ashby 2026-10-27): its question listed the states it hires in, the applicant's not among them, and four runs
         # stalled on the residence picker instead of closing.
         reason = f"The employer hires only in its listed locations, and the applicant lives in {where}"
         with db.exclusive() as s:

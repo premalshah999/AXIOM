@@ -424,7 +424,7 @@ class HistoryRulesMixin:
             r"\s*(education|experience|work experience|employment)\s+at\s+(.+?)\s*", group, re.I
         )
         if named and not row:
-            # Oracle names a row by its school or employer ("Education at University of Maryland", 2026-10-23).
+            # Oracle names a row by its school or employer ("Education at Example University", 2026-10-23).
             education = named[1].lower() == "education"
             entries = self.profile.education if education else self.profile.work
             names = [normalize(getattr(e, "school" if education else "company", "") or "") for e in entries]

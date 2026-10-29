@@ -13,7 +13,7 @@ def profile():
     return Profile(
         name="Alex Example",
         phone="+1 555 010 0000",
-        address=Address(line1="1 Home St", city="Springfield", state="Maryland", postal_code="00000",
+        address=Address(line1="1 Home St", city="Springfield", state="Ohio", postal_code="00000",
                         country="United States"),
         work=[WorkEntry(company="ExampleSoft", title="Engineer", location="Ann Arbor, MI", start="2024-01", current=True)],
     )
@@ -50,7 +50,7 @@ def test_the_batch_resolver_applies_the_guard_before_retrieval_and_the_model(ser
 def test_the_current_employers_location_comes_from_its_work_row(service):
     r = Resolver(profile(), service.db, service.config)
     assert r.local(field("City", "Current Employer")).value == "Ann Arbor"
-    state = r.local(field("State", "Current Employer", kind="combobox", options=["Maryland", "Michigan"]))
+    state = r.local(field("State", "Current Employer", kind="combobox", options=["Ohio", "Michigan"]))
     assert state.value == "Michigan" and state.evidence_ids == ["profile:work.0.location"]
     # A previous employer is no recorded row: nothing is guessed.
     assert r.local(field("City", "Previous Employer")).disposition == "review"

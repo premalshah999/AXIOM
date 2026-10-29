@@ -373,8 +373,8 @@ def equivalent(field, observed, expected):
     if re.fullmatch(r"(?:current )?(?:city|town|city town|city or town)", normalize(field.get("label", ""))) and (
         normalize(str(observed).split(",")[0]) == normalize(str(expected).split(",")[0]) != ""
     ):
-        # The same city with or without its region: iCIMS work rows held "College Park, MD" against the row's city
-        # "College Park", and 31 such findings sent a finished application back to its profile page (2026-10-25).
+        # The same city with or without its region: iCIMS work rows held "Springfield, OH" against the row's city
+        # "Springfield", and 31 such findings sent a finished application back to its profile page (2026-10-25).
         return True
     if re.search(r"\bgpa\b|grade point", field.get("label", ""), re.I) and gpa_number(observed) == gpa_number(expected) != "":
         # A GPA box holds the number of a "3.9/4.0" fact: the form writes it so (Medpace iCIMS refused the scale).
