@@ -132,3 +132,14 @@ def test_a_waiting_apply_moves_a_job_from_discovered_to_the_pipeline(client, ser
     waiting = {row["job"]["id"]: row for row in active}
     assert waiting["b0001"]["request"]["reason"] == "All workers busy" and waiting["b0001"]["run"] is None
     assert snap["counts"]["states"]["pending:waiting"] == 1
+
+
+def test_a_raised_target_applies_to_the_running_batch_and_a_lower_one_never_shrinks_it(service):
+    """Owner 2026-10-29: 150 more applications past a running batch of 200."""
+    from jobpilot.autopilot import start_batch
+
+    db = service.db
+    started = start_batch(db, 200)
+    assert start_batch(db, 350)["target"] == 350
+    assert start_batch(db, 100)["target"] == 350  # A default or older target never cuts the running goal.
+    assert db.get_setting("job_board_autopilot")["started_at"] == started["started_at"]  # Never restarted.

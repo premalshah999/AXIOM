@@ -358,6 +358,11 @@ def replenish_discovery(service, unattempted):
 def start_batch(db, target=100):
     previous = db.get_setting("job_board_autopilot", {})
     if previous.get("state") == "active":
+        if target > previous.get("target", 0):
+            # A raised goal applies to the running batch (owner 2026-10-29: 150 more past 200); saving settings with a
+            # lower or default target never shrinks it.
+            previous["target"] = target
+            db.set_setting("job_board_autopilot", previous)
         return previous  # Refreshing settings never restarts a batch or duplicates jobs.
     batch = {
         "state": "active",
