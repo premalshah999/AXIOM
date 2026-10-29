@@ -211,3 +211,26 @@ def protected(s, url: str, guards: set | None = None) -> bool:
     if guards is not None:
         return any(guard_key(identity) in guards for identity in identities)
     return any(s.get(Setting, guard_key(identity)) is not None for identity in identities)
+
+
+# ---------- dead sources ----------
+# A board that answers "not found" or refuses the public API will answer the same tomorrow. 450 of 4,263 sources (174
+# Greenhouse and 99 Ashby 404s, 77 career pages 404, 36 Workday 422s) failed on every scan, most with 34+ failures in
+# a row, yet each was retried every 24 hours for good (2026-10-29).
+PERMANENT_STATUS = frozenset({400, 401, 403, 404, 410, 422})
+DEAD_SOURCE_BASE_HOURS, DEAD_SOURCE_MAX_DAYS = 24, 14
+
+
+def permanent_failure(exc) -> bool:
+    """Whether the error says the board itself is gone or closed to us (not a timeout, 429 or server error)."""
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status in PERMANENT_STATUS:
+        return True
+    text = str(exc)
+    return "could not be resolved" in text or "CERTIFICATE_VERIFY_FAILED" in text
+
+
+def dead_source_wait(failures: int) -> timedelta:
+    """Wait before the next try after `failures` consecutive permanent errors: 1 day, 2, 4, 8, then 14 days."""
+    hours = DEAD_SOURCE_BASE_HOURS * 2 ** max(0, min(failures, 10) - 1)
+    return timedelta(hours=min(hours, 24 * DEAD_SOURCE_MAX_DAYS))

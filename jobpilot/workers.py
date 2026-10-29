@@ -21,6 +21,28 @@ async def apply_workflow(run_id: str):
     await SERVICE.execute(run_id)
 
 
+def source_failed(db, source_id, exc, managed, timezone):
+    """Record a failed scan and defer the source: a day for a managed board, longer for one that is gone or refuses us."""
+    from .features.discovery import record_source
+    from .features.discovery.policy import dead_source_wait, permanent_failure
+
+    health = record_source(db, source_id, False, type(exc).__name__)
+    with db.session() as s:
+        row = s.get(Source, source_id)
+        if row:
+            row.error, row.last_run = f"Source failed: {type(exc).__name__}: {str(exc)[:180]}", now()
+            if permanent_failure(exc):
+                # Not-found and refused boards back off from a day up to two weeks as failures repeat.
+                wait = dead_source_wait(health["failures"])
+            elif managed:
+                # Dead/moved career boards get a daily retry, not a request storm every two hours.
+                wait = timedelta(hours=24)
+            else:
+                wait = None
+            if wait:
+                row.next_run = (datetime.now(UTC) + wait).astimezone(ZoneInfo(timezone)).isoformat()  # an instant, not wall-clock arithmetic across a DST change
+
+
 @DBOS.workflow(max_recovery_attempts=1)
 async def source_workflow(source_id: str):
     service = SERVICE
@@ -58,20 +80,7 @@ async def source_workflow(source_id: str):
 
         record_source(service.db, source_id, True)
     except Exception as exc:
-        with service.db.session() as s:
-            row = s.get(Source, source_id)
-            if row:
-                row.error, row.last_run = f"Source failed: {type(exc).__name__}: {str(exc)[:180]}", now()
-                if managed:
-                    # Dead/moved career boards get a daily retry, not a request storm every two hours.
-                    from datetime import timedelta
-
-                    row.next_run = (
-                        datetime.now(ZoneInfo(service.config.timezone)) + timedelta(hours=24)
-                    ).isoformat()
-        from .features.discovery import record_source
-
-        record_source(service.db, source_id, False, type(exc).__name__)
+        source_failed(service.db, source_id, exc, managed, service.config.timezone)
 
 
 @DBOS.workflow(max_recovery_attempts=1)
