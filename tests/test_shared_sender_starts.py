@@ -50,7 +50,7 @@ def test_attempts_that_reached_the_employer_still_count(service):
         assert blocked.value.code == "application_retry_limit"
 
 
-@pytest.mark.parametrize("hours_ago,scheduled,waits", [(20, True, 1), (0, False, 3)])
+@pytest.mark.parametrize("hours_ago,scheduled,waits", [(20, True, 1), (0, True, 3)])
 def test_sender_waits_an_hour_apart_are_separate_attempts(service, hours_ago, scheduled, waits):
     with service.db.exclusive() as s:
         s.add(Job(id="hw", identity="hw", url="https://acme.fa.oraclecloud.com/job/hw", ats="oracle"))
