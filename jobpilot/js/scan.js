@@ -411,9 +411,23 @@
   // Never applicant fields: inert/hidden subtrees, honeypots, CAPTCHA widgets and their responses.
   const HONEYPOT = /honey.?pot|beecatcher|bot.?trap|leave.?(?:this|blank)|^hp_/i;
   const CAPTCHA_BOX = '.h-captcha,.g-recaptcha,.cf-turnstile,#px-captcha,[data-hcaptcha-widget-id],[data-sitekey]';
+  // Focus-trap libraries hide everything outside an open modal and mark what they hid (ADP's data-old-aria-hidden,
+  // Radix's data-aria-hidden). A modal closed by our acknowledgement can leave those hides behind: Montenson's ADP
+  // questionnaire kept its 12 questions aria-hidden after its "Quick tip" closed, and the scan saw none (2026-10-29).
+  // With no modal open, a library's hide is not hidden; inert and the page's own aria-hidden still are.
+  const MODAL_HIDE = '[data-old-aria-hidden],[data-aria-hidden]';
+  let modalOpen;
+  const anyModalOpen = () => modalOpen ??= all.some(d => d.matches('[aria-modal=true],dialog[open],[data-sdf-modal]')
+    && visible(d) && d.getBoundingClientRect().width > 120);
+  const hiddenBy = el => {
+    for (let h = el.closest('[inert],[aria-hidden="true"]'); h; h = h.parentElement?.closest('[inert],[aria-hidden="true"]')) {
+      if (h.matches('[inert]') || !h.matches(MODAL_HIDE) || anyModalOpen()) return h;
+    }
+    return null;
+  };
   // A select2/chosen <select> is itself aria-hidden behind its visible proxy; that one stays.
   const hiddenTree = el => {
-    const h = el.closest('[inert],[aria-hidden="true"]');
+    const h = hiddenBy(el);
     return !!h && !(h === el && el.tagName === 'SELECT');
   };
   const excluded = el => hiddenTree(el) || !!el.closest(CAPTCHA_BOX)
@@ -1017,7 +1031,10 @@
         if (x.hasAttribute('ui5-radio-button')) return clean(x.text || x.getAttribute('text') || textOf(x));
         const native = nativeMember(x);
         return native ? clean([...(native.labels || [])].map(textOf).join(' ')) || labelledBy(native)
-          || (native !== x && textOf(x)) || native.value : labelledBy(x) || clean(x.getAttribute('aria-label')) || textOf(x) || label(x);
+          || (native !== x && textOf(x)) || native.value : labelledBy(x) || clean(x.getAttribute('aria-label')) || textOf(x)
+          // A custom radio with no text of its own is its value, never the group's question (ADP's sdf-radio-button
+          // value="YES" renders its caption from a property, 2026-10-29).
+          || clean(x.getAttribute('value') || '') || label(x);
       };
       options = group.map(optionLabel);
       const chosen = group.find(x => {
@@ -1226,7 +1243,7 @@
       && !composedClosest(el, CALENDAR_POPUP)
       && !(el.matches('sdf-button') && ((el.shadowRoot?.querySelector('button') || el.querySelector('button'))?.disabled
         || el.hasAttribute('disabled') && el.getAttribute('disabled') !== 'false'))
-      && !el.closest('[inert],[aria-hidden="true"]')
+      && !hiddenBy(el)
       // Controls inside a CAPTCHA widget are not navigation. Invisible reCAPTCHA
       // instead marks the site's own action button (ADP: <sdf-button class=
       // "g-recaptcha" aria-label="Continue">); that button is the only way forward.
