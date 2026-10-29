@@ -165,6 +165,23 @@ export function ResumeEditor() {
     ) : (
       <Loading label="Opening the editor…" />
     );
+  if (!Array.isArray(loaded.data.doc?.sections) || !loaded.data.style || !Array.isArray(meta.data.templates))
+    return (
+      <div className="page">
+        <p className="muted">
+          The editor got an answer it could not read.{" "}
+          <button
+            className="link"
+            onClick={() => {
+              loaded.refresh();
+              meta.refresh();
+            }}
+          >
+            Try again
+          </button>
+        </p>
+      </div>
+    );
   return (
     <Workbench
       key={isMaster ? "master:" + loaded.data.master?.id : artifact || "new"}
@@ -451,6 +468,17 @@ function Workbench({
                 )}
               </a>
             ))}
+            {/* Below 960px the preview sits under the form: this jumps to it. */}
+            <a
+              className="editor-jump"
+              href="#preview"
+              onClick={(e) => {
+                e.preventDefault();
+                document.querySelector(".editor-preview")?.scrollIntoView({ block: "start" });
+              }}
+            >
+              Preview
+            </a>
           </nav>
           <div className="editor-scroll">
             {draft.latex !== null && tab !== "source" ? (

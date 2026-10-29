@@ -315,3 +315,13 @@ body:has(.ax-savebar) .ax-toasts {
   min-height: 72px;
   resize: vertical;
 }
+
+/* Resume editor: the preview is under the form on a phone, so the tabs carry a way down to it. */
+.editor-jump {
+  display: none;
+}
+@media (max-width: 960px) {
+  .editor-jump {
+    display: inline-flex;
+  }
+}
