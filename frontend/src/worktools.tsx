@@ -167,9 +167,12 @@ export function RowMenu({
     setPos({ top, left });
   }, [open, asking]);
 
+  // Focus moves in once the menu is placed: a hidden (not yet positioned) menu cannot take focus.
+  useEffect(() => {
+    if (open && pos) menu.current?.querySelector<HTMLElement>("button:not(:disabled)")?.focus();
+  }, [open, pos, asking]);
   useEffect(() => {
     if (!open) return;
-    menu.current?.querySelector<HTMLElement>("button:not(:disabled)")?.focus();
     const away = (e: Event) => {
       const t = e.target as Node;
       if (menu.current?.contains(t) || button.current?.contains(t)) return;

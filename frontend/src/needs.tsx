@@ -6,7 +6,7 @@ import { useWorkspace } from "./context";
 import { useDraft } from "./hooks";
 import { Pagination, usePagination } from "./pagination";
 import { groupQuestions, QuestionCard, type QuestionGroup } from "./questions";
-import { ago, plural } from "./ui";
+import { ago, linkHost, plural, urlRole } from "./ui";
 import { Button, Empty } from "./ui/index";
 import "./styles/work.css";
 import type { Job } from "./types";
@@ -91,11 +91,11 @@ export function NeedsView() {
       )}
       <div className="nq-jobs">
         {paging.items.map((b) => (
-          <section key={b.key} className="nq-job" aria-label={b.job?.company || "Application"}>
+          <section key={b.key} className="nq-job" aria-label={b.job?.company || linkHost(b.job?.url) || "Application"}>
             <header className="nq-job-head">
               <div className="nq-job-name">
-                <strong>{b.job?.company || "Employer"}</strong>
-                <span>{b.job?.title || "Application"}</span>
+                <strong>{b.job?.company || linkHost(b.job?.url) || "Employer"}</strong>
+                <span>{b.job?.title || (b.job ? urlRole(b.job.url) : "Application")}</span>
               </div>
               <span className="ax-note nq-job-meta">
                 {[b.job?.ats, b.since && `waiting since ${ago(b.since)}`, plural(b.cards.length, "question")].filter(Boolean).join(" · ")}
@@ -118,7 +118,7 @@ export function NeedsView() {
             {parked.map((g) => (
               <li key={g.review.id}>
                 <span className="nq-parked-q">
-                  <strong>{g.job?.company || "Employer"}</strong> {g.review.display_question || g.review.question}
+                  <strong>{g.job?.company || linkHost(g.job?.url) || "Employer"}</strong> {g.review.display_question || g.review.question}
                 </span>
                 <Button size="sm" variant="ghost" onClick={() => setSkipped((list) => list.filter((x) => x !== g.review.id))}>
                   Answer now

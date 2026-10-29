@@ -3,7 +3,7 @@ import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useDraft } from "./hooks";
 import type { Job, Review } from "./types";
-import { ago } from "./ui";
+import { ago, linkHost } from "./ui";
 import { Button, Pill } from "./ui/index";
 import "./styles/work.css";
 
@@ -269,7 +269,7 @@ export function QuestionCard({
       </p>
       {others.length > 0 && (
         <p className="nq-also">
-          Also waiting on this question: {others.slice(0, 3).map((j) => j.company).join(", ")}
+          Also waiting on this question: {others.slice(0, 3).map((j) => j.company || linkHost(j.url) || "another application").join(", ")}
           {others.length > 3 ? ` and ${others.length - 3} more` : ""}. A reusable answer is applied to them too.
         </p>
       )}
