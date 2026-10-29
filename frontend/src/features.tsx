@@ -6,7 +6,6 @@ import { Search } from "lucide-react";
 import { api, ApiError } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useDraft, usePoll } from "./hooks";
-import { LearnedAnswers } from "./autonomy";
 import {
   ago,
   Empty,
@@ -145,7 +144,7 @@ const unmounted = (e: Error | null) =>
 
 // Poll a feature endpoint; stop for this session once the service proves absent.
 const absent = new Set<string>();
-function useFeature<T>(
+export function useFeature<T>(
   key: string,
   load: (signal: AbortSignal) => Promise<T>,
   interval: number,
@@ -326,67 +325,7 @@ export function PipelineReadiness() {
   );
 }
 
-// ---------- Setup › Knowledge ----------
-export function KnowledgeSection() {
-  const probe = useFeature<{
-    categories: Record<string, Record<string, number>>;
-    employers: number;
-    store_version: number;
-  }>(
-    "knowledge",
-    (signal) => api("/v2/knowledge/summary", "GET", undefined, signal),
-    120000,
-  );
-  const [tab, setTab] = useDraft("knowledge-tab", "facts");
-  if (probe.unavailable)
-    return (
-      <>
-        <p className="muted sm">
-          Categorized facts and employer memory appear here once the knowledge
-          service is enabled. Saved answers work as before.
-        </p>
-        <LearnedAnswers />
-      </>
-    );
-  if (!probe.data)
-    return probe.error ? (
-      <ErrorLine error={probe.error} retry={probe.refresh} />
-    ) : (
-      <Loading />
-    );
-  const tabs = [
-    ["facts", "Facts"],
-    ["employers", `Employer memory (${probe.data.employers})`],
-    ["answers", "Saved answers"],
-  ];
-  return (
-    <>
-      <nav className="tabs sub" aria-label="Knowledge views">
-        {tabs.map(([id, label]) => (
-          <a
-            key={id}
-            href={"#" + id}
-            aria-current={tab === id ? "page" : undefined}
-            onClick={(e) => {
-              e.preventDefault();
-              setTab(id);
-            }}
-          >
-            {label}
-          </a>
-        ))}
-      </nav>
-      {tab === "facts" && (
-        <>
-          <Attestations />
-          <Facts summary={probe.data.categories} />
-        </>
-      )}
-      {tab === "employers" && <EmployerMemory />}
-      {tab === "answers" && <LearnedAnswers />}
-    </>
-  );
-}
+// Setup › Knowledge is src/knowledge.tsx; it composes the exported pieces below.
 
 // ---------- Statements confirmed once (e.g. a complete employment history) ----------
 type Attestation = {
@@ -406,7 +345,7 @@ const ATTESTATION_USE: Record<string, string> = {
     "Lets applications answer “Have you worked for this company?” with No for employers that aren’t in your history, instead of asking you each time.",
 };
 
-function Attestations() {
+export function Attestations() {
   const list = useFeature<{ items: Attestation[] }>(
     "knowledge-attestations",
     (signal) => api("/v2/knowledge/attestations", "GET", undefined, signal),
@@ -615,7 +554,7 @@ function ServerPager({
   );
 }
 
-function Facts({
+export function Facts({
   summary,
 }: {
   summary: Record<string, Record<string, number>>;
@@ -724,7 +663,7 @@ function Facts({
   );
 }
 
-function EmployerMemory() {
+export function EmployerMemory() {
   const [q, setQ] = useDraft("employer-q", "");
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState<Employer | null>(null);

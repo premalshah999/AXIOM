@@ -1,0 +1,23 @@
+/* Setup › Knowledge (src/knowledge.tsx). */
+.ax-kn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+.ax-kn-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.ax-kn-lead {
+  max-width: 72ch;
+  color: var(--ink-2);
+  font-size: var(--text-ui);
+  line-height: 1.55;
+}
+.ax-kn-count {
+  color: var(--ink);
+  font-weight: 560;
+  white-space: nowrap;
+}
