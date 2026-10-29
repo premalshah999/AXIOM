@@ -516,6 +516,22 @@ async def ranking_model(*args, **kwargs):
         raise RuntimeError(model_failure(exc)) from exc
 
 
+def board_floor(db):
+    """The autopilot's minimum_auto_fit (job board settings), or None when the board has none."""
+    value = (db.get_setting("job_board_settings", {}) or {}).get("minimum_auto_fit")
+    return value if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 100 else None
+
+
+def ranking_threshold(db, profile):
+    """The score at which ranking marks a posting ready: the LOWER of the profile's minimum_fit and the board's
+    minimum_auto_fit. Two settings answered the same question: with the board at 45 and the profile at 54 every
+    45-53 posting was ranked 'skipped' although the autopilot would have applied (2026-10-28). Ranking marks the
+    postings either setting would take; the autopilot's own floor still decides what is started, and no stored
+    setting changes."""
+    floor = board_floor(db)
+    return profile.minimum_fit if floor is None else min(profile.minimum_fit, floor)
+
+
 def rank_in_thread(db, config, job_id):
     """Run `rank` on its own event loop; call it through asyncio.to_thread.
 
@@ -596,7 +612,7 @@ async def rank(db, config, job_id):
         raise ValueError("Classifier returned an unknown resume")
     ready = (
         result.eligible
-        and result.score >= profile.minimum_fit
+        and result.score >= ranking_threshold(db, profile)
         and (not result.uncertainties or profile.autonomous)
         and result.resume_id
     )
@@ -671,6 +687,51 @@ def readmit_by_title(db, live_ids):
             job.status = "ready"
             readmitted += 1
     return readmitted
+
+
+def readmit_by_threshold(db):
+    """Return postings ranked 'skipped' only by the profile's higher minimum_fit to 'ready' under ranking_threshold.
+
+    With the board at 45 and the profile at 54, every 45-53 posting was ranked skipped (132 never-attempted jobs,
+    2026-10-28). Only a posting whose current-version classification says eligible, with no unresolved blocker,
+    inside the deterministic gate and never attempted is readmitted; a posting without a classification row has no
+    eligibility on record and is left alone."""
+    from .db import Run
+    from .features.discovery import gate, policy_for
+    from .features.discovery.classify import outcomes
+    from .features.discovery.graduation import graduation_gate
+
+    raw = db.get_setting("profile", {}) or {}
+    profile = Profile.model_validate(raw)
+    low, high = ranking_threshold(db, profile), profile.minimum_fit
+    if low >= high:
+        return 0
+    policy = policy_for(db)
+    with db.session() as s:
+        attempted = set(s.scalars(select(Run.job_id).distinct()))
+        rows = [
+            record(j) for j in s.scalars(
+                select(Job).where(Job.status == "skipped", Job.demo.is_(False), Job.score >= low, Job.score < high)
+            )
+            if j.id not in attempted and j.resume_id
+        ]
+    found = outcomes(db, rows, raw)
+    ids = []
+    for job in rows:
+        got = found.get(job["id"])
+        result = (got or {}).get("result") or {}
+        if (
+            got and got["status"] == "ok" and result.get("eligible")
+            and (profile.autonomous or not result.get("uncertainties"))
+            and not gate(job, policy) and not graduation_gate(job, raw)
+        ):
+            ids.append(job["id"])
+    if not ids:
+        return 0
+    with db.exclusive() as s:
+        for item in s.scalars(select(Job).where(Job.id.in_(ids), Job.status == "skipped")):
+            item.status = "ready"
+    return len(ids)
 
 
 class RankedJob(ClassifiedFit):
@@ -814,7 +875,7 @@ async def rank_batch(db, config, job_ids):
     job_by_id = {j["id"]: j for j in jobs}
     for r in result.jobs:
         validate_classification(r, job_by_id[r.job_id], profile, eligibility[r.job_id])
-    threshold = profile.minimum_fit
+    threshold = ranking_threshold(db, profile)
     with db.exclusive() as s:
         for r in result.jobs:
             j = s.get(Job, r.job_id)
