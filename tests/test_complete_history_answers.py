@@ -709,3 +709,21 @@ def test_residence_parser_does_not_answer_an_additional_personal_claim(service):
     q = {**field("Please select"), "options": [
         "I reside in Massachusetts and have never been convicted.", "I don’t reside in Massachusetts."]}
     assert resolver.located_in_answer(q) is None
+
+
+@pytest.mark.parametrize("apostrophe", ["'", "’"])
+def test_graduated_category_with_a_contraction_is_the_completed_choice(service, apostrophe):
+    # DV Trading's Greenhouse (2026-10-29): "I've already graduated" normalizes to "i ve already graduated", read as no
+    # category, so the local answer typed a date into the menu and the commit failed on every run.
+    resolver = Resolver(
+        Profile(education=[{"school": "Fixture", "degree": "MS", "end": "2026-05"}]), service.db, service.config
+    )
+    done = f"I{apostrophe}ve already graduated"
+    f = {
+        **field("Please re-confirm your expected graduation date"),
+        "type": "combobox",
+        "options": [done, "August 2026 - December 2026", "January 2027 - July 2027"],
+    }
+    assert resolver.graduation_choice_valid(f, done) is True
+    assert resolver.graduation_choice_valid(f, f"I{apostrophe}ll graduate after August 2026") is False
+    assert resolver.local(f).value == done

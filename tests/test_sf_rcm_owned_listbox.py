@@ -156,3 +156,32 @@ async def test_a_major_the_list_lacks_takes_the_profiles_fallback_major(page):
     committed = await widgets.combobox(page.main_frame, el, "Data Science", choose=no_guess,
                                        search_queries=["Computer Science"], resolve=major_pick)
     assert committed == "Computer Science"
+
+
+async def test_a_major_listed_with_a_code_is_found_by_the_fallback_search_before_the_words(page):
+    # Hershey's SuccessFactors Major/Field of Study (2026-10-29): names carry a catalog code, the catalog is long, and
+    # searches for the single words "Science" and "Data" (3.5 s each) spent the 12 s field budget before the fallback
+    # major "Computer Science" was typed; its pick compared the name with the code attached.
+    import json
+
+    from jobpilot.forms import major_by_name
+
+    majors = [f"Library Science {i:03d} ({i:05d})" for i in range(150)] + [
+        "Actuarial Science (00500)", "Computer Science (00123)", "Data Entry (00200)",
+    ]
+    await page.set_content(PICKLIST.replace("%s", json.dumps(majors)).replace("CLICKS", "true"))
+    typed = []
+    await page.expose_function("jpTyped", lambda v: typed.append(v))
+    await page.evaluate("document.getElementById('9:_input').addEventListener('input', e => window.jpTyped(e.target.value))")
+
+    async def no_guess(texts):
+        return None
+
+    el = page.locator("[id='9:_input']")
+    committed = await widgets.combobox(
+        page.main_frame, el, "Data Science", choose=no_guess, search_queries=["Computer Science"],
+        resolve=major_by_name("Data Science", "Computer Science"),
+    )
+    assert committed == "Computer Science (00123)"
+    assert typed[-1] == "Computer Science" and "Science" not in typed, typed
+    assert major_by_name("Data Science", "Computer Science")(["Computer Science and Engineering (00001)"]) is None

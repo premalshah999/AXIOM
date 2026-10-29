@@ -272,6 +272,33 @@ MONTH_NUMBERS = {
 NEGATION = re.compile(r"\b(?:not|no|non|never|none|neither|nor|without|decline|don ?t|do not|doesn ?t|am not|is not)\b")
 
 
+# A visa class as menus spell it: "F-1", "F1", "H-1B", "H1B", "L2" (letter, number, optional letter). A status that
+# spells a qualifier ("F-1 OPT") is matched by an option of its class that claims no qualifier it lacks.
+VISA_CLASS = re.compile(r"(?<![A-Za-z0-9])([FHJLOEGMPR])[\s-]?(\d{1,2})([A-Za-z]?)(?![A-Za-z0-9])", re.I)
+VISA_QUALIFIER = re.compile(r"\b(?:opt|cpt|stem)\b", re.I)
+
+
+def visa_class(text):
+    match = VISA_CLASS.search(str(text))
+    return (match[1] + match[2] + match[3]).upper() if match else None
+
+
+def visa_option(value, options):
+    """The one offered option that is the same visa class as `value` and states no qualifier (OPT, CPT, STEM) the
+    value lacks: "F-1 OPT" is the offered "F1" (ALTEN's Greenhouse visa-type menu, 2026-10-29), never "F-1 CPT". When
+    several remain, the ones stating exactly the value's qualifiers; ambiguity returns None."""
+    code = visa_class(value)
+    if not code:
+        return None
+    qualifiers = lambda t: {q.lower() for q in VISA_QUALIFIER.findall(str(t))}  # noqa: E731
+    have = qualifiers(value)
+    labels = [o["text"] if isinstance(o, dict) else o for o in options]
+    same = [i for i, x in enumerate(labels) if visa_class(x) == code and qualifiers(x) <= have]
+    if len(same) > 1:
+        same = [i for i in same if qualifiers(labels[i]) == have]
+    return options[same[0]] if len(same) == 1 else None
+
+
 def best_option(options, value):
     """Choose one observed option for a desired value. Ambiguity returns None, never a guess."""
     options = [o for o in options if not placeholder_option(o["text"] if isinstance(o, dict) else o)]
@@ -284,6 +311,8 @@ def best_option(options, value):
     exact = [i for i, x in enumerate(labels) if norm(x) == want]
     if len(exact) >= 1:
         return options[exact[0]]
+    if visa := visa_option(value, options):
+        return visa
     # A month number in a menu of month names: Oracle's Start Date Month grid offers "January" ... "December", and an
     # education start of 2024-08 asked for "8" four times without a match (2026-10-25).
     if re.fullmatch(r"0?[1-9]|1[0-2]", want) and sum(norm(x) in MONTH_NUMBERS for x in labels) >= 6:
@@ -1385,9 +1414,13 @@ OPEN_LISTS = (
 
 # Whether a matched list is an open picker. A menu without items is an action bar: Workable's uploaded-resume card
 # keeps its view/delete links in a permanent role=menu, and every dropdown after the upload was refused as "Previous
-# dropdown remains open" (Thorlabs, Saalex, TMEIC 2026-10-27).
+# dropdown remains open" (Thorlabs, Saalex, TMEIC 2026-10-27). A site's navigation menu is no picker either: IXL's
+# header is a visible role=menu of links inside a <nav>, so every education picker after the first read "Previous
+# dropdown remains open" and never opened (2026-10-29).
 OPEN_LIST_SHOWN = """e=>e.getClientRects().length && getComputedStyle(e).visibility!=='hidden'
-      && !(e.matches('[role=menu]') && !e.querySelector('[role^=menuitem],[role=option]'))"""
+      && !(e.matches('[role=menu]') && (!e.querySelector('[role^=menuitem],[role=option]')
+        || e.closest('nav,[role=navigation],[role=menubar]')
+        || [...e.querySelectorAll('[role^=menuitem]')].every(i => i.matches('a[href]:not([href^="#"]):not([href^="javascript"])'))))"""
 COUNT_OPEN_LISTS_JS = f"() => [...document.querySelectorAll('{OPEN_LISTS}')].filter({OPEN_LIST_SHOWN}).length"
 NO_OPEN_LISTS_JS = f"() => !({COUNT_OPEN_LISTS_JS})()"
 
@@ -1659,8 +1692,11 @@ async def _rcm_owned_select(frame, el, text, targets, base, longest, full_list_o
         key=len,
         reverse=True,
     ) or [max(re.findall(r"[A-Za-z]{4,}", longest) or [longest[:4]], key=len)]
-    # Then the caller's own searches: the profile's fallback major when the recorded one is not offered.
-    searches = list(dict.fromkeys([*words[:2], *(q for q in queries if q and norm(q) != norm(text))]))
+    # Then the caller's own searches: the profile's fallback major when the recorded one is not offered. When the caller
+    # has such searches they come before the single words: Hershey's Major/Field of Study searched "Science" and "Data"
+    # (3.5 s each) and spent the 12 s field budget before the fallback "Computer Science" was typed (2026-10-29).
+    own = [q for q in queries if q and norm(q) != norm(text)]
+    searches = list(dict.fromkeys([text, *own, *words[:2]] if own else words[:2]))
     for word in searches if not pick and not complete and not full_list_only else []:
         before = [o["id"] for o in state["options"]]
         await el.fill("")
@@ -2966,6 +3002,13 @@ async def combobox(
             await el.press_sequentially(alias, delay=12, timeout=4000)
             opts = await wait_options(frame, scope, timeout=2, query=alias, owner=el)
             choice = best_option(eligible(opts), value)
+            if not choice and resolve and opts:
+                # The caller's deterministic pick (the recorded major, else the fallback major) decides among the
+                # alias search's rows too: Greenhouse's Discipline search for "Data Science" finds nothing, the
+                # fallback search lists "Computer Science", and only best_option(value) was asked, so Affirm, SpaceX,
+                # Perpay and DV Trading stopped at "No matching option is offered" (2026-10-29).
+                picked = resolve([o["text"] for o in eligible(opts)])
+                choice = next((o for o in eligible(opts) if o["text"] == picked), None) if picked else None
             if choice:
                 break
     if not choice and choose and opts and not employer_scope:

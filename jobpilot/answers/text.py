@@ -13,6 +13,11 @@ def normalize(text):
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", text.lower())).strip()
 
 
+def strip_catalog_code(text):
+    """An option's name without the catalog code an employer's list appends: "Computer Science (00123)"."""
+    return re.sub(r"\s*\(\s*\d+\s*\)\s*$", "", str(text))
+
+
 def answer_key(field):
     return CACHE_VERSION + ":" + digest(question_identity(field))
 

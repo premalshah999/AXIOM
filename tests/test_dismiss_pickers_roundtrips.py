@@ -79,3 +79,26 @@ async def test_a_menu_without_items_is_not_an_open_picker(page):
     assert calls.total == 1, dict(calls)
     await page.evaluate("list.hidden = false")
     assert await page.main_frame.evaluate(widgets.COUNT_OPEN_LISTS_JS) == 1, "a real list still counts as open"
+
+
+async def test_a_sites_navigation_menu_is_not_an_open_picker(page):
+    """IXL's careers page (2026-10-29) has a visible header role=menu of links inside a <nav>; the school and field of
+    study pickers below it were refused as "Previous dropdown remains open" and never opened."""
+    await page.set_content(
+        """<header><nav><ul role=menu class=company-nav-list>
+        <li role=none><a role=menuitem href="/company/mission">Our mission</a></li>
+        <li role=none><a role=menuitem href="/company/careers">Careers</a></li></ul></nav></header>
+        <ul role=menu id=links><li role=none><a role=menuitem href="https://example.test/a">Docs</a></li></ul>
+        <input id=box role=combobox aria-controls=list aria-expanded=false>
+        <ul id=list role=listbox hidden><li role=option>Computer Science</li></ul>"""
+    )
+    with roundtrips() as calls:
+        await widgets.dismiss_pickers(page.main_frame)
+    assert calls.total == 1, dict(calls)
+    await page.evaluate("list.hidden = false")
+    assert await page.main_frame.evaluate(widgets.COUNT_OPEN_LISTS_JS) == 1, "a real list still counts as open"
+    # An action menu of buttons (not links) outside a nav is still a menu the next picker must wait out.
+    await page.set_content(
+        """<ul role=menu id=m><li role=menuitem tabindex=0>Edit</li><li role=menuitem tabindex=0>Delete</li></ul>"""
+    )
+    assert await page.main_frame.evaluate(widgets.COUNT_OPEN_LISTS_JS) == 1
