@@ -2262,7 +2262,7 @@ async def sdf_select(frame, el, value, choose=None):
 
     def match(texts):
         options = [{"text": t, "disabled": False} for t in texts]
-        # A profile's "MD" for State's "Maryland", "Mobile" for Phone Type's "Cell" (Midco 2026-10-27).
+        # A profile's "OH" for State's "Ohio", "Mobile" for Phone Type's "Cell" (Midco 2026-10-27).
         for want in [value, *aliases]:
             if hit := best_option(options, want):
                 return hit["text"]
@@ -2952,8 +2952,8 @@ async def combobox(
                 query=value if typed else None,
                 owner=el,
                 # The list shown before the search is not its answer. A search result that has stayed put for
-                # more than half a second is, even when no row repeats the query ("Rivertown, MD" -> "Rivertown,
-                # Maryland, United States"); a menu that keeps saying "No options" is the answer too.
+                # more than half a second is, even when no row repeats the query ("Rivertown, OH" -> "Rivertown,
+                # Ohio, United States"); a menu that keeps saying "No options" is the answer too.
                 changed_from=[o["text"] for o in listed] if typed else None,
                 accept=(lambda rows: resolve([o["text"] for o in eligible(rows)])) if resolve else None,
                 stable_for=0.6,
