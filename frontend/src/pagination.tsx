@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import "./styles/work.css";
 
 export function usePagination<T>(items: T[], filterKey = "", initialSize = 25) {
   const [page, setPage] = useState(1);
@@ -48,15 +49,15 @@ export function Pagination({
   if (!total) return null;
   const numbers = pageList(page, pages);
   return (
-    <nav className="pager" aria-label={label}>
-      <span className="pager-range">
+    <nav className="ax-pager" aria-label={label}>
+      <span className="ax-pager-range">
         {(page - 1) * size + 1}–{Math.min(page * size, total)} of{" "}
         {total.toLocaleString()}
       </span>
       {pages > 1 && (
-        <div className="pager-pages">
+        <div className="ax-pager-pages">
           <button
-            className="pager-btn"
+            className="ax-pager-btn"
             disabled={page === 1}
             onClick={() => setPage(page - 1)}
             aria-label="Previous page"
@@ -64,14 +65,14 @@ export function Pagination({
             ‹
           </button>
           {numbers.map((n, i) => (
-            <span key={n} className="pager-item">
+            <span key={n} className="ax-pager-item">
               {i > 0 && n - numbers[i - 1] > 1 && (
-                <span className="pager-gap" aria-hidden="true">
+                <span className="ax-pager-gap" aria-hidden="true">
                   …
                 </span>
               )}
               <button
-                className="pager-btn"
+                className="ax-pager-btn"
                 aria-label={`Page ${n}`}
                 aria-current={page === n ? "page" : undefined}
                 onClick={() => setPage(n)}
@@ -81,7 +82,7 @@ export function Pagination({
             </span>
           ))}
           <button
-            className="pager-btn"
+            className="ax-pager-btn"
             disabled={page === pages}
             onClick={() => setPage(page + 1)}
             aria-label="Next page"
@@ -91,7 +92,7 @@ export function Pagination({
         </div>
       )}
       {sizes && total > Math.min(25, paging.initialSize) && (
-        <label className="pager-size">
+        <label className="ax-pager-size">
           <span>Rows</span>
           <select
             aria-label="Rows per page"
