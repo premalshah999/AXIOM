@@ -535,7 +535,9 @@ async def persist_stalled(service, slots, roles, batch):
         # Saved packets are hundreds of KB each; retry scheduling needs only metadata.
         from .application_budget import nothing_sent
 
-        streaks = {}
+        from .recovery import backoff_seconds, nothing_sent_streak, repeats_unchanged
+
+        streaks, history = {}, {}
         for run in s.execute(select(
             Run.id, Run.job_id, Run.state, Run.reason, Run.created_at, Run.finished_at,
             Run.packet["engine_version"].as_string().label("engine"),
@@ -545,6 +547,7 @@ async def persist_stalled(service, slots, roles, batch):
             key = (run.engine, stall_key(run.reason))
             streak = streaks.get(run.job_id)
             streaks[run.job_id] = (key, streak[1] + 1 if streak and streak[0] == key else 1)
+            history.setdefault(run.job_id, []).append(run)
             # Deployment interruptions and sender waits sent nothing; they are not one of the day's retries
             # (Goldman Sachs' fixed job sat out its quota on two interrupted runs, 2026-10-18).
             if run.created_at >= day and not nothing_sent(run.state, run.reason):
@@ -567,6 +570,16 @@ async def persist_stalled(service, slots, roles, batch):
                 or streaks[job_id][1] >= SAME_STALL_RUNS
                 or (run.finished_at or run.created_at) > (current - persist_wait(runs_today, run.reason)).isoformat()
             ):
+                continue
+            # Waits that sent nothing back off 1, 2, 4 ... 30 minutes instead of the flat 30-60 s (a model outage
+            # requeued one job eight times in 12 minutes, 2026-10-28); a stall that repeated on this very engine
+            # runs the same failing step again, so it waits for a new engine.
+            streak = nothing_sent_streak((r.state, r.reason) for r in history[job_id])
+            if streak and (run.finished_at or run.created_at) > (
+                current - timedelta(seconds=backoff_seconds(streak, 60, 1800))
+            ).isoformat():
+                continue
+            if repeats_unchanged((r.reason, r.engine) for r in history[job_id]):
                 continue
             job = s.get(Job, job_id)
             control = s.get(Setting, "job_control:" + job_id)

@@ -19,6 +19,7 @@ How a row reads mirrors `frontend/src/model.ts` (`displayState`, `STATES[...].gr
 
 from sqlalchemy import and_, case, func, or_, select
 
+from ..application_budget import NOTHING_SENT
 from ..db import Job, Review, Run, Setting, bytewise, latest_runs
 
 CONTROL = "job_control:"
@@ -45,6 +46,12 @@ GROUPS = ("active", "needs", "repair", "unconfirmed", "paused", "done", "stopped
 OUTSIDE = ("new", "reserved")
 # List order for "All": what needs attention first (model.ts PRIORITY).
 PRIORITY = {group: index for index, group in enumerate(GROUPS[:5] + ("new", "done", "stopped", "reserved"))}
+# A stopped run whose own reason says what it needs reads by that, not by its state: "Repairing" is for stops the engine
+# can still fix. 2026-10-29: 28 of 32 Repairing jobs waited on the employer's mail or the owner's own browser (a refused
+# password, Amazon's Persona identity check), and waits that sent nothing (sender busy, model or browser down) retry
+# themselves (recovery.WAIT_BACKOFF).
+OWNER_ONLY = ("%persona%", "%identity verification%", "%in your own browser%", "%idverify%")
+STOPPED = ("waiting_browser", "timed_out", "failed")
 # Latest runs the Batch page shows live: owners at work, waits and questions.
 LIVE = ("queued", "running", "submitting", "waiting_email", "waiting_answer", "needs_review")
 
@@ -67,6 +74,14 @@ def classified(*where, reserved=()):
     latest = latest_runs()
     held = Job.id.in_(held_jobs())
     state = latest.c.state
+    # The latest run's reason, by primary key (latest_runs carries no text columns).
+    why = func.lower(select(Run.reason).where(Run.id == latest.c.id).scalar_subquery())
+    owner_only = and_(state.in_(STOPPED), or_(*[why.like(pattern) for pattern in OWNER_ONLY]))
+    # A bot-check pause (bot_wall) is not an automatic retry.
+    retrying = and_(
+        state.in_(("waiting_browser", "timed_out")),
+        or_(*[why.like(prefix.lower() + "%") for prefix in NOTHING_SENT if not prefix.startswith("A platform bot")]),
+    )
     paused_by_owner = and_(held, or_(state.is_(None), state.not_in(COMMITTED)))
     # Held until approved, unless an application is already under way or submitted: that one still reads as itself.
     reserving = (
@@ -88,6 +103,8 @@ def classified(*where, reserved=()):
         *([(reserving, "reserved")] if reserving is not None else []),
         (waiting, "active"),
         (state == "paused", "paused"),
+        (owner_only, "needs"),
+        (retrying, "active"),
         *[(state.in_(states), name) for name, states in RUN_GROUPS.items()],
         (state.is_not(None), "stopped"),
         *[(Job.status.in_(statuses), name) for name, statuses in JOB_GROUPS.items()],

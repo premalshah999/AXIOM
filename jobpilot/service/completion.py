@@ -17,13 +17,27 @@ PHONE_OTP = re.compile(
     r"(?:sent|texted)\b.{0,40}\bto your (?:phone|mobile)",
     re.I,
 )
+# A stop reason that says the posting itself is gone (the repair agent's and the controller's own words: "the posting is
+# gone", "this posting page does not exist", "the job posting no longer exists"). 22 such runs sat in Repairing and were
+# retried although no application form is left (MintMCP, Paylocity, Oracle 404 pages, 2026-10-22..29).
+CLOSED_POSTING = re.compile(
+    r"\b(?:posting|requisition)\b[^.]{0,60}\b(?:is|has been|was) (?:closed|gone|removed|filled)\b|"
+    r"\b(?:posting|requisition)\b[^.]{0,80}\bno longer (?:exists?|listed|available|active)\b|"
+    r"\b(?:job|posting|requisition)\b[^.]{0,30}\bdoes not exist\b|\bjob\b[^.]{0,60}\bhas been filled\b",
+    re.I,
+)
 OWNER_FINISHABLE = {"waiting_browser", "waiting_email", "waiting_answer", "needs_review", "timed_out", "paused"}
 
 
 class CompletionMixin:
     def authorize_validation_retry(self, run_id, rejection):
         """Keep one submission reservation; retries need a recorded, explicit field rejection."""
-        if rejection.get("category") != "validation" or not rejection.get("missing_fields"):
+        # The employer's own refusal page is the evidence, whether or not its banner names fields: JazzHR's "please correct
+        # the errors" page names none, and 9 runs on 2 jobs stopped here after the owned page had repaired its controls.
+        explicit = rejection.get("type") in {"explicit_rejection_page", "explicit_validation_rejection"} and bool(
+            rejection.get("evidence") or rejection.get("missing_fields")
+        )
+        if rejection.get("category") != "validation" or not (rejection.get("missing_fields") or explicit):
             raise ValueError("No explicit missing-field rejection permits a retry")
         with self.db.exclusive() as s:
             run = s.get(Run, run_id)
@@ -54,7 +68,7 @@ class CompletionMixin:
             count = (row.value.get("count", 0) if row else 0) + 1
             if count > 2:
                 raise ValueError("Application validation repair limit reached")
-            value = {"count": count, "missing_fields": rejection["missing_fields"], "at": now()}
+            value = {"count": count, "missing_fields": rejection.get("missing_fields", []), "at": now()}
             if row:
                 row.value = value
             else:
@@ -121,6 +135,15 @@ class CompletionMixin:
                     "state": "closed",
                     "reason": "The employer requires a phone (SMS) verification code; such applications are closed",
                 }
+            if (
+                state in {"waiting_browser", "timed_out", "failed"}
+                and run.state != "submitting"
+                and not result.get("reviews")
+                and not result.get("receipt")
+                and CLOSED_POSTING.search(str(result.get("reason") or ""))
+            ):
+                state = "closed"
+                result = {**result, "state": "closed", "reason": "The posting is closed: " + str(result["reason"])[:300]}
             if state in {"needs_review", "waiting_answer"} and result.get("reviews"):
                 from ..answers import protected_status_missing, residence_outside
 
@@ -242,6 +265,7 @@ class CompletionMixin:
                 # counted, reported and messaged as a failure (266 runs, 143 jobs; docs/forensics, F9).
                 state = "waiting_email"
             run.state, run.reason = state, result.get("reason", "")[:4000]
+            job_id = run.job_id
             run.finished_at, run.elapsed = now(), elapsed
             run.packet = {
                 **run.packet,
@@ -356,6 +380,14 @@ class CompletionMixin:
                 challenge = s.get(MailChallenge, handle.get("challenge_id", ""))
                 if challenge and challenge.run_id == run_id and challenge.state == "matched":
                     enqueue(s, "mail_resume", challenge.id, {"run_id": run_id, **handle}, run_id=run_id)
+        from ..operations.superseded import close_superseded_waits
+
+        # An earlier run of this job still parked on an email wait is left behind once this one has finished; unless
+        # this run parked on the same window.
+        handle = result.get("wait_handle") or {}
+        close_superseded_waits(
+            self, job_id, keep={handle.get("challenge_id") or handle.get("id")} - {None, ""}
+        )
         self.db.event(
             run_id,
             "finished",
