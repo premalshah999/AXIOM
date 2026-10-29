@@ -293,8 +293,9 @@ def test_every_question_says_what_kind_of_field_it_is_and_what_to_send():
 def test_adp_tax_credit_follow_ups_are_screener_questions():
     from jobpilot.answers.policy_rules import WOTC
 
-    for question in ("Have you or someone in your household received assistance at least 9 months in the past 18 months",
-                     "Have you received a conditional certification from the state workforce agency (SWA)?",
+    # Generic assistance needs the observed screener's TANF context (covered by FormSession tests).
+    assert not WOTC.search("Have you or someone in your household received assistance at least 9 months in the past 18 months")
+    for question in ("Have you received a conditional certification from the state workforce agency (SWA)?",
                      "Have you served in the U.S. military?"):
         assert WOTC.search(question), question
 
