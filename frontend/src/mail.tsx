@@ -381,6 +381,7 @@ export function MailSettings() {
                   cell: (r) => (
                     <ConfirmButton
                       label="Remove"
+                      variant="secondary"
                       confirm="Remove rule"
                       pending={pending === "rm" + r.id}
                       onConfirm={() => change("rm" + r.id, () => api(`/mail-rules/${r.id}`, "DELETE"), "Rule removed.")}
@@ -404,13 +405,14 @@ export function MailSettings() {
                 return (
                   <li className="ax-row" key={c.id}>
                     <span className="ax-row-main">
-                      {row ? (
+                      {row && (row.job.company || row.job.title) ? (
                         <button
                           className="link"
                           style={{ textAlign: "left" }}
                           onClick={() => openJob(row.job.id, c.run_id)}
                         >
-                          <strong>{row.job.company}</strong> — {row.job.title}
+                          <strong>{row.job.company || row.job.title}</strong>
+                          {row.job.company && row.job.title ? ` — ${row.job.title}` : ""}
                         </button>
                       ) : (
                         <strong>Attempt {(c.run_id || "").slice(0, 8)}</strong>

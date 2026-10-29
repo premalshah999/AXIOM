@@ -203,7 +203,7 @@ export function RecoveryCodes({
   const [saved, setSaved] = useState(false);
   const [copy, setCopy] = useState<"" | "copied" | "unavailable">("");
   const text =
-    "ApplyPilot recovery codes\nEach code resets the dashboard password once.\n\n" + codes.join("\n") + "\n";
+    "AXIOM recovery codes\nEach code resets the dashboard password once.\n\n" + codes.join("\n") + "\n";
   return (
     <div className="codes-box">
       <ol className="codes" aria-label="Recovery codes">
@@ -233,7 +233,7 @@ export function RecoveryCodes({
             const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
             const link = document.createElement("a");
             link.href = url;
-            link.download = "applypilot-recovery-codes.txt";
+            link.download = "axiom-recovery-codes.txt";
             link.click();
             window.setTimeout(() => URL.revokeObjectURL(url), 1000);
           }}
@@ -324,7 +324,7 @@ export function AuthScreen({ onSignedIn, notice = "" }: { onSignedIn: () => Prom
   if (!status)
     return (
       <main className="login">
-        <Loading label="Opening ApplyPilot…" />
+        <Loading label="Opening AXIOM…" />
       </main>
     );
 
@@ -423,7 +423,7 @@ function SignUp({
   return (
     <AuthCard
       title="Create your account"
-      lead="ApplyPilot applies to jobs for you, answering every form from facts you confirm once. This is the only account on this installation."
+      lead="AXIOM applies to jobs for you, answering every form from facts you confirm once. This is the only account on this installation."
       notice={notice}
       formRef={ref}
       onSubmit={async (e) => {
@@ -613,7 +613,7 @@ function TokenSignIn({
         error={error}
         hint={
           <>
-            Print it on the computer running ApplyPilot: <code>{TOKEN_COMMAND}</code>
+            Print it on the computer running AXIOM: <code>{TOKEN_COMMAND}</code>
           </>
         }
       >
@@ -720,7 +720,7 @@ function Forgot({
       {method === "cli" ? (
         <>
           <p className="muted">
-            On the computer running ApplyPilot, run <code>{RESET_COMMAND}</code> (or <code>jobpilot reset-password</code>{" "}
+            On the computer running AXIOM, run <code>{RESET_COMMAND}</code> (or <code>jobpilot reset-password</code>{" "}
             without Docker). It asks for the new password without showing it, then signs every browser out.
           </p>
           <button type="button" className="btn primary block" onClick={back}>
@@ -748,7 +748,7 @@ function Forgot({
               error={errors.proof}
               hint={
                 <>
-                  Print it on the computer running ApplyPilot: <code>{TOKEN_COMMAND}</code>
+                  Print it on the computer running AXIOM: <code>{TOKEN_COMMAND}</code>
                 </>
               }
             >

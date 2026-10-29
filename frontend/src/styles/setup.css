@@ -265,3 +265,63 @@
 .ax-page > .ax-stack {
   gap: var(--space-5);
 }
+
+/* ---------- Profile: legacy inner markup, brought in line with the ax- panels ---------- */
+/* A toast must never cover the Save button it is reporting on. */
+body:has(.ax-savebar) .ax-toasts {
+  bottom: 96px;
+}
+.ax-page .rule-steps {
+  margin-bottom: var(--space-4);
+}
+.ax-page .rule-steps li {
+  align-items: center;
+}
+.ax-page .rules-table th,
+.ax-page .rules-table td {
+  vertical-align: middle;
+}
+.ax-page .rules-table td input[type="checkbox"] {
+  display: block;
+  margin: 0;
+}
+/* "Example keys" and similar disclosures read as quiet text, not as a heading. */
+.ax-page details.fold {
+  margin: var(--space-3) 0;
+}
+.ax-page details.fold > summary {
+  padding: 0;
+  color: var(--ink-2);
+  font-size: var(--text-ui);
+  font-weight: 500;
+}
+.ax-page details.fold > summary:hover {
+  color: var(--ink);
+}
+.ax-page .entry {
+  border-radius: var(--radius-md);
+  background: var(--ground);
+}
+.ax-page .entry legend {
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+.ax-page .entry .form-grid + .ax-confirm,
+.ax-page .entry .form-grid + .confirm {
+  margin-top: var(--space-3);
+}
+.ax-page .note-row textarea,
+.ax-page .entry textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+/* Resume editor: the preview is under the form on a phone, so the tabs carry a way down to it. */
+.editor-jump {
+  display: none;
+}
+@media (max-width: 960px) {
+  .editor-jump {
+    display: inline-flex;
+  }
+}

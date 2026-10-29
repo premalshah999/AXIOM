@@ -207,11 +207,16 @@
   line-height: 1.5;
 }
 .ax-qf-progress {
+  position: sticky;
+  top: var(--qf-sticky, 0px);
+  z-index: 4;
   display: flex;
   align-items: center;
   gap: var(--space-3);
   width: 100%;
-  margin-top: var(--space-1);
+  padding: var(--space-2) 0;
+  background: var(--qf-bg, var(--ground));
+  border-bottom: 1px solid var(--line);
 }
 .ax-qf-progress .ax-meter {
   flex: 0 1 220px;
