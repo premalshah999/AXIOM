@@ -591,6 +591,33 @@
       hint:count ? `Select exactly ${count[1]} choices` : ''});
   }
 
+  // A question label can target a checkbox container directly (including unnamed Ant Design inputs).
+  // Group only its own controls, and infer exclusivity only from explicit Yes/No alternatives.
+  for (const caption of all.filter(e => e.matches('label[for]') && visible(e))) {
+    const box = byId(caption, caption.htmlFor);
+    if (!box || box.matches('input,select,textarea,button') || !visible(box)) continue;
+    const group = [...box.querySelectorAll('input[type=checkbox]')];
+    if (group.length < 2 || group.some(c=>consumed.has(c)) || excluded(box)
+        || box.querySelector('input:not([type=checkbox]):not([type=hidden]),select,textarea,[role=combobox],[role=radio]')) continue;
+    const root = box.getRootNode();
+    const captions = [...root.querySelectorAll('label[for]')].filter(l=>l.htmlFor === box.id && visible(l));
+    const q = captions.length === 1 ? clean(textOf(caption)) : '';
+    if (!q) continue;
+    const options = group.map(c=>label(c));
+    if (options.some(o=>!o || o === 'Unlabelled field') || new Set(options.map(o=>o.toLowerCase())).size !== options.length) continue;
+    const hasYes = options.some(o=>/^yes$/i.test(o));
+    const hasNo = options.some(o=>/^no$/i.test(o));
+    const single = hasYes && hasNo && options.every(o=>/^(?:yes|no|n\/?a|not applicable(?:\s*\([^)]*\))?)$/i.test(o))
+      && !/select all|choose all|check all/i.test(q);
+    const checked = group.filter(c=>c.checked);
+    const req = isReq(box,q) || group.some(c=>c.required || c.getAttribute('aria-required')==='true');
+    group.forEach(c=>consumed.add(c)); consumed.add(box);
+    push(box,{label:q,type:'checkboxgroup',required:req,options,value:checked.map(c=>label(c)).join('\n'),members:group,
+      valid:(!req || checked.length > 0) && (!single || checked.length <= 1),
+      widget:single ? 'single-choice-checkboxes' : 'container-checkboxes',maxlength:-1,
+      hint:single ? 'Select exactly one choice' : ''});
+  }
+
   // Checkboxes sharing one name are one multiple-choice question (Lever, Greenhouse).
   // Some Workday groups have no input names; their fieldset owns the question.
   for (const box of all.filter(e => e.matches('fieldset,[role=group]') && visible(e))) {

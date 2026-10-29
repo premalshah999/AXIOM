@@ -2535,6 +2535,8 @@ class FormSession:
             committed = await widgets.multi_pills(frame, field, value)
         elif kind == "checkboxgroup":
             wanted = {normalize(v) for v in str(value).splitlines() if v.strip()}
+            if field.get("widget") == "single-choice-checkboxes" and len(wanted) != 1:
+                raise ValueError("This question requires exactly one choice")
             matched = set()
             members = field.get("member_ids", [])
             if not members:
