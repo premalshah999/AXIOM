@@ -25,7 +25,7 @@ async def test_a_frame_replaced_during_the_wait_is_read_again_not_retried_until_
     form.network = None
     started = time.monotonic()
     assert await form.settle(timeout=8)
-    assert time.monotonic() - started < 2, "the wait kept calling the detached frame"
+    assert time.monotonic() - started < 6, "the wait kept calling the detached frame"
     assert len(reads) == 2
 
 

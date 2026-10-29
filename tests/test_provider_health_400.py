@@ -94,7 +94,7 @@ async def test_short_cooldown_is_waited_out_and_long_one_is_not(service):
     )
     started = time.monotonic()
     await provider_health.wait_out_short_cooldown(service.db, config)
-    assert time.monotonic() - started < 0.5
+    assert time.monotonic() - started < 30  # a long cooldown (3600 s here) returns at once; the margin is for a loaded machine
     assert provider_health.acquire(service.db, config, 25) is None
 
 

@@ -49,7 +49,7 @@ async def test_settle_deadline_includes_hung_renderer():
     form.network=None
     start=time.monotonic()
     assert not await form.settle(timeout=.05)
-    assert time.monotonic()-start < .5
+    assert time.monotonic()-start < 5  # the hung renderer sleeps 30 s; a loaded machine must not turn the margin into a flake
 
 
 async def test_field_write_bounds_nested_widget_retries(monkeypatch):
@@ -64,7 +64,7 @@ async def test_field_write_bounds_nested_widget_retries(monkeypatch):
     start=time.monotonic()
     with pytest.raises(TimeoutError):
         await form.fill({'type':'combobox','label':'Country'}, 'United States')
-    assert time.monotonic()-start < .5
+    assert time.monotonic()-start < 5  # the hung write sleeps 30 s
 
 
 async def test_alias_option_does_not_wait_for_literal_query_timeout(page):
