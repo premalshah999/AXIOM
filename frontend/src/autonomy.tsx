@@ -1152,7 +1152,7 @@ export function AccountSettings() {
                 hint={q || filter !== "all" ? undefined : "They appear after the first application that needs one."}
               />
             }
-            minWidth={980}
+            minWidth={600}
             columns={[
               {
                 key: "site",
@@ -1223,6 +1223,7 @@ export function AccountSettings() {
                 key: "login",
                 header: "Login",
                 truncate: true,
+                hideBelow: 600,
                 width: 240,
                 cell: (a) => (
                   <span title={[a.employer && "for " + a.employer, a.login_email].filter(Boolean).join(" · ")}>
@@ -1233,6 +1234,7 @@ export function AccountSettings() {
               {
                 key: "updated",
                 header: "Updated",
+                hideBelow: 860,
                 cell: (a) => <span title={stamp(a.updated_at)}>{ago(a.updated_at)}</span>,
               },
             ]}
