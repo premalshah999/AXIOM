@@ -274,7 +274,8 @@ function BatchStatus() {
             <>
               <span className="ov-n">{confirmed.toLocaleString()}</span>
               <span className="ov-of">
-                of {target.toLocaleString()} confirmed<span className="sr-only"> in this batch</span>
+                {confirmed > target ? `confirmed · target of ${target.toLocaleString()} reached` : `of ${target.toLocaleString()} confirmed`}
+                <span className="sr-only"> in this batch</span>
               </span>
             </>
           ) : (
@@ -345,7 +346,7 @@ function Tallies() {
     <div className="ov-tallies">
       <div className="ov-tally-row" role="group" aria-label="This batch">
         <span className="ov-tally-label">This batch</span>
-        {link("needs", rt.awaiting_answer ?? 0, "need your answer")}
+        {link("needs", rt.awaiting_answer ?? 0, (rt.awaiting_answer ?? 0) === 1 ? "application needs your answer" : "applications need your answer")}
         {link("repair", rt.blocked ?? 0, "blocked or unconfirmed")}
         {link("repair", rt.failed ?? 0, "not submitted")}
         {link("active", rt.queued ?? 0, "queued")}
@@ -526,7 +527,7 @@ function Workers({ mail, workers }: { mail: MailStatus | null; workers?: Applica
         </button>
         {" · "}
         <button type="button" className="ax-link" onClick={() => go({ view: "jobs", tab: "pipeline", filter: "needs" })}>
-          {answers} waiting for your answer
+          {plural(answers, "application")} waiting for your answer
         </button>
         {/* Runs parked on an emailed code or link (server count, as in the Queue line); the list below names them. */}
         {" · "}

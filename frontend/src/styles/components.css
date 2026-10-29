@@ -361,6 +361,7 @@ select.ax-control {
 
 /* ---------- Table ---------- */
 .ax-table-wrap {
+  container: ax-table / inline-size;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -411,8 +412,10 @@ select.ax-control {
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
 }
-/* A column with truncate keeps one line and ends in an ellipsis at its width (default 280px). */
+/* A column with truncate keeps one line and ends in an ellipsis. max-width 0 takes it out of the table's size
+   calculation, so it gets what is left after the other columns (shared by each one's width), never more. */
 .ax-table td.is-trunc {
+  max-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -447,6 +450,25 @@ select.ax-control {
   min-height: 0;
   padding: 0;
   accent-color: var(--brand);
+}
+@container ax-table (max-width: 859px) {
+  .ax-table .is-hide-860 {
+    display: none;
+  }
+}
+@container ax-table (max-width: 599px) {
+  .ax-table .is-hide-600 {
+    display: none;
+  }
+}
+.ax-table .is-pin {
+  position: sticky;
+  right: 0;
+  background: var(--card);
+}
+.ax-table thead .is-pin {
+  z-index: 3;
+  background: var(--surface);
 }
 .ax-table-state {
   padding: var(--space-6) var(--space-4);

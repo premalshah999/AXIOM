@@ -90,7 +90,7 @@ export function ReservedJobs() {
         />
       ),
     },
-    { key: "where", header: "Location", width: 200, truncate: true, cell: (r) => <Note>{r.job.location}</Note> },
+    { key: "where", header: "Location", hideBelow: 600, width: 200, truncate: true, cell: (r) => <Note>{r.job.location}</Note> },
     {
       key: "status",
       header: "Status",
@@ -109,10 +109,11 @@ export function ReservedJobs() {
           <StatusPill state={"job:" + r.job.status} />
         ),
     },
-    { key: "fit", header: "Fit", num: true, cell: (r) => r.job.score ?? "—" },
+    { key: "fit", header: "Fit", hideBelow: 600, num: true, cell: (r) => r.job.score ?? "—" },
     {
       key: "updated",
       header: "Updated",
+      hideBelow: 600,
       cell: (r) => (
         <time dateTime={r.updated} title={new Date(r.updated).toLocaleString()}>
           {ago(r.updated, now)}
@@ -123,6 +124,7 @@ export function ReservedJobs() {
       key: "act",
       header: <span className="sr-only">Actions</span>,
       width: "1%",
+      pin: true,
       cell: (r) =>
         r.state === "reserved" ? (
           <Button
@@ -151,7 +153,7 @@ export function ReservedJobs() {
             <>
               <strong>{plural(waiting, "job")} waiting for your approval.</strong> Nothing is applied at these employers
               until you approve the job.
-              {current && ` ${current.label}: ${current.employers.join(", ")}.`}
+              {current && current.employers.length > 0 && ` ${current.label}: ${current.employers.join(", ")}.`}
             </>
           ) : (
             <strong>Reserved employers are off: every employer is applied to as usual.</strong>

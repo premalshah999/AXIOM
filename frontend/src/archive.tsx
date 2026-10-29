@@ -43,9 +43,9 @@ export function ArchiveList() {
           <StatusPill state={a.state} label={a.owner_removed ? "Removed by you" : undefined} />
         ),
     },
-    { key: "reason", header: "Detail", width: 300, truncate: true, cell: (a) => (a.reason ? <Note>{a.reason}</Note> : null) },
-    { key: "tries", header: "Tries", num: true, cell: (a) => a.attempts },
-    { key: "archived", header: "Archived", cell: (a) => day(a.archived_at) },
+    { key: "reason", header: "Detail", hideBelow: 600, width: 300, truncate: true, cell: (a) => (a.reason ? <Note>{a.reason}</Note> : null) },
+    { key: "tries", header: "Tries", num: true, hideBelow: 860, cell: (a) => a.attempts },
+    { key: "archived", header: "Archived", hideBelow: 600, cell: (a) => day(a.archived_at) },
     {
       key: "log",
       header: "Log",

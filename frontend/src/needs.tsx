@@ -16,7 +16,7 @@ type Bucket = { key: string; job?: Job; runId: string; since: string; cards: Que
 const JOBS_PER_PAGE = 4;
 
 export function NeedsView() {
-  const { snapshot, go, openJob } = useWorkspace();
+  const { snapshot, counts, go, openJob } = useWorkspace();
   const [skipped, setSkipped] = useDraft<string[]>("needs-skipped", []);
   const jobFor = useMemo(() => {
     const runs = new Map(snapshot.runs.map((r) => [r.id, r.job_id]));
@@ -85,6 +85,15 @@ export function NeedsView() {
         <strong>{plural(groups.length, "question")}</strong> across {plural(applications, "application")}. You are asked only for
         personal details your profile doesn't have; other applications keep going while these wait. A saved answer is reused
         wherever the same question comes up.
+        {(counts.groups.needs ?? 0) > applications && (
+          <>
+            {" "}
+            <button type="button" className="ax-link" onClick={() => go({ view: "jobs", tab: "pipeline", filter: "needs" })}>
+              {plural(counts.groups.needs ?? 0, "application")} are marked as waiting on you
+            </button>{" "}
+            in Jobs; open one there for details.
+          </>
+        )}
       </p>
       {buckets.length === 0 && (
         <p className="ax-note">Every open question is skipped for now. They are listed below.</p>

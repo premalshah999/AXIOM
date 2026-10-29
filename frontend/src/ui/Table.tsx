@@ -7,10 +7,18 @@ export type Column<T> = {
   cell: (row: T) => ReactNode;
   /** Right-align (numbers). */
   num?: boolean;
-  /** CSS width for the column (and the truncation width). */
+  /** CSS width for the column. For a truncating column it is the share of the spare room the column asks for. */
   width?: number | string;
-  /** One line, ellipsis at `width` (default 280px). Without it the cell is nowrap and sizes to its content. */
+  /** One line with an ellipsis. The column takes the room left over (in proportion to `width`) down to `min`, so a
+   *  table fits its panel instead of sliding sideways. Without it the cell is nowrap and sizes to its content. */
   truncate?: boolean;
+  /** The narrowest a truncating column gets before the table scrolls sideways (default 160). */
+  min?: number;
+  /** Dropped when the table's panel is narrower than this (a panel under 860px, or under 600px), so the job, its
+   *  status and its actions stay in view. Everything dropped is in the job's drawer. */
+  hideBelow?: 860 | 600;
+  /** Stays in view at the panel's right edge while the rest scrolls sideways (the row's actions). */
+  pin?: boolean;
   /** Let the cell wrap onto several lines (rows grow past 40px). */
   wrap?: boolean;
 };
@@ -107,7 +115,7 @@ export function Table<T>({
                 </th>
               )}
               {columns.map((c) => (
-                <th key={c.key} scope="col" className={c.num ? "is-num" : undefined} style={c.width ? { width: c.width } : undefined}>
+                <th key={c.key} scope="col" className={[c.num ? "is-num" : "", c.hideBelow ? "is-hide-" + c.hideBelow : "", c.pin ? "is-pin" : ""].filter(Boolean).join(" ") || undefined} style={c.width ? { width: c.width } : undefined}>
                   {c.header}
                 </th>
               ))}
@@ -136,11 +144,11 @@ export function Table<T>({
                       </td>
                     )}
                     {columns.map((c) => {
-                      const style: CSSProperties | undefined = c.truncate ? { maxWidth: c.width ?? 280 } : undefined;
+                      const style: CSSProperties | undefined = c.truncate ? { width: c.width ?? 280, minWidth: c.min ?? 160 } : undefined;
                       return (
                         <td
                           key={c.key}
-                          className={[c.num ? "is-num" : "", c.truncate ? "is-trunc" : "", c.wrap ? "is-wrap" : ""].filter(Boolean).join(" ") || undefined}
+                          className={[c.num ? "is-num" : "", c.truncate ? "is-trunc" : "", c.wrap ? "is-wrap" : "", c.hideBelow ? "is-hide-" + c.hideBelow : "", c.pin ? "is-pin" : ""].filter(Boolean).join(" ") || undefined}
                           style={style}
                         >
                           {c.cell(row)}

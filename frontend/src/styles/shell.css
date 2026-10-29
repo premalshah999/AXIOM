@@ -73,8 +73,19 @@
   gap: var(--space-2);
   flex: none;
 }
-.ax-top-actions:empty {
+.ax-top-actions:empty,
+.ax-top-row:empty {
   display: none;
+}
+.ax-top-row {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
 }
 .ax-top-actions:empty + .ax-top-end {
   margin-left: auto;
@@ -722,5 +733,41 @@
   }
   .ax-palette-foot span:last-child {
     display: none;
+  }
+}
+
+/* A short window (a laptop, 800px and under) would push "Coming soon" under the footer: tighten the sidebar's rows so
+   the whole menu is in view; anything shorter than that scrolls inside the sidebar. */
+@media (min-width: 900px) and (max-height: 860px) {
+  .ax-nav {
+    height: 30px;
+  }
+  .ax-side-group {
+    margin-top: 6px;
+  }
+  .ax-foot-row {
+    min-height: 30px;
+  }
+  .ax-side-label {
+    padding-bottom: 2px;
+  }
+}
+@media (min-width: 900px) and (max-height: 780px) {
+  .ax-nav {
+    height: 27px;
+  }
+  .ax-side-group {
+    margin-top: 4px;
+  }
+  .ax-foot-row {
+    min-height: 28px;
+  }
+  .ax-side-label {
+    padding-bottom: 0;
+  }
+}
+@media (min-width: 900px) and (max-height: 740px) {
+  .ax-nav {
+    height: 26px;
   }
 }

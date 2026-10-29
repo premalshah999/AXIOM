@@ -32,7 +32,7 @@ function detail(data: unknown, status: number): string {
       })
       .join("; ");
   if (status === 404) return "Not found. It may have been removed.";
-  if (status >= 500) return "ApplyPilot hit a server error. Try again shortly.";
+  if (status >= 500) return "AXIOM hit a server error. Try again shortly.";
   return "Request failed (" + status + ")";
 }
 
@@ -61,7 +61,7 @@ export async function api<T = any>(
   } catch (error) {
     if ((error as Error).name === "AbortError") throw error;
     throw new ApiError(
-      "Can't reach ApplyPilot. Check that the service is running.",
+      "Can't reach AXIOM. Check your connection, or that the app is running.",
       0,
     );
   }

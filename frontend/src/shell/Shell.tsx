@@ -10,7 +10,7 @@ import { Sidebar, type Status, type Who } from "./Sidebar";
 const SlotContext = createContext<HTMLElement | null>(null);
 
 /**
- * Put controls in the top bar's actions slot (right of the page title) from inside any page:
+ * Put controls in the top bar's actions slot (right of the page title; a row under the bar on a phone) from inside any page:
  * `<TopActions><Button>Export</Button></TopActions>`. They unmount with the page.
  */
 export function TopActions({ children }: { children: ReactNode }) {
@@ -54,6 +54,7 @@ export function Shell({
   const drawer = useMedia("(max-width: 899px)");
   const [open, setOpen] = useState(false);
   const [slot, setSlot] = useState<HTMLElement | null>(null);
+  const [rowSlot, setRowSlot] = useState<HTMLElement | null>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const title = titleFor(route);
 
@@ -70,7 +71,7 @@ export function Shell({
   }, [paletteOpen]);
 
   return (
-    <SlotContext.Provider value={slot}>
+    <SlotContext.Provider value={drawer ? rowSlot : slot}>
       <a className="skip" href="#main">
         Skip to content
       </a>
@@ -97,6 +98,7 @@ export function Shell({
               </button>
             )}
             <h1 className="ax-top-title">{title}</h1>
+            {/* Under 900px the bar has no room for a page's buttons beside its title: they go in a row below it. */}
             <div className="ax-top-actions" ref={setSlot} />
             <div className="ax-top-end">
               {drawer && (
@@ -107,6 +109,7 @@ export function Shell({
               {end}
             </div>
           </header>
+          <div className="ax-top-row" ref={setRowSlot} />
           {banners}
           <div className={"ax-scroll" + (route.view === "editor" ? " is-fixed" : "")} ref={scroll}>
             <main id="main" className={"main view-" + route.view} tabIndex={-1}>

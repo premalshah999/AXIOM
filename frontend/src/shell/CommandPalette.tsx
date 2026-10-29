@@ -3,6 +3,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { useWorkspace, type Route } from "../context";
 import { OPEN_JOB_LINK } from "../jobintake";
+import { STATES, stateInfo } from "../model";
 import type { Listing, PipelinePage } from "../types";
 import { ALL_ITEMS } from "./nav";
 import { THEMES, useTheme } from "./prefs";
@@ -125,7 +126,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       id: "job:" + h.id,
       group: "Jobs",
       label: h.company + (h.title ? " · " + h.title : ""),
-      note: h.status.replaceAll("_", " "),
+      note: stateInfo(h.status in STATES ? h.status : "job:" + h.status).label,
       run: done(() => openJob(h.id)),
     }));
     // With no query, offer pages first and only the useful actions; with a query, pages then jobs then actions.

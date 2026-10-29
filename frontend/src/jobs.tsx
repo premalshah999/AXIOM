@@ -11,7 +11,7 @@ import { usePipelinePage } from "./pipeline";
 import { QueuePanel } from "./queue";
 import { ReservedJobs } from "./reserved";
 import { LedgerView } from "./ledger";
-import { ago, linkHost, urlRole } from "./ui";
+import { ago, linkHost, plural, urlRole } from "./ui";
 import { Button, Empty, RouteTabs, Table, type Column } from "./ui/index";
 import { Chips, JobCell, Notice, Note, SearchBox, StatusPill } from "./worktools";
 
@@ -90,6 +90,7 @@ function Pipeline() {
       {
         key: "detail",
         header: "Detail",
+        hideBelow: 600,
         width: 300,
         truncate: true,
         cell: (r) => {
@@ -98,18 +99,19 @@ function Pipeline() {
           return text ? <Note>{text}</Note> : null;
         },
       },
-      { key: "ats", header: "Platform", cell: (r) => <Note>{r.job.ats}</Note> },
-      { key: "tries", header: "Tries", num: true, cell: (r) => r.attempts || "—" },
+      { key: "ats", header: "Platform", hideBelow: 860, cell: (r) => <Note>{r.job.ats}</Note> },
+      { key: "tries", header: "Tries", num: true, hideBelow: 860, cell: (r) => r.attempts || "—" },
       {
         key: "updated",
         header: "Updated",
+        hideBelow: 600,
         cell: (r) => (
           <time dateTime={r.updated} title={new Date(r.updated).toLocaleString()}>
             {ago(r.updated, now)}
           </time>
         ),
       },
-      { key: "act", header: <span className="sr-only">Actions</span>, width: "1%", cell: (r) => <RowActions row={r} /> },
+      { key: "act", header: <span className="sr-only">Actions</span>, width: "1%", pin: true, cell: (r) => <RowActions row={r} /> },
     ],
     [now, openJob],
   );
@@ -126,6 +128,17 @@ function Pipeline() {
           onChange={(id) => go({ view: "jobs", tab: "pipeline", filter: id === "all" ? undefined : id })}
         />
       </div>
+      {filter === "needs" && !!(counts.needs ?? 0) && (
+        <Notice
+          action={
+            <Button size="sm" onClick={() => go({ view: "needs" })}>
+              Open Needs you
+            </Button>
+          }
+        >
+          {plural(counts.needs ?? 0, "application")} {(counts.needs ?? 0) === 1 ? "is" : "are"} waiting for an answer. Answer the questions on Needs you.
+        </Notice>
+      )}
       {list.error && (
         <Notice
           tone="bad"
