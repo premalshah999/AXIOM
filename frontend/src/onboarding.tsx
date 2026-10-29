@@ -194,6 +194,27 @@ const EMPTY_PROFILE: Draft = {
   autonomous: false,
 };
 
+// ---------- facts ----------
+// The server matches fact keys without regard to case, and facts saved elsewhere (Telegram, an import) are often
+// cased differently or written as a sentence ("work_authorization_US": "Yes, authorized ..."). The guide reads
+// them the same way, so a person who runs it again sees their existing answers, and saves over them, not beside them.
+type Facts = Record<string, unknown>;
+function foldFacts(facts: Facts): Facts {
+  const out: Facts = {};
+  const keys = Object.keys(facts);
+  // Keys already in lower case are applied last, so they win over another casing of the same name.
+  for (const key of keys.filter((k) => k !== k.toLowerCase())) out[key.toLowerCase()] = facts[key];
+  for (const key of keys.filter((k) => k === k.toLowerCase())) out[key] = facts[key];
+  return out;
+}
+function asBool(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return undefined;
+  if (/^\s*(yes|true)\b/i.test(value)) return true;
+  if (/^\s*(no|false)\b/i.test(value)) return false;
+  return undefined;
+}
+
 /** The server stores "" for fields nobody set; show the usual US answer instead of an empty box. */
 function withDefaults(profile: Partial<Draft>): Draft {
   const draft = {
@@ -208,7 +229,7 @@ function withDefaults(profile: Partial<Draft>): Draft {
     if (!String(draft[key] || "").trim()) draft[key] = EMPTY_PROFILE[key];
   if (!draft.address.country.trim()) draft.address.country = EMPTY_PROFILE.address.country;
   // The authorization step shows the residence prefilled; save what it shows.
-  if (!String(draft.facts.country_of_residence || "").trim()) draft.facts.country_of_residence = draft.address.country;
+  if (!String(foldFacts(draft.facts).country_of_residence || "").trim()) draft.facts.country_of_residence = draft.address.country;
   return draft;
 }
 
@@ -309,6 +330,32 @@ function Tags({
   );
 }
 
+/** A comma-separated field that keeps what is typed, commas and spaces included, and reports the finished list. */
+function CsvInput({
+  label,
+  hint,
+  values,
+  onChange,
+}: {
+  label: string;
+  hint?: React.ReactNode;
+  values: string[];
+  onChange: (v: string[]) => void;
+}) {
+  const [text, setText] = useState(values.join(", "));
+  return (
+    <Input
+      label={label}
+      hint={hint}
+      value={text}
+      onChange={(e) => {
+        setText(e.target.value);
+        onChange(e.target.value.split(",").map((x) => x.trim()).filter(Boolean));
+      }}
+    />
+  );
+}
+
 const STATUS_OPTIONS = [
   "U.S. citizen",
   "Permanent resident (green card)",
@@ -320,6 +367,19 @@ const STATUS_OPTIONS = [
   "Other visa",
 ] as const;
 type Status = (typeof STATUS_OPTIONS)[number];
+
+/** The option a stored status stands for: facts saved elsewhere are often a sentence ("OPT; expires ..."). Display only. */
+function matchStatus(text: string): Status | "" {
+  if ((STATUS_OPTIONS as readonly string[]).includes(text)) return text as Status;
+  if (/stem\s*opt/i.test(text)) return "F-1 STEM OPT";
+  if (/\bopt\b/i.test(text)) return "F-1 OPT";
+  if (/\bcpt\b/i.test(text)) return "F-1 student (CPT)";
+  if (/\bh-?1b\b/i.test(text)) return "H-1B";
+  if (/^\s*tn\b/i.test(text)) return "TN";
+  if (/green card|permanent resident/i.test(text)) return "Permanent resident (green card)";
+  if (/citizen/i.test(text) && !/non[- ]?citizen/i.test(text)) return "U.S. citizen";
+  return "";
+}
 
 /** What a step needs before moving on: only what nearly every application requires. */
 function stepProblem(step: StepId, d: Draft): string {
@@ -444,7 +504,13 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
     setDraft((d) => (d ? fn(d) : d));
   };
   const setTop = <K extends keyof Draft>(key: K, value: Draft[K]) => edit((d) => ({ ...d, [key]: value }));
-  const setFact = (key: string, value: unknown) => edit((d) => ({ ...d, facts: { ...d.facts, [key]: value } }));
+  const setFact = (key: string, value: unknown) =>
+    edit((d) => {
+      const facts = { ...d.facts };
+      const same = Object.keys(facts).filter((k) => k.toLowerCase() === key.toLowerCase());
+      for (const k of same.length ? same : [key]) facts[k] = value;
+      return { ...d, facts };
+    });
   const setAddress = (key: keyof Draft["address"], value: string) =>
     edit((d) => ({ ...d, address: { ...d.address, [key]: value } }));
   const setPeople = (updater: (d: Draft) => Draft) => {
@@ -813,12 +879,12 @@ function ContactStep({
 }
 
 function AuthorizationStep({ draft, setFact }: StepProps & { setFact: SetFact }) {
-  const f = draft.facts;
-  const status = (f.current_immigration_status_US as string) || "";
-  const statusChoice = (STATUS_OPTIONS as readonly string[]).includes(status) ? (status as Status) : "";
+  const f = foldFacts(draft.facts);
+  const status = (f.current_immigration_status_us as string) || "";
+  const statusChoice = matchStatus(status);
   const opt = /OPT/.test(status);
   const yn = (key: string, label: string) => (
-    <YesNo label={label} value={f[key] as boolean | undefined} onChange={(v) => setFact(key, v)} />
+    <YesNo label={label} value={asBool(f[key])} onChange={(v) => setFact(key, v)} />
   );
   return (
     <div className="ax-ob-stack">
@@ -866,7 +932,7 @@ const TRAVEL_OPTIONS = ["None", "Up to 25%", "Up to 50%", "75% or more"] as cons
 const TRAVEL_PERCENT: Record<string, number> = { None: 0, "Up to 25%": 25, "Up to 50%": 50, "75% or more": 75 };
 
 function PreferencesStep({ draft, setTop, setFact }: StepProps & { setTop: SetTop; setFact: SetFact }) {
-  const f = draft.facts;
+  const f = foldFacts(draft.facts);
   const travel = Object.entries(TRAVEL_PERCENT).find(([, n]) => n === f.travel_percentage_willingness)?.[0] || "";
   const anywhere = draft.target_locations.some((l) => /anywhere/i.test(l));
   // Recent job titles first (not internships or assistantships), then common roles.
@@ -896,15 +962,15 @@ function PreferencesStep({ draft, setTop, setFact }: StepProps & { setTop: SetTo
       </Question>
       <div className="ax-ob-list">
         <Question label="Are you willing to relocate?" asked={ASKED.relocate}>
-          <YesNo label="Willing to relocate" value={f.willing_to_relocate as boolean | undefined} onChange={(v) => setFact("willing_to_relocate", v)} />
+          <YesNo label="Willing to relocate" value={asBool(f.willing_to_relocate)} onChange={(v) => setFact("willing_to_relocate", v)} />
         </Question>
-        {f.willing_to_relocate === true && (
+        {asBool(f.willing_to_relocate) === true && (
           <Question label="Can you relocate at your own expense?" hint="Answers “Do you require relocation assistance?”">
-            <YesNo label="Relocate at own expense" value={f.relocation_at_own_expense as boolean | undefined} onChange={(v) => setFact("relocation_at_own_expense", v)} />
+            <YesNo label="Relocate at own expense" value={asBool(f.relocation_at_own_expense)} onChange={(v) => setFact("relocation_at_own_expense", v)} />
           </Question>
         )}
         <Question label="Are you open to working on-site or hybrid?">
-          <YesNo label="Open to on-site or hybrid" value={f.willing_onsite as boolean | undefined} onChange={(v) => setFact("willing_onsite", v)} />
+          <YesNo label="Open to on-site or hybrid" value={asBool(f.willing_onsite)} onChange={(v) => setFact("willing_onsite", v)} />
         </Question>
       </div>
       <Question label="How much travel can you do?" stack>
@@ -954,9 +1020,9 @@ const VETERAN = ["Not a veteran", "Protected veteran"] as const;
 const DISABILITY = ["No disability", "Yes, I have a disability"] as const;
 
 function ScreeningStep({ draft, setTop, setFact }: StepProps & { setTop: SetTop; setFact: SetFact }) {
-  const f = draft.facts;
+  const f = foldFacts(draft.facts);
   const yn = (key: string, label: string) => (
-    <YesNo label={label} value={f[key] as boolean | undefined} onChange={(v) => setFact(key, v)} />
+    <YesNo label={label} value={asBool(f[key])} onChange={(v) => setFact(key, v)} />
   );
   return (
     <div className="ax-ob-stack">
@@ -984,7 +1050,7 @@ function ScreeningStep({ draft, setTop, setFact }: StepProps & { setTop: SetTop;
         <Question label="Are you bound by a non-compete or other restrictive agreement?" asked={ASKED.noncompete}>
           <YesNo
             label="Bound by a non-compete"
-            value={f.has_non_compete as boolean | undefined}
+            value={asBool(f.has_non_compete)}
             onChange={(v) => {
               setFact("has_non_compete", v);
               setFact("has_employment_restrictions", v);
@@ -1006,7 +1072,7 @@ function ScreeningStep({ draft, setTop, setFact }: StepProps & { setTop: SetTop;
         <Question label="Have you ever been terminated or asked to resign?">
           <YesNo
             label="Terminated or asked to resign"
-            value={f.ever_fired as boolean | undefined}
+            value={asBool(f.ever_fired)}
             onChange={(v) => {
               setFact("ever_fired", v);
               setFact("asked_to_resign", v);
@@ -1023,7 +1089,7 @@ function ScreeningStep({ draft, setTop, setFact }: StepProps & { setTop: SetTop;
         <Question label="Do you hold U.S. asylee or refugee status?">
           <YesNo
             label="Asylee or refugee status"
-            value={f.has_asylee_status as boolean | undefined}
+            value={asBool(f.has_asylee_status)}
             onChange={(v) => {
               setFact("has_asylee_status", v);
               setFact("has_refugee_status", v);
@@ -1055,18 +1121,18 @@ function ScreeningStep({ draft, setTop, setFact }: StepProps & { setTop: SetTop;
             <Choice label="Gender" value={(f.gender as (typeof GENDER)[number]) || ""} options={GENDER} onChange={(v) => setFact("gender", v)} />
           </Question>
           <Question label="Are you Hispanic or Latino?">
-            <YesNo label="Hispanic or Latino" value={f.hispanic_or_latino as boolean | undefined} onChange={(v) => setFact("hispanic_or_latino", v)} />
+            <YesNo label="Hispanic or Latino" value={asBool(f.hispanic_or_latino)} onChange={(v) => setFact("hispanic_or_latino", v)} />
           </Question>
-          <Input
+          <CsvInput
             label="Race (as you would select it)"
-            hint="For example Asian, Black or African American, White, Two or more races."
-            value={Array.isArray(f.race_preference) ? (f.race_preference as string[]).join(", ") : String(f.race_preference || "")}
-            onChange={(e) => setFact("race_preference", e.target.value.split(",").map((s) => s.trim()).filter(Boolean))}
+            hint="For example Asian, Black or African American, White, Two or more races. Separate several with commas."
+            values={Array.isArray(f.race_preference) ? (f.race_preference as string[]) : f.race_preference ? [String(f.race_preference)] : []}
+            onChange={(list) => setFact("race_preference", list)}
           />
           <Question label="Veteran status" stack>
             <Choice
               label="Veteran status"
-              value={f.veteran === true ? "Protected veteran" : f.veteran === false ? "Not a veteran" : ""}
+              value={asBool(f.veteran) === true ? "Protected veteran" : asBool(f.veteran) === false ? "Not a veteran" : ""}
               options={VETERAN}
               onChange={(v) => setFact("veteran", v === "Protected veteran")}
             />
@@ -1074,7 +1140,7 @@ function ScreeningStep({ draft, setTop, setFact }: StepProps & { setTop: SetTop;
           <Question label="Disability status" stack>
             <Choice
               label="Disability status"
-              value={f.disability === true ? "Yes, I have a disability" : f.disability === false ? "No disability" : ""}
+              value={asBool(f.disability) === true ? "Yes, I have a disability" : asBool(f.disability) === false ? "No disability" : ""}
               options={DISABILITY}
               onChange={(v) => setFact("disability", v === "Yes, I have a disability")}
             />
@@ -1341,7 +1407,8 @@ function QuestionnairesStep({ onModule }: { onModule: (m: Module) => void }) {
 }
 
 function yesno(v: unknown) {
-  return v === true ? "Yes" : v === false ? "No" : "Not answered";
+  const b = asBool(v);
+  return b === true ? "Yes" : b === false ? "No" : "Not answered";
 }
 
 const STOPS = "Off: those applications stop for you";
@@ -1361,7 +1428,7 @@ function ReviewStep({
   linked: Linked;
   summary: { id: string; title: string; answered: number; total: number }[] | null;
 }) {
-  const f = draft.facts;
+  const f = foldFacts(draft.facts);
   const groups = useMemo(
     () => [
       {
@@ -1381,7 +1448,7 @@ function ReviewStep({
         rows: [
           ["Authorized to work in the US", yesno(f.work_authorization_us)],
           ["Requires sponsorship", yesno(f.requires_future_sponsorship_us)],
-          ["Status", String(f.current_immigration_status_US || "Not answered")],
+          ["Status", String(f.current_immigration_status_us || "Not answered")],
           ["18 or older", yesno(f.over_18)],
         ],
       },

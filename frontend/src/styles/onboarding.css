@@ -745,7 +745,4 @@
   .ax-ob-body .ax-qf-row {
     grid-template-columns: minmax(0, 1fr);
   }
-  .ax-ob-progress-name {
-    display: none;
-  }
 }
