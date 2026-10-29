@@ -327,8 +327,16 @@ def discover_due(
         and j.get("score") is None
         and not gated(j, policy)
     ]
-    if pipeline < policy.owners * policy.classify_lookahead:
-        ids = unclassified[: policy.owners * policy.classify_lookahead * 2]
+    # Supply is sized to the slots, not a fixed trickle: every owner keeps `classify_lookahead` eligible jobs ahead,
+    # and every FREE owner needs that many more at once. Only about a third of ranked postings are eligible, so the
+    # shortfall is multiplied up to the postings that must be ranked. 3,225 fresh postings sat unclassified because
+    # ~4 eligible jobs per owner was the whole target and 48 postings the whole plan (2026-10-28).
+    free = max(0, cap.owners_total - cap.owners_busy)
+    target = (policy.owners + free) * policy.classify_lookahead
+    if pipeline < target:
+        wanted = -(-(target - pipeline) * 100 // int(policy.classify_yield * 100))
+        wanted = max(policy.classify_batch, min(wanted, policy.classify_batch * policy.classify_batches_per_tick))
+        ids = unclassified[:wanted]
         work.classify = [
             ids[i : i + policy.classify_batch] for i in range(0, len(ids), policy.classify_batch)
         ]

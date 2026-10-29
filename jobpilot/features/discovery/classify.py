@@ -49,10 +49,13 @@ def cache_key(job: dict, pversion: str) -> str:
 
 def existing_rank_adapter(db, config) -> ClassifyFn:
     """Uses the application's batch ranker (which also writes Job.status/score)."""
-    from ...discovery import rank_batch
+    import asyncio
+
+    from ...discovery import rank_batch_in_thread
 
     async def run(job_ids):
-        rows = await rank_batch(db, config, job_ids)
+        # Off the shared loop: a batch reads every resume, fetches postings and writes 24 rows synchronously.
+        rows = await asyncio.to_thread(rank_batch_in_thread, db, config, job_ids)
         return {r["job_id"]: r for r in rows}
 
     return run

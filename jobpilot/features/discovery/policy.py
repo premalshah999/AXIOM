@@ -23,7 +23,9 @@ class DiscoveryPolicy(BaseModel):
     classify_batch: int = Field(default=24, ge=1, le=24)
     owners: int = Field(default=7, ge=1, le=7)
     tailor_lookahead: int = Field(default=2, ge=1, le=6)  # ready resumes kept ahead per owner
-    classify_lookahead: int = Field(default=4, ge=1, le=20)  # eligible jobs kept ahead per owner
+    classify_lookahead: int = Field(default=4, ge=1, le=20)  # eligible jobs kept ahead per owner (and per free one)
+    classify_yield: float = Field(default=0.35, gt=0, le=1)  # share of ranked postings that end up eligible
+    classify_batches_per_tick: int = Field(default=3, ge=1, le=6)  # model batches planned at once
     source_backoff_minutes: int = Field(default=15, ge=1)
     source_backoff_max_hours: int = Field(default=24, ge=1)
     classify_retry_minutes: int = Field(default=20, ge=1)

@@ -141,7 +141,10 @@ async def classification_workflow(job_ids: list[str]):
     from .features.discovery import classify, existing_rank_adapter, policy_for
     from .execution_services import prepare_due
 
-    for offset in range(0, len(job_ids), 6):
+    policy = policy_for(SERVICE.db)
+    # One model call ranks up to `classify_batch` (24) postings: six at a time paid the shared profile and resumes
+    # (about half of each prompt) four times over and ranked ~10 jobs a minute (2026-10-28).
+    for offset in range(0, len(job_ids), policy.classify_batch):
         if SERVICE.db.get_setting("control", {}).get("paused"):
             return
         with SERVICE.db.session() as s:
@@ -152,7 +155,7 @@ async def classification_workflow(job_ids: list[str]):
                 }
                 for j in s.scalars(
                     select(Job).where(
-                        Job.id.in_(job_ids[offset : offset + 6]), Job.status == "new", Job.score.is_(None)
+                        Job.id.in_(job_ids[offset : offset + policy.classify_batch]), Job.status == "new", Job.score.is_(None)
                     )
                 )
             ]
@@ -162,7 +165,7 @@ async def classification_workflow(job_ids: list[str]):
             SERVICE.db,
             jobs,
             existing_rank_adapter(SERVICE.db, SERVICE.config),
-            policy_for(SERVICE.db),
+            policy,
             SERVICE.db.get_setting("profile", {}),
         )
         await prepare_due(SERVICE)
@@ -174,7 +177,7 @@ async def enqueue_classification(job_ids):
         return False
     try:
         with SetEnqueueOptions(deduplication_id="autonomous-classification"):
-            await DBOS.enqueue_workflow_async("classification", classification_workflow, job_ids[:24])
+            await DBOS.enqueue_workflow_async("classification", classification_workflow, job_ids[:72])
         return True
     except DBOSQueueDeduplicatedError:
         return False
