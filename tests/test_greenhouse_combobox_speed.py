@@ -90,3 +90,45 @@ async def test_a_static_list_still_commits_and_reads_back(page, value, expected)
     got, error, _ = await pick(page, markup("degree--0", "Degree", degrees), "degree--0", value)
     assert got == expected, error
     assert await page.evaluate("window.picked") == expected
+
+
+MAJORS = ["Art", "Computer Science", "Mathematics", "Statistics & Decision Theory"]
+
+
+def major_pick(value, fallback):
+    def pick_major(texts):
+        for wanted in (value, fallback):
+            named = [t for t in texts if t == wanted]
+            if len(named) == 1:
+                return named[0]
+        return None
+
+    return pick_major
+
+
+async def test_a_major_the_search_lacks_commits_the_fallback_majors_search_result(page):
+    # Greenhouse education "Discipline" (SpaceX, Affirm, Perpay, DV Trading, 2026-10-29): "Data Science" finds nothing,
+    # the fallback search lists "Computer Science", and only the recorded major was matched against that list.
+    async def no_guess(texts):
+        return None
+
+    html = markup("discipline--0", "Discipline", MAJORS, remote=True)
+    got, error, _ = await pick(
+        page, html, "discipline--0", "Data Science", choose=no_guess,
+        search_queries=["Computer Science"], resolve=major_pick("Data Science", "Computer Science"),
+    )
+    assert got == "Computer Science", error
+    assert await page.evaluate("window.picked") == "Computer Science"
+
+
+async def test_a_fallback_major_search_never_picks_a_merely_similar_major(page):
+    async def no_guess(texts):
+        return None
+
+    html = markup("discipline--0", "Discipline", MAJORS, remote=True)
+    got, error, _ = await pick(
+        page, html, "discipline--0", "Data Science", choose=no_guess,
+        search_queries=["Statistics"], resolve=major_pick("Data Science", "Statistics"),
+    )
+    assert got is None and "No matching option" in error
+    assert await page.evaluate("window.picked") is None

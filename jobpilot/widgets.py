@@ -2963,6 +2963,13 @@ async def combobox(
             await el.press_sequentially(alias, delay=12, timeout=4000)
             opts = await wait_options(frame, scope, timeout=2, query=alias, owner=el)
             choice = best_option(eligible(opts), value)
+            if not choice and resolve and opts:
+                # The caller's deterministic pick (the recorded major, else the fallback major) decides among the
+                # alias search's rows too: Greenhouse's Discipline search for "Data Science" finds nothing, the
+                # fallback search lists "Computer Science", and only best_option(value) was asked, so Affirm, SpaceX,
+                # Perpay and DV Trading stopped at "No matching option is offered" (2026-10-29).
+                picked = resolve([o["text"] for o in eligible(opts)])
+                choice = next((o for o in eligible(opts) if o["text"] == picked), None) if picked else None
             if choice:
                 break
     if not choice and choose and opts and not employer_scope:
