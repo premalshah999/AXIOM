@@ -1310,7 +1310,25 @@ class Adapter:
         )
 
     async def on_reset_password(self, obs):
-        """A reset dialog/page that asks for the account email (e.g. after Forgot password)."""
+        """A reset dialog/page that asks for the account email (e.g. after Forgot password). A rerun that reopens on it
+        after this account's reset already went unanswered registers once instead: Bain's and MetLife's Avature runs
+        resumed on /ResetPassword and requested another reset that never came, every time (2026-10-28)."""
+        url = self.auth_url(obs)
+        record = self.accounts.record(url)
+        if (
+            record.get("state") in {"reset_requested", "password_unknown", "credentials_rejected"}
+            and not record.get("confirmed_at")
+            and reset_proven(record)
+            and time.time() - float(record.get("reset_requested_at") or 0) > UNANSWERED_RESET_SECONDS
+            and not create_spent(record)
+            and self.accounts.may_create
+            and self.attempts["create"] == 0
+            and await self.switch(obs, CREATE_LINK)
+        ):
+            self.accounts.mark(url, "no_account", self.accounts.saved(url) or self.accounts.credentials(url),
+                               absent_create_at=now())
+            self.emit("account", "The reset went unanswered; opened the registration route once")
+            return None
         return await self.request_reset(obs, "The password reset was requested from this page")
 
     async def on_form(self, obs):

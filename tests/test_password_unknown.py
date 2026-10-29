@@ -199,3 +199,22 @@ def test_a_create_spent_hours_ago_is_offered_again():
     assert create_spent({"absent_create_at": recent})
     assert not create_spent({"absent_create_at": old})
     assert not create_spent({})
+
+
+@pytest.mark.parametrize("minutes_ago,registers", [(30, True), (2, False)])
+async def test_a_rerun_reopened_on_the_reset_page_registers_after_an_unanswered_reset(service, minutes_ago, registers):
+    """Bain and MetLife (Avature, 2026-10-28) resumed on /ResetPassword and requested another reset that never came."""
+    from unittest.mock import AsyncMock
+
+    obs = observation(URL, password=False)
+    obs["controls"] += [{"id": "register", "label": "Register", "href": ""}]
+    value = adapter(service, obs)
+    value.accounts.mark(URL, "reset_requested", {"email": "alex@example.test", "password": "Synthetic9!x"},
+                        reset_requested_at=time.time() - minutes_ago * 60, reset_submitted_at=CONFIRMED)
+    value.auth_url = lambda obs: URL
+    value.switch = AsyncMock(return_value=True)
+    value.request_reset = AsyncMock(return_value=None)
+    assert await Adapter.on_reset_password(value, obs) is None  # Avature and others use the base handler.
+    assert value.switch.await_count == (1 if registers else 0)
+    assert value.request_reset.await_count == (0 if registers else 1)
+    assert bool(value.accounts.record(URL).get("absent_create_at")) is registers
