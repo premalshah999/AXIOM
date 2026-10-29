@@ -1,9 +1,12 @@
+import { X } from "lucide-react";
 import { useState } from "react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useAction } from "./hooks";
 import { appliedState } from "./model";
-import { linkHost, plural, StatePill } from "./ui";
+import { linkHost, plural } from "./ui";
+import { Button } from "./ui/index";
+import { StatusPill } from "./worktools";
 
 type LinkResult = {
   url: string;
@@ -25,19 +28,12 @@ export function linksIn(text: string) {
 // email), counted by the server like every other figure. A second list of the same jobs here, polled every 5 s with
 // its own numbers, disagreed with the chips below it (owner, 2026-10-23: "so confusing for the job pipeline part").
 export function QueuePanel() {
-  const { refresh, counts, go, openJob, markJobs } = useWorkspace();
+  const { refresh, openJob, markJobs } = useWorkspace();
   const action = useAction();
   const [text, setText] = useState("");
   const [focused, setFocused] = useState(false);
   const [results, setResults] = useState<LinkResult[]>([]);
   const links = linksIn(text);
-  const n = (state: string) => counts.states[state] ?? 0;
-  const parts = [
-    [n("running") + n("submitting"), "applying"],
-    [n("queued"), "queued"],
-    [n("pending:waiting"), "waiting to start"],
-    [n("waiting_email"), "waiting for an email"],
-  ] as const;
 
   const submit = async () => {
     if (!links.length) return;
@@ -59,72 +55,67 @@ export function QueuePanel() {
   };
 
   return (
-    <section className="block queue" aria-labelledby="queue-title">
-      <header className="block-head">
-        <h2 id="queue-title">Queue</h2>
-        <button
-          className="link sm"
-          onClick={() => go({ view: "jobs", tab: "pipeline", filter: "active" })}
-        >
-          {parts.map(([count, label]) => `${count} ${label}`).join(" · ")}
-        </button>
-      </header>
+    <section className="ax-queue-box" aria-label="Add job links to the queue">
       <form
-        className="queue-drop"
+        className="ax-queue"
         onSubmit={(e) => {
           e.preventDefault();
           submit();
         }}
       >
-        <label className="field">
-          <span className="sr-only">Add job links</span>
-          {/* One line until used: the box took a fifth of the Pipeline above the list (owner 2026-10-28: "cluttered"). */}
-          <textarea
-            rows={text || focused ? 3 : 1}
-            placeholder="Paste job links to add them to the queue"
-            value={text}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-          />
-          {(links.length > 0 || focused) && (
-            <span className="field-hint">
-              {links.length
-                ? `${plural(links.length, "link")} found${links.length > 25 ? "; the first 25 are added" : ""}`
-                : "Your own picks: added without the fit check. Duplicates and finished applications are protected."}
-            </span>
-          )}
-        </label>
-        <button className="btn primary" type="submit" disabled={!links.length || action.pending === "links"}>
-          {action.pending === "links" ? "Adding…" : "Add to queue"}
-        </button>
+        {/* One line until used: the box took a fifth of the Pipeline above the list (owner 2026-10-28: "cluttered"). */}
+        <textarea
+          className="ax-control"
+          aria-label="Job links to add to the queue"
+          rows={text || focused ? 3 : 1}
+          placeholder="Paste job links to add them to the queue"
+          value={text}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+        />
+        <Button variant="primary" type="submit" disabled={!links.length} loading={action.pending === "links"}>
+          Add to queue
+        </Button>
       </form>
+      {(links.length > 0 || focused) && (
+        <p className="ax-hint">
+          {links.length
+            ? `${plural(links.length, "link")} found${links.length > 25 ? "; the first 25 are added" : ""}. Ctrl or ⌘ Enter adds them.`
+            : "Your own picks: added without the fit check. Duplicates and finished applications are protected."}
+        </p>
+      )}
       {results.length > 0 && (
-        <ul className="list queue-results" aria-label="Pasted links">
+        <ul className="ax-outcomes" aria-label="Pasted links">
           {results.map((r) => (
-            <li key={r.url}>
+            <li key={r.url} className="ax-outcome">
               <span>
                 {r.job_id ? (
-                  <button className="link job-open" onClick={() => openJob(r.job_id!)}>
+                  <button type="button" className="ax-link" onClick={() => openJob(r.job_id!)}>
                     <strong>{linkHost(r.url) || r.url}</strong>
                   </button>
                 ) : (
                   <strong>{linkHost(r.url) || r.url}</strong>
                 )}
-                <span className="muted">{r.message || ""}</span>
+                <span className="ax-note"> {r.message || ""}</span>
               </span>
-              <StatePill
+              <StatusPill
                 state={r.state === "refused" ? "failed" : appliedState(r.state)}
                 label={r.state === "refused" ? "Not added" : undefined}
               />
             </li>
           ))}
+          <li className="ax-outcome-end">
+            <button type="button" className="ax-icon-btn" aria-label="Dismiss the results" onClick={() => setResults([])}>
+              <X size={16} />
+            </button>
+          </li>
         </ul>
       )}
     </section>

@@ -1,5 +1,5 @@
+import { Download, ExternalLink } from "lucide-react";
 import { useMemo } from "react";
-import { Download, Search } from "lucide-react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useDraft, useNow, usePoll } from "./hooks";
@@ -7,7 +7,15 @@ import { evidenceLabel } from "./model";
 import { usePipelinePage } from "./pipeline";
 import { Pagination, usePagination } from "./pagination";
 import type { Success } from "./types";
-import { ago, Empty, ErrorLine, External, Loading, plural, stamp, StatePill } from "./ui";
+import { ArchiveList } from "./archive";
+import { useSelection } from "./bulk";
+import { RowActions } from "./jobactions";
+import type { JobRow } from "./model";
+import { PipelineBulk } from "./pipelinebulk";
+import { TopActions } from "./shell/Shell";
+import { ago, linkHost, plural, stamp, urlRole } from "./ui";
+import { Button, Empty, RouteTabs, Table, type Column } from "./ui/index";
+import { JobCell, Notice, Note, SearchBox, StatusPill } from "./worktools";
 
 const EVIDENCE = [
   ["all", "Any evidence"],
@@ -55,8 +63,31 @@ function csv(rows: Success[]) {
   window.setTimeout(() => URL.revokeObjectURL(href), 1000);
 }
 
-export function LedgerView() {
-  const { snapshot, counts, openJob } = useWorkspace();
+const TABS = ["confirmed", "unconfirmed", "archive"];
+
+// Applications: what was sent. Confirmed applications are the ledger (trustworthy evidence only); Unconfirmed are
+// submissions with no receipt, protected from any retry; Archive keeps earlier failures. Discovered and the pipeline
+// are under Jobs.
+export function LedgerView({ forceTab }: { forceTab?: string }) {
+  const { route, counts } = useWorkspace();
+  const tab = forceTab || (TABS.includes(route.tab || "") ? route.tab! : "confirmed");
+  const tabs = [
+    { id: "confirmed", label: "Confirmed" },
+    { id: "unconfirmed", label: "Unconfirmed", count: counts.groups.unconfirmed },
+    { id: "archive", label: "Archive" },
+  ];
+  return (
+    <div className="ax-page ax-page-fill">
+      <RouteTabs view="ledger" tabs={tabs} label="Applications" current={tab} />
+      {tab === "confirmed" && <Confirmed />}
+      {tab === "unconfirmed" && <Unconfirmed />}
+      {tab === "archive" && <ArchiveList />}
+    </div>
+  );
+}
+
+function Confirmed() {
+  const { snapshot, openJob } = useWorkspace();
   const now = useNow(60000);
   const ledger = usePoll<{ applications: Success[] }>(
     (signal) => api("/successful-applications", "GET", undefined, signal),
@@ -64,151 +95,191 @@ export function LedgerView() {
   );
   const [query, setQuery] = useDraft("ledger-query", "");
   const [filter, setFilter] = useDraft("ledger-evidence", "all");
-  const all = ledger.data?.applications || [];
+  const all = useMemo(() => ledger.data?.applications || [], [ledger.data]);
   const q = query.trim().toLowerCase();
   const shown = useMemo(
     () =>
       all.filter(
-        (r) =>
-          matches(r, filter) &&
-          (!q || `${r.company} ${r.title} ${r.ats}`.toLowerCase().includes(q)),
+        (r) => matches(r, filter) && (!q || `${r.company} ${r.title} ${r.ats}`.toLowerCase().includes(q)),
       ),
     [all, filter, q],
   );
   const paging = usePagination(shown, filter + "|" + q, 25);
   const rt = snapshot.autopilot_runtime || {};
-  // Every unconfirmed submission from the server (the browser only had the newest 1,000 jobs to look through).
-  const unconfirmed = usePipelinePage("unconfirmed", "", 100).rows;
-  const unconfirmedTotal = counts.groups.unconfirmed ?? unconfirmed.length;
+  const columns: Column<Success>[] = [
+    {
+      key: "job",
+      header: "Job",
+      width: 440,
+      truncate: true,
+      cell: (r) => <JobCell company={r.company} role={r.title} onOpen={() => openJob(r.job_id, r.run_id)} />,
+    },
+    { key: "ats", header: "Platform", cell: (r) => <Note>{r.ats}</Note> },
+    {
+      key: "applied",
+      header: "Applied",
+      cell: (r) => (
+        <time dateTime={r.applied_at} title={stamp(r.applied_at)}>
+          {ago(r.applied_at, now)}
+        </time>
+      ),
+    },
+    { key: "evidence", header: "Evidence", cell: (r) => <StatusPill state="confirmed" label={evidenceLabel(r)} /> },
+    {
+      key: "posting",
+      header: <span className="sr-only">Posting</span>,
+      width: "1%",
+      cell: (r) => (
+        <a
+          className="ax-link"
+          href={r.url}
+          target="_blank"
+          rel="noreferrer noopener"
+          onClick={(e) => e.stopPropagation()}
+          title={`Open the posting (${linkHost(r.url)})`}
+        >
+          Posting <ExternalLink size={12} aria-hidden="true" style={{ verticalAlign: "-1px" }} />
+          <span className="sr-only"> (opens in a new tab)</span>
+        </a>
+      ),
+    },
+  ];
   return (
-    <div className="page">
-      <header className="page-head">
-        <div>
-          <h1>Ledger</h1>
-          <p className="page-sub">
-            Every application with trustworthy evidence: a job-specific page
-            acknowledgement or an authenticated employer receipt.
-          </p>
-        </div>
-      </header>
-      <p className="ledger-summary">
-        <strong>{ledger.data ? plural(all.length, "confirmed application") : "…"}</strong>{" "}
-        across all history · {snapshot.stats.confirmed_today} today
-        {rt.state === "active" && (
-          <>
-            {" "}
-            · {rt.confirmed ?? 0} of {rt.target ?? 100} for this batch since it started
-          </>
-        )}
-      </p>
-      <div className="toolbar">
-        <label className="search">
-          <Search size={15} aria-hidden="true" />
-          <input
-            type="search"
-            aria-label="Search confirmed applications"
-            placeholder="Company, role or platform"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </label>
-        <select aria-label="Evidence" value={filter} onChange={(e) => setFilter(e.target.value)}>
+    <>
+      <TopActions>
+        <Button size="sm" disabled={!shown.length} icon={<Download size={14} aria-hidden="true" />} onClick={() => csv(shown)}>
+          Export CSV{shown.length !== all.length ? ` (${shown.length})` : ""}
+        </Button>
+      </TopActions>
+      <div className="ax-toolbar">
+        <SearchBox value={query} onChange={setQuery} label="Search confirmed applications" placeholder="Company, role or platform" />
+        <select className="ax-control ax-inline-select" aria-label="Evidence" value={filter} onChange={(e) => setFilter(e.target.value)}>
           {EVIDENCE.map(([id, label]) => (
             <option key={id} value={id}>
               {label}
             </option>
           ))}
         </select>
-        <button
-          className="btn sm toolbar-end"
-          disabled={!shown.length}
-          onClick={() => csv(shown)}
-        >
-          <Download size={14} aria-hidden="true" />
-          Export CSV{shown.length !== all.length ? ` (${shown.length})` : ""}
-        </button>
+        <span className="ax-note ax-toolbar-note">
+          {ledger.data ? plural(all.length, "confirmed application") : "…"} across all history · {snapshot.stats.confirmed_today} today
+          {rt.state === "active" && ` · ${rt.confirmed ?? 0} of ${rt.target ?? 100} this batch`}. Each has a page
+          acknowledgement or an authenticated employer receipt.
+        </span>
       </div>
-      <ErrorLine error={ledger.error} retry={ledger.refresh} />
-      {!ledger.data && !ledger.error ? (
-        <Loading label="Loading confirmed applications…" />
-      ) : shown.length ? (
-        <>
-          <div className="table-wrap">
-            <table className="table ledger-table">
-              <thead>
-                <tr>
-                  <th scope="col">Company</th>
-                  <th scope="col">Role</th>
-                  <th scope="col">Applied</th>
-                  <th scope="col">Evidence</th>
-                  <th scope="col">Posting</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paging.items.map((r) => (
-                  <tr key={r.job_id}>
-                    <td className="cell-company">
-                      <button className="link" onClick={() => openJob(r.job_id, r.run_id)}>
-                        <strong>{r.company}</strong>
-                      </button>
-                      <small className="muted">{r.ats}</small>
-                    </td>
-                    <td className="cell-role">{r.title}</td>
-                    <td data-label="Applied">
-                      <time dateTime={r.applied_at} title={stamp(r.applied_at)}>
-                        {ago(r.applied_at, now)}
-                      </time>
-                    </td>
-                    <td data-label="Evidence">
-                      <span className="evidence-tag">{evidenceLabel(r)}</span>
-                    </td>
-                    <td data-label="Posting">
-                      <External href={r.url} className="link">
-                        Open
-                      </External>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <Pagination paging={paging} label="Ledger pages" />
-        </>
-      ) : (
-        <Empty title={all.length ? "No confirmed applications match" : "No confirmed applications yet"}>
-          {all.length
-            ? "Clear the search or evidence filter."
-            : "An application lands here once the employer's page acknowledges it or an authenticated receipt email arrives."}
-        </Empty>
+      {ledger.error && (
+        <Notice
+          tone="bad"
+          action={
+            <Button size="sm" onClick={() => ledger.refresh()}>
+              Try again
+            </Button>
+          }
+        >
+          {ledger.error.message}
+        </Notice>
       )}
-      {unconfirmed.length > 0 && (
-        <section className="block unconfirmed" aria-labelledby="unconfirmed-title">
-          <header className="block-head">
-            <h2 id="unconfirmed-title">Unconfirmed submissions</h2>
-            <span className="muted">
-              {plural(unconfirmedTotal, "job")} · protected
-              {unconfirmedTotal > unconfirmed.length && ` · newest ${unconfirmed.length} shown`}
-            </span>
-          </header>
-          <p className="block-note">
-            Submit was attempted but no acknowledgement or receipt was captured.
-            They may have been sent, so they're excluded from the ledger and never
-            retried. Open one to check email or record what you verified.
-          </p>
-          <ul className="feed">
-            {unconfirmed.map((r) => (
-              <li key={r.job.id}>
-                <time dateTime={r.updated}>{ago(r.updated, now)}</time>
-                <StatePill state="submission_unknown" />
-                <button className="feed-job link" onClick={() => openJob(r.job.id, r.run?.id)}>
-                  <strong>{r.job.company}</strong>
-                  <span>{r.job.title}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
+      <Table
+        fill
+        label="Confirmed applications"
+        columns={columns}
+        rows={paging.items}
+        rowKey={(r) => r.job_id}
+        onRowClick={(r) => openJob(r.job_id, r.run_id)}
+        loading={!ledger.data && !ledger.error}
+        empty={
+          <Empty
+            title={all.length ? "No confirmed applications match" : "No confirmed applications yet"}
+            hint={
+              all.length
+                ? "Clear the search or the evidence filter."
+                : "An application lands here once the employer's page acknowledges it or an authenticated receipt email arrives."
+            }
+          />
+        }
+      />
+      <Pagination paging={paging} label="Confirmed pages" />
+    </>
+  );
+}
+
+// Every unconfirmed submission, from the server (the browser only had the newest 1,000 jobs to look through).
+function Unconfirmed() {
+  const { openJob, go } = useWorkspace();
+  const now = useNow(30000);
+  const list = usePipelinePage("unconfirmed", "", 25);
+  const selection = useSelection(200);
+  const columns: Column<JobRow>[] = [
+    {
+      key: "job",
+      header: "Job",
+      width: 440,
+      truncate: true,
+      cell: (r) => (
+        <JobCell
+          company={r.job.company || linkHost(r.job.url) || "Employer"}
+          role={r.job.title || urlRole(r.job.url)}
+          onOpen={() => openJob(r.job.id, r.run?.id)}
+        />
+      ),
+    },
+    { key: "status", header: "Status", cell: (r) => <StatusPill state={r.state} /> },
+    { key: "detail", header: "Detail", width: 300, truncate: true, cell: (r) => (r.run?.reason ? <Note>{r.run.reason}</Note> : null) },
+    { key: "ats", header: "Platform", cell: (r) => <Note>{r.job.ats}</Note> },
+    {
+      key: "updated",
+      header: "Updated",
+      cell: (r) => (
+        <time dateTime={r.updated} title={stamp(r.updated)}>
+          {ago(r.updated, now)}
+        </time>
+      ),
+    },
+    { key: "act", header: <span className="sr-only">Actions</span>, width: "1%", cell: (r) => <RowActions row={r} promote="confirm" /> },
+  ];
+  return (
+    <>
+      <Notice>
+        Submit was attempted but no acknowledgement or receipt was captured. They may have been sent, so they are
+        excluded from Confirmed and never retried. Open one to check email or record what you verified.
+      </Notice>
+      {list.error && (
+        <Notice
+          tone="bad"
+          action={
+            <Button size="sm" onClick={() => list.refresh()}>
+              Try again
+            </Button>
+          }
+        >
+          {list.error.message}
+        </Notice>
       )}
-    </div>
+      <Table
+        fill
+        label="Unconfirmed submissions"
+        columns={columns}
+        rows={list.rows}
+        rowKey={(r) => r.job.id}
+        onRowClick={(r) => openJob(r.job.id, r.run?.id)}
+        selected={selection.chosen}
+        onSelectedChange={selection.replace}
+        rowLabel={(r) => r.job.company || "job"}
+        loading={!list.loaded}
+        busy={list.loaded && !list.current}
+        bulk={<PipelineBulk selection={selection} rows={list.rows} filter="unconfirmed" query="" total={list.paging.total} />}
+        empty={
+          <Empty
+            title="No unconfirmed submissions"
+            hint="Every submission so far has a receipt or acknowledgement."
+            action={
+              <Button size="sm" onClick={() => go({ view: "ledger" })}>
+                See confirmed applications
+              </Button>
+            }
+          />
+        }
+      />
+      <Pagination paging={list.paging} label="Unconfirmed pages" />
+    </>
   );
 }
