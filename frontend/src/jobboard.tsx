@@ -344,6 +344,14 @@ export function DiscoveredJobs() {
 // A listing in one of these states is already owned or protected; "pending:" is an Apply just made.
 const locked = (status: string) => LOCKED.has(status) || status.startsWith("pending:");
 
+// "Why isn't this applying?": the batch's last reason for a Ready job it did not start. The server keeps codes such
+// as `generic_careers_page` as the reason for some guards, so they are read as words.
+function whyNot(r: NonNullable<Listing["rejection"]>) {
+  const text = /\s/.test(r.reason) ? r.reason : r.reason.replace(/_/g, " ");
+  const label = r.outcome === "deferred" || !r.outcome ? "Waiting" : "Not started";
+  return `${label}: ${text.charAt(0).toLowerCase()}${text.slice(1)}`;
+}
+
 function BoardRow({
   job: j,
   minimum,
@@ -397,6 +405,14 @@ function BoardRow({
             .filter(Boolean)
             .join(" · ")}
         </small>
+        {j.rejection && j.status === "ready" && (
+          <small
+            className="why-not"
+            title={`${j.rejection.code || "reason"} · ${stamp(j.rejection.at)}`}
+          >
+            {whyNot(j.rejection)}
+          </small>
+        )}
       </td>
       <td data-label="Posted">
         <time
@@ -630,6 +646,24 @@ export function DiscoverySettings() {
   );
 }
 
+// "Client error '404 Not Found' for url ..." is "404 Not Found"; the rest is cut to one line.
+function shortError(error: string) {
+  const text = error.replace(/^Source failed: /, "");
+  const status = text.match(/'(\d{3}[^']*)'/);
+  if (status) return status[1];
+  if (/could not be resolved/i.test(text)) return "Address not found";
+  if (/CERTIFICATE_VERIFY_FAILED/.test(text)) return "Certificate error";
+  return text.length > 90 ? text.slice(0, 90) + "…" : text;
+}
+
+function until(value: string | null | undefined, now: number) {
+  const s = value ? (new Date(value).getTime() - now) / 1000 : NaN;
+  if (Number.isNaN(s) || s <= 0) return "soon";
+  if (s < 3600) return `in ${Math.max(1, Math.round(s / 60))}m`;
+  if (s < 86400) return `in ${Math.round(s / 3600)}h`;
+  return `in ${Math.round(s / 86400)}d`;
+}
+
 function EmployerBoards({
   board: b,
   reload,
@@ -644,10 +678,37 @@ function EmployerBoards({
   const [kind, setKind] = useDraft("board-add-kind", "greenhouse");
   const now = useNow(30000);
   const q = query.trim().toLowerCase();
+  const [failingOnly, setFailingOnly] = useState(false);
   const errors = b.sources.filter((s) => s.error || s.scan?.state === "error");
-  const shown = b.sources.filter(
-    (s) => !q || `${s.name} ${s.kind} ${s.url}`.toLowerCase().includes(q),
-  );
+  // Boards that failed their recent scans, worst first, so the dead ones can be turned off.
+  const failing = (s: (typeof b.sources)[number]) =>
+    s.enabled && (s.health?.failures ?? 0) > 0;
+  const shown = b.sources
+    .filter(
+      (s) =>
+        (!failingOnly || failing(s)) &&
+        (!q || `${s.name} ${s.kind} ${s.url}`.toLowerCase().includes(q)),
+    )
+    .sort((a, c) =>
+      failingOnly ? (c.health?.failures ?? 0) - (a.health?.failures ?? 0) : 0,
+    );
+  const health = b.source_health;
+  const off = (s: (typeof b.sources)[number], enabled: boolean) =>
+    run(
+      "t" + s.id,
+      async () => {
+        await api("/sources/" + s.id, "PUT", {
+          name: s.name,
+          kind: s.kind,
+          url: s.url,
+          cron: s.cron,
+          enabled,
+          auto_queue: s.auto_queue,
+        });
+        await reload();
+      },
+      enabled ? "Board turned on." : "Board turned off.",
+    );
   const paging = usePagination(shown, q, 10);
   return (
     <section className="panel">
@@ -657,9 +718,13 @@ function EmployerBoards({
           {plural(b.source_count, "board")} checked every{" "}
           {b.settings.interval_hours}{" "}
           {b.settings.interval_hours === 1 ? "hour" : "hours"}
-          {errors.length
-            ? ` · ${errors.length} couldn't be read last time`
-            : ""}
+          {health
+            ? health.failing
+              ? ` · ${health.failing} failing${health.dead ? `, ${health.dead} for 3 or more checks in a row` : ""}`
+              : ""
+            : errors.length
+              ? ` · ${errors.length} couldn't be read last time`
+              : ""}
           .
         </p>
       </header>
@@ -734,6 +799,18 @@ function EmployerBoards({
             onChange={(e) => setQuery(e.target.value)}
           />
         </label>
+        {!!health?.failing && (
+          <div className="chips" role="group" aria-label="Filter boards">
+            <button
+              className="chip"
+              aria-pressed={failingOnly}
+              onClick={() => setFailingOnly(!failingOnly)}
+            >
+              Failing
+              <span className="chip-n">{health.failing}</span>
+            </button>
+          </div>
+        )}
       </div>
       {shown.length ? (
         <>
@@ -744,6 +821,9 @@ function EmployerBoards({
                   <th scope="col">Board</th>
                   <th scope="col">Last check</th>
                   <th scope="col">Result</th>
+                  <th scope="col">
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -763,17 +843,39 @@ function EmployerBoards({
                       <td data-label="Result">
                         {checking ? (
                           <span className="muted">Checking…</span>
+                        ) : !s.enabled ? (
+                          <span className="muted">Turned off</span>
                         ) : failed ? (
                           <span className="warn-text">
                             {s.scan?.error ||
-                              s.error ||
+                              shortError(s.error) ||
                               "Couldn't read this board"}
+                            {(s.health?.failures ?? 0) > 1 && (
+                              <small className="muted">
+                                {" "}
+                                failed {s.health!.failures} checks in a row ·
+                                next try {until(s.next_run, now)}
+                              </small>
+                            )}
                           </span>
                         ) : (
                           <span>
                             {s.scan?.matched ?? 0} matches ·{" "}
                             {s.scan?.checked ?? 0} postings checked
                           </span>
+                        )}
+                      </td>
+                      <td className="cell-actions">
+                        {(failing(s) || !s.enabled) && s.kind !== "web_search" && (
+                          <div className="row-actions">
+                            <button
+                              className="btn sm"
+                              disabled={pending !== null}
+                              onClick={() => off(s, !s.enabled)}
+                            >
+                              {s.enabled ? "Turn off" : "Turn on"}
+                            </button>
+                          </div>
                         )}
                       </td>
                     </tr>

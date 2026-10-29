@@ -172,6 +172,25 @@ async def start_autonomous(service, target=100, refresh_sources=True):
     }
 
 
+def confirmed_since(session, started_at):
+    """Distinct non-demo jobs with a confirmed, evidence-settled run created at or after `started_at`, any origin."""
+    if not started_at:
+        return set()
+    return set(
+        session.scalars(
+            select(Run.job_id)
+            .distinct()
+            .join(Job, Job.id == Run.job_id)
+            .where(
+                Run.state == "confirmed",
+                Job.demo.is_(False),
+                Run.created_at >= started_at,
+                Run.receipt["evidence_reconciliation"].as_string().is_distinct_from("pending"),
+            )
+        )
+    )
+
+
 def batch_snapshot(service):
     """Authoritative distinct-job progress, never a count of retry attempts."""
     from .db import JobListing
@@ -205,6 +224,10 @@ def batch_snapshot(service):
                     )
                 )
             )
+        # Goal progress is every distinct job confirmed since the batch started, whoever started it: the owner's
+        # Apply, bulk Apply and apply-many runs are never in run_ids, so the batch showed 220 while 300+ were
+        # confirmed and the owner could not tell whether the goal was met (2026-10-29).
+        confirmed_all = confirmed | confirmed_since(s, batch.get("started_at"))
         batch_jobs = set(latest)
         controls = {
             row.key.removeprefix("job_control:"): row.value.get("state")
@@ -322,7 +345,10 @@ def batch_snapshot(service):
     return {
         "state": state,
         "target": batch.get("target", cfg.batch_target),
-        "confirmed": len(confirmed),
+        "confirmed": len(confirmed_all),
+        # The batch's own share; the rest were started by the owner (Apply, bulk Apply, apply-many).
+        "confirmed_by_batch": len(confirmed),
+        "confirmed_by_owner": len(confirmed_all - confirmed),
         "queued": sum(latest[j] == "queued" for j in batch_jobs),
         "dispatched": batch.get("queued", 0),
         "attempted_jobs": len(batch_jobs),
@@ -332,7 +358,7 @@ def batch_snapshot(service):
         "waiting_email": waiting_email,
         "blocked": blocked,
         "failed": failed,
-        "remaining": max(0, batch.get("target", cfg.batch_target) - len(confirmed)),
+        "remaining": max(0, batch.get("target", cfg.batch_target) - len(confirmed_all)),
         "intake_enabled": intake,
         "intake_reason": reason,
         "next_action": action,

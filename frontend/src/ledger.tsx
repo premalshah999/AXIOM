@@ -97,7 +97,7 @@ export function LedgerView() {
         {rt.state === "active" && (
           <>
             {" "}
-            · this batch counts {rt.confirmed ?? 0} of {rt.target ?? 100} separately
+            · {rt.confirmed ?? 0} of {rt.target ?? 100} for this batch since it started
           </>
         )}
       </p>

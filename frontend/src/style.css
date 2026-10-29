@@ -991,6 +991,9 @@ select {
   margin-top: 3px;
   color: var(--text-3);
 }
+.cell-job > small.why-not {
+  color: var(--text-2);
+}
 .cell-state {
   min-width: 180px;
   max-width: 340px;

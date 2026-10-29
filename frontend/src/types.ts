@@ -247,7 +247,10 @@ export type AutopilotRuntime = {
   application_workers?: ApplicationWorkers;
   state?: string;
   target?: number;
+  // Every distinct job confirmed since the batch started, whoever started it.
   confirmed?: number;
+  confirmed_by_batch?: number;
+  confirmed_by_owner?: number;
   queued?: number;
   dispatched?: number;
   attempted_jobs?: number;
@@ -464,6 +467,13 @@ export type Listing = Job & {
   date_basis: string;
   career_level: string;
   match_reason: string;
+  // Why the batch has not started this job (autopilot.remember_rejection); absent once anything is done to it.
+  rejection?: { reason: string; code?: string; outcome?: string; at?: string };
+};
+export type SourceHealth = {
+  failures: number;
+  last_error: string;
+  last_ok: string | null;
 };
 export type Scan = {
   state?: string;
@@ -477,8 +487,10 @@ export type Scan = {
 };
 export type Board = {
   jobs: Listing[];
-  sources: (Source & { scan: Scan })[];
+  sources: (Source & { scan: Scan; health?: SourceHealth })[];
   source_count: number;
+  // Boards failing their last scans (enabled ones only); dead = three or more in a row.
+  source_health?: { failing: number; dead: number };
   settings: BoardSettings;
   scanning: number;
   last_requested_at: string | null;

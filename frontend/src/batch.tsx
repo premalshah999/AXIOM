@@ -323,6 +323,12 @@ function BatchStatus() {
       {active && (
         <p className="status-meta">
           {batch.started_at && <>Started {day(batch.started_at)} · </>}
+          {!!rt.confirmed_by_owner && (
+            <>
+              {rt.confirmed_by_batch ?? 0} by the batch, {rt.confirmed_by_owner}{" "}
+              you started ·{" "}
+            </>
+          )}
           {plural(rt.attempted_jobs ?? 0, "job")} attempted ·{" "}
           {rt.remaining ?? Math.max(0, target - confirmed)} to go
           {rt.last_tick && <> · checked {ago(rt.last_tick, now)}</>}

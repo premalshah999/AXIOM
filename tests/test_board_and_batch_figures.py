@@ -100,14 +100,49 @@ def test_batch_figures_follow_each_batch_jobs_newest_run(service):
             ]
         )
         s.add(Job(id="j9", identity="outside", url="https://example.test/9", title="Engineer"))
-        # A job outside the batch never counts toward it.
-        s.add(Run(id="other", job_id="j9", state="confirmed", created_at=iso(2)))
-        batch = {"state": "active", "target": 3, "run_ids": ["r0", "r1", "r2", "r3"]}
+        # A job from before the batch started never counts toward it.
+        s.add(Run(id="before", job_id="j9", state="confirmed", created_at=iso(90)))
+        batch = {"state": "active", "target": 3, "started_at": iso(60), "run_ids": ["r0", "r1", "r2", "r3"]}
         s.add(Setting(key="job_board_autopilot", value=batch))
     figures = batch_snapshot(service)
-    assert figures["confirmed"] == 1
+    assert figures["confirmed"] == 1 == figures["confirmed_by_batch"] and figures["confirmed_by_owner"] == 0
     assert (figures["awaiting_answer"], figures["failed"], figures["queued"]) == (1, 1, 1)
     assert figures["attempted_jobs"] == 4 and figures["remaining"] == 2
+
+
+def test_the_goal_counts_every_confirmed_job_since_the_batch_started_whoever_started_it(service):
+    """The batch showed 220 while 300+ were confirmed: the owner's Apply, bulk Apply and apply-many runs are never in
+    run_ids (2026-10-29)."""
+    with service.db.exclusive() as s:
+        for n in range(5):
+            s.add(Job(id=f"c{n}", identity=f"goal-{n}", url=f"https://example.test/{n}", title="Engineer"))
+        s.add(Job(id="demo", identity="goal-demo", url="https://example.test/d", title="Engineer", demo=True))
+        s.add_all(
+            [
+                Run(id="own", job_id="c0", state="confirmed", created_at=iso(30)),
+                # The owner's own Apply, and a retry of the same job: one job, counted once.
+                Run(id="mine1", job_id="c1", state="confirmed", created_at=iso(20)),
+                Run(id="mine1b", job_id="c1", state="confirmed", created_at=iso(10)),
+                Run(id="mine2", job_id="c2", state="confirmed", created_at=iso(5)),
+                # Evidence not settled yet, a failure, a demo job and a job confirmed before the batch: not counted.
+                Run(id="pending", job_id="c3", state="confirmed", created_at=iso(5), receipt={"evidence_reconciliation": "pending"}),
+                Run(id="failed", job_id="c4", state="failed", created_at=iso(5)),
+                Run(id="demo-run", job_id="demo", state="confirmed", created_at=iso(5)),
+                Run(id="old", job_id="c4", state="confirmed", created_at=iso(300)),
+            ]
+        )
+        s.add(Setting(key="job_board_autopilot", value={"state": "active", "target": 4, "started_at": iso(60), "run_ids": ["own"]}))
+    figures = batch_snapshot(service)
+    assert figures["confirmed"] == 3 and figures["confirmed_by_batch"] == 1 and figures["confirmed_by_owner"] == 2
+    assert figures["remaining"] == 1
+
+
+def test_a_batch_without_a_start_time_counts_only_its_own_runs(service):
+    with service.db.exclusive() as s:
+        s.add_all([Job(id=f"d{n}", identity=f"nostart-{n}", url=f"https://example.test/{n}", title="Engineer") for n in range(2)])
+        s.add_all([Run(id="a", job_id="d0", state="confirmed", created_at=iso(3)), Run(id="b", job_id="d1", state="confirmed", created_at=iso(3))])
+        s.add(Setting(key="job_board_autopilot", value={"state": "active", "target": 3, "run_ids": ["a"]}))
+    assert batch_snapshot(service)["confirmed"] == 1
 
 
 def test_the_readiness_block_answers_when_a_fresh_listing_has_no_gate(client, service):
@@ -143,3 +178,46 @@ def test_a_raised_target_applies_to_the_running_batch_and_a_lower_one_never_shri
     assert start_batch(db, 350)["target"] == 350
     assert start_batch(db, 100)["target"] == 350  # A default or older target never cuts the running goal.
     assert db.get_setting("job_board_autopilot")["started_at"] == started["started_at"]  # Never restarted.
+
+
+def test_a_ready_job_the_batch_did_not_start_carries_its_reason_only_while_nothing_has_been_done_to_it(client, service):
+    seed_board(service, n=10)
+    reason = {"reason": "Employer already has 25 confirmed or reserved application(s); limit 25", "code": "company_limit", "outcome": "excluded", "at": iso(1)}
+    # b0001 is not applied to; b0000 has a run; b0003 has a waiting owner Apply: both are in Pipeline, not Discovered.
+    service.db.set_setting("owner_apply:b0003", {"at": iso(), "code": "worker_capacity", "reason": "All workers busy"})
+    service.db.set_setting(
+        "job_board_autopilot",
+        {"state": "active", "target": 5, "run_ids": ["b-run"], "rejections": {"b0001": reason, "b0000": reason, "b0003": reason}},
+    )
+    board = client.get("/api/job-board", params={"include_sources": "false"}).json()
+    carried = {j["id"]: j.get("rejection") for j in board["jobs"]}
+    assert carried["b0001"] == reason and carried["b0002"] is None
+    assert not carried.get("b0000") and not carried.get("b0003")
+    # The batch bookkeeping stays out of the payloads.
+    assert "rejections" not in board["autopilot"]
+    assert "rejections" not in client.get("/api/snapshot", params={"include_sources": "false"}).json()["autopilot"]
+
+
+def test_source_health_counts_boards_that_keep_failing_and_ignores_switched_off_ones(client, service):
+    from jobpilot.db import Source
+    from jobpilot.features.discovery.tables import DcSourceHealth
+
+    ids = []
+    for n in range(3):
+        added = client.post("/api/job-board/sources", json={"name": f"Example {n}", "kind": "greenhouse", "url": f"https://boards.example.test/{n}"})
+        ids.append(added.json()["id"])
+    with service.db.exclusive() as s:
+        s.add_all(
+            [
+                DcSourceHealth(source_id=ids[0], failures=34, last_error="HTTPStatusError"),
+                DcSourceHealth(source_id=ids[1], failures=1, last_error="ConnectTimeout"),
+                DcSourceHealth(source_id=ids[2], failures=9, last_error="HTTPStatusError"),
+            ]
+        )
+        s.get(Source, ids[2]).enabled = False
+    board = client.get("/api/job-board").json()
+    assert board["source_health"] == {"failing": 2, "dead": 1}
+    health = {x["id"]: x["health"] for x in board["sources"]}
+    assert health[ids[0]]["failures"] == 34 and health[ids[0]]["last_error"] == "HTTPStatusError"
+    ok = client.get("/api/job-board", params={"include_sources": "false"}).json()
+    assert ok["sources"] == [] and ok["source_health"] == {"failing": 2, "dead": 1}

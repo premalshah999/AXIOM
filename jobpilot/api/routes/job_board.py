@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from ...db import Job, Run, Source, now
+from ...features.discovery.tables import DcSourceHealth
 from ...discovery import rank_batch
 from ...jobboard import LOCKED, BoardSettings, board_snapshot, fit_of, managed_ids, setup_sources, settings
 from ...network import public_url
@@ -31,6 +32,26 @@ def unapplied(job):
         and not job.get("reserved")
         and job["status"] not in LOCKED
     )
+
+
+# Consecutive failures after which a board is called dead: the back-off (1, 2, 4 days...) has started by the third.
+DEAD_AFTER = 3
+
+
+def source_health(db, sources):
+    """Consecutive scan failures per source (dc_source_health), for Setup › Job board. Each source is annotated in
+    place with `health`; the counts cover the sources given. 450 of 4,263 boards were dead (404/422) on 2026-10-29
+    and only their error text said so."""
+    with db.session() as s:
+        rows = {
+            row.source_id: {"failures": row.failures, "last_error": row.last_error, "last_ok": row.last_ok}
+            for row in s.scalars(select(DcSourceHealth).where(DcSourceHealth.failures > 0))
+        }
+    for source in sources:
+        source["health"] = rows.get(source["id"]) or {"failures": 0, "last_error": "", "last_ok": None}
+    # A board the owner switched off is no longer a problem to show.
+    failing = [s["health"] for s in sources if s["health"]["failures"] and s.get("enabled", True)]
+    return {"failing": len(failing), "dead": sum(row["failures"] >= DEAD_AFTER for row in failing)}
 
 
 def listing_page(jobs, minimum, q, ats, level, fit, page, size):
@@ -106,9 +127,15 @@ def router(service) -> APIRouter:
         from ...reserved import held_ids
 
         held = held_ids(db)
+        # Why the batch has not started a job (autopilot.remember_rejection): only for a job nothing has been done to
+        # yet, so the Discovered list answers "why isn't this applying?" without opening the job (2026-10-29).
+        rejections = db.get_setting("job_board_autopilot", {}).get("rejections") or {}
         for job in board["jobs"]:
             job["reserved"] = job["id"] in held
+            if (why := rejections.get(job["id"])) and unapplied(job):
+                job["rejection"] = why
         board["source_count"] = len(board["sources"])
+        board["source_health"] = source_health(db, board["sources"])
         if not include_sources:
             board["sources"] = []
         board["autopilot"] = {k: v for k, v in board["autopilot"].items() if k not in BATCH_BOOKKEEPING}
