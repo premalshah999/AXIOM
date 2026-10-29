@@ -139,7 +139,7 @@ export function ConnectionSettings() {
     <>
       <p className="ax-lede" style={{ margin: 0 }}>
         Everything the app needs, in one place. Keys are encrypted on this computer and never shown again; use Test to
-        check one. Nothing needs editing in the .env file.
+        check one. Nothing needs editing in the .env file; anything already set there shows as saved.
       </p>
       {!data.model_ready && (
         <div className="ax-notice is-bad" role="alert">
@@ -215,7 +215,6 @@ function ConnField({
   const id = useId();
   const options = f.options ?? [];
   const dirty = value !== undefined;
-  const source = f.source === "env" && f.set ? " Currently from the server's .env file." : "";
   const pendingNote = f.pending ? (
     <strong>
       {" "}
@@ -234,7 +233,6 @@ function ConnField({
   const hint: ReactNode = (
     <>
       {f.help}
-      {source}
       {pendingNote}
       {outcome}
     </>
