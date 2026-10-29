@@ -623,6 +623,14 @@ class NavigationDecision(BaseModel):
 EDITOR_COMMIT = re.compile(r"\s*(?:update|save)\s*", re.I)
 
 
+def is_dismiss_control(button):
+    """Recognize explicit dismissal labels on a currently observed button."""
+    return bool(re.fullmatch(
+        r"\s*(?:close(?:\s+(?:menu|dialog|modal|popup))?|cancel|dismiss|not now|no thanks|×)\s*",
+        button.get("label") or "", re.I,
+    ))
+
+
 def open_editor_commit(controls, target_id=None):
     """The one open section editor's own commit (Update/Save directly before its Cancel), never the clicked control.
 
@@ -5239,9 +5247,7 @@ class BrowserEngine:
                         )
                 elif decision.action == "dismiss":
                     button = self.form.buttons.get(decision.control_id, {})
-                    if not re.fullmatch(
-                        r"close|cancel|dismiss|not now|no thanks|×", button.get("label", ""), re.I
-                    ):
+                    if not is_dismiss_control(button):
                         raise ValueError("Only an observed dismiss control can close a dialog")
                     await self.form.click(
                         decision.control_id, revision=obs["revision"], owner_id=obs["owner_id"]
