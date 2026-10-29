@@ -21,3 +21,24 @@
   font-weight: 560;
   white-space: nowrap;
 }
+/* The fact tables keep the kind and the source on one line each. */
+.ax-kn td[data-label] {
+  white-space: nowrap;
+}
+/* The legacy chips, search row and tables inside the knowledge panels (they were .panel children before). */
+.ax-kn .ax-panel .chips {
+  margin-bottom: var(--space-3);
+}
+.ax-kn .ax-panel .toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-3);
+}
+.ax-kn .ax-panel .table-wrap {
+  background: var(--ground);
+}
+.ax-kn .ax-panel .statement {
+  margin: var(--space-3) 0 var(--space-2);
+}

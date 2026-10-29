@@ -357,14 +357,10 @@ export function Attestations() {
   const [agreed, setAgreed] = useState<Record<string, boolean>>({});
   if (list.unavailable || !list.data) return null;
   return (
-    <section className="panel" aria-labelledby="attest-title">
-      <header className="panel-head">
-        <h2 id="attest-title">Confirmed once</h2>
-        <p className="muted">
-          Broad statements you confirm in your own words. Withdraw one at any
-          time and applications go back to asking.
-        </p>
-      </header>
+    <Panel title="Confirmed once">
+      <Lede>
+        Broad statements you confirm in your own words. Withdraw one at any time and applications go back to asking.
+      </Lede>
       {list.data.items.map((a) => (
         <div key={a.id} className="stack">
           <blockquote className="statement">
@@ -432,7 +428,7 @@ export function Attestations() {
           )}
         </div>
       ))}
-    </section>
+    </Panel>
   );
 }
 
@@ -580,15 +576,11 @@ export function Facts({
   const total = (c: string) =>
     Object.values(summary[c] || {}).reduce((a, b) => a + b, 0);
   return (
-    <section className="panel">
-      <header className="panel-head">
-        <h2>What applications can use</h2>
-        <p className="muted">
-          Confirmed facts answer questions directly. Supported narratives inform
-          written answers. Drafts are never used in an application. Employer
-          answers stay with that employer.
-        </p>
-      </header>
+    <Panel title="What applications can use">
+      <Lede>
+        Confirmed facts answer questions directly. Supported narratives inform written answers. Drafts are never used in
+        an application. Employer answers stay with that employer.
+      </Lede>
       <div className="chips" role="group" aria-label="Category">
         <button
           className="chip"
@@ -661,7 +653,7 @@ export function Facts({
       ) : (
         <Empty title="No facts match">Clear a filter to see more.</Empty>
       )}
-    </section>
+    </Panel>
   );
 }
 
@@ -681,15 +673,11 @@ export function EmployerMemory() {
     [page, q],
   );
   return (
-    <section className="panel">
-      <header className="panel-head">
-        <h2>Employer memory</h2>
-        <p className="muted">
-          Answers about one company (prior employment, relatives, why this role)
-          are only used for that company. Employers are matched by their
-          application site and exact names, never by partial text.
-        </p>
-      </header>
+    <Panel title="Employer memory">
+      <Lede>
+        Answers about one company (prior employment, relatives, why this role) are only used for that company. Employers
+        are matched by their application site and exact names, never by partial text.
+      </Lede>
       <div className="toolbar">
         <label className="search">
           <Search size={15} aria-hidden="true" />
@@ -752,7 +740,7 @@ export function EmployerMemory() {
           Company-specific answers appear here after you give one.
         </Empty>
       )}
-    </section>
+    </Panel>
   );
 }
 
@@ -782,6 +770,13 @@ function EmployerFacts({ employer }: { employer: Employer }) {
 }
 
 // ---------- Setup › Resumes: tailored versions and supported material ----------
+// An employer id looks like "emp:acme-corp" or "emp:careers.acme.com": show it as a name a person can scan.
+function employerLabel(id: string) {
+  const slug = id.replace(/^emp:/, "");
+  if (slug.includes(".")) return slug;
+  return slug.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 const ARTIFACT_TONE: Record<string, [string, string]> = {
   ready: ["ok", "Ready"],
   building: ["run", "Building"],
@@ -1062,6 +1057,7 @@ export function TailoredResumes() {
                   header: "Job",
                   cell: (a) => (
                     <>
+                      {a.employer_id && <strong title={a.artifact_id}>{employerLabel(a.employer_id)} </strong>}
                       {a.job_id ? (
                         <button className="link" onClick={() => openJob(a.job_id!)}>
                           Open job
@@ -1069,7 +1065,7 @@ export function TailoredResumes() {
                       ) : (
                         <span className="ax-hint">Job removed</span>
                       )}
-                      <small className="ax-mono ax-hint"> {(a.artifact_id || "").slice(3, 11)}</small>
+                      {!a.employer_id && <small className="ax-mono ax-hint"> {(a.artifact_id || "").slice(3, 11)}</small>}
                     </>
                   ),
                 },
