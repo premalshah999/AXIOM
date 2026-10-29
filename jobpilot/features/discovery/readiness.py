@@ -7,9 +7,10 @@ submission guard authoritative.
 """
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from .._store import now
 from .classify import eligible as classified_eligible, outcomes as classified_outcomes
@@ -68,27 +69,41 @@ def _candidates(db, policy: DiscoveryPolicy, at, manual_only=False) -> tuple[lis
             if row.value.get("until", "") > at.isoformat()
         )
         attempted = set(s.scalars(select(Run.job_id).distinct()))
+        # Only the paused/deleted controls and manual origins matter, and the database picks them out of the 17,700
+        # small rows instead of this process loading all of them on every tick (readiness was 31% of the loop
+        # thread's samples with the description loads below, py-spy 2026-10-29).
         controls = {
-            row.key.removeprefix("job_control:"): (row.value or {}).get("state")
-            for row in s.scalars(select(Setting).where(Setting.key.like("job_control:%")))
+            key.removeprefix("job_control:"): state
+            for key, state in s.execute(
+                select(Setting.key, Setting.value["state"].as_string()).where(
+                    Setting.key.like("job_control:%"), Setting.value["state"].as_string().in_(["paused", "deleted"])
+                )
+            )
         }
         # Only a link the applicant added (origin "manual") is a candidate without a listing. A board or feed
         # import without one never passed the board screen: 983 unscreened postings from new boards
         # (2026-10-18) would otherwise fill every classification batch with jobs that can never be dispatched.
         manual = {
-            row.key.removeprefix("job_origin:")
-            for row in s.scalars(select(Setting).where(Setting.key.like("job_origin:%")))
-            if (row.value or {}).get("kind") == "manual"
+            key.removeprefix("job_origin:")
+            for key in s.scalars(
+                select(Setting.key).where(
+                    Setting.key.like("job_origin:%"), Setting.value["kind"].as_string() == "manual"
+                )
+            )
         }
+        # Every column but the description: it is most of a 16,000-row, 100 MB read, and only the postings that
+        # survive the filters below need it (fetched after them).
+        columns = [c for c in Job.__table__.columns if c.name != "description"]
         query = (
-            select(Job, JobListing)
+            select(*columns, JobListing)
             .outerjoin(JobListing, JobListing.job_id == Job.id)
             .where(Job.demo.is_(False), Job.status.not_in(["archived", "closed"]))
         )
         rows = s.execute(query.where(Job.id.in_(manual)) if manual_only else query).all()
         guards = guard_keys(s)
         out = []
-        for job, listing in rows:
+        for *values, listing in rows:
+            job = SimpleNamespace(**dict(zip((c.name for c in columns), values)))
             if job.ats in excluded_ats:
                 stats["out_of_scope"] += 1
                 continue
@@ -103,8 +118,11 @@ def _candidates(db, policy: DiscoveryPolicy, at, manual_only=False) -> tuple[lis
                 # An earlier pipeline already applied (its submission guard survives resets). Leaving the job "ready"
                 # showed 84 of 218 ready jobs on the board as applicable, and every one was refused at the queue.
                 if job.status in {"new", "ready"}:
-                    job.status = "archived"
-                    job.reason = "Already applied by an earlier pipeline (submission guard)"
+                    s.execute(
+                        update(Job)
+                        .where(Job.id == job.id)
+                        .values(status="archived", reason="Already applied by an earlier pipeline (submission guard)")
+                    )
                 continue
             if listing is not None:
                 ok, basis = fresh(listing.posted_at, listing.date_basis, listing.first_seen, policy, at)
@@ -131,7 +149,7 @@ def _candidates(db, policy: DiscoveryPolicy, at, manual_only=False) -> tuple[lis
                     "company": job.company,
                     "location": job.location,
                     "country": country,
-                    "description": job.description or "",
+                    "description": "",
                     "status": job.status,
                     "score": job.score,
                     "resume_id": job.resume_id,
@@ -139,6 +157,14 @@ def _candidates(db, policy: DiscoveryPolicy, at, manual_only=False) -> tuple[lis
                     "posted_basis": basis,
                 }
             )
+        descriptions = {}
+        ids = [job["id"] for job in out]
+        for start in range(0, len(ids), 500):
+            descriptions.update(
+                s.execute(select(Job.id, Job.description).where(Job.id.in_(ids[start : start + 500]))).all()
+            )
+        for job in out:
+            job["description"] = descriptions.get(job["id"]) or ""
     return out, stats
 
 
@@ -204,11 +230,22 @@ def ready_manual_job_ids(db, policy=None, at=None):
     deferred = _deferred(db, at)
     jobs = [j for j in jobs if j["posted_basis"] == "manual" and j["id"] not in deferred]
     good = _eligible(db, jobs, db.get_setting("profile", {}) or {}, policy)
-    return {
-        j["id"] for j in jobs
-        if j["id"] in good and j["status"] == "ready" and not gated(j, policy)
-        and db.get_setting("job_origin:" + j["id"], {}).get("kind") == "manual"
-    }
+    ready = [j for j in jobs if j["id"] in good and j["status"] == "ready" and not gated(j, policy)]
+    if not ready:
+        return set()
+    # One query for the origins of the ready few, not a settings read per job.
+    from ...db import Setting
+
+    with db.session() as s:
+        manual = {
+            key.removeprefix("job_origin:")
+            for key in s.scalars(
+                select(Setting.key).where(
+                    Setting.key.in_(["job_origin:" + j["id"] for j in ready]), Setting.value["kind"].as_string() == "manual"
+                )
+            )
+        }
+    return {j["id"] for j in ready if j["id"] in manual}
 
 
 def ready_applications(

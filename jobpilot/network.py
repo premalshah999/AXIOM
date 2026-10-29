@@ -1,4 +1,5 @@
 import asyncio
+import codecs
 import functools
 import ipaddress
 import socket
@@ -50,11 +51,14 @@ async def fetch(url, *, method="GET", payload=None, allow_private=False, max_byt
                         method, payload = "GET", None
                     continue
                 r.raise_for_status()
-                chunks, size = [], 0
+                # Decoded as the chunks arrive: one decode of a 16 MB feed is a single call that holds the
+                # interpreter (8-30 ms) and no thread offload shortens it, but small ones let the loop interleave.
+                decoder, parts, size = codecs.getincrementaldecoder("utf-8")("replace"), [], 0
                 async for chunk in r.aiter_bytes():
                     size += len(chunk)
                     if size > max_bytes:
                         raise ValueError("Source response exceeds its size limit")
-                    chunks.append(chunk)
-                return b"".join(chunks).decode("utf-8", errors="replace"), str(r.url)
+                    parts.append(decoder.decode(chunk))
+                parts.append(decoder.decode(b"", final=True))
+                return "".join(parts), str(r.url)
     raise ValueError("Too many redirects")
