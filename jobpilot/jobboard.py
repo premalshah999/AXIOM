@@ -1141,19 +1141,32 @@ def setup_sources(db, cfg=None):
     return len(managed_ids(db))
 
 
-def add_managed_sources(db, entries):
-    """Add (kind, name, url) boards as managed sources, scanned from the next tick; returns how many were new.
-    Existing sources (any URL spelling of the same board) are left alone, and a retired board is never re-added."""
+def board_identity(url):
+    """One key per employer board whatever the spelling: boards.greenhouse.io/x, job-boards.greenhouse.io/x and
+    job-boards.eu.greenhouse.io/x/ are the same board, as are jobs.lever.co/X and jobs.eu.lever.co/x."""
     from urllib.parse import unquote
 
+    u = urlsplit(unquote(url).strip())
+    host, path = (u.hostname or "").casefold(), u.path.strip("/").casefold()
+    first = path.split("/")[0]
+    for suffix, kind in (("greenhouse.io", "greenhouse"), ("lever.co", "lever"), ("ashbyhq.com", "ashby"), ("smartrecruiters.com", "smartrecruiters")):
+        if first and (host == suffix or host.endswith("." + suffix)):
+            return f"{kind}|{first}"
+    return unquote(url).casefold().rstrip("/")
+
+
+def add_managed_sources(db, entries):
+    """Add (kind, name, url) boards as managed sources, scanned from the next tick; returns how many were new.
+    Existing sources (any URL spelling of the same board, also within `entries`) are left alone, and a retired board
+    is never re-added."""
     cfg = settings(db)
     retired = {"https://job-boards.greenhouse.io/" + slug for slug in ["snowflake", "confluent", "rippling", "aetion"]}
     retired |= {"https://jobs.lever.co/" + slug for slug in ["netflix", "viking", "welocalize"]}
     ids, added = managed_ids(db), 0
     with db.exclusive() as s:
-        have = {unquote(url).casefold().rstrip("/") for url in s.scalars(select(Source.url))}
+        have = {board_identity(url) for url in s.scalars(select(Source.url))}
         for kind, name, url in entries:
-            key = unquote(url).casefold().rstrip("/")
+            key = board_identity(url)
             if key in have or url in retired:
                 continue
             row = Source(

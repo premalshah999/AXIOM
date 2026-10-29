@@ -831,9 +831,16 @@ async def sweep(db, window_days: int = 7) -> dict:
             harvest = await harvest_boards(db)
         except Exception as exc:  # Finding more boards is an extra; the sweep result stands without it.
             harvest = {"error": type(exc).__name__}
+        try:
+            from .companies import harvest_companies
+
+            company_harvest = await harvest_companies(db)  # Boards of the listed companies the postings never linked to.
+        except Exception as exc:
+            company_harvest = {"error": type(exc).__name__}
         result = {
             "state": "done",
             "harvest": harvest,
+            "company_harvest": company_harvest,
             "started_at": started,
             "finished_at": datetime.now(UTC).isoformat(),
             "window_days": window_days,
