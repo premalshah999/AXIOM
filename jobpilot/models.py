@@ -22,6 +22,15 @@ _request_sent = ContextVar("model_request_sent", default=None)
 
 # The service tiers the OpenAI SDK's ChatCompletion accepts (plus none).
 OPENAI_SERVICE_TIERS = {None, "auto", "default", "flex", "scale", "priority"}
+# Model calls with no run: ranking's, and any other background work. They were recorded nowhere (0 model_call events
+# for ClassifiedFit/RankedBatch), so the cost of ranking could not be measured (2026-10-29). One event per call, filed
+# under a fixed id so a run's own events stay what they were.
+RANKING_PURPOSES = {"ClassifiedFit", "RankedBatch"}
+
+
+def call_owner(run_id, purpose):
+    """The `events.run_id` a model call is recorded under: its run, else "ranking" or "background"."""
+    return run_id or ("ranking" if purpose in RANKING_PURPOSES else "background")
 
 
 # Observation-only calls: their failure must never park the application's other model work. Sixty-five runs on
@@ -139,12 +148,20 @@ class AnswerModelUnavailable(RuntimeError):
         if answer.blocker_type == "site_transient" and answer.reason.startswith(
             "Answer model could not complete:"
         ):
+            if answer.reason.endswith(AnswerModelInvalidResponse.__name__):
+                raise AnswerModelInvalidResponse()
             raise cls()
 
     @classmethod
     def caused_by(cls, exc):
         # Provider SDKs wrap transport exceptions; inspect types, never private messages.
         return _caused_by(exc, cls)
+
+
+class AnswerModelInvalidResponse(AnswerModelUnavailable):
+    """The provider answered HTTP 200 but its reply is not a readable completion (Sail Research's service_tier,
+    2026-10-28). The provider is up, so this is not an outage on its first sighting; repeated, it opens the cooldown
+    (provider_health.note_invalid_response) with its own reason instead of parked runs retrying every 1-2 minutes."""
 
 
 class AnswerModelTimeout(AnswerModelUnavailable):
@@ -177,6 +194,8 @@ async def model_deadline(timeout):
             raise AnswerModelTimeout() from None
         if AnswerModelConnectionError.caused_by(exc):
             raise AnswerModelConnectionError() from None
+        if AnswerModelInvalidResponse.caused_by(exc):
+            raise AnswerModelInvalidResponse() from None
         if AnswerModelUnavailable.caused_by(exc):
             raise AnswerModelUnavailable() from None
         raise
@@ -356,26 +375,25 @@ class MeteredTransport(httpx.AsyncBaseTransport):
         except BaseException as exc:
             # asyncio's hard deadline cancels the request. Record that time too;
             # completed responses alone conceal the most expensive stalls.
-            if self.run_id:
-                self.db.event(
-                    self.run_id,
-                    "model_call",
-                    "Model request did not complete",
-                    {
-                        "purpose": self.purpose,
-                        "model": args.get("model"),
-                        "thinking": self.thinking,
-                        "elapsed_seconds": round(time.monotonic() - started, 2),
-                        "outcome": "cancelled"
-                        if isinstance(exc, asyncio.CancelledError)
-                        else "timeout"
-                        if isinstance(exc, (TimeoutError, httpx.TimeoutException))
-                        else "transport_error",
-                        "error_type": type(exc).__name__,
-                        "status": None,
-                        "billing": "reservation_retained",
-                    },
-                )
+            self.db.event(
+                call_owner(self.run_id, self.purpose),
+                "model_call",
+                "Model request did not complete",
+                {
+                    "purpose": self.purpose,
+                    "model": args.get("model"),
+                    "thinking": self.thinking,
+                    "elapsed_seconds": round(time.monotonic() - started, 2),
+                    "outcome": "cancelled"
+                    if isinstance(exc, asyncio.CancelledError)
+                    else "timeout"
+                    if isinstance(exc, (TimeoutError, httpx.TimeoutException))
+                    else "transport_error",
+                    "error_type": type(exc).__name__,
+                    "status": None,
+                    "billing": "reservation_retained",
+                },
+            )
             if isinstance(exc, (TimeoutError, httpx.TransportError)):
                 if ticket is not None:
                     provider_health.finish(
@@ -407,7 +425,9 @@ class MeteredTransport(httpx.AsyncBaseTransport):
                 usage["output_tokens"] if anthropic else usage["completion_tokens"],
                 0 if anthropic else cache_hits(usage),
             )
-        except (ValueError, KeyError, TypeError):
+        except (ValueError, KeyError, TypeError, AttributeError, IndexError):
+            # A reply that is not a completion (choices a string, usage a list) is the SDK's and pydantic-ai's to refuse,
+            # as an unreadable reply; an AttributeError here surfaced as "Connection error".
             usage = {}
             finish_reason = None
             actual = reserve
@@ -416,14 +436,14 @@ class MeteredTransport(httpx.AsyncBaseTransport):
             budget.spent = max(0, budget.spent + actual - reserve)
             # An UPDATE, not s.get(Run): loading the row decoded its whole packet on the shared loop per model call.
             delta = actual - reserve
-            if self.run_id and s.execute(
+            if not self.run_id or s.execute(
                 update(Run)
                 .where(Run.id == self.run_id)
                 .values(cost=case((Run.cost + delta < 0, 0), else_=Run.cost + delta))
             ).rowcount:
                 s.add(
                     Event(
-                        run_id=self.run_id,
+                        run_id=call_owner(self.run_id, self.purpose),
                         kind="model_call",
                         message="Model request completed",
                         data={
@@ -551,6 +571,22 @@ async def _structured_with_retry(db, run_id, args, kwargs):
                         data={"attempt": used + 1, "category": "connection" if AnswerModelConnectionError.caused_by(exc) else "timeout"},
                     ))
             await asyncio.sleep(0.25)
+
+
+def unreadable_reply(exc):
+    """Whether pydantic-ai refused the provider's HTTP 200 reply as not a chat completion ("Invalid response from ...
+    chat completions endpoint"), as opposed to an output that failed the caller's schema after retries."""
+    from pydantic_ai.exceptions import UnexpectedModelBehavior
+
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, UnexpectedModelBehavior) and str(getattr(exc, "message", "") or exc).startswith(
+            "Invalid response from"
+        ):
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
 
 
 async def _structured(
@@ -694,5 +730,11 @@ async def _structured(
                     "Model response did not match the action schema",
                     {"schema": output_type.__name__, "issues": issues},
                 )
+            if unreadable_reply(exc):
+                # HTTP 200, but the completion itself failed validation: neither a model_output slip (the model said
+                # nothing wrong) nor an outage on its first sighting. Counted toward the provider's health.
+                provider_health.note_invalid_response(db, config)
+                raise AnswerModelInvalidResponse() from exc
             raise
+        provider_health.note_readable_response(config)
         return result.output
