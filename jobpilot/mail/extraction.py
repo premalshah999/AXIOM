@@ -151,7 +151,7 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
         return reject("authentication")
     reset = challenge["kind"] == "password_reset"
     link_cue = (
-        r"reset.{0,30}password|password.{0,30}reset"
+        r"reset.{0,30}password|password.{0,30}reset|set\s*up.{0,60}password|password.{0,30}activat|activat.{0,30}password"
         if reset
         else r"verif|confirm|sign.?in|log.?in|continue|activate"
     )
