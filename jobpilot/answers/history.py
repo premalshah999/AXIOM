@@ -38,6 +38,14 @@ HISTORY_PERIOD = re.compile(
 )
 
 
+# A question that classifies a history row's employer or school ("Type of Company", "Company size", "Industry") is not
+# its name.
+HISTORY_CLASS = re.compile(
+    r"\b(?:type|kind|size|sector|industry|category) of (?:the )?(?:company|employer|organi[sz]ation|institution|school)\b|"
+    r"\b(?:company|employer|organi[sz]ation|institution|school) (?:type|kind|size|sector|industry|category)\b|^industry$"
+)
+
+
 HISTORY_UNKNOWN = "policy:history-contact-unknown"
 
 

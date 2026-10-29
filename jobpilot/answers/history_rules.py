@@ -6,6 +6,7 @@ import re
 from ..knowledge import topic
 from ..schemas import Answer
 from .history import EDUCATION
+from .history import HISTORY_CLASS
 from .history import HISTORY_CONTACT
 from .history import HISTORY_PERIOD
 from .history import HISTORY_REGION
@@ -526,7 +527,14 @@ class HistoryRulesMixin:
                 return self._ans(
                     f, f"{begin} - {close}", [f"profile:{kind}.{index}.start", f"profile:{kind}.{index}.end"]
                 )
-        for attr, pattern in patterns.items():
+        if HISTORY_CLASS.search(normalize(f["label"])):
+            return None  # "Type of Company" classifies the employer; the row's recorded name does not answer it.
+        order = list(patterns.items())
+        if kind == "work" and re.match(r"(?:is|are|was|were|do|did|does|have|has)\b", normalize(f["label"])):
+            # "Is this your current position?" asks whether the row is current; "position" is also the title pattern
+            # (Belden SuccessFactors audited the answer "No" against the job title, 2026-10-29).
+            order.sort(key=lambda item: item[0] != "current")
+        for attr, pattern in order:
             if not pattern.search(f["label"]):
                 continue
             if f.get("type") == "checkbox" and attr != "current":
