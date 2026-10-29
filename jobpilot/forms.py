@@ -41,6 +41,15 @@ EMPLOYER_PICKER = re.compile(
     re.I,
 )
 SCHOOL_WRITE_SECONDS = 30
+# Third-party beacons that sit in flight for seconds and never commit a field or load an option: LinkedIn's
+# "Apply with LinkedIn" widget and click tracker, Snowplow and TikTok pixels, Google's conversion ping. Workday and
+# Oracle pages held readiness waits to their deadline on them (384 waits on apply-with-linkedin alone, ~5 s each,
+# 2026-10-26..28).
+BEACON_REQUEST = re.compile(
+    r"^(?:www\.linkedin\.com/(?:talentwidgets/|li/track)|[^/]*/[^?]*snowplow"
+    r"|[^/]*\.tiktokv\.com/monitor_browser/|www\.google\.com/measurement/)",
+    re.I,
+)
 CONTROL_RECOVERY_SECONDS = 30
 
 # Unnumbered rows that repeat per work-history entry. SAP's SuccessFactors application page
@@ -808,10 +817,13 @@ class NetworkMonitor:
     def _start(self, request):
         # Analytics requests neither commit fields nor load dependent options.
         # Their periodic traffic must not keep every application step unsettled.
-        host = (urlsplit(request.url).hostname or "").lower()
+        parts = urlsplit(request.url)
+        host = (parts.hostname or "").lower()
         telemetry = ("google-analytics.com", "googletagmanager.com", "doubleclick.net",
                      "segment.io", "sentry.io", "datadoghq.com", "hotjar.com", "clarity.ms", "nr-data.net")
-        if request.resource_type != "document" and any(host == d or host.endswith("." + d) for d in telemetry):
+        if request.resource_type != "document" and (
+            any(host == d or host.endswith("." + d) for d in telemetry) or BEACON_REQUEST.search(host + parts.path)
+        ):
             return
         if request.resource_type in {"xhr", "fetch", "document"}:
             self.inflight[request] = time.monotonic()
@@ -2094,6 +2106,13 @@ class FormSession:
                 busy = True  # A navigation destroyed the context; the next call observes the new document.
                 self.settle_held_by = "navigation"
                 await asyncio.sleep(0.1)
+                # The frames read before the wait can be gone now (iCIMS and SuccessFactors replace their content
+                # frame): a detached frame fails every later call, so those waits ran to their whole deadline
+                # (8.0 s each, ~115 waits in 3 days). Read the application's frames again.
+                try:
+                    frames = await self.application_frames()
+                except Exception:
+                    pass
             if not busy and (self.network is None or self.network.quiet(quiet)):
                 return True
         return False
