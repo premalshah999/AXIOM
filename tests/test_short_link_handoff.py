@@ -61,3 +61,17 @@ async def test_avature_redirect_rekeys_the_shared_mail_identity():
     adapter.e = SimpleNamespace(job=original)
     adapter.job = original
     assert adapter.mail_job('password_reset')['url'] == portal
+
+
+async def test_a_resumed_short_link_draft_on_its_platform_adopts_the_handoff():
+    """EA (2026-10-29): resumed on its Avature site, the run kept the custom adapter and the short link's mail rule."""
+    engine = BrowserEngine.__new__(BrowserEngine)
+    engine.job = {"id": "j", "url": "https://go.example.test/AC", "ats": "custom"}
+    portal = "https://jobs.example.test/en_US/careers/JobDetail/Software-Engineer-I/216357"
+    engine.page = SimpleNamespace(url=portal)
+    engine.emit = lambda *a, **k: None
+    assert await engine.resume_detect(engine.page, "custom") == "avature"
+    assert engine.job == {"id": "j", "url": portal, "ats": "avature"}
+    # A resumed platform job, or a custom site that is really custom, is left alone.
+    assert await engine.resume_detect(SimpleNamespace(url="https://careers.example.test/apply"), "custom") == "custom"
+    assert await engine.resume_detect(engine.page, "workday") == "workday"

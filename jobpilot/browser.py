@@ -1390,6 +1390,8 @@ class BrowserEngine:
                 if job["demo"] or resumed
                 else await self.detect_ats(page, job["ats"])
             )
+            if resumed and not job["demo"]:
+                ats = await self.resume_detect(page, ats)
             self.observed_ats = ats
             if (
                 resumed
@@ -2438,6 +2440,14 @@ class BrowserEngine:
                 **({"x_cache": headers.get("x-cache"), "server": headers.get("server")} if response.status >= 400 else {}),
             },
         )
+
+    async def resume_detect(self, page, ats):
+        """A resumed draft of a short-linked job is already on its platform's page: adopt the handoff as a fresh run
+        does. EA's go.vansh.nyc job resumed on its Avature site kept the custom adapter and armed its reset email
+        with the short-link host's mail rule, whose senders were another employer's (2026-10-29)."""
+        if ats == "custom" and detect(page.url).id != "custom":
+            return await self.detect_ats(page, ats)
+        return ats
 
     async def detect_ats(self, page, ats):
         """Redirects and embedded frames reveal the real ATS behind a company career site."""
