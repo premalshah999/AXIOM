@@ -12,6 +12,7 @@ from jobpilot import widgets
 COUNTRIES = [f"Country {i:03d}" for i in range(240)] + ["United States", "United States Minor Outlying Islands"]
 
 SELECT2 = """
+<style>.select2-hidden-accessible {position:absolute;width:1px;height:1px;clip:rect(0,0,0,0)}</style>
 <label for=country>Country *</label>
 <select id=country aria-hidden=true tabindex=-1 class=select2-hidden-accessible><option value=""></option></select>
 <span class="select2 select2-container"><span id=trigger class="select2-selection select2-selection--single"
@@ -113,3 +114,54 @@ def test_a_shown_calling_code_satisfies_the_country_answer():
     assert widgets.same_value(field, "United States (+1)", "United States of America")
     assert not widgets.same_value(field, "American Samoa (+1)", "United States of America")
     assert not widgets.same_value(field, "Canada (+1)", "United States")
+
+
+async def test_owned_select2_scans_once_and_searches_ajax_rows(page):
+    import json
+    from jobpilot.forms import SCAN
+
+    await page.set_content(SELECT2 % json.dumps(COUNTRIES))
+    fields = (await page.main_frame.evaluate(SCAN))["fields"]
+    assert [(f["label"], f["type"]) for f in fields] == [("Country", "combobox")]
+    assert fields[0]["required"]
+    assert await widgets.combobox(page.main_frame, page.locator("#trigger"), "United States") == "United States"
+    fields = (await page.main_frame.evaluate(SCAN))["fields"]
+    assert fields[0]["value"] == "United States"
+
+
+async def test_select2_multi_chip_is_read_after_commit(page):
+    from jobpilot.forms import SCAN
+
+    await page.set_content("""<style>.select2-hidden-accessible {position:absolute;width:1px;height:1px;clip:rect(0,0,0,0)}</style><label for=skills>Skills *</label>
+      <select id=skills multiple required aria-hidden=true class=select2-hidden-accessible></select>
+      <span class=select2-container><span id=trigger class="select2-selection select2-selection--multiple"
+        role=combobox tabindex=0 aria-expanded=false onclick="openMenu()" style="display:inline-block;min-width:120px;min-height:24px"><ul></ul></span></span>
+      <script>
+      function openMenu() {
+        if (document.querySelector('#list')) return;
+        trigger.setAttribute('aria-expanded','true'); trigger.setAttribute('aria-controls','list');
+        document.body.insertAdjacentHTML('beforeend','<ul id=list role=listbox><li role=option>Artificial Intelligence</li><li role=option>Machine Learning</li></ul>');
+        for (const option of document.querySelectorAll('#list li')) option.onclick=()=>{
+          const text=option.textContent;
+          skills.add(new Option(text,text,true,true));
+          trigger.querySelector('ul').insertAdjacentHTML('beforeend','<li class=select2-selection__choice><span class=select2-selection__choice__remove>×</span>'+text+'</li>');
+          list.remove(); trigger.setAttribute('aria-expanded','false');
+        };
+      }
+      </script>""")
+    fields = (await page.main_frame.evaluate(SCAN))["fields"]
+    assert [(f["label"], f["type"], f["widget"]) for f in fields] == [("Skills", "combobox", "select2-multiselect")]
+    assert await widgets.multi_combobox(page.main_frame, page.locator("#trigger"), "Artificial Intelligence\nMachine Learning") == "Artificial Intelligence\nMachine Learning"
+    field = (await page.main_frame.evaluate(SCAN))["fields"][0]
+    assert field["value"] == "Artificial Intelligence\nMachine Learning"
+    assert widgets.same_value(field, field["value"], "Artificial Intelligence\nMachine Learning")
+
+
+async def test_unowned_select_is_not_suppressed(page):
+    from jobpilot.forms import SCAN
+
+    await page.set_content("""<label for=country>Country</label><select id=country aria-hidden=true style="display:none">
+      <option>Canada</option></select><span class=select2-container><span role=combobox>First</span>
+      <span role=combobox>Second</span></span>""")
+    fields = (await page.main_frame.evaluate(SCAN))["fields"]
+    assert any(f["type"] == "select" and f["label"] == "Country" for f in fields)

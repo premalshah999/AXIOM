@@ -815,6 +815,13 @@
       widget = 'ui5wc-valuehelp';
     }
     if (type === 'combobox' && el.getRootNode().host?.hasAttribute('ui5-select')) widget = 'ui5wc-select';
+    // Select2's clipped native control may still have a client rect. Its adjacent container owns the one
+    // visible trigger; scan that trigger to reach AJAX rows even when the select appears geometrically visible.
+    if (el.matches('select.select2-hidden-accessible[aria-hidden="true"]')) {
+      const proxy = el.nextElementSibling;
+      if (proxy?.matches('.select2-container') && visible(proxy)
+          && [...proxy.querySelectorAll('.select2-selection[role=combobox]')].filter(visible).length === 1) continue;
+    }
     if (!visible(el) && type !== 'file') {
       if (type === 'select-one' || type === 'select-multiple') {
         const proxy = el.nextElementSibling;
@@ -832,6 +839,17 @@
     }
     if (el.closest('[role=combobox]') !== el && el.closest('[role=combobox]')) continue;
     let options = [], value = el.value || '', question = label(el), group = null, uploadRequired = false;
+    const select2Container = el.matches('.select2-selection[role=combobox]') && el.closest('.select2-container');
+    const select2Native = select2Container?.previousElementSibling;
+    if (select2Native?.matches('select') && select2Native.nextElementSibling === select2Container
+        && [...select2Container.querySelectorAll('.select2-selection[role=combobox]')].filter(visible).length === 1) {
+      if (select2Native.labels?.length || select2Native.getAttribute('aria-label') || select2Native.getAttribute('aria-labelledby'))
+        question = label(select2Native);
+      if (select2Native.multiple && el.matches('.select2-selection--multiple')) {
+        widget = 'select2-multiselect';
+        value = [...select2Native.selectedOptions].map(o => clean(o.textContent)).filter(Boolean).join('\n');
+      }
+    }
     if (type === 'combobox' && el.matches('input.cx-multi-select-input')) {
       // CX clears the search query after selecting; sibling pills hold the answer.
       const root = el.closest('.cx-multi-select-container')?.parentElement;
@@ -983,7 +1001,7 @@
       value = el.multiple ? [...el.selectedOptions].map(x => x.text).join('\n') : el.selectedOptions[0]?.text || '';
       if (value && el.selectedOptions[0]?.value === '') value = '';
       if (PLACEHOLDER_VALUE.test(clean(value))) value = '';
-    } else if (type === 'combobox' && !value) {
+    } else if (type === 'combobox' && !value && widget !== 'select2-multiselect') {
       // react-select keeps the chosen value outside the input.
       const chosen = el.closest('[class*=__control]')?.querySelectorAll('[class*=__single-value],[class*=__multi-value__label]') || [];
       value = [...chosen].map(x => clean(x.textContent)).filter(Boolean).join(', ');
@@ -1082,7 +1100,7 @@
         question = t.replace(/\s*[*✱]+\s*$/, '').trim();
       }
     }
-    const req = isReq(el, question) || uploadRequired || questionRequired || radioCaptionRequired || (group && group.some(x => x.required || x.getAttribute('aria-required') === 'true'));
+    const req = isReq(el, question) || (select2Native?.matches('select') && isReq(select2Native, question)) || uploadRequired || questionRequired || radioCaptionRequired || (group && group.some(x => x.required || x.getAttribute('aria-required') === 'true'));
     push(el, { label: question, type, required: req, options, value, widget, date_format: dateFormat, parts:dateParts, members:['radio','radiogroup'].includes(type) ? group : [],
       valid: (el.validity ? el.validity.valid : true) && el.getAttribute('aria-invalid') !== 'true' });
   }

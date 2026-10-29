@@ -504,7 +504,7 @@ def same_value(field, actual, expected):
             return parse_date(actual) == parse_date(expected)
         except ValueError:
             return False
-    if kind in {"checkboxgroup", "select-multiple"} or field.get("widget") == "oracle-multiselect":
+    if kind in {"checkboxgroup", "select-multiple"} or field.get("widget") in {"oracle-multiselect", "select2-multiselect"}:
         return {norm(v) for v in str(actual).splitlines()} == {norm(v) for v in str(expected).splitlines()}
     if kind in {"dropdown", "pills", "combobox", "select", "radio", "radiogroup", "buttonchoice"}:
         if re.fullmatch(r"degree(?: type| level)?", norm(label)):
@@ -2764,6 +2764,13 @@ async def icims_code_dropdown_commit(frame, el, value):
 
 # The values a multiselect holds now: Oracle CX pills, React-Select chips, SmartRecruiters' spl-multiselect.
 MULTI_SELECTED_JS = """e=>{
+    if(e.matches('.select2-selection--multiple')) {
+        return [...e.querySelectorAll('.select2-selection__choice')].map(n=>{
+            const copy=n.cloneNode(true);
+            copy.querySelectorAll('.select2-selection__choice__remove').forEach(x=>x.remove());
+            return copy.textContent.trim();
+        }).filter(Boolean).join('\\n');
+    }
     if(e.matches('input.cx-multi-select-input')) {
         const root=e.closest('.cx-multi-select-container')?.parentElement;
         if(root?.querySelectorAll('input.cx-multi-select-input').length!==1)return '';
@@ -2843,7 +2850,7 @@ async def combobox(
     # Greenhouse "mark all that apply" questions are react-select multi
     # comboboxes: the commit is a chip, never a single-value or input value.
     multi = multi or await el.evaluate(
-        "e => !!e.closest('[class*=__control]')?.querySelector('[class*=__value-container--is-multi]')"
+        "e => e.matches('.select2-selection--multiple') || !!e.closest('[class*=__control]')?.querySelector('[class*=__value-container--is-multi]')"
     )
     if await el.evaluate("e => e.classList.contains('rcmpaginatedselectinput')"):
         if employer_scope:

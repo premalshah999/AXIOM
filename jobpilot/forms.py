@@ -2749,7 +2749,7 @@ class FormSession:
 
                     def degree_pick(texts):
                         return first_matching(texts, DEGREE_FALLBACK[level])
-            multiselect = field.get("widget") in {"spl-multiselect", "oracle-multiselect"}
+            multiselect = field.get("widget") in {"spl-multiselect", "oracle-multiselect", "select2-multiselect"}
             try:
                 committed = await (widgets.multi_combobox if multiselect else widgets.combobox)(
                     frame,
