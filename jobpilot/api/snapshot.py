@@ -66,7 +66,7 @@ class SnapshotCache:
 
 
 # Batch bookkeeping the dashboard never reads: thousands of ids (run_ids alone was ~150 KB at 3,000 runs).
-BATCH_BOOKKEEPING = ("run_ids", "considered_ids", "deferred", "skipped", "persisted")
+BATCH_BOOKKEEPING = ("run_ids", "considered_ids", "deferred", "skipped", "persisted", "rejections")
 
 
 def finished_today(session, tz):
