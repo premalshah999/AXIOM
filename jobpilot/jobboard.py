@@ -195,6 +195,36 @@ def workday_searches(profile):
     return list(dict.fromkeys(terms))
 
 
+# Level words the tenant's own search matches in titles and descriptions. Searched first: "Software Engineer" alone
+# returned hundreds of experienced postings per tenant while the early-career ones sat behind them.
+WORKDAY_LEVEL_TERMS = ("new grad", "entry level", "early career", "university", "junior", "associate")
+WORKDAY_LEVEL_PAGES, WORKDAY_ROLE_PAGES = 3, 2
+
+
+def workday_plan(profile, cfg):
+    """(search text, page limit) for one Workday tenant. Level terms lead for a new-grad-first profile or an
+    early-career-only board; the profile's own role terms follow with fewer pages (their relevance order is not a date
+    order, so deep pages are mostly senior postings)."""
+    terms = workday_searches(profile)
+    level = []
+    if cfg.early_career_only or getattr(profile, "job_priority", "new_grad_first") == "new_grad_first":
+        level = list(WORKDAY_LEVEL_TERMS)
+    plan = [(q, WORKDAY_LEVEL_PAGES) for q in level]
+    plan += [(q, WORKDAY_ROLE_PAGES) for q in terms if q.casefold() not in {x.casefold() for x in level}]
+    return plan
+
+
+WORKDAY_AGE = re.compile(r"Posted (?:(Today|Yesterday)|(\d{1,2}) Days? Ago)", re.I)
+
+
+def workday_age_days(posted_on):
+    """Days since a Workday list row was posted; None for "Posted 30+ Days Ago" and anything else it cannot date."""
+    match = WORKDAY_AGE.search(posted_on or "")
+    if not match:
+        return None
+    return 0 if match[1] and match[1].casefold() == "today" else 1 if match[1] else int(match[2])
+
+
 def candidate_title(title, profile):
     return (
         role_matches(title, "", profile)
@@ -310,8 +340,15 @@ async def document_post(url, company):
     return None
 
 
-async def read_feed(source, profile, cfg, at):
-    """Bounded board reads and detail calls; failed feeds never mark listings closed."""
+DETAIL_SLOTS = 4  # Concurrent posting-detail reads per board.
+
+
+async def read_feed(source, profile, cfg, at, known=None):
+    """Bounded board reads and detail calls; failed feeds never mark listings closed.
+
+    `known` is an async function (links -> links) naming postings that need no detail read: already stored with a
+    listing, or read and rejected by this profile recently. Their detail pages were fetched again on every scan (a
+    58-posting Workday tenant cost 58 sequential requests each time, 2026-10-29)."""
     url = source["url"].rstrip("/")
     parsed = urlsplit(url)
     slug = parsed.path.strip("/").split("/")[0]
@@ -324,6 +361,16 @@ async def read_feed(source, profile, cfg, at):
         body, _ = await fetch(url, **kwargs)
         # Whole-company boards are megabytes; parse them off the application loop.
         return await asyncio.to_thread(json.loads, body) if len(body) > 100_000 else json.loads(body)
+
+    async def unseen(links):
+        skip = await known(list(links)) if known else set()
+        return [link for link in links if link not in skip]
+
+    detail_slots = asyncio.Semaphore(DETAIL_SLOTS)
+
+    async def slot(work):
+        async with detail_slots:
+            return await work
 
     if kind == "ashby":
         data = await get(f"https://api.ashbyhq.com/posting-api/job-board/{slug}", max_bytes=16_000_000)
@@ -365,10 +412,13 @@ async def read_feed(source, profile, cfg, at):
             link = f"https://job-boards.greenhouse.io/{slug}/jobs/{j['id']}"
             seen.add(link)
             post = Posting(link, j["title"], company, j.get("location", {}).get("name", ""))
+            # The list names first_published: a posting older than the window needs no detail read.
+            published_at = published(j.get("first_published"))
             if (
                 us_location(post.location)
                 and not (cfg.early_career_only and SENIOR.search(post.title))
                 and candidate_title(post.title, profile)
+                and (published_at is None or fresh(j["first_published"], at, cfg.max_age_hours))
             ):
                 candidates.append((j, post))
         candidates.sort(
@@ -379,7 +429,8 @@ async def read_feed(source, profile, cfg, at):
             ),
             reverse=True,
         )
-        detail_slots = asyncio.Semaphore(4)
+        wanted = set(await unseen([post.url for _, post in candidates]))
+        candidates = [item for item in candidates if item[1].url in wanted]
 
         async def read_detail(item):
             nonlocal detail_errors
@@ -405,6 +456,7 @@ async def read_feed(source, profile, cfg, at):
                 + urlencode({"limit": 100, "offset": offset, "releasedAfter": after})
             )
             rows = data.get("content", [])
+            pending = []
             for j in rows:
                 link = f"https://jobs.smartrecruiters.com/{slug}/{j['id']}"
                 seen.add(link)
@@ -425,18 +477,25 @@ async def read_feed(source, profile, cfg, at):
                     and not (cfg.early_career_only and SENIOR.search(post.title))
                     and candidate_title(post.title, profile)
                 ):
-                    try:
-                        detail = await get(
-                            f"https://api.smartrecruiters.com/v1/companies/{slug}/postings/{j['id']}"
-                        )
-                        sections = detail.get("jobAd", {}).get("sections", {})
-                        post.description = "\n".join(
-                            text(v.get("text", "")) for v in sections.values() if isinstance(v, dict)
-                        )
-                    except Exception:
-                        detail_errors += 1
-                        continue
+                    pending.append((j, post))
+            wanted = set(await unseen([post.url for _, post in pending]))
+
+            async def read_detail(item):
+                nonlocal detail_errors
+                j, post = item
+                try:
+                    detail = await slot(
+                        get(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings/{j['id']}")
+                    )
+                    sections = detail.get("jobAd", {}).get("sections", {})
+                    post.description = "\n".join(
+                        text(v.get("text", "")) for v in sections.values() if isinstance(v, dict)
+                    )
                     posts.append(post)
+                except Exception:
+                    detail_errors += 1
+
+            await asyncio.gather(*(read_detail(item) for item in pending if item[1].url in wanted))
             if len(rows) < 100:
                 break
         else:
@@ -449,14 +508,21 @@ async def read_feed(source, profile, cfg, at):
         root = f"{parsed.scheme}://{parsed.netloc}/wday/cxs/{tenant}/{site}"
         # Search narrows pages but never substitutes for date/US checks.
         complete = False
-        for query in workday_searches(profile):
-            for offset in range(0, 100, 20):
-                data = await get(
-                    root + "/jobs",
-                    method="POST",
-                    payload={"appliedFacets": {}, "limit": 20, "offset": offset, "searchText": query},
-                )
+        max_days = cfg.max_age_hours // 24
+        wanted = {}  # link -> (title, path, row)
+        searches = asyncio.Semaphore(3)
+
+        async def search(query, pages):
+            nonlocal detail_errors
+            for page in range(pages):
+                async with searches:
+                    data = await get(
+                        root + "/jobs",
+                        method="POST",
+                        payload={"appliedFacets": {}, "limit": 20, "offset": page * 20, "searchText": query},
+                    )
                 rows = data.get("jobPostings", [])
+                found = 0
                 for j in rows:
                     path = j.get("externalPath")
                     if not path:
@@ -474,34 +540,53 @@ async def read_feed(source, profile, cfg, at):
                         continue
                     if (cfg.early_career_only and SENIOR.search(title)) or not candidate_title(title, profile):
                         continue
-                    if not re.search(
-                        r"Posted (?:Today|Yesterday|[1-7] Days? Ago)", j.get("postedOn", ""), re.I
-                    ):
+                    # The list dates a posting to the day ("Posted 3 Days Ago"; "30+" is undatable). It used to
+                    # cap at 7 days, so a newly added tenant's older postings in the window were never read.
+                    age = workday_age_days(j.get("postedOn", ""))
+                    if age is None or age > max_days:
                         continue
-                    try:
-                        detail = await get(root + path)
-                        info = detail.get("jobPostingInfo", {})
-                        loc = info.get("location", j.get("locationsText", ""))
-                        # The hiring organization's HQ country is not the job's country.
-                        country = info.get("country", "")
-                        if isinstance(country, dict):
-                            country = country.get("descriptor", country.get("id", ""))
-                        posts.append(
-                            Posting(
-                                link,
-                                title,
-                                company,
-                                loc,
-                                text(info.get("jobDescription")),
-                                country,
-                                info.get("startDate"),
-                                "Employer startDate (date only)",
-                            )
-                        )
-                    except Exception:
-                        detail_errors += 1
-                if len(rows) < 20:
+                    wanted[link] = (title, path, j)
+                    found += 1
+                # A short page ends the results; a page with nothing new for this profile ends the useful ones.
+                if len(rows) < 20 or not found:
                     break
+
+        outcomes = await asyncio.gather(
+            *(search(query, pages) for query, pages in workday_plan(profile, cfg)), return_exceptions=True
+        )
+        failed = [x for x in outcomes if isinstance(x, BaseException)]
+        if failed and len(failed) == len(outcomes):
+            raise failed[0]  # Every search failed (dead or refusing tenant): the source error, not an empty board.
+        detail_errors += len(failed)
+        fetch_links = await unseen(list(wanted))
+
+        async def read_detail(link):
+            nonlocal detail_errors
+            title, path, j = wanted[link]
+            try:
+                detail = await slot(get(root + path))
+                info = detail.get("jobPostingInfo", {})
+                loc = info.get("location", j.get("locationsText", ""))
+                # The hiring organization's HQ country is not the job's country.
+                country = info.get("country", "")
+                if isinstance(country, dict):
+                    country = country.get("descriptor", country.get("id", ""))
+                posts.append(
+                    Posting(
+                        link,
+                        title,
+                        company,
+                        loc,
+                        text(info.get("jobDescription")),
+                        country,
+                        info.get("startDate"),
+                        "Employer startDate (date only)",
+                    )
+                )
+            except Exception:
+                detail_errors += 1
+
+        await asyncio.gather(*(read_detail(link) for link in fetch_links[:60]))
     elif kind == "lever":
         data = await get(f"https://api.lever.co/v0/postings/{slug}?mode=json", max_bytes=16_000_000)
         candidates = []
@@ -520,16 +605,18 @@ async def read_feed(source, profile, cfg, at):
             )
             if screen(post, profile, cfg)[0]:
                 candidates.append(post)
-        for candidate in candidates[:20]:
+        wanted = set(await unseen([post.url for post in candidates]))
+
+        async def read_document(candidate):
+            nonlocal detail_errors
             try:
-                post = await document_post(candidate.url, company)
-                if post:
-                    posts.append(post)
-                else:
-                    # createdAt describes creation, not a verified publication date.
-                    posts.append(candidate)
+                post = await slot(document_post(candidate.url, company))
+                # createdAt describes creation, not a verified publication date.
+                posts.append(post or candidate)
             except Exception:
                 detail_errors += 1
+
+        await asyncio.gather(*(read_document(c) for c in [c for c in candidates if c.url in wanted][:20]))
     else:
         body, final = await fetch(url)
         soup = BeautifulSoup(body, "html.parser")
@@ -546,20 +633,156 @@ async def read_feed(source, profile, cfg, at):
             seen.add(final)
             if post := await document_post(final, company):
                 posts.append(post)
-        for link in links:
-            seen.add(link)
+        seen.update(links)
+
+        async def read_document(link):
+            nonlocal detail_errors
             try:
-                if post := await document_post(link, company):
+                if post := await slot(document_post(link, company)):
                     posts.append(post)
             except Exception:
                 detail_errors += 1
+
+        await asyncio.gather(*(read_document(link) for link in await unseen(links)))
     return posts, seen, complete and not detail_errors, detail_errors
 
 
-async def scrape_source(source, db, config):
+REJECTED = "job_board_rejected:"
+REJECTED_DAYS = 3  # A posting read and rejected is not read again for this long.
+LOOKUP_CHUNK = 400
+
+
+def screen_fingerprint(profile, cfg):
+    """What decides a posting's screen result: a changed profile, board setting or rule reads rejected postings again."""
+    import hashlib
+
+    basis = [
+        sorted(profile.target_roles), sorted(profile.skills), sorted(profile.excluded_keywords),
+        profile.include_internships, cfg.early_career_only, cfg.max_age_hours, "screen-1",
+    ]
+    return hashlib.sha1(json.dumps(basis).encode()).hexdigest()[:16]
+
+
+def listed_links(db, links):
+    """links -> job id for postings this database already holds with a listing (any source)."""
+    from .ats import identity_variants
+
+    by_identity = {}
+    for link in links:
+        try:
+            for identity in identity_variants(link):
+                by_identity.setdefault(identity, link)
+        except ValueError:
+            continue  # Not an application URL; it is read like any other.
+    found = {}
+    identities = list(by_identity)
+    with db.session() as s:
+        for i in range(0, len(identities), LOOKUP_CHUNK):
+            for identity, job_id in s.execute(
+                select(Job.identity, Job.id)
+                .join(JobListing, JobListing.job_id == Job.id)
+                .where(Job.identity.in_(identities[i : i + LOOKUP_CHUNK]))
+            ):
+                found[by_identity[identity]] = job_id
+    return found
+
+
+def rejected_links(db, source_id, fingerprint, at):
+    memo = db.get_setting(REJECTED + source_id, {})
+    since = published(memo.get("since"))
+    if memo.get("fp") != fingerprint or since is None or at - since > timedelta(days=REJECTED_DAYS):
+        return set()
+    return set(memo.get("urls", []))
+
+
+def persist_scan(db, source, posts, seen, complete, cfg, profile, at, report):
+    """Store a scan's postings. Runs in a worker thread: a few hundred matches meant hundreds of locked transactions
+    and a full same-ATS identity scan per new job on the loop the browsers share (2026-10-29)."""
     from .ats import identity_variants
     from .discovery import add_job
 
+    created, rejected = [], set()
+    for post in posts:
+        if not published(post.posted):
+            report["unknown_date"] += 1
+            rejected.add(post.url)
+            continue
+        if not fresh(post.posted, at, cfg.max_age_hours):
+            report["old"] += 1
+            rejected.add(post.url)
+            continue
+        match, _ = screen(post, profile, cfg)
+        if not match:
+            report["excluded"] += 1
+            rejected.add(post.url)
+            continue
+        row, new = add_job(
+            db,
+            JobInput(
+                url=post.url,
+                title=post.title,
+                company=post.company,
+                location=post.location,
+                description=post.description,
+            ),
+            origin="source",
+        )
+        if not new and published(row["created_at"]) < at - timedelta(hours=cfg.max_age_hours):
+            # Already seeing this public job earlier proves it isn't a newly posted job.
+            report["old"] += 1
+            rejected.add(post.url)
+            continue
+        with db.exclusive() as s:
+            entry = s.get(JobListing, row["id"])
+            date = published(post.posted).isoformat()
+            if entry:
+                # Republishing cannot make an already old stored listing fresh again.
+                date = min(entry.posted_at, date)
+                entry.posted_at, entry.last_seen, entry.active = date, at.isoformat(), True
+                entry.location, entry.career_level, entry.match_reason = post.location, match[0], match[1]
+            else:
+                s.add(
+                    JobListing(
+                        job_id=row["id"],
+                        source_id=source["id"],
+                        posted_at=date,
+                        date_basis=post.basis,
+                        location=post.location,
+                        career_level=match[0],
+                        match_reason=match[1],
+                        last_seen=at.isoformat(),
+                    )
+                )
+        report["matched"] += 1
+        if new:
+            created.append(row["id"])
+    # Postings still on the board that were not read again (already stored): they are still listed. Without this the
+    # board's "last seen" lapsed and a listing left the pipeline hours after its last full read.
+    stored = {post.url for post in posts}
+    still = {k: v for k, v in listed_links(db, seen).items() if k not in stored}
+    if still:
+        ids = list(still.values())
+        with db.exclusive() as s:
+            for i in range(0, len(ids), LOOKUP_CHUNK):
+                for entry in s.scalars(select(JobListing).where(JobListing.job_id.in_(ids[i : i + LOOKUP_CHUNK]))):
+                    entry.last_seen, entry.active = at.isoformat(), True
+        report["known"] = len(still)
+        report["matched"] += len(still)
+    if complete:
+        # A job stored before the platform hint was dropped keeps its older identity; both mean "still listed".
+        identities = {identity for url in seen for identity in identity_variants(url)}
+        with db.session() as s:
+            for entry, job in s.execute(
+                select(JobListing, Job)
+                .join(Job, Job.id == JobListing.job_id)
+                .where(JobListing.source_id == source["id"])
+            ):
+                if job.identity not in identities:
+                    entry.active = False
+    return created, rejected
+
+
+async def scrape_source(source, db, config):
     cfg = settings(db)
     if not cfg.enabled:
         return []
@@ -575,81 +798,35 @@ async def scrape_source(source, db, config):
         "unknown_date": 0,
         "excluded": 0,
     }
-    db.set_setting(key, report)
+    await asyncio.to_thread(db.set_setting, key, report)
     try:
-        profile = Profile.model_validate(db.get_setting("profile", {}))
-        posts, seen, complete, errors = await read_feed(source, profile, cfg, at)
-        report.update(checked=len(seen), detail_errors=errors)
-        created = []
-        for post in posts:
-            if not published(post.posted):
-                report["unknown_date"] += 1
-                continue
-            if not fresh(post.posted, at, cfg.max_age_hours):
-                report["old"] += 1
-                continue
-            match, _ = screen(post, profile, cfg)
-            if not match:
-                report["excluded"] += 1
-                continue
-            row, new = add_job(
-                db,
-                JobInput(
-                    url=post.url,
-                    title=post.title,
-                    company=post.company,
-                    location=post.location,
-                    description=post.description,
-                ),
-                origin="source",
-            )
-            if not new and published(row["created_at"]) < at - timedelta(hours=cfg.max_age_hours):
-                # Already seeing this public job earlier proves it isn't a newly posted job.
-                report["old"] += 1
-                continue
-            with db.exclusive() as s:
-                entry = s.get(JobListing, row["id"])
-                date = published(post.posted).isoformat()
-                if entry:
-                    # Republishing cannot make an already old stored listing fresh again.
-                    date = min(entry.posted_at, date)
-                    entry.posted_at, entry.last_seen, entry.active = date, at.isoformat(), True
-                    entry.location, entry.career_level, entry.match_reason = post.location, match[0], match[1]
-                else:
-                    s.add(
-                        JobListing(
-                            job_id=row["id"],
-                            source_id=source["id"],
-                            posted_at=date,
-                            date_basis=post.basis,
-                            location=post.location,
-                            career_level=match[0],
-                            match_reason=match[1],
-                            last_seen=at.isoformat(),
-                        )
-                    )
-            report["matched"] += 1
-            if new:
-                created.append(row["id"])
-        if complete:
-            # A job stored before the platform hint was dropped keeps its older identity; both mean "still listed".
-            identities = {identity for url in seen for identity in identity_variants(url)}
-            with db.session() as s:
-                for entry, job in s.execute(
-                    select(JobListing, Job)
-                    .join(Job, Job.id == JobListing.job_id)
-                    .where(JobListing.source_id == source["id"])
-                ):
-                    if job.identity not in identities:
-                        entry.active = False
+        profile = Profile.model_validate(await asyncio.to_thread(db.get_setting, "profile", {}))
+        fingerprint = screen_fingerprint(profile, cfg)
+        skip = await asyncio.to_thread(rejected_links, db, source["id"], fingerprint, at)
+
+        async def known(links):
+            return set(await asyncio.to_thread(listed_links, db, links)) | skip.intersection(links)
+
+        posts, seen, complete, errors = await read_feed(source, profile, cfg, at, known)
+        report.update(checked=len(seen), detail_errors=errors, read=len(posts))
+        created, rejected = await asyncio.to_thread(
+            persist_scan, db, source, posts, seen, complete, cfg, profile, at, report
+        )
+        # Keep memo entries still on the board plus what this scan rejected; the window restarts when it lapses.
+        kept = (skip & seen) | rejected
+        memo = await asyncio.to_thread(db.get_setting, REJECTED + source["id"], {})
+        since = memo.get("since") if memo.get("fp") == fingerprint and skip else at.isoformat()
+        await asyncio.to_thread(
+            db.set_setting, REJECTED + source["id"], {"fp": fingerprint, "since": since, "urls": sorted(kept)[:2000]}
+        )
         report.update(state="complete", finished_at=now(), new=len(created))
-        db.set_setting(key, report)
+        await asyncio.to_thread(db.set_setting, key, report)
         return created
     except Exception as exc:
         report.update(
             state="error", finished_at=now(), error=f"Board could not be read ({type(exc).__name__})"
         )
-        db.set_setting(key, report)
+        await asyncio.to_thread(db.set_setting, key, report)
         raise
 
 
@@ -941,3 +1118,4 @@ def setup_sources(db, cfg=None):
 
     setup_search(db)
     return len(managed_ids(db))
+
