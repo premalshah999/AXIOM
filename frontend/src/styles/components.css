@@ -1,0 +1,627 @@
+/* Shared primitives (src/ui). Every class is prefixed ax- so it never collides with the legacy rules in style.css
+   while pages migrate. Colours come only from tokens.css. */
+
+/* ---------- animation ---------- */
+@keyframes ax-rise {
+  from {
+    transform: translateY(6px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes ax-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes ax-sheet {
+  from {
+    transform: translateX(28px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes ax-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes ax-shimmer {
+  from {
+    background-position: -200px 0;
+  }
+  to {
+    background-position: calc(200px + 100%) 0;
+  }
+}
+
+/* ---------- page scaffolding ---------- */
+/* A page inside the shell's scroll region: content width, rhythm. Pages put a title only in the top bar. */
+.ax-page {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-6) 72px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+/* A page that is one table or one list filling the region: it scrolls itself and the region does not. */
+.ax-page-fill {
+  height: 100%;
+  min-height: 0;
+  padding-bottom: var(--space-6);
+}
+.ax-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+}
+.ax-toolbar-end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ---------- Panel ---------- */
+.ax-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+.ax-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 48px;
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--line);
+}
+.ax-panel-head h2 {
+  min-width: 0;
+  font-size: var(--text-ui);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ax-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+}
+.ax-panel-body {
+  padding: var(--space-4);
+  min-width: 0;
+}
+.ax-panel-body.is-flush {
+  padding: 0;
+}
+
+/* ---------- Pill ---------- */
+.ax-pill {
+  --pill: var(--ink-2);
+  --pill-soft: var(--surface-hover);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: var(--radius-sm);
+  background: var(--pill-soft);
+  color: color-mix(in srgb, var(--pill) 86%, var(--ink));
+  font-size: var(--text-micro);
+  font-weight: 560;
+  line-height: 1;
+  white-space: nowrap;
+}
+.ax-pill.is-brand {
+  --pill: var(--accent-text);
+  --pill-soft: var(--brand-soft);
+}
+.ax-pill.is-ok {
+  --pill: var(--ok);
+  --pill-soft: var(--ok-soft);
+}
+.ax-pill.is-warn {
+  --pill: var(--warn);
+  --pill-soft: var(--warn-soft);
+}
+.ax-pill.is-bad {
+  --pill: var(--bad);
+  --pill-soft: var(--bad-soft);
+}
+.ax-pill.is-info {
+  --pill: var(--info);
+  --pill-soft: var(--info-soft);
+}
+.ax-pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--pill);
+}
+
+/* ---------- Tabs (underline) ---------- */
+.ax-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  min-height: 40px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ax-tabs::-webkit-scrollbar {
+  display: none;
+}
+.ax-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 0 var(--space-3);
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  font-size: var(--text-ui);
+  font-weight: 540;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease);
+}
+.ax-tab:hover {
+  color: var(--ink-2);
+}
+.ax-tab[aria-current="page"],
+.ax-tab[aria-selected="true"] {
+  color: var(--ink);
+}
+.ax-tab[aria-current="page"]::after,
+.ax-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: var(--space-3);
+  right: var(--space-3);
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--brand);
+}
+.ax-tab-count {
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+}
+
+/* ---------- Button ---------- */
+.ax-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: none;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--text-ui);
+  font-weight: 540;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    filter var(--dur-fast) var(--ease);
+}
+.ax-btn:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--surface-hover);
+  border-color: var(--ink-3);
+}
+.ax-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.ax-btn:disabled,
+.ax-btn[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.ax-btn.is-sm {
+  height: 30px;
+  padding: 0 10px;
+  font-size: var(--text-meta);
+}
+.ax-btn.is-primary {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: var(--brand-ink);
+  font-weight: 600;
+}
+.ax-btn.is-primary:hover:not(:disabled) {
+  background: var(--brand);
+  border-color: var(--brand);
+  filter: brightness(1.1);
+}
+.ax-btn.is-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-2);
+}
+.ax-btn.is-ghost:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: transparent;
+  color: var(--ink);
+}
+.ax-btn.is-danger {
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 45%, transparent);
+}
+.ax-btn.is-danger:hover:not(:disabled) {
+  background: var(--bad-soft);
+  border-color: var(--bad);
+}
+.ax-btn.is-block {
+  width: 100%;
+}
+.ax-spinner {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  animation: ax-spin 0.7s linear infinite;
+}
+
+/* ---------- Field ---------- */
+.ax-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.ax-label {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  font-weight: 560;
+}
+.ax-hint {
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+}
+.ax-error {
+  color: var(--bad);
+  font-size: var(--text-meta);
+}
+.ax-control {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--field);
+  color: var(--ink);
+  font-size: var(--text-ui);
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+.ax-control:hover:not(:disabled) {
+  border-color: var(--ink-3);
+}
+.ax-control:focus-visible {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-soft);
+}
+.ax-control:disabled {
+  opacity: 0.55;
+}
+.ax-control[aria-invalid="true"] {
+  border-color: var(--bad);
+}
+textarea.ax-control {
+  resize: vertical;
+  line-height: 1.45;
+}
+select.ax-control {
+  appearance: none;
+  padding-right: 30px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--ink-2) 50%), linear-gradient(135deg, var(--ink-2) 50%, transparent 50%);
+  background-position:
+    calc(100% - 15px) 52%,
+    calc(100% - 10px) 52%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+
+/* ---------- Table ---------- */
+.ax-table-wrap {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  overflow: hidden;
+}
+.ax-table-scroll {
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+/* fill: the table is the page's one vertical scroller (give the page .ax-page-fill). */
+.ax-table-wrap.is-fill {
+  flex: 1;
+  min-height: 0;
+}
+.ax-table-wrap.is-fill .ax-table-scroll {
+  flex: 1;
+  overflow: auto;
+}
+.ax-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--text-ui);
+}
+.ax-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 36px;
+  padding: 0 var(--space-3);
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+  font-weight: 560;
+  text-align: left;
+  white-space: nowrap;
+}
+.ax-table td {
+  height: 40px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+/* A column with truncate keeps one line and ends in an ellipsis at its width (default 280px). */
+.ax-table td.is-trunc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ax-table td.is-wrap {
+  white-space: normal;
+  height: auto;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+.ax-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.ax-table tbody tr:hover td {
+  background: var(--surface-hover);
+}
+.ax-table tbody tr[aria-selected="true"] td {
+  background: var(--brand-soft);
+}
+.ax-table tbody tr.is-click {
+  cursor: pointer;
+}
+.ax-table .is-num {
+  text-align: right;
+}
+.ax-table .is-check {
+  width: 40px;
+  padding-right: 0;
+}
+.ax-table .is-check input {
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  padding: 0;
+  accent-color: var(--brand);
+}
+.ax-table-state {
+  padding: var(--space-6) var(--space-4);
+}
+.ax-skeleton {
+  display: block;
+  height: 12px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--surface-hover) 0, var(--line) 50%, var(--surface-hover) 100%);
+  background-size: 200px 100%;
+  background-repeat: no-repeat;
+  background-color: var(--surface-hover);
+  animation: ax-shimmer 1.3s linear infinite;
+}
+.ax-bulk {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--line);
+  background: var(--brand-soft);
+  font-size: var(--text-ui);
+}
+.ax-bulk-count {
+  font-weight: 600;
+}
+.ax-bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+/* ---------- Drawer ---------- */
+.ax-drawer-root {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  justify-content: flex-end;
+}
+.ax-scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: var(--scrim);
+  animation: ax-fade var(--dur) ease;
+  cursor: default;
+}
+.ax-drawer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(var(--drawer-w, 600px), 100vw);
+  height: 100%;
+  background: var(--raised);
+  border-left: 1px solid var(--line-strong);
+  box-shadow: var(--shadow);
+  animation: ax-sheet var(--dur-slow) var(--ease);
+}
+.ax-drawer-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 56px;
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--line);
+}
+.ax-drawer-head h2 {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-emphasis);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The drawer owns its scroll: the page behind never moves. */
+.ax-drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-4);
+}
+.ax-drawer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--line);
+}
+
+/* ---------- Empty ---------- */
+.ax-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  max-width: 520px;
+  padding: var(--space-8) var(--space-4);
+  color: var(--ink-2);
+}
+.ax-empty svg {
+  color: var(--ink-3);
+}
+.ax-empty-title {
+  color: var(--ink);
+  font-size: var(--text-emphasis);
+  font-weight: 600;
+}
+.ax-empty-hint {
+  max-width: 60ch;
+}
+.ax-empty-action {
+  margin-top: var(--space-1);
+}
+
+/* ---------- Toast ---------- */
+.ax-toasts {
+  position: fixed;
+  right: var(--space-5);
+  bottom: var(--space-5);
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(420px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.ax-toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 11px 14px;
+  border: 1px solid var(--line-strong);
+  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  box-shadow: var(--shadow);
+  font-size: var(--text-ui);
+  animation: ax-rise var(--dur) var(--ease);
+}
+.ax-toast.is-ok {
+  border-left-color: var(--ok);
+}
+.ax-toast.is-error {
+  border-left-color: var(--bad);
+}
+.ax-toast.is-info {
+  border-left-color: var(--brand);
+}
+.ax-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.ax-icon-btn:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+.ax-toast-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
