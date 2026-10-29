@@ -86,6 +86,13 @@ class PolicyRulesMixin:
             facts.get("tax_credit_screening_no") is True
             and WOTC.search(label)
             and not DEMOGRAPHIC.search(label)
+            and not re.search(
+                r"\b(?:not|never|neither|without|if|indicated above|as you indicated)\b|n['’]t\b", label, re.I
+            )
+            and re.search(
+                r"\b(?:receive[ds]?|receiving|served|unemployed|convicted|released|referred|eligible|certification)\b",
+                label, re.I,
+            )
         ):
             if (no := [o for o in options if NO_OPTION.search(str(o))]) and len(no) == 1:
                 return Answer(

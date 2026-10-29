@@ -50,7 +50,7 @@ WOTC = re.compile(
     r"vocational rehabilitation|ticket to work|unemployment (?:compensation|benefits|insurance)|"
     r"empowerment zone|rural renewal|summer youth|veteran|"
     # ADP's tax-credit questionnaire (Terminix via Workday, 2026-10-23): follow-ups that do not repeat the program name.
-    r"household received assistance|state workforce agency|\bSWA\b|work opportunity tax credit|"
+    r"state workforce agency|\bSWA\b|"
     r"served in the (?:u\.?s\.? )?(?:military|armed forces)",
     re.I,
 )

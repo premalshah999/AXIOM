@@ -304,6 +304,9 @@ def test_tax_credit_screener_and_healthcare_exclusion_answer_no_only_with_the_ow
     r = Resolver(p, service.db, service.config, employer="Caesars")
     assert r.local(yes_no("Have you received SNAP (food stamp) benefits in the last 6 months?")).value == "No"
     assert r.local(yes_no("Has anyone in your family received TANF in the last 18 months?")).value == "No"
+    assert r.owner_policy_answer(yes_no("Have you never received SNAP?")) is None
+    assert r.owner_policy_answer(yes_no("Do you consent to disclosure of SNAP information?")) is None
+    assert r.owner_policy_answer(yes_no("As you indicated above, you are unemployed. Have you received unemployment benefits?")) is None
     assert (
         r.local(
             yes_no(

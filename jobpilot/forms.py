@@ -17,7 +17,7 @@ from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from . import icims_protocol, phone_fields, taleo_protocol, widgets
-from .answers import HISTORY_UNKNOWN, answer_key, job_catalog_search_box, normalize
+from .answers import HISTORY_UNKNOWN, WOTC, answer_key, job_catalog_search_box, normalize
 from .knowledge import topic
 from .browser_contracts import ActionResult, action_result, field_identity, fingerprint
 from .models import AnswerModelUnavailable
@@ -4442,8 +4442,7 @@ class FormSession:
         return named
 
     def wotc_answer(self, field):
-        """Unlabeled required Yes/No radios on a tax-credit (WOTC) screener answer No when the
-        applicant confirmed it (Caesars/Oracle exposed no question text for three of them)."""
+        """Apply the recorded screener answer only to identifiable statutory screening questions."""
         if (
             not self.resolver
             or (self.resolver.profile.facts or {}).get("tax_credit_screening_no") is not True
@@ -4451,15 +4450,31 @@ class FormSession:
             return None
         if field.get("type") not in {"radio", "radiogroup"} or not field.get("required"):
             return None
-        if str(field.get("label", "")).strip() and not re.fullmatch(
-            r"(?:yes|no|yes/no)\??", str(field["label"]).strip(), re.I
+        label = str(field.get("label", "")).strip()
+        # A blank caption cannot establish which fact is being asked. Conditional follow-ups may also
+        # depend on a prior answer, while negated questions invert the meaning of No.
+        if not label or re.search(
+            r"\b(?:not|never|neither|without|if|indicated above|as you indicated)\b|n['’]t\b", label, re.I
         ):
-            return None  # A labeled question (e.g. "Are you under the age of 40?") is answered on its own merits.
+            return None
+        if not re.search(
+            r"\b(?:receive[ds]?|receiving|served|unemployed|convicted|released|referred|eligible|certification)\b",
+            label, re.I,
+        ):
+            return None
+        statutory = WOTC.search(label) or re.search(r"\bfelony\b", label, re.I)
+        assistance = re.search(
+            r"\b(?:household|family)\b.*\breceived assistance (?:for )?at least\b", label, re.I
+        )
+        if not statutory and not assistance:
+            return None
         options = [str(o).strip() for o in field.get("options") or []]
         if sorted(o.casefold() for o in options) != ["no", "yes"]:
             return None
         text = str((getattr(self, "last_observation", None) or {}).get("text", ""))
         if not re.search(r"work opportunity tax credit|\bWOTC\b|tax credit", text, re.I):
+            return None
+        if assistance and not re.search(r"\bTANF\b|temporary assistance for needy", label + " " + text, re.I):
             return None
         from .schemas import Answer
 

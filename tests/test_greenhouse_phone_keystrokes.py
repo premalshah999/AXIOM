@@ -122,14 +122,38 @@ async def test_stale_site_error_after_a_verified_retype_does_not_block_resubmit(
     assert not any("Phone" in p for p in report["problems"]), report["problems"]
 
 
-def test_unlabeled_wotc_radios_answer_no_only_on_a_tax_credit_page(tmp_path):
+def test_wotc_answers_only_identifiable_positive_statutory_questions(tmp_path):
     from jobpilot.schemas import Profile as P
 
     resolver = Resolver(P(facts={"tax_credit_screening_no": True}), None, None)
     form = FormSession(None, resolver, tmp_path / "resume.pdf", lambda *a: None)
     radio = {"id": "r", "label": "", "type": "radiogroup", "required": True, "options": ["Yes", "No"]}
     form.last_observation = {"text": "Work Opportunity Tax Credit questionnaire"}
-    assert form.wotc_answer(radio).value == "No"
-    assert form.wotc_answer({**radio, "label": "Are you under the age of 40?"}) is None
-    form.last_observation = {"text": "Application questions"}
     assert form.wotc_answer(radio) is None
+    questions = [
+        "Did you or a household member receive SNAP (food stamps) in the past 6 months?",
+        "Have you or someone in your household received or stopped receiving TANF (Welfare), child care, housing, or transportation assistance in the past 2 years?",
+        "Have you or someone in your household received assistance at least 9 months in the past 18 months?",
+        "Have you or someone in your household received assistance for at least the past 18 months?",
+        "Have you or someone in your household received assistance at least 18 months between August 1997 and October 2024?",
+        "Have you stopped being eligible for TANF in the past 2 years because of limits on maximum payments?",
+        "Have you served in the U.S. military?",
+        "Were you unemployed and received unemployment compensation for at least 27 weeks in the past year?",
+        "Did you receive Supplemental Security Income (SSI) in the past 60 days?",
+        "Have you received Vocational Rehabilitation services or were you referred to this job application by a government agency?",
+        "Were you convicted or released for a felony in the past year?",
+        "Have you received a conditional certification from the state workforce agency?",
+    ]
+    form.last_observation["text"] += " TANF"
+    for question in questions:
+        assert form.wotc_answer({**radio, "label": question}).value == "No"
+    for question in ["Are you under the age of 40?", "Have you been employed in the last 6 months?",
+                     "Have you never received SNAP?", "As you indicated above, you are unemployed. Have you received unemployment benefits?",
+                     "Do you consent to disclosure of SNAP information?"]:
+        assert form.wotc_answer({**radio, "label": question}) is None
+    form.last_observation = {"text": "Application questions"}
+    assert form.wotc_answer({**radio, "label": questions[0]}) is None
+    form.last_observation = {"text": "Work Opportunity Tax Credit questionnaire"}
+    assert form.wotc_answer({**radio, "label": questions[2]}) is None
+    resolver.profile.facts = {}
+    assert form.wotc_answer({**radio, "label": questions[0]}) is None
