@@ -138,3 +138,24 @@ def test_a_bare_generic_word_is_not_the_recorded_major():
     assert major_option("Data Science", options) is None  # Ensemble's Workday catalog, 2026-10-28.
     assert major_option("Data Science", [*options, "Data Science"]) == "Data Science"
     assert major_option("Data Science", ["Data Science & Analytics", "Science"]) == "Data Science & Analytics"
+
+
+async def test_partial_major_catalog_falls_back_to_picker_search(page, service, tmp_path):
+    from types import SimpleNamespace
+    from jobpilot.forms import FormSession
+
+    await page.set_content('''<div data-automation-id="formField-fieldOfStudy"><label for=fos>Field of Study</label>
+      <div data-automation-id=multiSelectContainer><div data-automation-id=multiselectInputContainer id=fos-box>
+      <input id=fos onkeydown="if(event.key==='Enter'){search(this.value);event.preventDefault()}">
+      </div></div></div><div id=menu role=listbox hidden></div><script>
+      function search(q){const m=document.getElementById('menu');m.hidden=false;
+        m.innerHTML=(/data/i.test(q)?['Data Science']:['No Items.']).map(t=>
+          '<div role=option data-automation-id=promptOption onclick="pick(this)">'+t+'</div>').join('');}
+      function pick(e){document.getElementById('fos-box').insertAdjacentHTML('beforeend',
+        '<span data-automation-id=selectedItem>'+e.textContent+'</span>');e.parentElement.hidden=true;}
+      </script>''')
+    form = FormSession(page, resolver(service), tmp_path / "unused.pdf", lambda *a: None)
+    form.network = SimpleNamespace(value_list=lambda kind: ["Accounting", "Biology"], quiet=lambda *_: True)
+    field = next(f for f in (await form.scan())["fields"] if f["label"] == "Field of Study")
+    field["group"] = "Education 1"
+    assert await form.fill(field, "Data Science") == "Data Science"

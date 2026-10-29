@@ -718,11 +718,17 @@ class NetworkMonitor:
                 "payload": payload,
             })
             del self.catalog[:-40]
+            if "search" not in query and isinstance(payload, list) and any(
+                isinstance(item, dict) and item.get("href") for item in payload
+            ):
+                # Group descriptors are navigable categories, not selectable values.
+                self.values.pop(parts.path.rstrip("/").rsplit("/", 1)[-1], None)
             if (
                 "search" not in query
                 and isinstance(payload, list)
                 and payload
-                and all(isinstance(item, dict) and isinstance(item.get("descriptor"), str) for item in payload)
+                and all(isinstance(item, dict) and isinstance(item.get("descriptor"), str) and not item.get("href")
+                        for item in payload)
             ):
                 self.values[parts.path.rstrip("/").rsplit("/", 1)[-1]] = [item["descriptor"] for item in payload]
         except Exception:
@@ -2802,6 +2808,14 @@ class FormSession:
                 is_major = bool(EDUCATION["field_of_study"].search(field["label"]))
                 network = getattr(self, "network", None)
                 catalog = network.value_list("fieldsOfStudy") if is_major and network is not None else None
+                if catalog:
+                    from .answers.history import major_option
+
+                    rules = getattr(self.resolver, "answer_rules", None)
+                    fallback = (getattr(rules, "major_fallback", "") or "").strip()
+                    # A partial catalog is not proof the major is absent; search the picker in that case.
+                    if not any(major_option(candidate, catalog) for candidate in (value, fallback) if candidate):
+                        catalog = None
                 if catalog:
                     # The page's own Field of Study list decides first; only the chosen exact name is searched, so no
                     # probe search can commit a sole result the policy rejects (REA, 2026-10-25).

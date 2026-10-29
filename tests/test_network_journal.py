@@ -99,3 +99,24 @@ async def test_workday_option_sources_are_kept_for_the_step_record(page):
     assert [c["path"].rsplit("/", 2)[-2:] for c in catalog] == [["[token]", "definition"], ["phone", "deviceTypes"]]
     assert catalog[0]["payload"] == definition and catalog[0]["query"] == ["type"]
     assert monitor.take_catalog() == []
+
+
+async def test_grouped_workday_values_are_not_a_flat_catalog(page):
+    class Response:
+        headers = {}
+        url = "https://example.test/values/fieldsOfStudy"
+
+        def __init__(self, data):
+            self.data = data
+
+        async def body(self):
+            return json.dumps(self.data).encode()
+
+    monitor = NetworkMonitor(page)
+    await monitor._catalog(Response([{"descriptor": "Data Science", "id": "1"}]))
+    assert monitor.value_list("fieldsOfStudy") == ["Data Science"]
+    await monitor._catalog(Response([
+        {"descriptor": "Partial List (First 500 Entries)", "href": "/groups/partial"},
+        {"descriptor": "All", "href": "/groups/all"},
+    ]))
+    assert monitor.value_list("fieldsOfStudy") is None
