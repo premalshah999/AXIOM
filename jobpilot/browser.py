@@ -5115,14 +5115,20 @@ class BrowserEngine:
                         "A verified page was sent to the submit path instead of a repeated fill",
                     )
                     decision = decision.model_copy(update={"action": "submit", "control_id": ""})
-            if repeated[action_key] > 2 and decision.action not in {"submit", "help"}:
+            # A page-wide fill that already held back a write (the same field failed the same way twice on this page)
+            # cannot do better the second time it is chosen: it skips that field again. bd8ca424 (iCIMS "Desired
+            # Location", 10-28) spent 19 decisions and 5 minutes on one field; Avature ran 84 answer calls on a picker.
+            stuck_fill = bool(
+                decision.action == "fill" and repeated[action_key] > 1 and (stuck := self.form.stuck_fields())
+            )
+            if (repeated[action_key] > 2 or stuck_fill) and decision.action not in {"submit", "help"}:
                 self.emit(
                     "navigation_repeated",
                     "Refused a repeated unchanged strategy",
                     {"action": decision.action, "control_id": decision.control_id},
                 )
                 refused += 1
-                if refused >= 3:
+                if refused >= (2 if stuck_fill else 3):
                     # Each refusal is still a paid decision. A model that keeps proposing
                     # the refused strategy will not find another one in this episode.
                     self.emit("navigation_stalled", "The controller repeated refused strategies")
@@ -5132,7 +5138,14 @@ class BrowserEngine:
                         "action": decision.action,
                         "control": target.get("label", ""),
                         "section": target.get("section", ""),
-                        "outcome": "Unchanged strategy refused. Choose a different control operation or inspect its menu.",
+                        "outcome": (
+                            "Fill refused: "
+                            + ", ".join(stuck[:4])
+                            + " already failed twice with the same write on this page. Use inspect_options, search "
+                            "or choose on that field, or help; do not fill again."
+                            if stuck_fill
+                            else "Unchanged strategy refused. Choose a different control operation or inspect its menu."
+                        ),
                     }
                 )
                 continue
