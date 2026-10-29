@@ -2281,9 +2281,6 @@ class Adapter:
         if len(uploads) != 1 or not path:
             return False
         self.attempts["first_time"] += 1
-        if not self.accounts.record(url).get("confirmed_at"):
-            # Not an account here: a later create-password step must not be turned back to this sign-in.
-            self.accounts.mark(url, "no_account", self.accounts.saved(url) or credentials)
         self.emit("account", "This site starts a new candidate's application with a resume upload beside its sign-in; "
                   "uploading the resume there")
         # Some registration pages expose the file input while its panel and
@@ -2299,6 +2296,9 @@ class Adapter:
             if len(uploads) != 1:
                 return False
         await self.form.locator(uploads[0]["id"]).set_input_files(str(path), timeout=15000)
+        if not self.accounts.record(url).get("confirmed_at"):
+            # The resume route was taken: a later create-password step must not return to sign-in.
+            self.accounts.mark(url, "no_account", self.accounts.saved(url) or credentials)
         await self.form.wait_upload()
         self.form.uploaded = True
         after = await self.form.scan()

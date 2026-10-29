@@ -275,6 +275,8 @@ async def test_an_unanswered_reset_creates_the_account_once(service):
     assert await flow.handle()
     assert form.clicked == ["create"]
     assert flow.store.record(URL).get("absent_create_at")
+    assert flow.store.state(URL) == "password_unknown"
+    assert flow.store.known(URL)
     # The create form in the same run registers instead of switching to Sign In for a "known" account.
     create = {
         "fields": _fields("Choose Password", "Retype Password"),
@@ -306,6 +308,19 @@ async def test_the_absent_create_is_tried_only_once(service):
     except (AttributeError, TypeError, KeyError):
         pass  # the fake form stops inside sign-in, past the point that matters here
     assert "create" not in form.clicked
+
+
+async def test_failed_registration_link_does_not_spend_the_create_attempt(service):
+    from unittest.mock import AsyncMock
+    import pytest
+
+    flow, form, scope = _sf_flow(service, SIGN_IN)
+    flow.store.save(URL, flow.store.shared(), "password_unknown", reset_submitted_at="2026-10-23T00:00:00+00:00")
+    form.click = AsyncMock(side_effect=TimeoutError("registration link unavailable"))
+    with pytest.raises(TimeoutError):
+        await flow.handle()
+    assert not flow.store.record(URL).get("absent_create_at")
+    assert ("absent", scope) not in flow.attempts
 
 
 async def test_a_recent_reset_still_waits_for_its_email(service):

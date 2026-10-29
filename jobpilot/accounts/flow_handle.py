@@ -119,11 +119,10 @@ class FlowHandleMixin:
             from ..adapters.base import create_spent
 
             if not create_spent(record):
+                await e.form.click(create_links[0]["id"], auth_control=True)
                 self.store.save(account_url, saved or self.store.shared(), "password_unknown", absent_create_at=now())
                 self.attempts.add(("absent", scope))
-                e.emit("account", "No password reset email ever arrived, so this employer has no account for this "
-                       "email; creating one")
-                await e.form.click(create_links[0]["id"], auth_control=True)
+                e.emit("account", "The reset went unanswered; opened the registration route once")
                 settle = getattr(e.form, "settle", None)
                 if settle:
                     await settle(timeout=8)

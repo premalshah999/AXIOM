@@ -102,7 +102,6 @@ async def test_the_route_is_taken_once_per_run(service, monkeypatch):
 
 async def test_legacy_unused_create_flag_does_not_block_resume_first_route(service, monkeypatch):
     import time
-
     obs = page()
     value, upload, recover = sign_in(service, monkeypatch, obs)
     from datetime import UTC, datetime, timedelta
@@ -129,3 +128,12 @@ async def test_local_upload_panel_is_opened_before_attaching_resume(service, mon
     assert await value.first_time_route(obs, URL, LOGIN)
     opened.assert_awaited_once_with(timeout=4000)
     upload.assert_awaited_once()
+
+
+async def test_failed_resume_upload_does_not_mark_account_absent(service, monkeypatch):
+    obs = page()
+    value, upload, _ = sign_in(service, monkeypatch, obs, state="reset_requested")
+    upload.side_effect = TimeoutError("upload unavailable")
+    with pytest.raises(TimeoutError):
+        await value.first_time_route(obs, URL, LOGIN)
+    assert value.accounts.record(URL)["state"] == "reset_requested"
