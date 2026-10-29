@@ -325,17 +325,33 @@ class CompletionMixin:
                 for r in s.scalars(select(Review).where(Review.run_id == run_id, Review.answer.is_(None)))
                 if r.key not in {"manual", "session"}
             }  # An answered question that is still missing is asked again, so the run can resume.
+            from .. import owner_questions as oq
+            from ..answers import normalize
+
+            asked_here = set()
             for q in result.get("reviews", []) if state in {"needs_review", "waiting_answer"} else []:
                 if self.review_kind(q) != "missing_fact":
                     continue
                 if q.get("key", "manual") in known:
                     continue
+                if q.get("required") is False:
+                    continue  # An optional field is left blank, never asked.
+                # One question once: Bosch's two "Other (free text)", TikTok's repeated "Start & end date" and NCSU's
+                # fourteen rows of three questions (2026-10-29). Rows that differ in their block stay apart.
+                signature = (
+                    q.get("key", "manual"),
+                    normalize(oq.display(q["question"], oq.context_from(q))),
+                    tuple(str(o) for o in q.get("options") or []),
+                )
+                if signature in asked_here:
+                    continue
+                asked_here.add(signature)
                 from ..owner_questions import context_from
 
                 s.add(
                     Review(
                         run_id=run_id,
-                        question=q["question"][:8000],
+                        question=(q.get("owner_question") or q["question"])[:8000],
                         options=q.get("options", []),
                         key=q.get("key", "manual"),
                         reason=q.get("reason", ""),
@@ -464,9 +480,14 @@ class CompletionMixin:
                 run.reason = "The employer's final page acknowledged the application"
             elif not run or (run.state not in {"submission_unknown", "already_applied"} and not committed):
                 raise ValueError("Only uncertain submissions or already-applied notices can be reconciled")
-            else:
+            elif submitted:
                 run.receipt = {"type": "user_reconciled", "evidence": evidence[:4000], "at": now()}
                 run.reason = "Submission reconciled by the applicant"
-            run.state = "confirmed" if submitted else "needs_review"
+            else:
+                # Not sent: the form is still open, so the engine has work to do and nobody has a question. It sat in
+                # "Needs you" with no question for five jobs (2026-10-29: the repair agent read each final page as unsent).
+                run.receipt = {"type": "unsent_reconciled", "evidence": evidence[:4000], "at": now()}
+                run.reason = "Not submitted: " + evidence[:300]
+            run.state = "confirmed" if submitted else "waiting_browser"
             s.get(Job, run.job_id).status = run.state
         self.db.event(run_id, "reconciled", "Applicant reconciled submission", {"submitted": submitted})

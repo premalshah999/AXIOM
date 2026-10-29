@@ -1,4 +1,4 @@
-"""Uploaded resume variants: upload, download, remove."""
+"""Uploaded resume variants (upload, download, remove) and the profile photo."""
 
 import hashlib
 import io
@@ -86,5 +86,35 @@ def router(service) -> APIRouter:
             # Keep the immutable file for historical receipts; remove its inventory entry.
             s.delete(row)
         return {"deleted": True}
+
+    @r.get("/api/profile/photo")
+    def photo_info():
+        """The saved profile photo's description ({"saved": false} when none); Setup › Profile shows it."""
+        from ... import profile_photo
+
+        return profile_photo.describe(db)
+
+    @r.post("/api/profile/photo")
+    async def photo_upload(file: UploadFile = File(...)):
+        """Save the profile photo (JPEG, PNG, GIF or WebP, at most 5 MB); applications asking for a photo attach it."""
+        from ... import profile_photo
+
+        content = await file.read(profile_photo.MAX_BYTES + 1)
+        return profile_photo.save(db, config.data_dir, file.filename or "photo", content)
+
+    @r.get("/api/profile/photo/file")
+    def photo_file():
+        from ... import profile_photo
+
+        path = profile_photo.path_for(db, config.data_dir)
+        if path is None:
+            raise HTTPException(404)
+        return FileResponse(path, media_type=db.get_setting(profile_photo.SETTING, {}).get("content_type", "image/jpeg"))
+
+    @r.delete("/api/profile/photo")
+    def photo_remove():
+        from ... import profile_photo
+
+        return {"deleted": profile_photo.remove(db, config.data_dir)}
 
     return r

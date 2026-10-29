@@ -207,6 +207,8 @@ def test_repairing_holds_only_what_the_engine_can_still_fix(service):
         "mail": ("waiting_browser", "The employer's password reset email did not arrive in time; the draft is kept"),
         "persona": ("waiting_browser", "The application is blocked at Amazon's Persona identity-verification page."),
         "password": ("waiting_browser", "This employer refuses the saved password. Reset the password in your own browser"),
+        # The repair agent's own sentence "not a missing personal fact" is not the Persona identity check (Neon, 2026-10-29).
+        "technical": ("waiting_browser", "Resume upload fails with a site-side error. A technical blocker, not a missing personal fact."),
         "busy": ("timed_out", BUSY),
         "model": ("waiting_browser", PROVIDER),
         "stall": ("waiting_browser", "Recovery stopped: Required field incomplete: Country; draft saved."),
@@ -218,7 +220,7 @@ def test_repairing_holds_only_what_the_engine_can_still_fix(service):
     found = groups(service)
     assert found["persona"] == found["password"] == "needs"
     assert found["busy"] == found["model"] == "active"
-    assert found["mail"] == found["stall"] == found["botwall"] == "repair"
+    assert found["mail"] == found["stall"] == found["botwall"] == found["technical"] == "repair"
 
 
 def test_an_explicit_refusal_page_permits_the_validation_retry_even_without_field_names(service):

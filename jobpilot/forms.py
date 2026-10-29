@@ -17,6 +17,7 @@ from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from . import icims_protocol, phone_fields, taleo_protocol, widgets
+from . import profile_photo
 from .answers import HISTORY_UNKNOWN, WOTC, answer_key, job_catalog_search_box, normalize
 from .answers.text import strip_catalog_code
 from .knowledge import topic
@@ -299,6 +300,75 @@ def link_companion_text(fields):
             and parent["label"] not in field.get("label", "")
         ):
             field["label"] = f"{parent['label']} {field.get('label', '')}".strip()
+
+
+# What a control with only a generic caption ("None of the Above", "Make Selection Here", "Start & end date") belongs to,
+# read from the page around it: the question printed above its choices, the heading it sits under, and the repeated block
+# (work or education row) holding it with that block's own company/school/title/degree values. Smithfield, Westinghouse
+# and TikTok (2026-10-29) reached the owner as these bare captions.
+ROW_CONTEXT_JS = """el => {
+  const clean = t => (t || '').replace(/\\s+/g, ' ').trim();
+  const visible = e => { const r = e.getBoundingClientRect(), c = getComputedStyle(e);
+    return r.width > 0 && r.height > 0 && c.visibility !== 'hidden' && c.display !== 'none'; };
+  const controls = root => [...root.querySelectorAll('input:not([type=hidden]),select,textarea')].filter(visible);
+  const labelOf = c => clean((c.labels && c.labels[0] && c.labels[0].textContent) || c.getAttribute('aria-label')
+    || c.getAttribute('placeholder') || c.name || c.id || '');
+  const valueOf = c => c.tagName === 'SELECT' ? clean(c.selectedOptions[0] && c.selectedOptions[0].textContent) : clean(c.value);
+  const out = {caption: '', heading: '', kind: '', identity: {}, index: 0};
+  // The first control of this control's choice group, or the control itself.
+  let first = el;
+  const group = el.closest('fieldset,[role=group],[role=radiogroup]');
+  if (group && controls(group).length > 1) first = controls(group)[0];
+  const walker = document.createTreeWalker(el.getRootNode().body || el.getRootNode(), NodeFilter.SHOW_TEXT);
+  walker.currentNode = first;
+  const own = new Set([labelOf(el)]);
+  for (let n = walker.previousNode(), steps = 0; n && steps < 60 && !(out.caption && out.heading); n = walker.previousNode(), steps++) {
+    const t = clean(n.textContent), host = n.parentElement;
+    if (!t || !host || host.closest('script,style,noscript,option,button,a') || !/[a-z]{3}/i.test(t) || !visible(host)) continue;
+    if (own.has(t) || t.length > 400) continue;
+    const isHeading = host.closest('legend,[role=heading],h1,h2,h3,h4,h5,h6');
+    if (isHeading) { if (!out.heading) out.heading = t; continue; }
+    if (!out.caption && (t.length >= 12 || /\\?/.test(t)) && !host.closest('label')) out.caption = t;
+  }
+  // The repeated block: the nearest ancestor holding a company/school field and several controls.
+  for (let node = el.parentElement, up = 0; node && up < 9; node = node.parentElement, up++) {
+    const inside = controls(node);
+    if (inside.length < 3 || inside.length > 40) continue;
+    const named = {};
+    for (const c of inside) {
+      const l = labelOf(c).toLowerCase().replace(/[*✱]/g, '').trim(), v = valueOf(c);
+      if (!v || /^(select|choose|please)/i.test(v)) continue;
+      if (/^(company|employer)( name)?$/.test(l)) named.company = v;
+      else if (/^(job )?(title|position)$|^position title$/.test(l)) named.title = v;
+      else if (/^(school|university|college|institution)( name)?$/.test(l)) named.school = v;
+      else if (/^degree( type| level)?$/.test(l)) named.degree = v;
+    }
+    if (named.company || named.school) {
+      out.kind = named.company ? 'work' : 'education';
+      out.identity = out.kind === 'work' ? {company: named.company || '', title: named.title || ''}
+        : {school: named.school || '', degree: named.degree || ''};
+      const peers = [...(node.parentElement ? node.parentElement.children : [])].filter(x => x.tagName === node.tagName && x.className === node.className);
+      out.index = peers.length > 1 ? peers.indexOf(node) + 1 : 0;
+      break;
+    }
+  }
+  return out;
+}"""
+
+
+def apply_row_hints(fields, hints, profile):
+    """Place a control whose scan marked no history row in the profile entry its block's own company/school names (one
+    entry only). The row's dates and location are then that entry's, as for a marked row."""
+    if not hints or profile is None:
+        return
+    for f in fields:
+        hint = hints.get(f.get("dom_id"))
+        if not hint or f.get("history_row") or f.get("history_kind"):
+            continue
+        from .owner_questions import row_for
+
+        if (index := row_for(profile, hint["kind"], hint["identity"])) is not None:
+            f["history_row"] = {"kind": hint["kind"], "index": index}
 
 
 HISTORY_GROUP_NUMBER = re.compile(r"^(?:Work Experience|Education) (\d+)$")
@@ -1172,6 +1242,9 @@ class FormSession:
         # Workday history rows deleted because the employer cannot list their answer, by kind ("education").
         self.dropped_rows = {}
         self.document_uploads = {}
+        # A control's dom id -> the history row it sits in, read from its block when the scan did not mark one
+        # (enrich_pending); applied to the next scan so the row's own profile entry answers it.
+        self.row_hints = {}
         self.owner_id = uuid.uuid4().hex
         self.revision = 0
         self._revision_hash = ""
@@ -1724,6 +1797,7 @@ class FormSession:
                     and not AUTH.search(f["label"])
                 }
         mark_history_rows(self.fields.values())
+        apply_row_hints(self.fields.values(), self.row_hints, getattr(getattr(self, "resolver", None), "profile", None))
         name_phone_numbers(list(self.fields.values()))
         link_companion_text(self.fields.values())
         label_signature_date(list(self.fields.values()), "\n".join(texts))
@@ -2277,7 +2351,7 @@ class FormSession:
             return sorted(named, key=rank)[:1]
         unnamed = [f for f in files if not NOT_RESUME.search(f["label"])]
         if len(files) == 1:
-            return unnamed[:1]
+            return [f for f in unnamed[:1] if not profile_photo.wants_photo(f)]  # A lone "Photo" is not the resume.
         # Generic "Upload a file" inputs named by their section (Jabil: Resume/CV/... beside Additional Attachments).
         grouped = [f for f in unnamed if RESUME.search(f.get("group") or "")]
         if len(grouped) == 1:
@@ -3419,6 +3493,37 @@ class FormSession:
             }
         )
 
+    async def enrich_pending(self):
+        """Give each pending question the page context its bare caption lacks (ROW_CONTEXT_JS): the question above it,
+        its heading and the history row it belongs to. Idempotent; a page that cannot be read leaves the item as it was."""
+        from .owner_questions import generic
+
+        for item in self.pending[:12]:
+            context = item.setdefault("context", {})
+            if context.get("enriched") or item.get("type") == "file":
+                continue
+            located = bool(context.get("history_identity") or (item.get("scope") or {}).get("group"))
+            if located and not generic(item["question"]):
+                continue
+            context["enriched"] = True
+            try:
+                found = await self.locator(item["field_id"]).evaluate(ROW_CONTEXT_JS, timeout=2500)
+            except Exception:
+                continue
+            if not isinstance(found, dict):
+                continue
+            for key in ("caption", "heading"):
+                if found.get(key) and normalize(found[key]) != normalize(item["question"]):
+                    context[key] = found[key][:300]
+            identity = {k: v for k, v in (found.get("identity") or {}).items() if v}
+            if identity and found.get("kind") and not context.get("history_identity"):
+                context["history_kind"], context["history_identity"] = found["kind"], identity
+                if isinstance(found.get("index"), int) and found["index"] > 0:
+                    context["row_index"] = found["index"]
+                dom_id = (self.fields.get(item["field_id"]) or {}).get("dom_id")
+                if dom_id:
+                    self.row_hints[dom_id] = {"kind": found["kind"], "identity": identity}
+
     async def attach_owner_documents(self):
         """Attach a document the owner sent for an upload question (a transcript, a work sample) to each required,
         empty file field asking for that kind of document. True when a file was attached.
@@ -3431,9 +3536,23 @@ class FormSession:
         from .owner_questions import document_for
 
         attached = False
+        photo = profile_photo.path_for(resolver.db, resolver.config.data_dir)
+        for field in list(self.fields.values()):
+            if not (photo and profile_photo.wants_photo(field)) or field["value"] or self.field_key(field) in self.document_uploads:
+                continue
+            # The profile photo (Setup › Profile) goes to any photo upload, required or not.
+            try:
+                await self.locator(field["id"]).set_input_files(str(photo), timeout=15000)
+                await self.wait_upload()
+            except (PlaywrightError, ValueError):
+                continue
+            self.document_uploads[self.field_key(field)] = photo.name
+            attached = True
+            self.emit("document_upload", "Attached the profile photo", {"field": field["label"]})
         for field in list(self.fields.values()):
             if (
                 field["type"] != "file"
+                or profile_photo.wants_photo(field)
                 or not field["required"]
                 or field["value"]
                 or self.field_key(field) in self.document_uploads
@@ -4451,6 +4570,7 @@ class FormSession:
                 continue  # Hidden/removed questions no longer need a personal answer.
             pending.append({**p, "field_id": current["id"], "slot": current.get("slot", 0)})
         self.pending = pending
+        await self.enrich_pending()
         # Validation often appears only after the first input/blur. Repair our
         # own known prose once before returning control to navigation; verify()
         # stays read-only and never changes applicant data.
@@ -5215,6 +5335,11 @@ class FormSession:
                     problems.append(f"Required document missing: {f['label']}")
                     if not any(p.get("field_id") == f["id"] for p in self.pending):
                         self._pending(f, "Required document upload")
+                        if profile_photo.wants_photo(f):
+                            # One clear question that names where the photo is kept; the owner's file also fills Setup.
+                            self.pending[-1].update(
+                                key=profile_photo.KEY, owner_question=profile_photo.QUESTION, reason="Required profile photo"
+                            )
                 continue
             empty = not f["value"] or (f["type"] == "checkbox" and f["value"] != "true")
             if f["required"] and f["type"] != "file" and (not f["valid"] or empty):
@@ -5245,6 +5370,7 @@ class FormSession:
             # lists the applicant's resume and the application form has no upload of its own.
             self.uploaded = self.upload_verified = self.resume_on_file = True
         self.last_problems = list(dict.fromkeys(problems))
+        await self.enrich_pending()
         return {
             "ok": not problems,
             "problems": self.last_problems,

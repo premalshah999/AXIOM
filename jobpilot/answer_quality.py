@@ -510,6 +510,12 @@ def confirmed_phone_type(form, field):
 
 
 def supported_local(form, field):
+    from .answers.third_party import guard
+
+    if (own := guard(form.resolver, field)) is not None:
+        # An employer's, supervisor's or reference's contact detail is not the applicant's own: the audit blocked a correct
+        # "Employer City" because the applicant's city was "the confirmed fact" (2026-10-29).
+        return own
     if re.fullmatch(r"degree(?: type| level)?", normalize(field.get("label", ""))) and re.fullmatch(
         r"Education \d+", field.get("group", "")
     ):

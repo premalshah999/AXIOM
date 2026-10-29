@@ -45,3 +45,14 @@ def test_an_active_run_cannot_be_recorded_as_owner_submitted(service):
     run_id, _ = seed(service, "running", False)
     with pytest.raises(ValueError):
         service.reconcile(run_id, True, "claimed", submitted_by_owner=True)
+
+
+def test_an_unsent_form_goes_to_repair_not_to_an_empty_needs_you(service):
+    # Five jobs sat in "Needs you" with no question after the repair agent read their final page as unsent (2026-10-29).
+    run_id, job_id = seed(service, "needs_review", True)
+    service.reconcile(run_id, False, "Repair agent read the final page: the unsent form is still shown")
+    with service.db.session() as s:
+        run = s.get(Run, run_id)
+        assert run.state == "waiting_browser" and run.receipt["type"] == "unsent_reconciled"
+        assert run.reason.startswith("Not submitted")
+        assert s.get(Job, job_id).status == "waiting_browser"

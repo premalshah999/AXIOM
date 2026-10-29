@@ -50,7 +50,12 @@ PRIORITY = {group: index for index, group in enumerate(GROUPS[:5] + ("new", "don
 # can still fix. 2026-10-29: 28 of 32 Repairing jobs waited on the employer's mail or the owner's own browser (a refused
 # password, Amazon's Persona identity check), and waits that sent nothing (sender busy, model or browser down) retry
 # themselves (recovery.WAIT_BACKOFF).
-OWNER_ONLY = ("%persona%", "%identity verification%", "%in your own browser%", "%idverify%")
+# "%persona%" alone also matched the repair agent's own sentence "not a missing personal fact", which sent Neon's
+# resume-upload site error to "Needs you" (2026-10-29): only the identity-check product's name, in its usual phrases.
+OWNER_ONLY = (
+    "%persona identity%", "%persona verif%", "%persona check%", "%persona page%", "%persona step%", "%persona's%",
+    "%identity verification%", "%in your own browser%", "%idverify%",
+)
 STOPPED = ("waiting_browser", "timed_out", "failed")
 # Latest runs the Batch page shows live: owners at work, waits and questions.
 LIVE = ("queued", "running", "submitting", "waiting_email", "waiting_answer", "needs_review")

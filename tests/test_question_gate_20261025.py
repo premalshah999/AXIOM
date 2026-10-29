@@ -95,7 +95,7 @@ async def test_open_questions_are_revalidated_against_the_current_engine(service
                context={"type": "textarea"})
     add_review(service, "q-legit", jobs["legit"], "City of Birth")
     outcome = await service.revalidate_open_questions()
-    assert outcome == {"closed": 1, "recovered": 1, "answered": 1}
+    assert outcome == {"closed": 1, "recovered": 1, "answered": 1, "merged": 0}
     with service.db.session() as s:
         assert s.get(Run, jobs["misread"]).state == "waiting_browser"
         assert s.get(Run, jobs["restricted"]).state == "closed"
