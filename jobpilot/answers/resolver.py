@@ -348,7 +348,8 @@ class Resolver(
                 # acknowledges receipt of this notice; unrelated assertions are not residence evidence.
                 or re.fullmatch(
                     r"i (?:(do not|don t) )?reside in ([a-z ]+?)"
-                    r"(?: and acknowledge that i have received notice of this (?:statement|statute))?",
+                    r"(?: and acknowledge that i have received notice of this (?:statement|statute)"
+                    r"(?: pursuant to (?:[a-z]{1,3} )*\d+[a-z]*(?: \d+[a-z]*)*)?)?",
                     n,
                 )
                 # "Not a resident of Maine - does not apply" / "Maine - Acknowledgment of Receipt ..."

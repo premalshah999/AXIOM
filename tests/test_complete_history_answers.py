@@ -691,7 +691,7 @@ def test_reside_notice_options_use_saved_state(service, state, index):
 
     resolver = Resolver(Profile(address=Address(state=state, country="United States")), service.db, service.config)
     options = [
-        "I reside in Massachusetts and acknowledge that I have received notice of this statute.",
+        "I reside in Massachusetts and acknowledge that I have received notice of this statement pursuant to G.L. c. 149, § 19B.",
         "I don’t reside in Massachusetts.",
     ]
     q = {**field("It is unlawful in Massachusetts to require a lie detector test; criminal penalties apply."),

@@ -6033,6 +6033,15 @@ class FormSession:
 
     async def rejection(self):
         text = await self._page_text()
+        # A standalone duplicate notice can be the entire submit error, without a "cannot submit" prefix.
+        # Match a statement about this posting, never a footer question or instructions about other jobs.
+        duplicate = re.search(
+            r"(?im)^\s*you(?: have|['’]ve)? already applied (?:for|to) this (?:job|position|role)[.!]?\s*$",
+            text,
+        )
+        if duplicate:
+            return {"type": "explicit_rejection_page", "url": self.page.url,
+                    "category": "already_applied", "evidence": duplicate[0].strip(), "missing_fields": []}
         match = re.search(
             r"(?:we )?(?:couldn.t|could not|unable to) submit your application|"
             r"application submission was (?:flagged|rejected)|"

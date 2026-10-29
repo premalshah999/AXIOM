@@ -49,3 +49,17 @@ async def test_shadow_dialog_reads_slotted_warning_before_acknowledging(page, tm
     await form.fill(field, 'No')
     obs = await form.scan()
     assert next(f for f in obs['fields'] if f['type'] == 'radiogroup')['value'] == 'No'
+
+
+@pytest.mark.parametrize('message,dismissed', [
+    ('Not sure about your answers? Select Yes and we will verify the information on your behalf.', True),
+    ('Do you wish to withdraw your application?', False),
+])
+async def test_explicit_component_modal_marker_owns_its_shadow_acknowledgement(page, tmp_path, message, dismissed):
+    markup = PAGE.replace('<example-tip id=tip>', '<example-tip id=tip data-sdf-modal style="display:block;width:400px">')
+    markup = markup.replace('role=dialog aria-modal=true', '')
+    await page.set_content(markup.format(message=message))
+    form = FormSession(page, Resolver(Profile(), None, None), tmp_path / 'r.pdf', lambda *a, **k: None)
+    obs = await form.scan()
+    assert (await page.locator('#tip').count() == 0) is dismissed
+    assert bool(obs['fields']) is dismissed

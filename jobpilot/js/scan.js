@@ -866,6 +866,23 @@
     }
     if (el.closest('[role=combobox]') !== el && el.closest('[role=combobox]')) continue;
     let options = [], value = el.value || '', question = label(el), group = null, uploadRequired = false;
+    // RCM sometimes labels a picker only "Make Selection Here"; its immediately preceding instruction
+    // column owns the actual question. Stop at any other control or content rather than borrowing a section.
+    if (/^\s*[*✱]?\s*make selection here\s*$/i.test(question) && el.closest('.RCMFormField')) {
+      const column = el.closest('.RCMFormField')?.parentElement;
+      const controls = column && [...column.querySelectorAll('input:not([type=hidden]),select,textarea')].filter(visible);
+      if (controls?.length === 1 && controls[0] === el) {
+        let previous = column.previousElementSibling;
+        for (let n=0; previous && n<3 && previous.matches('.clearfix') && !clean(textOf(previous)); n++)
+          previous = previous.previousElementSibling;
+        const notes = previous && [...previous.querySelectorAll('.instructionField[role=note]')].filter(visible);
+        if (notes?.length === 1 && !previous.querySelector('input,select,textarea,[role=combobox]')) {
+          const text = clean(textOf(notes[0]));
+          if (/^(?:\d+[.)]\s*)?(?:are|have|do|did|will|can|which|what|is)\b/i.test(text) && text.includes('?'))
+            question = text;
+        }
+      }
+    }
     const select2Container = el.matches('.select2-selection[role=combobox]') && el.closest('.select2-container');
     const select2Native = select2Container?.previousElementSibling;
     if (select2Native?.matches('select') && select2Native.nextElementSibling === select2Container
@@ -1263,7 +1280,7 @@
     return false;
   };
   const nodesById = new Map(all.filter(n => n.dataset.jpId).map(n => [n.dataset.jpId, n]));
-  const dialogs = all.filter(d => d.matches('[role=dialog],[role=alertdialog],[aria-modal=true],dialog[open],[data-automation-id="popUpDialog"],[data-automation-id="wd-Popup"]'))
+  const dialogs = all.filter(d => d.matches('[role=dialog],[role=alertdialog],[aria-modal=true],[data-sdf-modal],dialog[open],[data-automation-id="popUpDialog"],[data-automation-id="wd-Popup"]'))
     .filter(d => visible(d) && !d.closest(CAPTCHA_BOX) && d.getBoundingClientRect().width > 120)
     .map(d => ({
       title: clean(d.querySelector('h1,h2,h3,[role=heading]')?.innerText || d.getAttribute('aria-label') || ''),
