@@ -1,5 +1,6 @@
 """Shared admission decisions for unattended jobs, manual batches and recovery."""
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -38,10 +39,22 @@ def require_intake(session, job_id):
         )
 
 
+# Link shorteners and listing aggregators serve many employers from one host.
+SHARED_LINK_HOSTS = {
+    "go.vansh.nyc", "bit.ly", "lnkd.in", "tinyurl.com", "t.co", "ow.ly", "buff.ly", "rebrand.ly", "cutt.ly",
+    "short.gy", "simplify.jobs", "jobright.ai",
+}
+
+
 def employer_partition(job):
     get = job.get if isinstance(job, dict) else lambda key, default=None: getattr(job, key, default)
     parsed = urlsplit(get("url", ""))
     host = (parsed.hostname or "").lower()
+    if host in SHARED_LINK_HOSTS:
+        # Every go.vansh.nyc job was one "employer": DV Trading, OneImaging, IXL, ALTEN and Perpay waited for each
+        # other as employer_busy, one at a time across all workers (2026-10-29). The employer is the company.
+        company = re.sub(r"\s+", " ", str(get("company", "") or "")).strip().casefold()
+        return host + "/" + (company or parsed.path.strip("/").lower())
     parts = parsed.path.strip("/").split("/")
     ats = get("ats", "custom")
     if ats in {"greenhouse", "lever", "ashby", "smartrecruiters", "rippling"} and parts[0]:

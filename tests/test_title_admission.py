@@ -242,3 +242,16 @@ def test_ranking_admits_by_title_only_inside_the_gate(service, location, reason,
     job = {"title": "AI Engineer", "url": "https://careers-acme.icims.com/jobs/1/ai-engineer/job",
            "description": "Build AI agents. " * 40, "location": location}
     assert title_admits_job(service.db, profile, job, reason) is admitted
+
+
+def test_jobs_behind_a_shared_short_link_host_are_separate_employers():
+    """go.vansh.nyc jobs (DV Trading, OneImaging, IXL…) waited for each other as one employer (2026-10-29)."""
+    from jobpilot.admission import employer_partition
+
+    a = {"url": "https://go.vansh.nyc/Ud", "company": "Example Trading", "ats": "custom"}
+    b = {"url": "https://go.vansh.nyc/Hu", "company": "Example Imaging", "ats": "custom"}
+    c = {"url": "https://go.vansh.nyc/Hx", "company": "Example  Imaging", "ats": "custom"}
+    assert employer_partition(a) != employer_partition(b)
+    assert employer_partition(b) == employer_partition(c)
+    site = {"url": "https://careers.example.test/jobs/1", "company": "Example", "ats": "custom"}
+    assert employer_partition(site) == "careers.example.test"
