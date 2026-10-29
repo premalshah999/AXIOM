@@ -116,7 +116,9 @@ class FlowHandleMixin:
             and self.reset_unanswered(account_url, recorded)
         ):
             record = getattr(self.store, "record", lambda url: {})(account_url)
-            if not record.get("absent_create_at"):
+            from ..adapters.base import create_spent
+
+            if not create_spent(record):
                 self.store.save(account_url, saved or self.store.shared(), "password_unknown", absent_create_at=now())
                 self.attempts.add(("absent", scope))
                 e.emit("account", "No password reset email ever arrived, so this employer has no account for this "

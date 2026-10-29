@@ -27,6 +27,8 @@ from .senders import sender_domains_overlap
 
 # Seconds a password-reset window stays open on a platform that mails every employer from one sender (see begin()).
 CENTRAL_RESET_WAIT = 180
+# Seconds before a reset wait opens that its mail may already be dated (see begin()).
+RESET_SENT_EARLY_SECONDS = 30
 SHARED_RESET_SENDERS = {"icims.com", "successfactors.com", "successfactors.eu", "sapsf.com", "sapsf.eu"}
 
 
@@ -262,6 +264,12 @@ class ChallengesMixin:
             # A legacy supplied timestamp cannot backdate a new request. Observed
             # activation links may explicitly recover their bounded current-run window.
             request_since = current
+            if kind == "password_reset":
+                # The reset was submitted before this wait opened, and a fast sender's mail lands in between: EA's
+                # Avature "Password activation" was dated 2-3 s before each wait, and every run waited out 20 minutes
+                # for mail already in the inbox (2026-10-28). Never before this run started.
+                start = datetime.fromisoformat(run.started_at or run.created_at).timestamp()
+                request_since = max(start, current - RESET_SENT_EARLY_SECONDS)
             if observed and since is not None:
                 if kind not in {"link", "password_reset"} or set(rule["link_origins"]) != {
                     origin(rule["employer_origin"])

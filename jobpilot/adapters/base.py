@@ -330,6 +330,22 @@ def reset_proven(record):
     return bool((record or {}).get("reset_submitted_at"))
 
 
+# The one Create after unanswered resets is offered again after this long: Lenovo's (2026-10-28 22:43) was spent by a
+# run the model provider stopped before its registration was sent, and every later run requested another reset.
+ABSENT_CREATE_RETRY_SECONDS = 2 * 3600
+
+
+def create_spent(record):
+    """The one Create after unanswered resets was tried within ABSENT_CREATE_RETRY_SECONDS."""
+    at = (record or {}).get("absent_create_at")
+    if not at:
+        return False
+    try:
+        return time.time() - datetime.fromisoformat(at).timestamp() < ABSENT_CREATE_RETRY_SECONDS
+    except (TypeError, ValueError):
+        return True
+
+
 # Account states meaning "an account exists here": sign in rather than create.
 KNOWN_ACCOUNT = {
     "authenticated",
@@ -2198,7 +2214,7 @@ class Adapter:
             absent = (
                 unknown
                 and reset_proven(record)
-                and not record.get("absent_create_at")
+                and not create_spent(record)
             )
             # The same silence where nothing ever showed that an account exists (no Create, sign-in or "already
             # registered"): Bain's, EA's and Intuit's career sites answer a reset with "If the email address you entered
@@ -2220,7 +2236,7 @@ class Adapter:
                 # Only spend the one registration attempt when a route was
                 # actually taken. Older runs set this flag even when no link
                 # existed, permanently blocking a later resume-first route.
-                if not record.get("absent_create_at") and await self.switch(obs, CREATE_LINK):
+                if not create_spent(record) and await self.switch(obs, CREATE_LINK):
                     if absent or unproven:
                         self.accounts.mark(url, "password_unknown" if absent else "no_account",
                                            self.accounts.saved(url) or credentials, absent_create_at=now())

@@ -186,3 +186,16 @@ async def test_a_failed_new_password_step_requests_no_further_reset_on_this_buil
 def test_a_locked_account_is_never_retried_by_the_autopilot():
     # By Light (iCIMS 2026-10-27) was retried twice after the employer locked the account.
     assert PERSIST_SKIP.search("The employer locked the account after failed sign-ins: account has been blocked")
+
+
+def test_a_create_spent_hours_ago_is_offered_again():
+    """Lenovo (2026-10-28): the one Create was spent by a run the model provider stopped before registering."""
+    from datetime import UTC, datetime, timedelta
+
+    from jobpilot.adapters.base import ABSENT_CREATE_RETRY_SECONDS, create_spent
+
+    recent = (datetime.now(UTC) - timedelta(minutes=30)).isoformat()
+    old = (datetime.now(UTC) - timedelta(seconds=ABSENT_CREATE_RETRY_SECONDS + 60)).isoformat()
+    assert create_spent({"absent_create_at": recent})
+    assert not create_spent({"absent_create_at": old})
+    assert not create_spent({})
