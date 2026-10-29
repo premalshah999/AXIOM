@@ -18,7 +18,7 @@ import type {
 } from "./types";
 import { ago, Confirm, Empty, ErrorLine, External, Field, KeyValues, Loading, plural, stamp } from "./ui";
 import { ProfilePhoto } from "./profile-photo";
-import { Actions, ConfirmButton, Facts, FormGrid, Lede, SaveBar, SecretInput } from "./setup-kit";
+import { Actions, ConfirmButton, Facts, FormGrid, Lede, ListInput, SaveBar, SecretInput } from "./setup-kit";
 import { Button, Drawer, Empty as AxEmpty, Input, Panel, Pill, Table, Tabs, type PillTone } from "./ui/index";
 
 // ---------- Profile ----------
@@ -28,11 +28,6 @@ const comparable = (p: Profile) => {
   const { reviewed_answers: _r, approved_answers: _a, ...rest } = p as Profile & Record<string, unknown>;
   return JSON.stringify(rest);
 };
-const list = (v: string) =>
-  v
-    .split(",")
-    .map((x) => x.trim())
-    .filter(Boolean);
 const EMPTY_WORK: WorkEntry = { company: "", title: "", location: "", start: "", end: "", current: false, description: "" };
 const EMPTY_EDU: EducationEntry = { school: "", degree: "", field_of_study: "", start: "", end: "", gpa: "" };
 const SECTIONS = [
@@ -526,10 +521,10 @@ function Experience({ p, set }: { p: Profile; set: Setter }) {
       <Panel title="Skills and languages">
         <div className="form-grid">
           <Field label="Skills" hint="Comma separated" wide>
-            <input value={p.skills.join(", ")} onChange={(e) => set("skills", list(e.target.value))} />
+            <ListInput value={p.skills} onChange={(v) => set("skills", v)} />
           </Field>
           <Field label="Languages" hint="Comma separated" wide>
-            <input value={(p.languages || []).join(", ")} onChange={(e) => set("languages", list(e.target.value))} />
+            <ListInput value={p.languages || []} onChange={(v) => set("languages", v)} />
           </Field>
         </div>
       </Panel>
@@ -589,7 +584,7 @@ function Check({
 
 function Policies({ p, set }: { p: Profile; set: Setter }) {
   return (
-    <Panel title="What ApplyPilot may do for you">
+    <Panel title="What AXIOM may do for you">
       <Lede>These decide which steps run unattended.</Lede>
       <div className="form-grid">
         <Check checked={p.autonomous} onChange={(v) => set("autonomous", v)} title="Apply autonomously">
@@ -732,7 +727,7 @@ function AnswerRulesEditor({ p, set }: { p: Profile; set: Setter }) {
             hint="Used when your own source isn’t offered. Comma separated, best first: LinkedIn, company website, Indeed, job board… Empty asks you."
             wide
           >
-            <input value={rules.source_order.join(", ")} onChange={(e) => update({ source_order: list(e.target.value) })} />
+            <ListInput value={rules.source_order} onChange={(v) => update({ source_order: v })} />
           </Field>
           <Check checked={rules.source_any_channel} onChange={(v) => update({ source_any_channel: v })} title="Then any other plain channel">
             Accepts an offered channel that claims no referral or insider relationship.
@@ -821,7 +816,7 @@ function Preferences({ p, set }: { p: Profile; set: Setter }) {
           hint="Comma separated. Usual alternate titles count too: Software Development Engineer also finds Software Engineer and SDE."
           wide
         >
-          <input value={p.target_roles.join(", ")} onChange={(e) => set("target_roles", list(e.target.value))} />
+          <ListInput value={p.target_roles} onChange={(v) => set("target_roles", v)} />
         </Field>
         <Field label="Apply first to" hint="Order of ready jobs in a batch">
           <select
@@ -833,10 +828,10 @@ function Preferences({ p, set }: { p: Profile; set: Setter }) {
           </select>
         </Field>
         <Field label="Target locations" hint="Comma separated" wide>
-          <input value={p.target_locations.join(", ")} onChange={(e) => set("target_locations", list(e.target.value))} />
+          <ListInput value={p.target_locations} onChange={(v) => set("target_locations", v)} />
         </Field>
         <Field label="Exclude titles containing" hint="Comma separated keywords" wide>
-          <input value={p.excluded_keywords.join(", ")} onChange={(e) => set("excluded_keywords", list(e.target.value))} />
+          <ListInput value={p.excluded_keywords} onChange={(v) => set("excluded_keywords", v)} />
         </Field>
         <Field label="Minimum fit for ranking" hint="0–100">
           <input type="number" min={0} max={100} value={p.minimum_fit} onChange={(e) => set("minimum_fit", Number(e.target.value))} />
@@ -1206,6 +1201,7 @@ export function AccountSettings() {
                     </Button>
                     <ConfirmButton
                       label="Forget"
+                      variant="secondary"
                       confirm="Forget account"
                       note="The next application signs in again or creates the account."
                       pending={pending === "forget" + a.id}
@@ -1311,7 +1307,7 @@ function EmployerPassword({
             (sign-in email <strong>{a.login_email}</strong>)
           </>
         ) : null}
-        , then enter it here. It's encrypted on the server and never shown again; ApplyPilot stops asking this employer
+        , then enter it here. It's encrypted on the server and never shown again; AXIOM stops asking this employer
         for resets.
       </p>
       <div className="ax-field">
