@@ -189,6 +189,11 @@ def candidates(form, *, current_page=False):
     for key, record in () if current_page else form.ledger.items():
         if not record.get("verified") or SECRET.search(record.get("label", "")):
             continue
+        if record.get("external"):
+            # An answer written on the tax-credit questionnaire's own host belongs to that finished questionnaire: no
+            # control of the application's pages can show or repair it, so auditing it at the final submit looped
+            # (Montenson's Oracle run blocked on an ADP questionnaire answer, "revisit_history_row", 2026-10-29).
+            continue
         scope = record.get("field_key", [])
         fields[key] = {
             "id": key,
@@ -283,6 +288,17 @@ def unplaced_row(form, field, known):
         if found and len(getattr(profile, found[1], None) or []) > 1:
             return True
     return False
+
+
+def revisit_key(item):
+    """The identity of an earlier-step row a finding names, from the finding itself or from the field it came from."""
+    scope = item.get("scope") or {}
+    return digest(logical_identity({"label": item.get("question", ""), "type": item.get("type", ""), **scope}))
+
+
+def stop_revisit(form, item):
+    """Remember that an earlier-step row cannot be reopened (its step is gone, or three reviews found it unchanged)."""
+    form.failed_strategies.setdefault("__quality_revisit_failed__", {})[revisit_key(item)] = True
 
 
 def blocked_detail(pending, by_id, corrections):
@@ -926,6 +942,25 @@ async def audit_form(form, *, current_page=False):
                 digest(logical_identity(field))
             ] = answer.model_dump()
         if not field["editable"]:
+            scope = {key: field.get(key) for key in ("section", "group", "slot", "name", "automation_id")}
+            if revisit_key({"question": field["label"], "type": field["type"], "scope": scope}) in (
+                form.failed_strategies.get("__quality_revisit_failed__") or {}
+            ):
+                # Reopening its step was tried (or reviewed three times without change): repeating the same repair
+                # only loops. Stop once, naming the field and both values (Montenson, Belden 2026-10-29).
+                pending.append(
+                    {
+                        "field_id": field_id,
+                        "question": field["label"],
+                        "reason": f'Earlier-step answer "{str(field["label"])[:80]}" is "{str(field.get("value", ""))[:60]}" '
+                        f'but the confirmed fact is "{str(answer.value or "")[:60]}", and its step cannot be reopened; '
+                        "draft retained",
+                        "blocker_type": "control_failure",
+                        "retryable": False,
+                        "repair_cause": cause,
+                    }
+                )
+                continue
             pending.append(
                 {
                     "field_id": field_id,

@@ -31,7 +31,7 @@ def driver(pages, cls=Workday):
         adapter.clicks.append(control['id'])
         adapter.index = min(adapter.index+1, len(pages)-1)
     adapter.click = click
-    adapter.e = SimpleNamespace(armed=False, form=SimpleNamespace(scan=scan, settle=settle))
+    adapter.e = SimpleNamespace(armed=False, form=SimpleNamespace(scan=scan, settle=settle, failed_strategies={}))
     return adapter
 
 

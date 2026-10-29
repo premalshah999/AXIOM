@@ -1461,6 +1461,11 @@ class Adapter:
             key = "quality_revisit:" + repr((item["question"], sorted(scope.items())))
             if not self.attempts[key]:
                 targets.append((key, item, scope))
+            else:
+                # Reopened before and flagged again: the correction did not stay; it is not offered a third walk.
+                from ..answer_quality import stop_revisit
+
+                stop_revisit(self.form, item)
         if not targets:
             return False
         seen = set()
@@ -1492,9 +1497,13 @@ class Adapter:
                 break
             await self.click(back[0])
             await self.form.settle(timeout=4)
-        # A failed traversal is not a reason to walk the same pages forever.
-        for key, _, _ in targets:
+        # A failed traversal is not a reason to walk the same pages forever: the audit reports these rows as exhausted
+        # (a stop that names the field) instead of repeating the repair (Montenson, Belden 2026-10-29).
+        from ..answer_quality import stop_revisit
+
+        for key, item, _ in targets:
             self.attempts[key] += 1
+            stop_revisit(self.form, item)
         return False
 
     async def on_review(self, obs, report=None):
@@ -1749,6 +1758,9 @@ class Adapter:
         if quality_blocker := await self.e.quality_gate():
             if await self.revisit_history(quality_blocker):
                 return None  # Walked back to the step that owns the flagged answer; the loop refills it.
+            if any(p.get("repair_action") == "revisit_history_row" for p in quality_blocker["report"]["pending"]):
+                # The rows that could not be reopened now report as exhausted: stop with the reason naming them.
+                return await self.e.quality_gate() or quality_blocker
             return quality_blocker
         # The reviewer may have remounted a repaired input; use a fresh final ID.
         final = await self.observed_final(await self.form.scan())

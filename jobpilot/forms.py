@@ -1266,6 +1266,9 @@ class FormSession:
             "answer": value,
             "evidence_ids": evidence_ids,
             "verified": verified,
+            # Written on the tax-credit questionnaire's own host: the answer quality review never audits it against the
+            # application's pages (answer_quality.candidates).
+            "external": self.on_questionnaire(),
             "profile_digest": digest(self.resolver.profile.model_dump()),
             "knowledge_digest": digest([entry.model_dump() for entry in self.resolver.kb.entries])
             if self.resolver.kb

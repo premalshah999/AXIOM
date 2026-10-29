@@ -3436,10 +3436,31 @@ class BrowserEngine:
         if quality.get("ok"):
             return None
         pending = quality.get("pending", [])
+        # An earlier-step finding that three reviews found unchanged is not repaired by a fourth walk: it is reported
+        # as exhausted, with the field named (Montenson's Oracle run looped on an ADP questionnaire answer and Belden's
+        # SuccessFactors on two work rows, 2026-10-29).
+        from .answer_quality import revisit_key, stop_revisit
+
+        seen = self.form.failed_strategies.setdefault("__quality_offpage_seen__", {})
+        stopped = False
+        for item in pending:
+            if item.get("repair_action") == "revisit_history_row":
+                key = revisit_key(item)
+                seen[key] = seen.get(key, 0) + 1
+                if seen[key] >= 3:
+                    stop_revisit(self.form, item)
+                    stopped = True
+        if stopped:
+            quality = await review(current_page=True) if current_page else await review()
+            if quality.get("ok"):
+                return None
+            pending = quality.get("pending", [])
         facts = [q for q in pending if self.service.review_kind(q) == "missing_fact"]
         repair = getattr(self.form, "recover_controls", None)
         exhausted = any(p.get("retryable") is False for p in pending)
-        if pending and not facts and not exhausted and repair and not quality.get("observation_failure"):
+        # Findings in earlier steps are not on this page: a control recovery here can only look for them in vain.
+        offpage = bool(pending) and all(p.get("repair_action") == "revisit_history_row" for p in pending)
+        if pending and not facts and not exhausted and not offpage and repair and not quality.get("observation_failure"):
             self.emit(
                 "quality_repair",
                 "Repairing the reviewer's supported field findings",
@@ -3459,7 +3480,8 @@ class BrowserEngine:
             "state": "needs_review" if facts else "waiting_browser",
             "reason": "Answer quality repair needs a required fact"
             if facts
-            else "Answer quality repair needs a fresh field observation",
+            else "; ".join(str(p["reason"]) for p in pending if p.get("retryable") is False and p.get("reason"))[:400]
+            or "Answer quality repair needs a fresh field observation",
             "blocker_type": "missing_fact"
             if facts
             else next((p.get("blocker_type") for p in pending if p.get("blocker_type")), "control_failure")
