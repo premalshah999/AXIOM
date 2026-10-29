@@ -153,7 +153,7 @@ export function ReservedJobs() {
             <>
               <strong>{plural(waiting, "job")} waiting for your approval.</strong> Nothing is applied at these employers
               until you approve the job.
-              {current && ` ${current.label}: ${current.employers.join(", ")}.`}
+              {current && current.employers.length > 0 && ` ${current.label}: ${current.employers.join(", ")}.`}
             </>
           ) : (
             <strong>Reserved employers are off: every employer is applied to as usual.</strong>
