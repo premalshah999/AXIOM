@@ -136,6 +136,7 @@ def navigation_context(form, observation):
     """Bring current-question evidence to the owner before it chooses a tool."""
     from .answer_context import relevant_context
     from .answer_quality import SECRET
+    from .prompt_layout import canonical, without_defaults
 
     fields = [
         f
@@ -165,9 +166,21 @@ def navigation_context(form, observation):
     for packet in packets.values():
         items = packet.pop("items")
         packet["references"] = [item["reference"] for item in items]
-        knowledge.update({item["reference"]: item for item in items})
+        # The reference is the key; the id, empty scope fields and default flags are not facts (a False value stays).
+        knowledge.update(
+            {
+                item["reference"]: without_defaults({k: v for k, v in item.items() if k not in {"fact_id", "reference"}})
+                for item in items
+            }
+        )
+        if "question" in packet:
+            packet["question"] = without_defaults(packet["question"])
+        for flag in ("conflicts", "truncated"):
+            if not packet.get(flag):
+                packet.pop(flag, None)
     return {
-        "facts": selected,
+        # Sorted: the same profile renders the same bytes on every step and run, so the provider reuses its cache.
+        "facts": canonical(selected),
         "questions": packets,
         "knowledge": knowledge,
         "remaining_question_ids": [f["id"] for f in remaining],

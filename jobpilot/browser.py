@@ -4754,6 +4754,7 @@ class BrowserEngine:
         from .models import effective_thinking, structured
         from .vision import available as vision_available
         from .continuous_agent import navigation_context
+        from .prompt_layout import dumps as dumps_payload, navigation_payload
 
         history = list(self.form.failed_strategies.get("__navigation_outcomes__", []))[-12:]
         if self.form.failed_strategies.get("__navigation_run__") != self.run_id:
@@ -4942,33 +4943,31 @@ class BrowserEngine:
                 "a control or quality failure as a missing personal fact. Return only the requested JSON."
                 + " "
                 + worker_context(self.job.get("ats"), self.run_record["packet"].get("worker_pool", "normal")),
-                json.dumps(
-                    {
-                        # What stays the same for every step of this run leads, so consecutive steps share it as a
-                        # cached prefix; the page and its recent actions follow.
-                        "company": self.job.get("company"),
-                        "role": self.job.get("title"),
-                        "profile_history": {
+                # Stable content first (prompt_layout.navigation_payload): the scan counter inside the observation
+                # cut the cached prefix at ~1.8k of 20-40k tokens on every step (cache hit 1792 tokens, 2026-10-28).
+                dumps_payload(
+                    navigation_payload(
+                        company=self.job.get("company"),
+                        role=self.job.get("title"),
+                        profile_history={
                             "work_rows": len(self.form.resolver.profile.work),
                             "education_rows": len(self.form.resolver.profile.education),
                         }
                         if getattr(self.form, "resolver", None)
                         else {},
-                        "owner_instruction": self.db.get_setting(
-                            "application_directive:" + self.job["id"], {}
-                        ).get("text", ""),
+                        owner_instruction=self.db.get_setting("application_directive:" + self.job["id"], {}).get(
+                            "text", ""
+                        ),
                         # The repair agent's diagnosis of this job's last failure (repair_agent.py).
-                        "repair_instruction": self.current_repair_instruction(),
-                        "specialist_handoff": self.run_record["packet"]
-                        .get("specialist_escalation", {})
-                        .get("context", {}),
-                        "observation": navigation_observation(obs),
-                        "blocked_step": blocker,
-                        "applicant_context": navigation_context(self.form, obs),
-                        "supported_answers": navigation_supported_answers(self.form, obs),
-                        "visual_observation": visual_hint,
-                        "recent_actions": [{**h, "outcome": h["outcome"][:1600]} for h in history[-6:]],
-                    }
+                        repair_instruction=self.current_repair_instruction(),
+                        specialist_handoff=self.run_record["packet"].get("specialist_escalation", {}).get("context", {}),
+                        observation=navigation_observation(obs),
+                        blocked_step=blocker,
+                        applicant_context=navigation_context(self.form, obs),
+                        supported_answers=navigation_supported_answers(self.form, obs),
+                        visual_observation=visual_hint,
+                        recent_actions=[{**h, "outcome": h["outcome"][:1600]} for h in history[-6:]],
+                    )
                 ),
                 self.run_id,
                 max_tokens=2400 if thinking == "disabled" else 6400,
