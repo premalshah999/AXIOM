@@ -827,12 +827,19 @@ async def tick(service):
             return
         with db.session() as s:
             owned_jobs = select(Run.job_id).where(Run.id.in_(batch["run_ids"]))
-            confirmed = s.scalar(
-                select(func.count(func.distinct(Run.job_id))).where(
-                    Run.job_id.in_(owned_jobs),
-                    Run.state == "confirmed",
-                    Run.receipt["evidence_reconciliation"].as_string().is_distinct_from("pending"),
+            # Every confirmation since the batch started counts toward its goal, whoever started it (Apply, bulk
+            # Apply): the dashboard counted 436 against a goal the tick measured as 222 (2026-10-29).
+            confirmed = len(
+                set(
+                    s.scalars(
+                        select(Run.job_id).distinct().where(
+                            Run.job_id.in_(owned_jobs),
+                            Run.state == "confirmed",
+                            Run.receipt["evidence_reconciliation"].as_string().is_distinct_from("pending"),
+                        )
+                    )
                 )
+                | confirmed_since(s, batch.get("started_at"))
             )
             # A count: the whole rows (packets and descriptions) were read here every 15 s only to be counted.
             active = s.scalar(

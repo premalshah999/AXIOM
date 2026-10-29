@@ -1039,12 +1039,24 @@ def _extend_catalog():
 _extend_catalog()
 
 
+# Sources the owner switched off (Setup › Sources); setup_sources never turns them back on.
+OWNER_DISABLED_KEY = "job_board_owner_disabled"
+
+
+def owner_switched(db, source_id, enabled):
+    """Remember a source the owner switched off, or forget it when switched back on."""
+    ids = set(db.get_setting(OWNER_DISABLED_KEY, {}).get("ids", []))
+    ids = ids - {source_id} if enabled else ids | {source_id}
+    db.set_setting(OWNER_DISABLED_KEY, {"ids": sorted(ids)})
+
+
 def setup_sources(db, cfg=None):
     configure = cfg is not None
     cfg = cfg or settings(db)
     if cfg.interval_hours not in {1, 2, 3, 6}:
         raise ValueError("Choose a 1, 2, 3 or 6 hour refresh interval")
     ids = managed_ids(db)
+    owner_disabled = set(db.get_setting(OWNER_DISABLED_KEY, {}).get("ids", []))
     with db.exclusive() as s:
         replacements = {
             "https://jobs.ashbyhq.com/anthropic": (
@@ -1070,7 +1082,12 @@ def setup_sources(db, cfg=None):
         retired |= {"https://jobs.lever.co/" + slug for slug in ["netflix", "viking", "welocalize"]}
         for row in s.scalars(select(Source).where(Source.id.in_(ids))):
             if configure:
-                row.enabled = cfg.enabled and (cfg.web_search or row.kind != "web_search")
+                # A board the owner switched off stays off: every settings save re-enabled them all (2026-10-29).
+                row.enabled = (
+                    cfg.enabled
+                    and (cfg.web_search or row.kind != "web_search")
+                    and row.id not in owner_disabled
+                )
                 row.cron, row.auto_queue = f"0 */{cfg.interval_hours} * * *", False
             if row.url in replacements:
                 row.kind, row.url, row.name = replacements[row.url]

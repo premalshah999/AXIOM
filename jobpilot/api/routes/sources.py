@@ -35,8 +35,13 @@ def router(service) -> APIRouter:
                 row = s.get(Source, source_id)
                 if not row:
                     raise HTTPException(404)
+                switched = row.enabled != data.enabled
                 for key, value in data.model_dump().items():
                     setattr(row, key, value)
+            if switched:
+                from ...jobboard import owner_switched
+
+                owner_switched(db, source_id, data.enabled)
 
         await asyncio.to_thread(save)
         return {"saved": True}

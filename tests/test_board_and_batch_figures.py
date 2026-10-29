@@ -221,3 +221,40 @@ def test_source_health_counts_boards_that_keep_failing_and_ignores_switched_off_
     assert health[ids[0]]["failures"] == 34 and health[ids[0]]["last_error"] == "HTTPStatusError"
     ok = client.get("/api/job-board", params={"include_sources": "false"}).json()
     assert ok["sources"] == [] and ok["source_health"] == {"failing": 2, "dead": 1}
+
+
+async def test_the_tick_measures_the_goal_the_same_way_as_the_dashboard(service, monkeypatch):
+    """The tick counted only the batch's own runs (222) while the dashboard counted 436 (2026-10-29)."""
+    from jobpilot import autopilot
+    from jobpilot.jobboard import BoardSettings
+
+    service.dispatch = lambda *args: None
+    service.db.set_setting("control", {"auto_submit": True})
+    monkeypatch.setattr(autopilot, "settings", lambda db: BoardSettings(auto_apply=True))
+    with service.db.exclusive() as s:
+        s.add_all([Job(id=f"t{n}", identity=f"tick-{n}", url=f"https://example.test/t{n}", title="Engineer") for n in range(3)])
+        s.add_all([Run(id=f"tr{n}", job_id=f"t{n}", state="confirmed", created_at=iso(5)) for n in range(3)])
+        s.add(Setting(key="job_board_autopilot", value={"state": "active", "target": 3, "started_at": iso(60), "run_ids": ["tr0"]}))
+    await autopilot.tick(service)
+    batch = service.db.get_setting("job_board_autopilot")
+    assert batch["state"] == "complete" and batch["confirmed"] == 3
+
+
+def test_a_board_the_owner_switched_off_stays_off_after_a_settings_save(service):
+    from jobpilot.db import Source
+    from jobpilot.jobboard import BoardSettings, owner_switched, setup_sources
+
+    with service.db.exclusive() as s:
+        s.add_all([Source(id=f"src{n}", name=f"Example {n}", kind="greenhouse", url=f"https://job-boards.greenhouse.io/example{n}",
+                          cron="0 */2 * * *", enabled=True) for n in range(2)])
+    service.db.set_setting("job_board_sources", {"ids": ["src0", "src1"]})
+    owner_switched(service.db, "src0", False)
+    with service.db.exclusive() as s:
+        s.get(Source, "src0").enabled = False
+    setup_sources(service.db, BoardSettings(enabled=True))
+    with service.db.session() as s:
+        assert s.get(Source, "src0").enabled is False and s.get(Source, "src1").enabled is True
+    owner_switched(service.db, "src0", True)
+    setup_sources(service.db, BoardSettings(enabled=True))
+    with service.db.session() as s:
+        assert s.get(Source, "src0").enabled is True
