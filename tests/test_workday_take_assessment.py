@@ -25,6 +25,8 @@ class Page(SimpleNamespace):
 
 
 class Scripted(Workday):
+    ASSESSMENT_SETTLE_SECONDS = 0
+
     def __init__(self):
         self.workday_page = Page(url=WORKDAY, closed=False)
         form = SimpleNamespace(page=self.workday_page, scan=self.scan, settle=self.settle, click=self.form_click,
@@ -224,3 +226,22 @@ async def test_an_answer_that_posts_back_to_the_next_question_continues_the_ques
     assert await adapter.on_assessment() is None  # Moved on by itself.
     # The last question no longer changes and offers no way forward: hand the page to the guided flow.
     assert (await adapter.on_assessment())["fallback"] is True
+
+
+async def test_a_page_whose_pop_up_opens_after_it_renders_is_scanned_again_before_giving_up():
+    """ADP's "Quick tip before you begin ... Okay" (Montenson, 2026-10-28) opened after the statements page rendered;
+    the scan 1.9 s after Next saw neither its 12 questions nor Next, and the run fell back to the navigator."""
+    adapter = await opened()
+    adapter.open_questionnaire([])
+    scans = iter([[], [], [{"label": "Did you receive SNAP in the past 6 months?", "type": "radiogroup",
+                            "options": ["Yes", "No"]}]])
+    last = []
+
+    async def scan():
+        nonlocal last
+        last = next(scans, last)
+        return {"url": adapter.page.url, "controls": [], "errors": [], "automation": [], "headings": [],
+                "text": "Work Opportunity Tax Credit Questionnaire", "dialogs": [], "fields": last}
+
+    adapter.e.form.scan = scan
+    assert await adapter.on_assessment() is None  # The settled rescan shows the questions: fill them next.

@@ -386,6 +386,8 @@ class Adapter:
     apply_ids: tuple[str, ...] = ()
     # Element ids of the email step's own submit, whose label varies by employer.
     email_submit_ids: tuple[str, ...] = ()
+    # How long a questionnaire page without questions or a way forward is given to open its pop-up.
+    ASSESSMENT_SETTLE_SECONDS = 2.5
 
     def __init__(self, engine, ats_id=None, name=None):
         if ats_id:
@@ -714,9 +716,20 @@ class Adapter:
             # Finished on its own host ("Thank you ... you may close this window"): back to the application.
             if await self.form.return_from_questionnaire():
                 return None
+        if not forward and not self.attempts["assessment_settle"]:
+            # A page can open an informational pop-up after it renders: ADP's "Quick tip before you begin ... Okay" hid
+            # Montenson's 12 questions and its Next, and this verdict came 1.9 s after the previous Next (2026-10-28).
+            # One settled rescan, which acknowledges such a pop-up, before giving up.
+            self.attempts["assessment_settle"] += 1
+            await asyncio.sleep(self.ASSESSMENT_SETTLE_SECONDS)
+            await self.form.settle(timeout=4)
+            if question_set(await self.form.scan()) != question_set(obs):
+                return None
+            return await self.on_assessment()
         if not forward:
             return {"fallback": True, "reason": "No way forward in the tax-credit questionnaire"}
         self.emit("assessment", "Continuing the tax-credit questionnaire", {"control": forward["label"][:40]})
+        self.attempts["assessment_settle"] = 0  # Each page gets its own settled rescan.
         # Not the application's submit: the tab is on the questionnaire's own host, which classify_page and commit
         # never treat as the application. Its "Submit form" passes the page guard like an account control.
         await self.dismiss_overlays()
