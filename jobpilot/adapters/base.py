@@ -673,10 +673,11 @@ class Adapter:
             return False
         return self.id == "custom" or detect(url).id != self.id
 
-    def assessment_launcher(self, obs):
-        """The control that opens the tax-credit questionnaire this application requires, once per run."""
+    def assessment_launcher(self, obs, again=False):
+        """The control that opens the tax-credit questionnaire this application requires: once per run, and once more
+        when the application still reports the step incomplete after the questionnaire returned (`again`)."""
         attempts = getattr(self, "attempts", None)
-        if getattr(self, "committed", False) or attempts is None or attempts["assessment"] >= 1:
+        if getattr(self, "committed", False) or attempts is None or attempts["assessment"] >= (2 if again else 1):
             return None
         for control in obs.get("controls", []):
             label = control["label"].strip()
@@ -689,11 +690,11 @@ class Adapter:
                     return control
         return None
 
-    async def launch_assessment(self, obs):
+    async def launch_assessment(self, obs, again=False):
         """Open the questionnaire before the application's own submit: Rentokil's Workday answered Save and Continue
         past an untaken one with a server error (2026-10-24), and Community Health Systems' Oracle refused Submit with
         "This info is required" while its Tax Credits section was untaken (2026-10-28)."""
-        take = self.assessment_launcher(obs)
+        take = self.assessment_launcher(obs, again)
         if not take:
             return False
         self.attempts["assessment"] += 1
@@ -1382,8 +1383,10 @@ class Adapter:
         report = await self.fill_page()
         if isinstance(report, dict) and report.get("state"):
             # The readback reports an untaken launcher as an incomplete required step (Mortenson, Oracle 2026-10-27):
-            # the questionnaire is taken first, whatever else the page still needs.
-            if await self.launch_assessment(await self.form.scan()):
+            # the questionnaire is taken first, whatever else the page still needs. Once more after it returned: ADP
+            # finished Montenson's questionnaire and returned to Oracle, whose partner block still read untaken until
+            # the assessment was opened again (2026-10-29).
+            if await self.launch_assessment(await self.form.scan(), again=True):
                 return None
             return report
         obs = await self.form.scan()

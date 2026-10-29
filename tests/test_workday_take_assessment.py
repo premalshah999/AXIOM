@@ -245,3 +245,15 @@ async def test_a_page_whose_pop_up_opens_after_it_renders_is_scanned_again_befor
 
     adapter.e.form.scan = scan
     assert await adapter.on_assessment() is None  # The settled rescan shows the questions: fill them next.
+
+
+async def test_a_step_still_reported_incomplete_after_the_return_is_opened_once_more():
+    """Montenson (Oracle → ADP, 2026-10-29): the questionnaire finished and returned, but the application still read the
+    step as untaken; it is opened once more, never a third time."""
+    adapter = await opened()
+    adapter.e.form.page = adapter.workday_page
+    obs = await adapter.scan()
+    assert await adapter.launch_assessment(obs) is False  # The ordinary path opens it once per run.
+    assert await adapter.launch_assessment(obs, again=True) is True
+    assert await adapter.launch_assessment(obs, again=True) is False
+    assert adapter.launched == ["take", "take"]
