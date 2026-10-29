@@ -22,12 +22,13 @@ WIZARD = {
 
 def background_step():
     text = (ROOT / "frontend" / "src" / "onboarding.tsx").read_text()
-    return text.split("function BackgroundStep", 1)[1].split("\nconst GENDER", 1)[0]
+    # Background and self-identification are one Screening step since the v1 setup guide.
+    return text.split("function ScreeningStep", 1)[1].split("\nfunction ", 1)[0]
 
 
 @pytest.mark.parametrize("key", sorted(WIZARD))
 def test_the_background_step_writes_the_key_the_resolver_reads(key):
-    assert re.search(rf'setFact\("{key}"|yn\("{key}"\)', background_step())
+    assert re.search(rf'setFact\("{key}"|yn\("{key}"[,)]', background_step())
 
 
 def test_no_background_question_is_defaulted():
