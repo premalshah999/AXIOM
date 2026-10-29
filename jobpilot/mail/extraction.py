@@ -7,6 +7,8 @@ import base64
 import re
 from .helpers import origin
 from .senders import CLICK_TRACKERS
+from .senders import GENERIC_LABELS
+from .senders import KNOWN_SENDERS
 from .senders import authenticated_sender
 from .senders import icims_attributed
 from .senders import oracle_attributed
@@ -66,6 +68,54 @@ FOOTER_TEXT = re.compile(
     r"accessibility|legal|careers? home|view (?:in|this) (?:browser|email)",
     re.I,
 )
+
+
+# A reset answered by a password instead of a link: Avature's "Password activation" mail (Electronic Arts, Lenovo,
+# MetLife, Bain, Intuit, 2026-10-29) holds a TEMPORARY PASSWORD, never a reset link. Every poll refused it as
+# token_format, and by the next run the login page said "Temporary password has expired". The label is explicit
+# ("temporary password", "your password is"); the value is the next word, accepted only when it looks like a
+# password (TEMP_PASSWORD_SHAPE) rather than prose.
+TEMP_PASSWORD = re.compile(
+    r"(?i:\b(?:(?:temporary|temp|initial|provisional|one.time|auto.?generated|generated)\s+(?:log.?in\s+|sign.?in\s+)?password\b"
+    r"|your\s+(?:new\s+|log.?in\s+|sign.?in\s+|account\s+)?password\b(?=\s*(?:is\b|:)))"
+    r"(?:\s+(?:is|was|will\s+be)\b)?\s*[:=\-]?\s*)(\S{6,64})"
+)
+
+
+def temporary_passwords(text):
+    """Every distinct temporary password a message states (normally one). Prose after the label ("expires in 24
+    hours"), links and plain words never qualify: a value needs a digit, a symbol or inner capitals."""
+    found = set()
+    for raw in TEMP_PASSWORD.findall(text):
+        value = raw.strip("\"'<>([{").rstrip(".,;:!?)]}\"'<>")
+        if (
+            6 <= len(value) <= 64
+            and "://" not in value
+            and not value.lower().startswith("www.")
+            and (
+                re.search(r"\d", value)
+                or re.search(r"[^A-Za-z0-9]", value)
+                or re.search(r"[a-z]", value) and re.search(r"[A-Z]", value[1:])
+            )
+        ):
+            found.add(value)
+    return found
+
+
+def names_tenant_host(host, tokens):
+    """Whether a host's tenant label names this employer: ea.avature.net's "ea" is the tenant, avature.net the platform.
+    Short labels must match a token exactly; longer ones may contain it (deloitteus / deloitte)."""
+    labels = host.lower().split(".")
+    platform = any(".".join(labels[-2:]) == d for ds in KNOWN_SENDERS.values() for d in ds)
+    named = [x for x in labels[: -2 if platform else -1] if x and x not in GENERIC_LABELS]
+    return any(x == t or (len(x) >= 4 and len(t) >= 4 and (x in t or t in x)) for x in named for t in tokens or [])
+
+
+def _host_or_empty(href):
+    try:
+        return urlsplit(href).hostname or ""
+    except ValueError:
+        return ""
 
 
 def _origin_or_none(href):
@@ -441,6 +491,23 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
             if len(valid_links) == 1
             else reject("token_format")
         )
+    if reset and not unbranded_sender:
+        passwords = temporary_passwords(text)
+        if passwords:
+            # A credential, so it is taken only from a message tied to this employer: it links to the employer's own
+            # origin (the mail's sign-in link), or its sender or link host names the employer's tenant. A shared
+            # platform sender (avature.net) mails every tenant's candidates; Lenovo's window must never take EA's.
+            urls = links + plain + re.findall(r"https://[^\s<>\"']+", text)
+            own = any((_origin_or_none(u) or "") in rule["link_origins"] for u in urls) or any(
+                names_tenant_host(h, challenge.get("tenant_tokens"))
+                for h in [domain, *(_host_or_empty(u) for u in urls)]
+                if h
+            )
+            if not own:
+                return reject("tenant")
+            if len(passwords) > 1:
+                return reject("ambiguous_token")
+            return {"kind": "password", "value": next(iter(passwords))}
     if kind in {"code", "auto"} and len(codes) == 1:
         return {"kind": "code", "value": next(iter(codes))}
     if kind in {"link", "auto", "password_reset"} and len(valid_links) == 1 and (reset or not codes):
@@ -470,6 +537,11 @@ def latest_employer_code(matches, challenge):
     """
     if len(matches) < 2:
         return matches
+    if all(token.get("kind") == "password" for _, token, _, _ in matches):
+        # A resent temporary password replaces the earlier one (it is the last the employer will accept); every match
+        # already passed the identity checks. Tied timestamps stay ambiguous.
+        dated = sorted(matches, key=lambda item: int(item[2]["internalDate"]), reverse=True)
+        return dated[:1] if int(dated[0][2]["internalDate"]) != int(dated[1][2]["internalDate"]) else matches
     own = [
         item
         for item in matches

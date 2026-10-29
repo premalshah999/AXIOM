@@ -240,6 +240,10 @@ BAD_CREDENTIALS = re.compile(
     # Taleo uses this wording for a username with no account, before offering New User.
     re.I,
 )
+# Avature (Electronic Arts, 2026-10-29): the login page of an emailed temporary password that was not used in time.
+TEMPORARY_EXPIRED = re.compile(
+    r"(?:temporary|one.time) password (?:has |is |was )?(?:expired|no longer valid|invalid)", re.I
+)
 NOT_FOUND = re.compile(
     r"no account|account (?:was )?not found|not registered|couldn'?t find (?:an |your )?account|"
     r"does not correspond to a registered user|(?:user|account) (?:does not|doesn'?t) exist|no user (?:found|with)|"
@@ -2230,14 +2234,20 @@ class Adapter:
                 return self.lease_busy()
             # Saved before the click: the same shared login, so a crash cannot lose it.
             self.accounts.mark(url, "created_locally", credentials)
+        temporary = bool(mode == "sign_in" and not using_alternate and self.accounts.store.temporary(url))
         await self.click(button, auth=True)
         if challenge := await self.after_auth_click():
             return challenge
-        outcome, detail = await self.auth_outcome()
+        outcome, detail = await self.auth_outcome(forced_ok=temporary)
         self.emit("auth", f"{mode.replace('_', ' ')}: {outcome}")
+        if outcome == "new_password":
+            # The temporary password signed in and the employer demands the real one: on_new_password sets the shared
+            # password. The temporary login is never saved as the account's.
+            self.release_mail()
+            return None
         if outcome == "ok":
             self.release_mail()
-            self.accounts.mark(url, "authenticated", credentials)
+            self.accounts.mark(url, "authenticated", credentials, temporary_password=None, temporary_password_at=None)
             return None
         if outcome == "verify":
             self.accounts.mark(url, "verification_pending", credentials)
@@ -2269,6 +2279,8 @@ class Adapter:
             if await self.switch(obs, SIGNIN_LINK):
                 return None
             return await self.recover(obs, detail)
+        if temporary and outcome != "new_password":
+            self.accounts.store.clear_temporary(url)  # Refused or expired: never tried again; a new reset follows
         if outcome == "bad_credentials" and mode == "sign_in":
             # An unanswered reset stays settled: overwriting it with "credentials_rejected" requested another reset on
             # every run (L3Harris, 2026-10-21..23: four resets, none delivered).
@@ -2425,13 +2437,19 @@ class Adapter:
         actions = [b for b in hits if not b.get("href")]
         return (filters or primary or actions or hits or [None])[0]
 
-    async def auth_outcome(self, timeout=12):
+    async def auth_outcome(self, timeout=12, *, forced_ok=False):
+        """forced_ok: a sign-in that lands on the employer's forced new-password page is "new_password" at once (the
+        page is waited on for 12 s otherwise), not a success: the credential it accepted is still temporary."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             await self.form.settle(timeout=4)
             obs = await self.form.scan()
             text = " ".join(obs["errors"]) + "\n" + obs["text"]
             errors = " ".join(obs["errors"]) or text
+            if TEMPORARY_EXPIRED.search(text):
+                return "bad_credentials", TEMPORARY_EXPIRED.search(text).group()
+            if forced_ok and not obs["errors"] and self.new_password_step(obs):
+                return "new_password", ""
             if LOCKED.search(errors):
                 return "locked", LOCKED.search(errors).group()
             # SuccessFactors' sign-in page asks "Already have an account?"; read as a refusal, Boehringer's sign-in
@@ -2564,6 +2582,12 @@ class Adapter:
         self.attempts["reset"] += 1
         obs = await self.form.scan()
         forgot = [b for b in obs["controls"] if FORGOT.search(b["label"])]
+        if not forgot and not obs["controls"] and TEMPORARY_EXPIRED.search(obs.get("text", "")):
+            # EA's expired temporary password leaves a page with no controls (2026-10-29): the sign-in page, where
+            # "Forgot your password?" lives, is opened again.
+            await self.return_to_application()
+            obs = await self.form.scan()
+            forgot = [b for b in obs["controls"] if FORGOT.search(b["label"])]
         if not forgot and await self.switch(obs, SIGNIN_LINK):
             # "Forgot password" usually lives on the sign-in page, not the sign-up page.
             obs = await self.form.scan()
@@ -2941,6 +2965,12 @@ class Adapter:
                 state="waiting_browser",
             )
         self.emit("auth", "Employer password reset email received")
+        if token["kind"] == "password":
+            page = await self.form.scan()
+            if not self.code_fields(page):
+                return await self.use_temporary_password(url, token["value"])
+            # A "one-time password" typed into the code boxes the page shows is that page's code.
+            token = {"kind": "code", "value": token["value"]}
         if token["kind"] == "link":
             await self.open_link(token["value"])
         else:
@@ -2962,6 +2992,23 @@ class Adapter:
             await self.form.settle(timeout=6)
         obs = await self.form.scan()
         return await self.set_new_password(url, obs)
+
+    async def use_temporary_password(self, url, password):
+        """The employer answered the reset with a TEMPORARY PASSWORD instead of a link (Avature's "Password activation":
+        Electronic Arts, Lenovo, MetLife, Bain, Intuit, 2026-10-29). It expires within hours, so this run signs in with
+        it now: the sealed temporary login is the next sign-in's credential (Accounts.credentials), and the forced
+        new-password page that follows takes the shared password and replaces it (on_new_password)."""
+        if not self.accounts.store.set_temporary(url, {"email": self.accounts.email, "password": password}):
+            self.finish_mail("failed", "Temporary password could not be kept")
+            return self.defer("The employer mailed a temporary password but its account tenant is not observed")
+        self.finish_mail("verified", "Employer mailed a temporary password")
+        self.emit("auth", "Employer emailed a temporary password; signing in with it")
+        self.attempts["sign_in"] = self.attempts["create"] = 0
+        self.reset_in_progress = False
+        await self.form.settle(timeout=6)
+        if self.classify(await self.form.scan()) not in {Step.SIGN_IN, Step.FORM, Step.METHOD}:
+            await self.return_to_application()
+        return None
 
     async def set_new_password(self, url, obs, *, forced=False):
         """Complete an observed new-password page; persist its credential only on acceptance."""
@@ -3030,7 +3077,9 @@ class Adapter:
             return self.defer("The employer did not accept the new password: " + (detail or outcome))
         self.finish_mail("verified", "Employer accepted the password reset")
         record = self.accounts.record(url)
-        self.accounts.mark(url, "password_reset", credentials, resets=record.get("resets", 0) + 1)
+        # The temporary password the employer mailed is spent by this change.
+        self.accounts.mark(url, "password_reset", credentials, resets=record.get("resets", 0) + 1,
+                           temporary_password=None, temporary_password_at=None)
         self.attempts["sign_in"] = self.attempts["create"] = 0
         self.emit("auth", "Employer accepted the new account password")
         await self.form.settle(timeout=6)

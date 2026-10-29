@@ -5,6 +5,7 @@ from urllib.parse import urlsplit
 import hashlib
 import re
 import secrets
+import time
 from ..db import Setting
 from ..db import now
 from ..mail import origin
@@ -13,6 +14,11 @@ from .pages import CONFIRMED_ACCOUNT
 from .tenants import SF_HOSTS
 from .tenants import account_tenant
 from .tenants import sf_company
+
+
+# How long an employer's emailed temporary password is tried: Avature's expires ("Temporary password has expired" was
+# EA's login page on the run after the mail, 2026-10-29), and a stale one only refuses the sign-in.
+TEMPORARY_PASSWORD_SECONDS = 2700
 
 
 class AccountStore:
@@ -198,6 +204,44 @@ class AccountStore:
         self.service.db.set_setting(self.key(url), {**record, **sealed, "updated_at": now()})
         return True
 
+    def set_temporary(self, url, credentials):
+        """Keep a temporary password the employer mailed (sealed, beside the account's own login). It is used for the
+        next sign-in only; the forced new-password page that follows replaces it with the shared password. False
+        when the tenant is not observed, so no record can hold it."""
+        url = self.canonical(url)
+        if account_tenant(url, self.job_url) == "unresolved_shared_tenant":
+            return False
+        self.observe(url)
+        record = dict(self.record(url)) or {"origin": origin(url), "tenant": account_tenant(url, self.job_url)}
+        self.service.db.set_setting(
+            self.key(url),
+            {
+                **record,
+                "temporary_password": self.service.mail.vault.seal(credentials),
+                "temporary_password_at": time.time(),
+                "updated_at": now(),
+                # Only an existing account is mailed a temporary password: a later refusal is not an absent account.
+                "confirmed_at": record.get("confirmed_at") or now(),
+            },
+        )
+        return True
+
+    def temporary(self, url):
+        """The employer's emailed temporary login while it can still work, else None."""
+        record = self.record(url)
+        try:
+            fresh = time.time() - float(record.get("temporary_password_at") or 0) <= TEMPORARY_PASSWORD_SECONDS
+        except (TypeError, ValueError):
+            fresh = False
+        return self.service.mail.vault.open(record["temporary_password"]) if record.get("temporary_password") and fresh else None
+
+    def clear_temporary(self, url):
+        record = self.record(url)
+        if record.get("temporary_password"):
+            self.service.db.set_setting(
+                self.key(url), {**record, "temporary_password": None, "temporary_password_at": None}
+            )
+
     def save(self, url, credentials, state, *, previous=None, **extra):
         url = self.canonical(url)
         if account_tenant(url, self.job_url) == "unresolved_shared_tenant":
@@ -241,7 +285,7 @@ class AccountStore:
 # in with it instead of requesting another reset. Markers the engine adds under these prefixes are cleared too.
 OWNER_SETTLED = ("error", "previous_credentials")
 OWNER_SETTLED_PREFIXES = ("reset_requested", "reset_submitted", "reset_unconfirmed", "rejected_", "password_unknown",
-                          "unanswered")
+                          "unanswered", "temporary_password")
 
 
 def save_owner_password(service, key, password):

@@ -382,7 +382,7 @@ class PollingMixin:
                             and (
                                 row.kind in {"auto", token["kind"]}
                                 or row.kind == "password_reset"
-                                and token["kind"] in {"link", "code"}
+                                and token["kind"] in {"link", "code", "password"}
                             )
                             and owner
                             and (
