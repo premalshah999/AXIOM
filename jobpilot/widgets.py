@@ -269,6 +269,9 @@ MONTH_NUMBERS = {
 }
 
 
+NEGATION = re.compile(r"\b(?:not|no|non|never|none|neither|nor|without|decline|don ?t|do not|doesn ?t|am not|is not)\b")
+
+
 def best_option(options, value):
     """Choose one observed option for a desired value. Ambiguity returns None, never a guess."""
     options = [o for o in options if not placeholder_option(o["text"] if isinstance(o, dict) else o)]
@@ -356,12 +359,20 @@ def best_option(options, value):
             i for i, label in enumerate(labels) if norm(re.sub(r"\(?\+\s*\d{1,4}\)?", "", label)) in group
         ]
         return options[decorated[0]] if len(decorated) == 1 else None
-    # "United States of America (+1)" for "+1"; "Mobile" for "Mobile Phone".
+    # "United States of America (+1)" for "+1"; "Mobile" for "Mobile Phone". A label inside a negative answer is not
+    # that answer: "I am not a protected veteran" is not the bare option "Veteran", nor "No, I do not have a
+    # disability" the option "Disability" (forms audit, 2026-10-29).
+    negative = bool(NEGATION.search(want))
     contained = [
         i
         for i, x in enumerate(labels)
         if re.search(r"(^|\s)" + re.escape(want) + r"($|\s)", norm(x))
-        or (norm(x) and re.search(r"(^|\s)" + re.escape(norm(x)) + r"($|\s)", want) and len(norm(x)) > 2)
+        or (
+            norm(x)
+            and re.search(r"(^|\s)" + re.escape(norm(x)) + r"($|\s)", want)
+            and len(norm(x)) > 2
+            and (not negative or NEGATION.search(norm(x)))
+        )
     ]
     if len(contained) == 1:
         return options[contained[0]]
