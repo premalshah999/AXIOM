@@ -193,6 +193,30 @@ def reusable_answer(kb, question, options=(), context=None, reason="", employer=
     return value if not listed or value in listed else None
 
 
+def inferable(db, config, profile, question, options=(), employer="", job=None):
+    """Why the owner need not be asked this question, else None: the profile, the standing answer rules or an answer the owner
+    already gave (no model call). `profile` is a Profile.
+
+    The repair agent asked "Are you a U.S. Citizen?" while its own diagnosis said the saved profile holds the answer (Flatirons,
+    2026-10-29); the radio group had simply never been committed, which is a control failure, not a missing fact."""
+    from .answers import Resolver
+    from .knowledge import KnowledgeBase
+
+    text = tidy(question)
+    listed = [text_ for _, text_ in choices(options)]
+    if found := reusable_answer(KnowledgeBase(db), question, options, {}, "", employer):
+        return f"the owner already answered this question ({found[:60]})"
+    field = {"id": "q", "label": text, "type": "select" if listed else "text", "options": list(options or []),
+             "required": True, "section": "", "group": "", "value": "", "valid": True}
+    try:
+        answer = Resolver(profile, db, config, None, employer, job or {}).local(field)
+    except Exception:
+        return None
+    if answer is not None and answer.disposition == "answer" and str(answer.value or "").strip():
+        return f"the saved profile answers it ({', '.join(answer.evidence_ids or [])[:80]})"
+    return None
+
+
 def placeholder(option):
     from .widgets import placeholder_option
 

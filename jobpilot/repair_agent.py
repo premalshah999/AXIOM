@@ -124,6 +124,18 @@ class RepairPlan(BaseModel):
     confidence: float = Field(default=0.5, ge=0, le=1)
 
 
+def oq_inferable(db, config, profile, question, service, job_id):
+    """Why this owner question is not asked (owner_questions.inferable and defect), else None."""
+    from . import owner_questions as oq
+
+    with db.session() as s:
+        job = s.get(Job, job_id)
+        employer, record = (job.company or job.url, {"id": job.id, "url": job.url, "ats": job.ats}) if job else ("", {})
+    if problem := oq.defect(question.question, question.options, {"source": "repair"}, ""):
+        return problem
+    return oq.inferable(db, config, profile, question.question, question.options, employer, record)
+
+
 def already_asked(db, job_id, question):
     """True when this job already has an open or answered owner question that says the same thing in other words."""
     from difflib import SequenceMatcher
@@ -491,6 +503,9 @@ async def _repair_run(service, run_id):
         question = None
     if question and INTERNAL_QUESTION.search(question.question):
         applied["rejected"] = [*applied["rejected"], (question.question[:200], "describes the app, not the applicant")]
+        question = None
+    if question and (known := oq_inferable(db, config, profile, question, service, job_id)):
+        applied["rejected"] = [*applied["rejected"], (question.question[:200], known)]
         question = None
     if question and already_asked(db, job_id, question.question):
         applied["rejected"] = [*applied["rejected"], (question.question[:200], "the owner was already asked this")]

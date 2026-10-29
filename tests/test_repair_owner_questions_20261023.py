@@ -70,3 +70,24 @@ async def test_an_answered_repair_question_reaches_the_navigator(service, tmp_pa
     assert result["message"].startswith("Saved.")
     directive = service.db.get_setting("application_directive:" + job_id)
     assert "military spouse" in directive["text"] and directive["text"].endswith(": No")
+
+
+async def test_a_question_the_profile_answers_is_never_put_to_the_owner(service, tmp_path, monkeypatch):
+    """Flatirons (2026-10-29): the agent's own diagnosis said the saved profile holds the U.S.-citizen answer, yet it asked.
+    The radio group not committing is a control failure; the saved fact answers the question."""
+    run_id, _, _ = seed(service, tmp_path)
+    stored = service.db.get_setting("profile", {}) or {}
+    service.db.set_setting("profile", {**stored, "facts": {**(stored.get("facts") or {}), "us_citizen": False}})
+    await plan_with(monkeypatch, "Are you a U.S. Citizen? Being a U.S. citizen is a requirement for this role.",
+                    ["Yes", "No"])
+    summary = await repair_run(service, run_id)
+    assert summary["outcome"] != "asked_owner"
+    assert any("saved profile answers it" in why for _, why in summary["rejected"])
+    with service.db.session() as s:
+        assert s.query(Review).filter(Review.run_id == run_id).count() == 0
+
+
+async def test_a_bare_caption_from_the_repair_agent_is_not_asked(service, tmp_path, monkeypatch):
+    run_id, _, _ = seed(service, tmp_path)
+    await plan_with(monkeypatch, "None of the Above")
+    assert (await repair_run(service, run_id))["outcome"] != "asked_owner"
