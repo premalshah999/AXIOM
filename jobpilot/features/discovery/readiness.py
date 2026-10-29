@@ -83,7 +83,7 @@ def _candidates(db, policy: DiscoveryPolicy, at, manual_only=False) -> tuple[lis
         query = (
             select(Job, JobListing)
             .outerjoin(JobListing, JobListing.job_id == Job.id)
-            .where(Job.demo.is_(False), Job.status != "archived")
+            .where(Job.demo.is_(False), Job.status.not_in(["archived", "closed"]))
         )
         rows = s.execute(query.where(Job.id.in_(manual)) if manual_only else query).all()
         guards = guard_keys(s)
@@ -140,6 +140,15 @@ def _candidates(db, policy: DiscoveryPolicy, at, manual_only=False) -> tuple[lis
                 }
             )
     return out, stats
+
+
+def master_resume(db) -> str | None:
+    """The source resume id when the application resume policy is `master` (no tailored PDF is ever built), else None.
+    Readiness and status asked for tailored resumes under this policy: "Tailoring: 31 eligible jobs are waiting for a
+    tailored resume" while nothing had been built since 2026-10-07 and `ready_to_apply` read 0 beside 260 ready jobs
+    (2026-10-28)."""
+    policy = db.get_setting("application_resume_policy", {}) or {}
+    return (policy.get("resume_id") or policy.get("source_resume_id") or "") if policy.get("mode") == "master" else None
 
 
 def _deferred(db, at) -> set:
@@ -215,17 +224,25 @@ def ready_applications(
     deferred = _deferred(db, at)
     good = _eligible(db, [j for j in jobs if j["id"] not in deferred], profile, policy)
     out = []
+    master = master_resume(db)
     for job in sorted(jobs, key=lambda j: (-(good.get(j["id"], {}).get("score") or 0), j["posted_at"] or "")):
         if job["id"] not in good:
             continue
-        artifact = current_artifact(db, job["id"], data_dir)
-        if not artifact:
-            continue
+        if master is not None:
+            # The master resume needs no artifact: a job the ranker marked ready applies with the source PDF.
+            if job["status"] != "ready":
+                continue
+            artifact_id, resume_id = "", job["resume_id"] or master
+        else:
+            artifact = current_artifact(db, job["id"], data_dir)
+            if not artifact:
+                continue
+            artifact_id, resume_id = artifact.artifact_id, artifact.source_resume_id
         out.append(
             ReadyApplication(
                 job_id=job["id"],
-                artifact_id=artifact.artifact_id,
-                resume_id=artifact.source_resume_id,
+                artifact_id=artifact_id,
+                resume_id=resume_id,
                 score=good[job["id"]].get("score"),
                 posted_at=job["posted_at"],
                 posted_basis=job["posted_basis"],
@@ -250,20 +267,25 @@ def discover_due(
     jobs = [j for j in jobs if j["id"] not in deferred]
     good = _eligible(db, jobs, profile, policy)
     # Current-identity readiness: a stale variant or an expired build lease counts as not prepared.
-    artifacts = {j: preparation_state(db, j, data_dir) for j in good}
-    ready = sum(1 for j in good if artifacts.get(j) == "ready")
-    building = sum(1 for j in good if artifacts.get(j) == "building")
     work = DueWork()
-    # Tailoring: keep a bounded number of ready resumes ahead of the owners.
-    budget = policy.owners * policy.tailor_lookahead - ready - building
-    waiting = [j for j in good if artifacts.get(j) in {"none", "stale"}]
-    waiting.sort(key=lambda j: -(good[j].get("score") or 0))
-    if budget > 0:
-        work.tailor = waiting[:budget]
-    elif waiting:
-        work.reasons.append(
-            f"Tailoring paused: {ready + building} resumes already ahead of {policy.owners} owners"
-        )
+    if master_resume(db) is not None:
+        # The master resume is the application resume: nothing is tailored, so nothing is planned or waiting.
+        artifacts, ready, building = {}, 0, 0
+        work.reasons.append("Tailoring not needed: the resume policy is master")
+    else:
+        artifacts = {j: preparation_state(db, j, data_dir) for j in good}
+        ready = sum(1 for j in good if artifacts.get(j) == "ready")
+        building = sum(1 for j in good if artifacts.get(j) == "building")
+        # Tailoring: keep a bounded number of ready resumes ahead of the owners.
+        budget = policy.owners * policy.tailor_lookahead - ready - building
+        waiting = [j for j in good if artifacts.get(j) in {"none", "stale"}]
+        waiting.sort(key=lambda j: -(good[j].get("score") or 0))
+        if budget > 0:
+            work.tailor = waiting[:budget]
+        elif waiting:
+            work.reasons.append(
+                f"Tailoring paused: {ready + building} resumes already ahead of {policy.owners} owners"
+            )
     # Classification: only while the eligible pipeline is short. Jobs that
     # already have a run are not dispatched again by the autopilot (recovery,
     # protection and employer caps own them), so they do not fill the pipeline.
@@ -399,6 +421,16 @@ def status(db, policy: DiscoveryPolicy | None = None, cap: Capacity | None = Non
     with db.session() as s:
         tailoring = dict(s.execute(select(RsArtifact.status, func.count()).group_by(RsArtifact.status)).all())
     ready = len(ready_applications(db, policy, limit=10_000, at=at, candidates=jobs))
+    master = master_resume(db) is not None
+    with db.session() as s:
+        from ...db import Job, Run
+
+        # Every ready job nothing has attempted, listed or not (imports and listings a sweep has not re-seen).
+        ready_jobs = s.scalar(
+            select(func.count()).select_from(Job).where(
+                Job.status == "ready", Job.demo.is_(False), Job.id.not_in(select(Run.job_id))
+            )
+        )
     basis = {}
     for j in jobs:
         basis[j["posted_basis"]] = basis.get(j["posted_basis"], 0) + 1
@@ -413,6 +445,11 @@ def status(db, policy: DiscoveryPolicy | None = None, cap: Capacity | None = Non
         )
     elif ready:
         bottleneck = "All application owners are busy. Ready applications wait for a free owner."
+    elif good and master:
+        bottleneck = (
+            f"Ranking: {len(good)} classified-eligible jobs are not marked ready "
+            f"(resume policy is master, so no tailored resume is needed)."
+        )
     elif good:
         bottleneck = (
             f"Tailoring: {len(good)} eligible jobs are waiting for a tailored resume "
@@ -435,7 +472,9 @@ def status(db, policy: DiscoveryPolicy | None = None, cap: Capacity | None = Non
             "unclassified": unclassified,
         },
         "tailoring": tailoring,
+        "resume_policy": "master" if master else "tailored",
         "ready_to_apply": ready,
+        "ready_jobs": ready_jobs,
         "owners": {"total": cap.owners_total, "busy": cap.owners_busy},
         "bottleneck": bottleneck,
         "policy": policy.model_dump(),
