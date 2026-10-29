@@ -51,3 +51,48 @@ def test_admission_revision_ignores_unrelated_settings(service):
     assert autopilot.admission_revision(service.db, cfg) == before
     service.db.set_setting("ats_focus", {"exclude": ["workday"]})
     assert autopilot.admission_revision(service.db, cfg) != before
+
+
+async def test_a_rejection_is_reconsidered_in_the_next_window(service, monkeypatch):
+    """222 ready jobs under every limit sat untried after one transient rejection (2026-10-29)."""
+    import time
+
+    service.dispatch = lambda *args: None
+    service.db.set_setting("control", {"auto_submit": True})
+    cfg = BoardSettings(auto_apply=True)
+    monkeypatch.setattr(autopilot, "settings", lambda db: cfg)
+    monkeypatch.setattr(autopilot, "replenish_discovery", lambda *args: None)
+
+    async def no_retries(*args):
+        return 0
+
+    monkeypatch.setattr(autopilot, "persist_stalled", no_retries)
+    with service.db.exclusive() as s:
+        job = Job(identity="window-ready", url="https://employer.example/job/2", ats="oracle",
+                  title="Software Engineer", company="Example", status="ready", score=90)
+        s.add(job)
+        s.flush()
+        jid = job.id
+    board = {"jobs": [{"id": jid, "status": "ready", "score": 90,
+                      "title": "Software Engineer", "company": "Example", "location": "US",
+                      "posted_at": "2026-10-17", "career_level": "New grad"}]}
+    monkeypatch.setattr(autopilot, "board_snapshot", lambda *args, **kwargs: board)
+    calls, busy = [], [True]
+
+    async def queue(job_id, *args, **kwargs):
+        calls.append(job_id)
+        if busy[0]:
+            raise QueueBlocked("Briefly full", code="company_limit")
+        return {"id": "queued-window"}
+
+    monkeypatch.setattr(service, "queue", queue)
+    now = [time.time()]
+    monkeypatch.setattr(autopilot.time, "time", lambda: now[0])
+    await autopilot.tick(service)
+    await autopilot.tick(service)
+    assert calls == [jid]  # Within one window the rejection stands.
+    busy[0] = False
+    now[0] += autopilot.RECONSIDER_SECONDS
+    await autopilot.tick(service)
+    assert calls == [jid, jid]
+    assert service.db.get_setting("job_board_autopilot")["queued"] == 1

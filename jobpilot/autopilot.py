@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import re
+import time
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 from sqlalchemy import func, select, update
@@ -353,6 +354,10 @@ def replenish_discovery(service, unattempted):
             r.next_run = now()
     db.set_setting("autopilot_replenish", {"at": now(), "sources_due": min(60, len(rows))})
     return min(60, len(rows))
+
+
+# How often an autopilot rejection of a Ready job is reconsidered (see the tick's admission_state).
+RECONSIDER_SECONDS = 1800
 
 
 def start_batch(db, target=100):
@@ -806,9 +811,12 @@ async def tick(service):
         board["jobs"].extend(await asyncio.to_thread(unlisted_ready, db, cfg, {j["id"] for j in board["jobs"]}))
         considered_state = batch.setdefault("considered_state", {})
         policy_revision = admission_revision(db, cfg)
+        # A rejection is looked at again every RECONSIDER_SECONDS: a job turned away while a pool, an employer or a
+        # hold was briefly full was never considered again (222 ready jobs under every limit sat untried, 2026-10-29).
+        window = int(time.time() // RECONSIDER_SECONDS)
 
         def admission_state(job):
-            return f"{job.get('status')}:{job.get('score')}:{policy_revision}"
+            return f"{job.get('status')}:{job.get('score')}:{policy_revision}:{window}"
 
         def reconsider(job):
             # A job considered while unranked or skipped and later ranked ready
