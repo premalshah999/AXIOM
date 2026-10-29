@@ -875,6 +875,16 @@ class Adapter:
                 self.release_mail()
 
     async def _drive(self):
+        # SuccessFactors and iCIMS have their own continuation handlers (the latter targets its Central origin).
+        # All other adapters must reclaim the existing request before trying another sign-in or reset.
+        if self.id not in {"successfactors", "icims"} and self.reset_mail_continuation():
+            if not await self.arm_mail("password_reset"):
+                return self.lease_busy()
+            if not self.challenge:
+                return self.defer("The saved password reset request could not be recovered", state="waiting_browser",
+                                  blocker_type="email_wait")
+            if result := await self.complete_password_reset(self.accounts.store.canonical(self.job["url"])):
+                return result
         for _ in range(self.max_steps):
             recover = getattr(self.e, "recover_workday_error", None)
             if recover and await recover():
@@ -933,6 +943,18 @@ class Adapter:
             if isinstance(result, dict):
                 return result
         return self.defer("The application has more steps than the configured limit")
+
+    def reset_mail_continuation(self):
+        """Only resume a reset request made by an earlier run of this job."""
+        handle = (getattr(self, "run_record", None) or {}).get("packet", {}).get("email_wait_resume", {})
+        if (handle.get("kind") != "password_reset" or not handle.get("source_run_id")
+                or not handle.get("challenge_id") or not self.accounts.store):
+            return False
+        from ..db import Run
+
+        with self.service.db.session() as session:
+            source = session.get(Run, handle["source_run_id"])
+            return bool(source and source.job_id == self.job["id"])
 
     # ----- step handlers ------------------------------------------------------------------------
     async def on_job_details(self, obs):
@@ -2310,7 +2332,7 @@ class Adapter:
 
     def login_value(self, f, credentials):
         """A "User name"/"User ID" field gets the applicant's username when one is configured."""
-        username = getattr(self.e.profile, "account_username", "") if getattr(self, "e", None) else ""
+        username = getattr(getattr(getattr(self, "e", None), "profile", None), "account_username", "")
         if (
             username
             and f["type"] != "email"
@@ -2687,7 +2709,7 @@ class Adapter:
         if not emails:
             return self.defer("The password reset step has no email field")
         for f in emails:
-            await self.form.locator(f["id"]).fill(self.accounts.email, timeout=4000)
+            await self.form.locator(f["id"]).fill(self.login_value(f, {"email": self.accounts.email}), timeout=4000)
             await self.form.locator(f["id"]).blur()
         credentials = None
         if one_page:

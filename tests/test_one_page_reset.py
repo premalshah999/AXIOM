@@ -141,6 +141,18 @@ async def test_a_sign_in_page_is_still_reported_as_a_reset_that_did_not_open(ser
     value.click.assert_not_awaited()
 
 
+async def test_reset_uses_configured_username_and_email_for_their_respective_fields(service):
+    value = adapter(service)
+    value.e.profile = SimpleNamespace(account_username="candidate123")
+    reset = page("/forgot", [field("user", "User Name"), field("email", "Email Address", "email")],
+                 [control("go", "Send")], "Forgot password", ())
+    value.reset_outcome = AsyncMock(return_value=("sent", ""))
+    value.complete_password_reset = AsyncMock(return_value=None)
+    await value.request_reset(reset, "refused")
+    value.locators["user"].fill.assert_awaited_once_with("candidate123", timeout=4000)
+    value.locators["email"].fill.assert_awaited_once_with("alex@example.test", timeout=4000)
+
+
 TIKTOK_CODE = page(
     "/reset-password",
     [field(f"d{n}", "") for n in range(6)],
