@@ -6,6 +6,8 @@ import { Search } from "lucide-react";
 import { api, ApiError } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useDraft, usePoll } from "./hooks";
+import { Actions, Facts as KV, Lede } from "./setup-kit";
+import { Button, Empty as AxEmpty, Panel, Pill, Table, type PillTone } from "./ui/index";
 import {
   ago,
   Empty,
@@ -806,6 +808,15 @@ function useMasterStatus() {
 }
 
 // ---------- Setup › Resumes: the master every tailored copy starts from ----------
+const ARTIFACT_PILL: Record<string, PillTone> = {
+  ready: "ok",
+  building: "info",
+  failed: "warn",
+  cancelled: "neutral",
+  invalid: "neutral",
+  kept_master: "neutral",
+};
+
 function MasterResume({
   status,
   refresh,
@@ -816,73 +827,64 @@ function MasterResume({
   const { go } = useWorkspace();
   const { pending, run } = useAction();
   const [accept, setAccept] = useState(false);
-  const { master, source, policy, approved_id } = status;
+  const { master = null, source = null, approved_id = null } = status;
+  const policy = status.policy || {};
   const masterOnly = policy.mode === "master";
   const v = master?.verification || {};
-  const importButton = (label: string) => (
-    <button
-      className="btn sm"
-      disabled={pending !== null || !source}
+  const importButton = (label: string, primary = false) => (
+    <Button
+      size="sm"
+      variant={primary ? "primary" : "secondary"}
+      loading={pending === "import"}
+      disabled={!source || (pending !== null && pending !== "import")}
       onClick={() =>
         run(
           "import",
           async () => {
-            const r = await api<MasterView>(
-              "/v2/resumes/master/import",
-              "POST",
-            );
+            const r = await api<MasterView>("/v2/resumes/master/import", "POST");
             await refresh();
             return r;
           },
           (r) =>
-            r?.verification.faithful
+            r?.verification?.faithful
               ? "Imported. Compare it with the original, then approve it."
               : "Imported with differences. Review them before approving.",
         )
       }
     >
       {pending === "import" ? "Transcribing…" : label}
-    </button>
+    </Button>
   );
   return (
-    <section className="panel">
-      <header className="panel-head row">
-        <div>
-          <h2>Master resume</h2>
-          <p className="muted">
-            {masterOnly
-              ? `Applications are sent with ${source?.name || "your uploaded resume"}, exactly as you uploaded it. Tailoring is paused.`
-              : "A job gets a tailored copy only when it reads at least as well as this master. Otherwise the master is sent."}
-          </p>
-        </div>
-        {master && (
-          <Tag
-            tone={
-              master.status === "approved" ? "ok" : v.faithful ? "ask" : "fix"
-            }
-          >
+    <Panel
+      title="Master resume"
+      actions={
+        master && (
+          <Pill tone={master.status === "approved" ? "ok" : v.faithful ? "warn" : "bad"} dot>
             {master.status === "approved" ? "Approved" : "Draft"}
-          </Tag>
-        )}
-      </header>
+          </Pill>
+        )
+      }
+    >
+      <Lede>
+        {masterOnly
+          ? `Applications are sent with ${source?.name || "your uploaded resume"}, exactly as you uploaded it. Tailoring is paused.`
+          : "A job gets a tailored copy only when it reads at least as well as this master. Otherwise the master is sent."}
+      </Lede>
       {!master ? (
         <>
-          <p>
-            Tailoring needs an editable copy of your resume. Importing
-            transcribes {source ? source.name : "your resume PDF"} word for
-            word. You compare it with the original, match the spacing, and
-            approve it. Experience and education are then never reworded.
-          </p>
-          <p className="row-actions">
-            {importButton(source ? `Import ${source.name}` : "Import")}
-            {!source && (
-              <span className="muted sm">Upload your resume above first.</span>
-            )}
-          </p>
+          <Lede>
+            Tailoring needs an editable copy of your resume. Importing transcribes {source ? source.name : "your resume PDF"}{" "}
+            word for word. You compare it with the original, match the spacing, and approve it. Experience and education are
+            then never reworded.
+          </Lede>
+          <Actions start note={!source ? "Upload your resume above first." : undefined}>
+            {importButton(source ? `Import ${source.name}` : "Import", true)}
+          </Actions>
         </>
       ) : (
         <>
-          <KeyValues
+          <KV
             items={[
               [
                 "Matches the original",
@@ -897,80 +899,62 @@ function MasterResume({
                   {v.render_fill
                     ? `${plural(v.render_fill.pages, "page")}, ${pct(v.render_fill.fill)} full`
                     : "Not built yet"}
-                  {v.source_fill && (
-                    <span className="muted">
-                      {" "}
-                      · original {pct(v.source_fill.fill)} full
-                    </span>
-                  )}
+                  {v.source_fill && <span className="ax-hint"> · original {pct(v.source_fill.fill)} full</span>}
                 </>,
               ],
               [
                 master.status === "approved" ? "Approved" : "Created",
                 <>
                   {ago(master.approved_at || master.created_at)}
-                  <span className="muted">
-                    {" "}
-                    ·{" "}
-                    {master.origin === "edited" ? "edited by you" : "imported"}
-                  </span>
+                  <span className="ax-hint"> · {master.origin === "edited" ? "edited by you" : "imported"}</span>
                 </>,
               ],
             ]}
           />
           {(!!v.missing?.length || !!v.added?.length) && (
-            <div className="inline-warn">
+            <div className="ax-notice" style={{ marginTop: "var(--space-3)", display: "block" }}>
               {!!v.missing?.length && (
                 <p>
-                  <strong>Missing from this copy:</strong>{" "}
-                  {v.missing.slice(0, 12).join(", ")}
+                  <strong>Missing from this copy:</strong> {v.missing.slice(0, 12).join(", ")}
                 </p>
               )}
               {!!v.added?.length && (
                 <p>
-                  <strong>Not in your original:</strong>{" "}
-                  {v.added.slice(0, 12).join(", ")}
+                  <strong>Not in your original:</strong> {v.added.slice(0, 12).join(", ")}
                 </p>
               )}
             </div>
           )}
           {master.status === "draft" && approved_id && (
-            <p className="muted sm">
-              Your previously approved master stays in use until you approve
-              this draft.
+            <p className="ax-hint" style={{ marginTop: "var(--space-3)" }}>
+              Your previously approved master stays in use until you approve this draft.
             </p>
           )}
-          <p className="row-actions">
-            <button
-              className="btn sm"
-              onClick={() => go({ view: "editor", artifact: "master" })}
-            >
+          <Actions>
+            {importButton("Import again")}
+            <Button size="sm" onClick={() => go({ view: "editor", artifact: "master" })}>
               Compare and edit
-            </button>
+            </Button>
             {master.status === "draft" && (
               <>
                 {!v.faithful && (
                   <label className="check">
-                    <input
-                      type="checkbox"
-                      checked={accept}
-                      onChange={(e) => setAccept(e.target.checked)}
-                    />
+                    <input type="checkbox" checked={accept} onChange={(e) => setAccept(e.target.checked)} />
                     <span>These differences are intended</span>
                   </label>
                 )}
-                <button
-                  className="btn sm primary"
-                  disabled={pending !== null || (!v.faithful && !accept)}
+                <Button
+                  size="sm"
+                  variant="primary"
+                  loading={pending === "approve"}
+                  disabled={(pending !== null && pending !== "approve") || (!v.faithful && !accept)}
                   onClick={() =>
                     run(
                       "approve",
                       async () => {
-                        const r = await api(
-                          `/v2/resumes/master/${master.id}/approve`,
-                          "POST",
-                          { accept_differences: accept },
-                        );
+                        const r = await api(`/v2/resumes/master/${master.id}/approve`, "POST", {
+                          accept_differences: accept,
+                        });
                         await refresh();
                         return r;
                       },
@@ -978,22 +962,21 @@ function MasterResume({
                     )
                   }
                 >
-                  {pending === "approve" ? "Approving…" : "Approve"}
-                </button>
+                  Approve
+                </Button>
               </>
             )}
-            {importButton("Import again")}
-          </p>
+          </Actions>
         </>
       )}
-    </section>
+    </Panel>
   );
 }
 
 export function TailoredResumes() {
   const { openJob, go } = useWorkspace();
   const master = useMasterStatus();
-  const masterOnly = master.data?.policy.mode === "master";
+  const masterOnly = master.data?.policy?.mode === "master";
   const [status, setStatus] = useDraft("artifact-status", "");
   const [page, setPage] = useState(1);
   const list = useFeature<Page<Artifact>>(
@@ -1009,232 +992,216 @@ export function TailoredResumes() {
     [page, status],
   );
   if (list.unavailable) return null;
+  const items = Array.isArray(list.data?.items) ? list.data!.items : [];
   return (
     <>
-      {master.data && (
-        <MasterResume status={master.data} refresh={master.refresh} />
+      {master.data && <MasterResume status={master.data} refresh={master.refresh} />}
+      {!master.unavailable && master.error && !master.data && (
+        <p className="ax-error" role="alert">
+          {master.error.message}
+        </p>
       )}
-      <ErrorLine error={master.unavailable ? null : master.error} />
-      <section className="panel">
-        <header className="panel-head row">
-          <div>
-            <h2>Tailored versions</h2>
-            <p className="muted">
-              {masterOnly
-                ? "Drafts for review only. None of these are attached to applications while tailoring is paused."
-                : "One per job. Projects and skills are chosen for the posting; experience, education and your contact line are copied from the master unchanged. A version is used only if it reads at least as well as the master."}
-            </p>
-          </div>
-          <span className="row-actions">
-            <button className="btn sm" onClick={() => go({ view: "editor" })}>
-              Open resume editor
-            </button>
-            <select
-              aria-label="Status"
-              value={status}
-              onChange={(e) => {
-                setStatus(e.target.value);
-                setPage(1);
-              }}
-            >
-              <option value="">Any status</option>
-              <option value="ready">Ready</option>
-              <option value="building">Building</option>
-              <option value="failed">Needs repair</option>
-              <option value="kept_master">Master kept</option>
-            </select>
-          </span>
-        </header>
-        <ErrorLine error={list.error} retry={list.refresh} />
-        {!list.data ? (
-          !list.error && <Loading />
-        ) : list.data.items.length ? (
-          <>
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th scope="col">Job</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Checks</th>
-                    <th scope="col">Built</th>
-                    <th scope="col">
-                      <span className="sr-only">PDF</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {list.data.items.map((a) => {
-                    const [tone, label] = ARTIFACT_TONE[a.status] || [
-                      "idle",
-                      a.status,
-                    ];
-                    return (
-                      <tr key={a.artifact_id}>
-                        <td className="cell-job">
-                          {a.job_id ? (
-                            <button
-                              className="link"
-                              onClick={() => openJob(a.job_id!)}
-                            >
-                              Open job
-                            </button>
-                          ) : (
-                            <span className="muted">Job removed</span>
-                          )}
-                          <small className="muted mono">
-                            {" "}
-                            {a.artifact_id.slice(3, 11)}
-                          </small>
-                        </td>
-                        <td data-label="Status">
-                          <Tag tone={tone}>{label}</Tag>
-                          {a.status === "failed" && a.error.code && (
-                            <small className="reason">
-                              {a.error.code.replaceAll("_", " ")}
-                              {a.error.retryable
-                                ? " · retried automatically"
-                                : ""}
-                            </small>
-                          )}
-                        </td>
-                        <td data-label="Checks">
-                          {a.status === "ready" ? (
-                            <>
-                              {plural(a.validation.pages || 1, "page")}
-                              {a.validation.fill != null
-                                ? `, ${pct(a.validation.fill)} full`
-                                : ` · ${a.selection.length} rows`}
-                              {a.validation.keyword_coverage != null && (
-                                <small className="muted">
-                                  {" "}
-                                  ·{" "}
-                                  {Math.round(
-                                    a.validation.keyword_coverage * 100,
-                                  )}
-                                  % keyword overlap
-                                </small>
-                              )}
-                            </>
-                          ) : (
-                            "—"
-                          )}
-                        </td>
-                        <td data-label="Built">
-                          {ago(a.finished_at || a.created_at)}
-                        </td>
-                        <td className="cell-actions">
-                          {a.status === "ready" && (
-                            <span className="row-actions">
-                              <button
-                                className="btn sm"
-                                onClick={() =>
-                                  go({
-                                    view: "editor",
-                                    artifact: a.artifact_id,
-                                  })
-                                }
-                              >
-                                Edit
-                              </button>
-                              <External
-                                href={`/api/v2/resumes/artifacts/${a.artifact_id}/pdf`}
-                                className="link"
-                              >
-                                PDF
-                              </External>
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+      <Panel
+        title="Tailored versions"
+        actions={
+          <Button size="sm" onClick={() => go({ view: "editor" })}>
+            Open resume editor
+          </Button>
+        }
+      >
+        <Lede>
+          {masterOnly
+            ? "Drafts for review only. None of these are attached to applications while tailoring is paused."
+            : "One per job. Projects and skills are chosen for the posting; experience, education and your contact line are copied from the master unchanged. A version is used only if it reads at least as well as the master."}
+        </Lede>
+        {list.error && !list.data && (
+          <AxEmpty
+            title="Could not load tailored versions"
+            hint={list.error.message}
+            action={<Button size="sm" onClick={list.refresh}>Try again</Button>}
+          />
+        )}
+        {list.data && (
+          <div className="ax-stack">
+            <div className="ax-toolbar">
+              <select
+                className="ax-control"
+                style={{ width: "auto" }}
+                aria-label="Filter by status"
+                value={status}
+                onChange={(e) => {
+                  setStatus(e.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="">Any status</option>
+                <option value="ready">Ready</option>
+                <option value="building">Building</option>
+                <option value="failed">Needs repair</option>
+                <option value="kept_master">Master kept</option>
+              </select>
             </div>
+            <Table
+              label="Tailored resumes"
+              rows={items}
+              rowKey={(a) => a.artifact_id}
+              minWidth={720}
+              empty={
+                <AxEmpty
+                  title="No tailored versions yet"
+                  hint={
+                    masterOnly
+                      ? "Your master resume is used for every application."
+                      : "Eligible jobs get a tailored version before an application starts."
+                  }
+                />
+              }
+              columns={[
+                {
+                  key: "job",
+                  header: "Job",
+                  cell: (a) => (
+                    <>
+                      {a.job_id ? (
+                        <button className="link" onClick={() => openJob(a.job_id!)}>
+                          Open job
+                        </button>
+                      ) : (
+                        <span className="ax-hint">Job removed</span>
+                      )}
+                      <small className="ax-mono ax-hint"> {(a.artifact_id || "").slice(3, 11)}</small>
+                    </>
+                  ),
+                },
+                {
+                  key: "status",
+                  header: "Status",
+                  cell: (a) => (
+                    <span
+                      title={
+                        a.status === "failed" && a.error?.code
+                          ? a.error.code.replaceAll("_", " ") + (a.error.retryable ? " · retried automatically" : "")
+                          : undefined
+                      }
+                    >
+                      <Pill tone={ARTIFACT_PILL[a.status] || "neutral"} dot>
+                        {ARTIFACT_TONE[a.status]?.[1] || a.status}
+                      </Pill>
+                    </span>
+                  ),
+                },
+                {
+                  key: "checks",
+                  header: "Checks",
+                  cell: (a) =>
+                    a.status === "ready" ? (
+                      <>
+                        {plural(a.validation?.pages || 1, "page")}
+                        {a.validation?.fill != null
+                          ? `, ${pct(a.validation.fill)} full`
+                          : ` · ${(a.selection || []).length} rows`}
+                        {a.validation?.keyword_coverage != null && (
+                          <span className="ax-hint"> · {Math.round(a.validation.keyword_coverage * 100)}% keyword overlap</span>
+                        )}
+                      </>
+                    ) : (
+                      "—"
+                    ),
+                },
+                { key: "built", header: "Built", cell: (a) => ago(a.finished_at || a.created_at) },
+                {
+                  key: "act",
+                  header: <span className="sr-only">Actions</span>,
+                  cell: (a) =>
+                    a.status === "ready" ? (
+                      <span className="ax-row-end" style={{ flexWrap: "nowrap" }}>
+                        <Button size="sm" onClick={() => go({ view: "editor", artifact: a.artifact_id })}>
+                          Edit
+                        </Button>
+                        <External href={`/api/v2/resumes/artifacts/${a.artifact_id}/pdf`} className="link">
+                          PDF
+                        </External>
+                      </span>
+                    ) : null,
+                },
+              ]}
+            />
             <ServerPager
-              page={list.data.page}
-              total={list.data.total}
-              size={list.data.size}
+              page={list.data.page ?? 1}
+              total={list.data.total ?? items.length}
+              size={list.data.size ?? 25}
               setPage={setPage}
               label="Tailored resume pages"
             />
-          </>
-        ) : (
-          <Empty title="No tailored versions yet">
-            {masterOnly
-              ? "Your master resume is used for every application."
-              : "Eligible jobs get a tailored version before an application starts."}
-          </Empty>
+          </div>
         )}
-      </section>
+        {!list.data && !list.error && <p className="ax-hint" role="status">Loading…</p>}
+      </Panel>
       <SupportedMaterial />
     </>
   );
 }
 
 function SupportedMaterial() {
-  const inv = usePoll<Inventory>(
-    (signal) => api("/v2/resumes/evidence", "GET", undefined, signal),
-    300000,
-  );
+  const inv = usePoll<Inventory>((signal) => api("/v2/resumes/evidence", "GET", undefined, signal), 300000);
   if (!inv.data)
     return inv.error && !unmounted(inv.error) ? (
-      <ErrorLine error={inv.error} />
+      <p className="ax-error" role="alert">
+        {inv.error.message}
+      </p>
     ) : null;
   const d = inv.data;
+  const roles = d.roles || [];
+  const education = d.education || [];
+  const projects = d.projects || [];
+  const units = d.units || [];
   return (
-    <details className="panel fold">
+    <details className="ax-panel ax-fold">
       <summary>
         <strong>Supported material</strong>
-        <span className="muted sm">
-          {" "}
-          · {plural(d.roles.length, "role")},{" "}
-          {plural(d.education.length, "degree")},{" "}
-          {plural(d.projects.length, "project")},{" "}
-          {plural(d.units.length, "bullet")}
+        <span className="ax-hint">
+          · {plural(roles.length, "role")}, {plural(education.length, "degree")}, {plural(projects.length, "project")},{" "}
+          {plural(units.length, "bullet")}
         </span>
       </summary>
-      <p className="muted sm">
-        Projects and skills a tailored copy may draw on beyond your master.
-        Tailoring never adds a metric, tool or project that isn't in your master
-        or here. Edit it in Profile.
-      </p>
-      {d.roles.map((r) => (
-        <div key={r.row} className="stack">
-          <h3>
-            {r.title}, {r.company}{" "}
-            <small className="muted">
-              {r.start}–{r.current ? "present" : r.end}
-            </small>
-          </h3>
-          <ul className="evidence">
-            {d.units
-              .filter((u) => u.source_row === r.row)
-              .map((u) => (
-                <li key={u.id}>{u.text}</li>
-              ))}
-          </ul>
+      <div className="ax-panel-body">
+        <Lede>
+          Projects and skills a tailored copy may draw on beyond your master. Tailoring never adds a metric, tool or
+          project that isn't in your master or here. Edit it in Profile.
+        </Lede>
+        <div className="ax-stack">
+          {roles.map((r) => (
+            <div key={r.row}>
+              <h3 style={{ fontSize: "var(--text-ui)", fontWeight: 600 }}>
+                {r.title}, {r.company}{" "}
+                <small className="ax-hint">
+                  {r.start}–{r.current ? "present" : r.end}
+                </small>
+              </h3>
+              <ul className="evidence">
+                {units
+                  .filter((u) => u.source_row === r.row)
+                  .map((u) => (
+                    <li key={u.id}>{u.text}</li>
+                  ))}
+              </ul>
+            </div>
+          ))}
+          {projects.map((p) => (
+            <div key={p.row}>
+              <h3 style={{ fontSize: "var(--text-ui)", fontWeight: 600 }}>{p.title}</h3>
+              <ul className="evidence">
+                {units
+                  .filter((u) => u.source_row === p.row)
+                  .map((u) => (
+                    <li key={u.id}>{u.text}</li>
+                  ))}
+              </ul>
+            </div>
+          ))}
+          <KV items={education.map((e): [string, string] => [e.degree || "Degree", `${e.school}${e.end ? " · " + e.end : ""}`])} />
         </div>
-      ))}
-      {d.projects.map((p) => (
-        <div key={p.row} className="stack">
-          <h3>{p.title}</h3>
-          <ul className="evidence">
-            {d.units
-              .filter((u) => u.source_row === p.row)
-              .map((u) => (
-                <li key={u.id}>{u.text}</li>
-              ))}
-          </ul>
-        </div>
-      ))}
-      <KeyValues
-        items={d.education.map((e) => [
-          e.degree || "Degree",
-          `${e.school}${e.end ? " · " + e.end : ""}`,
-        ])}
-      />
+      </div>
     </details>
   );
 }

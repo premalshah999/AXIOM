@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { api } from "./api";
 import { routeUrl, useWorkspace } from "./context";
 import { useAction, usePoll } from "./hooks";
+import { Actions, ConfirmButton, FormGrid, Lede, SaveBar, SecretInput } from "./setup-kit";
 import type { MailStatus } from "./types";
-import { ErrorLine, Field, Loading } from "./ui";
+import { Button, Empty, Input, Panel, Pill, Select } from "./ui/index";
 
 type ConnectionField = {
   name: string;
@@ -37,7 +38,7 @@ const GROUPS = [
   { id: "Discovery", title: "Job search", note: "Optional. More job sources." },
   { id: "Limits", title: "Limits", note: "Daily caps on applications and AI spending." },
   { id: "Vision", title: "Screenshot model", note: "Optional. Only needed if your AI model cannot read images." },
-  { id: "Workers", title: "Workers", note: "How many applications run at once." },
+  { id: "Workers", title: "Workers", note: "How many applications run at once. Changes apply after a restart." },
 ];
 
 const PROVIDERS = [
@@ -48,198 +49,283 @@ const PROVIDERS = [
   { id: "openrouter", label: "OpenRouter: DeepSeek V4.1 Flash (choose its host below)" },
 ];
 
+type TestResult = { ok: boolean; message: string };
+
+/** The value a field shows when nothing is typed: what the next start will use. */
+const shown = (f: ConnectionField) => (f.pending || f.value || "") as string;
+
 /** Setup > Connections: every service key and setting is entered here; nothing needs editing in .env. */
 export function ConnectionSettings() {
   const state = usePoll<Connections>((signal) => api("/connections", "GET", undefined, signal), 60000);
   const [draft, setDraft] = useState<Record<string, string>>({});
-  const [results, setResults] = useState<Record<string, { ok: boolean; message: string }>>({});
+  const [results, setResults] = useState<Record<string, TestResult>>({});
   const { pending, run } = useAction();
-  const data = state.data;
-  const changed = Object.keys(draft).length > 0;
-  const restartNeeded = Object.keys(draft).some((name) => data?.fields.find((f) => f.name === name)?.restart);
+  const data = state.data && Array.isArray(state.data.fields) ? state.data : null;
+  const fields = data?.fields ?? [];
+  const byName = (name: string) => fields.find((f) => f.name === name);
+
+  // A field is changed only when its draft differs from what is saved, so typing a value back is not a change.
+  const same = (name: string, value: string) => {
+    const f = byName(name);
+    if (!f) return false;
+    if (name === "llm_provider") return value === data?.provider;
+    return f.kind === "secret" ? value === "" : value === shown(f);
+  };
+  const setField = (name: string, value: string) =>
+    setDraft((d) => {
+      const next = { ...d };
+      if (same(name, value)) delete next[name];
+      else next[name] = value;
+      return next;
+    });
+  const changes = Object.keys(draft);
+  const changed = changes.length > 0;
+  const restartNeeded = changes.some((name) => byName(name)?.restart);
 
   const save = () =>
     run(
       "save",
       async () => {
-        const next = await api<Connections>("/connections", "PUT", { values: draft });
+        await api<Connections>("/connections", "PUT", { values: draft });
         setDraft({});
         await state.refresh();
-        return next;
       },
       restartNeeded ? "Saved. Worker settings apply after the app restarts." : "Settings saved.",
     );
 
   const test = (name: string) =>
     run(`test:${name}`, async () => {
-      const result = await api<{ ok: boolean; message: string }>(`/connections/${name}/test`, "POST");
+      const result = await api<TestResult>(`/connections/${name}/test`, "POST");
       setResults((r) => ({ ...r, [name]: result }));
       return result;
     });
 
-  const editor = (f: ConnectionField) => {
-    if (f.name === "llm_provider")
-      return (
-        <select
-          value={draft.llm_provider ?? data!.provider}
-          onChange={(e) => setDraft({ ...draft, llm_provider: e.target.value })}
-        >
-          {PROVIDERS.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label}
-            </option>
-          ))}
-        </select>
-      );
-    if (f.options.length)
-      return (
-        <select
-          value={draft[f.name] ?? (f.pending || f.value)}
-          onChange={(e) => setDraft({ ...draft, [f.name]: e.target.value })}
-        >
-          {[...new Set([...f.options, f.pending || f.value].filter(Boolean))].map((o) => (
-            <option key={o} value={o}>
-              {f.option_labels?.[o] || o}
-            </option>
-          ))}
-        </select>
-      );
-    if (f.kind === "bool")
-      return (
-        <select
-          value={draft[f.name] ?? ((f.pending || f.value) === "true" ? "true" : "false")}
-          onChange={(e) => setDraft({ ...draft, [f.name]: e.target.value })}
-        >
-          <option value="true">On</option>
-          <option value="false">Off</option>
-        </select>
-      );
+  if (state.error && !data)
     return (
-      <span className="input-row">
-        <input
-          type={f.kind === "secret" ? "password" : f.kind === "number" ? "number" : "text"}
-          inputMode={f.kind === "number" ? "decimal" : undefined}
-          step={f.kind === "number" ? "any" : undefined}
-          autoComplete="off"
-          spellCheck={false}
-          placeholder={
-            f.kind === "secret" ? (f.set ? "Replace…" : "Paste here") : f.set ? f.value : "Not set"
+      <Panel title="Connections">
+        <Empty
+          title="Could not load the connections"
+          hint={state.error.message}
+          action={
+            <Button size="sm" onClick={state.refresh}>
+              Try again
+            </Button>
           }
-          value={draft[f.name] ?? ""}
-          onChange={(e) => setDraft({ ...draft, [f.name]: e.target.value })}
         />
-        {f.kind === "secret" && (f.set || draft[f.name]) && (
-          <button
-            type="button"
-            className="btn ghost sm"
-            disabled={pending !== null || !!draft[f.name]}
-            title={draft[f.name] ? "Save first, then test" : undefined}
-            onClick={() => test(f.name)}
-          >
-            {pending === `test:${f.name}` ? "Testing…" : "Test"}
-          </button>
-        )}
-      </span>
+      </Panel>
     );
-  };
+  if (!data)
+    return (
+      <Panel title="Connections">
+        <p className="ax-hint" role="status">
+          Loading…
+        </p>
+      </Panel>
+    );
 
-  const hint = (f: ConnectionField) => (
+  const known = new Set(GROUPS.map((g) => g.id));
+  const groups = [
+    ...GROUPS,
+    // A setting in a group this page does not know yet still gets a panel rather than vanishing.
+    ...[...new Set(fields.map((f) => f.group).filter((g) => g && !known.has(g)))].map((g) => ({
+      id: g,
+      title: g,
+      note: "",
+    })),
+  ];
+  const needsRestart = fields.some((f) => f.pending);
+
+  return (
     <>
-      {f.help}{" "}
-      {f.kind === "bool" || f.options.length || f.name === "llm_provider" ? null : f.set ? (
-        <strong>
-          {f.kind === "secret" ? `Saved ${f.value}` : `Now: ${f.value}`}
-          {f.source === "env" ? " (from the .env file)" : ""}.
-        </strong>
-      ) : (
-        "Not set."
+      <p className="ax-lede" style={{ margin: 0 }}>
+        Everything the app needs, in one place. Keys are encrypted on this computer and never shown again; use Test to
+        check one. Nothing needs editing in the .env file.
+      </p>
+      {!data.model_ready && (
+        <div className="ax-notice is-bad" role="alert">
+          <span>
+            Add a key for the selected AI model below. Until then the guide cannot read your resume and no application
+            can run.
+          </span>
+        </div>
       )}
-      {f.pending ? (
-        <strong>
-          {" "}
-          Running {f.kind === "bool" ? (f.value === "true" ? "on" : "off") : f.value}; saved{" "}
-          {f.kind === "bool" ? (f.pending === "true" ? "on" : "off") : f.pending}, used after a restart.
-        </strong>
-      ) : (
-        f.restart && draft[f.name] !== undefined && <strong> Applies after a restart.</strong>
-      )}
-      {results[f.name] && (
-        <span className={results[f.name].ok ? "ok-text" : "error-text"}> {results[f.name].message}</span>
-      )}
+      {needsRestart && <RestartBar />}
+      {groups.map((group) => {
+        const list = fields.filter((f) => f.group === group.id);
+        if (group.id === "Email")
+          return (
+            <Panel key={group.id} title={group.title}>
+              {group.note && <Lede>{group.note}</Lede>}
+              <GmailConnection />
+            </Panel>
+          );
+        if (!list.length) return null;
+        return (
+          <Panel key={group.id} title={group.title}>
+            {group.note && <Lede>{group.note}</Lede>}
+            <FormGrid>
+              {list.map((f) => (
+                <ConnField
+                  key={f.name}
+                  f={f}
+                  provider={data.provider}
+                  value={draft[f.name]}
+                  onChange={(v) => setField(f.name, v)}
+                  result={results[f.name]}
+                  testing={pending === `test:${f.name}`}
+                  busy={pending !== null}
+                  onTest={() => test(f.name)}
+                />
+              ))}
+            </FormGrid>
+          </Panel>
+        );
+      })}
+      <SaveBar
+        dirty={changed}
+        saving={pending === "save"}
+        onSave={save}
+        onDiscard={() => setDraft({})}
+        label={changed ? `Save ${changes.length} change${changes.length > 1 ? "s" : ""}` : "Save"}
+        note={restartNeeded ? "Unsaved changes. Worker settings apply after a restart." : undefined}
+      />
+    </>
+  );
+}
+
+function ConnField({
+  f,
+  provider,
+  value,
+  onChange,
+  result,
+  testing,
+  busy,
+  onTest,
+}: {
+  f: ConnectionField;
+  provider: string;
+  value: string | undefined;
+  onChange: (value: string) => void;
+  result?: TestResult;
+  testing: boolean;
+  busy: boolean;
+  onTest: () => void;
+}) {
+  const id = useId();
+  const options = f.options ?? [];
+  const dirty = value !== undefined;
+  const source = f.source === "env" && f.set ? " Currently from the server's .env file." : "";
+  const pendingNote = f.pending ? (
+    <strong>
+      {" "}
+      Running {f.kind === "bool" ? (f.value === "true" ? "on" : "off") : f.value || "unset"}; saved{" "}
+      {f.kind === "bool" ? (f.pending === "true" ? "on" : "off") : f.pending}, used after a restart.
+    </strong>
+  ) : f.restart && dirty ? (
+    <strong> Applies after a restart.</strong>
+  ) : null;
+  const outcome = result && (
+    <span style={{ color: result.ok ? "var(--ok)" : "var(--bad)" }} role="status">
+      {" "}
+      {result.message}
+    </span>
+  );
+  const hint: ReactNode = (
+    <>
+      {f.help}
+      {source}
+      {pendingNote}
+      {outcome}
     </>
   );
 
-  return (
-    <section className="panel">
-      <header className="panel-head">
-        <h2>Connections</h2>
-        <p className="muted">
-          Everything the app needs, in one place. Keys are encrypted on this computer and never shown again; use Test
-          to check one. Nothing needs editing in the .env file.
+  if (f.name === "llm_provider")
+    return (
+      <Select label={f.label} hint={f.help} value={value ?? provider} onChange={(e) => onChange(e.target.value)}>
+        {PROVIDERS.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.label}
+          </option>
+        ))}
+      </Select>
+    );
+  if (options.length)
+    return (
+      <Select label={f.label} hint={hint} value={value ?? shown(f)} onChange={(e) => onChange(e.target.value)}>
+        {[...new Set([...options, shown(f)].filter(Boolean))].map((o) => (
+          <option key={o} value={o}>
+            {f.option_labels?.[o] || o}
+          </option>
+        ))}
+      </Select>
+    );
+  if (f.kind === "bool")
+    return (
+      <Select
+        label={f.label}
+        hint={hint}
+        value={value ?? (shown(f) === "true" ? "true" : "false")}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="true">On</option>
+        <option value="false">Off</option>
+      </Select>
+    );
+  if (f.kind === "secret") {
+    // Saved keys are masked by the API ("····5d30") and cannot be revealed; the control either replaces them or sets
+    // a first one. Show/Hide reveals only what is being typed.
+    return (
+      <div className="ax-field">
+        <label className="ax-label" htmlFor={id}>
+          {f.label} <Pill tone={f.set ? "ok" : "neutral"}>{f.set ? `Saved ${f.value || ""}`.trim() : "Not set"}</Pill>
+        </label>
+        <SecretInput
+          id={id}
+          label={f.label}
+          describedBy={id + "-msg"}
+          placeholder={f.set ? "Paste a new key to replace it" : "Paste here"}
+          value={value ?? ""}
+          onChange={onChange}
+          extra={
+            f.set ? (
+              <Button
+                size="sm"
+                loading={testing}
+                disabled={busy || dirty}
+                title={dirty ? "Save first, then test" : undefined}
+                onClick={onTest}
+              >
+                Test
+              </Button>
+            ) : null
+          }
+        />
+        <p className="ax-hint" id={id + "-msg"}>
+          {hint}
         </p>
-      </header>
-      <ErrorLine error={state.error} retry={state.refresh} />
-      {!data ? (
-        <Loading />
-      ) : (
-        <>
-          {!data.model_ready && (
-            <p className="callout warn">
-              Add a key for the selected AI model below. Until then the guide cannot read your resume and no application
-              can run.
-            </p>
-          )}
-          {GROUPS.map((group) => (
-            <div key={group.id} className="connection-group">
-              <h3>{group.title}</h3>
-              <p className="muted small">{group.note}</p>
-              {group.id === "Email" ? (
-                <GmailConnection />
-              ) : group.id === "Workers" ? (
-                <>
-                  <div className="form-grid">
-                    {data.fields
-                      .filter((f) => f.group === group.id)
-                      .map((f) => (
-                        <Field key={f.name} label={f.label} hint={hint(f)}>
-                          {editor(f)}
-                        </Field>
-                      ))}
-                  </div>
-                  <RestartBar pending={data.fields.some((f) => f.pending)} />
-                </>
-              ) : (
-                <div className="form-grid">
-                  {data.fields
-                    .filter((f) => f.group === group.id)
-                    .map((f) => (
-                      <Field key={f.name} label={f.label} hint={hint(f)}>
-                        {editor(f)}
-                      </Field>
-                    ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </>
-      )}
-      <div className="form-actions start connections-save">
-        <button className="btn primary sm" disabled={!changed || pending !== null} onClick={save}>
-          {pending === "save" ? "Saving…" : changed ? `Save ${Object.keys(draft).length} change${Object.keys(draft).length > 1 ? "s" : ""}` : "Save"}
-        </button>
-        {changed && (
-          <button className="btn ghost sm" disabled={pending !== null} onClick={() => setDraft({})}>
-            Discard
-          </button>
-        )}
       </div>
-    </section>
+    );
+  }
+  return (
+    <Input
+      label={f.label}
+      hint={hint}
+      type={f.kind === "number" ? "number" : "text"}
+      inputMode={f.kind === "number" ? "decimal" : undefined}
+      step={f.kind === "number" ? "any" : undefined}
+      autoComplete="off"
+      spellCheck={false}
+      placeholder="Not set"
+      value={value ?? shown(f)}
+      onChange={(e) => onChange(e.target.value)}
+    />
   );
 }
 
 // Worker counts are sized when the app starts: saving keeps them for the next start, and this restarts now. New
 // starts pause, a final submit in progress finishes, then the app restarts on its own in under a minute.
-function RestartBar({ pending }: { pending: boolean }) {
+function RestartBar() {
   const { pending: busy, run } = useAction();
   const [restarting, setRestarting] = useState(false);
   const restart = () =>
@@ -264,18 +350,25 @@ function RestartBar({ pending }: { pending: boolean }) {
       },
       "Restarting. Running applications resume after the restart.",
     );
-  if (!pending && !restarting) return null;
   return (
-    <p className="callout restart-bar">
-      {restarting
-        ? "Restarting… this page reloads when the app is back (under a minute)."
-        : "New worker settings are saved. They take effect when the app restarts."}{" "}
+    <div className="ax-notice" role="status">
+      <span>
+        {restarting
+          ? "Restarting… this page reloads when the app is back (under a minute)."
+          : "New worker settings are saved. They take effect when the app restarts."}
+      </span>
       {!restarting && (
-        <button className="btn sm primary" disabled={busy !== null} onClick={restart}>
-          {busy === "restart" ? "Restarting…" : "Restart now"}
-        </button>
+        <ConfirmButton
+          label="Restart now"
+          confirm="Restart"
+          note="Applications pause, final submits finish, then it comes back."
+          variant="secondary"
+          size="md"
+          pending={busy === "restart"}
+          onConfirm={restart}
+        />
       )}
-    </p>
+    </div>
   );
 }
 
@@ -286,87 +379,108 @@ function GmailConnection() {
   const [form, setForm] = useState({ email: "", app_password: "" });
   const { pending, run } = useAction();
   const boxes = mail.data?.mailboxes || [];
+  const profileEmail = snapshot.profile?.email || "";
   const connect = () =>
     run(
       "gmail",
       async () => {
-        await api("/mail/imap", "POST", { ...form, email: form.email || snapshot.profile.email });
+        await api("/mail/imap", "POST", { ...form, email: form.email || profileEmail });
         setForm({ email: "", app_password: "" });
         await mail.refresh();
       },
       "Gmail connected. Verification codes and receipts are read automatically.",
     );
   return (
-    <>
-      <ErrorLine error={mail.error} retry={mail.refresh} />
+    <div className="ax-stack">
+      {mail.error && !mail.data && (
+        <p className="ax-error" role="alert">
+          {mail.error.message}
+        </p>
+      )}
       {boxes.length > 0 && (
-        <ul className="list gmail-list">
+        <ul className="ax-rows">
           {boxes.map((b) => (
-            <li key={b.id}>
-              <span>
-                <strong>{b.email}</strong>{" "}
-                <span className="muted">
-                  {b.provider === "gmail_imap" ? "app password" : b.provider === "gmail_oauth" ? "Google sign-in" : ""}
-                  {b.state && ` · ${b.state}`}
-                </span>
+            <li className="ax-row" key={b.id}>
+              <span className="ax-row-main">
+                <strong>{b.email}</strong>
+                <small>
+                  {b.provider === "gmail_imap" ? "App password" : b.provider === "gmail_oauth" ? "Google sign-in" : ""}
+                </small>
               </span>
-              <a
-                className="link sm"
-                href={routeUrl({ view: "setup", tab: "email" })}
-                onClick={(e) => {
-                  e.preventDefault();
-                  go({ view: "setup", tab: "email" });
-                }}
-              >
-                Manage
-              </a>
+              <span className="ax-row-end">
+                <Pill tone={b.state === "connected" ? "ok" : "warn"} dot>
+                  {(b.state || "unknown").replaceAll("_", " ")}
+                </Pill>
+                <a
+                  className="ax-btn is-sm"
+                  href={routeUrl({ view: "setup", tab: "email" })}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    go({ view: "setup", tab: "email" });
+                  }}
+                >
+                  Manage
+                </a>
+              </span>
             </li>
           ))}
         </ul>
       )}
       <form
-        className="form-grid"
         onSubmit={(e) => {
           e.preventDefault();
           connect();
         }}
       >
-        <Field label={boxes.length ? "Connect another Gmail" : "Gmail address"} hint="Empty: the email in your profile.">
-          <input
+        <FormGrid>
+          <Input
+            label={boxes.length ? "Connect another Gmail" : "Gmail address"}
+            hint="Empty: the email in your profile."
             type="email"
             autoComplete="off"
-            placeholder={snapshot.profile.email || "you@gmail.com"}
+            placeholder={profileEmail || "you@gmail.com"}
             value={form.email}
             onChange={(e) => setForm({ ...form, email: e.target.value })}
           />
-        </Field>
-        <Field
-          label="Gmail app password"
-          hint={
-            <>
-              16 letters from{" "}
-              <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer">
-                myaccount.google.com/apppasswords
-              </a>{" "}
-              (needs 2-Step Verification). Read-only use: codes, links and receipts.
-            </>
-          }
-        >
-          <span className="input-row">
-            <input
-              type="password"
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="xxxx xxxx xxxx xxxx"
-              value={form.app_password}
-              onChange={(e) => setForm({ ...form, app_password: e.target.value })}
-            />
-            <button className="btn sm" type="submit" disabled={!form.app_password.trim() || pending !== null}>
-              {pending === "gmail" ? "Checking…" : "Connect"}
-            </button>
-          </span>
-        </Field>
+          <GmailPassword value={form.app_password} onChange={(v) => setForm({ ...form, app_password: v })} />
+        </FormGrid>
+        <Actions>
+          <Button
+            type="submit"
+            variant="primary"
+            loading={pending === "gmail"}
+            disabled={!form.app_password.trim() || (pending !== null && pending !== "gmail")}
+          >
+            Connect
+          </Button>
+        </Actions>
       </form>
-    </>
+    </div>
+  );
+}
+
+function GmailPassword({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const id = useId();
+  return (
+    <div className="ax-field">
+      <label className="ax-label" htmlFor={id}>
+        Gmail app password
+      </label>
+      <SecretInput
+        id={id}
+        label="app password"
+        describedBy={id + "-msg"}
+        placeholder="xxxx xxxx xxxx xxxx"
+        value={value}
+        onChange={onChange}
+      />
+      <p className="ax-hint" id={id + "-msg"}>
+        16 letters from{" "}
+        <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer">
+          myaccount.google.com/apppasswords
+        </a>{" "}
+        (needs 2-Step Verification). Read-only use: codes, links and receipts.
+      </p>
+    </div>
   );
 }

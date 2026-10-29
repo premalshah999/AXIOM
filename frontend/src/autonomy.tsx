@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useId, useMemo, useState } from "react";
 import { Plus, Search } from "lucide-react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
@@ -17,6 +17,9 @@ import type {
   WorkEntry,
 } from "./types";
 import { ago, Confirm, Empty, ErrorLine, External, Field, KeyValues, Loading, plural, stamp } from "./ui";
+import { ProfilePhoto } from "./profile-photo";
+import { Actions, ConfirmButton, Facts, FormGrid, Lede, SaveBar, SecretInput } from "./setup-kit";
+import { Button, Drawer, Empty as AxEmpty, Input, Panel, Pill, Table, Tabs, type PillTone } from "./ui/index";
 
 // ---------- Profile ----------
 type ProfileDraft = { value: Profile; base: string; dirty: boolean };
@@ -41,9 +44,52 @@ const SECTIONS = [
   ["preferences", "Preferences"],
 ] as const;
 
+// A profile that arrives thin (a new account, an older server) is filled in so no section reads a missing list.
+const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+export function normalizeProfile(raw: Partial<Profile> | null | undefined): Profile {
+  const p = (raw || {}) as Partial<Profile>;
+  const text = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
+  return {
+    ...(p as Profile),
+    name: text(p.name),
+    email: text(p.email),
+    phone: text(p.phone),
+    location: text(p.location),
+    linkedin: text(p.linkedin),
+    website: text(p.website),
+    github: text(p.github),
+    first_name: text(p.first_name),
+    last_name: text(p.last_name),
+    middle_name: text(p.middle_name),
+    preferred_name: text(p.preferred_name),
+    phone_country_code: text(p.phone_country_code),
+    phone_type: text(p.phone_type),
+    salary_expectation: text(p.salary_expectation),
+    availability: text(p.availability),
+    application_source: text(p.application_source),
+    address: { line1: "", line2: "", city: "", state: "", postal_code: "", country: "", county: "", ...(p.address || {}) },
+    work: arr<WorkEntry>(p.work).map((w) => ({ ...EMPTY_WORK, ...w })),
+    education: arr<EducationEntry>(p.education).map((e) => ({ ...EMPTY_EDU, ...e })),
+    skills: arr<string>(p.skills),
+    languages: arr<string>(p.languages),
+    evidence: arr<Profile["evidence"][number]>(p.evidence),
+    target_roles: arr<string>(p.target_roles),
+    target_locations: arr<string>(p.target_locations),
+    excluded_keywords: arr<string>(p.excluded_keywords),
+    approved_consents: arr<string>(p.approved_consents),
+    facts: p.facts && typeof p.facts === "object" && !Array.isArray(p.facts) ? p.facts : {},
+    minimum_fit: Number.isFinite(Number(p.minimum_fit)) ? Number(p.minimum_fit) : 70,
+    decline_demographics: !!p.decline_demographics,
+    allow_account_creation: !!p.allow_account_creation,
+    allow_application_consents: !!p.allow_application_consents,
+    accept_all_application_terms: !!p.accept_all_application_terms,
+    autonomous: !!p.autonomous,
+  };
+}
+
 export function ProfileSettings() {
   const { snapshot, refresh, route } = useWorkspace();
-  const server = snapshot.profile;
+  const server = useMemo(() => normalizeProfile(snapshot.profile), [snapshot.profile]);
   const [draft, setDraft] = useDraft<ProfileDraft | null>("profile", null);
   const [section, setSection] = useDraft<string>("profile-section", "identity");
   // Links such as ?view=setup&tab=profile&filter=preferences open one section directly.
@@ -104,49 +150,36 @@ export function ProfileSettings() {
 
   return (
     <form
-      className="profile"
+      className="ax-stack"
       onSubmit={(e) => {
         e.preventDefault();
         if (!factsError) save();
       }}
     >
-      <nav className="tabs sub" aria-label="Profile sections">
-        {SECTIONS.map(([id, label]) => (
-          <a
-            key={id}
-            href={"#" + id}
-            aria-current={section === id ? "page" : undefined}
-            onClick={(e) => {
-              e.preventDefault();
-              setSection(id);
-            }}
-          >
-            {label}
-            {id === "facts" && factsError && <span className="tab-flag" aria-label="has an error">!</span>}
-          </a>
-        ))}
-      </nav>
+      <Tabs
+        label="Profile sections"
+        value={section}
+        onChange={setSection}
+        tabs={SECTIONS.map(([id, label]) => ({ id, label: id === "facts" && factsError ? label + " (fix)" : label }))}
+      />
       {changedElsewhere && (
-        <div className="inline-warn" role="status">
-          Your profile changed elsewhere (for example from Telegram) after you
-          started editing. Saving replaces the fields shown here.{" "}
-          <button type="button" className="link" onClick={discard}>
+        <div className="ax-notice" role="status">
+          <span>
+            Your profile changed elsewhere (for example from Telegram) after you started editing. Saving replaces the
+            fields shown here.
+          </span>
+          <Button size="sm" onClick={discard}>
             Discard my edits and reload
-          </button>
+          </Button>
         </div>
       )}
       {section === "identity" && <Identity p={p} set={set} />}
       {section === "experience" && <Experience p={p} set={set} />}
       {section === "facts" && (
-        <section className="panel">
-          <header className="panel-head">
-            <h2>Confirmed facts</h2>
-            <p className="muted">
-              Explicit facts answer screening questions first: authorization,
+        <Panel title="Confirmed facts">
+          <Lede>Explicit facts answer screening questions first: authorization,
               sponsorship, age, relocation and similar. Give each a clear
-              time and country scope. Missing facts are asked once, never guessed.
-            </p>
-          </header>
+              time and country scope. Missing facts are asked once, never guessed.</Lede>
           <Field label="Facts (JSON)" hint={factsError ? undefined : `${Object.keys(parsedFacts).length} facts`}>
             <textarea
               className="code"
@@ -183,9 +216,9 @@ export function ProfileSettings() {
             />
           </Field>
           <div className="form-actions start">
-            <button
+            <Button
               type="button"
-              className="btn sm"
+              size="sm"
               disabled={pending !== null || draft.dirty}
               title={draft.dirty ? "Save or discard your edits first" : undefined}
               onClick={() =>
@@ -203,34 +236,28 @@ export function ProfileSettings() {
               }
             >
               {pending === "organize" ? "Organizing…" : "Organize saved facts with AI"}
-            </button>
+            </Button>
             <span className="muted sm">
               {draft.dirty ? "Save or discard your edits first. " : ""}Only restructures facts you already saved; nothing is invented.
             </span>
           </div>
-        </section>
+        </Panel>
       )}
       {section === "policies" && <Policies p={p} set={set} />}
       {section === "rules" && <AnswerRulesEditor p={p} set={set} />}
       {section === "preferences" && <Preferences p={p} set={set} />}
       {draft.dirty && (
-      <div className="save-bar dirty">
-        <span className="muted sm">
-          {draft.dirty
-            ? factsError
-              ? "Fix the facts JSON to save."
-              : "Unsaved changes are kept while you move around."
-            : "All changes saved."}
-        </span>
-        {draft.dirty && (
-          <button type="button" className="btn quiet" onClick={discard}>
-            Discard
-          </button>
-        )}
-        <button className="btn primary" disabled={!draft.dirty || !!factsError || pending !== null}>
-          {pending === "save" ? "Saving…" : "Save profile"}
-        </button>
-      </div>
+        <SaveBar
+          dirty
+          saving={pending === "save"}
+          onSave={() => {
+            if (!factsError) save();
+          }}
+          onDiscard={discard}
+          disabled={!!factsError}
+          label="Save profile"
+          note={factsError ? "Fix the facts JSON to save." : "Unsaved changes are kept while you move around."}
+        />
       )}
     </form>
   );
@@ -272,11 +299,9 @@ function Identity({ p, set }: { p: Profile; set: Setter }) {
   const setAddr = (k: keyof Profile["address"], v: string) => set("address", { ...addr, [k]: v });
   return (
     <>
-      <section className="panel">
-        <header className="panel-head">
-          <h2>Name and contact</h2>
-          <p className="muted">Filled directly into forms. First and last names are used exactly as written.</p>
-        </header>
+      <ProfilePhoto name={p.name || [p.first_name, p.last_name].filter(Boolean).join(" ")} />
+      <Panel title="Name and contact">
+        <Lede>Filled directly into forms. First and last names are used exactly as written.</Lede>
         <div className="form-grid">
           <Text p={p} set={set} k="name" label="Full legal name" />
           <Text p={p} set={set} k="preferred_name" label="Preferred name" />
@@ -292,11 +317,8 @@ function Identity({ p, set }: { p: Profile; set: Setter }) {
           <Text p={p} set={set} k="github" label="GitHub URL" type="url" />
           <Text p={p} set={set} k="website" label="Website or portfolio" type="url" />
         </div>
-      </section>
-      <section className="panel">
-        <header className="panel-head">
-          <h2>Address</h2>
-        </header>
+      </Panel>
+      <Panel title="Address">
         <div className="form-grid">
           {(
             [
@@ -314,7 +336,7 @@ function Identity({ p, set }: { p: Profile; set: Setter }) {
             </Field>
           ))}
         </div>
-      </section>
+      </Panel>
     </>
   );
 }
@@ -339,15 +361,9 @@ function Experience({ p, set }: { p: Profile; set: Setter }) {
   const newEdu = proposal?.education.filter((e) => !hasEdu(e)) || [];
   return (
     <>
-      <section className="panel">
-        <header className="panel-head row">
-          <div>
-            <h2>From your resume</h2>
-            <p className="muted">Proposes roles and degrees found in your uploaded resume. Nothing is replaced; you choose what to add.</p>
-          </div>
-          <button
+      <Panel title="From your resume" actions={<><Button
             type="button"
-            className="btn sm"
+            size="sm"
             disabled={pending !== null}
             onClick={() =>
               run("extract", async () => {
@@ -371,8 +387,8 @@ function Experience({ p, set }: { p: Profile; set: Setter }) {
             }
           >
             {pending === "extract" ? "Reading resume…" : "Extract from resume"}
-          </button>
-        </header>
+          </Button></>}>
+        <Lede>Proposes roles and degrees found in your uploaded resume. Nothing is replaced; you choose what to add.</Lede>
         {proposal && (
           <div className="proposal">
             <p>
@@ -392,63 +408,57 @@ function Experience({ p, set }: { p: Profile; set: Setter }) {
                     </>
                   )}
                 </span>
-                <button
+                <Button
                   type="button"
-                  className="btn sm"
+                  size="sm"
                   onClick={() =>
                     item.kind === "work" ? set("work", [...p.work, item.w]) : set("education", [...p.education, item.e])
                   }
                 >
                   Add
-                </button>
+                </Button>
               </div>
             ))}
             <div className="form-actions start">
               {newWork.length + newEdu.length > 1 && (
-                <button
+                <Button
                   type="button"
-                  className="btn sm"
+                  size="sm"
                   onClick={() => {
                     set("work", [...p.work, ...newWork]);
                     set("education", [...p.education, ...newEdu]);
                   }}
                 >
                   Add all new
-                </button>
+                </Button>
               )}
               {Object.keys(proposal.contact).length > 0 && (
-                <button
+                <Button
                   type="button"
-                  className="btn sm"
+                  size="sm"
                   onClick={() => {
                     for (const [k, v] of Object.entries(proposal.contact)) set(k as keyof Profile, v as never);
                   }}
                 >
                   Fill {plural(Object.keys(proposal.contact).length, "empty contact field")}
-                </button>
+                </Button>
               )}
               {proposal.skills.length > 0 && !p.skills.length && (
-                <button type="button" className="btn sm" onClick={() => set("skills", proposal.skills)}>
+                <Button type="button" size="sm" onClick={() => set("skills", proposal.skills)}>
                   Use {plural(proposal.skills.length, "skill")}
-                </button>
+                </Button>
               )}
-              <button type="button" className="btn sm quiet" onClick={() => setProposal(null)}>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setProposal(null)}>
                 Done
-              </button>
+              </Button>
             </div>
           </div>
         )}
-      </section>
-      <section className="panel">
-        <header className="panel-head row">
-          <div>
-            <h2>Work history</h2>
-            <p className="muted">Dates as YYYY-MM, or YYYY when the month isn't known.</p>
-          </div>
-          <button type="button" className="btn sm" onClick={() => set("work", [...p.work, { ...EMPTY_WORK }])}>
+      </Panel>
+      <Panel title="Work history" actions={<><Button type="button" size="sm" onClick={() => set("work", [...p.work, { ...EMPTY_WORK }])}>
             <Plus size={14} aria-hidden="true" /> Add role
-          </button>
-        </header>
+          </Button></>}>
+        <Lede>Dates as YYYY-MM, or YYYY when the month isn't known.</Lede>
         {p.work.length === 0 && <p className="muted sm">No roles yet.</p>}
         {p.work.map((w, i) => (
           <fieldset className="entry" key={i}>
@@ -477,20 +487,14 @@ function Experience({ p, set }: { p: Profile; set: Setter }) {
                 <textarea rows={3} value={w.description} onChange={(e) => updateWork(i, { description: e.target.value })} />
               </Field>
             </div>
-            <Confirm label="Remove role" confirm="Remove" onConfirm={() => set("work", p.work.filter((_, j) => j !== i))} />
+            <ConfirmButton label="Remove role" confirm="Remove" onConfirm={() => set("work", p.work.filter((_, j) => j !== i))} />
           </fieldset>
         ))}
-      </section>
-      <section className="panel">
-        <header className="panel-head row">
-          <div>
-            <h2>Education</h2>
-            <p className="muted">List every degree; each is answered separately on forms.</p>
-          </div>
-          <button type="button" className="btn sm" onClick={() => set("education", [...p.education, { ...EMPTY_EDU }])}>
+      </Panel>
+      <Panel title="Education" actions={<><Button type="button" size="sm" onClick={() => set("education", [...p.education, { ...EMPTY_EDU }])}>
             <Plus size={14} aria-hidden="true" /> Add degree
-          </button>
-        </header>
+          </Button></>}>
+        <Lede>List every degree; each is answered separately on forms.</Lede>
         {p.education.length === 0 && <p className="muted sm">No degrees yet.</p>}
         {p.education.map((x, i) => (
           <fieldset className="entry" key={i}>
@@ -515,14 +519,11 @@ function Experience({ p, set }: { p: Profile; set: Setter }) {
                 <input value={x.gpa} onChange={(e) => updateEdu(i, { gpa: e.target.value })} />
               </Field>
             </div>
-            <Confirm label="Remove degree" confirm="Remove" onConfirm={() => set("education", p.education.filter((_, j) => j !== i))} />
+            <ConfirmButton label="Remove degree" confirm="Remove" onConfirm={() => set("education", p.education.filter((_, j) => j !== i))} />
           </fieldset>
         ))}
-      </section>
-      <section className="panel">
-        <header className="panel-head">
-          <h2>Skills and languages</h2>
-        </header>
+      </Panel>
+      <Panel title="Skills and languages">
         <div className="form-grid">
           <Field label="Skills" hint="Comma separated" wide>
             <input value={p.skills.join(", ")} onChange={(e) => set("skills", list(e.target.value))} />
@@ -531,18 +532,10 @@ function Experience({ p, set }: { p: Profile; set: Setter }) {
             <input value={(p.languages || []).join(", ")} onChange={(e) => set("languages", list(e.target.value))} />
           </Field>
         </div>
-      </section>
-      <section className="panel">
-        <header className="panel-head row">
-          <div>
-            <h2>Stories and evidence</h2>
-            <p className="muted">
-              Projects, achievements and examples used to write supported narrative answers. Nothing beyond these notes is claimed.
-            </p>
-          </div>
-          <button
+      </Panel>
+      <Panel title="Stories and evidence" actions={<><Button
             type="button"
-            className="btn sm"
+            size="sm"
             onClick={() => {
               const used = new Set(p.evidence.map((e) => e.id));
               let n = p.evidence.length + 1;
@@ -551,8 +544,8 @@ function Experience({ p, set }: { p: Profile; set: Setter }) {
             }}
           >
             <Plus size={14} aria-hidden="true" /> Add note
-          </button>
-        </header>
+          </Button></>}>
+        <Lede>Projects, achievements and examples used to write supported narrative answers. Nothing beyond these notes is claimed.</Lede>
         {p.evidence.length === 0 && <p className="muted sm">No notes yet.</p>}
         {p.evidence.map((note, i) => (
           <div className="note-row" key={note.id}>
@@ -564,10 +557,10 @@ function Experience({ p, set }: { p: Profile; set: Setter }) {
                 onChange={(e) => set("evidence", p.evidence.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))}
               />
             </Field>
-            <Confirm label="Remove" confirm="Remove note" onConfirm={() => set("evidence", p.evidence.filter((_, j) => j !== i))} />
+            <ConfirmButton label="Remove" confirm="Remove note" onConfirm={() => set("evidence", p.evidence.filter((_, j) => j !== i))} />
           </div>
         ))}
-      </section>
+      </Panel>
     </>
   );
 }
@@ -596,11 +589,8 @@ function Check({
 
 function Policies({ p, set }: { p: Profile; set: Setter }) {
   return (
-    <section className="panel">
-      <header className="panel-head">
-        <h2>What ApplyPilot may do for you</h2>
-        <p className="muted">These decide which steps run unattended.</p>
-      </header>
+    <Panel title="What ApplyPilot may do for you">
+      <Lede>These decide which steps run unattended.</Lede>
       <div className="form-grid">
         <Check checked={p.autonomous} onChange={(v) => set("autonomous", v)} title="Apply autonomously">
           Applications missing a required personal fact wait for your answer while other jobs continue.
@@ -623,7 +613,7 @@ function Policies({ p, set }: { p: Profile; set: Setter }) {
           Chooses “prefer not to say” unless you confirmed a specific answer.
         </Check>
       </div>
-    </section>
+    </Panel>
   );
 }
 
@@ -694,11 +684,8 @@ function AnswerRulesEditor({ p, set }: { p: Profile; set: Setter }) {
     });
   return (
     <>
-      <section className="panel">
-        <header className="panel-head">
-          <h2>Degree, major or school not listed</h2>
-          <p className="muted">What to choose when the form’s list doesn’t include your exact value. Enabled steps run in this order.</p>
-        </header>
+      <Panel title="Degree, major or school not listed">
+        <Lede>What to choose when the form’s list doesn’t include your exact value. Enabled steps run in this order.</Lede>
         <ol className="rule-steps">
           {ordered.map((step) => {
             const [, title, note] = EDUCATION_STEPS.find(([s]) => s === step)!;
@@ -715,17 +702,18 @@ function AnswerRulesEditor({ p, set }: { p: Profile; set: Setter }) {
                 </label>
                 {on && (
                   <span className="rule-order">
-                    <button className="btn ghost sm" aria-label={`Move ${title} earlier`} disabled={i === 0} onClick={() => move(step, -1)}>
+                    <Button size="sm" variant="ghost" aria-label={`Move ${title} earlier`} disabled={i === 0} onClick={() => move(step, -1)}>
                       ↑
-                    </button>
-                    <button
-                      className="btn ghost sm"
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
                       aria-label={`Move ${title} later`}
                       disabled={i === rules.education.length - 1}
                       onClick={() => move(step, 1)}
                     >
                       ↓
-                    </button>
+                    </Button>
                   </span>
                 )}
               </li>
@@ -750,15 +738,10 @@ function AnswerRulesEditor({ p, set }: { p: Profile; set: Setter }) {
             Accepts an offered channel that claims no referral or insider relationship.
           </Check>
         </div>
-      </section>
-      <section className="panel">
-        <header className="panel-head">
-          <h2>Self-identification questions</h2>
-          <p className="muted">
-            Each question runs: “prefer not to say” when on and offered → your answer → if your answer isn’t listed, the
-            fallback you choose. Nothing is guessed from other facts.
-          </p>
-        </header>
+      </Panel>
+      <Panel title="Self-identification questions">
+        <Lede>Each question runs: “prefer not to say” when on and offered → your answer → if your answer isn’t listed, the
+            fallback you choose. Nothing is guessed from other facts.</Lede>
         <div className="table-wrap">
           <table className="table rules-table">
             <thead>
@@ -808,11 +791,8 @@ function AnswerRulesEditor({ p, set }: { p: Profile; set: Setter }) {
             </tbody>
           </table>
         </div>
-      </section>
-      <section className="panel">
-        <header className="panel-head">
-          <h2>Buttons and steps</h2>
-        </header>
+      </Panel>
+      <Panel title="Buttons and steps">
         <div className="form-grid">
           <Check checked={rules.guest_apply_first} onChange={(v) => update({ guest_apply_first: v })} title="Apply as a guest when the site allows it">
             Skips sign-in and account creation when an employer offers “Apply without an account”.
@@ -825,7 +805,7 @@ function AnswerRulesEditor({ p, set }: { p: Profile; set: Setter }) {
           </Check>
         </div>
         <p className="muted sm rules-note">Account creation, consents and terms are under Policies. CAPTCHA solving is under System › Helpers.</p>
-      </section>
+      </Panel>
     </>
   );
 }
@@ -834,10 +814,7 @@ function Preferences({ p, set }: { p: Profile; set: Setter }) {
   const rules = rulesWithDefaults(p);
   const rule = (next: Partial<AnswerRules>) => set("answer_rules", { ...rules, ...next });
   return (
-    <section className="panel">
-      <header className="panel-head">
-        <h2>Targets and answers about the role</h2>
-      </header>
+    <Panel title="Targets and answers about the role">
       <div className="form-grid">
         <Field
           label="Target roles"
@@ -886,7 +863,7 @@ function Preferences({ p, set }: { p: Profile; set: Setter }) {
           <input value={p.application_source} onChange={(e) => set("application_source", e.target.value)} />
         </Field>
       </div>
-    </section>
+    </Panel>
   );
 }
 
@@ -1063,14 +1040,25 @@ const ACCOUNT_FILTERS: { id: string; label: string; match: (a: AccountRow) => bo
   },
 ];
 
+const ACCOUNT_PILL: Record<string, PillTone> = {
+  ok: "ok",
+  ask: "warn",
+  fix: "warn",
+  hold: "info",
+  bad: "bad",
+  run: "info",
+  idle: "neutral",
+};
+
 export function AccountSettings() {
   const { snapshot } = useWorkspace();
   const summary = usePoll<AccountSummary>((signal) => api("/accounts", "GET", undefined, signal), 60000);
   const { pending, run } = useAction();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
+  const [resetting, setResetting] = useState<AccountRow | null>(null);
   const q = query.trim().toLowerCase();
-  const all = useMemo(() => summary.data?.accounts || [], [summary.data]);
+  const all = useMemo(() => (Array.isArray(summary.data?.accounts) ? summary.data!.accounts : []), [summary.data]);
   const counts = useMemo(
     () => Object.fromEntries(ACCOUNT_FILTERS.map((f) => [f.id, all.filter(f.match).length])),
     [all],
@@ -1086,184 +1074,194 @@ export function AccountSettings() {
     [all, chosen, q],
   );
   const paging = usePagination(accounts, q + filter, 25);
-  const cfg = snapshot.config;
+  const cfg = snapshot.config || ({} as typeof snapshot.config);
   const attention = counts.attention || 0;
+  const problems = summary.data?.password_problems || [];
   return (
     <>
-      <section className="panel">
-        <header className="panel-head">
-          <h2>How sign-in works</h2>
-          <p className="muted">
-            Employer accounts are created or reused with one login. Passwords stay encrypted on the
-            server and are never shown here. Your mailbox handles verification codes and resets.
-          </p>
-        </header>
-        <KeyValues
+      <Panel title="How sign-in works">
+        <Lede>
+          Employer accounts are created or reused with one login. Passwords stay encrypted on the server and are never
+          shown here. Your mailbox handles verification codes and resets.
+        </Lede>
+        <Facts
           items={[
             ["Login email", cfg.account_email || "Profile email"],
             ["Shared password", cfg.account ? "Set on the server" : "Generated and encrypted"],
-            ["Gmail IMAP", cfg.imap ? "Configured" : <span className="warn-text">Not configured</span>],
+            ["Gmail IMAP", cfg.imap ? "Configured" : <span style={{ color: "var(--warn)" }}>Not configured</span>],
             ["Captcha service", cfg.twocaptcha ? "Configured" : "Not configured"],
-            ["Account creation", snapshot.profile.allow_account_creation ? "Allowed" : <span className="warn-text">Off (Profile › Policies)</span>],
+            [
+              "Account creation",
+              snapshot.profile?.allow_account_creation ? (
+                "Allowed"
+              ) : (
+                <span style={{ color: "var(--warn)" }}>Off (Profile › Policies)</span>
+              ),
+            ],
           ]}
         />
-        {!!summary.data?.password_problems.length && (
-          <p className="inline-warn">Some portals may reject the shared password: {summary.data.password_problems.join("; ")}.</p>
+        {problems.length > 0 && (
+          <div className="ax-notice" style={{ marginTop: "var(--space-3)" }}>
+            Some portals may reject the shared password: {problems.join("; ")}.
+          </div>
         )}
-        <div className="form-actions start">
-          <button
-            className="btn sm"
-            disabled={!cfg.imap || pending !== null}
+        <Actions start note={!cfg.imap ? "Add the Gmail address and app password in Setup › Connections." : undefined}>
+          <Button
+            size="sm"
+            loading={pending === "imap"}
+            disabled={!cfg.imap || (pending !== null && pending !== "imap")}
             onClick={() => run("imap", () => api("/inbox/check", "POST"), "Gmail IMAP sign-in works.")}
           >
-            {pending === "imap" ? "Testing…" : "Test Gmail connection"}
-          </button>
-          {!cfg.imap && <span className="muted sm">Set GMAIL_ADDRESS and GMAIL_APP_PASSWORD on the server, then restart.</span>}
-        </div>
-      </section>
-      <section className="panel">
-        <header className="panel-head row">
-          <div>
-            <h2>Employer accounts</h2>
-            <p className="muted">
-              {summary.data ? plural(all.length, "account") : "…"}
-              {attention > 0 && <span className="warn-text"> · {attention} need{attention === 1 ? "s" : ""} you</span>}
+            Test Gmail connection
+          </Button>
+        </Actions>
+      </Panel>
+      <Panel title={`Employer accounts${summary.data ? " · " + all.length.toLocaleString() : ""}`}>
+        <div className="ax-stack">
+          {attention > 0 && (
+            <p className="ax-lede" style={{ margin: 0, color: "var(--warn)" }}>
+              {attention} {attention === 1 ? "account needs" : "accounts need"} you.
             </p>
-          </div>
-          <div className="account-tools">
-            <select aria-label="Show accounts" value={filter} onChange={(e) => setFilter(e.target.value)}>
-              {ACCOUNT_FILTERS.map((f) => (
-                <option key={f.id} value={f.id} disabled={f.id !== "all" && !counts[f.id] && filter !== f.id}>
-                  {f.label} ({counts[f.id] || 0})
-                </option>
-              ))}
-            </select>
+          )}
+          <div className="ax-toolbar">
+            <label className="ax-toolbar-filter">
+              <span className="sr-only">Show accounts</span>
+              <select className="ax-control" aria-label="Show accounts" value={filter} onChange={(e) => setFilter(e.target.value)}>
+                {ACCOUNT_FILTERS.map((f) => (
+                  <option key={f.id} value={f.id} disabled={f.id !== "all" && !counts[f.id] && filter !== f.id}>
+                    {f.label} ({counts[f.id] || 0})
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="search">
               <Search size={15} aria-hidden="true" />
-              <input type="search" aria-label="Search employer accounts" placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} />
+              <input
+                type="search"
+                aria-label="Search employer accounts"
+                placeholder="Search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
             </label>
           </div>
-        </header>
-        <ErrorLine error={summary.error} retry={summary.refresh} />
-        {!summary.data && !summary.error ? (
-          <Loading />
-        ) : accounts.length ? (
-          <>
-            <div className="table-wrap">
-              <table className="table accounts-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Employer site</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Updated</th>
-                    <th scope="col">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paging.items.map((a) => (
-                    <EmployerAccount key={a.id} account={a} refresh={summary.refresh} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <Pagination paging={paging} label="Account pages" />
-          </>
-        ) : (
-          <Empty title={q || filter !== "all" ? "No accounts match" : "No employer accounts yet"}>
-            {q || filter !== "all" ? null : "They appear after the first application that needs one."}
-          </Empty>
-        )}
-      </section>
+          <Table
+            label="Employer accounts"
+            rows={paging.items}
+            rowKey={(a) => a.id}
+            loading={!summary.data && !summary.error}
+            error={summary.error && !summary.data ? <AxEmpty title="Could not load accounts" hint={summary.error.message} action={<Button size="sm" onClick={summary.refresh}>Try again</Button>} /> : undefined}
+            empty={
+              <AxEmpty
+                title={q || filter !== "all" ? "No accounts match" : "No employer accounts yet"}
+                hint={q || filter !== "all" ? undefined : "They appear after the first application that needs one."}
+              />
+            }
+            minWidth={980}
+            columns={[
+              {
+                key: "site",
+                header: "Employer site",
+                truncate: true,
+                width: 230,
+                cell: (a) => (a.origin ? <External href={a.origin}>{a.host}</External> : a.host),
+              },
+              {
+                key: "status",
+                header: "Status",
+                cell: (a) => (
+                  <span title={a.detail}>
+                    <Pill tone={ACCOUNT_PILL[ACCOUNT_TONE[a.status] || "idle"] || "neutral"} dot>
+                      {a.label}
+                    </Pill>
+                  </span>
+                ),
+              },
+              {
+                key: "actions",
+                header: <span className="sr-only">Actions</span>,
+                cell: (a) => (
+                  <span className="ax-row-end" style={{ flexWrap: "nowrap" }}>
+                    {a.can_retry_verification && (
+                      <Button
+                        size="sm"
+                        loading={pending === "verify" + a.id}
+                        disabled={pending !== null && pending !== "verify" + a.id}
+                        onClick={() =>
+                          run(
+                            "verify" + a.id,
+                            async () => {
+                              await api(`/accounts/${encodeURIComponent(a.id)}/verify`, "POST");
+                              await summary.refresh();
+                            },
+                            "Verification restarted. The paused application asks the employer for a new email.",
+                          )
+                        }
+                      >
+                        Retry verification
+                      </Button>
+                    )}
+                    <Button size="sm" onClick={() => setResetting(a)}>
+                      I reset it myself
+                    </Button>
+                    <ConfirmButton
+                      label="Forget"
+                      confirm="Forget account"
+                      note="The next application signs in again or creates the account."
+                      pending={pending === "forget" + a.id}
+                      onConfirm={() =>
+                        run(
+                          "forget" + a.id,
+                          async () => {
+                            await api("/accounts/" + encodeURIComponent(a.id), "DELETE");
+                            await summary.refresh();
+                          },
+                          "Account record forgotten.",
+                        )
+                      }
+                    />
+                  </span>
+                ),
+              },
+              {
+                key: "login",
+                header: "Login",
+                truncate: true,
+                width: 240,
+                cell: (a) => (
+                  <span title={[a.employer && "for " + a.employer, a.login_email].filter(Boolean).join(" · ")}>
+                    {[a.employer && "for " + a.employer, a.login_email].filter(Boolean).join(" · ") || "—"}
+                  </span>
+                ),
+              },
+              {
+                key: "updated",
+                header: "Updated",
+                cell: (a) => <span title={stamp(a.updated_at)}>{ago(a.updated_at)}</span>,
+              },
+            ]}
+          />
+          <Pagination paging={paging} label="Account pages" />
+        </div>
+      </Panel>
       <SessionImport />
-    </>
-  );
-}
-
-function EmployerAccount({ account: a, refresh }: { account: AccountRow; refresh: () => Promise<void> }) {
-  const { pending, run } = useAction();
-  const [editing, setEditing] = useState(false);
-  const meta = [a.employer && "for " + a.employer, a.login_email].filter(Boolean).join(" · ");
-  return (
-    <>
-      <tr>
-        <td className="cell-account">
-          {a.origin ? <External href={a.origin}>{a.host}</External> : a.host}
-          {meta && <small className="muted">{meta}</small>}
-        </td>
-        <td data-label="Status" className="cell-account-status">
-          <span className={"pill tone-" + (ACCOUNT_TONE[a.status] || "idle")}>
-            <i aria-hidden="true" />
-            {a.label}
-          </span>
-          <small className="muted">{a.detail}</small>
-        </td>
-        <td data-label="Updated" className="cell-time" title={stamp(a.updated_at)}>
-          {ago(a.updated_at)}
-        </td>
-        <td className="cell-actions">
-          <span className="row-actions">
-            {a.can_retry_verification && (
-              <button
-                type="button"
-                className="btn sm"
-                disabled={pending !== null}
-                onClick={() =>
-                  run(
-                    "verify",
-                    async () => {
-                      await api(`/accounts/${encodeURIComponent(a.id)}/verify`, "POST");
-                      await refresh();
-                    },
-                    "Verification restarted. The paused application asks the employer for a new email.",
-                  )
-                }
-              >
-                {pending === "verify" ? "Restarting…" : "Retry verification"}
-              </button>
-            )}
-            <button
-              type="button"
-              className={"btn sm" + (a.attention ? " ask" : "")}
-              aria-expanded={editing}
-              onClick={() => setEditing((open) => !open)}
-            >
-              I reset it myself
-            </button>
-            <Confirm
-              label="Forget"
-              confirm="Forget account"
-              note="The next application signs in again or creates the account."
-              pending={pending === "forget"}
-              onConfirm={() =>
-                run(
-                  "forget",
-                  async () => {
-                    await api("/accounts/" + encodeURIComponent(a.id), "DELETE");
-                    await refresh();
-                  },
-                  "Account record forgotten.",
-                )
-              }
-            />
-          </span>
-        </td>
-      </tr>
-      {editing && (
-        <tr className="row-form">
-          <td colSpan={4}>
-            <EmployerPassword
-              account={a}
-              close={() => setEditing(false)}
-              saved={async () => {
-                setEditing(false);
-                await refresh();
-              }}
-            />
-          </td>
-        </tr>
-      )}
+      <Drawer
+        open={!!resetting}
+        onClose={() => setResetting(null)}
+        title={resetting ? `Reset password · ${resetting.host}` : "Reset password"}
+        width={480}
+      >
+        {resetting && (
+          <EmployerPassword
+            account={resetting}
+            close={() => setResetting(null)}
+            saved={async () => {
+              setResetting(null);
+              await summary.refresh();
+            }}
+          />
+        )}
+      </Drawer>
     </>
   );
 }
@@ -1281,12 +1279,12 @@ function EmployerPassword({
   const notify = useNotify();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [show, setShow] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const id = useId();
   return (
     <form
-      className="employer-password"
+      className="ax-stack"
       noValidate
       onSubmit={async (e) => {
         e.preventDefault();
@@ -1305,7 +1303,7 @@ function EmployerPassword({
         }
       }}
     >
-      <p className="muted sm">
+      <p className="ax-lede" style={{ margin: 0 }}>
         Reset the password on {a.origin ? <External href={a.origin}>{a.host}</External> : a.host} yourself
         {a.login_email ? (
           <>
@@ -1313,45 +1311,34 @@ function EmployerPassword({
             (sign-in email <strong>{a.login_email}</strong>)
           </>
         ) : null}
-        , then enter it here. It's encrypted on the server and never shown again; ApplyPilot stops asking this
-        employer for resets.
+        , then enter it here. It's encrypted on the server and never shown again; ApplyPilot stops asking this employer
+        for resets.
       </p>
-      <Field label="New password">
-        <input
-          type={show ? "text" : "password"}
-          autoFocus
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          autoComplete="new-password"
-          maxLength={200}
-        />
-      </Field>
-      <Field label="Confirm password">
-        <input
-          type={show ? "text" : "password"}
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          autoComplete="new-password"
-          maxLength={200}
-        />
-      </Field>
-      <label className="check">
-        <input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} />
-        <span>Show passwords</span>
-      </label>
-      {error && (
-        <p className="error-text" role="alert">
-          {error}
-        </p>
-      )}
-      <div className="form-actions start">
-        <button className="btn primary sm" disabled={busy}>
-          {busy ? "Saving…" : "Save password"}
-        </button>
-        <button type="button" className="btn quiet sm" onClick={close}>
-          Cancel
-        </button>
+      <div className="ax-field">
+        <label className="ax-label" htmlFor={id + "-p"}>
+          New password
+        </label>
+        <SecretInput id={id + "-p"} label="password" value={password} onChange={setPassword} />
       </div>
+      <div className="ax-field">
+        <label className="ax-label" htmlFor={id + "-c"}>
+          Confirm password
+        </label>
+        <SecretInput id={id + "-c"} label="confirmation" value={confirm} onChange={setConfirm} />
+        {error && (
+          <p className="ax-error" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
+      <Actions>
+        <Button variant="ghost" onClick={close}>
+          Cancel
+        </Button>
+        <Button type="submit" variant="primary" loading={busy}>
+          Save password
+        </Button>
+      </Actions>
     </form>
   );
 }
@@ -1362,46 +1349,54 @@ function SessionImport() {
   const [file, setFile] = useState<File | null>(null);
   const [key, setKey] = useState(0);
   return (
-    <details className="panel fold">
+    <details className="ax-panel ax-fold">
       <summary>
         <strong>Import an employer session</strong>
-        <span className="muted sm"> · only for SMS or passkey sign-ins</span>
+        <span className="ax-hint">· only for SMS or passkey sign-ins</span>
       </summary>
-      <p className="muted sm">
-        Run <code>jobpilot login https://employer.example</code> on your own machine, or import a Playwright
-        storage-state JSON. Only cookies for that exact employer host are accepted; the file stays in the
-        private data directory.
-      </p>
-      <form
-        className="inline-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!file) return;
-          const f = new FormData();
-          f.append("url", url);
-          f.append("file", file);
-          run(
-            "session",
-            async () => {
-              const r = await api<{ host: string }>("/sessions", "POST", f);
-              setFile(null);
-              setKey((k) => k + 1);
-              return r;
-            },
-            (r) => r && `Session saved for ${r.host}.`,
-          );
-        }}
-      >
-        <Field label="Employer URL">
-          <input type="url" required value={url} onChange={(e) => setUrl(e.target.value)} />
-        </Field>
-        <Field label="Storage-state JSON">
-          <input key={key} type="file" accept="application/json" required onChange={(e) => setFile(e.target.files?.[0] || null)} />
-        </Field>
-        <button className="btn" disabled={!file || pending !== null}>
-          {pending === "session" ? "Importing…" : "Import session"}
-        </button>
-      </form>
+      <div className="ax-panel-body">
+        <Lede>
+          Run <code>jobpilot login https://employer.example</code> on your own machine, or import a Playwright
+          storage-state JSON. Only cookies for that exact employer host are accepted; the file stays in the private data
+          directory.
+        </Lede>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!file) return;
+            const f = new FormData();
+            f.append("url", url);
+            f.append("file", file);
+            run(
+              "session",
+              async () => {
+                const r = await api<{ host: string }>("/sessions", "POST", f);
+                setFile(null);
+                setKey((k) => k + 1);
+                return r;
+              },
+              (r) => r && `Session saved for ${r.host}.`,
+            );
+          }}
+        >
+          <FormGrid>
+            <Input label="Employer URL" type="url" required value={url} onChange={(e) => setUrl(e.target.value)} />
+            <Input
+              key={key}
+              label="Storage-state JSON"
+              type="file"
+              accept="application/json"
+              required
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+            />
+          </FormGrid>
+          <Actions>
+            <Button type="submit" variant="primary" loading={pending === "session"} disabled={!file}>
+              Import session
+            </Button>
+          </Actions>
+        </form>
+      </div>
     </details>
   );
 }
