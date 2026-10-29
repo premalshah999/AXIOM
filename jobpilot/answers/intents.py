@@ -32,8 +32,12 @@ INTENTS = [
     ),
     (
         re.compile(
-            r"\b(?:18|eighteen)\b.{0,30}(?:years|older|over|age)|of legal (?:working )?age|at least 18|"
-            r"\bover (?:18|eighteen)\b|\bage (?:18|eighteen)\b",
+            # Not a count of something else: "received assistance at least 18 months between ..." (Montenson's WOTC
+            # questionnaire, 2026-10-29) read as the age question, and a truthful No was blocked as contradicting it.
+            r"\b(?:18|eighteen)\b(?!\s*(?:months?|weeks?|days?|hours?|credits?|units?|%|percent))"
+            r".{0,30}(?:years|older|over|age)|of legal (?:working )?age|"
+            r"at least 18\b(?!\s*(?:months?|weeks?|days?|hours?|credits?|units?|%|percent))|"
+            r"\bover (?:18|eighteen)\b(?!\s*(?:months?|weeks?|days?|hours?))|\bage (?:18|eighteen)\b",
             re.I,
         ),
         ["over_18", "age_18_or_older"],
