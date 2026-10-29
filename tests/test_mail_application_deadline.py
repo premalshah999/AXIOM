@@ -77,8 +77,11 @@ def test_sender_retry_delay_fits_total_budget(service):
         before = time.time()
         schedule_recovery(session, service.config, run, {"recovery_cause": "sender_busy"})
         saved = session.get(Setting, "draft_recovery:job").value
-        delay = datetime.fromisoformat(saved["not_before"]).timestamp() - before
-        assert saved["scheduled"] and 14 <= delay <= 16
+        after = time.time()
+        not_before = datetime.fromisoformat(saved["not_before"]).timestamp()
+        # The first sender wait is 15 s from when it was scheduled; bound it by the clock around the call, not by
+        # a fixed window, so a slow or loaded machine cannot fail the test.
+        assert saved["scheduled"] and before + 14 <= not_before <= after + 16
 
 
 @pytest.mark.parametrize("kind,blocked", [("code", True), ("password_reset", False)])
