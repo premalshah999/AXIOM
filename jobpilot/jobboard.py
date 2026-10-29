@@ -892,10 +892,14 @@ def board_snapshot(db, limit=500):
         # per row instead of two key filters (116 ms of a 142 ms board read with 3,000 listings, 2026-10-23).
         names = [key.removeprefix(LISTED) for key in found.keys()]
         jobs = [dict(zip(names, row, strict=True)) for row in found]
+        # The database keeps the paused few; every control row (1,278 of them) used to be loaded per board poll.
         paused_jobs = {
-            row.key.removeprefix("job_control:")
-            for row in s.scalars(select(Setting).where(Setting.key.like("job_control:%")))
-            if row.value.get("state") == "paused"
+            key.removeprefix("job_control:")
+            for key in s.scalars(
+                select(Setting.key).where(
+                    Setting.key.like("job_control:%"), Setting.value["state"].as_string() == "paused"
+                )
+            )
         }
         for job in jobs:
             if job["id"] in paused_jobs and job["status"] not in {
