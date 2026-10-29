@@ -75,3 +75,29 @@ async def test_a_resumed_short_link_draft_on_its_platform_adopts_the_handoff():
     # A resumed platform job, or a custom site that is really custom, is left alone.
     assert await engine.resume_detect(SimpleNamespace(url="https://careers.example.test/apply"), "custom") == "custom"
     assert await engine.resume_detect(engine.page, "workday") == "workday"
+
+
+async def test_mail_verification_uses_observed_tenant_after_short_link_handoff():
+    from unittest.mock import AsyncMock
+
+    engine = BrowserEngine.__new__(BrowserEngine)
+    short = "https://short.example.test/job/7"
+    tenant = "https://sample.wd5.myworkdayjobs.com"
+    engine.job = {"id": "j", "url": short, "ats": "custom"}
+    engine.page = SimpleNamespace(url=tenant + "/External/job/Engineer_R7")
+    engine.emit = lambda *a, **k: None
+    engine.profile = SimpleNamespace(email="candidate@example.test")
+    rules = {short: {"link_origins": ["https://short.example.test"]}}
+
+    async def ensure_rule(job, recipient):
+        assert job["ats"] == "workday"
+        assert recipient == "candidate@example.test"
+        rules[job["url"]] = {"link_origins": [tenant]}
+
+    engine.service = SimpleNamespace(mail=SimpleNamespace(
+        ensure_rule=AsyncMock(side_effect=ensure_rule), rule_for=rules.get,
+    ))
+    ats = await engine.detect_ats(engine.page, "custom")
+    await engine.initialize_email_verification(ats)
+    assert engine.email_verification.rule["link_origins"] == [tenant]
+    assert rules[short]["link_origins"] == ["https://short.example.test"]

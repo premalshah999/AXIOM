@@ -1381,9 +1381,6 @@ class BrowserEngine:
                         "proof": "",
                     },
                 )
-            if not job["demo"]:
-                await self.service.mail.ensure_rule(job, self.profile.email)
-            self.email_verification = EmailBrowser(self)
             self.account_flow = AccountFlow(self)
             ats = (
                 (resume_ats if external and resumed else job["ats"])
@@ -1402,23 +1399,13 @@ class BrowserEngine:
                 # The resumed tab is already on the portal this job's career site handed off to.
                 self.adopt_handoff("icims", platform)
             if not job["demo"] and job["ats"] == "custom" and ats != "custom":
-                # The rule built above names the career site's own domain; the platform behind it mails from its
-                # own senders.
-                from .mail.senders import KNOWN_SENDERS
-
-                if ats in KNOWN_SENDERS:
-                    await self.service.mail.ensure_rule({**job, "ats": ats}, self.profile.email)
-                    if getattr(self, "platform_url", None) == self.job["url"] and (
-                        rule := await self.service.mail.ensure_rule(self.job, self.profile.email)
-                    ):
-                        # The adopted portal's own rule: its emailed links lead to the portal, not the career site.
-                        self.email_verification.rule = rule
                 if ats in {"icims", "successfactors", "taleo"}:
                     # The platform's own rules apply to its forms (this record is the resolver's and the engine's):
                     # iCIMS refuses a current role without an end date as "Invalid Data Error", and Medpace's and
                     # America's Tire's profiles failed so while their jobs read as custom career sites (2026-10-27).
                     # An adopted iCIMS portal gave the engine its own copy, which already names the platform.
                     job["ats"] = self.job["ats"] = ats
+            await self.initialize_email_verification(ats)
             adapters = self.use_adapters(ats)
             budget = (
                 self.config.multipage_timeout
@@ -2440,6 +2427,12 @@ class BrowserEngine:
                 **({"x_cache": headers.get("x-cache"), "server": headers.get("server")} if response.status >= 400 else {}),
             },
         )
+
+    async def initialize_email_verification(self, ats):
+        """Bind mail only after navigation has established the employer's platform identity."""
+        if not self.job.get("demo"):
+            await self.service.mail.ensure_rule({**self.job, "ats": ats}, self.profile.email)
+        self.email_verification = EmailBrowser(self)
 
     async def resume_detect(self, page, ats):
         """A resumed draft of a short-linked job is already on its platform's page: adopt the handoff as a fresh run
