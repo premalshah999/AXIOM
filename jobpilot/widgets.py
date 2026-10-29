@@ -1631,7 +1631,7 @@ def _rcm_match(text, targets, options):
     return next((o for o in options if o["text"] == pick), None)
 
 
-async def _rcm_owned_select(frame, el, text, targets, base, longest, full_list_only=False, choose=None):
+async def _rcm_owned_select(frame, el, text, targets, base, longest, full_list_only=False, choose=None, queries=()):
     """Open the whole list by its button (no typing), read every page, and decide on the real options; search the
     employer's "contains" filter once only when the catalog is longer than the pages that loaded. Typed searches ran
     first and waited 4 s each for an exact entry, so every answer spelled unlike its option burned the 12 s field
@@ -1652,7 +1652,9 @@ async def _rcm_owned_select(frame, el, text, targets, base, longest, full_list_o
         key=len,
         reverse=True,
     ) or [max(re.findall(r"[A-Za-z]{4,}", longest) or [longest[:4]], key=len)]
-    for word in words[:2] if not pick and not complete and not full_list_only else []:
+    # Then the caller's own searches: the profile's fallback major when the recorded one is not offered.
+    searches = list(dict.fromkeys([*words[:2], *(q for q in queries if q and norm(q) != norm(text))]))
+    for word in searches if not pick and not complete and not full_list_only else []:
         before = [o["id"] for o in state["options"]]
         await el.fill("")
         await el.press_sequentially(word, delay=30)
@@ -1684,7 +1686,7 @@ async def _rcm_owned_select(frame, el, text, targets, base, longest, full_list_o
     raise ValueError("The website did not commit the observed choice")
 
 
-async def _rcm_paginated(frame, el, value, full_list_only=False, choose=None):
+async def _rcm_paginated(frame, el, value, full_list_only=False, choose=None, queries=()):
     """SuccessFactors RCM paginated picklist (ASSA ABLOY State/Ethnicity, 2026-10-14).
 
     An input plus a ``<id>_selectButton``; its list renders outside the field without
@@ -1705,7 +1707,7 @@ async def _rcm_paginated(frame, el, value, full_list_only=False, choose=None):
     base = (await el.get_attribute("id") or "").removesuffix("_input")
     longest = max(targets, key=len)
     if await el.get_attribute("aria-owns"):
-        return await _rcm_owned_select(frame, el, text, targets, base, longest, full_list_only, choose)
+        return await _rcm_owned_select(frame, el, text, targets, base, longest, full_list_only, choose, queries)
     # A 4-letter prefix of a long catalog entry ("Univ" for a university) leaves hundreds of paged
     # entries (Cargill, 2026-10-16); type the whole answer, then its most distinctive word.
     queries = (
@@ -2840,7 +2842,14 @@ async def combobox(
                 return await _rcm_paginated(frame, el, value, full_list_only=True)
             except ValueError:
                 return await _rcm_paginated(frame, el, "Other")
-        return await _rcm_paginated(frame, el, value, choose=choose)
+        rcm_choose = choose
+        if resolve:
+            # A deterministic pick by the caller (the recorded major, else the profile's fallback major) decides first:
+            # Hershey's SuccessFactors list lacks Data Science, and only the no-guess chooser was asked (2026-10-28).
+            async def rcm_choose(texts):
+                return resolve(texts) or (await choose(texts) if choose else None)
+
+        return await _rcm_paginated(frame, el, value, choose=rcm_choose, queries=search_queries or ())
     await open_combobox(el)
     if await _is_ui5_picker(frame, el):
         return await _ui5_combobox(frame, el, value)

@@ -137,3 +137,22 @@ async def test_an_unlisted_wording_is_chosen_among_the_lists_own_entries(page):
     el = page.locator("[id='9:_input']")
     assert await widgets.combobox(page.main_frame, el, "No", choose=choose) == "I am not a protected veteran"
     assert seen and seen[-1] == entries
+
+
+async def test_a_major_the_list_lacks_takes_the_profiles_fallback_major(page):
+    # Hershey's SuccessFactors list (2026-10-28) has no Data Science; only the no-guess chooser was asked.
+    import json
+
+    majors = [f"Major {i:03d}" for i in range(150)] + ["Actuarial Science", "Computer Science", "Library Science"]
+    await page.set_content(PICKLIST.replace("%s", json.dumps(majors)).replace("CLICKS", "true"))
+
+    def major_pick(texts):
+        return next((t for want in ("Data Science", "Computer Science") for t in texts if t == want), None)
+
+    async def no_guess(texts):
+        return None
+
+    el = page.locator("[id='9:_input']")
+    committed = await widgets.combobox(page.main_frame, el, "Data Science", choose=no_guess,
+                                       search_queries=["Computer Science"], resolve=major_pick)
+    assert committed == "Computer Science"
