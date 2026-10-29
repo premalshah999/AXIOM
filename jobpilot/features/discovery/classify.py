@@ -96,6 +96,10 @@ async def classify(db, jobs: list[dict], fn: ClassifyFn, policy: DiscoveryPolicy
         batch = [job["id"] for job, _ in rankable[i : i + policy.classify_batch]]
         report["model_batches"] += 1
         ok, bad = await _bisect(fn, batch)
+        # A posting that cannot be fetched right now comes back flagged: it is retried later with its own reason,
+        # not recorded as "model omitted this job" (the real blocker was hidden).
+        for jid in [j for j, r in ok.items() if r.get("deferred")]:
+            bad[jid] = ok.pop(jid)["deferred"]
         results.update(ok)
         errors.update(bad)
     with db.exclusive() as s:
