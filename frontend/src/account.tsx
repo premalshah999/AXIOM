@@ -5,6 +5,8 @@ import { useAction, useNotify } from "./hooks";
 import { guideLater } from "./guide";
 import type { Profile } from "./types";
 import { Brand, Confirm, day, ErrorLine, Field, KeyValues, Loading } from "./ui";
+import { ConfirmButton, Lede } from "./setup-kit";
+import { Button, Panel } from "./ui/index";
 
 // ---------------------------------------------------------------------------
 // The owner's account (server: owner_account.py, api/routes/owner.py): sign-up with recovery codes, sign-in,
@@ -796,15 +798,10 @@ export function SignInSettings() {
     load();
   }, []);
   return (
-    <section className="panel">
-      <header className="panel-head">
-        <h2>Your sign-in</h2>
-        <p className="muted">
-          {status && !status.exists
+    <Panel title="Your sign-in">
+      <Lede>{status && !status.exists
             ? "This installation opens only with the access token. Add an email and password to sign in with them."
-            : "How you sign in to this dashboard. The access token keeps working for scripts."}
-        </p>
-      </header>
+            : "How you sign in to this dashboard. The access token keeps working for scripts."}</Lede>
       <ErrorLine error={error} retry={load} />
       {!status ? (
         !error && <Loading />
@@ -814,7 +811,7 @@ export function SignInSettings() {
         <AddSignIn onAdded={load} />
       )}
       <GuideRow />
-    </section>
+    </Panel>
   );
 }
 
@@ -838,7 +835,7 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
           ["This browser", browserSession(status)],
         ]}
       />
-      <div className="switch-row">
+      <div className="ax-switch-row">
         <span>
           <strong>Password</strong>
           <small className="muted">
@@ -847,9 +844,9 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
           </small>
         </span>
         {open !== "password" && (
-          <button type="button" className="btn" onClick={() => setOpen("password")}>
+          <Button type="button"  onClick={() => setOpen("password")}>
             Change password
-          </button>
+          </Button>
         )}
       </div>
       {open === "password" && (
@@ -861,7 +858,7 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
           }}
         />
       )}
-      <div className="switch-row">
+      <div className="ax-switch-row">
         <span>
           <strong>Recovery codes</strong>
           <small className={fewCodes ? "warn-text" : "muted"}>
@@ -871,9 +868,9 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
           </small>
         </span>
         {open !== "codes" && (
-          <button type="button" className="btn" onClick={() => setOpen("codes")}>
+          <Button type="button"  onClick={() => setOpen("codes")}>
             {codes ? "Generate new codes" : "Generate codes"}
-          </button>
+          </Button>
         )}
       </div>
       {open === "codes" && (
@@ -886,14 +883,13 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
           replacing={!!codes}
         />
       )}
-      <div className="switch-row">
+      <div className="ax-switch-row">
         <span>
           <strong>Sign out of this browser</strong>
           <small className="muted">Applications keep running on the server.</small>
         </span>
-        <button
+        <Button
           type="button"
-          className="btn"
           disabled={pending !== null}
           onClick={() =>
             run("logout", async () => {
@@ -903,14 +899,14 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
           }
         >
           Sign out
-        </button>
+        </Button>
       </div>
-      <div className="switch-row">
+      <div className="ax-switch-row">
         <span>
           <strong>Sign out everywhere</strong>
           <small className="muted">Every browser, this one included, must sign in again. The access token keeps working.</small>
         </span>
-        <Confirm
+        <ConfirmButton
           label="Sign out everywhere"
           confirm="Sign out every browser"
           pending={pending === "everywhere"}
@@ -973,12 +969,12 @@ function ChangePassword({ close, done }: { close: () => void; done: () => void }
       <NewPassword value={secret} onChange={setSecret} errors={errors} label="New password" />
       <FormError message={submit.error} />
       <div className="form-actions start">
-        <button className="btn primary" disabled={submit.busy || submit.wait > 0}>
+        <Button type="submit" variant="primary" disabled={submit.busy || submit.wait > 0}>
           {submit.busy ? "Saving…" : "Change password"}
-        </button>
-        <button type="button" className="btn quiet" onClick={close}>
+        </Button>
+        <Button type="button" variant="ghost" onClick={close}>
           Cancel
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -1038,12 +1034,12 @@ function RegenerateCodes({
       </Field>
       <FormError message={submit.error} />
       <div className="form-actions start">
-        <button className="btn primary" disabled={submit.busy || submit.wait > 0}>
+        <Button type="submit" variant="primary" disabled={submit.busy || submit.wait > 0}>
           {submit.busy ? "Generating…" : "Generate codes"}
-        </button>
-        <button type="button" className="btn quiet" onClick={close}>
+        </Button>
+        <Button type="button" variant="ghost" onClick={close}>
           Cancel
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -1115,9 +1111,9 @@ function AddSignIn({ onAdded }: { onAdded: () => void }) {
       </div>
       <FormError message={submit.error} />
       <div className="ob-form-end">
-        <button className="btn primary" disabled={submit.busy || submit.wait > 0}>
+        <Button type="submit" variant="primary" disabled={submit.busy || submit.wait > 0}>
           {submit.busy ? "Saving…" : "Set email and password"}
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -1126,14 +1122,13 @@ function AddSignIn({ onAdded }: { onAdded: () => void }) {
 function GuideRow() {
   const { pending, run } = useAction();
   return (
-    <div className="switch-row">
+    <div className="ax-switch-row">
       <span>
         <strong>Setup guide</strong>
         <small className="muted">Walk through your resume, contact details and the screening questions again.</small>
       </span>
-      <button
+      <Button
         type="button"
-        className="btn"
         disabled={pending !== null}
         onClick={() =>
           run("guide", async () => {
@@ -1144,7 +1139,7 @@ function GuideRow() {
         }
       >
         Open setup guide
-      </button>
+      </Button>
     </div>
   );
 }
