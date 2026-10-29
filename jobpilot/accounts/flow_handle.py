@@ -94,6 +94,8 @@ class FlowHandleMixin:
         # SuccessFactors: "If you do not receive an email then no matching account was found." A reset that went
         # unanswered means this email has no account on the tenant (L3Harris 2026-10-21..23: four resets, none came;
         # the saved login was from a registration that never finished). One Create is tried, never again after.
+        # Every ATS that says "if an account exists, we will email you" is the same: Avature (Lenovo, MetLife, Bain),
+        # Taleo (Textron) and custom sites reset on every rerun and no mail ever came (2026-10-28).
         absent = ("absent", scope) in self.attempts
         if absent:
             known = False
@@ -111,7 +113,6 @@ class FlowHandleMixin:
             and not configured
             and known
             and create_links
-            and (getattr(e, "job", None) or {}).get("ats") == "successfactors"
             and self.reset_unanswered(account_url, recorded)
         ):
             record = getattr(self.store, "record", lambda url: {})(account_url)

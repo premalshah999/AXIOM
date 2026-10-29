@@ -50,17 +50,20 @@ async def test_a_password_unknown_account_waits_then_resets_again(service, hours
     assert not PERSIST_SKIP.search(PASSWORD_UNKNOWN)
 
 
-async def test_successfactors_creates_the_account_once_after_an_unanswered_reset(service, monkeypatch):
+@pytest.mark.parametrize("ats", ["successfactors", "avature", "taleo", "custom"])
+async def test_an_unanswered_reset_creates_the_account_once(service, monkeypatch, ats):
     """SuccessFactors says a reset that sends nothing means "no matching account was found". L3Harris (2026-10-21..23)
     requested four resets that never came: the saved login was from a registration that never finished. One Create is
-    tried; the state stays settled so no further reset is requested."""
+    tried; the state stays settled so no further reset is requested. Avature (Lenovo, MetLife, Bain), Taleo (Textron)
+    and custom sites say the same "if an account exists" and reset on every rerun (2026-10-28)."""
     import re
     from unittest.mock import AsyncMock
 
     obs = observation(URL, email=False)
     obs["controls"][0].update(aria_label="", automation_id="")
     value = adapter(service, obs)
-    value.id = "successfactors"
+    value.id = ats
+    value.job["ats"] = ats
     value.final = re.compile(r"^Submit Application$", re.I)
     value.accounts.mark(URL, "password_unknown", {"email": "alex@example.test", "password": "Synthetic9!x"},
                         reset_submitted_at=CONFIRMED)

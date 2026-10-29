@@ -2193,10 +2193,10 @@ class Adapter:
             not_found = bool(NOT_FOUND.search(str(detail or "")))
             # SuccessFactors' reset page: "If you do not receive an email then no matching account was found." A reset
             # that went unanswered means this email has no account on the tenant (a saved login from a registration
-            # that never finished): create one, once. "Account already exists" restores the saved login.
+            # that never finished): create one, once. "Account already exists" restores the saved login. Avature
+            # (Lenovo, MetLife, Bain) and Taleo (Textron) say the same and reset on every rerun (2026-10-28).
             absent = (
-                self.id == "successfactors"
-                and unknown
+                unknown
                 and reset_proven(record)
                 and not record.get("absent_create_at")
             )
