@@ -330,7 +330,7 @@ class Resolver(
     def located_in_answer(self, f):
         """Options "I am located in <State>, I acknowledge" / "I am not located in <State>":
         a residence question (TransUnion's Massachusetts notice), answered from the address."""
-        from ..widgets import _alias_group, norm
+        from .eligibility import US_STATES
 
         options = f.get("options", [])
         state = self.profile.address.state
@@ -344,6 +344,13 @@ class Resolver(
                     r"(?:i am |i m )?(not )?(?:located|residing|living|based) in ([a-z ]+?)(?: i acknowledge.*)?$",
                     n,
                 )
+                # Some notices say "reside" rather than "am located". The trailing claim only
+                # acknowledges receipt of this notice; unrelated assertions are not residence evidence.
+                or re.fullmatch(
+                    r"i (?:(do not|don t) )?reside in ([a-z ]+?)"
+                    r"(?: and acknowledge that i have received notice of this (?:statement|statute))?",
+                    n,
+                )
                 # "Not a resident of Maine - does not apply" / "Maine - Acknowledgment of Receipt ..."
                 or re.match(
                     r"(?:i am |i m )?(not )?(?:a )?resident of ([a-z ]+?)(?: does not apply.*| i acknowledge.*)?$",
@@ -353,14 +360,16 @@ class Resolver(
             )
             return m
 
+        states = {normalize(name): code for code, name in US_STATES.items()}
+        states.update({code.lower(): code for code in US_STATES})
+        home = states.get(normalize(state))
         parsed = [parse(o) for o in options]
-        if not all(parsed):
+        if not home or not all(m and m.group(2).strip() in states for m in parsed):
             return None
-        mine = _alias_group(state) | {norm(state)}
         chosen = [
             o
             for o, m in zip(options, parsed, strict=True)
-            if (not m.group(1)) == (m.group(2).strip() in mine)
+            if (not m.group(1)) == (states[m.group(2).strip()] == home)
         ]
         if len(chosen) != 1:
             return None

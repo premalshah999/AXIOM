@@ -683,3 +683,29 @@ def test_a_date_asked_of_a_named_employer_comes_from_its_row(service):
     resolver = Resolver(profile, service.db, service.config)
     answer = resolver.local({"id": "q", "label": "What was your end date at Globex?", "type": "text", "options": []})
     assert answer and answer.value and "profile:work.0" in answer.evidence_ids
+
+
+@pytest.mark.parametrize("state,index", [("MA", 0), ("Massachusetts", 0), ("CA", 1)])
+def test_reside_notice_options_use_saved_state(service, state, index):
+    from jobpilot.schemas import Address
+
+    resolver = Resolver(Profile(address=Address(state=state, country="United States")), service.db, service.config)
+    options = [
+        "I reside in Massachusetts and acknowledge that I have received notice of this statute.",
+        "I don’t reside in Massachusetts.",
+    ]
+    q = {**field("It is unlawful in Massachusetts to require a lie detector test; criminal penalties apply."),
+         "options": options}
+    answer = resolver.local(q)
+    assert answer.disposition == "answer"
+    assert answer.value == options[index]
+    assert answer.evidence_ids == ["profile:address"]
+
+
+def test_residence_parser_does_not_answer_an_additional_personal_claim(service):
+    from jobpilot.schemas import Address
+
+    resolver = Resolver(Profile(address=Address(state="CA")), service.db, service.config)
+    q = {**field("Please select"), "options": [
+        "I reside in Massachusetts and have never been convicted.", "I don’t reside in Massachusetts."]}
+    assert resolver.located_in_answer(q) is None
