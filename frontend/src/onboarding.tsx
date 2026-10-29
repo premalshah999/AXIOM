@@ -225,6 +225,11 @@ function withDefaults(profile: Partial<Draft>): Draft {
     approved_answers: {},
     reviewed_answers: [],
   } as Draft;
+  // A profile read from an older or partial server can hold null where a list belongs.
+  for (const key of ["work", "education", "skills", "languages", "target_roles", "target_locations", "excluded_keywords", "approved_consents", "evidence"] as const)
+    if (!Array.isArray(draft[key])) draft[key] = [] as never;
+  for (const key of ["first_name", "last_name", "name", "email", "phone", "location", "linkedin", "github", "website", "salary_expectation", "availability", "preferred_name", "middle_name"] as const)
+    if (typeof draft[key] !== "string") draft[key] = "" as never;
   for (const key of ["phone_country_code", "phone_type", "application_source"] as const)
     if (!String(draft[key] || "").trim()) draft[key] = EMPTY_PROFILE[key];
   if (!draft.address.country.trim()) draft.address.country = EMPTY_PROFILE.address.country;
@@ -485,9 +490,17 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
   if (error && !draft)
     return (
       <main className="ax-ob">
-        <p className="ax-ob-fatal" role="alert">
-          {error}
-        </p>
+        <div className="ax-ob-fatal" role="alert">
+          <p>Could not open the setup guide: {error}</p>
+          <span className="ax-ob-fatal-actions">
+            <Button variant="primary" size="sm" onClick={() => window.location.reload()}>
+              Try again
+            </Button>
+            <Button variant="ghost" size="sm" onClick={onExit}>
+              Skip for now
+            </Button>
+          </span>
+        </div>
       </main>
     );
   if (!draft)

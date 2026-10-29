@@ -9,9 +9,20 @@
   color: var(--ink);
 }
 .ax-ob-fatal {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  max-width: 520px;
   margin: var(--space-8) auto;
   padding: var(--space-4);
+}
+.ax-ob-fatal p {
   color: var(--bad);
+}
+.ax-ob-fatal-actions {
+  display: flex;
+  gap: var(--space-2);
 }
 
 /* ---------- header: brand, progress, finish later ---------- */
@@ -236,6 +247,15 @@
 .ax-ob-status {
   color: var(--ink-2);
   font-size: var(--text-ui);
+}
+.ax-ob-body {
+  --qf-sticky: 56px;
+  --qf-bg: var(--card);
+}
+/* The sticky progress row spans the card, so nothing shows beside it while the questions scroll under it. */
+.ax-ob-body .ax-qf-progress {
+  margin-inline: calc(-1 * var(--space-8));
+  padding-inline: var(--space-8);
 }
 .ax-ob-foot {
   position: sticky;
@@ -717,6 +737,11 @@
   }
   .ax-ob-body {
     padding: var(--space-5);
+    --qf-sticky: 78px;
+  }
+  .ax-ob-body .ax-qf-progress {
+    margin-inline: calc(-1 * var(--space-5));
+    padding-inline: var(--space-5);
   }
   .ax-ob-foot {
     padding: var(--space-3) var(--space-5);

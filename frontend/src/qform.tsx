@@ -68,7 +68,17 @@ export function useQuestionnaires() {
   const load = useCallback(() => {
     setError(null);
     api<Questionnaires>("/knowledge/questionnaires")
-      .then(setData)
+      .then((d) => {
+        // An older or partial server can answer with something else: say so instead of crashing the page.
+        if (!Array.isArray(d?.modules)) throw new Error("The server's answer was not in the expected form.");
+        const modules = d.modules.map((m) => ({ ...m, questions: Array.isArray(m.questions) ? m.questions : [] }));
+        const answered = modules.reduce((n, m) => n + (m.answered || 0), 0);
+        const total = modules.reduce((n, m) => n + (m.total || 0), 0);
+        setData({
+          modules,
+          completion: d.completion ?? { answered, total, percent: total ? Math.round((100 * answered) / total) : 0 },
+        });
+      })
       .catch((e) => setError(e as Error));
   }, []);
   useEffect(load, [load]);
@@ -379,14 +389,15 @@ export function ModuleForm({
           <Pill tone="neutral">Optional</Pill>
         </div>
         <p className="ax-qf-purpose">{module.purpose} Skip any question; nothing here is required to apply.</p>
-        <div className="ax-qf-progress">
-          <Meter percent={module.percent} label={`${module.title}: ${module.answered} of ${module.total} answered`} />
-          <small>
-            {module.answered} of {module.total} answered
-          </small>
-          <SaveState status={status} retry={failed.current ? retry : undefined} />
-        </div>
       </header>
+      {/* Stays in view while you scroll, so "Saved" or a failed save with Retry is never off screen. */}
+      <div className="ax-qf-progress">
+        <Meter percent={module.percent} label={`${module.title}: ${module.answered} of ${module.total} answered`} />
+        <small>
+          {module.answered} of {module.total} answered
+        </small>
+        <SaveState status={status} retry={failed.current ? retry : undefined} />
+      </div>
 
       {hasSuggestions && open > 0 && module.id === "wotc" && (
         <div className="ax-qf-bulk">
@@ -624,7 +635,7 @@ function Supervisors({
               <div className="ax-qf-contact">
                 <span className="ax-label">May we contact this supervisor?</span>
                 <Segmented
-                  label="May we contact this supervisor?"
+                  label={`May we contact the supervisor at ${r.company || "this employer"}?`}
                   value={entry.may_contact || ""}
                   options={Object.entries(contact).map(([v, label]) => ({ value: v, label }))}
                   onChange={(v) => {
