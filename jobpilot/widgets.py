@@ -272,6 +272,33 @@ MONTH_NUMBERS = {
 NEGATION = re.compile(r"\b(?:not|no|non|never|none|neither|nor|without|decline|don ?t|do not|doesn ?t|am not|is not)\b")
 
 
+# A visa class as menus spell it: "F-1", "F1", "H-1B", "H1B", "L2" (letter, number, optional letter). A status that
+# spells a qualifier ("F-1 OPT") is matched by an option of its class that claims no qualifier it lacks.
+VISA_CLASS = re.compile(r"(?<![A-Za-z0-9])([FHJLOEGMPR])[\s-]?(\d{1,2})([A-Za-z]?)(?![A-Za-z0-9])", re.I)
+VISA_QUALIFIER = re.compile(r"\b(?:opt|cpt|stem)\b", re.I)
+
+
+def visa_class(text):
+    match = VISA_CLASS.search(str(text))
+    return (match[1] + match[2] + match[3]).upper() if match else None
+
+
+def visa_option(value, options):
+    """The one offered option that is the same visa class as `value` and states no qualifier (OPT, CPT, STEM) the
+    value lacks: "F-1 OPT" is the offered "F1" (ALTEN's Greenhouse visa-type menu, 2026-10-29), never "F-1 CPT". When
+    several remain, the ones stating exactly the value's qualifiers; ambiguity returns None."""
+    code = visa_class(value)
+    if not code:
+        return None
+    qualifiers = lambda t: {q.lower() for q in VISA_QUALIFIER.findall(str(t))}  # noqa: E731
+    have = qualifiers(value)
+    labels = [o["text"] if isinstance(o, dict) else o for o in options]
+    same = [i for i, x in enumerate(labels) if visa_class(x) == code and qualifiers(x) <= have]
+    if len(same) > 1:
+        same = [i for i in same if qualifiers(labels[i]) == have]
+    return options[same[0]] if len(same) == 1 else None
+
+
 def best_option(options, value):
     """Choose one observed option for a desired value. Ambiguity returns None, never a guess."""
     options = [o for o in options if not placeholder_option(o["text"] if isinstance(o, dict) else o)]
@@ -284,6 +311,8 @@ def best_option(options, value):
     exact = [i for i, x in enumerate(labels) if norm(x) == want]
     if len(exact) >= 1:
         return options[exact[0]]
+    if visa := visa_option(value, options):
+        return visa
     # A month number in a menu of month names: Oracle's Start Date Month grid offers "January" ... "December", and an
     # education start of 2024-08 asked for "8" four times without a match (2026-10-25).
     if re.fullmatch(r"0?[1-9]|1[0-2]", want) and sum(norm(x) in MONTH_NUMBERS for x in labels) >= 6:

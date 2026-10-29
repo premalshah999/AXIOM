@@ -801,7 +801,11 @@ class LocalRulesMixin:
             if re.search(r"\bOPT\b", status):
                 stated = "F-1 OPT"
                 if options:
+                    from ..widgets import visa_option
+
+                    # "F-1 OPT" is an offered "F1" or "F-1" as much as "F-1 OPT" (ALTEN Greenhouse, 2026-10-29).
                     hits = [o for o in options if re.search(r"\bOPT\b|\bF-?1\b", str(o), re.I)]
+                    hits = [visa] if (visa := visa_option(stated, options)) else hits
                     if len(hits) == 1:
                         return Answer(field_id=f["id"], value=hits[0], disposition="answer",
                                       evidence_ids=["fact:current_immigration_status_US"])
