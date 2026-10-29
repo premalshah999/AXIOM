@@ -619,6 +619,156 @@ if __name__ == "__main__":  # python -m jobpilot.features.discovery.feeds [days]
 
 SWEEP_KEY = "discovery_feed_run"
 
+# The full listing histories, inactive rows included, and the internship repos: companies that hire interns post
+# new-grad roles too, and a closed row still names a live board. (vanshb03's lists link through go.vansh.nyc
+# redirects, which name no board.)
+HISTORY_FEEDS = (
+    ("simplify-history", "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json"),
+    ("simplify-internships", "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/.github/scripts/listings.json"),
+)
+HARVEST_KEY = "discovery_board_harvest"
+HARVEST_EVERY = timedelta(hours=20)
+HARVEST_RECHECK = timedelta(days=14)  # A board that failed validation is not asked again for this long.
+MAX_NEW_BOARDS = 150  # Validated and added per harvest.
+MAX_VALIDATIONS = 400  # Public API calls per harvest.
+BOARD_URL = {
+    "greenhouse": "https://job-boards.greenhouse.io/{ident}",
+    "lever": "https://jobs.lever.co/{ident}",
+    "ashby": "https://jobs.ashbyhq.com/{ident}",
+    "smartrecruiters": "https://jobs.smartrecruiters.com/{ident}",
+}
+
+
+def board_source_url(kind, ident):
+    """The managed-source URL for a board ident (workday idents are host|tenant|site)."""
+    if kind == "workday":
+        host, _tenant, site = ident.split("|")
+        return f"https://{host}/{site}"
+    return BOARD_URL[kind].format(ident=ident)
+
+
+def board_key(kind, ident):
+    from urllib.parse import unquote
+
+    return f"{kind}|{unquote(ident).casefold()}"
+
+
+async def validate_board(client, kind, ident) -> bool:
+    """Whether the board's own public API answers and lists at least one posting."""
+    try:
+        if kind == "greenhouse":
+            r = await client.get(f"https://boards-api.greenhouse.io/v1/boards/{ident}/jobs")
+            return r.status_code == 200 and bool(r.json().get("jobs"))
+        if kind == "lever":
+            r = await client.get(f"https://api.lever.co/v0/postings/{ident}?mode=json&limit=1")
+            return r.status_code == 200 and bool(r.json())
+        if kind == "ashby":
+            r = await client.get(f"https://api.ashbyhq.com/posting-api/job-board/{ident}")
+            return r.status_code == 200 and bool(r.json().get("jobs"))
+        if kind == "smartrecruiters":
+            # An unknown company answers 200 with totalFound 0.
+            r = await client.get(f"https://api.smartrecruiters.com/v1/companies/{ident}/postings", params={"limit": 1})
+            return r.status_code == 200 and (r.json().get("totalFound") or 0) > 0
+        if kind == "workday":
+            host, tenant, site = ident.split("|")
+            body = {"appliedFacets": {}, "limit": 1, "offset": 0, "searchText": ""}
+            r = await client.post(f"https://{host}/wday/cxs/{tenant}/{site}/jobs", json=body)
+            return r.status_code == 200 and (r.json().get("total") or 0) > 0
+    except Exception:
+        return False
+    return False
+
+
+async def history_boards(client, feeds=HISTORY_FEEDS) -> dict:
+    """{(kind, ident): company} for every board the feeds' full histories link to."""
+    boards = {}
+    for name, url in feeds:
+        try:
+            response = await client.get(url)
+            data = await asyncio.to_thread(response.json)  # 13 MB of JSON, parsed off the loop
+        except Exception as exc:
+            log.warning("board harvest: %s unreadable (%s)", name, type(exc).__name__)
+            continue
+        rows = [
+            Posting(x.get("company_name", ""), "", x["url"], [], "", "verified", name)
+            for x in data
+            if isinstance(x, dict) and x.get("url")
+        ]
+        for kind, ident, company in boards_from(rows):
+            boards.setdefault((kind, ident), company)
+    return boards
+
+
+def managed_board_keys(db) -> set:
+    from sqlalchemy import select
+
+    from ...db import Source
+
+    with db.session() as s:
+        rows = s.execute(select(Source.kind, Source.url)).all()
+    return {
+        board_key(kind, ident)
+        for kind, ident, _ in boards_from([Posting("", "", url + ("/job/x" if kind == "workday" else ""), [], "", "verified", "s") for kind, url in rows if url])
+    }
+
+
+async def harvest_boards(db, *, client=None, at=None, feeds=HISTORY_FEEDS, limit=MAX_NEW_BOARDS) -> dict:
+    """Add every live employer board the feeds' histories reference as a managed source, once a day.
+
+    Bounded (validations and additions per run), deduplicated against every stored source, and each board is proven
+    live by its own public API first. This replaces adding such boards by hand (230 of 3,800 referenced boards were
+    still unmanaged on 2026-10-29)."""
+    at = at or datetime.now(UTC)
+    state = await asyncio.to_thread(db.get_setting, HARVEST_KEY, {}) or {}
+    last = state.get("at")
+    if last and datetime.fromisoformat(last) + HARVEST_EVERY > at:
+        return {"state": "skipped"}
+    from ...jobboard import settings as board_settings
+
+    if not board_settings(db).enabled:
+        return {"state": "disabled"}
+    focus = await asyncio.to_thread(db.get_setting, "ats_focus", {}) or {}
+    excluded = set(focus.get("exclude", []))
+    checked = {k: v for k, v in (state.get("checked") or {}).items() if datetime.fromisoformat(v) + HARVEST_RECHECK > at}
+    own = client is None
+    client = client or httpx.AsyncClient(
+        timeout=25.0, follow_redirects=True, headers={"User-Agent": "ApplyPilot discovery (public postings)"}
+    )
+    try:
+        found = await history_boards(client, feeds)
+        have = await asyncio.to_thread(managed_board_keys, db)
+        todo = [
+            (kind, ident, company)
+            for (kind, ident), company in sorted(found.items())
+            if kind not in excluded and board_key(kind, ident) not in have and board_key(kind, ident) not in checked
+        ][:MAX_VALIDATIONS]
+        gate = asyncio.Semaphore(8)
+
+        async def check(board):
+            async with gate:
+                return board, await validate_board(client, board[0], board[1])
+
+        live = []
+        for (kind, ident, company), ok in await asyncio.gather(*(check(b) for b in todo)):
+            if ok:
+                live.append((kind, ident, company))
+            else:
+                checked[board_key(kind, ident)] = at.isoformat()
+    finally:
+        if own:
+            await client.aclose()
+    from ...jobboard import add_managed_sources
+
+    # Live boards over the bound are validated again, and added, by the next harvest.
+    entries = [(kind, company or ident, board_source_url(kind, ident)) for kind, ident, company in live[:limit]]
+    added = await asyncio.to_thread(add_managed_sources, db, entries)
+    result = {
+        "state": "done", "at": at.isoformat(), "referenced": len(found), "validated": len(todo), "live": len(live),
+        "added": added, "checked": checked,
+    }
+    await asyncio.to_thread(db.set_setting, HARVEST_KEY, result)
+    return {k: v for k, v in result.items() if k != "checked"}
+
 
 def known_boards(db, kinds=("workday", "smartrecruiters"), limit=20000):
     """Employer boards of the focused ATSs that this database already knows. The scheduled sweep covered only boards
@@ -677,8 +827,13 @@ async def sweep(db, window_days: int = 7) -> dict:
             text = await fill_missing_text(db)
         except Exception as exc:  # Text loading is an optimisation; the HTML loader remains.
             text = {"error": type(exc).__name__}
+        try:
+            harvest = await harvest_boards(db)
+        except Exception as exc:  # Finding more boards is an extra; the sweep result stands without it.
+            harvest = {"error": type(exc).__name__}
         result = {
             "state": "done",
+            "harvest": harvest,
             "started_at": started,
             "finished_at": datetime.now(UTC).isoformat(),
             "window_days": window_days,

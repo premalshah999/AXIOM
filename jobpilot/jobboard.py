@@ -1119,3 +1119,36 @@ def setup_sources(db, cfg=None):
     setup_search(db)
     return len(managed_ids(db))
 
+
+def add_managed_sources(db, entries):
+    """Add (kind, name, url) boards as managed sources, scanned from the next tick; returns how many were new.
+    Existing sources (any URL spelling of the same board) are left alone, and a retired board is never re-added."""
+    from urllib.parse import unquote
+
+    cfg = settings(db)
+    retired = {"https://job-boards.greenhouse.io/" + slug for slug in ["snowflake", "confluent", "rippling", "aetion"]}
+    retired |= {"https://jobs.lever.co/" + slug for slug in ["netflix", "viking", "welocalize"]}
+    ids, added = managed_ids(db), 0
+    with db.exclusive() as s:
+        have = {unquote(url).casefold().rstrip("/") for url in s.scalars(select(Source.url))}
+        for kind, name, url in entries:
+            key = unquote(url).casefold().rstrip("/")
+            if key in have or url in retired:
+                continue
+            row = Source(
+                name=name[:200] or url,
+                kind=kind,
+                url=url,
+                cron=f"0 */{cfg.interval_hours} * * *",
+                enabled=cfg.enabled,
+                auto_queue=False,
+                next_run=now(),
+            )
+            s.add(row)
+            s.flush()
+            ids.add(row.id)
+            have.add(key)
+            added += 1
+    if added:
+        db.set_setting("job_board_sources", {"ids": sorted(ids)})
+    return added
