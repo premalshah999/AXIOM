@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import uuid
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -31,7 +32,7 @@ from .network import public_url
 from .schemas import Answer, Profile
 from .accounts import AccountFlow
 from .captcha import CaptchaSolver, challenge_frame, checkbox_frame
-from .captcha_observation import ARM_JS, PROVIDER_FRAME_JS
+from .captcha_observation import ARM_JS, DISARM_JS, PROVIDER_FRAME_JS
 from .privacy import deny_location, dismiss_cookies
 from .pipeline_comparison import worker_context
 
@@ -58,6 +59,43 @@ GUARD = r"""(() => {
     }
   },true);
 })()"""
+
+# The witness of one commit click, set in the control's document and the top document just before the click. A click
+# that timed out means one of two very different things: Playwright never found the control actionable and sent no input
+# (Two Sigma's Avature widget page, 2026-10-30), or the input went out and a later wait ran out (the form is posting, a
+# handler is slow). The text of its call log is not a contract; the page is the witness. Input that reaches a document
+# passes these capture listeners on window before anything else there. An input Playwright's own hit-target check blocks
+# reaches nothing, and if it is logged all the same the click only stays uncertain, the safe direction.
+COMMIT_WATCH = r"""token => {
+  if(""" + PROVIDER_FRAME_JS + r""")return false;
+  const old=window.__jpCommitWatch;
+  if(old&&old.token===token)return true;
+  if(old)old.stop();
+  const stop=new AbortController(), watch={token,events:[],stop:()=>stop.abort()};
+  for(const type of ['pointerdown','mousedown','pointerup','mouseup','click','dblclick','auxclick','touchstart','touchend',
+                     'keydown','keyup','submit','beforeunload','pagehide'])
+    window.addEventListener(type,()=>{if(watch.events.length<20)watch.events.push(type)},
+                            {capture:true,passive:true,signal:stop.signal});
+  window.__jpCommitWatch=watch;
+  return true;
+}"""
+COMMIT_WATCH_CONTROL = r"""(e,token) => {
+  const watch=window.__jpCommitWatch;
+  if(!watch||watch.token!==token)return false;
+  watch.control=e;
+  watch.shape=c=>JSON.stringify([c.tagName,c.type,c.disabled,c.getAttribute('aria-disabled'),c.getAttribute('aria-busy'),
+                                 String(c.className),(c.innerText||c.value||'').trim()]);
+  watch.before=watch.shape(e);
+  return true;
+}"""
+COMMIT_WATCH_EVENTS = r"""token => {
+  const watch=window.__jpCommitWatch;
+  return watch&&watch.token===token?watch.events:null;
+}"""
+COMMIT_CONTROL_UNCHANGED = r"""(e,token) => {
+  const watch=window.__jpCommitWatch;
+  return !!watch&&watch.token===token&&watch.control===e&&e.isConnected&&watch.shape(e)===watch.before;
+}"""
 
 # Greenhouse's embed posts "greenhouse.confirmation" to its parent only after the application POST succeeded
 # (`if(O.ok){... window.parent.postMessage("greenhouse.confirmation","*") ...}`, REA 2026-10-18). Employer pages
@@ -446,6 +484,10 @@ POST_SUBMIT_CODE_SETTLE_SECONDS = 25
 # SmartRecruiters' reopened one-click forms (LLNL, AbbVie, 2026-10-26..28) spent three minutes per commit waiting out
 # the slow-confirmation window, and four commits outlasted the 600 s budget.
 NOTHING_SENT_SECONDS = 60
+# Input the browser had already accepted when a click timed out lands within this; only then is the witness read.
+COMMIT_INPUT_GRACE_SECONDS = 1.5
+# Each read of the page for the witness. A page too busy to answer is doubt: the click stays uncertain.
+COMMIT_WATCH_SECONDS = 3
 # Controls whose disabled state means the page has an unfinished requirement.
 STEP_ACTION = re.compile(
     r"^\s*(?:next|continue|save (?:and|&) continue|submit(?: application)?|apply|sign in|log in|create account|register)\s*$",
@@ -732,6 +774,11 @@ def pending_observation(item):
     if item.get("options"):
         entry["options"] = [observation_text(o, 120) for o in item["options"][:12]]
     return entry
+
+
+def control_name(control):
+    """A control's label for a reason the owner and the navigator read."""
+    return " ".join(str((control or {}).get("label") or "submit").split())[:80]
 
 
 def recovery_observation(result):
@@ -3906,15 +3953,26 @@ class BrowserEngine:
             # the twin inside the submit watch.
             self.prepared_header_token = (await self.mint_header_token(), time.monotonic())
         self.armed = True
-        before = await self.form.proof()
-        self.pre_commit_proof = before
-        before_rejection = await self.form.rejection()
-        for frame in self.page.frames:
-            await frame.evaluate(ARM_JS)
+        try:
+            before = await self.form.proof()
+            self.pre_commit_proof = before
+            before_rejection = await self.form.rejection()
+            for frame in self.page.frames:
+                await frame.evaluate(ARM_JS)
+            control = self.form.locator(final[0]["id"])
+        except (ValueError, PlaywrightError) as exc:
+            # The click has not been issued: a frame detached while arming is not an uncertain submission.
+            return await self.commit_not_delivered(final[0], exc)
         self.emit("submitting", "Commit step started; automatic retries are disabled")
         self.commit_requests, self.commit_tracking, self.commit_inflight, self.refusal_said = [], 0, set(), []
         self.commit_url = getattr(self.page, "url", "")
-        await self.form.locator(final[0]["id"]).click(timeout=10000)
+        watch = await self.watch_commit_click(final[0]["id"], before, before_rejection)
+        try:
+            await control.click(timeout=10000)
+        except PlaywrightError as exc:
+            if not await self.commit_click_undelivered(watch):
+                raise
+            return await self.commit_not_delivered(final[0], exc)
         result = await self.watch_submission(before, before_rejection, validation_attempt)
         if result.get("state") == "submission_unknown" and (
             created := application_created(
@@ -3926,6 +3984,88 @@ class BrowserEngine:
                       "receipt": created}
         self.emit_commit_requests()
         return result
+
+    async def watch_commit_click(self, control_id, proof=None, rejection=None):
+        """Set the witness of the click about to happen (COMMIT_WATCH). None when it cannot be set: that click, if it
+        fails, stays uncertain as every failed commit click did before. The witness never stands in the click's way."""
+        token = uuid.uuid4().hex
+        try:
+            frames = list(dict.fromkeys((self.page.main_frame, self.form.frames[control_id])))
+            for frame in frames:
+                if not await asyncio.wait_for(frame.evaluate(COMMIT_WATCH, token), COMMIT_WATCH_SECONDS):
+                    return None
+            control = self.form.locator(control_id)
+            if not await asyncio.wait_for(control.evaluate(COMMIT_WATCH_CONTROL, token), COMMIT_WATCH_SECONDS):
+                return None
+        except Exception:
+            return None
+        return {"token": token, "control_id": control_id, "frames": frames, "proof": proof, "rejection": rejection}
+
+    async def commit_click_undelivered(self, watch):
+        """True only when a failed commit click provably delivered nothing, on all of this evidence:
+
+        - the witness was set before the click, and is still alive in the control's document and the top one (that
+          document was not replaced), with no pointer, key or submit event and no unload in either;
+        - the very same control is still attached, with the same label, class and disabled state;
+        - the page is on the URL it was committed from, with no write in flight and none logged but tracking calls;
+        - no new receipt and no new refusal on the page.
+
+        Anything unreadable or changed keeps the submission uncertain: a false "not sent" could submit a real application
+        twice, which is far worse than one stuck job."""
+        if not watch:
+            return False
+        await asyncio.sleep(COMMIT_INPUT_GRACE_SECONDS)
+        writes = getattr(self, "commit_requests", None) or []
+        if (
+            not getattr(self, "commit_url", "")
+            or getattr(self.page, "url", "") != self.commit_url
+            or getattr(self, "commit_inflight", None)
+            or len(writes) >= 40  # a full log may have dropped writes
+            or any(not COMMIT_TRACKING.search(r.get("path", "")) for r in writes)
+        ):
+            return False
+        try:
+            control = self.form.locator(watch["control_id"])
+            token = watch["token"]
+            if await asyncio.wait_for(control.evaluate(COMMIT_CONTROL_UNCHANGED, token), COMMIT_WATCH_SECONDS) is not True:
+                return False
+            for frame in watch["frames"]:
+                if await asyncio.wait_for(frame.evaluate(COMMIT_WATCH_EVENTS, token), COMMIT_WATCH_SECONDS) != []:
+                    return False
+            receipt = await self.form.proof()
+            rejection = await self.form.rejection()
+        except Exception:
+            return False
+        return not (receipt and receipt != watch["proof"]) and not (rejection and rejection != watch["rejection"])
+
+    async def commit_not_delivered(self, control, exc):
+        """End a commit whose click never reached the page: disarmed, its reservation back, repairable like any other
+        page that refused a control. A late click cannot follow it: the page's guard is closed again."""
+        self.armed = False
+        for frame in self.page.frames:
+            try:
+                await asyncio.wait_for(frame.evaluate(DISARM_JS), COMMIT_WATCH_SECONDS)
+            except Exception:  # A frame that is gone holds no armed guard.
+                pass
+        await self.release_reservation()
+        self.emit_commit_requests()
+        why = ""
+        explain = getattr(self.form, "control_block_reason", None)
+        if explain:
+            try:
+                why = await asyncio.wait_for(explain(control["id"]), COMMIT_WATCH_SECONDS)
+            except Exception:  # The reason is a courtesy; what was proven does not depend on it.
+                pass
+        name = control_name(control)
+        self.emit("commit_not_delivered", "The commit click never reached the page; nothing was sent",
+                  {"control": name, "why": why, "diagnostics": exception_diagnostics(exc)})
+        return {
+            "state": "waiting_browser",
+            "reason": f"The final control '{name}' never took the click{': ' + why if why else ''}; nothing was submitted",
+            "blocker_type": "control_failure",
+            "recovery_cause": "control_observation",
+            "recoverable": True,
+        }
 
     async def watch_submission(self, before, before_rejection, validation_attempt=0):
         """Observe the commit after the final click: proof, a refusal, a challenge, or a bounded

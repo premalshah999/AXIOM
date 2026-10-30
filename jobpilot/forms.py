@@ -601,6 +601,21 @@ ENTRY = re.compile(
 AUTH = re.compile(r"\bpasswords?\b|verification code|one.time|authentication code|security code", re.IGNORECASE)
 BACK_STEP = re.compile(r"^(?:back|previous|go back)(?: step)?$", re.I)
 RESUME = re.compile(r"r[eé]sum[eé]|cv\b|curriculum", re.IGNORECASE)
+# Why a control would not take a click, in words. Only its tag, id and class name the element in the way.
+CONTROL_BLOCK_JS = r"""e => {
+  const name=n=>[n.tagName.toLowerCase(),n.id?'#'+n.id:'',typeof n.className==='string'&&n.className.trim()
+    ?'.'+n.className.trim().split(/\s+/)[0]:''].join('').slice(0,60);
+  if(e.disabled||e.getAttribute('aria-disabled')==='true')return 'it is disabled';
+  const s=getComputedStyle(e),r=e.getBoundingClientRect();
+  if(s.display==='none'||s.visibility!=='visible')return 'it is hidden';
+  if(!r.width||!r.height)return 'it has no size on the page';
+  if(s.pointerEvents==='none')return 'it ignores the pointer';
+  const x=r.left+r.width/2,y=r.top+r.height/2;
+  if(x<0||y<0||x>=innerWidth||y>=innerHeight)return 'it is outside the visible page';
+  const hit=e.ownerDocument.elementFromPoint(x,y);
+  if(hit&&hit!==e&&!e.contains(hit)&&!hit.contains(e))return 'covered by '+name(hit);
+  return 'it never became clickable';
+}"""
 # A submit is live only if rendered, enabled, and not inside an inert/hidden/aria-hidden ancestor.
 LIVE_CONTROL_JS = """b => {
   const cs = getComputedStyle(b);
@@ -5105,6 +5120,9 @@ class FormSession:
             ):
                 final.append(button)
         return await self._reduce_submit_controls(final)
+
+    async def control_block_reason(self, control_id):
+        return await self.locator(control_id).evaluate(CONTROL_BLOCK_JS, timeout=2000)
 
     async def accepted_resume_tile(self, submit_id=None):
         if not self.resume_path or not self.uploaded:
