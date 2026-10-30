@@ -177,3 +177,64 @@ async def test_a_large_response_is_decoded_chunk_by_chunk_with_the_same_result(m
     monkeypatch.setattr(httpx, "AsyncClient", Client)
     text, url = await network.fetch("https://example.test/feed", allow_private=True)
     assert text == body.decode("utf-8", errors="replace") and url == "https://example.test/feed"
+
+
+def test_a_receipt_claim_check_reads_no_packet_but_the_recipients_it_lacks(service):
+    """It read every receipted run's whole packet per message, under the app lock (673 runs, ~300 MB, 2026-10-30)."""
+    from jobpilot.receipts import receipt_claimed
+
+    with service.db.exclusive() as s:
+        for n in range(3):
+            s.add(Job(id=f"j{n}", identity=f"j{n}", url=f"https://careers.example.test/jobs/{n}", company=f"Example{n}", ats="custom"))
+            s.add(Run(id=f"r{n}", job_id=f"j{n}", state="confirmed", mode="submit",
+                      packet={"profile": {"email": "alex@example.test"}, "ledger": ["x" * 100]},
+                      receipt={"email": {"message_id": f"gm:{n}", "received_at": "2026-10-30T00:00:00+00:00"}}))
+        s.add(Job(id="now", identity="now", url="https://careers.example.test/jobs/now", company="ExampleSoft", ats="custom"))
+        s.add(Run(id="now", job_id="now", state="waiting_email", mode="submit", packet={"profile": {"email": "alex@example.test"}}))
+    for rid in ("r0", "r1", "r2", "now"):
+        _PACKET_FACTS.pop(rid, None)
+    receipt = {"run_id": "now", "received_at": "2026-10-30T01:00:00+00:00"}
+    seen, stop = statements(service)
+    try:
+        with service.db.session() as s:
+            assert receipt_claimed(s, {"id": "gm:1"}, receipt) is True  # another run already holds this message
+            assert receipt_claimed(s, {"id": "gm:new"}, receipt) is False
+    finally:
+        stop()
+    assert not [q for q in seen if "runs.resume_id" in q], seen  # a whole Run row carries the whole packet
+    assert len([q for q in seen if "packet" in q]) == 1  # the recipients, once
+
+
+def test_a_claim_held_for_another_mailbox_does_not_block_this_one(service):
+    from jobpilot.receipts import receipt_claimed
+
+    with service.db.exclusive() as s:
+        s.add(Job(id="old", identity="old", url="https://careers.example.test/jobs/old", company="ExampleSoft", ats="custom"))
+        s.add(Run(id="old", job_id="old", state="confirmed", mode="submit", packet={"profile": {"email": "other@example.test"}},
+                  receipt={"email": {"message_id": "gm:1"}}))
+        s.add(Job(id="now2", identity="now2", url="https://careers.example.test/jobs/now2", company="ExampleSoft", ats="custom"))
+        s.add(Run(id="now2", job_id="now2", state="waiting_email", mode="submit", packet={"profile": {"email": "ALEX@example.test"}}))
+    for rid in ("old", "now2"):
+        _PACKET_FACTS.pop(rid, None)
+    with service.db.session() as s:
+        assert receipt_claimed(s, {"id": "gm:1"}, {"run_id": "now2", "received_at": "2026-10-30T01:00:00+00:00"}) is False
+
+
+def test_a_new_posting_finds_its_older_identity_without_loading_descriptions(service):
+    """Every new posting read all of its platform's jobs, descriptions included, under the app lock (2026-10-30)."""
+    from jobpilot.discovery import add_job
+    from jobpilot.schemas import JobInput
+
+    url = "https://job-boards.greenhouse.io/example/jobs/1234"
+    with service.db.exclusive() as s:
+        # A row saved before tracking parameters were dropped: its stored identity is not today's.
+        s.add(Job(id="older", identity="legacy-identity", url=url + "?utm_source=feed", title="Engineer", company="ExampleSoft",
+                  ats="greenhouse", description="Build software. " * 400))
+    seen, stop = statements(service)
+    try:
+        row, new = add_job(service.db, JobInput(url=url, title="Engineer", company="ExampleSoft", description="d"))
+    finally:
+        stop()
+    assert row["id"] == "older" and new is False
+    scans = [q for q in seen if "jobs.ats =" in q]
+    assert scans and all("description" not in q for q in scans), seen

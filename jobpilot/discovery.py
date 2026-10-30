@@ -12,7 +12,7 @@ from httpx import HTTPError, HTTPStatusError
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from .ats import canonicalize, detect
+from .ats import canonicalize, detect, url_identity
 from .db import Job, Resume, Setting, record
 from .models import structured
 from .network import fetch
@@ -315,14 +315,17 @@ def add_job(db, data: JobInput, demo=False, origin="unknown"):
         existing = s.scalar(select(Job).where(Job.identity == identity))
         if not existing:
             # Preserve old rows/receipts whose identities included presentation/tracking parameters.
-            existing = next(
+            # Two columns: every new posting read all of its platform's jobs with their descriptions (tens of MB) while
+            # holding the app lock, and re-parsed each URL (5.6% of the interpreter, 2026-10-30).
+            earlier = next(
                 (
-                    row
-                    for row in s.scalars(select(Job).where(Job.ats == detect(url).id))
-                    if canonicalize(row.url)[1] == identity
+                    row.id
+                    for row in s.execute(select(Job.id, Job.url).where(Job.ats == detect(url).id))
+                    if url_identity(row.url) == identity
                 ),
                 None,
             )
+            existing = s.get(Job, earlier) if earlier else None
         if existing:
             if origin == "manual":
                 row = s.get(Setting, "job_origin:" + existing.id)
