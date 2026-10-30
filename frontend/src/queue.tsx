@@ -1,4 +1,3 @@
-import { X } from "lucide-react";
 import { useState } from "react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
@@ -84,26 +83,24 @@ export function QueuePanel() {
           Add to queue
         </Button>
       </form>
-      {(links.length > 0 || focused) && (
+      {links.length > 0 && (
         <p className="ax-hint">
-          {links.length
-            ? `${plural(links.length, "link")} found${links.length > 25 ? "; the first 25 are added" : ""}. Ctrl or ⌘ Enter adds them.`
-            : "Your own picks: added without the fit check. Duplicates and finished applications are protected."}
+          {plural(links.length, "link")} found{links.length > 25 ? "; the first 25 are added" : ""}. Ctrl or ⌘ Enter adds them.
         </p>
       )}
       {results.length > 0 && (
-        <ul className="ax-outcomes" aria-label="Pasted links">
+        <ul className="ax-rows" aria-label="Pasted links">
           {results.map((r) => (
-            <li key={r.url} className="ax-outcome">
-              <span>
+            <li key={r.url} className="ax-row">
+              <span className="ax-row-main">
                 {r.job_id ? (
                   <button type="button" className="ax-link" onClick={() => openJob(r.job_id!)}>
-                    <strong>{linkHost(r.url) || r.url}</strong>
+                    {linkHost(r.url) || r.url}
                   </button>
                 ) : (
                   <strong>{linkHost(r.url) || r.url}</strong>
                 )}
-                <span className="ax-note"> {r.message || ""}</span>
+                {r.message && <small>{r.message}</small>}
               </span>
               <StatusPill
                 state={r.state === "refused" ? "failed" : appliedState(r.state)}
@@ -111,10 +108,10 @@ export function QueuePanel() {
               />
             </li>
           ))}
-          <li className="ax-outcome-end">
-            <button type="button" className="ax-icon-btn" aria-label="Dismiss the results" onClick={() => setResults([])}>
-              <X size={16} />
-            </button>
+          <li className="ax-row">
+            <Button size="sm" variant="ghost" onClick={() => setResults([])}>
+              Dismiss
+            </Button>
           </li>
         </ul>
       )}

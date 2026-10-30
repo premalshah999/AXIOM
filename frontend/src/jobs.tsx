@@ -10,7 +10,6 @@ import { Pagination } from "./pagination";
 import { usePipelinePage } from "./pipeline";
 import { QueuePanel } from "./queue";
 import { ReservedJobs } from "./reserved";
-import { LedgerView } from "./ledger";
 import { ago, linkHost, plural, urlRole } from "./ui";
 import { Button, Empty, RouteTabs, Table, type Column } from "./ui/index";
 import { Chips, JobCell, Notice, Note, SearchBox, StatusPill } from "./worktools";
@@ -24,8 +23,6 @@ const TABS = [
 
 export function JobsView() {
   const { route, counts: all } = useWorkspace();
-  // The archive lives under Applications now; an older link to Jobs › Archive opens it there.
-  if (route.tab === "archive") return <LedgerView forceTab="archive" />;
   const tab = TABS.some((t) => t.id === route.tab) ? route.tab! : "pipeline";
   // Server counts over every job (the browser used to count the newest 1,000 it was sent). Discovered is the jobs not
   // applied to yet, the same number its page shows; Pipeline is everything started or waiting to start.
@@ -45,16 +42,13 @@ export function JobsView() {
 
 // Jobs › Pipeline: applications that have started or will start (the queue, applying, needs you, repairing, done,
 // stopped). Jobs found but never applied to are in Discovered, which is where they are selected and applied to
-// (owner, 2026-10-23: "so confusing for the job pipeline part, like the pipeline and the discovery").
+// (owner, 2026-10-23: "so confusing for the job pipeline part, like the pipeline and the discovery"). Adding a job
+// link is the paste box above the list, and ⌘K.
 function Pipeline() {
   const { route, go, counts: all } = useWorkspace();
   const [query, setQuery] = useDraft("pipeline-query", "");
   const filter = (route.filter || "all") as Group | "all";
-  // Old links to the Pipeline's "Not started" list now open Discovered.
-  useEffect(() => {
-    if (filter === "new") go({ view: "jobs", tab: "discovered" });
-  }, [filter, go]);
-  const list = usePipelinePage(filter === "new" ? "all" : filter, query);
+  const list = usePipelinePage(filter, query);
   // Exact group counts read together with the rows on screen, so a chip and its list always agree.
   const counts = list.counts?.groups || all.groups;
   const q = query.trim();
@@ -99,8 +93,6 @@ function Pipeline() {
           return text ? <Note>{text}</Note> : null;
         },
       },
-      { key: "ats", header: "Platform", hideBelow: 860, cell: (r) => <Note>{r.job.ats}</Note> },
-      { key: "tries", header: "Tries", num: true, hideBelow: 860, cell: (r) => r.attempts || "—" },
       {
         key: "updated",
         header: "Updated",
@@ -167,7 +159,7 @@ function Pipeline() {
           <PipelineBulk
             selection={selection}
             rows={list.rows}
-            filter={filter === "new" ? "all" : filter}
+            filter={filter}
             query={q}
             total={list.paging.total}
           />
