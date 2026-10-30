@@ -247,6 +247,7 @@ export function MailSettings() {
       </Panel>
 
       <Panel title={`Employer rules · ${rules.length}`}>
+        <div className="ax-stack">
         <p className="ax-hint">Only for employers outside the built-in rules. Use the employer's path on shared ATS domains.</p>
         {mailboxes.length > 0 ? (
           <form
@@ -355,6 +356,7 @@ export function MailSettings() {
                 {
                   key: "act",
                   header: <span className="sr-only">Remove</span>,
+                  pin: true,
                   cell: (r) => (
                     <ConfirmButton
                       label="Remove"
@@ -370,6 +372,7 @@ export function MailSettings() {
             <Pagination paging={rulePaging} label="Rule pages" />
           </div>
         )}
+        </div>
       </Panel>
 
       <Panel title="Recent verifications">

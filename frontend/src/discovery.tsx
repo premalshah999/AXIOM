@@ -373,6 +373,7 @@ function EmployerBoards({ board: b, reload }: { board: Board; reload: () => Prom
             {
               key: "act",
               header: <span className="sr-only">Actions</span>,
+              pin: true,
               cell: (s) =>
                 (failing(s) || !s.enabled) && s.kind !== "web_search" ? (
                   <Button size="sm" disabled={pending !== null} onClick={() => off(s, !s.enabled)}>

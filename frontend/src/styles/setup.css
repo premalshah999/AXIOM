@@ -29,6 +29,10 @@
 .ax-row > .ax-check {
   flex: 1 1 260px;
 }
+.ax-row-main > .ax-link {
+  align-self: flex-start;
+  text-align: left;
+}
 
 /* A fold's summary: a quiet chevron that turns when it is open. */
 .ax-fold > summary {

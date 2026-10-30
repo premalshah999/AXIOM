@@ -119,6 +119,7 @@ export function LearnedAnswers() {
             {
               key: "act",
               header: <span className="sr-only">Actions</span>,
+              pin: true,
               cell: (e) => (
                 <ConfirmButton
                   label="Forget"
@@ -276,18 +277,19 @@ export function AccountSettings() {
                 hint={q || filter !== "all" ? undefined : "They appear after the first application that needs one."}
               />
             }
-            minWidth={600}
+            minWidth={340}
             columns={[
               {
                 key: "site",
                 header: "Employer site",
                 truncate: true,
-                width: 230,
+                width: 150,
                 cell: (a) => (a.origin ? <External href={a.origin}>{a.host}</External> : a.host),
               },
               {
                 key: "status",
                 header: "Status",
+                width: 150,
                 cell: (a) => (
                   <span title={a.detail}>
                     <Pill tone={ACCOUNT_TONE[a.status] || "neutral"} dot>
