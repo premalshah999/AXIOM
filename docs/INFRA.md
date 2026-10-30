@@ -151,6 +151,30 @@ The `execution_v2_deployment_hold` setting still works (`stage: draining` stops 
 autopilot and queue admission honour it) but a deploy no longer needs it; a forgotten hold keeps stopping intake, so
 never leave it at `draining`.
 
+## Database size
+
+`runs.packet` and DBOS's history were 2.2 GB of a 2.8 GB database on 2026-10-30. Three things keep them down:
+
+- **One profile per version.** A new run stores its profile once in `profile_snapshots` (`jobpilot/run_profile.py`) and keeps the hash,
+  the email and `autonomous` on the packet. Read the rest with `run_profile.full(packet, db)`, never from `packet["profile"]`.
+- **`jobpilot compact-runs`** moves the copies out of older runs and drops `browser_checkpoint` from runs nothing can resume
+  (`NEVER_RESUMED`). It reports only, unless given `--apply`. It leaves queued, running and submitting runs alone, and it is safe
+  beside a live application and to repeat.
+- **DBOS retention** deletes finished workflows older than `DBOS_RETENTION_DAYS` (14) every day, starting 15 minutes after a start
+  (`jobpilot/retention.py`). `jobpilot prune-workflows [--days N] [--apply]` does the same by hand; `select value from settings where
+  key = 'dbos_retention'` shows the last round.
+
+PostgreSQL reuses freed space, so its files keep their size until a rewrite. To give the space back, with the app stopped
+(`docker compose stop app`) and free disk equal to the new size:
+
+```sql
+VACUUM (FULL, ANALYZE) runs;
+VACUUM (FULL, ANALYZE) dbos.workflow_status;
+VACUUM (FULL, ANALYZE) dbos.workflow_input;
+VACUUM (FULL, ANALYZE) dbos.workflow_output;
+VACUUM (FULL, ANALYZE) dbos.operation_outputs;
+```
+
 ## Host Chromes
 
 `scripts/chrome-worker.sh` (port 9224) and `scripts/chrome-twin.sh` (port 9225) start Chrome with the same flags and

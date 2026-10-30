@@ -368,8 +368,11 @@ def pin_resume(session, config, job, source, profile, artifact_id=None, continua
     # the exact employment/education context already attached to this draft.
     bound = copy.deepcopy(profile)
     if pinned:
+        from .run_profile import full as full_profile
+
+        started_with = full_profile(previous, session)
         for key in ("work", "education", "evidence", "skills", "languages"):
-            bound[key] = copy.deepcopy(previous.get("profile", {}).get(key, bound.get(key)))
+            bound[key] = copy.deepcopy(started_with.get(key, bound.get(key)))
     else:
         from .features.knowledge.migration import row_id
 

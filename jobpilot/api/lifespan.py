@@ -34,7 +34,15 @@ async def lifespan(app):
 
         # Samples how late the event loop runs; the gates in host_health read it (docs/forensics, 4.2).
         load_task = asyncio.create_task(watch_host(db))
+    retention_task = None
+    if config.enable_workers and config.dbos_retention_days:
+        from ..retention import watch as watch_retention
+
+        retention_task = asyncio.create_task(watch_retention(service))
     yield
+    if retention_task:
+        retention_task.cancel()
+        await asyncio.gather(retention_task, return_exceptions=True)
     if config.enable_workers and config.shutdown_drain_seconds:
         # First of all, while the workers, outbox and mail poller still run: a stop must not cut a commit.
         await service.drain(config.shutdown_drain_seconds)

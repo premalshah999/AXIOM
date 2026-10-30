@@ -90,6 +90,60 @@ def print_trace(config, run_id):
     print(f"\nSnapshots (HTML + screenshots): {folder}")
 
 
+def _sizes(db):
+    """Tables that shrink, in MB as PostgreSQL counts them; {} on SQLite."""
+    from sqlalchemy import text
+
+    if db.engine.dialect.name != "postgresql":
+        return {}
+    with db.engine.connect() as c:
+        return {
+            "runs": round(c.execute(text("select pg_total_relation_size('runs')")).scalar() / 1e6),
+            "profile_snapshots": round(c.execute(text("select pg_total_relation_size('profile_snapshots')")).scalar() / 1e6),
+            "database": round(c.execute(text("select pg_database_size(current_database())")).scalar() / 1e6),
+        }
+
+
+def compact_runs(config, apply, say=print) -> int:
+    """The report goes to stdout as JSON. Safe beside a live application."""
+    import json
+
+    from .db import Database
+    from .run_profile import compact_runs as compact
+
+    db = Database(config.database_url)
+    before = _sizes(db)
+    report = compact(
+        db,
+        apply=apply,
+        progress=lambda r: say(f"{r['runs_scanned']} runs read, {r['runs_changed']} to change", flush=True),
+    )
+    say(json.dumps({**report, "sizes_before_mb": before, "sizes_after_mb": _sizes(db)}, indent=1))
+    if apply and before:
+        say("PostgreSQL reuses the freed space but its files keep their size until: VACUUM (FULL, ANALYZE) runs;")
+        say("That locks the table while it runs, so stop the app first. It needs free disk equal to the new size.")
+    elif not apply:
+        say("Nothing changed. Run again with --apply to write this.")
+    return 0
+
+
+def prune_workflows(config, days, apply, say=print) -> int:
+    import json
+
+    from .retention import has_history, open_system_database, prune
+
+    days = config.dbos_retention_days if days is None else days
+    if days <= 0:
+        say("Retention is off (DBOS_RETENTION_DAYS=0); pass --days to choose an age.")
+        return 1
+    database = open_system_database(config)
+    try:
+        say(json.dumps(prune(database, days, apply=apply), indent=1) if has_history(database) else "No DBOS history yet.")
+    finally:
+        database.destroy()
+    return 0
+
+
 def reset_password(config, ask=None, say=print) -> int:
     """Set the owner's dashboard password from the host, without echoing it, and sign every browser out.
 
@@ -148,6 +202,11 @@ def main():
     trace = sub.add_parser("trace", help="Summarize the step trace of a run")
     trace.add_argument("run_id")
     sub.add_parser("mcp", help="Serve read-only application tools over MCP stdio")
+    compact = sub.add_parser("compact-runs", help="Drop duplicate profiles and unneeded checkpoints from runs not in flight")
+    compact.add_argument("--apply", action="store_true", help="Write the changes; without it this only reports")
+    prune = sub.add_parser("prune-workflows", help="Delete finished DBOS workflows past the retention age")
+    prune.add_argument("--days", type=int, help="Keep this many days (default DBOS_RETENTION_DAYS)")
+    prune.add_argument("--apply", action="store_true", help="Delete them; without it this only counts")
     verify = sub.add_parser(
         "verify", help="Exercise the running installation with two synthetic browser runs"
     )
@@ -170,6 +229,13 @@ def main():
         print(config.app_token)
     elif args.command == "reset-password":
         raise SystemExit(reset_password(config))
+    elif args.command in {"compact-runs", "prune-workflows"}:
+        import os
+
+        os.nice(10)  # Beside live browsers: both are background work.
+        if args.command == "compact-runs":
+            raise SystemExit(compact_runs(config.prepare(), args.apply))
+        raise SystemExit(prune_workflows(config.prepare(), args.days, args.apply))
     elif args.command == "mcp":
         from .mcp_server import create_server
 

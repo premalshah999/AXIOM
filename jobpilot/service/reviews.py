@@ -396,7 +396,9 @@ class ReviewsMixin:
                 duplicates.append(rid)
                 continue
             seen.add(signature)
-            options, context, profile = options or [], context or {}, (packet or {}).get("profile") or {}
+            from ..run_profile import full as full_profile
+
+            options, context, profile = options or [], context or {}, full_profile(packet, self.db)
             outside = residence_outside(question, options, profile.get("facts"), profile.get("location", ""))
             from ..sensitive_ids import sensitive_field
 

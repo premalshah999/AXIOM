@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     data_dir: Path = Path(".data")
     database_url: str = ""
     dbos_database_url: str = ""
+    # DBOS never forgets a finished workflow (845 MB by 2026-10-30, most of it source sweeps). Days to keep them; 0 keeps all.
+    dbos_retention_days: int = Field(default=14, ge=0, le=3650)
     app_token: str = ""
     secure_cookies: bool = False
     base_url: str = "http://127.0.0.1:8080"
