@@ -103,6 +103,15 @@ class Run(Base):
     created_at: Mapped[str] = mapped_column(String, default=now)
 
 
+class ProfileSnapshot(Base):
+    """A profile exactly as some run started with it (run_profile.py)."""
+
+    __tablename__ = "profile_snapshots"
+    version: Mapped[str] = mapped_column(String, primary_key=True)
+    profile: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[str] = mapped_column(String, default=now)
+
+
 class Event(Base):
     __tablename__ = "events"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

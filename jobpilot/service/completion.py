@@ -146,8 +146,9 @@ class CompletionMixin:
                 result = {**result, "state": "closed", "reason": "The posting is closed: " + str(result["reason"])[:300]}
             if state in {"needs_review", "waiting_answer"} and result.get("reviews"):
                 from ..answers import protected_status_missing, residence_outside
+                from ..run_profile import full as full_profile
 
-                profile = run.packet.get("profile") or {}
+                profile = full_profile(run.packet, s)
                 outside = next(
                     (
                         where

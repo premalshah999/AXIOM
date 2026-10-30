@@ -482,6 +482,7 @@ class QueueingMixin:
                     continuation=continuation,
                 )
             from ..pipeline_comparison import assign, assign_pool, normalize_ats, pool_capacity
+            from ..run_profile import keep as keep_profile
 
             pipeline_source = continuation or (
                 s.get(Run, recovery_source_run) if recovery_source_run else None
@@ -515,7 +516,7 @@ class QueueingMixin:
                 mode=mode,
                 resume_id=chosen.id,
                 packet={
-                    "profile": packet_profile,
+                    **keep_profile(s, packet_profile),
                     "resume_path": str(path),
                     "resume_sha": chosen.sha256,
                     "resume_text": "" if job.demo else (chosen.text or "")[:16000],

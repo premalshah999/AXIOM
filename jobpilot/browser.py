@@ -1355,7 +1355,9 @@ class BrowserEngine:
                     pass  # The scanner/navigator can handle an employer-hosted entry page.
                 # File upload clients initialize after React hydration.
                 await page.wait_for_timeout(2000)
-            self.profile = Profile.model_validate(run["packet"]["profile"])
+            from .run_profile import full as full_profile
+
+            self.profile = Profile.model_validate(full_profile(run["packet"], self.db))
             original = Path(run["packet"]["resume_path"])
             if hashlib.sha256(original.read_bytes()).hexdigest() != run["packet"]["resume_sha"]:
                 raise RuntimeError("Selected resume changed since this run was queued")
