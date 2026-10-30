@@ -291,11 +291,17 @@
       if(!historyMemo.has(p)) {
         const inputs=deepQuery(p,'input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=password]),select,textarea').filter(visible);
         const labelled=inputs.map(e=>({e,label:clean(label(e)).replace(/\s*[*✱]\s*$/,'')}));
-        const companies=labelled.filter(x=>/^(?:company(?: name)?|employer(?: name)?)$/i.test(x.label));
-        const titles=labelled.filter(x=>/^(?:(?:job|position) )?title$/i.test(x.label));
-        const schools=labelled.filter(x=>/^(?:school|university|college|institution)(?: name)?$/i.test(x.label));
+        const companies=labelled.filter(x=>/^(?:(?:most recent|current|previous) )?(?:company(?: name)?|employer(?: name)?)$/i.test(x.label));
+        const titles=labelled.filter(x=>/^(?:(?:job|position) )?title$|^(?:job |position )?role$/i.test(x.label));
+        let schools=labelled.filter(x=>/^(?:school|university|college|institution)(?: name)?$/i.test(x.label));
+        // A school's Other picker and its free-text name describe one row.
+        if(schools.length===2) {
+          const names=schools.filter(x=>/ name$/i.test(x.label));
+          const pickers=schools.filter(x=>x.e.matches('select,[role=combobox]'));
+          if(names.length===1 && pickers.length===1 && names[0]!==pickers[0]) schools=names;
+        }
         // TikTok's rows (2026-10-28) date themselves with one "Start & end date" period picker.
-        const dates=labelled.filter(x=>/^(?:from|to|(?:start|end) date(?: (?:year|month))?)$/i.test(x.label) || DATE_RANGE.test(x.label));
+        const dates=labelled.filter(x=>/^(?:from|to|(?:start|end)(?: date)?(?: (?:year|month))?|graduation (?:date|year))$/i.test(x.label) || DATE_RANGE.test(x.label));
         // A whole application can contain one history row. Its contact and
         // narrative controls must not inherit that row when climbing ancestors.
         const outsideHistory=labelled.some(x=>/first name|last name|email|phone|hiring team|message to|why (?:us|this)|cover letter/i.test(x.label));
@@ -339,9 +345,8 @@
     if (education?.value) return 'Education at ' + clean(education.value);
     const row=historyRow(el);
     if(row) {
-      const anchors=deepQuery(document,'input,select,textarea').filter(visible).filter(e=>row.kind==='work'
-        ? /^(?:company(?: name)?|employer(?: name)?)$/i.test(clean(label(e)).replace(/\s*[*✱]\s*$/,''))
-        : /^(?:school|university|college|institution)(?: name)?$/i.test(clean(label(e)).replace(/\s*[*✱]\s*$/,'')));
+      const anchors=[...new Set(deepQuery(document,'input,select,textarea').filter(visible)
+        .map(e=>historyRow(e)).filter(r=>r?.kind===row.kind).map(r=>r.anchor))];
       return (row.kind==='work'?'Work Experience ':'Education ')+(anchors.indexOf(row.anchor)+1);
     }
     let g = composedClosest(parentOf(el),'[role=group]');
