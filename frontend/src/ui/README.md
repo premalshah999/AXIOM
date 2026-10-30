@@ -19,7 +19,7 @@ import { Button, Panel, Pill, Table } from "./ui/index";
 `{ title?, actions?, children, flush?, className?, id? }` A plain titled section on a hairline. `actions` sits right of the title. `flush` is for a table inside, which brings its own rules.
 
 ## Pill
-`{ tone?: "neutral" | "brand" | "ok" | "warn" | "bad" | "info", children, title? }` A status as muted text. Only `warn` and `bad` add a small dot and full-strength text. `dot` is accepted and adds nothing.
+`{ tone?: "neutral" | "brand" | "ok" | "warn" | "bad" | "info" | "fix", children, title?, dot? }` A short status. Every tone and the dot are always in the markup; `components.css` decides the look (today only `warn` and `bad` show the dot).
 
 ## Tabs
 - `RouteTabs { view, tabs: {id, label, count?}[], label, current? }` Quiet text tabs that are real links and set the route `tab` for `view` (`go({ view, tab })`). Unknown `route.tab` falls back to the first tab. Profile's and Settings' lists are `PAGE_TABS` in `src/shell/nav.ts`.
@@ -46,7 +46,7 @@ Inside `FormGrid` (`src/setup-kit.tsx`) on a page, fields become one column of l
 `{ open, onClose, title, children, footer?, width? }` A right-side drawer with its own scroll, Esc and scrim to close, focus moved in and returned on close, Tab kept inside. Mark a field `data-autofocus` to focus it on open.
 
 ## Empty
-`{ title, hint?, action? }` One line of what is missing and the one action that fixes it, which reads as a link. `icon` is accepted and not drawn.
+`{ title, hint?, action?, icon? }` One line of what is missing and the one action that fixes it, which reads as a link. `icon` is rendered and hidden by `components.css`.
 
 ## Toast
 `ToastStack { toasts, onDismiss }` is rendered once by `main.tsx`. Pages raise toasts with `useNotify()` from `src/hooks.ts`: `notify("ok" | "info" | "error", "text")`. Errors announce as alerts and stay until dismissed.

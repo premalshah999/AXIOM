@@ -1,6 +1,24 @@
 # AXIOM dashboard design system (v2, 2026-10-30)
 
-Quiet and sparse, in the manner of Linear and Stripe's dashboard. Two themes.
+**Status: the structure here is settled; the look is not.** The owner rejected the navy-and-Geist look on 2026-10-30 ("supergeneric"), and a new visual identity (fonts, palette, component look) is being designed. Navigation, routes, the two-theme mechanism and the primitives' APIs stand. Where this document names a colour, a font, a size or a weight, treat it as a placeholder until the identity lands, and update it then.
+
+## Swapping the identity
+
+Edit only these. No page or primitive TSX needs to change:
+
+- `src/styles/tokens.css`: every colour and every font, including `@font-face` and the font imports. It is the only file with colour literals.
+- `src/styles/base.css`: element defaults, including how checkboxes and radios are drawn.
+- `src/styles/components.css` and `shell.css`: what each primitive looks like.
+
+Three things to know when doing it:
+
+- The Geist faces declare `font-weight: 400 500`, and `base.css` sets `font-synthesis-weight: none`, so any heavier weight renders at 500 until those faces change.
+- Every status tone is in the markup (`.ax-pill.is-ok`, `is-brand`, `is-info`, `is-fix`, `is-warn`, `is-bad`, `is-neutral`, with the dot element always present), and only the CSS decides that just warn and bad show a dot.
+- The legacy names at the end of `tokens.css` map `--ok`, `--info`, `--hold` and `--fix` to neutral text and `--brand-soft` to a neutral tint. Those mappings set how unconverted pages look.
+
+The browser's `theme-color` is read from `--ground` at runtime, and the mark in `src/shell/Brand.tsx` draws in `--ink`.
+
+## Principles
 
 The test for every element: does the person need this right now to decide or act? If not, remove it, or put it one click away. When in doubt, delete. A screen has one obvious thing to look at and at most one primary button.
 
@@ -24,7 +42,7 @@ Exactly two, set on `<html data-theme>`. A missing or unknown value is dark.
 | `dark` (default) | deep navy `#0b1220` | near-white | restrained blue |
 | `light` | warm white `#fbf9f7` | near-black | maroon `#8c1d40` |
 
-The toggle is the sun or moon item in the account menu (and "Switch to … theme" in the palette). The choice is saved in `localStorage` under `axiom.theme` and applied before first paint by the inline script in `index.html`. Old stored values still work: `navy`, `slate` and `system` read as dark; `maroon` and `ivory` read as light. `readTheme` in `src/shell/prefs.ts` and the inline script must agree.
+The toggle is the sun or moon item in the account menu (and "Switch to … theme" in the palette). The choice is saved in `localStorage` under `axiom.theme` and `data-theme` is set before first paint by the inline script in `index.html`. Old stored values still work: `navy`, `slate` and `system` read as dark; `maroon` and `ivory` read as light. `readTheme` in `src/shell/prefs.ts` and the inline script must agree.
 
 **The accent appears only on:** the primary button, the current sidebar item, links, focus rings. Everything else is neutral: tabs, filters, switches, checkboxes and the brand mark use the text colours.
 
@@ -42,6 +60,7 @@ Contrast is WCAG AA in both themes on both surfaces, including `--ink-3` at 12px
 | Accent | `--brand` (button fill), `--brand-ink`, `--accent-text` (links, current item), `--focus` |
 | Status | `--warn`, `--bad` |
 | Overlays | `--overlay-shadow`, `--scrim` |
+| Resume pages | `--paper`, `--paper-shadow` |
 | Scale | `--text-meta`, `--text-ui`, `--text-body`, `--text-title`, `--radius`, `--space-1` to `--space-12` |
 | Layout | `--page-w`, `--gutter`, `--side-w`, `--side-w-collapsed`, `--top-h` |
 
