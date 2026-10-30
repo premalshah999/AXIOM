@@ -7,8 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { useNotify, usePoll } from "./hooks";
-import { ConfirmButton, Lede } from "./setup-kit";
-import { Button, Panel } from "./ui/index";
+import { Button, ConfirmButton, Panel } from "./ui/index";
 
 type Info = { saved: boolean; sha256?: string; name?: string };
 const TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
@@ -88,8 +87,8 @@ export function ProfilePhoto({ name }: { name: string }) {
             <span aria-hidden="true">{initials(name)}</span>
           )}
         </span>
-        <div className="ax-stack" style={{ flex: "1 1 260px", gap: "var(--space-2)" }}>
-          <Lede>Used where an application asks for a photo. Optional; JPEG, PNG, GIF or WebP, up to 5 MB.</Lede>
+        <div className="ax-photo-body">
+          <p className="ax-hint">Optional. Used where an application asks for a photo. JPEG, PNG, GIF or WebP, up to 5 MB.</p>
           <input
             ref={input}
             type="file"

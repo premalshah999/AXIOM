@@ -1,14 +1,14 @@
 // Setup › Discovery: what the job board looks for, and the employer boards it reads.
 import { useEffect, useState } from "react";
-import { Search } from "lucide-react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useDraft, useNow, usePoll } from "./hooks";
 import { Pagination, usePagination } from "./pagination";
-import { Actions, ConfirmButton, FormGrid, Lede, SaveBar, SwitchRow } from "./setup-kit";
+import { Actions, FormGrid, SaveBar, SwitchRow } from "./setup-kit";
 import type { Board, BoardSettings } from "./types";
-import { ago, External, plural } from "./ui";
-import { Button, Empty, Input, Panel, Select, Table } from "./ui/index";
+import { ago, plural } from "./format";
+import { SearchBox } from "./worktools";
+import { Button, ConfirmButton, Empty, External, Input, Loading, Panel, Select, Table } from "./ui/index";
 
 // The page needs the settings and the boards, not the listings: one listing keeps the answer from carrying them all.
 const BOARD = "/job-board?include_sources=true&page=1&size=1";
@@ -36,9 +36,7 @@ export function DiscoverySettings() {
             }
           />
         ) : (
-          <p className="ax-hint" role="status">
-            Loading discovery settings…
-          </p>
+          <Loading label="Loading discovery settings…" />
         )}
       </Panel>
     );
@@ -70,15 +68,13 @@ export function DiscoverySettings() {
   return (
     <>
       <form
-        className="ax-stack"
-        style={{ gap: "var(--space-5)" }}
+        className="ax-sections"
         onSubmit={(e) => {
           e.preventDefault();
           if (!fitError && !targetError) save();
         }}
       >
         <Panel title="What to look for">
-          <Lede>Discovery finds recent US roles; ranking scores each against your profile and resumes in batches.</Lede>
           <SwitchRow
             label="Automatic discovery"
             note="Check employer boards and search on a schedule."
@@ -93,12 +89,11 @@ export function DiscoverySettings() {
           />
           <SwitchRow
             label="Search the web for new employers"
-            note={`${search.provider}.${search.google_configured ? "" : " Add a Serper key in Setup › Connections for Google results; free search works now."}`}
+            note={`${search.provider}.${search.google_configured ? "" : " Add a Serper key in Settings › Connections for Google results; free search works now."}`}
             checked={!!form.web_search}
             onChange={() => set("web_search", !form.web_search)}
           />
-          <div style={{ marginTop: "var(--space-4)" }}>
-            <FormGrid>
+          <FormGrid>
               <Select
                 label="Check boards"
                 value={form.interval_hours}
@@ -120,7 +115,6 @@ export function DiscoverySettings() {
                 <option value={720}>30 days</option>
               </Select>
             </FormGrid>
-          </div>
         </Panel>
         <Panel title="Automatic applications">
           <SwitchRow
@@ -129,8 +123,7 @@ export function DiscoverySettings() {
             checked={!!form.auto_apply}
             onChange={() => set("auto_apply", !form.auto_apply)}
           />
-          <div style={{ marginTop: "var(--space-4)" }}>
-            <FormGrid>
+          <FormGrid>
               <Input
                 label="Minimum fit to apply"
                 hint="0–100. Jobs ranked below this are never applied to automatically."
@@ -152,7 +145,6 @@ export function DiscoverySettings() {
                 onChange={(e) => set("batch_target", Number(e.target.value))}
               />
             </FormGrid>
-          </div>
         </Panel>
         <SaveBar
           dirty={dirty}
@@ -250,17 +242,18 @@ function EmployerBoards({ board: b, reload }: { board: Board; reload: () => Prom
         />
       }
     >
-      <Lede>
-        {plural(b.source_count ?? sources.length, "board")} checked every {interval} {interval === 1 ? "hour" : "hours"}
+      <div className="ax-stack">
+      <p className="ax-hint">
+        Checked every {interval} {interval === 1 ? "hour" : "hours"}
         {health
           ? health.failing
-            ? ` · ${health.failing} failing${health.dead ? `, ${health.dead} for 3 or more checks in a row` : ""}`
+            ? `, ${health.failing} failing${health.dead ? ` (${health.dead} for 3 or more checks in a row)` : ""}`
             : ""
           : errors.length
-            ? ` · ${errors.length} couldn't be read last time`
+            ? `, ${errors.length} couldn't be read last time`
             : ""}
-        . Boards that fail keep their retry cooldown; they don't block discovery from other sources.
-      </Lede>
+        .
+      </p>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -299,7 +292,6 @@ function EmployerBoards({ board: b, reload }: { board: Board; reload: () => Prom
             ))}
           </Select>
           <Input
-            className="is-wide"
             label="Board URL"
             hint="The company's board, not a single job."
             required
@@ -310,28 +302,14 @@ function EmployerBoards({ board: b, reload }: { board: Board; reload: () => Prom
           />
         </FormGrid>
         <Actions>
-          <Button
-            type="submit"
-            variant="primary"
-            loading={pending === "add"}
-            disabled={pending !== null && pending !== "add"}
-          >
+          <Button type="submit" loading={pending === "add"} disabled={pending !== null && pending !== "add"}>
             Add board
           </Button>
         </Actions>
       </form>
-      <div className="ax-stack" style={{ marginTop: "var(--space-5)" }}>
+      <div className="ax-stack">
         <div className="ax-toolbar">
-          <label className="search">
-            <Search size={15} aria-hidden="true" />
-            <input
-              type="search"
-              aria-label="Search employer boards"
-              placeholder="Search boards"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </label>
+          <SearchBox label="Search employer boards" placeholder="Search boards" value={query} onChange={setQuery} />
           {!!health?.failing && (
             <Button
               size="sm"
@@ -362,8 +340,8 @@ function EmployerBoards({ board: b, reload }: { board: Board; reload: () => Prom
               width: 260,
               cell: (s) => (
                 <>
-                  <strong style={{ fontWeight: 560 }}>{s.name}</strong>{" "}
-                  <External href={s.url} className="ax-hint">
+                  <strong>{s.name}</strong>{" "}
+                  <External href={s.url}>
                     {(s.kind || "").replace("_", " ")}
                   </External>
                 </>
@@ -389,16 +367,13 @@ function EmployerBoards({ board: b, reload }: { board: Board; reload: () => Prom
                             : ""
                         }`
                       : `${plural(s.scan?.matched ?? 0, "match", "matches")} · ${plural(s.scan?.checked ?? 0, "posting")} checked`;
-                return (
-                  <span title={text} style={{ color: failed && s.enabled && !checking ? "var(--warn)" : undefined }}>
-                    {text}
-                  </span>
-                );
+                return <span title={text}>{text}</span>;
               },
             },
             {
               key: "act",
               header: <span className="sr-only">Actions</span>,
+              pin: true,
               cell: (s) =>
                 (failing(s) || !s.enabled) && s.kind !== "web_search" ? (
                   <Button size="sm" disabled={pending !== null} onClick={() => off(s, !s.enabled)}>
@@ -409,6 +384,7 @@ function EmployerBoards({ board: b, reload }: { board: Board; reload: () => Prom
           ]}
         />
         <Pagination paging={paging} label="Board pages" />
+      </div>
       </div>
     </Panel>
   );

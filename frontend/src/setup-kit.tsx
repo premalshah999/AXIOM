@@ -1,13 +1,10 @@
-// Small shared pieces for the Setup pages, built on the ax- primitives (src/ui/index). Nothing here knows a page.
+// Small shared pieces for Profile and Settings, built on the ax- primitives (src/ui/index). Nothing here knows a page.
 import { Eye, EyeOff } from "lucide-react";
-import { useEffect, useId, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
+import { useEffect, useId, useState, type InputHTMLAttributes, type ReactNode } from "react";
 import "./styles/setup.css";
-import { Button } from "./ui/index";
-
-/** A muted paragraph under a panel's title. Almost none should remain: a person rarely reads them. */
-export function Lede({ children }: { children: ReactNode }) {
-  return <p className="ax-lede">{children}</p>;
-}
+import { api } from "./api";
+import { useAction } from "./hooks";
+import { Button, ConfirmButton } from "./ui/index";
 
 /** On a page, one column of labelled rows divided by hairlines; in a drawer, stacked fields. */
 export function FormGrid({ children }: { children: ReactNode }) {
@@ -90,87 +87,13 @@ export function SwitchRow({
         role="switch"
         aria-checked={checked}
         aria-labelledby={id}
-        className="switch"
+        className="ax-switch"
         disabled={disabled}
         onClick={onChange}
       >
         <i />
       </button>
     </div>
-  );
-}
-
-/**
- * A destructive action asks first, in place: the button becomes "Cancel / Yes, <verb>". Esc cancels, focus moves to the
- * confirming button. `onConfirm` may be async; the confirm closes when it settles.
- */
-export function ConfirmButton({
-  label,
-  confirm,
-  note,
-  onConfirm,
-  pending,
-  disabled,
-  variant = "danger",
-  size = "sm",
-}: {
-  label: string;
-  confirm: string;
-  note?: string;
-  onConfirm: () => unknown;
-  pending?: boolean;
-  disabled?: boolean;
-  variant?: "danger" | "secondary";
-  size?: "sm" | "md";
-}) {
-  const [asking, setAsking] = useState(false);
-  const root = useRef<HTMLSpanElement>(null);
-  const was = useRef(false);
-  // Focus follows the swap: to the confirming button when it opens, back to the first button when it closes.
-  useEffect(() => {
-    if (asking || was.current) root.current?.querySelector("button")?.focus();
-    was.current = asking;
-  }, [asking]);
-  return (
-    <span
-      ref={root}
-      className="ax-confirm"
-      role={asking ? "group" : undefined}
-      aria-label={asking ? note || confirm : undefined}
-      onKeyDown={(e) => {
-        if (asking && e.key === "Escape") {
-          e.stopPropagation();
-          setAsking(false);
-        }
-      }}
-    >
-      {!asking ? (
-        <Button variant={variant} size={size} disabled={disabled || pending} onClick={() => setAsking(true)}>
-          {label}
-        </Button>
-      ) : (
-        <>
-          {note && <span className="ax-confirm-note">{note}</span>}
-          <Button
-            variant="danger"
-            size={size}
-            loading={pending}
-            onClick={async () => {
-              try {
-                await onConfirm();
-              } finally {
-                setAsking(false);
-              }
-            }}
-          >
-            {confirm}
-          </Button>
-          <Button variant="ghost" size={size} onClick={() => setAsking(false)}>
-            Cancel
-          </Button>
-        </>
-      )}
-    </span>
   );
 }
 
@@ -264,5 +187,51 @@ export function Facts({ items }: { items: [ReactNode, ReactNode][] }) {
         </div>
       ))}
     </dl>
+  );
+}
+
+/**
+ * Worker counts are sized when the app starts. This says so and restarts now: new starts pause, a final submit in
+ * progress finishes, then the app comes back on its own in under a minute and this page reloads.
+ */
+export function RestartNotice({ message }: { message: string }) {
+  const { pending, run } = useAction();
+  const [restarting, setRestarting] = useState(false);
+  const restart = () =>
+    run(
+      "restart",
+      async () => {
+        await api("/system/restart", "POST");
+        setRestarting(true);
+        const started = Date.now();
+        const wait = async () => {
+          await new Promise((r) => setTimeout(r, 4000));
+          try {
+            await api("/runtime-health", "GET");
+            if (Date.now() - started > 8000) return location.reload();
+          } catch {
+            /* still restarting */
+          }
+          if (Date.now() - started < 180000) void wait();
+        };
+        void wait();
+      },
+      "Restarting. Running applications resume after the restart.",
+    );
+  return (
+    <div className="ax-notice is-warn" role="status">
+      <span>{restarting ? "Restarting. This page reloads when the app is back." : message}</span>
+      {!restarting && (
+        <ConfirmButton
+          label="Restart now"
+          confirm="Restart"
+          note="Applications pause, final submits finish, then it comes back."
+          variant="secondary"
+          size="md"
+          pending={pending === "restart"}
+          onConfirm={restart}
+        />
+      )}
+    </div>
   );
 }

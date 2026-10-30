@@ -1,0 +1,294 @@
+/* The resume editor (src/editor.tsx) and its PDF preview (src/pdfpages.tsx): a form at the left, the page at the right.
+   It fills the region (.ax-scroll.is-fixed) and each side scrolls inside itself. Tokens only. */
+.main.view-editor {
+  height: 100%;
+  padding: 0;
+}
+/* The states before the editor opens (no master, an unreadable answer) keep the page gutter that the editor itself drops. */
+.ax-ed-state {
+  padding: var(--space-4) var(--gutter);
+}
+.ax-ed {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.ax-ed-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-2) var(--gutter);
+  border-bottom: 1px solid var(--line);
+}
+.ax-ed-status {
+  margin-left: auto;
+}
+.ax-ed-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+.ax-ed-grid {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(340px, 440px) minmax(0, 1fr);
+  min-height: 0;
+}
+.ax-ed-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+}
+.ax-ed-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4) 0 var(--gutter);
+}
+.ax-ed-tabs .ax-tabs {
+  flex: 1;
+}
+.ax-ed-jump {
+  display: none;
+}
+.ax-ed-scroll {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-4);
+  overflow: auto;
+  padding: var(--space-4) var(--space-4) var(--space-12) var(--gutter);
+}
+.ax-ed-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.ax-ed-fields:disabled {
+  opacity: 0.5;
+}
+.ax-ed-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.ax-ed-group > h2 {
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--line);
+}
+.is-off {
+  opacity: 0.55;
+}
+.ax-ed-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.ax-ed-title {
+  flex: 1;
+}
+.ax-ed-entry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-2) 0 var(--space-1);
+}
+.ax-ed-bullet {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: start;
+}
+.ax-ed-bullet input[type="checkbox"] {
+  margin-top: var(--space-3);
+}
+.ax-ed-tools {
+  display: flex;
+  flex-direction: column;
+}
+.ax-ed-tools .ax-icon-btn {
+  width: 24px;
+  height: 24px;
+}
+.ax-ed-templates {
+  display: flex;
+  flex-direction: column;
+}
+.ax-ed-templates button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: var(--text-ui);
+  text-align: left;
+  cursor: pointer;
+}
+.ax-ed-templates button[aria-checked="true"] {
+  padding-right: var(--space-2);
+  padding-left: var(--space-2);
+  background: var(--tint);
+  color: var(--ink);
+}
+.ax-ed-templates small {
+  color: var(--ink-3);
+}
+.ax-ed-slider,
+.ax-ed-choice {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr) 56px;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--ink-2);
+  font-size: var(--text-ui);
+}
+.ax-ed-choice {
+  grid-template-columns: 110px minmax(0, 1fr);
+}
+.ax-ed-slider input[type="range"] {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  accent-color: var(--ink);
+}
+.ax-ed-slider output {
+  color: var(--ink);
+  text-align: right;
+}
+.ax-ed-code {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  height: min(62vh, 640px);
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+}
+.ax-ed-gutter {
+  overflow: hidden;
+  padding: var(--space-2);
+  border-right: 1px solid var(--line);
+  color: var(--ink-3);
+  font: var(--text-meta) / 1.6 var(--font-code);
+  text-align: right;
+  user-select: none;
+}
+.ax-ed-gutter span {
+  display: block;
+}
+.ax-ed-gutter .is-bad {
+  color: var(--bad);
+}
+.ax-ed-code textarea {
+  height: 100%;
+  padding: var(--space-2);
+  overflow: auto;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font: var(--text-meta) / 1.6 var(--font-code);
+  resize: none;
+  white-space: pre;
+}
+
+/* The preview: the page on a neutral ground; a failed compile leaves the last good page, dimmed, and lists why under it. */
+.ax-ed-preview {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--tint);
+}
+.ax-ed-preview > .ax-chips {
+  padding: var(--space-2) var(--space-4) 0;
+}
+.ax-ed-preview.is-stale .ax-pdf-stack {
+  opacity: 0.55;
+}
+.ax-ed-errors {
+  align-items: flex-start;
+  flex-direction: column;
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--line);
+  background: var(--ground);
+}
+.ax-ed-errors ul {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+.ax-pdf {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.ax-pdf-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+}
+.ax-pdf-host {
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-4) var(--space-6) var(--space-6);
+}
+.ax-pdf-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-5);
+}
+.ax-pdf-page {
+  display: block;
+  background: var(--paper);
+  box-shadow: var(--paper-shadow);
+}
+
+/* Narrow: the form is above the page and the region scrolls as a whole. */
+@media (max-width: 960px) {
+  .ax-scroll.is-fixed {
+    overflow-y: auto;
+  }
+  .main.view-editor,
+  .ax-ed {
+    height: auto;
+  }
+  .ax-ed-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ax-ed-panel {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .ax-ed-scroll {
+    overflow: visible;
+  }
+  .ax-ed-preview {
+    height: 80vh;
+  }
+  .ax-ed-jump {
+    display: inline-flex;
+    align-self: center;
+  }
+  .ax-ed-status {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+  }
+  .ax-ed-tabs {
+    padding-left: var(--gutter);
+  }
+}

@@ -299,8 +299,7 @@
     height: 36px;
   }
 }
-.ax-icon-btn,
-.icon-btn {
+.ax-icon-btn {
   display: inline-grid;
   place-items: center;
   flex: none;
@@ -315,8 +314,7 @@
     background var(--dur) var(--ease),
     color var(--dur) var(--ease);
 }
-.ax-icon-btn:hover,
-.icon-btn:hover {
+.ax-icon-btn:hover {
   background: var(--tint);
   color: var(--ink);
 }
@@ -341,18 +339,6 @@
   color: var(--accent-text);
   font-size: var(--text-ui);
 }
-.external {
-  color: var(--accent-text);
-  text-decoration: none;
-}
-.external:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-.external::after {
-  color: inherit;
-}
-
 /* ---------- Field ---------- */
 .ax-field {
   display: flex;
@@ -360,19 +346,16 @@
   gap: 6px;
   min-width: 0;
 }
-.ax-label,
-.field-label {
+.ax-label {
   color: var(--ink-2);
   font-size: var(--text-ui);
   font-weight: 400;
 }
-.ax-hint,
-.field-hint {
+.ax-hint {
   color: var(--ink-3);
   font-size: var(--text-meta);
 }
-.ax-error,
-.field-error {
+.ax-error {
   color: var(--bad);
   font-size: var(--text-meta);
 }
@@ -528,7 +511,7 @@
   flex-wrap: wrap;
   gap: var(--space-2);
 }
-.switch {
+.ax-switch {
   position: relative;
   flex: none;
   width: 30px;
@@ -540,7 +523,7 @@
   cursor: pointer;
   transition: background var(--dur) var(--ease);
 }
-.switch i {
+.ax-switch i {
   position: absolute;
   top: 2px;
   left: 2px;
@@ -550,15 +533,15 @@
   background: var(--ground);
   transition: transform var(--dur) var(--ease);
 }
-.switch[aria-checked="true"] {
+.ax-switch[aria-checked="true"] {
   border: 0;
   background: var(--ink);
 }
-.switch[aria-checked="true"] i {
+.ax-switch[aria-checked="true"] i {
   background: var(--ground);
   transform: translateX(12px);
 }
-.switch:disabled {
+.ax-switch:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -867,9 +850,8 @@
   border-top: 1px solid var(--line);
 }
 
-/* ---------- Empty: one line (ui.tsx's legacy Empty, ErrorLine and inline-warn read the same) ---------- */
-.ax-empty,
-.empty {
+/* ---------- Empty: one line ---------- */
+.ax-empty {
   display: flex;
   align-items: baseline;
   flex-direction: row;
@@ -880,37 +862,6 @@
   border-radius: 0;
   color: var(--ink-3);
   font-size: var(--text-ui);
-}
-.empty strong {
-  color: var(--ink-2);
-  font-weight: 400;
-}
-.error-line,
-.inline-warn {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-3);
-  margin: var(--space-2) 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: none;
-  color: var(--ink);
-  font-size: var(--text-ui);
-}
-.error-line::before,
-.inline-warn::before {
-  content: "";
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--bad);
-}
-.inline-warn::before {
-  background: var(--warn);
 }
 .ax-empty > svg {
   display: none;

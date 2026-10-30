@@ -34,6 +34,17 @@ import { Button, Panel, Pill, Table } from "./ui/index";
 
 Inside `FormGrid` (`src/setup-kit.tsx`) on a page, fields become one column of labelled rows divided by hairlines; in a drawer they stack. `.ax-control` on a bare control is not needed for the look: `base.css` draws `input`, `select`, `textarea`, checkboxes and radios.
 
+## Field wrapper and Check
+`Field { label, hint?, error?, children }` puts a label over any control (a list input, a secret input); the label wraps the control, so no id is needed. `Check { checked, onChange(checked), label, note?, disabled? }` is a checkbox with its name and, only where a person could get it wrong, one line of what it does. On a page, put either directly in `FormGrid` for a hairline row. `Textarea` takes `mono` for JSON and code.
+
+## ConfirmButton, Segmented, Loading, ErrorLine, External
+- `ConfirmButton { label, confirm, note?, onConfirm, pending?, variant?: "danger" | "secondary", size? }` asks in place ("Yes, remove / Cancel"); Esc cancels.
+- `Segmented { value, options: {value, label}[], onChange, label, block? }` is a few buttons acting as one radio group (arrow keys move).
+- `Loading { label? }` and `ErrorLine { error, retry? }` are the quiet one-line loading and failure states.
+- `External { href }` is a link to another site that opens a new tab.
+
+Their small bits of CSS are in `styles/setup.css` until the identity moves them into `components.css`.
+
 ## Table
 `Table<T> { columns, rows, rowKey(row), label, onRowClick?, selected?, onSelectedChange?, bulk?, loading?, error?, empty?, fill?, minWidth?, canSelect?, busy?, rowLabel? }`
 - `columns: { key, header, cell(row), num?, width?, truncate?, min?, hideBelow?, pin?, wrap? }[]`. No outer card; rows are one line of 40px with hairline rules. `truncate` ends a cell in an ellipsis and gives it the room left over; `hideBelow` drops a column under 860px or 600px; `pin` keeps the row's actions in view; `wrap` lets a cell grow.

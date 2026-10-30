@@ -93,7 +93,6 @@ export const PAGE_TABS: Partial<Record<View, TabItem[]>> = {
   ],
   settings: [
     { id: "connections", label: "Connections" },
-    { id: "storage", label: "Storage" },
     { id: "accounts", label: "Accounts" },
     { id: "email", label: "Email" },
     { id: "discovery", label: "Discovery" },
