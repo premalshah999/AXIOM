@@ -166,6 +166,7 @@ function App() {
     () => withMarks(derived, marks, snap.requestedAt),
     [derived, marks, snap.requestedAt],
   );
+  const lost = snap.failures >= 2;
   const workspace = useMemo<Workspace | null>(
     () =>
       snap.data && {
@@ -174,13 +175,14 @@ function App() {
         counts: snap.data.counts || NO_COUNTS,
         refresh,
         version,
+        link: { lost, updatedAt: snap.updatedAt },
         marks,
         markJobs,
         route,
         go,
         openJob: (job, run) => go({ ...route, job, run }),
       },
-    [snap.data, rows, refresh, version, marks, markJobs, route, go],
+    [snap.data, rows, refresh, version, lost, snap.updatedAt, marks, markJobs, route, go],
   );
 
   useEffect(() => {
@@ -300,7 +302,7 @@ function App() {
                   </button>
                 </div>
               )}
-              {snap.failures >= 2 && (
+              {lost && (
                 <div className="ax-banner is-bad" role="status">
                   <span>
                     Connection lost{snap.error ? ` (${snap.error.message})` : ""}. Showing data from {ago(snap.updatedAt)};
