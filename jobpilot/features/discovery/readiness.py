@@ -188,8 +188,10 @@ _GATES: dict = {}
 def gated(job, policy):
     """gate(), remembered per posting and policy. Each autopilot tick (every 15 s) gated about 2,000 postings by
     scanning their full descriptions, on threads that hold the interpreter the browsers' event loop needs."""
-    key = (policy.model_dump_json(), job.get("id"), job.get("title"), job.get("url"), job.get("location"),
-           job.get("country"), len(job.get("description") or ""))
+    # Hashes, not the values: each entry kept its own copy of the 289-byte policy text, the title, URL and location (7,100
+    # entries, 50,000 allowed, 2026-10-30), and the policy was serialized again per job.
+    key = (hash(policy.model_dump_json()), job.get("id"), hash((job.get("title"), job.get("url"), job.get("location"),
+           job.get("country"), len(job.get("description") or ""))))
     if key not in _GATES:
         if len(_GATES) > 50_000:
             _GATES.clear()

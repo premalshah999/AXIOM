@@ -273,8 +273,11 @@ _KEYS: dict = {}
 def employer_keys(alias_rows):
     """employer_key bound to `alias_rows`, remembered across calls while the alias table is unchanged."""
     version = hash(frozenset(alias_rows.items()))
-    if len(_KEYS) > 200_000:
+    # A key computed under an older alias table can never be used again; it only held its strings (22,000 tuples of a name,
+    # a URL and a key in production, up to 200,000 allowed, 2026-10-30). ~17,000 jobs fit well under this.
+    if _KEYS.get("version") != version or len(_KEYS) > 50_000:
         _KEYS.clear()
+        _KEYS["version"] = version
 
     def identity(name, url=""):
         key = (version, name or "", url or "")
