@@ -48,7 +48,8 @@ CITIZENSHIP_REQUIRED = re.compile(
     rf"\brequires?\s+{US}\s+citizenship\b",
     re.I,
 )
-CITIZENSHIP_NEGATED = re.compile(r"\b(?:no|not|without|never|neither|nor)\b.{0,40}\bcitizen", re.I)
+# A negation stays inside its clause: "Clearance ... not required on day one; U.S. Citizenship required." is a requirement.
+CITIZENSHIP_NEGATED = re.compile(r"\b(?:no|not|without|never|neither|nor)\b[^;]{0,40}\bcitizen", re.I)
 # Another way in: permanent residents and the like keep the restriction open to a U.S. person; work authorization or
 # a visa opens it to the applicant, which the facts here cannot decide.
 CITIZEN_OR_RESIDENT = re.compile(

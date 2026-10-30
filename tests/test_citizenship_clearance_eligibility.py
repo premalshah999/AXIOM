@@ -68,3 +68,10 @@ def test_a_clearance_the_applicant_must_already_hold_is_checked_against_the_clea
         "security_clearance"
     ]
     assert not check("Must hold an active Secret security clearance.", {"has_security_clearance": True}).conflicts
+
+
+def test_a_negation_does_not_reach_across_a_clause():
+    text = "Must obtain and maintain a U.S. Government Security Clearance, but not required on day one; U.S. Citizenship required."
+    assert any(f.subject == "citizenship" and f.verdict == "unmet" for f in check(text, NOT_CITIZEN).findings)
+    # Inside one clause the negation still stands.
+    assert not any(f.subject == "citizenship" for f in check("U.S. citizenship is not required for this role.", NOT_CITIZEN).findings)
