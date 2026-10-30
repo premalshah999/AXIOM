@@ -1,3 +1,4 @@
+import { confirmedToday } from "./identity/state";
 import { Download, ExternalLink } from "lucide-react";
 import { useMemo } from "react";
 import { api } from "./api";
@@ -162,7 +163,7 @@ function Confirmed() {
         <span className="ax-note ax-toolbar-note">
           {[
             ledger.data && `${plural(all.length, "confirmed application")} across all history`,
-            `${snapshot.stats.confirmed_today} today`,
+            ledger.data && `${confirmedToday(all, now).length} today`,
             rt.state === "active" && `${rt.confirmed ?? 0} of ${rt.target ?? 100} this batch`,
           ]
             .filter(Boolean)

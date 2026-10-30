@@ -77,7 +77,7 @@
   --shade-deep: rgba(0, 0, 0, 0.9);
   --engrave: 0 -1px 0 rgba(0, 0, 0, 0.65);
   /* Bead-blasted plate: a tile of noise drawn once. It is a background, not a blend over the page, so it costs nothing to keep. */
-  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.15' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1.4 -.2'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)' opacity='.05'/%3E%3C/svg%3E");
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.15' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1.4 -.2'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)' opacity='.028'/%3E%3C/svg%3E");
   /* A resume page: white paper in both themes, because it is a picture of a printed page. */
   --paper: #ffffff;
   --paper-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), 0 12px 36px rgba(0, 0, 0, 0.35);
@@ -123,7 +123,7 @@
   --shade: rgba(0, 0, 0, 0.33);
   --shade-deep: rgba(0, 0, 0, 0.9);
   --engrave: 0 1px 0 rgba(255, 255, 255, 0.55);
-  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.15' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1.4 -.2'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)' opacity='.07'/%3E%3C/svg%3E");
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.15' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1.4 -.2'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)' opacity='.035'/%3E%3C/svg%3E");
   --paper: #ffffff;
   --paper-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), 0 12px 36px rgba(0, 0, 0, 0.35);
   --overlay-shadow: 0 14px 34px rgba(50, 46, 34, 0.28);
@@ -135,6 +135,8 @@
   /* --live is what is lit when the machine runs: vermilion only then, plain ink otherwise. The shell sets data-run from real
      state, and it starts off, so nothing claims to be live before the first answer. */
   --live: var(--ink);
+  /* An opaque piece of the plate (a sticky table head), with the plate's finish. */
+  --plate: var(--ground) var(--grain);
 
   --font-read: "Doto", var(--font-data);
   --font-text: "Archivo", Arial, sans-serif;

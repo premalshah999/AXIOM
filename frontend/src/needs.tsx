@@ -7,7 +7,7 @@ import { useDraft } from "./hooks";
 import { Pagination, usePagination } from "./pagination";
 import { groupQuestions, QuestionCard, type QuestionGroup } from "./questions";
 import { ago, linkHost, plural, urlRole } from "./format";
-import { Button, Empty, Panel } from "./ui/index";
+import { Button, Empty } from "./ui/index";
 import "./styles/work.css";
 import type { Job } from "./types";
 
@@ -81,45 +81,45 @@ export function NeedsView() {
   const applications = new Set(groups.map((g) => g.job?.id || g.review.run_id)).size;
   return (
     <div className="ax-page">
-      <p className="ax-note">
-        {plural(groups.length, "question")} across {plural(applications, "application")}.
-        {(counts.groups.needs ?? 0) > applications && (
-          <>
-            {" "}
-            <button type="button" className="ax-link" onClick={() => go({ view: "jobs", tab: "pipeline", filter: "needs" })}>
-              {plural(counts.groups.needs ?? 0, "application")} are marked as waiting on you
-            </button>{" "}
-            in Jobs.
-          </>
-        )}
-      </p>
+      <div className="nq-head">
+        <p className="nq-say">
+          {plural(groups.length, "question")} {groups.length === 1 ? "is" : "are"} holding back {plural(applications, "application")}.
+        </p>
+        <p className="ax-note">
+          Answer each one once. Every application asking the same thing moves again.
+          {(counts.groups.needs ?? 0) > applications && (
+            <>
+              {" "}
+              <button type="button" className="ax-link" onClick={() => go({ view: "jobs", tab: "pipeline", filter: "needs" })}>
+                {plural(counts.groups.needs ?? 0, "application")} are marked as waiting on you
+              </button>{" "}
+              in Jobs.
+            </>
+          )}
+        </p>
+      </div>
       {buckets.length === 0 && <p className="ax-note">Every open question is skipped for now. They are listed below.</p>}
       {paging.items.map((b) => (
-        <Panel
-          key={b.key}
-          title={
-            <>
-              {b.job?.company || linkHost(b.job?.url) || "Employer"}{" "}
-              <span className="ax-note">{b.job?.title || (b.job ? urlRole(b.job.url) : "Application")}</span>
-            </>
-          }
-          actions={
-            <Button size="sm" variant="ghost" onClick={() => b.job && openJob(b.job.id, b.runId)} disabled={!b.job}>
-              Open application
-            </Button>
-          }
-        >
-          <div className="dr-stack">
-            <p className="ax-note">
-              {[b.job?.ats, b.since && `waiting since ${ago(b.since)}`, plural(b.cards.length, "question")].filter(Boolean).join(" · ")}
+        <section key={b.key} className="nq-row" aria-label={b.job?.company || "Application"}>
+          <div className="nq-who">
+            <h2>
+              <i className="ax-lamp is-ask" aria-hidden="true" />
+              <span title={b.job?.company}>{b.job?.company || linkHost(b.job?.url) || "Employer"}</span>
+            </h2>
+            <p title={b.job?.title}>{b.job?.title || (b.job ? urlRole(b.job.url) : "Application")}</p>
+            <p className="mono">
+              {[b.job?.ats, b.since && `waiting ${ago(b.since)}`].filter(Boolean).join(" · ")}
             </p>
-            <div className="ax-stack">
-              {b.cards.map((g) => (
-                <QuestionCard key={g.review.id} group={g} onSaved={advance} onSkip={skip} />
-              ))}
-            </div>
+            <button type="button" className="ax-link" onClick={() => b.job && openJob(b.job.id, b.runId)} disabled={!b.job}>
+              Open application
+            </button>
           </div>
-        </Panel>
+          <div className="ax-stack">
+            {b.cards.map((g) => (
+              <QuestionCard key={g.review.id} group={g} onSaved={advance} onSkip={skip} />
+            ))}
+          </div>
+        </section>
       ))}
       <Pagination paging={paging} label="Question pages" sizes={false} />
       {parked.length > 0 && (

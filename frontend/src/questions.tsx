@@ -271,11 +271,13 @@ export function QuestionCard({
           </p>
         )}
       </div>
-      <div className="nq-answer">{control}</div>
-      <div className="ax-toolbar">
-        <Button type="submit" variant={compact ? "primary" : "secondary"} size="sm" disabled={!ready} loading={pending === "save"}>
-          {kind === "upload" ? "Attach file" : "Save answer"}
+      <div className="nq-ctl">
+        <div className="nq-answer">{control}</div>
+        <Button type="submit" variant="primary" round disabled={!ready} loading={pending === "save"} aria-label={kind === "upload" ? "Attach file" : "Save answer"}>
+          {kind === "upload" ? "Attach" : "Send"}
         </Button>
+      </div>
+      <div className="ax-toolbar">
         {!compact && onSkip && (
           <Button size="sm" variant="ghost" disabled={pending !== null} onClick={() => onSkip(q.id)}>
             Skip for now

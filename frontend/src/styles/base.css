@@ -24,7 +24,7 @@ body,
 body {
   margin: 0;
   overflow: hidden;
-  background: var(--ground) var(--grain);
+  background: var(--plate);
   color: var(--ink);
   font-family: var(--font-text);
   font-size: var(--text-body);

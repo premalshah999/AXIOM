@@ -1,13 +1,20 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useDraft, useNow, usePoll } from "./hooks";
+import { ChannelBank, type Channel } from "./identity/ChannelBank";
+import { DayChart, DotPatterns } from "./identity/DayChart";
+import { MasterKey } from "./identity/MasterKey";
+import { confirmedToday, panelState, STATE_WORD } from "./identity/state";
+import { progressOf } from "./identity/stages";
+import { useRunProgress } from "./identity/useRunProgress";
+import "./identity/panel.css";
 import { appliedState, STATES, type JobRow } from "./model";
 import { Pagination, usePagination } from "./pagination";
 import { OPEN_JOB_LINK } from "./jobintake";
 import { countQuestions } from "./questions";
 import type { ApplicationWorkers, MailStatus, RuntimeHealth, Snapshot } from "./types";
-import { ago, clock, day, elapsed, plural } from "./format";
+import { ago, clock, day, plural } from "./format";
 import { Button, Empty, Panel, Table, type Column } from "./ui/index";
 import { Facts, JobCell, Notice, Note, StatusPill } from "./worktools";
 import "./styles/work.css";
@@ -16,11 +23,12 @@ const LIVE_MAIL = new Set(["pending", "matched", "consumed"]);
 
 type Working = {
   key: string;
+  slot: number;
+  runId?: string;
   company: string;
   role: string;
-  detail: string;
+  platform: string;
   state: string;
-  label?: string;
   open?: () => void;
   /** The job to pause, when it can be paused now. */
   pause?: string;
@@ -28,8 +36,8 @@ type Working = {
   since?: string;
 };
 
-// The home page: one sentence on whether the batch is running, what is applying now, what waits, what just finished.
-// The questions themselves are on Needs you; worker and host detail is in Settings › System.
+// The home page: the panel. One sentence on whether the batch is running, what each worker is on, what waits, what just
+// finished. The questions themselves are on Needs you; worker and host detail is in Settings › System.
 export function BatchView() {
   const health = usePoll<RuntimeHealth>(
     (signal) => api("/runtime-health", "GET", undefined, signal),
@@ -41,22 +49,20 @@ export function BatchView() {
   );
   const work = useWorking(mail.data, health.data?.application_workers);
   return (
-    <div className="ax-page">
-      <div className="ov-head">
-        <State work={work} />
-        <NeedsLine />
+    <div className="ax-page ax-panel-page">
+      <DotPatterns />
+      <Master work={work} />
+      <Bank work={work} checking={!health.data && !work.known} />
+      <div className="ax-panel-below">
+        <FirstRun mail={mail.data} />
+        <Backlog work={work} />
+        <Activity />
       </div>
-      <FirstRun mail={mail.data} />
-      <Workers work={work} />
-      <Backlog work={work} />
-      <Activity />
     </div>
   );
 }
 
 // ---------- the workers that are doing something ----------
-// Only the workers that are working get a row; the idle ones are one count. Nine rows of "Status unavailable" said
-// nothing (owner 2026-10-29).
 function useWorking(mail: MailStatus | null, workers?: ApplicationWorkers) {
   const { snapshot, rows, counts, openJob } = useWorkspace();
   const runtimeWorkers = snapshot.autopilot_runtime?.application_workers || workers;
@@ -68,10 +74,6 @@ function useWorking(mail: MailStatus | null, workers?: ApplicationWorkers) {
     .filter((r) => r.run && ["running", "submitting"].includes(r.run.state))
     .sort((a, b) => (a.run!.started_at || a.run!.created_at).localeCompare(b.run!.started_at || b.run!.created_at));
   const assignments = runtimeWorkers?.assignments || [];
-  const assignedRuns = new Set(assignments.map((assignment) => assignment.run_id).filter(Boolean));
-  // The snapshot carries every running and submitting application, so this is exact; a run without a slot still
-  // counts as in progress.
-  const working = Math.max(runtimeWorkers ? assignedRuns.size : 0, owners.length);
   const jobs = new Map(snapshot.jobs.map((j) => [j.id, j]));
   const runJob = new Map(snapshot.runs.map((r) => [r.id, r.job_id]));
   const emailWaits = (mail?.challenges || [])
@@ -79,31 +81,25 @@ function useWorking(mail: MailStatus | null, workers?: ApplicationWorkers) {
     .map((c) => ({ c, job: jobs.get(runJob.get(c.run_id) || "") }));
 
   const busy: Working[] = [];
-  let unknown = 0;
-  const phaseOf = (phase?: string) => {
-    const text = (phase || "").replaceAll("_", " ");
-    return text && !["running", "submitting", "idle"].includes(text) ? text : "";
-  };
   Array.from({ length: limit }, (_, i) => {
-    const assignment = assignments.find((worker) => worker.slot === i + 1);
+    const slot = i + 1;
+    const assignment = assignments.find((worker) => worker.slot === slot);
     const row: JobRow | undefined = assignment?.run_id
       ? rows.find((owner) => owner.run?.id === assignment.run_id)
       : runtimeWorkers
         ? undefined
-        : owners.find((owner) => owner.run?.worker_slot === i + 1);
-    if (!row && !assignment?.run_id) {
-      if (runtimeWorkers && !assignment) unknown += 1;
-      return;
-    }
+        : owners.find((owner) => owner.run?.worker_slot === slot);
+    if (!row && !assignment?.run_id) return;
     if (!row && assignment) {
       const job = assignment.job_id ? jobs.get(assignment.job_id) : undefined;
       busy.push({
-        key: "assigned" + assignment.slot,
+        key: "assigned" + slot,
+        slot,
+        runId: assignment.run_id || undefined,
         company: job?.company || "Assigned application",
         role: job?.title || "Details loading",
-        detail: [assignment.ats, phaseOf(assignment.phase)].filter(Boolean).join(" · "),
-        state: assignment.state || "assigned",
-        label: assignment.state ? undefined : "Assigned",
+        platform: assignment.ats,
+        state: assignment.state || "running",
       });
       return;
     }
@@ -111,9 +107,11 @@ function useWorking(mail: MailStatus | null, workers?: ApplicationWorkers) {
     const r = row.run!;
     busy.push({
       key: r.id,
+      slot,
+      runId: r.id,
       company: row.job.company || "Employer",
       role: row.job.title,
-      detail: [assignment?.ats || row.job.ats, phaseOf(assignment?.phase)].filter(Boolean).join(" · "),
+      platform: assignment?.ats || row.job.ats,
       state: row.state,
       open: () => openJob(row.job.id, r.id),
       pause: r.state === "running" && row.state !== "pausing" ? row.job.id : undefined,
@@ -123,9 +121,9 @@ function useWorking(mail: MailStatus | null, workers?: ApplicationWorkers) {
   return {
     busy,
     limit,
-    working,
-    idle: Math.max(0, limit - busy.length - unknown),
-    unknown,
+    // Whether the slots themselves have reported, so an idle channel can say idle.
+    known: !!runtimeWorkers,
+    working: Math.max(runtimeWorkers ? new Set(assignments.map((a) => a.run_id).filter(Boolean)).size : 0, owners.length),
     emailWaits,
     waiting: {
       queued: counts.states.queued ?? 0,
@@ -138,11 +136,19 @@ function useWorking(mail: MailStatus | null, workers?: ApplicationWorkers) {
 }
 type WorkingState = ReturnType<typeof useWorking>;
 
-// ---------- the one sentence ----------
-function State({ work }: { work: WorkingState }) {
-  const { snapshot, counts, link, refresh } = useWorkspace();
+// ---------- the master row: today's count, the one sentence, what waits on you, and the key ----------
+type Success = { applied_at: string; existing_application?: boolean };
+
+function Master({ work }: { work: WorkingState }) {
+  const { snapshot, counts, link, refresh, go } = useWorkspace();
   const { pending, run } = useAction();
   const now = useNow();
+  const ledger = usePoll<{ applications: Success[] }>(
+    (signal) => api("/successful-applications", "GET", undefined, signal),
+    60000,
+  );
+  const today = useMemo(() => confirmedToday(ledger.data?.applications || [], now), [ledger.data, now]);
+
   const rt = snapshot.autopilot_runtime || {};
   const batch = snapshot.autopilot || {};
   const state = rt.state || batch.state || "idle";
@@ -153,27 +159,24 @@ function State({ work }: { work: WorkingState }) {
   const workers = snapshot.config.workers_enabled;
   const noResume = snapshot.resumes.length === 0;
   const paused = snapshot.control.paused;
-  const degraded = !!(rt.scheduler?.degraded || snapshot.scheduler_health?.degraded);
+  const panel = panelState(snapshot, link.lost);
   // Applications you started yourself count too, so a batch can finish above its target ("560/477" read as a mistake).
   const progress = confirmed > target ? `${confirmed} confirmed, target ${target}` : `${confirmed} of ${target} confirmed`;
   const stopped = paused || (!rt.intake_enabled && rt.intake_reason === "Paused");
 
-  // The worst thing that is true right now, in plain words (it was the sidebar's status dot).
-  const [tone, sentence]: ["info" | "warn" | "bad", string] = link.lost
-    ? ["bad", `Connection lost. Showing data from ${ago(link.updatedAt, now)}; retrying.`]
-    : degraded
-      ? ["bad", "Needs a restart. Automation is degraded; restart it to keep applying."]
-      : paused
-        ? ["warn", "Paused. No new applications start; progress is kept."]
-        : state === "complete"
-          ? ["info", `Target reached. ${progress}.`]
-          : rt.intake_enabled
-            ? ["info", `Applying. ${work.working} of ${work.limit} workers busy, ${progress}.`]
-            : active
-              ? ["warn", `Held. ${(rt.intake_reason || "New applications are not starting").replace(/\.$/, "")}. ${progress}.`]
-              : ["info", work.limit ? `No batch running. ${plural(work.limit, "worker")} ready.` : "No batch running."];
+  // The worst thing that is true right now, in plain words.
+  const said: Record<typeof panel, ["info" | "warn" | "bad", string]> = {
+    lost: ["bad", `Connection lost. Showing data from ${ago(link.updatedAt, now)}; retrying.`],
+    restart: ["bad", "Needs a restart. Automation is degraded; restart it to keep applying."],
+    paused: ["warn", "Paused. No new applications start; progress is kept."],
+    complete: ["info", `Target reached. ${progress}.`],
+    running: ["info", `Applying. ${work.working} of ${work.limit} workers busy, ${progress}.`],
+    held: ["warn", `Held. ${(rt.intake_reason || "New applications are not starting").replace(/\.$/, "")}. ${progress}.`],
+    none: ["info", work.limit ? `No batch running. ${plural(work.limit, "worker")} ready.` : "No batch running."],
+  };
+  const [tone, sentence] = said[panel];
 
-  const start = (value: number) =>
+  const begin = (value: number) =>
     run(
       "start",
       async () => {
@@ -197,81 +200,122 @@ function State({ work }: { work: WorkingState }) {
       "New applications paused. Progress is kept, and you can still manage each job.",
     );
 
-  const action = !workers ? null : !active ? (
+  const key = !workers ? null : !active ? (
     <form
-      className="ov-start"
+      className="ax-power"
       onSubmit={(e) => {
         e.preventDefault();
-        start(Math.max(1, Math.min(500, Math.round(goal || 25))));
+        begin(Math.max(1, Math.min(500, Math.round(goal || 25))));
       }}
     >
-      <label className="ov-target">
-        <span>Apply until</span>
-        <input
-          className="ax-control"
-          type="number"
-          min={1}
-          max={500}
-          step={1}
-          required
-          value={goal}
-          onChange={(e) => setGoal(Number(e.target.value))}
-          aria-describedby="target-hint"
-        />
-        <span>are confirmed</span>
-      </label>
-      <Button type="submit" variant="primary" loading={pending === "start"} disabled={pending !== null || noResume}>
-        Start batch
-      </Button>
-      <span id="target-hint" className="sr-only">
-        Up to 500 confirmed applications.
-      </span>
+      <div className="ax-legend">
+        <span className="ax-legend-state">{STATE_WORD[panel]}</span>
+        <label className="ax-target">
+          <span>Apply until</span>
+          <input
+            type="number"
+            min={1}
+            max={500}
+            step={1}
+            required
+            value={goal}
+            onChange={(e) => setGoal(Number(e.target.value))}
+            aria-describedby="target-hint"
+          />
+          <span>confirmed</span>
+        </label>
+        <span id="target-hint" className="sr-only">
+          Up to 500 confirmed applications.
+        </span>
+      </div>
+      <MasterKey type="submit" word="start" icon="start" aria-label="Start applying" busy={pending === "start"} disabled={pending !== null || noResume} />
     </form>
   ) : stopped ? (
-    <Button variant="primary" loading={pending === "start"} disabled={pending !== null} onClick={() => start(target)}>
-      Resume batch
-    </Button>
+    <div className="ax-power">
+      <div className="ax-legend">
+        <span className="ax-legend-state">{STATE_WORD[panel]}</span>
+        <span className="ax-legend-note">Nothing new starts until you press resume.</span>
+      </div>
+      <MasterKey word="resume" icon="start" aria-label="Resume applying" busy={pending === "start"} disabled={pending !== null} onClick={() => begin(target)} />
+    </div>
   ) : (
-    <div className="ov-start">
-      {degraded && (
-        <Button variant="primary" loading={pending === "start"} disabled={pending !== null} onClick={() => start(target)}>
-          Restart automation
-        </Button>
-      )}
-      <Button loading={pending === "pause"} disabled={pending !== null} onClick={pause} aria-describedby="pause-hint">
-        Pause new applications
-      </Button>
-      <span id="pause-hint" className="sr-only">
-        Stops new applications and holds running ones before their final submit. Progress is kept.
-      </span>
+    <div className="ax-power">
+      <div className="ax-legend">
+        <span className="ax-legend-state">{STATE_WORD[panel]}</span>
+        {panel === "restart" ? (
+          <Button variant="primary" loading={pending === "start"} disabled={pending !== null} onClick={() => begin(target)}>
+            Restart automation
+          </Button>
+        ) : (
+          <span className="ax-legend-note" id="pause-hint">
+            Pausing holds each channel before it sends.
+          </span>
+        )}
+      </div>
+      <MasterKey word="pause" icon="pause" aria-label="Pause applying" busy={pending === "pause"} disabled={pending !== null} onClick={pause} />
     </div>
   );
 
+  const questions = countQuestions(snapshot.reviews);
+  const count = today.length.toLocaleString();
   return (
     <>
-      <Notice lead tone={tone} action={action}>
-        {sentence}
-      </Notice>
-      {!workers && (
-        <Notice tone="warn">
-          Application workers are disabled in this installation's configuration, so a batch can't run. Enable workers on
-          the server and restart.
-        </Notice>
+      <div className="ax-master">
+        <div className="ax-big">
+          <span className="ax-read" style={{ "--chars": count.length } as React.CSSProperties}>
+            {ledger.data ? count : "–"}
+          </span>
+          <span className="ax-engraved">confirmed today</span>
+        </div>
+        <div className="ax-say">
+          <p className={"ax-sentence is-" + tone} aria-live="polite">
+            {sentence}
+          </p>
+          {active && (
+            <p className="ax-meta">
+              {[
+                batch.started_at && `Started ${day(batch.started_at)}`,
+                rt.confirmed_by_owner ? `${rt.confirmed_by_batch ?? 0} by the batch, ${rt.confirmed_by_owner} you started` : "",
+                `${plural(rt.attempted_jobs ?? 0, "job")} attempted`,
+                `${rt.remaining ?? Math.max(0, target - confirmed)} to go`,
+                rt.last_tick && `checked ${ago(rt.last_tick, now)}`,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          )}
+          <DayChart times={today} now={now} />
+        </div>
+        <a
+          className="ax-wait"
+          href="?view=needs"
+          onClick={(e) => {
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+            e.preventDefault();
+            go({ view: "needs" });
+          }}
+        >
+          <span className={"ax-window ax-litwin" + (questions ? "" : " is-dark")}>
+            <span className="ax-read" style={{ "--chars": String(questions).length } as React.CSSProperties}>
+              {questions}
+            </span>
+          </span>
+          <span className="ax-engraved">{questions === 1 ? "question waiting" : "questions waiting"}</span>
+          {questions > 0 && <span className="ax-wait-go">{questions === 1 ? "answer it" : "answer them"}</span>}
+        </a>
+        {key}
+      </div>
+      {(!workers || (!active && noResume && workers)) && (
+        <div className="ax-panel-notes">
+          {!workers && (
+            <Notice tone="warn">
+              Application workers are disabled in this installation's configuration, so a batch can't run. Enable workers on
+              the server and restart.
+            </Notice>
+          )}
+          {!active && noResume && workers && <ResumeNotice />}
+        </div>
       )}
-      {active && (
-        <p className="ax-note ov-meta">
-          {[
-            batch.started_at && `Started ${day(batch.started_at)}`,
-            rt.confirmed_by_owner ? `${rt.confirmed_by_batch ?? 0} by the batch, ${rt.confirmed_by_owner} you started` : "",
-            `${plural(rt.attempted_jobs ?? 0, "job")} attempted`,
-            `${rt.remaining ?? Math.max(0, target - confirmed)} to go`,
-            rt.last_tick && `checked ${ago(rt.last_tick, now)}`,
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-        </p>
-      )}
-      {!active && noResume && workers && <ResumeNotice />}
     </>
   );
 }
@@ -292,23 +336,47 @@ function ResumeNotice() {
   );
 }
 
-// One line, not the questions: they are on the Needs you page.
-function NeedsLine() {
-  const { snapshot, go } = useWorkspace();
-  const n = countQuestions(snapshot.reviews);
-  if (!n) return null;
-  return (
-    <Notice
-      tone="warn"
-      action={
-        <button type="button" className="ax-link" onClick={() => go({ view: "needs" })}>
-          Answer {n === 1 ? "it" : "them"}
-        </button>
-      }
-    >
-      {plural(n, "question")} {n === 1 ? "needs" : "need"} you.
-    </Notice>
-  );
+// ---------- the bank: one channel per worker slot ----------
+function Bank({ work, checking }: { work: WorkingState; checking: boolean }) {
+  const { refresh, markJobs } = useWorkspace();
+  const { pending, run } = useAction();
+  const now = useNow(1000);
+  const told = useRunProgress(work.busy.flatMap((w) => (w.runId ? [w.runId] : [])));
+  const channels: Channel[] = work.busy.map((w) => ({
+    slot: w.slot,
+    id: w.key,
+    company: w.company,
+    role: w.role,
+    platform: w.platform,
+    state: w.state,
+    since: w.since,
+    progress: progressOf(w.state, w.runId ? told[w.runId] : undefined),
+    open: w.open,
+    pause: w.pause ? (
+      <button
+        type="button"
+        className="ax-ch-pause"
+        disabled={pending !== null}
+        onClick={() =>
+          run(
+            w.key,
+            async () => {
+              const res = await api<{ message: string; state?: string }>(`/jobs/${w.pause}/pause`, "POST");
+              // Reads as pausing at once; the next poll confirms.
+              const shown = appliedState(res.state || "");
+              if (shown in STATES) markJobs([w.pause!], shown);
+              void refresh();
+              return res;
+            },
+            (res) => res?.message,
+          )
+        }
+      >
+        {pending === w.key ? "Pausing…" : "Pause"}
+      </button>
+    ) : undefined,
+  }));
+  return <ChannelBank slots={work.limit} channels={channels} now={now} checking={checking} />;
 }
 
 /** Until the first job exists: the few things that decide whether the first application works. */
@@ -411,76 +479,6 @@ function FirstRun({ mail }: { mail: MailStatus | null }) {
           </li>
         ))}
       </ul>
-    </Panel>
-  );
-}
-
-function Workers({ work }: { work: WorkingState }) {
-  const { refresh, markJobs } = useWorkspace();
-  const { pending, run } = useAction();
-  const now = useNow(1000);
-  const { busy, limit, working, idle, unknown } = work;
-  const columns: Column<Working>[] = [
-    {
-      key: "job",
-      header: "Job",
-      width: 420,
-      truncate: true,
-      cell: (w) => (w.open ? <JobCell company={w.company} role={w.role} onOpen={w.open} /> : <span>{w.company}</span>),
-    },
-    {
-      key: "detail",
-      header: "Details",
-      hideBelow: 600,
-      width: 200,
-      truncate: true,
-      cell: (w) => <Note>{[w.detail, w.since ? elapsed(w.since, now) : ""].filter(Boolean).join(" · ")}</Note>,
-    },
-    { key: "status", header: "Status", cell: (w) => <StatusPill state={w.state} label={w.label} /> },
-    {
-      key: "act",
-      header: <span className="sr-only">Actions</span>,
-      width: "1%",
-      pin: true,
-      cell: (w) =>
-        w.pause ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={pending !== null}
-            loading={pending === w.key}
-            onClick={() =>
-              run(
-                w.key,
-                async () => {
-                  const res = await api<{ message: string; state?: string }>(`/jobs/${w.pause}/pause`, "POST");
-                  // Reads as pausing at once; the next poll confirms.
-                  const shown = appliedState(res.state || "");
-                  if (shown in STATES) markJobs([w.pause!], shown);
-                  void refresh();
-                  return res;
-                },
-                (res) => res?.message,
-              )
-            }
-          >
-            Pause
-          </Button>
-        ) : null,
-    },
-  ];
-  const idleLine =
-    busy.length === 0 && unknown === 0
-      ? limit
-        ? `All ${limit} workers are idle. They pick up work when a batch runs or you add a job link.`
-        : "No workers are configured."
-      : [idle > 0 && `${idle} idle`, unknown > 0 && `status unavailable for ${unknown}`].filter(Boolean).join(" · ");
-  return (
-    <Panel title="Applying now" actions={<span className="ax-note">{working} of {limit} working</span>} flush={busy.length > 0}>
-      {busy.length > 0 && (
-        <Table label="Applying now" columns={columns} rows={busy} rowKey={(w) => w.key} />
-      )}
-      {idleLine && <p className="ax-note ov-idle">{idleLine}</p>}
     </Panel>
   );
 }
@@ -591,24 +589,8 @@ function Activity() {
   const paging = usePagination(recent, "", 10);
   const columns: Column<(typeof recent)[number]>[] = [
     {
-      key: "job",
-      header: "Job",
-      width: 420,
-      truncate: true,
-      cell: (r) => <JobCell company={r.job.company} role={r.job.title} onOpen={() => openJob(r.job.id, r.run!.id)} />,
-    },
-    { key: "status", header: "Status", cell: (r) => <StatusPill state={r.state} /> },
-    {
-      key: "reason",
-      header: "Detail",
-      hideBelow: 600,
-      width: 300,
-      truncate: true,
-      cell: (r) => (r.state !== "confirmed" && r.run!.reason ? <Note>{r.run!.reason}</Note> : null),
-    },
-    {
       key: "time",
-      header: "When",
+      header: "Time",
       cell: (r) => {
         const finished = r.run!.finished_at!;
         const today = new Date(finished).toDateString() === new Date(now).toDateString();
@@ -619,6 +601,23 @@ function Activity() {
         );
       },
     },
+    { key: "status", header: "What happened", cell: (r) => <StatusPill state={r.state} /> },
+    {
+      key: "job",
+      header: "Job",
+      width: 520,
+      truncate: true,
+      cell: (r) => <JobCell company={r.job.company} role={r.job.title} onOpen={() => openJob(r.job.id, r.run!.id)} />,
+    },
+    {
+      key: "reason",
+      header: "Detail",
+      hideBelow: 860,
+      width: 300,
+      truncate: true,
+      cell: (r) => (r.state !== "confirmed" && r.run!.reason ? <Note>{r.run!.reason}</Note> : null),
+    },
+    { key: "platform", header: "Platform", hideBelow: 600, cell: (r) => <span className="mono">{r.job.ats}</span> },
   ];
   return (
     <Panel

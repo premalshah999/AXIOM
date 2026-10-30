@@ -14,6 +14,18 @@ export const STATE_WORD: Record<PanelState, string> = {
   none: "no batch",
 };
 
+/**
+ * Confirmations since local midnight, as epoch ms. A notice that the employer already had an application is not one AXIOM just
+ * sent, so it is not counted. Overview's count and chart and Applications' "today" all read this.
+ */
+export function confirmedToday(applications: readonly { applied_at: string; existing_application?: boolean }[], now: number): number[] {
+  const midnight = new Date(now).setHours(0, 0, 0, 0);
+  return applications
+    .filter((a) => !a.existing_application)
+    .map((a) => Date.parse(a.applied_at))
+    .filter((t) => t >= midnight && t <= now);
+}
+
 export function panelState(snapshot: Snapshot, lost: boolean): PanelState {
   const rt = snapshot.autopilot_runtime || {};
   const state = rt.state || snapshot.autopilot?.state || "idle";

@@ -1,38 +1,6 @@
 /* What the work pages (Overview, Jobs, Applications, Needs you, the job drawer) still draw for themselves: layout only.
    Every look comes from src/ui, worktools.tsx and the tokens. */
 
-/* Overview */
-.ov-head {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-.ov-start {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-3);
-}
-.ov-target {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--ink-2);
-}
-.ov-target input {
-  width: 84px;
-}
-.ov-idle {
-  padding-top: var(--space-3);
-}
-.ov-meta {
-  font-size: var(--text-meta);
-}
-.ax-notice.is-lead {
-  color: var(--ink);
-  font-size: var(--text-body);
-}
-
 /* Jobs: the paste box above the Pipeline */
 .ax-queue-box {
   display: flex;
@@ -61,7 +29,58 @@
   }
 }
 
-/* Needs you and the job drawer */
+/* Needs you: who is asking on the left, the question and its answer on the right, on hairlines. */
+.nq-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--ink);
+}
+.nq-say {
+  font-size: var(--text-title);
+  font-stretch: var(--wide);
+  font-weight: 500;
+  line-height: 1.2;
+}
+.ax-page:has(> .nq-head) {
+  gap: 0;
+}
+.nq-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 280px) minmax(0, 1fr);
+  gap: var(--space-3) var(--space-8);
+  padding-block: var(--space-5);
+  border-bottom: 1px solid var(--line);
+}
+.nq-who {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+.nq-who h2 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-sub);
+  font-stretch: 100%;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.nq-who .mono {
+  margin-top: var(--space-1);
+  color: var(--ink-2);
+}
+.nq-who .ax-link {
+  margin-top: var(--space-1);
+  font-size: var(--text-meta);
+}
+.ax-page > .ax-pager {
+  padding-top: var(--space-4);
+}
 .dr-stack {
   display: flex;
   flex-direction: column;
@@ -69,11 +88,85 @@
   min-width: 0;
 }
 .nq-q {
+  max-width: 62ch;
+  font-size: var(--text-title);
+  font-stretch: var(--wide);
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.006em;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
+.nq-q + .ax-note,
+.dr-stack > div > .ax-note {
+  margin-top: var(--space-2);
+  max-width: 72ch;
+}
+.nq-ctl {
+  display: grid;
+  grid-template-columns: minmax(0, 560px) auto;
+  gap: var(--space-4);
+  align-items: start;
+  justify-content: start;
+}
 .nq-answer {
-  max-width: 640px;
+  min-width: 0;
+}
+/* A few short choices are keys: one presses in and its lamp lights. */
+.nq-answer [role="radiogroup"].nq-opts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: var(--space-1);
+}
+.nq-answer [role="radiogroup"] .ax-check {
+  position: relative;
+  align-items: flex-end;
+  min-height: 72px;
+  padding: 0 var(--space-2) 10px var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--key);
+  box-shadow:
+    inset 0 1px 0 var(--key-top),
+    0 1px 0 1px var(--key-bot),
+    0 2px 0 1px var(--key-bot);
+  color: var(--key-ink);
+  font-size: var(--text-sub);
+  font-stretch: var(--wide);
+  font-weight: 500;
+}
+.nq-answer [role="radiogroup"] .ax-check input {
+  position: absolute;
+  top: 10px;
+  left: var(--space-3);
+  width: 8px;
+  height: 8px;
+  margin: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ground-3);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.nq-answer [role="radiogroup"] .ax-check input::after {
+  display: none;
+}
+.nq-answer [role="radiogroup"] .ax-check:has(input:checked) {
+  background: var(--key-down);
+  box-shadow:
+    inset 0 2px 3px var(--shade),
+    0 0 0 1px var(--key-bot);
+  font-weight: 700;
+  transform: translateY(1px);
+}
+.nq-answer [role="radiogroup"] .ax-check input:checked {
+  background: var(--signal);
+  box-shadow: none;
+}
+.nq-answer [role="radiogroup"] .ax-check:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.nq-answer [role="radiogroup"] .ax-check input:focus-visible {
+  outline: none;
 }
 .nq-opts {
   display: flex;
@@ -82,6 +175,17 @@
   margin: 0;
   padding: 0;
   border: 0;
+}
+@media (max-width: 760px) {
+  .nq-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .nq-ctl {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .nq-q {
+    font-size: var(--text-title);
+  }
 }
 .ax-shot img {
   display: block;

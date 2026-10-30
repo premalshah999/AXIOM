@@ -22,7 +22,7 @@
   gap: var(--space-3);
   padding: var(--space-2) 0;
   border-bottom: 1px solid var(--line);
-  background: var(--ground);
+  background: var(--plate);
 }
 .ax-save {
   display: inline-flex;

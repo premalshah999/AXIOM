@@ -8,6 +8,7 @@ export function Button({
   size = "md",
   loading,
   block,
+  round,
   icon,
   children,
   className = "",
@@ -19,6 +20,8 @@ export function Button({
   size?: "sm" | "md";
   loading?: boolean;
   block?: boolean;
+  /** The round commit key, for one short word ("Send", "Add"). */
+  round?: boolean;
   icon?: ReactNode;
 } & ButtonHTMLAttributes<HTMLButtonElement>) {
   const cls = [
@@ -26,6 +29,7 @@ export function Button({
     variant === "secondary" ? "" : "is-" + variant,
     size === "sm" ? "is-sm" : "",
     block ? "is-block" : "",
+    round ? "is-round" : "",
     className,
   ]
     .filter(Boolean)

@@ -100,8 +100,8 @@ export function JobCell({
         onOpen();
       }}
     >
-      <strong>{company}</strong>
-      <span>{role}</span>
+      <strong title={company}>{company}</strong>
+      <span title={role}>{role}</span>
     </button>
   );
 }

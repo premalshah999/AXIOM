@@ -75,7 +75,7 @@
   gap: 7px;
   color: var(--ink-2);
   font-family: var(--font-data);
-  font-size: var(--text-meta);
+  font-size: 12px;
   line-height: 1;
 }
 .ax-theme-switch {
@@ -618,7 +618,7 @@
     flex: none;
     height: calc(68px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--ink);
-    background: var(--ground);
+    background: var(--plate);
   }
   .ax-tuner.is-phone .ax-stations {
     display: flex;

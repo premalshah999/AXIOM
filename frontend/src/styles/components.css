@@ -342,6 +342,34 @@
 .btn.ask {
   color: var(--key-ink);
 }
+.ax-btn.is-round {
+  width: 64px;
+  height: 64px;
+  margin: 4px;
+  padding: 0;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 3px var(--ground),
+    0 0 0 4px var(--ink),
+    0 2px 0 0 var(--key-bot);
+}
+.ax-btn.is-round:hover:not(:disabled) {
+  box-shadow:
+    0 0 0 3px var(--ground),
+    0 0 0 4px var(--ink),
+    0 2px 0 0 var(--key-bot);
+}
+.ax-btn.is-round:active:not(:disabled) {
+  box-shadow:
+    0 0 0 3px var(--ground),
+    0 0 0 4px var(--ink);
+}
+.ax-btn.is-round:disabled {
+  background: transparent;
+  box-shadow:
+    0 0 0 3px var(--ground),
+    0 0 0 4px var(--line-strong);
+}
 .ax-btn.is-block,
 .btn.block {
   width: 100%;
@@ -526,7 +554,7 @@
   gap: var(--space-2) var(--space-3);
   padding: var(--space-3) 0;
   border-top: 1px solid var(--line);
-  background: var(--ground);
+  background: var(--plate);
 }
 .ax-savebar-note {
   margin-right: auto;
@@ -725,7 +753,7 @@
   z-index: 2;
   height: 32px;
   padding: 0 var(--space-3);
-  background: var(--ground);
+  background: var(--plate);
   border-bottom: 1px solid var(--line);
   color: var(--ink-2);
   font-size: var(--text-meta);
@@ -801,11 +829,11 @@
 .ax-table .is-pin {
   position: sticky;
   right: 0;
-  background: var(--ground);
+  background: var(--plate);
 }
 .ax-table tbody tr:hover td.is-pin,
 .ax-table tbody tr[aria-selected="true"] td.is-pin {
-  background: linear-gradient(var(--tint), var(--tint)), var(--ground);
+  background: linear-gradient(var(--tint), var(--tint)), var(--plate);
 }
 .ax-table thead .is-pin {
   z-index: 3;
@@ -862,6 +890,7 @@
 .ax-drawer,
 .dialog {
   --ground: var(--raised);
+  --plate: var(--raised);
   --surface: var(--raised);
   --card: var(--raised);
 }
