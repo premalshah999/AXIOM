@@ -1775,6 +1775,9 @@ class Adapter:
                 "fallback": True,
                 "reason": "This is a talent-community signup, not the job application; open the job's Apply",
             }
+        refuse = getattr(self.e, "not_the_final_step", None)
+        if not self.committed and refuse and (refused := await refuse(final)):
+            return refused
         if quality_blocker := await self.e.quality_gate():
             if await self.revisit_history(quality_blocker):
                 return None  # Walked back to the step that owns the flagged answer; the loop refills it.
@@ -1826,18 +1829,26 @@ class Adapter:
         self.emit("submitting", "Commit step started; automatic retries are disabled")
         self.e.commit_requests, self.e.commit_tracking, self.e.commit_inflight, self.e.refusal_said = [], 0, set(), []
         self.e.commit_url = getattr(self.page, "url", "")
+        witness = getattr(self.e, "watch_commit_click", None)
+        watch = await witness(final["id"], self.before_commit) if witness else None
         try:
-            await self.form.click(final["id"], step_control=True)
-        except ValueError as exc:
-            # JPMorgan Oracle 2026-10-14: the captcha callback re-rendered the page and the final
-            # control id went stale. That refusal happens before any click, so re-observe the one
-            # final control and click it once.
-            if "stale" not in str(exc).lower():
+            try:
+                await self.form.click(final["id"], step_control=True)
+            except ValueError as exc:
+                # JPMorgan Oracle 2026-10-14: the captcha callback re-rendered the page and the final
+                # control id went stale. That refusal happens before any click, so re-observe the one
+                # final control and click it once.
+                if "stale" not in str(exc).lower():
+                    raise
+                fresh = await self.observed_final(await self.form.scan())
+                if not fresh:
+                    raise
+                await self.form.click(fresh["id"], step_control=True)
+        except (ValueError, PlaywrightError) as exc:
+            if not watch or not await self.e.commit_click_undelivered(watch):
                 raise
-            fresh = await self.observed_final(await self.form.scan())
-            if not fresh:
-                raise
-            await self.form.click(fresh["id"], step_control=True)
+            self.committed = False
+            return await self.e.commit_not_delivered(final, exc)
         # Dayforce's "Congratulations, your application has been submitted!" arrives after its
         # reCAPTCHA and server work, past 20 s (Interactive Brokers, York 2026-10-16).
         for _ in range(120 if self.job.get("ats") == "dayforce" else 40):

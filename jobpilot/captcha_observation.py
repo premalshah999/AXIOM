@@ -13,6 +13,7 @@ PROVIDER_FRAME_JS = (
     r"||/(^|\.)(google\.com|recaptcha\.net)$/.test(location.hostname)&&location.pathname.startsWith('/recaptcha'))"
 )
 ARM_JS = PROVIDER_FRAME_JS + "||(window.__jpArmed=true)"
+DISARM_JS = PROVIDER_FRAME_JS + "||(window.__jpArmed=false)"
 
 
 async def challenge_frame(page):

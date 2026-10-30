@@ -606,6 +606,29 @@ ENTRY = re.compile(
 AUTH = re.compile(r"\bpasswords?\b|verification code|one.time|authentication code|security code", re.IGNORECASE)
 BACK_STEP = re.compile(r"^(?:back|previous|go back)(?: step)?$", re.I)
 RESUME = re.compile(r"r[eé]sum[eé]|cv\b|curriculum", re.IGNORECASE)
+# What a last step says about itself. The page's own furniture ("Application FAQs", "Privacy Policy") says none of it.
+FINAL_STEP_WORDS = re.compile(
+    r"\b(?:review|confirm|summary|final step|last step|step \d+ of \d+|almost (?:done|there)|certify|certification|attest|"
+    r"acknowledge\w*|declaration|e-?signature|(?:your|this|my|job|the) application|application (?:form|summary|review))\b",
+    re.I,
+)
+# Answers given on the sign-in and account pages: a signed-in header repeats them on any page of the site.
+ACCOUNT_SECTION = re.compile(r"\b(?:log ?in|sign ?in|account)\b", re.I)
+# Why a control would not take a click, in words. Only its tag, id and class name the element in the way.
+CONTROL_BLOCK_JS = r"""e => {
+  const name=n=>[n.tagName.toLowerCase(),n.id?'#'+n.id:'',typeof n.className==='string'&&n.className.trim()
+    ?'.'+n.className.trim().split(/\s+/)[0]:''].join('').slice(0,60);
+  if(e.disabled||e.getAttribute('aria-disabled')==='true')return 'it is disabled';
+  const s=getComputedStyle(e),r=e.getBoundingClientRect();
+  if(s.display==='none'||s.visibility!=='visible')return 'it is hidden';
+  if(!r.width||!r.height)return 'it has no size on the page';
+  if(s.pointerEvents==='none')return 'it ignores the pointer';
+  const x=r.left+r.width/2,y=r.top+r.height/2;
+  if(x<0||y<0||x>=innerWidth||y>=innerHeight)return 'it is outside the visible page';
+  const hit=e.ownerDocument.elementFromPoint(x,y);
+  if(hit&&hit!==e&&!e.contains(hit)&&!hit.contains(e))return 'covered by '+name(hit);
+  return 'it never became clickable';
+}"""
 # A submit is live only if rendered, enabled, and not inside an inert/hidden/aria-hidden ancestor.
 LIVE_CONTROL_JS = """b => {
   const cs = getComputedStyle(b);
@@ -5175,6 +5198,60 @@ class FormSession:
             ):
                 final.append(button)
         return await self._reduce_submit_controls(final)
+
+    def final_step_evidence(self, obs, control=None):
+        """What on the open page shows it is this application's last step, or "" when nothing does. The caller refuses
+        the commit on "": verified answers and a resume are the ledger of earlier steps, so they say nothing about this
+        page. A review page has no editable field, and it repeats what was entered: an answer, the resume's name or the
+        job, or calls itself a review. The final control's own label does not count."""
+        if any(
+            f.get("type") != "password" and not AUTH.search(f.get("label") or "") and not f.get("site_account")
+            for f in obs.get("fields", [])
+        ):
+            return "field"
+        text = " ".join(str(obs.get("text") or "").split())
+        label = " ".join(str((control or {}).get("label") or "").split())
+        if label:
+            text = re.sub(re.escape(label), " ", text, flags=re.I)  # CSS may capitalize it on the page.
+        if FINAL_STEP_WORDS.search(text):
+            return "wording"
+        shown = text.casefold()
+        if self.resume_path and self.resume_path.name.casefold() in shown:
+            return "resume"
+        title = " ".join(str((getattr(self.resolver, "job", None) or {}).get("title") or "").split()).casefold()
+        if len(title) >= 4 and title in shown:
+            return "job"
+        for record in self.ledger.values():
+            answer = record.get("answer")
+            if (
+                isinstance(answer, str)
+                and len(answer.strip()) >= 4
+                and answer.strip().casefold() not in {"true", "false", "none", "null"}
+                and not AUTH.search(record.get("label") or "")
+                and not ACCOUNT_SECTION.search(str((record.get("comparison") or {}).get("section") or ""))
+                and " ".join(answer.split()).casefold() in shown
+            ):
+                return "answer"
+        return ""
+
+    async def final_control_blocked(self, control_id, timeout=10000):
+        """Why the final control cannot take a click, or "" when it can. A trial hover runs the real click's own checks
+        (visible, stable, in view, the hit point its own), and the only input it sends is the pointer move the real click
+        starts with. A trial click was not used: it sends the press as well and relies on one listener to stop it, on the
+        live Submit. _reduce_submit_controls looks at liveness only among several candidates, so a lone Submit no one can
+        click reached the commit (Two Sigma's Avature widget page, 2026-10-30)."""
+        control = self.locator(control_id)
+        try:
+            await control.hover(trial=True, timeout=timeout)
+            return "it is disabled" if await control.is_disabled(timeout=2000) else ""
+        except PlaywrightTimeoutError:
+            try:
+                return await self.control_block_reason(control_id)
+            except PlaywrightError:
+                return "it never became clickable"
+
+    async def control_block_reason(self, control_id):
+        return await self.locator(control_id).evaluate(CONTROL_BLOCK_JS, timeout=2000)
 
     async def accepted_resume_tile(self, submit_id=None):
         if not self.resume_path or not self.uploaded:
