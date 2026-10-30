@@ -87,7 +87,8 @@ def router(service) -> APIRouter:
     @r.post("/api/system/restart")
     async def restart():
         """Apply startup-only settings (worker counts): stop admitting new starts, let a final submit finish, then exit
-        so the container restarts (compose restart: unless-stopped). Running drafts resume after the restart."""
+        so whatever owns this process starts it again (compose restart: unless-stopped, or the native supervisor).
+        Running drafts resume after the restart."""
         import asyncio
         import os
         import time

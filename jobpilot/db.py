@@ -362,8 +362,12 @@ class Database:
             if self.engine.dialect.name == "sqlite":
                 s.connection().exec_driver_sql("BEGIN IMMEDIATE")
             else:
-                # One per-app lock for budget/cap reservations and job transitions.
-                s.connection().exec_driver_sql("SELECT pg_advisory_xact_lock(72319001)")
+                # One per-app lock for budget/cap reservations and job transitions. These commits are the ones that must
+                # survive a crash ("submitting" before the click), so they wait for the disk even where plain commits do
+                # not (jobpilot/native/pg.py). Under Compose every commit waits already, and this changes nothing.
+                s.connection().exec_driver_sql(
+                    "SELECT pg_advisory_xact_lock(72319001), set_config('synchronous_commit', 'on', true)"
+                )
             try:
                 yield s
                 s.commit()
