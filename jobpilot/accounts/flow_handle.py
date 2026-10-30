@@ -476,12 +476,23 @@ class FlowHandleMixin:
             state = recorded  # a sign-in attempt never erases an unanswered reset (it requested one on every run)
         else:
             state = "created_locally" if creating else "signing_in"
+        extra = {}
+        if creating:
+            # Each Create mails a passcode: an account the employer never confirmed is registered at most twice a day
+            # across runs (adapters.base.create_allowed), where it was six times (SuccessFactors, 2026-10-27..29).
+            from ..adapters.base import create_allowed, create_limit_result, create_stamp
+
+            current = getattr(self.store, "record", lambda url: {})(account_url)
+            if not create_allowed(current, getattr(e, "run_id", "")):
+                e.result = create_limit_result()
+                return True
+            extra = {"create_sent": create_stamp(current, getattr(e, "run_id", ""))}
         # A Create that replaced a saved login keeps it, so "Account Already Exists" can restore it.
         replaced = saved if creating and saved and saved.get("password") != creds["password"] else None
         if replaced:
-            self.store.save(account_url, creds, state, previous=replaced)
+            self.store.save(account_url, creds, state, previous=replaced, **extra)
         else:
-            self.store.save(account_url, creds, state)
+            self.store.save(account_url, creds, state, **extra)
         self.attempts.add(signature)
         if dfid == "sign_in":
             self.attempts.add(("dayforce_id", "signin"))
