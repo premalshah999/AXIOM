@@ -1,16 +1,17 @@
 import React, { useEffect, useId, useRef, useState } from "react";
-import { Check, Copy, Download } from "lucide-react";
+import { Check as Tick, Copy, Download } from "lucide-react";
 import { api, ApiError, signedOut } from "./api";
 import { useAction, useNotify } from "./hooks";
 import { guideLater } from "./guide";
 import type { Profile } from "./types";
-import { Brand, Confirm, day, ErrorLine, Field, KeyValues, Loading } from "./ui";
-import { ConfirmButton, Lede } from "./setup-kit";
-import { Button, Panel } from "./ui/index";
+import { day } from "./format";
+import { BrandMark } from "./shell/Brand";
+import { Facts, FormGrid } from "./setup-kit";
+import { Button, Check, ConfirmButton, ErrorLine, Field, Loading, Panel, Pill, Segmented } from "./ui/index";
 
 // ---------------------------------------------------------------------------
 // The owner's account (server: owner_account.py, api/routes/owner.py): sign-up with recovery codes, sign-in,
-// forgot password (recovery code, access token or the host command), and Setup → System › Your sign-in.
+// forgot password (recovery code, access token or the host command), and Settings › System › Your sign-in.
 // ---------------------------------------------------------------------------
 
 export type AccountStatus = {
@@ -109,7 +110,7 @@ function useSubmit() {
 
 function FormError({ message }: { message: string }) {
   return message ? (
-    <p className="error-text" role="alert">
+    <p className="ax-error" role="alert">
       {message}
     </p>
   ) : null;
@@ -117,12 +118,12 @@ function FormError({ message }: { message: string }) {
 
 function PasswordRules({ password, id }: { password: string; id: string }) {
   return (
-    <ul className="pw-rules" id={id}>
+    <ul className="ax-rules-list" id={id}>
       {RULES.map((rule) => {
         const met = rule.test(password);
         return (
-          <li key={rule.label} className={met ? "met" : ""}>
-            <Check size={13} aria-hidden="true" />
+          <li key={rule.label} className={met ? "is-met" : ""}>
+            <Tick size={13} aria-hidden="true" />
             {rule.label}
             <span className="sr-only">{met ? ", met" : ", not met yet"}</span>
           </li>
@@ -170,23 +171,14 @@ function NewPassword({
           aria-invalid={!!errors.confirm}
         />
       </Field>
-      <label className="check">
-        <input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} />
-        <span>Show passwords</span>
-      </label>
+      <Check checked={show} onChange={setShow} label="Show passwords" />
     </>
   );
 }
 
 function KeepSignedIn({ value, onChange }: { value: boolean; onChange: (value: boolean) => void }) {
   return (
-    <label className="check">
-      <input type="checkbox" checked={value} onChange={(e) => onChange(e.target.checked)} />
-      <span>
-        Keep me signed in on this browser
-        <small>For 30 days without use. Otherwise 24 hours.</small>
-      </span>
-    </label>
+    <Check checked={value} onChange={onChange} label="Keep me signed in on this browser" note="For 30 days without use. Otherwise 24 hours." />
   );
 }
 
@@ -205,16 +197,16 @@ export function RecoveryCodes({
   const text =
     "AXIOM recovery codes\nEach code resets the dashboard password once.\n\n" + codes.join("\n") + "\n";
   return (
-    <div className="codes-box">
-      <ol className="codes" aria-label="Recovery codes">
+    <div className="ax-stack">
+      <ol className="ax-codes" aria-label="Recovery codes">
         {codes.map((code) => (
           <li key={code}>{code}</li>
         ))}
       </ol>
-      <div className="codes-actions">
-        <button
-          type="button"
-          className="btn sm"
+      <div className="ax-actions is-start">
+        <Button
+          size="sm"
+          icon={<Copy size={14} aria-hidden="true" />}
           onClick={async () => {
             try {
               await navigator.clipboard.writeText(text);
@@ -224,11 +216,11 @@ export function RecoveryCodes({
             }
           }}
         >
-          <Copy size={14} aria-hidden="true" /> {copy === "copied" ? "Copied" : "Copy"}
-        </button>
-        <button
-          type="button"
-          className="btn sm"
+          {copy === "copied" ? "Copied" : "Copy"}
+        </Button>
+        <Button
+          size="sm"
+          icon={<Download size={14} aria-hidden="true" />}
           onClick={() => {
             const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
             const link = document.createElement("a");
@@ -238,19 +230,16 @@ export function RecoveryCodes({
             window.setTimeout(() => URL.revokeObjectURL(url), 1000);
           }}
         >
-          <Download size={14} aria-hidden="true" /> Download .txt
-        </button>
-        <span className="muted sm" role="status">
+          Download .txt
+        </Button>
+        <span className="ax-hint" role="status">
           {copy === "unavailable" ? "This browser blocked copying. Download them or write them down." : ""}
         </span>
       </div>
-      <label className="check">
-        <input type="checkbox" checked={saved} onChange={(e) => setSaved(e.target.checked)} />
-        <span>I saved these codes somewhere safe</span>
-      </label>
-      <button type="button" className="btn primary" disabled={!saved} onClick={onDone}>
+      <Check checked={saved} onChange={setSaved} label="I saved these codes somewhere safe" />
+      <Button variant="primary" disabled={!saved} onClick={onDone}>
         {doneLabel}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -278,25 +267,28 @@ function AuthCard({
 }) {
   const body = (
     <>
-      <Brand />
+      <div className="ax-brand">
+        <BrandMark size={22} />
+        <span>AXIOM</span>
+      </div>
       <h1>{title}</h1>
-      {lead && <p className="muted">{lead}</p>}
+      {lead && <p className="ax-hint">{lead}</p>}
       {notice && (
-        <p className="auth-notice" role="status">
-          {notice}
-        </p>
+        <div className="ax-notice is-warn" role="status">
+          <span>{notice}</span>
+        </div>
       )}
       {children}
     </>
   );
   return (
-    <main className="login">
+    <main className="ax-auth">
       {onSubmit ? (
-        <form className="login-card" onSubmit={onSubmit} noValidate ref={formRef}>
+        <form className="ax-auth-card" onSubmit={onSubmit} noValidate ref={formRef}>
           {body}
         </form>
       ) : (
-        <div className="login-card">{body}</div>
+        <div className="ax-auth-card">{body}</div>
       )}
     </main>
   );
@@ -323,7 +315,7 @@ export function AuthScreen({ onSignedIn, notice = "" }: { onSignedIn: () => Prom
 
   if (!status)
     return (
-      <main className="login">
+      <main className="ax-auth">
         <Loading label="Opening AXIOM…" />
       </main>
     );
@@ -349,16 +341,18 @@ export function AuthScreen({ onSignedIn, notice = "" }: { onSignedIn: () => Prom
         }
       >
         {reset.method === "recovery_code" && reset.left <= 3 && (
-          <p className="inline-warn">
-            {reset.left === 0
-              ? "That was your last recovery code."
-              : `${reset.left} recovery code${reset.left === 1 ? "" : "s"} left.`}{" "}
-            Generate new ones in Setup → System.
-          </p>
+          <div className="ax-notice is-warn">
+            <span>
+              {reset.left === 0
+                ? "That was your last recovery code."
+                : `${reset.left} recovery code${reset.left === 1 ? "" : "s"} left.`}{" "}
+              Generate new ones in Settings › System.
+            </span>
+          </div>
         )}
-        <button type="button" className="btn primary block" onClick={() => onSignedIn()} autoFocus>
+        <Button variant="primary" block onClick={() => onSignedIn()} autoFocus>
           Continue
-        </button>
+        </Button>
       </AuthCard>
     );
 
@@ -464,11 +458,11 @@ function SignUp({
       <NewPassword value={secret} onChange={setSecret} errors={errors} />
       <KeepSignedIn value={form.keep} onChange={(keep) => setForm({ ...form, keep })} />
       <FormError message={submit.error} />
-      <button className="btn primary block" disabled={submit.busy || submit.wait > 0}>
+      <Button type="submit" variant="primary" block disabled={submit.busy || submit.wait > 0}>
         {submit.busy ? "Creating your account…" : "Create account"}
-      </button>
-      <p className="login-help">
-        <button type="button" className="link" onClick={toToken}>
+      </Button>
+      <p className="ax-auth-help">
+        <button type="button" className="ax-link" onClick={toToken}>
           Use the access token instead
         </button>
       </p>
@@ -541,18 +535,18 @@ function PasswordSignIn({
           aria-invalid={!!errors.password}
         />
       </Field>
-      <p className="field-aside">
-        <button type="button" className="link sm" onClick={forgot}>
+      <p className="ax-auth-help">
+        <button type="button" className="ax-link" onClick={forgot}>
           Forgot password?
         </button>
       </p>
       <KeepSignedIn value={keep} onChange={setKeep} />
       <FormError message={submit.error} />
-      <button className="btn primary block" disabled={submit.busy || submit.wait > 0}>
+      <Button type="submit" variant="primary" block disabled={submit.busy || submit.wait > 0}>
         {submit.wait ? `Try again in ${submit.wait}s` : submit.busy ? "Signing in…" : "Sign in"}
-      </button>
-      <p className="login-help">
-        <button type="button" className="link" onClick={toToken}>
+      </Button>
+      <p className="ax-auth-help">
+        <button type="button" className="ax-link" onClick={toToken}>
           Use the access token instead
         </button>
       </p>
@@ -583,7 +577,7 @@ function TokenSignIn({
     status.installation === "has_data" ? (
       <>
         This installation already holds a profile or jobs, so it can't be claimed by signing up here. Sign in
-        with its access token, then add an email and password in Setup → System.
+        with its access token, then add an email and password in Settings › System.
       </>
     ) : (
       "Sign in with this installation's access token."
@@ -629,16 +623,16 @@ function TokenSignIn({
       </Field>
       <KeepSignedIn value={keep} onChange={setKeep} />
       <FormError message={submit.error} />
-      <button className="btn primary block" disabled={submit.busy || submit.wait > 0}>
+      <Button type="submit" variant="primary" block disabled={submit.busy || submit.wait > 0}>
         {submit.wait ? `Try again in ${submit.wait}s` : submit.busy ? "Signing in…" : "Sign in"}
-      </button>
+      </Button>
       {status.exists && (
-        <p className="login-help">
-          <button type="button" className="link" onClick={toPassword}>
+        <p className="ax-auth-help">
+          <button type="button" className="ax-link" onClick={toPassword}>
             Sign in with email and password
           </button>
           {" · "}
-          <button type="button" className="link" onClick={forgot}>
+          <button type="button" className="ax-link" onClick={forgot}>
             Forgot password?
           </button>
         </p>
@@ -685,7 +679,7 @@ function Forgot({
   return (
     <AuthCard
       title="Reset your password"
-      lead="This installation can't send email, so prove it's yours with one of these, then choose a new password."
+      lead="This installation can't send email, so prove it's yours first, then choose a new password."
       formRef={ref}
       onSubmit={async (e) => {
         e.preventDefault();
@@ -703,29 +697,22 @@ function Forgot({
         if (done) onReset({ email: done.email, left: done.recovery_codes_left, method });
       }}
     >
-      <div className="auth-methods" role="radiogroup" aria-label="How to prove it's your installation">
-        {METHODS.map((m) => (
-          <button
-            key={m.id}
-            type="button"
-            role="radio"
-            aria-checked={method === m.id}
-            className="ob-choice"
-            onClick={() => choose(m.id)}
-          >
-            {m.label}
-          </button>
-        ))}
-      </div>
+      <Segmented
+        block
+        label="How to prove it's your installation"
+        value={method}
+        options={METHODS.map((m) => ({ value: m.id, label: m.label }))}
+        onChange={choose}
+      />
       {method === "cli" ? (
         <>
-          <p className="muted">
+          <p className="ax-hint">
             On the computer running AXIOM, run <code>{RESET_COMMAND}</code> (or <code>jobpilot reset-password</code>{" "}
             without Docker). It asks for the new password without showing it, then signs every browser out.
           </p>
-          <button type="button" className="btn primary block" onClick={back}>
+          <Button variant="primary" block onClick={back}>
             Back to sign in
-          </button>
+          </Button>
         </>
       ) : (
         <>
@@ -766,11 +753,11 @@ function Forgot({
           <NewPassword value={secret} onChange={setSecret} errors={errors} label="New password" />
           <KeepSignedIn value={keep} onChange={setKeep} />
           <FormError message={submit.error} />
-          <button className="btn primary block" disabled={submit.busy || submit.wait > 0}>
+          <Button type="submit" variant="primary" block disabled={submit.busy || submit.wait > 0}>
             {submit.wait ? `Try again in ${submit.wait}s` : submit.busy ? "Saving…" : "Set new password"}
-          </button>
-          <p className="login-help">
-            <button type="button" className="link" onClick={back}>
+          </Button>
+          <p className="ax-auth-help">
+            <button type="button" className="ax-link" onClick={back}>
               Back to sign in
             </button>
           </p>
@@ -781,8 +768,21 @@ function Forgot({
 }
 
 // ---------------------------------------------------------------------------
-// Setup → System › Your sign-in
+// Settings › System › Your sign-in
 // ---------------------------------------------------------------------------
+
+/** A labelled row of Settings: what it is and when it was last true, with its action at the right. */
+function SettingRow({ title, note, children }: { title: string; note?: React.ReactNode; children?: React.ReactNode }) {
+  return (
+    <div className="ax-row">
+      <span className="ax-row-main">
+        <strong>{title}</strong>
+        {note && <small>{note}</small>}
+      </span>
+      {children && <span className="ax-row-end">{children}</span>}
+    </div>
+  );
+}
 
 export function SignInSettings() {
   const [status, setStatus] = useState<AccountStatus | null>(null);
@@ -799,9 +799,6 @@ export function SignInSettings() {
   }, []);
   return (
     <Panel title="Your sign-in">
-      <Lede>{status && !status.exists
-            ? "This installation opens only with the access token. Add an email and password to sign in with them."
-            : "How you sign in to this dashboard. The access token keeps working for scripts."}</Lede>
       <ErrorLine error={error} retry={load} />
       {!status ? (
         !error && <Loading />
@@ -828,27 +825,19 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
   const fewCodes = !codes || codes.left <= 3;
   return (
     <>
-      <KeyValues
+      <Facts
         items={[
           ["Email", status.email || "—"],
           ["Name", status.name || "—"],
           ["This browser", browserSession(status)],
         ]}
       />
-      <div className="ax-switch-row">
-        <span>
-          <strong>Password</strong>
-          <small className="muted">
-            {status.password_changed_at ? `Set ${day(status.password_changed_at)}. ` : ""}Changing it signs out every
-            other browser.
-          </small>
-        </span>
-        {open !== "password" && (
-          <Button type="button"  onClick={() => setOpen("password")}>
-            Change password
-          </Button>
-        )}
-      </div>
+      <SettingRow
+        title="Password"
+        note={`${status.password_changed_at ? `Set ${day(status.password_changed_at)}. ` : ""}Changing it signs out every other browser.`}
+      >
+        {open !== "password" && <Button onClick={() => setOpen("password")}>Change password</Button>}
+      </SettingRow>
       {open === "password" && (
         <ChangePassword
           close={() => setOpen("")}
@@ -858,21 +847,17 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
           }}
         />
       )}
-      <div className="ax-switch-row">
-        <span>
-          <strong>Recovery codes</strong>
-          <small className={fewCodes ? "warn-text" : "muted"}>
-            {!codes
-              ? "None yet. Without them, a forgotten password needs the access token or the host command."
-              : `${codes.left} of ${codes.total} unused${codes.created_at ? `, created ${day(codes.created_at)}` : ""}. Each resets a forgotten password once.`}
-          </small>
-        </span>
-        {open !== "codes" && (
-          <Button type="button"  onClick={() => setOpen("codes")}>
-            {codes ? "Generate new codes" : "Generate codes"}
-          </Button>
-        )}
-      </div>
+      <SettingRow
+        title="Recovery codes"
+        note={
+          !codes
+            ? "None yet. Without them, a forgotten password needs the access token or the host command."
+            : `${codes.left} of ${codes.total} unused${codes.created_at ? `, created ${day(codes.created_at)}` : ""}. Each resets a forgotten password once.`
+        }
+      >
+        {fewCodes && <Pill tone="warn" dot>{codes ? "Few left" : "None"}</Pill>}
+        {open !== "codes" && <Button onClick={() => setOpen("codes")}>{codes ? "Generate new codes" : "Generate codes"}</Button>}
+      </SettingRow>
       {open === "codes" && (
         <RegenerateCodes
           close={() => setOpen("")}
@@ -883,13 +868,8 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
           replacing={!!codes}
         />
       )}
-      <div className="ax-switch-row">
-        <span>
-          <strong>Sign out of this browser</strong>
-          <small className="muted">Applications keep running on the server.</small>
-        </span>
+      <SettingRow title="Sign out of this browser" note="Applications keep running on the server.">
         <Button
-          type="button"
           disabled={pending !== null}
           onClick={() =>
             run("logout", async () => {
@@ -900,15 +880,12 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
         >
           Sign out
         </Button>
-      </div>
-      <div className="ax-switch-row">
-        <span>
-          <strong>Sign out everywhere</strong>
-          <small className="muted">Every browser, this one included, must sign in again. The access token keeps working.</small>
-        </span>
+      </SettingRow>
+      <SettingRow title="Sign out everywhere" note="Every browser, this one included, must sign in again. The access token keeps working.">
         <ConfirmButton
           label="Sign out everywhere"
           confirm="Sign out every browser"
+          variant="secondary"
           pending={pending === "everywhere"}
           onConfirm={() =>
             run("everywhere", async () => {
@@ -917,7 +894,7 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
             })
           }
         />
-      </div>
+      </SettingRow>
     </>
   );
 }
@@ -940,7 +917,7 @@ function ChangePassword({ close, done }: { close: () => void; done: () => void }
   return (
     <form
       ref={ref}
-      className="inline-panel"
+      className="ax-stack ax-inline"
       noValidate
       onSubmit={async (e) => {
         e.preventDefault();
@@ -968,11 +945,11 @@ function ChangePassword({ close, done }: { close: () => void; done: () => void }
       </Field>
       <NewPassword value={secret} onChange={setSecret} errors={errors} label="New password" />
       <FormError message={submit.error} />
-      <div className="form-actions start">
+      <div className="ax-actions is-start">
         <Button type="submit" variant="primary" disabled={submit.busy || submit.wait > 0}>
           {submit.busy ? "Saving…" : "Change password"}
         </Button>
-        <Button type="button" variant="ghost" onClick={close}>
+        <Button variant="ghost" onClick={close}>
           Cancel
         </Button>
       </div>
@@ -995,17 +972,15 @@ function RegenerateCodes({
   const submit = useSubmit();
   if (codes)
     return (
-      <div className="inline-panel">
-        <p className="muted">
-          These replace every earlier code. Save them now; they won't be shown again.
-        </p>
+      <div className="ax-stack ax-inline">
+        <p className="ax-hint">These replace every earlier code. Save them now; they won't be shown again.</p>
         <RecoveryCodes codes={codes} doneLabel="Done" onDone={done} />
       </div>
     );
   const error = tried && !password ? "Enter your password" : undefined;
   return (
     <form
-      className="inline-panel"
+      className="ax-stack ax-inline"
       noValidate
       onSubmit={async (e) => {
         e.preventDefault();
@@ -1033,11 +1008,11 @@ function RegenerateCodes({
         />
       </Field>
       <FormError message={submit.error} />
-      <div className="form-actions start">
+      <div className="ax-actions is-start">
         <Button type="submit" variant="primary" disabled={submit.busy || submit.wait > 0}>
           {submit.busy ? "Generating…" : "Generate codes"}
         </Button>
-        <Button type="button" variant="ghost" onClick={close}>
+        <Button variant="ghost" onClick={close}>
           Cancel
         </Button>
       </div>
@@ -1060,10 +1035,10 @@ function AddSignIn({ onAdded }: { onAdded: () => void }) {
   }, []);
   if (codes)
     return (
-      <div className="inline-panel">
-        <p className="muted">
-          Email and password saved. If you forget the password, one of these codes lets you choose a new one. Each
-          works once; they won't be shown again.
+      <div className="ax-stack ax-inline">
+        <p className="ax-hint">
+          Email and password saved. If you forget the password, one of these codes lets you choose a new one. Each works
+          once; they won't be shown again.
         </p>
         <RecoveryCodes codes={codes} doneLabel="Done" onDone={onAdded} />
       </div>
@@ -1073,7 +1048,6 @@ function AddSignIn({ onAdded }: { onAdded: () => void }) {
   return (
     <form
       ref={ref}
-      className="ob-grid"
       noValidate
       onSubmit={async (e) => {
         e.preventDefault();
@@ -1089,28 +1063,31 @@ function AddSignIn({ onAdded }: { onAdded: () => void }) {
         if (created) setCodes(created.recovery_codes);
       }}
     >
-      <Field label="Full name" error={errors.name}>
-        <input
-          value={form.name}
-          onChange={(e) => setForm({ ...form, name: e.target.value })}
-          autoComplete="name"
-          aria-invalid={!!errors.name}
-        />
-      </Field>
-      <Field label="Email" error={errors.email}>
-        <input
-          type="email"
-          value={form.email}
-          onChange={(e) => setForm({ ...form, email: e.target.value })}
-          autoComplete="email"
-          aria-invalid={!!errors.email}
-        />
-      </Field>
-      <div className="stack-tight wide">
-        <NewPassword value={secret} onChange={setSecret} errors={errors} />
-      </div>
+      <p className="ax-hint">This installation opens only with the access token. Add an email and password to sign in with them.</p>
+      <FormGrid>
+        <Field label="Full name" error={errors.name}>
+          <input
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            autoComplete="name"
+            aria-invalid={!!errors.name}
+          />
+        </Field>
+        <Field label="Email" error={errors.email}>
+          <input
+            type="email"
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            autoComplete="email"
+            aria-invalid={!!errors.email}
+          />
+        </Field>
+        <div className="ax-stack">
+          <NewPassword value={secret} onChange={setSecret} errors={errors} />
+        </div>
+      </FormGrid>
       <FormError message={submit.error} />
-      <div className="ob-form-end">
+      <div className="ax-actions is-start">
         <Button type="submit" variant="primary" disabled={submit.busy || submit.wait > 0}>
           {submit.busy ? "Saving…" : "Set email and password"}
         </Button>
@@ -1122,13 +1099,8 @@ function AddSignIn({ onAdded }: { onAdded: () => void }) {
 function GuideRow() {
   const { pending, run } = useAction();
   return (
-    <div className="ax-switch-row">
-      <span>
-        <strong>Setup guide</strong>
-        <small className="muted">Walk through your resume, contact details and the screening questions again.</small>
-      </span>
+    <SettingRow title="Setup guide" note="Walk through your resume, contact details and the screening questions again.">
       <Button
-        type="button"
         disabled={pending !== null}
         onClick={() =>
           run("guide", async () => {
@@ -1140,6 +1112,6 @@ function GuideRow() {
       >
         Open setup guide
       </Button>
-    </div>
+    </SettingRow>
   );
 }
