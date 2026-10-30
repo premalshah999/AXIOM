@@ -1,20 +1,20 @@
-// Small pieces the work pages (Overview, Jobs, Applications, Needs you, the job drawer) share: the status pill that maps
-// the product's states onto the shell's Pill tones, a search box, filter chips, a company-and-role cell, an overflow
-// menu for row actions and a two-step confirm button. Tokens only; the CSS is styles/work.css.
+// Small pieces the work pages (Overview, Jobs, Applications, Needs you, the job drawer) share: the status that maps the
+// product's states onto the Pill tones, a search box, filter text, a company-and-role cell, an overflow menu for row
+// actions and a two-step confirm button. Tokens only; the CSS is styles/components.css.
 import { MoreHorizontal, Search } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import "./styles/work.css";
 import { stateInfo, type Tone } from "./model";
 import { Button, Pill, type PillTone } from "./ui/index";
 
-// model.ts tones (ok, run, ask, hold, fix, bad, idle) onto the primitives' tones.
+// model.ts tones onto the primitives' tones. Only "ask" (needs an answer) and "bad" (failed) call for attention: a job the
+// system is still repairing or holding is not the owner's problem, so it reads as plain text.
 const TONE: Record<Tone, PillTone> = {
   ok: "ok",
-  run: "brand",
+  run: "neutral",
   ask: "warn",
-  hold: "info",
-  fix: "warn",
+  hold: "neutral",
+  fix: "neutral",
   bad: "bad",
   idle: "neutral",
 };
@@ -22,7 +22,7 @@ const TONE: Record<Tone, PillTone> = {
 export function StatusPill({ state, label, title }: { state: string; label?: string; title?: string }) {
   const info = stateInfo(state);
   return (
-    <Pill tone={TONE[info.tone]} dot title={title}>
+    <Pill tone={TONE[info.tone]} title={title}>
       {label || info.label}
     </Pill>
   );
@@ -55,7 +55,7 @@ export function SearchBox({
 
 export type ChipItem = { id: string; label: string; count?: number };
 
-/** A row of toggle chips that act as one choice (aria-pressed on each). */
+/** One quiet row of text filters with counts, acting as one choice (aria-pressed on each). */
 export function Chips({
   items,
   value,
@@ -79,7 +79,7 @@ export function Chips({
   );
 }
 
-/** Company in bold and the role beside it, on one line that ends in an ellipsis. Opens the job. */
+/** Company and the role beside it in muted text, on one line that ends in an ellipsis. Opens the job. */
 export function JobCell({
   company,
   role,
@@ -360,7 +360,7 @@ export function ConfirmButton({
   );
 }
 
-/** A single sentence with an action, for things that are fine but worth a glance ("3 questions need you"). */
+/** A single plain sentence with an action ("3 questions need you"). warn and bad add a small dot; nothing else is coloured. */
 export function Notice({
   tone = "info",
   children,

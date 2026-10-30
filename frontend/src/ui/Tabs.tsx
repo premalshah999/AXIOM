@@ -3,7 +3,7 @@ import { routeUrl, useWorkspace, type View } from "../context";
 export type TabItem = { id: string; label: string; count?: number };
 
 /**
- * Underline tabs that set the route `tab` for `view`. They are real links (middle-click and copy-link work) and mark
+ * Quiet text tabs that set the route `tab` for `view`. They are real links (middle-click and copy-link work) and mark
  * the current one with aria-current. `current` is the active id (falls back to the first tab when the route's is unknown).
  */
 export function RouteTabs({ view, tabs, label, current }: { view: View; tabs: TabItem[]; label: string; current?: string }) {

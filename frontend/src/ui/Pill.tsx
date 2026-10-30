@@ -2,21 +2,24 @@ import type { ReactNode } from "react";
 
 export type PillTone = "neutral" | "brand" | "ok" | "warn" | "bad" | "info";
 
-/** A short status chip. Sentence case; `dot` adds a leading dot in the tone colour. */
+/**
+ * A status as plain muted text. Only warn and bad (needs an answer, failed) get a small coloured dot and full-strength
+ * text; success and everything else stay quiet. `dot` is accepted for older call sites and adds nothing on its own.
+ */
 export function Pill({
   tone = "neutral",
   children,
   title,
-  dot,
 }: {
   tone?: PillTone;
   children: ReactNode;
   title?: string;
   dot?: boolean;
 }) {
+  const attention = tone === "warn" || tone === "bad";
   return (
-    <span className={"ax-pill" + (tone === "neutral" ? "" : " is-" + tone)} title={title}>
-      {dot && <i className="ax-pill-dot" aria-hidden="true" />}
+    <span className={"ax-pill" + (attention ? " is-" + tone : "")} title={title}>
+      {attention && <i className="ax-pill-dot" aria-hidden="true" />}
       {children}
     </span>
   );

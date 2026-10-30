@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-/** A titled card. `actions` sits at the right of the header; `flush` drops the body padding (for a table inside). */
+/** A plain titled section on a hairline, not a card. `actions` sits at the right of the title; `flush` is for a table inside. */
 export function Panel({
   title,
   actions,

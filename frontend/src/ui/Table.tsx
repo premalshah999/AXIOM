@@ -10,23 +10,24 @@ export type Column<T> = {
   /** CSS width for the column. For a truncating column it is the share of the spare room the column asks for. */
   width?: number | string;
   /** One line with an ellipsis. The column takes the room left over (in proportion to `width`) down to `min`, so a
-   *  table fits its panel instead of sliding sideways. Without it the cell is nowrap and sizes to its content. */
+   *  table fits its width instead of sliding sideways. Without it the cell is nowrap and sizes to its content. */
   truncate?: boolean;
   /** The narrowest a truncating column gets before the table scrolls sideways (default 160). */
   min?: number;
-  /** Dropped when the table's panel is narrower than this (a panel under 860px, or under 600px), so the job, its
+  /** Dropped when the table is narrower than this (under 860px, or under 600px), so the job, its
    *  status and its actions stay in view. Everything dropped is in the job's drawer. */
   hideBelow?: 860 | 600;
-  /** Stays in view at the panel's right edge while the rest scrolls sideways (the row's actions). */
+  /** Stays in view at the right edge while the rest scrolls sideways (the row's actions). */
   pin?: boolean;
   /** Let the cell wrap onto several lines (rows grow past 40px). */
   wrap?: boolean;
 };
 
 /**
- * Table shell: sticky head, one-line 40px rows, row hover, optional selection with a bulk-action bar, and loading,
- * empty and error states. Scrolls sideways inside its own panel. For a sticky head against the page, put the table on
- * a page with className "ax-page ax-page-fill" and pass `fill`: the table then is the page's only vertical scroller.
+ * A plain table: no outer card, hairline row rules, a sticky head, one-line 40px rows, row hover, optional selection with
+ * a bulk-action line, and quiet loading, empty and error states. Scrolls sideways inside itself. For a sticky head against
+ * the page, put the table on a page with className "ax-page ax-page-fill" and pass `fill`: the table then is the page's
+ * only vertical scroller.
  */
 export function Table<T>({
   columns,
@@ -85,7 +86,7 @@ export function Table<T>({
     <div className={"ax-table-wrap" + (fill ? " is-fill" : "")}>
       {selectable && chosen.size > 0 && (
         <div className="ax-bulk" role="status">
-          <span className="ax-bulk-count">{chosen.size} selected</span>
+          <span>{chosen.size} selected</span>
           <div className="ax-bulk-actions">
             {bulk}
             <Button size="sm" variant="ghost" onClick={() => onSelectedChange?.(new Set())}>
