@@ -6,8 +6,8 @@ import { useWorkspace } from "./context";
 import { useDraft } from "./hooks";
 import { Pagination, usePagination } from "./pagination";
 import { groupQuestions, QuestionCard, type QuestionGroup } from "./questions";
-import { ago, linkHost, plural, urlRole } from "./ui";
-import { Button, Empty } from "./ui/index";
+import { ago, linkHost, plural, urlRole } from "./format";
+import { Button, Empty, Panel } from "./ui/index";
 import "./styles/work.css";
 import type { Job } from "./types";
 
@@ -64,11 +64,11 @@ export function NeedsView() {
 
   if (!groups.length)
     return (
-      <div className="ax-page needs-page">
+      <div className="ax-page">
         <Empty
           icon={MessageCircleQuestion}
           title="Nothing is waiting on you"
-          hint="If an application is missing a required personal fact, it appears here with the page it came from. Site and control problems are repaired automatically and never turned into questions."
+          hint="Questions appear here when an application needs a personal fact your profile doesn't have."
           action={
             <Button size="sm" onClick={() => go({ view: "batch" })}>
               Back to Overview
@@ -80,54 +80,57 @@ export function NeedsView() {
 
   const applications = new Set(groups.map((g) => g.job?.id || g.review.run_id)).size;
   return (
-    <div className="ax-page needs-page">
-      <p className="nq-lede">
-        <strong>{plural(groups.length, "question")}</strong> across {plural(applications, "application")}. You are asked only for
-        personal details your profile doesn't have; other applications keep going while these wait. A saved answer is reused
-        wherever the same question comes up.
+    <div className="ax-page">
+      <p className="ax-note">
+        {plural(groups.length, "question")} across {plural(applications, "application")}.
         {(counts.groups.needs ?? 0) > applications && (
           <>
             {" "}
             <button type="button" className="ax-link" onClick={() => go({ view: "jobs", tab: "pipeline", filter: "needs" })}>
               {plural(counts.groups.needs ?? 0, "application")} are marked as waiting on you
             </button>{" "}
-            in Jobs; open one there for details.
+            in Jobs.
           </>
         )}
       </p>
-      {buckets.length === 0 && (
-        <p className="ax-note">Every open question is skipped for now. They are listed below.</p>
-      )}
-      <div className="nq-jobs">
-        {paging.items.map((b) => (
-          <section key={b.key} className="nq-job" aria-label={b.job?.company || linkHost(b.job?.url) || "Application"}>
-            <header className="nq-job-head">
-              <div className="nq-job-name">
-                <strong>{b.job?.company || linkHost(b.job?.url) || "Employer"}</strong>
-                <span>{b.job?.title || (b.job ? urlRole(b.job.url) : "Application")}</span>
-              </div>
-              <span className="ax-note nq-job-meta">
-                {[b.job?.ats, b.since && `waiting since ${ago(b.since)}`, plural(b.cards.length, "question")].filter(Boolean).join(" · ")}
-              </span>
-              <Button size="sm" variant="ghost" onClick={() => b.job && openJob(b.job.id, b.runId)} disabled={!b.job}>
-                Open application
-              </Button>
-            </header>
-            {b.cards.map((g) => (
-              <QuestionCard key={g.review.id} group={g} onSaved={advance} onSkip={skip} />
-            ))}
-          </section>
-        ))}
-      </div>
+      {buckets.length === 0 && <p className="ax-note">Every open question is skipped for now. They are listed below.</p>}
+      {paging.items.map((b) => (
+        <Panel
+          key={b.key}
+          title={
+            <>
+              {b.job?.company || linkHost(b.job?.url) || "Employer"}{" "}
+              <span className="ax-note">{b.job?.title || (b.job ? urlRole(b.job.url) : "Application")}</span>
+            </>
+          }
+          actions={
+            <Button size="sm" variant="ghost" onClick={() => b.job && openJob(b.job.id, b.runId)} disabled={!b.job}>
+              Open application
+            </Button>
+          }
+        >
+          <div className="dr-stack">
+            <p className="ax-note">
+              {[b.job?.ats, b.since && `waiting since ${ago(b.since)}`, plural(b.cards.length, "question")].filter(Boolean).join(" · ")}
+            </p>
+            <div className="ax-stack">
+              {b.cards.map((g) => (
+                <QuestionCard key={g.review.id} group={g} onSaved={advance} onSkip={skip} />
+              ))}
+            </div>
+          </div>
+        </Panel>
+      ))}
       <Pagination paging={paging} label="Question pages" sizes={false} />
       {parked.length > 0 && (
-        <details className="nq-parked ax-fold">
+        <details className="ax-fold">
           <summary>Skipped for now ({parked.length})</summary>
-          <ul>
+          <ul className="ax-rows">
             {parked.map((g) => (
-              <li key={g.review.id}>
-                <span className="nq-parked-q">
-                  <strong>{g.job?.company || linkHost(g.job?.url) || "Employer"}</strong> {g.review.display_question || g.review.question}
+              <li key={g.review.id} className="ax-row">
+                <span className="ax-row-main">
+                  <strong>{g.job?.company || linkHost(g.job?.url) || "Employer"}</strong>
+                  <small>{g.review.display_question || g.review.question}</small>
                 </span>
                 <Button size="sm" variant="ghost" onClick={() => setSkipped((list) => list.filter((x) => x !== g.review.id))}>
                   Answer now

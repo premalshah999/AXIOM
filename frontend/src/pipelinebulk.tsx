@@ -5,7 +5,7 @@ import { useAction } from "./hooks";
 import type { Selection } from "./bulk";
 import { reconcileRun } from "./jobactions";
 import { appliedState, type Group, type JobRow } from "./model";
-import { plural } from "./ui";
+import { plural } from "./format";
 import { Button } from "./ui/index";
 import { ConfirmButton } from "./worktools";
 
@@ -112,7 +112,7 @@ export function PipelineBulk({
     <>
       {total > rows.length && (
         <Button size="sm" variant="ghost" disabled={busy} loading={pending === "select"} onClick={selectMatching}>
-          {`Select all ${total.toLocaleString()} matching${total > 200 ? " (first 200)" : ""}`}
+          {total > 200 ? "Select the first 200" : `Select all ${total.toLocaleString()}`}
         </Button>
       )}
       {filter === "unconfirmed" && (

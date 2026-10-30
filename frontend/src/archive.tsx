@@ -6,9 +6,9 @@ import { useWorkspace } from "./context";
 import { useAction, useDraft, usePoll } from "./hooks";
 import { Pagination, usePagination } from "./pagination";
 import type { Archived } from "./types";
-import { day, plural } from "./ui";
+import { day, plural } from "./format";
 import { Button, Empty, Table, type Column } from "./ui/index";
-import { ConfirmButton, JobCell, Notice, Note, SearchBox, StatusPill } from "./worktools";
+import { ConfirmButton, JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
 
 export function ArchiveList() {
   const { openJob } = useWorkspace();
@@ -31,7 +31,7 @@ export function ArchiveList() {
       header: "Job",
       width: 420,
       truncate: true,
-      cell: (a) => <JobCell company={a.company} role={a.title} onOpen={() => openJob(a.job_id, a.run_id)} />,
+      cell: (a) => <JobCell company={a.company || "Employer"} role={a.title || "Untitled role"} onOpen={() => openJob(a.job_id, a.run_id)} />,
     },
     {
       key: "outcome",
@@ -44,14 +44,13 @@ export function ArchiveList() {
         ),
     },
     { key: "reason", header: "Detail", hideBelow: 600, width: 300, truncate: true, cell: (a) => (a.reason ? <Note>{a.reason}</Note> : null) },
-    { key: "tries", header: "Tries", num: true, hideBelow: 860, cell: (a) => a.attempts },
     { key: "archived", header: "Archived", hideBelow: 600, cell: (a) => day(a.archived_at) },
     {
       key: "log",
       header: "Log",
       cell: (a) => (
         <a className="ax-link" href={`/api/archive/${a.job_id}/log`} download>
-          <Download size={13} aria-hidden="true" style={{ verticalAlign: "-2px" }} /> Log
+          <Download size={13} aria-hidden="true" /> Log
           {a.log_bytes ? ` · ${Math.max(1, Math.ceil(a.log_bytes / 1024))} KB` : ""}
         </a>
       ),
@@ -61,7 +60,7 @@ export function ArchiveList() {
     <>
       <div className="ax-toolbar">
         <SearchBox value={query} onChange={setQuery} label="Search archive" placeholder="Company or role" />
-        <span className="ax-note ax-toolbar-note">Failed and removed jobs, with logs. Nothing here is retried.</span>
+        <span className="ax-note ax-toolbar-note">Nothing here is retried.</span>
         <div className="ax-toolbar-end">
           <ConfirmButton
             label="Archive earlier failures"
@@ -86,18 +85,7 @@ export function ArchiveList() {
           />
         </div>
       </div>
-      {archive.error && (
-        <Notice
-          tone="bad"
-          action={
-            <Button size="sm" onClick={() => archive.refresh()}>
-              Try again
-            </Button>
-          }
-        >
-          {archive.error.message}
-        </Notice>
-      )}
+      {archive.error && archive.data && <LoadError error={archive.error} retry={archive.refresh} />}
       <Table
         fill
         label="Archived applications"
@@ -105,6 +93,7 @@ export function ArchiveList() {
         rows={paging.items}
         rowKey={(a) => a.job_id}
         loading={!archive.data && !archive.error}
+        error={archive.error && !archive.data ? <LoadError error={archive.error} retry={archive.refresh} /> : undefined}
         empty={
           <Empty
             title={q ? "No archived jobs match" : "The archive is empty"}

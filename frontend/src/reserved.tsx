@@ -9,10 +9,10 @@ import { useAction, useDraft, useNow, usePoll } from "./hooks";
 import { appliedState, rowFromServer, stateInfo, STATES, withMarks, type JobRow } from "./model";
 import { Pagination, type Paging } from "./pagination";
 import type { ReservedEmployer, ReservedPage, ReservedRules } from "./types";
-import { ago, linkHost, plural } from "./ui";
-import { Button, Drawer, Empty, Table, Textarea, type Column } from "./ui/index";
+import { ago, linkHost, plural } from "./format";
+import { Button, Check, Drawer, Empty, Table, Textarea, type Column } from "./ui/index";
 import { TopActions } from "./shell/Shell";
-import { Chips, ConfirmButton, JobCell, Notice, Note, SearchBox, StatusPill } from "./worktools";
+import { Chips, ConfirmButton, JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
 
 export function ReservedJobs() {
   const { route, go, version, marks, markJobs, refresh, openJob } = useWorkspace();
@@ -129,7 +129,7 @@ export function ReservedJobs() {
         r.state === "reserved" ? (
           <Button
             size="sm"
-            variant="primary"
+            className="ax-lead"
             disabled={pending !== null}
             loading={pending === "approve:" + r.job.id}
             onClick={() => approve(r.job.id)}
@@ -149,15 +149,9 @@ export function ReservedJobs() {
       </TopActions>
       {data && (
         <p className="ax-lede">
-          {data.enabled ? (
-            <>
-              <strong>{plural(waiting, "job")} waiting for your approval.</strong> Nothing is applied at these employers
-              until you approve the job.
-              {current && current.employers.length > 0 && ` ${current.label}: ${current.employers.join(", ")}.`}
-            </>
-          ) : (
-            <strong>Reserved employers are off: every employer is applied to as usual.</strong>
-          )}
+          {data.enabled
+            ? `${plural(waiting, "job")} waiting for your approval.${current && current.employers.length > 0 ? ` ${current.label}: ${current.employers.join(", ")}.` : ""}`
+            : "Reserved employers are off: every employer is applied to as usual."}
         </p>
       )}
       {data && data.enabled && data.sections.length > 0 && (
@@ -184,18 +178,7 @@ export function ReservedJobs() {
           )}
         </div>
       )}
-      {list.error && (
-        <Notice
-          tone="bad"
-          action={
-            <Button size="sm" onClick={() => list.refresh()}>
-              Try again
-            </Button>
-          }
-        >
-          {list.error.message}
-        </Notice>
-      )}
+      {list.error && data && <LoadError error={list.error} retry={list.refresh} />}
       {(!data || data.enabled) && (
         <Table
           fill
@@ -205,6 +188,7 @@ export function ReservedJobs() {
           rowKey={(r) => r.job.id}
           onRowClick={(r) => openJob(r.job.id, r.run?.id)}
           loading={!data && !list.error}
+          error={list.error && !data ? <LoadError error={list.error} retry={list.refresh} /> : undefined}
           busy={!!data && data.key !== key}
           empty={
             <Empty
@@ -274,11 +258,8 @@ function EmployerEditor({ rules }: { rules: ReservedRules }) {
       "Reserved employers saved.",
     );
   return (
-    <div className="ax-editor">
-      <label className="ax-check">
-        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-        <span>Hold these employers until I approve each job</span>
-      </label>
+    <div className="ax-stack">
+      <Check checked={enabled} onChange={setEnabled} label="Hold these employers until I approve each job" />
       {rules.sections.map((s, i) => (
         <Textarea
           key={s.id}
@@ -295,7 +276,7 @@ function EmployerEditor({ rules }: { rules: ReservedRules }) {
           onChange={(e) => setTexts((all) => all.map((t, j) => (j === i ? e.target.value : t)))}
         />
       ))}
-      <div className="ax-editor-actions">
+      <div className="ax-toolbar">
         <Button size="sm" variant="primary" disabled={!dirty} loading={pending === "save"} onClick={save}>
           Save employers
         </Button>

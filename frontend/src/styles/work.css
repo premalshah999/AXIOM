@@ -1,32 +1,47 @@
-/* What the work pages (Overview, Jobs, Applications, Needs you, the job drawer) still draw for themselves. The shared
-   pieces moved to components.css; page agents shrink this file as each page is converted. */
+/* What the work pages (Overview, Jobs, Applications, Needs you, the job drawer) still draw for themselves: layout only.
+   Every look comes from src/ui, worktools.tsx and the tokens. */
 
-.ax-outcomes {
+/* Overview */
+.ov-head {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  gap: var(--space-2);
 }
-.ax-outcome {
+.ov-start {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  min-height: 34px;
-  padding: 2px 0;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
 }
-.ax-outcome > span:first-child {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ax-outcome-end {
+.ov-target {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--ink-2);
 }
+.ov-target input {
+  width: 84px;
+}
+.ov-idle {
+  padding-top: var(--space-3);
+}
+.ov-meta {
+  font-size: var(--text-meta);
+}
+.ax-notice.is-lead {
+  color: var(--ink);
+  font-size: var(--text-body);
+}
+
+/* A row's checkbox always shows (owner, 2026-10-30: they complained when it went missing). components.css still hides it
+   until hover; delete that rule there and this one can go. */
+@media (hover: hover) {
+  .ax-table tbody .is-check input {
+    opacity: 1;
+  }
+}
+
+/* Jobs: the paste box above the Pipeline */
 .ax-queue-box {
   display: flex;
   flex-direction: column;
@@ -38,726 +53,51 @@
   align-items: flex-start;
   gap: var(--space-2);
 }
-.ax-queue .ax-control {
+.ax-queue textarea {
   flex: 1;
   resize: none;
 }
-.ax-lede strong {
-  color: var(--ink);
+/* The bulk line wraps on a phone, so Remove and Clear stay reachable (the Table primitive's does not yet). */
+.ax-bulk,
+.ax-bulk-actions {
+  flex-wrap: wrap;
 }
-.ax-fit {
-  font-weight: 600;
-}
-.ax-fit.is-good {
-  color: var(--ok);
-}
-.ax-fit.is-low {
-  color: var(--warn);
-}
-.ax-fit.is-none {
-  color: var(--ink-3);
-  font-weight: 400;
-}
-.ax-whynot {
-  margin-left: 6px;
-  color: var(--ink-3);
-  font-size: var(--text-micro);
-  cursor: help;
-  border-bottom: 1px dotted var(--ink-3);
-}
-.spin {
-  animation: ax-spin 1s linear infinite;
+/* A phone keeps the job, its status and the row menu readable: the row's one button is in the job's drawer. */
+@container ax-table (max-width: 599px) {
+  .ax-table .ax-lead {
+    display: none;
+  }
 }
 
-.ax-editor {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-.ax-editor-actions {
-  display: flex;
-  gap: var(--space-2);
-}
-.ax-check {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-ui);
-}
-.ax-check input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--brand);
-}
-.ax-code textarea,
-textarea.ax-code {
-  font-family: var(--font-code);
-  font-size: var(--text-meta);
-}
-
-/* ---------- job drawer ---------- */
-.ax-dr {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  min-width: 0;
-}
-.ax-dr-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-1) var(--space-4);
-  color: var(--ink-2);
-  font-size: var(--text-ui);
-}
-.ax-dr-status {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--card);
-}
-.ax-dr-statushead {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-.ax-dr-status p {
-  color: var(--ink-2);
-  font-size: var(--text-ui);
-}
-.ax-dr-status p.ax-dr-reason {
-  color: var(--ink);
-}
-.ax-dr-sec {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--line);
-  min-width: 0;
-}
-.ax-dr-sec > h3 {
-  font-size: var(--text-ui);
-}
-details.ax-dr-sec > summary {
-  cursor: pointer;
-  font-weight: 600;
-  font-size: var(--text-ui);
-}
-details.ax-dr-sec[open] > summary {
-  margin-bottom: var(--space-2);
-}
-.ax-dr-foot {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-2);
-  width: 100%;
-}
-.ax-drawer-acts {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-}
-.ax-list {
-  margin: 0;
-  padding-left: 18px;
-  font-size: var(--text-ui);
-}
-.ax-ok {
-  color: var(--ok);
-}
-.ax-mini {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--text-meta);
-}
-.ax-mini th {
-  padding: 6px 8px 6px 0;
-  color: var(--ink-3);
-  font-weight: 560;
-  text-align: left;
-  border-bottom: 1px solid var(--line);
-}
-.ax-mini td {
-  padding: 6px 8px 6px 0;
-  vertical-align: top;
-  border-bottom: 1px solid var(--line);
-  overflow-wrap: anywhere;
-}
-.ax-timeline {
+/* Needs you and the job drawer */
+.dr-stack {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  min-width: 0;
 }
-.ax-timeline li {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 2px var(--space-3);
-  font-size: var(--text-meta);
-}
-.ax-timeline time {
-  color: var(--ink-3);
-}
-.ax-timeline p {
-  grid-column: 1 / -1;
-  color: var(--ink);
-  font-size: var(--text-ui);
+.nq-q {
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
-.ax-attempts {
+.nq-answer {
+  max-width: 640px;
+}
+.nq-opts {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
   margin: 0;
   padding: 0;
-  list-style: none;
-}
-.ax-attempts li {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  min-height: 30px;
-}
-.ax-attempts li[aria-current] {
-  font-weight: 600;
+  border: 0;
 }
 .ax-shot img {
   display: block;
   max-width: 100%;
   border: 1px solid var(--line);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
 }
-.ax-reconcile {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-}
-
-/* ---------- Needs you ---------- */
-.needs-page {
-  max-width: 880px;
-}
-.nq-lede {
-  color: var(--ink-2);
-  font-size: var(--text-ui);
-}
-.nq-lede strong {
-  color: var(--ink);
-}
-.nq-jobs {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-.nq-job {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--card);
-}
-.nq-job-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--line);
-}
-.nq-job-name {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  flex: 1 1 260px;
-  min-width: 0;
-}
-.nq-job-name strong {
-  flex: none;
-  max-width: 50%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.nq-job-name span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink-2);
-}
-.nq-job-meta {
+.ax-code textarea {
+  font-family: var(--font-code);
   font-size: var(--text-meta);
 }
-.nq-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-4);
-  min-width: 0;
-}
-.nq-card + .nq-card {
-  border-top: 1px solid var(--line);
-}
-.nq-card.is-compact {
-  padding: 0;
-}
-.nq-card.is-compact + .nq-card {
-  padding-top: var(--space-4);
-}
-.nq-q {
-  font-size: var(--text-emphasis);
-  font-weight: 560;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-.nq-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-3);
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-}
-.nq-why {
-  color: var(--ink-2);
-  font-weight: 560;
-}
-.nq-also {
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-}
-.nq-answer {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin-top: var(--space-1);
-  max-width: 640px;
-}
-.nq-answer textarea.ax-control {
-  resize: vertical;
-}
-.nq-date {
-  max-width: 220px;
-}
-.nq-file {
-  padding: 5px 8px;
-}
-.nq-opts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-.nq-opt {
-  position: relative;
-  display: inline-flex;
-  cursor: pointer;
-}
-.nq-opt input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-.nq-opt span {
-  display: inline-flex;
-  align-items: center;
-  min-height: 36px;
-  padding: 0 14px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
-  background: var(--field);
-  color: var(--ink);
-  font-size: var(--text-ui);
-  font-weight: 540;
-  transition:
-    background var(--dur-fast) var(--ease),
-    border-color var(--dur-fast) var(--ease);
-}
-.nq-opt:hover span {
-  border-color: var(--ink-3);
-}
-.nq-opt input:checked + span {
-  border-color: var(--brand);
-  background: var(--brand-soft);
-}
-.nq-opt input:focus-visible + span {
-  outline: 2px solid var(--brand);
-  outline-offset: 2px;
-}
-.nq-multi {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-.nq-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-3);
-}
-.nq-page {
-  margin-left: auto;
-  font-size: var(--text-meta);
-}
-.nq-parked ul {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.nq-parked li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  min-height: 36px;
-}
-.nq-parked-q {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink-2);
-}
-.nq-parked-q strong {
-  color: var(--ink);
-}
-
-/* ---------- Overview ---------- */
-.ov-status {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-.ov-head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--space-4);
-  flex-wrap: wrap;
-}
-.ov-count {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  min-height: 40px;
-}
-.ov-n {
-  font-size: 40px;
-  line-height: 1;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-}
-.ov-of {
-  color: var(--ink-2);
-  font-size: var(--text-emphasis);
-}
-.ov-idle {
-  color: var(--ink-2);
-  font-size: var(--text-display);
-  font-weight: 600;
-}
-.ov-controls {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-.ov-start {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-}
-.ov-target {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--ink-2);
-  font-size: var(--text-ui);
-}
-.ov-target input {
-  width: 84px;
-}
-.ov-buttons {
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-}
-.ov-bar {
-  height: 6px;
-  border-radius: 3px;
-  background: var(--chip);
-  overflow: hidden;
-}
-.ov-bar span {
-  display: block;
-  height: 100%;
-  border-radius: 3px;
-  background: var(--brand);
-  transition: width var(--dur-slow) var(--ease);
-}
-.ov-bar span.is-done {
-  background: var(--ok);
-}
-.ov-line {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-  font-size: var(--text-ui);
-}
-.ov-line span {
-  color: var(--ink-2);
-}
-.ov-dot {
-  display: inline-block;
-  flex: none;
-  width: 8px;
-  height: 8px;
-  margin-right: 2px;
-  border-radius: 50%;
-  background: var(--idle);
-  align-self: center;
-}
-.ov-dot.is-ok {
-  background: var(--ok);
-}
-.ov-dot.is-run {
-  background: var(--brand);
-}
-.ov-dot.is-fix {
-  background: var(--fix);
-}
-.ov-dot.is-idle {
-  background: var(--idle);
-}
-.ov-meta {
-  font-size: var(--text-meta);
-}
-.ov-tallies {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: var(--text-ui);
-}
-.ov-tally-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 2px var(--space-4);
-  min-height: 28px;
-}
-.ov-tally-label {
-  width: 84px;
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-}
-.ov-tally {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--ink-2);
-  font: inherit;
-  cursor: pointer;
-}
-.ov-tally b {
-  color: var(--ink);
-  font-weight: 600;
-}
-.ov-tally:hover {
-  color: var(--ink);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-.ov-tally.is-zero b {
-  color: var(--ink-3);
-  font-weight: 500;
-}
-.ov-cols {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
-  gap: var(--space-5);
-  align-items: start;
-}
-.ov-main {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-5);
-  min-width: 0;
-}
-.ov-side {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  min-width: 0;
-}
-.ov-steps {
-  display: flex;
-  flex-direction: column;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.ov-steps li {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: var(--space-3);
-  min-height: 52px;
-  padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--line);
-}
-.ov-steps li:last-child {
-  border-bottom: 0;
-}
-.ov-steps li > span {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.ov-steps small {
-  overflow-wrap: anywhere;
-}
-.ov-workers {
-  display: flex;
-  flex-direction: column;
-  margin: 0 0 var(--space-3);
-  padding: 0;
-  list-style: none;
-}
-.ov-worker {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto auto 64px;
-  align-items: center;
-  gap: var(--space-3);
-  min-height: 40px;
-  border-bottom: 1px solid var(--line);
-}
-.ov-worker.is-quiet {
-  grid-template-columns: 24px 1fr;
-  color: var(--ink-3);
-}
-.ov-slot {
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-  text-align: center;
-}
-.ov-w-job {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ov-w-job span {
-  color: var(--ink-2);
-}
-.ov-w-meta {
-  font-size: var(--text-meta);
-  white-space: nowrap;
-}
-.ov-w-act {
-  display: flex;
-  justify-content: flex-end;
-}
-.ov-idle-line {
-  font-size: var(--text-ui);
-}
-.ov-waiting {
-  margin-top: var(--space-2);
-  font-size: var(--text-ui);
-  color: var(--ink-2);
-}
-.ov-waits {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: var(--space-2) 0 0;
-  padding: 0;
-  list-style: none;
-  font-size: var(--text-meta);
-}
-.ov-waits li {
-  display: flex;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-}
-.ov-sec-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-bottom: var(--space-2);
-}
-.ov-links {
-  display: flex;
-  gap: var(--space-4);
-  font-size: var(--text-ui);
-}
-.ov-activity {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  min-width: 0;
-}
-.ov-sys {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  margin: 0;
-}
-.ov-sys dt {
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-}
-.ov-sys dd {
-  margin: 0;
-  font-size: var(--text-ui);
-}
-.ax-warn {
-  color: var(--warn);
-}
-
-@media (max-width: 1100px) {
-  .ov-cols {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-@media (max-width: 700px) {
-  .ov-n {
-    font-size: 32px;
-  }
-  .ov-worker {
-    grid-template-columns: 20px minmax(0, 1fr) auto;
-  }
-  .ov-worker .ov-w-meta,
-  .ov-worker .ov-w-act {
-    display: none;
-  }
-  .ov-tally-label {
-    width: 100%;
-  }
-  .nq-page {
-    margin-left: 0;
-  }
-}
-

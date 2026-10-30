@@ -159,6 +159,8 @@ export type Workspace = {
   // Re-reads the snapshot; paged lists re-read too (they watch `version`).
   refresh: () => Promise<void>;
   version: number;
+  // The snapshot link: lost after two failed reads in a row. `updatedAt` is when the data on screen was fetched.
+  link: { lost: boolean; updatedAt: number };
   // Optimistic: show these jobs in `state` until a list fetched after now arrives.
   marks: Marks;
   markJobs: (ids: string[], state: string) => void;

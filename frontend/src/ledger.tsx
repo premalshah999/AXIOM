@@ -13,9 +13,9 @@ import { RowActions } from "./jobactions";
 import type { JobRow } from "./model";
 import { PipelineBulk } from "./pipelinebulk";
 import { TopActions } from "./shell/Shell";
-import { ago, linkHost, plural, stamp, urlRole } from "./ui";
+import { ago, linkHost, plural, stamp, urlRole } from "./format";
 import { Button, Empty, RouteTabs, Table, type Column } from "./ui/index";
-import { JobCell, Notice, Note, SearchBox, StatusPill } from "./worktools";
+import { JobCell, LoadError, Notice, Note, SearchBox, StatusPill } from "./worktools";
 
 const EVIDENCE = [
   ["all", "Any evidence"],
@@ -114,7 +114,6 @@ function Confirmed() {
       truncate: true,
       cell: (r) => <JobCell company={r.company} role={r.title} onOpen={() => openJob(r.job_id, r.run_id)} />,
     },
-    { key: "ats", header: "Platform", hideBelow: 860, cell: (r) => <Note>{r.ats}</Note> },
     {
       key: "applied",
       header: "Applied",
@@ -138,7 +137,7 @@ function Confirmed() {
           onClick={(e) => e.stopPropagation()}
           title={`Open the posting (${linkHost(r.url)})`}
         >
-          Posting <ExternalLink size={12} aria-hidden="true" style={{ verticalAlign: "-1px" }} />
+          Posting <ExternalLink size={12} aria-hidden="true" />
           <span className="sr-only"> (opens in a new tab)</span>
         </a>
       ),
@@ -161,23 +160,16 @@ function Confirmed() {
           ))}
         </select>
         <span className="ax-note ax-toolbar-note">
-          {ledger.data ? plural(all.length, "confirmed application") : "…"} across all history · {snapshot.stats.confirmed_today} today
-          {rt.state === "active" && ` · ${rt.confirmed ?? 0} of ${rt.target ?? 100} this batch`}. Each has a page
-          acknowledgement or an authenticated employer receipt.
+          {[
+            ledger.data && `${plural(all.length, "confirmed application")} across all history`,
+            `${snapshot.stats.confirmed_today} today`,
+            rt.state === "active" && `${rt.confirmed ?? 0} of ${rt.target ?? 100} this batch`,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
         </span>
       </div>
-      {ledger.error && (
-        <Notice
-          tone="bad"
-          action={
-            <Button size="sm" onClick={() => ledger.refresh()}>
-              Try again
-            </Button>
-          }
-        >
-          {ledger.error.message}
-        </Notice>
-      )}
+      {ledger.error && ledger.data && <LoadError error={ledger.error} retry={ledger.refresh} />}
       <Table
         fill
         label="Confirmed applications"
@@ -186,6 +178,7 @@ function Confirmed() {
         rowKey={(r) => r.job_id}
         onRowClick={(r) => openJob(r.job_id, r.run_id)}
         loading={!ledger.data && !ledger.error}
+        error={ledger.error && !ledger.data ? <LoadError error={ledger.error} retry={ledger.refresh} /> : undefined}
         empty={
           <Empty
             title={all.length ? "No confirmed applications match" : "No confirmed applications yet"}
@@ -224,7 +217,6 @@ function Unconfirmed() {
     },
     { key: "status", header: "Status", cell: (r) => <StatusPill state={r.state} /> },
     { key: "detail", header: "Detail", hideBelow: 600, width: 300, truncate: true, cell: (r) => (r.run?.reason ? <Note>{r.run.reason}</Note> : null) },
-    { key: "ats", header: "Platform", hideBelow: 860, cell: (r) => <Note>{r.job.ats}</Note> },
     {
       key: "updated",
       header: "Updated",
@@ -239,22 +231,8 @@ function Unconfirmed() {
   ];
   return (
     <>
-      <Notice>
-        Submit was attempted but no acknowledgement or receipt was captured. They may have been sent, so they are
-        excluded from Confirmed and never retried. Open one to check email or record what you verified.
-      </Notice>
-      {list.error && (
-        <Notice
-          tone="bad"
-          action={
-            <Button size="sm" onClick={() => list.refresh()}>
-              Try again
-            </Button>
-          }
-        >
-          {list.error.message}
-        </Notice>
-      )}
+      <Notice>No receipt was captured for these. They may have been sent, so they are not in Confirmed and are never retried.</Notice>
+      {list.error && list.loaded && <LoadError error={list.error} retry={list.refresh} />}
       <Table
         fill
         label="Unconfirmed submissions"
@@ -265,7 +243,8 @@ function Unconfirmed() {
         selected={selection.chosen}
         onSelectedChange={selection.replace}
         rowLabel={(r) => r.job.company || "job"}
-        loading={!list.loaded}
+        loading={!list.loaded && !list.error}
+        error={list.error && !list.loaded ? <LoadError error={list.error} retry={list.refresh} /> : undefined}
         busy={list.loaded && !list.current}
         bulk={<PipelineBulk selection={selection} rows={list.rows} filter="unconfirmed" query="" total={list.paging.total} />}
         empty={

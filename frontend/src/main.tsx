@@ -20,7 +20,7 @@ import {
 import { ToastContext, usePoll, type Toast } from "./hooks";
 import { deriveRows, withMarks, type Marks } from "./model";
 import type { Snapshot } from "./types";
-import { ago, Loading } from "./ui";
+import { ago } from "./format";
 import { NeedsView } from "./needs";
 import { countQuestions } from "./questions";
 import { Shell } from "./shell/Shell";
@@ -28,7 +28,7 @@ import { BrandMark } from "./shell/Brand";
 import { CommandPalette } from "./shell/CommandPalette";
 import { ComingSoon } from "./shell/ComingSoon";
 import { ALL_ITEMS, titleFor } from "./shell/nav";
-import { Button, ToastStack } from "./ui/index";
+import { Button, Loading, ToastStack } from "./ui/index";
 import { BatchView } from "./batch";
 import { JobsView } from "./jobs";
 import { LedgerView } from "./ledger";
@@ -166,6 +166,7 @@ function App() {
     () => withMarks(derived, marks, snap.requestedAt),
     [derived, marks, snap.requestedAt],
   );
+  const lost = snap.failures >= 2;
   const workspace = useMemo<Workspace | null>(
     () =>
       snap.data && {
@@ -174,13 +175,14 @@ function App() {
         counts: snap.data.counts || NO_COUNTS,
         refresh,
         version,
+        link: { lost, updatedAt: snap.updatedAt },
         marks,
         markJobs,
         route,
         go,
         openJob: (job, run) => go({ ...route, job, run }),
       },
-    [snap.data, rows, refresh, version, marks, markJobs, route, go],
+    [snap.data, rows, refresh, version, lost, snap.updatedAt, marks, markJobs, route, go],
   );
 
   useEffect(() => {
@@ -300,7 +302,7 @@ function App() {
                   </button>
                 </div>
               )}
-              {snap.failures >= 2 && (
+              {lost && (
                 <div className="ax-banner is-bad" role="status">
                   <span>
                     Connection lost{snap.error ? ` (${snap.error.message})` : ""}. Showing data from {ago(snap.updatedAt)};

@@ -167,15 +167,6 @@ export function useFeature<T>(
   return { ...poll, unavailable: !enabled || unmounted(poll.error) };
 }
 
-function Tag({ tone, children }: { tone: string; children: React.ReactNode }) {
-  return (
-    <span className={"pill tone-" + tone}>
-      <i aria-hidden="true" />
-      {children}
-    </span>
-  );
-}
-
 const CATEGORY_LABEL: Record<string, string> = {
   personal: "Personal details",
   education: "Education",
@@ -1060,34 +1051,47 @@ export function JobResume({
   );
   if (list.unavailable || (!list.data && !list.error)) return null;
   const a = list.data?.items?.[0];
-  const [tone, label] = a
-    ? ARTIFACT_TONE[a.status] || ["idle", a.status]
-    : ["idle", "None yet"];
   return (
-    <section className="panel-section" aria-labelledby="tailored-title">
-      <h3 id="tailored-title">Resume</h3>
-      {masterOnly && (
-        <p className="muted sm">
-          This application is sent with your master resume
-          {master.data?.source ? `, ${master.data.source.name}` : ""}.
-          {a ? " The draft below is for review only." : ""}
-        </p>
-      )}
-      <ErrorLine error={list.error} retry={list.refresh} />
-      {a ? (
-        <>
-          <p>
-            <Tag tone={tone}>{label}</Tag>{" "}
+    <Panel
+      title="Resume"
+      actions={
+        a && (
+          <Pill tone={ARTIFACT_PILL[a.status] || "neutral"} dot>
+            {ARTIFACT_TONE[a.status]?.[1] || a.status}
+          </Pill>
+        )
+      }
+    >
+      <div className="dr-stack">
+        {masterOnly && (
+          <p className="ax-note">
+            This application is sent with your master resume
+            {master.data?.source ? `, ${master.data.source.name}` : ""}.
+            {a ? " The draft below is for review only." : ""}
+          </p>
+        )}
+        {list.error && (
+          <p className="ax-error" role="alert">
+            {list.error.message}{" "}
+            <button type="button" className="ax-link" onClick={() => list.refresh()}>
+              Try again
+            </button>
+          </p>
+        )}
+        {a ? (
+          <>
             {a.status === "ready" && (
-              <>
-                <External
+              <div className="ax-toolbar">
+                <a
+                  className="ax-link"
                   href={`/api/v2/resumes/artifacts/${a.artifact_id}/pdf`}
-                  className="link"
+                  target="_blank"
+                  rel="noreferrer noopener"
                 >
-                  Open PDF
-                </External>{" "}
-                <button
-                  className="btn sm"
+                  Open PDF<span className="sr-only"> (opens in a new tab)</span>
+                </a>
+                <Button
+                  size="sm"
                   onClick={() =>
                     go({
                       view: "editor",
@@ -1097,98 +1101,93 @@ export function JobResume({
                   }
                 >
                   Review in editor
-                </button>
-              </>
+                </Button>
+              </div>
             )}
-          </p>
-          {a.status === "failed" && (
-            <p className="muted sm">
-              {a.error.detail || a.error.code}. This is an internal repair, not
-              a question for you
-              {a.error.retryable ? "; it is retried automatically" : ""}.
+            {a.status === "failed" && (
+              <p className="ax-note">
+                {a.error.detail || a.error.code}. This is an internal repair, not
+                a question for you
+                {a.error.retryable ? "; it is retried automatically" : ""}.
+              </p>
+            )}
+            {a.status === "kept_master" && (
+              <p className="ax-note">
+                The tailored draft did not read better than your master, so the
+                master is used.
+              </p>
+            )}
+            {a.status === "ready" && (
+              <details className="ax-fold">
+                <summary>
+                  What it says <span className="ax-note">{plural(a.selection.length, "row")}</span>
+                </summary>
+                <ul className="ax-rows">
+                  {a.selection.map((x) => (
+                    <li key={x.unit_id} className="ax-row">
+                      <span className="ax-row-main">
+                        <span>{x.text}</span>
+                        {x.text !== x.source_text && <small>Reworded from: {x.source_text}</small>}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {!!a.validation.repairs?.length && (
+                  <p className="ax-note">
+                    {plural(a.validation.repairs.length, "suggested change")}{" "}
+                    undone (unsupported claim or page overflow); your original
+                    wording was kept there.
+                  </p>
+                )}
+              </details>
+            )}
+          </>
+        ) : (
+          !masterOnly && (
+            <p className="ax-note">
+              {eligible
+                ? "No tailored version yet. One is prepared before this application starts."
+                : "Tailored versions are prepared for eligible jobs."}
             </p>
-          )}
-          {a.status === "kept_master" && (
-            <p className="muted sm">
-              The tailored draft did not read better than your master, so the
-              master is used.
-            </p>
-          )}
-          {a.status === "ready" && (
-            <details className="fold">
-              <summary>
-                What it says{" "}
-                <span className="muted">
-                  {plural(a.selection.length, "row")}
-                </span>
-              </summary>
-              <ul className="evidence">
-                {a.selection.map((x) => (
-                  <li key={x.unit_id}>
-                    {x.text}
-                    {x.text !== x.source_text && (
-                      <small className="muted">
-                        {" "}
-                        (reworded from: {x.source_text})
-                      </small>
-                    )}
-                  </li>
-                ))}
-              </ul>
-              {!!a.validation.repairs?.length && (
-                <p className="muted sm">
-                  {plural(a.validation.repairs.length, "suggested change")}{" "}
-                  undone (unsupported claim or page overflow); your original
-                  wording was kept there.
-                </p>
-              )}
-            </details>
-          )}
-        </>
-      ) : (
-        !masterOnly && (
-          <p className="muted sm">
-            {eligible
-              ? "No tailored version yet. One is prepared before this application starts."
-              : "Tailored versions are prepared for eligible jobs."}
-          </p>
-        )
-      )}
-      {eligible &&
-        (!a || a.status === "failed" || a.status === "cancelled") && (
-          <button
-            className="btn sm"
-            disabled={pending !== null}
-            onClick={() =>
-              run(
-                "prepare",
-                async () => {
-                  const r = await api<{ status: string }>(
-                    "/v2/resumes/prepare",
-                    "POST",
-                    { job_id: jobId },
-                  );
-                  await list.refresh();
-                  return r;
-                },
-                (r) =>
-                  r?.status === "ready"
-                    ? "Tailored draft ready."
-                    : r?.status === "use_master"
-                      ? "Your master resume is used for this job."
-                      : "Preparing a tailored draft.",
-              )
-            }
-          >
-            {pending
-              ? "Preparing…"
-              : a
-                ? "Try again"
-                : masterOnly
-                  ? "Draft one for review"
-                  : "Prepare now"}
-          </button>
+          )
         )}
-    </section>
+        {eligible && (!a || a.status === "failed" || a.status === "cancelled") && (
+          <div>
+            <Button
+              size="sm"
+              disabled={pending !== null}
+              onClick={() =>
+                run(
+                  "prepare",
+                  async () => {
+                    const r = await api<{ status: string }>(
+                      "/v2/resumes/prepare",
+                      "POST",
+                      { job_id: jobId },
+                    );
+                    await list.refresh();
+                    return r;
+                  },
+                  (r) =>
+                    r?.status === "ready"
+                      ? "Tailored draft ready."
+                      : r?.status === "use_master"
+                        ? "Your master resume is used for this job."
+                        : "Preparing a tailored draft.",
+                )
+              }
+            >
+              {pending
+                ? "Preparing…"
+                : a
+                  ? "Try again"
+                  : masterOnly
+                    ? "Draft one for review"
+                    : "Prepare now"}
+            </Button>
+          </div>
+        )}
+      </div>
+    </Panel>
   );
 }
