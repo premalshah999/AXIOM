@@ -13,6 +13,9 @@ PORT=${CHROME_WORKER_PORT:-9224}
 # The same folder `jobpilot browser` uses, so an existing profile (and its sign-ins) keeps working.
 PROFILE=${CHROME_WORKER_PROFILE:-$PWD/.data/desktop-browser}
 # A capped disk cache: an unbounded one grew to about 1 GB and slowed page loads.
-EXTRA_FLAGS="--disk-cache-size=268435456 about:blank"
+# Capped GPU caches: the GPU process held 340-730 MB of decoded images and textures for tabs nobody looks at (2026-10-30).
+# Measured on a scratch Chrome (3 image-heavy tabs): peak 684 -> 491 MB, and the user agent, deviceMemory, hardwareConcurrency,
+# webdriver, heap limit, WebGL vendor and renderer, texture limit and screen all read the same; a page cannot see these caches.
+EXTRA_FLAGS="--disk-cache-size=268435456 --force-gpu-mem-discardable-limit-mb=96 --skia-resource-cache-limit-mb=48 about:blank"
 . scripts/lib/chrome.sh
 launch_chrome

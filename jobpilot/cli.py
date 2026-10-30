@@ -288,6 +288,9 @@ def main():
                 "--renderer-process-limit=8",
                 # A capped disk cache: an unbounded one grew to ~1 GB and slowed page loads.
                 "--disk-cache-size=268435456",
+                # Capped GPU caches, invisible to a page: see scripts/chrome-worker.sh.
+                "--force-gpu-mem-discardable-limit-mb=96",
+                "--skia-resource-cache-limit-mb=48",
                 "about:blank",
             ],
             stdout=subprocess.DEVNULL,

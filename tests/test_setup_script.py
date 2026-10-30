@@ -114,3 +114,17 @@ def test_a_running_chrome_is_left_alone(checkout):
     assert result.returncode == 0
     assert "already running" in result.stdout
     assert "--user-data-dir" not in result.stdout
+
+
+def test_the_worker_chrome_caps_its_gpu_caches_and_never_changes_what_a_page_can_see(tmp_path):
+    """The GPU process held 340-730 MB for tabs nobody looks at (2026-10-30). Nothing here may change the fingerprint: no
+    headless, no disabled GPU, no heap limit (performance.memory shows it), no automation flag."""
+    from pathlib import Path
+
+    root = Path(__file__).parent.parent
+    script = (root / "scripts" / "chrome-worker.sh").read_text() + (root / "scripts" / "lib" / "chrome.sh").read_text()
+    cli = (root / "jobpilot" / "cli.py").read_text()
+    for flag in ("--force-gpu-mem-discardable-limit-mb=96", "--skia-resource-cache-limit-mb=48"):
+        assert flag in script and flag in cli
+    for visible in ("--headless", "--disable-gpu ", "--js-flags", "--enable-automation", "--disable-site-isolation", "--enable-low-end-device-mode"):
+        assert visible not in script
