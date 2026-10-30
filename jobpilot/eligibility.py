@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from bs4 import BeautifulSoup
 from sqlalchemy import select
 
-from .answer_context import SPONSOR_KEYS, boolean
+from .answer_context import SPONSOR_KEYS, boolean, us_person
 from .db import Run
 
 
@@ -34,6 +34,48 @@ SPONSOR_EXCLUSION = re.compile(
     r"\bwithout\s+(?:(?:requiring|needing)\s+)?(?:\w+\s+){0,3}sponsorship\b",
     re.I,
 )
+
+
+# "U.S. citizenship is required", "U.S. Citizenship required", "Must be a U.S. citizen", "U.S. citizens only". A posting
+# that closes the job to anyone who is not a citizen is the employer's restriction, whatever the applicant's fit
+# (two link-only jobs said so and the engine spent days on password resets for them, 2026-10-30).
+US = r"(?:u\.?\s?s\.?a?|united states(?: of america)?)"
+CITIZENSHIP_REQUIRED = re.compile(
+    rf"\b{US}\s+citizenship\s+(?:is\s+|are\s+)?(?:required|mandatory|needed|necessary)\b|"
+    rf"\bcitizenship\s+(?:is\s+|are\s+)?(?:required|mandatory)\b|"
+    rf"\b(?:must|need to|have to|should)\s+(?:be|hold|have)\s+(?:an?\s+|the\s+)?(?:current\s+|valid\s+)?{US}\s+citizen(?:ship)?\b|"
+    rf"\bonly\s+{US}\s+citizens\b|\b{US}\s+citizens?\s+(?:only|required)\b|"
+    rf"\brequires?\s+{US}\s+citizenship\b",
+    re.I,
+)
+CITIZENSHIP_NEGATED = re.compile(r"\b(?:no|not|without|never|neither|nor)\b.{0,40}\bcitizen", re.I)
+# Another way in: permanent residents and the like keep the restriction open to a U.S. person; work authorization or
+# a visa opens it to the applicant, which the facts here cannot decide.
+CITIZEN_OR_RESIDENT = re.compile(
+    r"\bor\s+(?:an?\s+)?(?:lawful\s+|legal\s+)?(?:permanent\s+resident|green\s*card|national|lpr|asylee|refugee|protected individual)|"
+    r"\b(?:permanent\s+resident|green\s*card)s?\b",
+    re.I,
+)
+CITIZEN_OR_AUTHORIZED = re.compile(r"\b(?:authori[sz]ed|eligible)\s+to\s+work|work\s+(?:authori[sz]ation|permit)|\bvisa\b|\bsponsor", re.I)
+# "must be able to obtain and maintain a Secret level DoD security clearance", "Must obtain and maintain a U.S.
+# Government Security Clearance", "active TS/SCI clearance required".
+CLEARANCE_WORD = re.compile(
+    r"\bsecurity\s+clearance\b|\b(?:secret|top[- ]secret|ts/sci|dod|public\s+trust)\s+clearance\b|\bclearance\s+(?:level|eligibility)\b",
+    re.I,
+)
+CLEARANCE_CUE = re.compile(
+    r"\b(?:must|required?|requires?|requirements?|obtain|maintain|active|currently|eligib\w+|ability to|able to|need|hold|possess)\b",
+    re.I,
+)
+CLEARANCE_OPTIONAL = re.compile(
+    r"\b(?:prefer\w*|plus|bonus|nice[- ]to[- ]have|desirable|ideal\w*|helpful|beneficial|advantag\w+|an asset|"
+    r"not\s+(?:required|necessary|needed)|no\s+(?:security\s+)?clearance)\b",
+    re.I,
+)
+# A clearance the applicant must already hold; "obtain"/"eligible" ones are decided by citizenship (DoD grants Secret
+# and above to citizens only).
+CLEARANCE_HELD = re.compile(r"\b(?:active|current(?:ly)?|existing|already|presently)\b|\b(?:must|should)\s+(?:hold|have|possess)\b", re.I)
+CLEARANCE_KEYS = ("has_security_clearance", "active_security_clearance", "security_clearance")
 
 
 @dataclass(frozen=True)
@@ -56,6 +98,12 @@ class EligibilityCheck:
     @property
     def uncertainties(self):
         return tuple(f for f in self.findings if f.verdict == "unknown")
+
+
+def _us_words(text):
+    """The periods of 'U.S.' and 'U.S.A.' as one-dot leaders, which do not end a sentence and which _normalized turns
+    back into periods, so the quote keeps the employer's own spelling."""
+    return re.sub(r"\b[Uu]\.\s?[Ss]\.(?:\s?[Aa]\.)?", lambda m: m.group(0).replace(".", "\u2024"), text or "")
 
 
 def _normalized(text):
@@ -113,11 +161,50 @@ def confirmed_status(facts):
     return next(iter(values)), tuple("fact:" + k for k, _ in candidates)
 
 
+def fact_boolean(facts, names):
+    """(key, boolean) of the first explicit boolean fact among `names`, else (None, None)."""
+    for key, raw in facts.items():
+        if key.casefold().removeprefix("fact:") in names and (value := boolean(raw)) is not None:
+            return key, value
+    return None, None
+
+
+def citizenship_finding(quote, facts, source):
+    """Whether the applicant meets a citizenship requirement: unmet on an explicit non-citizen fact, met on a citizen
+    one, unknown when the facts are silent or the posting opens the door to work-authorized applicants too."""
+    exception = bool(re.search(r"\b(?:unless|except|case.by.case)\b", quote, re.I))
+    key, citizen = fact_boolean(facts, ("us_citizen",))
+    ids = ("fact:" + key,) if key else ()
+    if exception or CITIZEN_OR_AUTHORIZED.search(quote):
+        verdict = "unknown"
+    elif CITIZEN_OR_RESIDENT.search(quote):
+        person = us_person(facts)
+        verdict, ids = ("unknown", ids) if person is None else ("met" if person[0] else "unmet", tuple(person[1]))
+    else:
+        verdict = "unknown" if citizen is None else "met" if citizen else "unmet"
+    return PolicyFinding("citizenship", verdict, quote, ids, source)
+
+
+def clearance_finding(quote, facts, source):
+    """A security clearance requirement against the applicant's citizenship (to obtain one) or clearance facts."""
+    held = bool(CLEARANCE_HELD.search(quote))
+    key, citizen = fact_boolean(facts, ("us_citizen",))
+    clearance_key, cleared = fact_boolean(facts, CLEARANCE_KEYS)
+    if held and cleared is not None and citizen is not False:
+        verdict, ids = ("met" if cleared else "unmet"), ("fact:" + clearance_key,)
+    elif citizen is not None:
+        verdict, ids = ("met" if citizen else "unmet"), ("fact:" + key,)
+    else:
+        verdict, ids = "unknown", ()
+    return PolicyFinding("security_clearance", verdict, quote, ids, source)
+
+
 def policy_findings(text, profile, source="posting"):
     sponsorship, sponsor_ids = confirmed_sponsorship(profile.facts)
     status, status_ids = confirmed_status(profile.facts)
-    # Paragraph/sentence boundaries avoid attaching an EEO statement to a restriction.
-    for raw in re.split(r"(?<=[.!?])\s+|[\r\n]+", text or ""):
+    # Paragraph/sentence boundaries avoid attaching an EEO statement to a restriction. "U.S." is one word: its periods
+    # ended the sentence of "U.S. citizenship is required".
+    for raw in re.split(r"(?<=[.!?])\s+|[\r\n]+", _us_words(text)):
         quote = _normalized(raw)
         if not quote or len(quote) > 2000:
             continue
@@ -140,6 +227,10 @@ def policy_findings(text, profile, source="posting"):
                 sponsor_ids,
                 source,
             )
+        if CITIZENSHIP_REQUIRED.search(quote) and not CITIZENSHIP_NEGATED.search(quote):
+            yield citizenship_finding(quote, profile.facts, source)
+        if CLEARANCE_WORD.search(quote) and CLEARANCE_CUE.search(quote) and not CLEARANCE_OPTIONAL.search(quote):
+            yield clearance_finding(quote, profile.facts, source)
         visas = _visa_tokens(quote)
         if visas and barred:
             # Explicit visa exclusions stand independently of the sponsorship answer.
@@ -152,8 +243,25 @@ def policy_findings(text, profile, source="posting"):
             )
 
 
-def check_eligibility(posting, profile, form_evidence=()):
+def degree_findings(job, profile, source="posting"):
+    """A required PhD against the profile's recorded degrees (features/discovery/degree.py): unmet when education is
+    recorded without a doctorate, unknown when none is recorded. Two postings titled "... (PhD)" were applied to
+    repeatedly for a Master's applicant (2026-10-29/30)."""
+    from .features.discovery.degree import doctorate_requirement, holds_doctorate
+
+    quote = doctorate_requirement(job)
+    if not quote:
+        return
+    education = list(getattr(profile, "education", None) or [])
+    verdict = "unknown" if not education else "met" if holds_doctorate(education) else "unmet"
+    yield PolicyFinding(
+        "degree", verdict, _normalized(quote), tuple(f"education:{i}" for i in range(len(education))), source
+    )
+
+
+def check_eligibility(posting, profile, form_evidence=(), title=""):
     findings = list(policy_findings(posting, profile))
+    findings.extend(degree_findings({"title": title, "description": posting}, profile))
     for source, text in form_evidence:
         findings.extend(policy_findings(text, profile, source))
     return EligibilityCheck(tuple(dict.fromkeys(findings)))
@@ -202,8 +310,13 @@ def observed_form_evidence(session, job, data_dir):
                     node.decompose()
                 # Oracle policy spans live inside custom form-element-label elements.
                 # Scan sentences across inline markup rather than requiring a standard block.
-                for text in re.split(r"(?<=[.!?])\s+", soup.get_text(" ", strip=True)):
-                    if SPONSOR_EXCLUSION.search(_normalized(text)) or INELIGIBLE.search(_normalized(text)):
+                for text in re.split(r"(?<=[.!?])\s+", _us_words(soup.get_text(" ", strip=True))):
+                    if (
+                        SPONSOR_EXCLUSION.search(_normalized(text))
+                        or INELIGIBLE.search(_normalized(text))
+                        or CITIZENSHIP_REQUIRED.search(_normalized(text))
+                        or CLEARANCE_WORD.search(_normalized(text))
+                    ):
                         evidence.append((f"run:{run.id}:step:{meta_path.stem}", text))
             except (OSError, ValueError, TypeError, AttributeError):
                 continue
@@ -211,7 +324,9 @@ def observed_form_evidence(session, job, data_dir):
 
 
 def eligibility_for_job(session, job, profile, data_dir=None):
-    return check_eligibility(job.description, profile, observed_form_evidence(session, job, data_dir))
+    return check_eligibility(
+        job.description, profile, observed_form_evidence(session, job, data_dir), title=job.title or ""
+    )
 
 
 def require_eligibility(session, job, profile, data_dir=None):
@@ -221,7 +336,8 @@ def require_eligibility(session, job, profile, data_dir=None):
     check = eligibility_for_job(session, job, profile, data_dir)
     if check.conflicts:
         raise QueueBlocked(
-            "An explicit hiring restriction conflicts with confirmed applicant facts",
+            "An explicit hiring restriction conflicts with confirmed applicant facts: "
+            + "; ".join(f'{f.subject}: "{f.quote[:240]}"' for f in check.conflicts[:2]),
             code="eligibility_conflict",
         )
     return check

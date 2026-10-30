@@ -278,27 +278,74 @@ async def greenhouse_board(url, company=""):
     return None
 
 
+AVATURE_PORTAL = r"(/(?:[a-z]{2}_[A-Z]{2}/)?[A-Za-z0-9_-]+)"
+AVATURE_BY_PATH = re.compile(r"/(?:JobDetail|FolderDetail)(?:/[^?#/]+)*/\d+/?$")
+AVATURE_POSTING_PATH = re.compile(
+    AVATURE_PORTAL + r"/(?:(?:JobDetail|FolderDetail)(?:/[^?#/]+)*/\d+|JobDetail|FolderDetail|ApplicationMethods)/?"
+)
+AVATURE_POSTING_ID = re.compile(r"(?:^|&)(?:jobId|folderId)=\d+(?:&|$)", re.I)
+UNAVAILABLE_POSTING = {
+    "catalogue": "The posting is closed: the employer redirects its job detail to the job catalogue, so nothing was submitted",
+    "error": "The posting is closed: the employer's career portal answers the posting link with its error page "
+    "(\"An error has occurred\"), so nothing was submitted",
+}
+
+
 def unavailable_posting_redirect(source, destination):
-    """An Avature job detail redirected to its own unfiltered catalogue is no longer served."""
+    """Why an Avature posting link is no longer served: "catalogue" when a job detail redirects to its own unfiltered
+    catalogue, "error" when a posting link (a job detail, a folder, or an apply link naming a job id) redirects to the
+    portal's own /Error page ("An error has occurred": MetLife's, EA's and Bain's dead postings, 2026-10-30). The source
+    must be a posting address of the same portal over HTTPS: a mid-application page (Login, ResetPassword, Register,
+    ApplicationForm) answering with an error page says nothing about the posting."""
     left, right = urlsplit(source), urlsplit(destination)
-    detail = re.fullmatch(r"(/(?:[a-z]{2}_[A-Z]{2}/)?[A-Za-z0-9_-]+)/(?:JobDetail|FolderDetail)/[^?#]+/\d+/?", left.path)
-    return bool(
-        detail and left.scheme == right.scheme == "https" and left.netloc == right.netloc
-        and right.path.rstrip("/") == detail[1] + "/SearchJobs" and not right.query
-    )
+    posting = AVATURE_POSTING_PATH.fullmatch(left.path)
+    if not posting or left.scheme != "https" or right.scheme != "https" or right.query:
+        return ""
+    by_path = bool(AVATURE_BY_PATH.search(left.path))
+    if not by_path and not AVATURE_POSTING_ID.search(left.query):
+        return ""  # a bare /JobDetail, /FolderDetail or /ApplicationMethods names no posting
+    target = right.path.rstrip("/")
+    # A tenant's own avature.net address answers with its employer's domain (mantech.avature.net -> careers.mantech.com).
+    vanity = (left.hostname or "").endswith(".avature.net")
+    if target == posting[1] + "/Error" and (left.netloc == right.netloc or vanity):
+        return "error"
+    if by_path and left.netloc == right.netloc and target == posting[1] + "/SearchJobs":
+        return "catalogue"
+    return ""
 
 
 def unavailable_posting_response(response):
-    """Follow only the initial document's actual HTTP redirect chain, including short links."""
+    """Follow only the initial document's actual HTTP redirect chain, including short links. The reason kind, or ''."""
     if response is None or response.status != 200:
-        return False
+        return ""
     request = response.request
     while request.redirected_from is not None:
         previous = request.redirected_from
-        if unavailable_posting_redirect(previous.url, request.url):
-            return request.url == response.url
+        if kind := unavailable_posting_redirect(previous.url, request.url):
+            return kind if request.url == response.url else ""
         request = previous
-    return False
+    return ""
+
+
+async def avature_redirect_kind(url):
+    """unavailable_posting_redirect's kind for the posting link's own redirect chain (three hops at most, without
+    cookies; a tenant's avature.net address may first answer with its employer's domain), or ''."""
+    import httpx
+    from urllib.parse import urljoin
+
+    async with httpx.AsyncClient(timeout=8) as client:
+        for _ in range(3):
+            response = await client.get(url, follow_redirects=False)
+            if not response.is_redirect:
+                return ""
+            target = urljoin(url, response.headers.get("location", ""))
+            if kind := unavailable_posting_redirect(url, target):
+                return kind
+            before, after = urlsplit(url), urlsplit(target)
+            if not ((before.hostname or "").endswith(".avature.net") and after.scheme == "https" and after.path == before.path):
+                return ""
+            url = target
+    return ""
 
 
 async def posting_gone(url, company=""):
@@ -334,16 +381,15 @@ async def posting_gone(url, company=""):
         if response.is_redirect and re.search(r"/CandidateExperience/errors?/404\b", location, re.I):
             return "The posting is closed: Oracle's career site no longer serves it (Page not found), so nothing was submitted"
         return ""
-    elif detect(url).id == "avature" and re.search(r"/(?:JobDetail|FolderDetail)/", urlsplit(url).path):
-        from urllib.parse import urljoin
+    elif detect(url).id == "avature" and AVATURE_POSTING_PATH.fullmatch(urlsplit(url).path):
         try:
-            async with httpx.AsyncClient(timeout=8) as client:
-                response = await client.get(url, follow_redirects=False)
+            kind = await avature_redirect_kind(url)
+            if kind == "error":
+                await asyncio.sleep(1.5)  # asked twice: a passing glitch must not close a live posting
+                kind = "error" if await avature_redirect_kind(url) == "error" else ""
         except httpx.HTTPError:
             return ""
-        if response.is_redirect and unavailable_posting_redirect(url, urljoin(url, response.headers.get("location", ""))):
-            return "The posting is closed: the employer redirects its job detail to the job catalogue, so nothing was submitted"
-        return ""
+        return UNAVAILABLE_POSTING[kind] if kind else ""
     elif ICIMS_SITE_JOB.match(url or ""):
         if await icims_site_posting_gone(url):
             return "The posting is closed: the employer's career site no longer lists it, so nothing was submitted"
@@ -1092,6 +1138,13 @@ class BrowserEngine:
             ):
                 self.result = {"state": "closed", "reason": gone}
                 return self.result
+            from .posting_read import refuse_unread_page, refuse_unread_posting
+
+            if not job.get("demo") and (refused := await refuse_unread_posting(self, job, run)):
+                # A link-only job's posting is read before anything else, so its own eligibility wording (U.S.
+                # citizenship required, a clearance, a PhD) closes it before account work (posting_read.py).
+                self.result = refused
+                return self.result
             if external:
                 import httpx
 
@@ -1355,11 +1408,8 @@ class BrowserEngine:
                         raise
                     self.emit("browser_retry", "Retrying the job page after a connection interruption")
                     await asyncio.sleep(1)
-            if not reopened_route and unavailable_posting_response(landing_response):
-                self.result = {
-                    "state": "closed",
-                    "reason": "The posting is closed: the employer redirects its job detail to the job catalogue, so nothing was submitted",
-                }
+            if not reopened_route and (kind := unavailable_posting_response(landing_response)):
+                self.result = {"state": "closed", "reason": UNAVAILABLE_POSTING[kind]}
                 return self.result
             if (
                 (job["ats"] == "greenhouse" or "gh_jid" in parse_qs(urlsplit(job["url"]).query))
@@ -1539,6 +1589,9 @@ class BrowserEngine:
                         }
                     self.result = await self.finish()
                 else:
+                    if not (resumed or reopened_route) and (refused := await refuse_unread_page(self, job, run)):
+                        self.result = refused
+                        return self.result
                     if resumed and (receipt := await self.form.proof()):
                         # Only new evidence counts: the app's own earlier submit attempt, or a
                         # confirmation that appeared after you finished the step in the tab. The

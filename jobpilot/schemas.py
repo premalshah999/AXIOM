@@ -169,6 +169,17 @@ PORTAL_TITLE = re.compile(
 )
 
 
+# iCIMS lists each posting as <a><span class="sr-only field-label">Requisition Title</span><h3>Lead Data Scientist</h3></a>;
+# a listing crawl that took the link's text titled 26 jobs "Requisition Title Lead Data Scientist" (2026-10-30). The label
+# is screen-reader text for the field, not part of the title.
+FIELD_LABEL = re.compile(r"^\s*Requisition\s+Title\b[\s:\-\u2013]*", re.I)
+
+
+def job_title(title):
+    """A job title without a leading "Requisition Title" field label (a title that is only the label is empty)."""
+    return FIELD_LABEL.sub("", title, count=1).strip() if isinstance(title, str) else title
+
+
 def employer_from_title(name):
     return PORTAL_TITLE.sub("", name or "").strip() or (name or "")
 
@@ -184,6 +195,11 @@ class JobInput(BaseModel):
     @classmethod
     def employer_name(cls, value):
         return employer_from_title(value)
+
+    @field_validator("title")
+    @classmethod
+    def clean_title(cls, value):
+        return job_title(value)
 
 
 class QueueInput(BaseModel):

@@ -43,7 +43,7 @@ async def test_the_owners_own_pick_skips_the_fit_filters(service, title):
     try:
         await service.queue("pick", "submit", owner_pick=True)
     except QueueBlocked as err:  # Later gates (provider, budget, pacing) may hold it; never the fit filters.
-        assert err.code not in {"target_role", "seniority", "internship", "company_limit", "eligibility_conflict"}
+        assert err.code not in {"target_role", "seniority", "internship", "company_limit"}
     except ValueError:  # Past the filters: no resume is uploaded in this synthetic database.
         pass
 
@@ -79,3 +79,19 @@ async def test_retries_of_the_owners_pick_keep_the_owners_say(service):
     with pytest.raises(QueueBlocked) as err:
         await service.queue("auto", "submit")
     assert err.value.code == "target_role"
+
+
+@pytest.mark.parametrize("owner_pick", [False, True])
+async def test_a_citizenship_requirement_closes_the_job_even_for_the_owners_pick(service, owner_pick):
+    """Owner rule (2026-10-30): citizenship-required jobs are closed for a non-citizen, picked or not. Two link-only
+    jobs said \"U.S. citizenship is required\" and ran for days."""
+    service.db.set_setting("profile", {"facts": {"us_citizen": False}})
+    with service.db.exclusive() as s:
+        s.add(Job(id="citizen", identity="citizen", url="https://example.test/job/20", title="Data Engineer",
+                  description="Great team. U.S. citizenship is required. Apply today.", status="ready"))
+    with pytest.raises(QueueBlocked) as err:
+        await service.queue("citizen", "submit", owner_pick=owner_pick)
+    assert err.value.code == "eligibility_conflict" and "U.S. citizenship is required" in str(err.value)
+    with service.db.session() as s:
+        job = s.get(Job, "citizen")
+        assert job.status == "closed" and "U.S. citizenship is required" in job.reason

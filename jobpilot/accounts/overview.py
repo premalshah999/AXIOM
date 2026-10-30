@@ -27,6 +27,7 @@ STATUS = {
     "created_locally": "created",
     "signing_in": "signing_in",
     "exists": "registered",
+    "identity_conflict": "identity_conflict",
 }
 LABEL = {
     "active": "Active",
@@ -37,10 +38,11 @@ LABEL = {
     "created": "Created",
     "signing_in": "Signing in",
     "registered": "Already registered",
+    "identity_conflict": "Phone number on another account",
     "unknown": "Unknown",
 }
 # Statuses only the owner can settle, or that are worth a look.
-ATTENTION = {"verification", "password_unknown", "reset_pending", "locked"}
+ATTENTION = {"verification", "password_unknown", "reset_pending", "locked", "identity_conflict"}
 FIX_IT = "Reset it on the employer's site, then save the new password here."
 # A verification request that ended without its email; a matched or pending one is still in progress.
 RESTARTABLE = {"cancelled", "expired", "failed"}
@@ -76,6 +78,12 @@ def detail(status: str, record: dict, retry: bool) -> str:
         return "Created during an application. No sign-in has succeeded yet."
     if status == "signing_in":
         return "An application started signing in here and didn't record the outcome."
+    if status == "identity_conflict":
+        return (
+            "The employer already has an account that holds your phone number under a different email address, so "
+            "this email cannot sign in or create one. No codes or resets are requested for it. Save the password of "
+            "the account's email under this record, or forget the record once the other account is dealt with."
+        )
     if status == "registered":
         return "The employer says this email already has an account. The next application signs in with the saved login."
     return f"Recorded state: {str(record.get('state') or 'none').replace('_', ' ')}."

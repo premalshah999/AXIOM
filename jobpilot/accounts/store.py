@@ -288,7 +288,7 @@ class AccountStore:
 # in with it instead of requesting another reset. Markers the engine adds under these prefixes are cleared too.
 OWNER_SETTLED = ("error", "previous_credentials")
 OWNER_SETTLED_PREFIXES = ("reset_requested", "reset_submitted", "reset_unconfirmed", "rejected_", "password_unknown",
-                          "unanswered", "temporary_password")
+                          "unanswered", "temporary_password", "identity_conflict")
 
 
 def save_owner_password(service, key, password):

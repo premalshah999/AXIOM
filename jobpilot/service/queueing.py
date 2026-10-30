@@ -29,6 +29,22 @@ async def off_loop(fn, *args, **kwargs):
     return await asyncio.get_running_loop().run_in_executor(ADMISSION, call)
 
 
+def fit_blocker(profile, board, title):
+    """(message, code) of the fit filter that refuses a title for the autopilot, or None. The owner's own pick skips
+    these; a run that reads a title the job did not have at queue time applies them again (posting_read.py)."""
+    from ..features.discovery.feeds import INTERN
+    from ..features.discovery.policy import SENIOR
+    from ..features.discovery.roles import matching_role
+
+    if profile.target_roles and not matching_role(title, profile.target_roles):
+        return "Outside the profile's target roles", "target_role"
+    if INTERN.search(title) and not profile.include_internships:
+        return "Internships are excluded from application discovery", "internship"
+    if board.get("early_career_only", False) and SENIOR.search(title):
+        return "Outside the saved career-level policy", "seniority"
+    return None
+
+
 class QueueingMixin:
     @staticmethod
     def cooldown_key(job):
@@ -115,7 +131,17 @@ class QueueingMixin:
                 await off_loop(
                     self._request_preparation, job_id, mode, resume_id, retry, batch_id, controller_policy
                 )
+            elif exc.code == "eligibility_conflict":
+                await off_loop(self._close_ineligible, job_id, str(exc))
             raise
+
+    def _close_ineligible(self, job_id, reason):
+        """An employer restriction the applicant cannot meet closes the job with the employer's own words, so it leaves
+        the ready list instead of being refused on every autopilot tick."""
+        with self.db.exclusive() as session:
+            job = session.get(Job, job_id)
+            if job and not job.demo and job.status in {"new", "ready", "skipped", "needs_review", "waiting_answer"}:
+                job.status, job.reason = "closed", reason[:500]
 
     def _request_preparation(self, job_id, mode, resume_id, retry, batch_id, controller_policy):
         from ..outbox import enqueue
@@ -193,8 +219,9 @@ class QueueingMixin:
     ):
         """`owner_pick`: the owner applied or pasted this job themselves. Owner, 2026-10-22: "if I say apply, then it
         should apply no questions asked." Fit and policy filters (target roles, internships, career level, the
-        per-employer cap, platform focus, eligibility conflicts) are the autopilot's, not the owner's;
-        duplicate-submission guards, pauses, budgets and pacing still apply."""
+        per-employer cap, platform focus) are the autopilot's, not the owner's; duplicate-submission guards, pauses,
+        budgets, pacing and the employer's own eligibility restrictions (citizenship, clearance, PhD, sponsorship)
+        still apply."""
         from ..controller_policy import validate_policy
         from ..tiers import job_tier
 
@@ -231,19 +258,9 @@ class QueueingMixin:
             # Automatic retries of the owner's pick (stalls, repair, tiers) keep the owner's say.
             owner_pick = owner_pick or picked(s, job_id)
             if mode == "submit" and not job.demo and not owner_pick:
-                from ..features.discovery.roles import matching_role
-                from ..features.discovery.policy import SENIOR
-                from ..features.discovery.feeds import INTERN
-
-                if profile.target_roles and not matching_role(job.title, profile.target_roles):
-                    raise QueueBlocked("Outside the profile's target roles", code="target_role")
-                if INTERN.search(job.title) and not profile.include_internships:
-                    raise QueueBlocked(
-                        "Internships are excluded from application discovery", code="internship"
-                    )
                 board = self.db.get_setting("job_board_settings", {}) or {}
-                if board.get("early_career_only", False) and SENIOR.search(job.title):
-                    raise QueueBlocked("Outside the saved career-level policy", code="seniority")
+                if blocker := fit_blocker(profile, board, job.title):
+                    raise QueueBlocked(blocker[0], code=blocker[1])
             from ..pipeline_comparison import routed_pool
             from ..specialist import pool_boost
             from ..tiers import job_over_budget
@@ -318,8 +335,9 @@ class QueueingMixin:
                     )
             from ..eligibility import require_eligibility
 
-            if not owner_pick:
-                require_eligibility(s, job, profile, self.config.data_dir)
+            # The owner's pick included: it skips the autopilot's fit filters, not an employer's own restriction
+            # (owner rule: a job that requires U.S. citizenship is closed for an applicant who is not a citizen).
+            require_eligibility(s, job, profile, self.config.data_dir)
             self.check_cooldown(s, job)
             recovery_row = None
             if recovery_source_run:

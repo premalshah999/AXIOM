@@ -18,6 +18,9 @@ from sqlalchemy import (
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.sql.functions import FunctionElement
+from sqlalchemy.types import TypeDecorator
+
+from .schemas import job_title
 
 
 def now():
@@ -50,12 +53,24 @@ class Resume(Base):
     created_at: Mapped[str] = mapped_column(String, default=now)
 
 
+class JobTitleText(TypeDecorator):
+    """A job title as read: without the "Requisition Title" field label that 26 stored titles carry (schemas.job_title).
+    Every read of the column (entities, the dashboard's column selects, the cover letter's job) is clean; the stored
+    text is replaced when the title is next written. Reads only: a LIKE pattern bound through here would be altered."""
+
+    impl = String
+    cache_ok = True
+
+    def process_result_value(self, value, dialect):
+        return job_title(value)
+
+
 class Job(Base):
     __tablename__ = "jobs"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=uid)
     identity: Mapped[str] = mapped_column(String, unique=True)
     url: Mapped[str] = mapped_column(Text)
-    title: Mapped[str] = mapped_column(String, default="")
+    title: Mapped[str] = mapped_column(JobTitleText, default="")
     company: Mapped[str] = mapped_column(String, default="")
     location: Mapped[str] = mapped_column(String, default="")
     description: Mapped[str] = mapped_column(Text, default="")

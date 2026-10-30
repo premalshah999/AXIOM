@@ -362,6 +362,46 @@ def create_spent(record):
         return True
 
 
+# Each registration (Create) mails the employer's passcode. An unconfirmed SuccessFactors account pressed Create 6, 4 and 4
+# times on three days, 20+ passcodes in the mailbox, because every run's sign-in was refused and the switch to Create
+# was taken again (2026-10-27..29). Reset requests have had a cooldown since 38efd0c; a registration had none. Two
+# registrations of one unconfirmed account in a day, from different runs; a second try inside one run is not counted.
+CREATE_SENT_LIMIT, CREATE_SENT_WINDOW = 2, 24 * 3600
+
+
+def create_allowed(record, run_id=""):
+    """Whether this run may send another registration for an account the employer never confirmed."""
+    if (record or {}).get("confirmed_at"):
+        return True  # a confirmed account signs in; a registration page for it is something else (a profile form)
+    recent = [
+        entry for entry in (record or {}).get("create_sent") or []
+        if isinstance(entry, (list, tuple)) and len(entry) == 2 and entry[1] != run_id
+        and time.time() - float(entry[0]) < CREATE_SENT_WINDOW
+    ]
+    return len(recent) < CREATE_SENT_LIMIT
+
+
+def create_stamp(record, run_id=""):
+    """The record's `create_sent` list with this registration added (newest four, none older than the window)."""
+    kept = [
+        list(entry) for entry in (record or {}).get("create_sent") or []
+        if isinstance(entry, (list, tuple)) and len(entry) == 2 and time.time() - float(entry[0]) < CREATE_SENT_WINDOW
+    ]
+    return [*kept, [time.time(), run_id]][-4:]
+
+
+def create_limit_result():
+    from ..application_budget import REGISTRATION_COOLDOWN
+
+    return {
+        "state": "waiting_browser",
+        "reason": REGISTRATION_COOLDOWN + " twice in the last day; no further registration (and no further passcode email) "
+        "is requested until that day has passed",
+        "blocker_type": "email_wait",
+        "recoverable": False,
+    }
+
+
 # Account states meaning "an account exists here": sign in rather than create.
 KNOWN_ACCOUNT = {
     "authenticated",
@@ -925,6 +965,10 @@ class Adapter:
 
             if not self.committed and missing_posting_notice(obs, self.job["url"]):
                 return await self.on_closed(obs)
+            from ..account_identity import stop_if_identity_conflict
+
+            if await stop_if_identity_conflict(self.e, obs):
+                return self.e.result  # an account under another email holds the phone number: no code, reset or Create
             shell_recovery = getattr(self.e, "recover_oracle_job_shell", None)
             if shell_recovery and await shell_recovery(obs):
                 continue
@@ -2282,10 +2326,12 @@ class Adapter:
             self.emit("auth", "Account fields are part of the application form")
             return await self.on_form(await self.form.scan())
         if mode == "create":
+            if not create_allowed(record, self.e.run_id):
+                return create_limit_result()
             if not await self.arm_mail():
                 return self.lease_busy()
             # Saved before the click: the same shared login, so a crash cannot lose it.
-            self.accounts.mark(url, "created_locally", credentials)
+            self.accounts.mark(url, "created_locally", credentials, create_sent=create_stamp(record, self.e.run_id))
         temporary = bool(mode == "sign_in" and not using_alternate and self.accounts.store.temporary(url))
         await self.click(button, auth=True)
         if challenge := await self.after_auth_click():
