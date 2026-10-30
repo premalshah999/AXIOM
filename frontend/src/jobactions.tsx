@@ -167,7 +167,7 @@ export function RowActions({ row, promote }: { row: JobRow; promote?: string }) 
           {lead.label}
         </Button>
       )}
-      {protectedNote && <span className="ax-note">Protected</span>}
+      {protectedNote && <span className="ax-note ax-lead">Protected</span>}
       <RowMenu label={`More actions for ${name}`} actions={asMenu(rest, busy)} busy={busy} />
     </div>
   );

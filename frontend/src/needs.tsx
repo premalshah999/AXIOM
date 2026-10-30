@@ -64,7 +64,7 @@ export function NeedsView() {
 
   if (!groups.length)
     return (
-      <div className="ax-page needs-page">
+      <div className="ax-page">
         <Empty
           icon={MessageCircleQuestion}
           title="Nothing is waiting on you"
@@ -80,7 +80,7 @@ export function NeedsView() {
 
   const applications = new Set(groups.map((g) => g.job?.id || g.review.run_id)).size;
   return (
-    <div className="ax-page needs-page">
+    <div className="ax-page">
       <p className="ax-note">
         {plural(groups.length, "question")} across {plural(applications, "application")}.
         {(counts.groups.needs ?? 0) > applications && (

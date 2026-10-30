@@ -57,6 +57,11 @@
   flex: 1;
   resize: none;
 }
+/* The bulk line wraps on a phone, so Remove and Clear stay reachable (the Table primitive's does not yet). */
+.ax-bulk,
+.ax-bulk-actions {
+  flex-wrap: wrap;
+}
 /* A phone keeps the job, its status and the row menu readable: the row's one button is in the job's drawer. */
 @container ax-table (max-width: 599px) {
   .ax-table .ax-lead {

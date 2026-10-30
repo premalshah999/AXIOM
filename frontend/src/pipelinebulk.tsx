@@ -112,7 +112,7 @@ export function PipelineBulk({
     <>
       {total > rows.length && (
         <Button size="sm" variant="ghost" disabled={busy} loading={pending === "select"} onClick={selectMatching}>
-          {`Select all ${total.toLocaleString()} matching${total > 200 ? " (first 200)" : ""}`}
+          {total > 200 ? "Select the first 200" : `Select all ${total.toLocaleString()}`}
         </Button>
       )}
       {filter === "unconfirmed" && (

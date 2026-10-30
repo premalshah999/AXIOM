@@ -292,7 +292,7 @@ export function DiscoveredJobs() {
                 disabled={selection.full}
                 onClick={() => selection.setMany(b?.selectable_ids || [], true)}
               >
-                {`Select all ${(b?.selectable_total ?? 0).toLocaleString()} matching${(b?.selectable_total ?? 0) > selection.limit ? ` (first ${selection.limit})` : ""}`}
+                {(b?.selectable_total ?? 0) > selection.limit ? `Select the first ${selection.limit}` : `Select all ${(b?.selectable_total ?? 0).toLocaleString()}`}
               </Button>
             )}
             {selection.full && <span className="ax-note">{selection.limit} at a time</span>}
