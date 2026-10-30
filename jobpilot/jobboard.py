@@ -875,7 +875,7 @@ def board_snapshot(db, limit=500, *, jobs_only=False):
                 # Already applied to (any run), or the owner's Apply is waiting: Jobs › Pipeline shows those.
                 Job.id.in_(select(Run.job_id)).label("attempted"),
                 Job.id.in_(
-                    select(func.substr(Setting.key, len(REQUESTED) + 1)).where(Setting.key.like(REQUESTED + "%"))
+                    select(func.substr(Setting.key, len(REQUESTED) + 1)).where(Setting.key.startswith(REQUESTED, autoescape=True))
                 ).label("requested"),
             )
             .select_from(JobListing)
@@ -901,7 +901,7 @@ def board_snapshot(db, limit=500, *, jobs_only=False):
             key.removeprefix("job_control:")
             for key in s.scalars(
                 select(Setting.key).where(
-                    Setting.key.like("job_control:%"), Setting.value["state"].as_string() == "paused"
+                    Setting.key.startswith("job_control:", autoescape=True), Setting.value["state"].as_string() == "paused"
                 )
             )
         }
@@ -929,7 +929,7 @@ def board_snapshot(db, limit=500, *, jobs_only=False):
     with db.session() as s:
         scans = {
             key.removeprefix("job_board_scan:"): value
-            for key, value in s.execute(select(Setting.key, Setting.value).where(Setting.key.like("job_board_scan:%")))
+            for key, value in s.execute(select(Setting.key, Setting.value).where(Setting.key.startswith("job_board_scan:", autoescape=True)))
             if key.removeprefix("job_board_scan:") in ids
         }
     for source in sources:

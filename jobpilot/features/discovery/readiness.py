@@ -64,7 +64,7 @@ def _candidates(db, policy: DiscoveryPolicy, at, manual_only=False) -> tuple[lis
     with db.session() as s:
         excluded_ats.update(
             row.key.removeprefix("ats_outage:")
-            for row in s.scalars(select(Setting).where(Setting.key.like("ats_outage:%")))
+            for row in s.scalars(select(Setting).where(Setting.key.startswith("ats_outage:", autoescape=True)))
             if row.value.get("until", "") > at.isoformat()
         )
         attempted = set(s.scalars(select(Run.job_id).distinct()))
@@ -75,7 +75,7 @@ def _candidates(db, policy: DiscoveryPolicy, at, manual_only=False) -> tuple[lis
             key.removeprefix("job_control:"): state
             for key, state in s.execute(
                 select(Setting.key, Setting.value["state"].as_string()).where(
-                    Setting.key.like("job_control:%"), Setting.value["state"].as_string().in_(["paused", "deleted"])
+                    Setting.key.startswith("job_control:", autoescape=True), Setting.value["state"].as_string().in_(["paused", "deleted"])
                 )
             )
         }
@@ -86,7 +86,7 @@ def _candidates(db, policy: DiscoveryPolicy, at, manual_only=False) -> tuple[lis
             key.removeprefix("job_origin:")
             for key in s.scalars(
                 select(Setting.key).where(
-                    Setting.key.like("job_origin:%"), Setting.value["kind"].as_string() == "manual"
+                    Setting.key.startswith("job_origin:", autoescape=True), Setting.value["kind"].as_string() == "manual"
                 )
             )
         }

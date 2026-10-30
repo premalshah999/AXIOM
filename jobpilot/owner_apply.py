@@ -163,7 +163,7 @@ async def due(service, limit, retries=None):
 
     with service.db.session() as s:
         waiting = [(row.key.removeprefix(KEY), dict(row.value or {})) for row in s.scalars(
-            select(Setting).where(Setting.key.like(KEY + "%"))
+            select(Setting).where(Setting.key.startswith(KEY, autoescape=True))
         )]
         attempted = set(s.scalars(
             select(Run.job_id).where(Run.job_id.in_([job_id for job_id, _ in waiting])).distinct()

@@ -919,7 +919,7 @@ def next_question(service, allow_live):
         ).all()
         sent = {
             key.removeprefix("telegram_question_sent:")
-            for key in s.scalars(select(Setting.key).where(Setting.key.like("telegram_question_sent:%")))
+            for key in s.scalars(select(Setting.key).where(Setting.key.startswith("telegram_question_sent:", autoescape=True)))
         }
         for review, run, job in candidates:
             if review.key in {"manual", "session"} or review.id in sent:
@@ -2051,7 +2051,7 @@ async def poll(service):
                     for key in s.scalars(
                         select(Setting.key)
                         .where(
-                            Setting.key.like("telegram_run_pending:%"),
+                            Setting.key.startswith("telegram_run_pending:", autoescape=True),
                             Setting.value["pending"].as_boolean().is_(True),
                         )
                         .limit(6)

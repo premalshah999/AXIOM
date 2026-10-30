@@ -391,7 +391,7 @@ def require_company_limit(session, job, run_id=None):
         elif run.mode == "submit" and run.state in {"queued", "running", "submitting"}:
             if run.id != run_id:
                 reserved.add(candidate.identity)
-    for item in session.scalars(select(Setting).where(Setting.key.like(HISTORICAL_PREFIX + "%"))):
+    for item in session.scalars(select(Setting).where(Setting.key.startswith(HISTORICAL_PREFIX, autoescape=True))):
         data = item.value
         if identity(data.get("company", ""), data.get("url", "")) == target:
             confirmed.update(i for i in data.get("identities", []) if isinstance(i, str))

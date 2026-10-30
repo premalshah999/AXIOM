@@ -277,7 +277,7 @@ async def prepare_due(service):
         ]
         controlled = {
             r.key.removeprefix("job_control:")
-            for r in session.scalars(select(Setting).where(Setting.key.like("job_control:%")))
+            for r in session.scalars(select(Setting).where(Setting.key.startswith("job_control:", autoescape=True)))
             if r.value.get("state") in {"paused", "deleted"}
         }
     stale = [

@@ -702,7 +702,7 @@ async def retry_due(service):
         employers = set().union(*(pool.employers for pool in pools.values()))
         due = [
             (r.key.removeprefix("draft_recovery:"), dict(r.value))
-            for r in s.scalars(select(Setting).where(Setting.key.like("draft_recovery:%")))
+            for r in s.scalars(select(Setting).where(Setting.key.startswith("draft_recovery:", autoescape=True)))
             if r.value.get("scheduled")
         ]
     # A parked model outage does not wait out its timer once the provider is back (provider_health.recovered_since):

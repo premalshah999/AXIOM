@@ -233,11 +233,11 @@ def batch_snapshot(service):
         batch_jobs = set(latest)
         controls = {
             row.key.removeprefix("job_control:"): row.value.get("state")
-            for row in s.scalars(select(Setting).where(Setting.key.like("job_control:%")))
+            for row in s.scalars(select(Setting).where(Setting.key.startswith("job_control:", autoescape=True)))
         }
         requested = {
             key.removeprefix("owner_apply:")
-            for key in s.scalars(select(Setting.key).where(Setting.key.like("owner_apply:%")))
+            for key in s.scalars(select(Setting.key).where(Setting.key.startswith("owner_apply:", autoescape=True)))
         }
         # Columns only: whole Job rows carried every fresh posting's description into each poll.
         fresh = list(

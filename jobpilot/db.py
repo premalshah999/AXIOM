@@ -334,10 +334,12 @@ class Database:
                         raise
 
     def add_settings_prefix_index(self):
-        """Let `key LIKE 'prefix%'` use an index: the primary key cannot under en_US collation, so each such read scanned
-        all 62,000 settings (2.9 scans/s, 179,000 rows/s, 2026-10-30). Built once, here, before any worker starts; it takes
-        well under a second and only writers wait, of which there are none yet. Not CONCURRENTLY: that cannot run in a
-        transaction and a failed build would leave an invalid index that IF NOT EXISTS then keeps."""
+        """Let a prefix read use an index: the primary key cannot serve one under en_US collation, so each scanned all
+        62,000 settings (2.9 scans/s, 179,000 rows/s, 6 ms each, 2026-10-30). Query with
+        `Setting.key.startswith(prefix, autoescape=True)`: in a plain LIKE every `_` is a wildcard, so "job_control:%" has
+        the fixed prefix "job" and the planner keeps scanning. Built once, here, before any worker starts: 0.2 s for 62,000
+        rows, and only writers wait, of which there are none yet. Not CONCURRENTLY: that cannot run in a transaction and a
+        failed build would leave an invalid index that IF NOT EXISTS then keeps."""
         if self.engine.dialect.name != "postgresql":
             return
         with self.engine.begin() as connection:

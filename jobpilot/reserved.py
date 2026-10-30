@@ -381,7 +381,7 @@ def matched(session, *where):
 
 def approvals(session, job_ids=None):
     """Job ids the owner approved: all of them, or those among `job_ids`."""
-    key = Setting.key.like(APPROVAL + "%") if job_ids is None else Setting.key.in_([APPROVAL + j for j in job_ids])
+    key = Setting.key.startswith(APPROVAL, autoescape=True) if job_ids is None else Setting.key.in_([APPROVAL + j for j in job_ids])
     return set(session.scalars(select(func.substr(Setting.key, len(APPROVAL) + 1)).where(key)))
 
 

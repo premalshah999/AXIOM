@@ -89,12 +89,12 @@ def archive_failed(service):
 def summaries(db):
     with db.session() as s:
         rows = list(
-            row.value for row in s.scalars(select(Setting).where(Setting.key.like("archived_application:%")))
+            row.value for row in s.scalars(select(Setting).where(Setting.key.startswith("archived_application:", autoescape=True)))
         )
         known = {row["job_id"] for row in rows}
         removed = [
             row
-            for row in s.scalars(select(Setting).where(Setting.key.like("job_control:%")))
+            for row in s.scalars(select(Setting).where(Setting.key.startswith("job_control:", autoescape=True)))
             if row.value.get("state") == "deleted"
         ]
         for control in removed:
