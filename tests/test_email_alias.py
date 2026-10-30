@@ -107,17 +107,20 @@ def test_an_unusable_icims_identity_is_abandoned_once_for_that_employer():
         value.accounts = SimpleNamespace(email=email)
         value.config = SimpleNamespace(browser_cdp_url="")
         value.emit = lambda *a, **k: None
+        value.reset_mail_silent = lambda record: True  # the mailbox check has its own tests (test_fresh_identity.py)
         return value
 
-    assert adapter().fresh_identity({"confirmed_at": "2026-10-20T00:00:00"}) is None  # a real account is kept
-    assert adapter(ats="workday", url="https://acme.wd5.myworkdayjobs.com/x/job/1").fresh_identity({}) is None
-    assert adapter(email="alex+jobs@gmail.com").fresh_identity({}) is None
-    assert adapter(email="alex@example.edu").fresh_identity({}) is None
+    proven = {"state": "password_unknown", "reset_requested_at": 1.0, "reset_submitted_at": "2026-10-29T00:00:00"}
+    assert adapter().fresh_identity({**proven, "confirmed_at": "2026-10-20T00:00:00"}) is None  # a real account is kept
+    assert adapter(ats="workday", url="https://acme.wd5.myworkdayjobs.com/x/job/1").fresh_identity(proven) is None
+    assert adapter(email="alex+jobs@gmail.com").fresh_identity(proven) is None
+    assert adapter(email="alex@example.edu").fresh_identity(proven) is None
+    assert adapter().fresh_identity({"state": "password_unknown"}) is None  # no reset the employer confirmed
     assert not settings
-    result = adapter().fresh_identity({"state": "password_unknown"})
+    result = adapter().fresh_identity(proven)
     assert result["state"] == "waiting_browser" and not result["reviews"]
     assert settings["email_alias:https://careers-acme.icims.com"]["tag"] == "apply"
-    assert adapter().fresh_identity({"state": "password_unknown"}) is None  # once per employer
+    assert adapter().fresh_identity(proven) is None  # once per employer
     # An iCIMS career site filed under another ATS name is the same platform.
-    assert adapter(ats="custom", url="https://careers-other.icims.com/jobs/2/job").fresh_identity({})
+    assert adapter(ats="custom", url="https://careers-other.icims.com/jobs/2/job").fresh_identity(proven)
     assert "email_alias:https://careers-other.icims.com" in settings

@@ -302,6 +302,10 @@ PASSWORD_UNKNOWN = (
     "This employer has an account for your email but refuses the saved password, and its password reset email never "
     "arrives. Reset the password in your own browser, then save it under Setup > Accounts"
 )
+ALIAS_REFUSED = (
+    "This employer's sign-up form refuses the plus-address that was to replace its unusable account for your email. "
+    "Reset the password in your own browser, then save it under Setup > Accounts"
+)
 # The page after a reset request that the employer took. SuccessFactors' Password Help: "If an account matches the
 # information you entered, then you will receive an email with instructions on how to reset your password." (REA of
 # L3Harris's career-hcm20.ns2cloud.com, 2026-10-25).
@@ -2377,6 +2381,15 @@ class Adapter:
             return challenge
         outcome, detail = await self.auth_outcome(forced_ok=temporary)
         self.emit("auth", f"{mode.replace('_', ' ')}: {outcome}")
+        if mode == "create" and outcome not in {"ok", "verify", "new_password"}:
+            from ..email_alias import alias_refusal
+
+            # The replacement identity (fresh_identity) needs a sign-up form that takes a plus-address.
+            shown = [detail, *(await self.form.scan()).get("errors", [])]
+            if alias_refusal(self.service.db, self.job["url"], self.accounts.email, shown):
+                self.release_mail()
+                self.emit("account", "This employer's sign-up form refused the plus-address; its profile address is used again")
+                return self.defer(ALIAS_REFUSED, state="waiting_browser", blocker_type="account")
         if outcome == "new_password":
             # The temporary password signed in and the employer demands the real one: on_new_password sets the shared
             # password. The temporary login is never saved as the account's.
@@ -2543,25 +2556,69 @@ class Adapter:
                 await self.click(proceed)
         return True
 
+    def reset_mail_silent(self, record):
+        """The mailbox, not the clock, shows that the password reset the employer confirmed was never answered.
+
+        Every reset of this job's runs ended without a mail, and no poll of its window saw one: no candidate message
+        and no reset or verification mail from a sender the rule does not list (the poll's `outside_senders`). A reset
+        with no challenge on record proves nothing (SuccessFactors' sign-in page recorded resets it never sent)."""
+        asked = float((record or {}).get("reset_requested_at") or 0)
+        if not asked:
+            return False
+        from sqlalchemy import select
+
+        from ..db import Event, MailChallenge, Run
+
+        with self.service.db.session() as session:
+            runs = list(session.scalars(select(Run.id).where(Run.job_id == self.job["id"])))
+            resets = list(
+                session.scalars(
+                    select(MailChallenge).where(MailChallenge.run_id.in_(runs), MailChallenge.kind == "password_reset")
+                )
+            )
+            # The latest request is among them (its window opens just before the click records it).
+            if not resets or max(c.since for c in resets) < asked - 600:
+                return False
+            if any(c.state not in {"expired", "cancelled"} for c in resets):
+                return False  # one matched, was claimed, failed on an ambiguous message, or is still open
+            for run_id, since in {(c.run_id, c.created_at) for c in resets}:
+                for event in session.scalars(
+                    select(Event).where(Event.run_id == run_id, Event.kind == "mail_poll", Event.created_at >= since)
+                ):
+                    seen = event.data or {}
+                    if seen.get("candidate_count") or seen.get("outside_senders") or seen.get("matching_count"):
+                        return False
+        return True
+
     def fresh_identity(self, record):
-        """An iCIMS identity bound to the applicant's address that never signed in and mails no reset is abandoned for
-        this employer: its next run applies with a plus-address, which iCIMS reads as a new candidate and Gmail
-        delivers to the same inbox (email_alias). HERE, Berry, American Systems and Publicis (2026-10-29): Central
-        accepted the email, refused the shared password, and no reset ever reached the mailbox. Once per employer."""
+        """An identity the employer holds for the applicant's address that refuses the login and mails no reset is
+        abandoned for this employer: its next run applies with a plus-address, which the employer reads as a new
+        candidate and Gmail delivers to the same inbox (email_alias). Any platform, once per employer.
+
+        iCIMS (HERE, Berry, American Systems and Publicis, 2026-10-29): Central accepted the email, refused the shared
+        password, and no reset ever reached the mailbox. SuccessFactors (Farmers 21 runs, Wipro 20, 2026-10-30): Create
+        answered "Account Already Exists", the saved login "Invalid email address or password", the reset "If an
+        account matches ...", and no mail ever came from the employer. The silence is read from the mailbox
+        (reset_mail_silent) after a reset the employer confirmed, never assumed. An account that signed in before is
+        kept unless the employer's own Create refused as existing (`absent_create_at`, `identity_exists_at`)."""
         from ..email_alias import EMPLOYER_ALIAS_TAG, GMAIL_DOMAINS, employer_alias_key
 
         db = getattr(self.service, "db", None)
         key = employer_alias_key(self.job.get("url", ""))
         local, _, domain = str(self.accounts.email or "").partition("@")
         host = (urlsplit(self.job.get("url", "")).hostname or "").lower()
+        said_exists = bool(record.get("absent_create_at") or record.get("identity_exists_at"))
+        icims = self.job.get("ats") == "icims" or host.endswith(".icims.com")
         if (
-            not (self.job.get("ats") == "icims" or host.endswith(".icims.com"))
-            or record.get("confirmed_at")
-            or not db
+            not db
             or not key
             or db.get_setting(key)
             or "+" in local
             or domain not in GMAIL_DOMAINS
+            or not reset_proven(record)
+            or (record.get("confirmed_at") and not said_exists)
+            or not (icims or said_exists)
+            or not self.reset_mail_silent(record)
         ):
             return None
         db.set_setting(key, {"tag": EMPLOYER_ALIAS_TAG, "at": now(), "reason": "identity never signed in; no reset mail"})
@@ -2700,6 +2757,8 @@ class Adapter:
             except ValueError:
                 waited = 0
             if waited > RESET_RETRY_SECONDS:
+                if fresh := self.fresh_identity(record):
+                    return fresh  # a reset the mailbox never answered is not asked for a third time; a new identity is
                 self.emit("auth", "Requesting this employer's password reset again (resets are always allowed)")
                 record = {**record, "state": "credentials_rejected", "reset_requested_at": 0, "reset_unconfirmed": 0}
                 recent = False
