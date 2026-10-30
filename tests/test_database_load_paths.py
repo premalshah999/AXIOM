@@ -321,3 +321,41 @@ def test_a_settings_prefix_index_is_created_only_on_postgres_and_only_once():
     calls.clear()
     db.add_settings_prefix_index()
     assert calls == []
+
+
+async def test_a_queue_attempt_loads_packets_only_for_the_run_it_continues(service):
+    """Admission holds the app lock; each earlier run's whole packet was read per attempt (2026-10-30)."""
+    from jobpilot.pipeline_comparison import routed_pool
+
+    with service.db.exclusive() as s:
+        s.add(Job(id="job", identity="job", url="https://careers.example.test/jobs/1", title="Engineer", company="ExampleSoft", ats="custom"))
+        for n in range(4):
+            s.add(Run(id=f"old{n}", job_id="job", state="failed", mode="submit", packet={"worker_pool": "normal"},
+                      created_at=f"2026-10-30T00:0{n}:00+00:00"))
+        s.add(Run(id="waiting", job_id="job", state="waiting_browser", mode="submit", packet={"worker_pool": "specialist"},
+                  created_at="2026-10-30T00:09:00+00:00"))
+    seen, stop = statements(service)
+    try:
+        with service.db.session() as s:
+            routed_pool(s, s.get(Job, "job"))
+    finally:
+        stop()
+    packets = [q for q in seen if "runs.packet" in q]
+    assert len(packets) <= 1 and all("runs.id = ?" in q for q in packets), seen
+
+
+def test_the_archive_page_reads_no_packet_of_a_removed_job(service):
+    from jobpilot.archive import summaries
+    from jobpilot.db import Setting
+
+    with service.db.exclusive() as s:
+        s.add(Job(id="gone", identity="gone", url="https://careers.example.test/jobs/2", title="Engineer", company="ExampleSoft", ats="custom"))
+        s.add(Run(id="r1", job_id="gone", state="failed", mode="submit", packet={"ledger": ["x"]}, reason="stopped", cost=0.25))
+        s.add(Setting(key="job_control:gone", value={"state": "deleted", "at": "2026-10-30T00:00:00+00:00"}))
+    seen, stop = statements(service)
+    try:
+        rows = summaries(service.db)
+    finally:
+        stop()
+    assert [(r["run_id"], r["state"], r["cost"], r["attempts"]) for r in rows] == [("r1", "failed", 0.25, 1)]
+    assert not [q for q in seen if "runs.packet" in q], seen

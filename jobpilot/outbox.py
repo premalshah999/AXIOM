@@ -5,7 +5,7 @@ import hashlib
 import time
 
 from sqlalchemy import and_, case, exists, or_, select
-from sqlalchemy.orm import aliased
+from sqlalchemy.orm import aliased, defer
 
 from .db import Job, Outbox, Review, Run, Setting, now, record
 
@@ -35,6 +35,7 @@ def sweep_answered_drafts(service, limit=200):
     with service.db.exclusive() as session:
         query = (
             select(Run, Job)
+            .options(defer(Run.packet), defer(Job.description))  # Read only for a run with answers to resume.
             .join(Job, Job.id == Run.job_id)
             .where(
                 Run.state.in_(["waiting_answer", "needs_review"]),

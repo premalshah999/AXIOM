@@ -9,6 +9,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 from sqlalchemy import func, select, update
+from sqlalchemy.orm import defer
 
 from .db import Budget, Job, Run, Source, Setting, latest_runs, now
 from .discovery import rank_batch
@@ -516,7 +517,9 @@ def unknown_candidates(db):
         for job in s.scalars(select(Job).where(Job.status == "submission_unknown")):
             if job.id in waiting:
                 continue
-            runs = list(s.scalars(select(Run).where(Run.job_id == job.id).order_by(Run.created_at.desc())))
+            runs = list(
+                s.scalars(select(Run).options(defer(Run.packet)).where(Run.job_id == job.id).order_by(Run.created_at.desc()))
+            )
             if runs and runs[0].state == "submission_unknown" and unknown_resubmit_allowed(s, runs):
                 found.append((runs[0].created_at, job.id, runs[0].id))
     return [(job_id, run_id) for _, job_id, run_id in sorted(found)]

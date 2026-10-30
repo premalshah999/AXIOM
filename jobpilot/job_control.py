@@ -2,6 +2,7 @@
 
 import asyncio
 from sqlalchemy import select
+from sqlalchemy.orm import defer
 
 from .db import Job, Run, Setting, now
 from .admission import QueueBlocked
@@ -28,7 +29,10 @@ async def manage(service, job_id, action, *, controller_policy=None, reopen_clos
         job = s.get(Job, job_id)
         if not job:
             raise ValueError("Job not found")
-        runs = list(s.scalars(select(Run).where(Run.job_id == job_id).order_by(Run.created_at.desc())))
+        # Under the app lock; only the newest run's packet is ever read, and only for some actions.
+        runs = list(
+            s.scalars(select(Run).options(defer(Run.packet)).where(Run.job_id == job_id).order_by(Run.created_at.desc()))
+        )
         last = runs[0] if runs else None
         active = next((r for r in runs if r.state in {"queued", "running"}), None)
         from .admission import unknown_resubmit_allowed

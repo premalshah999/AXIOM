@@ -8,6 +8,7 @@ import functools
 import hashlib
 
 from sqlalchemy import select
+from sqlalchemy.orm import defer
 
 from ..db import Job, Resume, Run, Setting, now, record
 from ..schemas import Profile
@@ -293,7 +294,8 @@ class QueueingMixin:
                 for candidate in s.execute(select(Job.id, Job.url, Job.ats, Job.company).where(Job.ats == job.ats))
                 if url_identity(candidate.url) == identity or icims_requisition_alias(job, candidate)
             ]
-            previous = list(s.scalars(select(Run).where(Run.job_id.in_(aliases))))
+            # A packet loads when asked for: admission holds the app lock, and most attempts read none of these.
+            previous = list(s.scalars(select(Run).options(defer(Run.packet)).where(Run.job_id.in_(aliases))))
             if any(x.state in ACTIVE for x in previous):
                 raise QueueBlocked(
                     "This job already has an active run", outcome="protected", code="active_run"

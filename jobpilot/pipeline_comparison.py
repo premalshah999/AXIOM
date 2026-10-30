@@ -5,6 +5,7 @@ use the current ATS controller; the scheduler persists any specialist handoff.
 """
 
 from sqlalchemy import select
+from sqlalchemy.orm import defer
 
 from .config import MAX_WORKERS, Topology, legacy_topology
 from .db import Run
@@ -85,7 +86,8 @@ def routed_pool(session, job, source_id=None):
     it used to look only at the recovery source, so an owner's Apply on a job whose last run was handed to a
     specialist was admitted under the ATS workers' cap and then ran with the specialist's budget.
     """
-    runs = list(session.scalars(select(Run).where(Run.job_id == job.id)))
+    # Only the chosen run's packet is read: loaded when asked for, not one per earlier run under the app lock.
+    runs = list(session.scalars(select(Run).options(defer(Run.packet)).where(Run.job_id == job.id)))
     source = session.get(Run, source_id) if source_id else None
     return assign_pool(session, job, continued_run(runs, source))
 

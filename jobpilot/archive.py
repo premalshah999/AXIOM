@@ -102,7 +102,10 @@ def summaries(db):
             job = s.get(Job, jid)
             if not job or jid in known:
                 continue
-            runs = list(s.scalars(select(Run).where(Run.job_id == jid).order_by(Run.created_at.desc())))
+            # Columns only: the archive page read every removed job's whole packets (18 of 121 JSON samples, 2026-10-30).
+            runs = s.execute(
+                select(Run.id, Run.state, Run.reason, Run.cost).where(Run.job_id == jid).order_by(Run.created_at.desc())
+            ).all()
             last = runs[0] if runs else None
             rows.append(
                 {
