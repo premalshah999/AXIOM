@@ -158,6 +158,12 @@ profile folders as `jobpilot browser` and `jobpilot twin-browser`, so existing p
 on the host. They do nothing if the port already answers, so running them by mistake cannot start a second Chrome. The
 debugging port listens on 127.0.0.1 only; Docker Desktop forwards `host.docker.internal` to it.
 
+## Native mode
+
+`scripts/axiom` runs the same app with no Docker: a supervisor (`jobpilot/native`) owns PostgreSQL, the app and the Chromes, and does what
+Compose did for restarts, stop order, process reaping and the environment. Docker mode is unchanged. Its design, the database evaluation, the
+cut-over runbook and rollback are in [NATIVE.md](NATIVE.md).
+
 ## Continuous integration
 
 `.github/workflows/ci.yml`: ruff, the unit tests (everything not marked `browser`), the dashboard type-check and build, and
