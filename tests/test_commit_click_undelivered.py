@@ -529,3 +529,11 @@ async def test_an_adapter_refuses_a_page_that_is_not_the_final_step(monkeypatch)
     adapter.e.not_the_final_step = AsyncMock(return_value={"state": "waiting_browser", "recoverable": True, "reason": "x"})
     assert (await adapter.commit({"id": "submit-1", "label": "Submit"}))["state"] == "waiting_browser"
     assert form.clicks == 0 and adapter.e.armed is False and adapter.committed is False
+
+
+def test_a_conversion_pixel_is_not_the_application():
+    from jobpilot.browser import COMMIT_TRACKING
+
+    assert COMMIT_TRACKING.search("/pagead/form-data/123")
+    assert COMMIT_TRACKING.search("/ccm/form-data/123")
+    assert not COMMIT_TRACKING.search("/api/applications/submit")

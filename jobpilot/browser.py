@@ -125,6 +125,8 @@ SENSITIVE_STEPS = {"sign_in", "create_account", "email_code", "verify_link", "re
 # Paths of telemetry calls a page makes on its own site while a form is submitted (Oracle's recruitingCEUserTrackings).
 COMMIT_TRACKING = re.compile(
     r"track|analytic|telemetr|beacon|metric|collect|/log(?:s|ging)?\b|/events?\b|/report/?$|data-ingestion|"
+    # Google's conversion pixels fire on the page's submit event; they are not the application (IXL, 2026-10-28).
+    r"/pagead/|/ccm/form-data|"
     # A CAPTCHA widget's own reloads and checks during the click are not the application.
     r"/recaptcha/|getcaptcha|checksiteconfig|/vslog/?$",
     re.I,
