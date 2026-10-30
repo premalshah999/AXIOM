@@ -23,37 +23,55 @@ import type {
   Source,
 } from "./types";
 import { ago, day, External, plural } from "./ui";
-import { Button, Empty, Input, Panel, Pill, Select } from "./ui/index";
+import { PAGE_TABS } from "./shell/nav";
+import { Button, Empty, Input, Panel, Pill, RouteTabs, Select } from "./ui/index";
 
-// Each Setup section is a page of the sidebar (Knowledge is its own page too); the top bar owns the title, so
-// there is no side list and no heading here. An unknown tab opens Connections, as the sidebar marks it.
-const SECTIONS = ["connections", "profile", "answers", "resumes", "accounts", "email", "discovery", "system"];
-
-export function SetupView() {
+// Profile and Settings are one page each with tabs (nav.ts lists them; context.ts sends old Setup links to the right one).
+export function ProfileView() {
   const { route } = useWorkspace();
-  const section = SECTIONS.includes(route.tab || "") ? route.tab : "connections";
+  const tabs = PAGE_TABS.profile!;
+  const tab = tabs.some((t) => t.id === route.tab) ? route.tab : tabs[0]!.id;
   return (
     <div className="ax-page">
-      {section === "connections" && <ConnectionSettings />}
-      {section === "profile" && <ProfileSettings />}
-      {section === "answers" && <KnowledgeView />}
-      {section === "resumes" && (
+      <RouteTabs view="profile" tabs={tabs} label="Profile" current={tab} />
+      {tab === "identity" && <ProfileSettings sections={["identity"]} />}
+      {tab === "experience" && <ProfileSettings sections={["experience", "preferences"]} />}
+      {tab === "knowledge" && <KnowledgeView />}
+      {tab === "resumes" && (
         <>
           <Resumes />
           <TailoredResumes />
         </>
       )}
-      {section === "accounts" && <AccountSettings />}
-      {section === "email" && <MailSettings />}
-      {section === "discovery" && (
+    </div>
+  );
+}
+
+export function SettingsView() {
+  const { route } = useWorkspace();
+  const tabs = PAGE_TABS.settings!;
+  const tab = tabs.some((t) => t.id === route.tab) ? route.tab : tabs[0]!.id;
+  return (
+    <div className="ax-page">
+      <RouteTabs view="settings" tabs={tabs} label="Settings" current={tab} />
+      {tab === "connections" && <ConnectionSettings />}
+      {tab === "storage" && <StorageSettings />}
+      {tab === "accounts" && <AccountSettings />}
+      {tab === "email" && <MailSettings />}
+      {tab === "discovery" && (
         <>
           <DiscoverySettings />
           <CustomSources />
         </>
       )}
-      {section === "system" && <SystemSettings />}
+      {tab === "system" && <SystemSettings />}
     </div>
   );
+}
+
+// Nothing to configure yet: everything lives on this one server.
+function StorageSettings() {
+  return <Empty title="Applications, resumes and keys are stored on this server." />;
 }
 
 function Resumes() {

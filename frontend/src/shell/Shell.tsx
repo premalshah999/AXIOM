@@ -58,9 +58,9 @@ export function Shell({
   const scroll = useRef<HTMLDivElement>(null);
   const title = titleFor(route);
 
-  // Leaving a page starts the next one at its top; a tab inside the same page keeps its place (Setup's sections
-  // are pages of the sidebar, so they reset too).
-  const page = route.view === "setup" ? "setup:" + (route.tab || "") : route.view;
+  // Leaving a page starts the next one at its top. Profile's and Settings' tabs are whole pages, so they reset too; the
+  // lists under Jobs and Applications share their page's place.
+  const page = route.view === "profile" || route.view === "settings" ? route.view + ":" + (route.tab || "") : route.view;
   useEffect(() => {
     scroll.current?.scrollTo({ top: 0 });
   }, [page]);

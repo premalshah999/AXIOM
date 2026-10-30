@@ -38,6 +38,7 @@ const SECTIONS = [
   ["rules", "When options don't match"],
   ["preferences", "Preferences"],
 ] as const;
+export type ProfileSection = (typeof SECTIONS)[number][0];
 
 // A profile that arrives thin (a new account, an older server) is filled in so no section reads a missing list.
 const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
@@ -82,14 +83,17 @@ export function normalizeProfile(raw: Partial<Profile> | null | undefined): Prof
   };
 }
 
-export function ProfileSettings() {
+/** The profile's one form and one draft. Profile's tabs (setup.tsx) and Knowledge each show the sections they own. */
+export function ProfileSettings({ sections }: { sections: ProfileSection[] }) {
   const { snapshot, refresh, route } = useWorkspace();
   const server = useMemo(() => normalizeProfile(snapshot.profile), [snapshot.profile]);
   const [draft, setDraft] = useDraft<ProfileDraft | null>("profile", null);
-  const [section, setSection] = useDraft<string>("profile-section", "identity");
-  // Links such as ?view=setup&tab=profile&filter=preferences open one section directly.
+  const shown = SECTIONS.filter(([id]) => sections.includes(id));
+  const [picked, setSection] = useDraft<string>("profile-section", sections[0]!);
+  const section = shown.some(([id]) => id === picked) ? picked : sections[0]!;
+  // Links such as ?view=profile&tab=experience&filter=preferences open one section directly.
   useEffect(() => {
-    if (route.filter && SECTIONS.some(([id]) => id === route.filter)) setSection(route.filter);
+    if (route.filter && shown.some(([id]) => id === route.filter)) setSection(route.filter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.filter]);
   const [factsText, setFactsText] = useDraft<string | null>("profile-facts", null);
@@ -151,12 +155,14 @@ export function ProfileSettings() {
         if (!factsError) save();
       }}
     >
-      <Tabs
-        label="Profile sections"
-        value={section}
-        onChange={setSection}
-        tabs={SECTIONS.map(([id, label]) => ({ id, label: id === "facts" && factsError ? label + " (fix)" : label }))}
-      />
+      {shown.length > 1 && (
+        <Tabs
+          label="Profile sections"
+          value={section}
+          onChange={setSection}
+          tabs={shown.map(([id, label]) => ({ id, label: id === "facts" && factsError ? label + " (fix)" : label }))}
+        />
+      )}
       {changedElsewhere && (
         <div className="ax-notice" role="status">
           <span>

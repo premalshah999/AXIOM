@@ -1,63 +1,43 @@
-// Where everything lives (DESIGN.md §4). Every item maps onto the route model in context.ts (view + tab), so each
-// existing URL keeps working and the sidebar is only another way to reach it. Groups are always open.
+// Where everything lives (DESIGN.md, Navigation). Six pages, then the coming-soon group. Each item maps onto the route
+// table in context.ts, which is where old URLs are resolved.
 import {
-  BookOpen,
   Briefcase,
-  ClipboardCheck,
-  Compass,
-  FileText,
-  KeyRound,
-  LayoutDashboard,
+  House,
+  Inbox,
   Mail,
-  MailPlus,
-  MessageCircleQuestion,
   Mic,
   Network,
-  Plug,
-  Radar,
+  Send,
   Settings,
   UserRound,
   type LucideIcon,
 } from "lucide-react";
-import type { Route } from "../context";
+import type { Route, View } from "../context";
+import type { TabItem } from "../ui/Tabs";
 
 export type NavItem = {
   id: string;
   label: string;
   icon: LucideIcon;
   route: Route;
-  /** Which badge to attach, named so the nav does not know what it counts. */
+  /** Which count to show, named so the nav does not know what it counts. */
   badge?: "needs";
-  /** A "Soon" pill and a calm page instead of a feature. */
+  /** Lives under the quiet "Coming soon" label and opens a page of one sentence. */
   soon?: boolean;
-  /** One sentence for the coming-soon page. */
+  /** The one sentence for the coming-soon page. */
   about?: string;
 };
 export type NavSection = { label?: string; items: NavItem[] };
 
-const SETUP_TABS = ["profile", "answers", "resumes", "accounts", "email", "discovery", "connections", "system"];
-
 export const NAV: NavSection[] = [
   {
     items: [
-      { id: "overview", label: "Overview", icon: LayoutDashboard, route: { view: "batch" } },
-      { id: "jobs", label: "Jobs", icon: Briefcase, route: { view: "jobs", tab: "pipeline" } },
-      { id: "needs", label: "Needs you", icon: MessageCircleQuestion, route: { view: "needs" }, badge: "needs" },
-      { id: "discovered", label: "Discovered", icon: Compass, route: { view: "jobs", tab: "discovered" } },
-      { id: "applications", label: "Applications", icon: ClipboardCheck, route: { view: "ledger" } },
-    ],
-  },
-  {
-    label: "Setup",
-    items: [
-      { id: "profile", label: "Profile", icon: UserRound, route: { view: "setup", tab: "profile" } },
-      { id: "knowledge", label: "Knowledge", icon: BookOpen, route: { view: "setup", tab: "answers" } },
-      { id: "resumes", label: "Resumes", icon: FileText, route: { view: "setup", tab: "resumes" } },
-      { id: "accounts", label: "Accounts", icon: KeyRound, route: { view: "setup", tab: "accounts" } },
-      { id: "email", label: "Email", icon: Mail, route: { view: "setup", tab: "email" } },
-      { id: "discovery", label: "Discovery", icon: Radar, route: { view: "setup", tab: "discovery" } },
-      { id: "connections", label: "Connections", icon: Plug, route: { view: "setup", tab: "connections" } },
-      { id: "system", label: "System", icon: Settings, route: { view: "setup", tab: "system" } },
+      { id: "overview", label: "Overview", icon: House, route: { view: "batch" } },
+      { id: "jobs", label: "Jobs", icon: Briefcase, route: { view: "jobs" } },
+      { id: "needs", label: "Needs you", icon: Inbox, route: { view: "needs" }, badge: "needs" },
+      { id: "applications", label: "Applications", icon: Send, route: { view: "ledger" } },
+      { id: "profile", label: "Profile", icon: UserRound, route: { view: "profile" } },
+      { id: "settings", label: "Settings", icon: Settings, route: { view: "settings" } },
     ],
   },
   {
@@ -69,7 +49,7 @@ export const NAV: NavSection[] = [
         icon: Mic,
         route: { view: "soon-axe" },
         soon: true,
-        about: "Axe is an AI interviewer. It will run mock interviews for the roles you are applying to and tell you what to tighten.",
+        about: "An AI interviewer that runs mock interviews for the roles you apply to.",
       },
       {
         id: "network",
@@ -77,15 +57,15 @@ export const NAV: NavSection[] = [
         icon: Network,
         route: { view: "soon-network" },
         soon: true,
-        about: "Network will connect users and affiliates, so people applying to the same companies can introduce each other.",
+        about: "Connects users and affiliates, so people applying to the same companies can introduce each other.",
       },
       {
         id: "emails",
         label: "Emails",
-        icon: MailPlus,
+        icon: Mail,
         route: { view: "soon-emails" },
         soon: true,
-        about: "Emails will run email automation pipelines: outreach and follow-ups that send themselves on your schedule.",
+        about: "Outreach and follow-up emails that send themselves on your schedule.",
       },
     ],
   },
@@ -93,30 +73,41 @@ export const NAV: NavSection[] = [
 
 export const ALL_ITEMS = NAV.flatMap((s) => s.items);
 
-/** Whether `item` is where `route` is. Setup defaults to its first section (Connections) when no tab is given. */
+// Each page's tabs. The palette offers them as places to jump to; Profile and Settings render from these.
+export const PAGE_TABS: Partial<Record<View, TabItem[]>> = {
+  jobs: [
+    { id: "pipeline", label: "Pipeline" },
+    { id: "discovered", label: "Discovered" },
+    { id: "reserved", label: "Reserved" },
+  ],
+  ledger: [
+    { id: "confirmed", label: "Confirmed" },
+    { id: "unconfirmed", label: "Unconfirmed" },
+    { id: "archive", label: "Archive" },
+  ],
+  profile: [
+    { id: "identity", label: "Identity" },
+    { id: "experience", label: "Experience" },
+    { id: "knowledge", label: "Knowledge" },
+    { id: "resumes", label: "Resumes" },
+  ],
+  settings: [
+    { id: "connections", label: "Connections" },
+    { id: "storage", label: "Storage" },
+    { id: "accounts", label: "Accounts" },
+    { id: "email", label: "Email" },
+    { id: "discovery", label: "Discovery" },
+    { id: "system", label: "System" },
+  ],
+};
+
+/** Whether `item` is where `route` is. Routes are canonical, so one page is lit per view; the editor belongs to Profile. */
 export function isActive(item: NavItem, route: Route): boolean {
-  const r = item.route;
-  // Discovered, Applications and Jobs share the Jobs view: the tab picks which row is lit.
-  if (r.view === "jobs") {
-    if (route.view !== "jobs") return false;
-    const tab = route.tab || "pipeline";
-    if (item.id === "discovered") return tab === "discovered";
-    return tab !== "discovered" && tab !== "archive";
-  }
-  if (item.id === "applications") return route.view === "ledger" || (route.view === "jobs" && route.tab === "archive");
-  if (r.view === "setup") {
-    if (route.view === "editor") return item.id === "resumes";
-    if (route.view !== "setup") return false;
-    const tab = SETUP_TABS.includes(route.tab || "") ? route.tab : "connections";
-    return tab === r.tab;
-  }
-  return route.view === r.view;
+  return item.route.view === (route.view === "editor" ? "profile" : route.view);
 }
 
 /** The page's own name, for the top bar and the document title. */
 export function titleFor(route: Route): string {
   if (route.view === "editor") return "Resume editor";
-  // Jobs on the Archive tab reads as Applications in the nav, but the page is still Jobs › Archive.
-  if (route.view === "jobs" && route.tab === "archive") return "Archive";
   return ALL_ITEMS.find((i) => isActive(i, route))?.label ?? "AXIOM";
 }

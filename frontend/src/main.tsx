@@ -9,10 +9,12 @@ import "./styles/components.css";
 import "./styles/shell.css";
 import { api, ApiError, SIGNED_OUT, signedOut } from "./api";
 import {
+  canonical,
   NO_COUNTS,
   parseRoute,
   routeUrl,
   WorkspaceContext,
+  type AnyRoute,
   type Route,
   type Workspace,
 } from "./context";
@@ -37,9 +39,10 @@ import { JobLinkIntake } from "./jobintake";
 import type { AccountStatus } from "./account";
 import { guideLater } from "./guide";
 
-// Setup, the resume editor, sign-in and the setup guide are most of the dashboard's code and are rarely open: they
-// load when shown, so Batch and Jobs paint from a smaller bundle (2026-10-23).
-const SetupView = lazy(() => import("./setup").then((m) => ({ default: m.SetupView })));
+// Profile, Settings, the resume editor, sign-in and the setup guide are most of the dashboard's code and are rarely open:
+// they load when shown, so Batch and Jobs paint from a smaller bundle (2026-10-23).
+const ProfileView = lazy(() => import("./setup").then((m) => ({ default: m.ProfileView })));
+const SettingsView = lazy(() => import("./setup").then((m) => ({ default: m.SettingsView })));
 const ResumeEditor = lazy(() => import("./editor").then((m) => ({ default: m.ResumeEditor })));
 const AuthScreen = lazy(() => import("./account").then((m) => ({ default: m.AuthScreen })));
 const Onboarding = lazy(() => import("./onboarding").then((m) => ({ default: m.Onboarding })));
@@ -76,7 +79,14 @@ function App() {
       setSignOutReason((current) => reason || current);
       setAuth("out");
     };
-    const pop = () => setRoute(parseRoute());
+    // An old link (?view=setup&tab=email) is rewritten to its new home in the address bar; the page was already told.
+    const pop = () => {
+      const next = parseRoute();
+      const here = location.pathname + location.search + location.hash;
+      if (routeUrl(next) !== here) history.replaceState(null, "", routeUrl(next));
+      setRoute(next);
+    };
+    pop();
     window.addEventListener(SIGNED_OUT, out);
     window.addEventListener("popstate", pop);
     return () => {
@@ -85,7 +95,8 @@ function App() {
     };
   }, []);
 
-  const go = useCallback((next: Route) => {
+  const go = useCallback((raw: AnyRoute) => {
+    const next = canonical(raw);
     history.pushState(null, "", routeUrl(next));
     setRoute(next);
   }, []);
@@ -353,7 +364,8 @@ function App() {
           {route.view === "needs" && <NeedsView />}
           {soon && <ComingSoon item={soon} />}
           <Suspense fallback={<Loading />}>
-            {route.view === "setup" && <SetupView />}
+            {route.view === "profile" && <ProfileView />}
+            {route.view === "settings" && <SettingsView />}
             {route.view === "editor" && <ResumeEditor />}
           </Suspense>
         </Shell>

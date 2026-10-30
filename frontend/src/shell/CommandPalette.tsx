@@ -99,7 +99,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       id: "page:" + i.id,
       group: "Pages",
       label: i.label,
-      note: i.route.view === "setup" ? "Setup" : i.soon ? "Coming soon" : undefined,
+      note: i.soon ? "Coming soon" : undefined,
       icon: <i.icon size={15} aria-hidden="true" />,
       run: done(() => go(i.route as Route)),
     }));
