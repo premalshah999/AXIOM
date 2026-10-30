@@ -1,12 +1,12 @@
-import { Menu, Search } from "lucide-react";
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { Route } from "../context";
 import type { Who } from "./AccountMenu";
 import { PageBoundary } from "./ErrorBoundary";
 import { titleFor } from "./nav";
-import { usePersisted, useMedia } from "./prefs";
-import { Sidebar } from "./Sidebar";
+import { NavDrawer } from "./NavDrawer";
+import { useMedia } from "./prefs";
+import { TopBar } from "./TopBar";
 
 const SlotContext = createContext<HTMLElement | null>(null);
 
@@ -21,9 +21,9 @@ export function TopActions({ children }: { children: ReactNode }) {
 }
 
 /**
- * The application frame (DESIGN.md, Shell): a grid of [sidebar | main]. Main is a column of the top bar, banners, and ONE
- * scroll region (.ax-scroll) holding the page. The document itself never scrolls (base.css), so every scrolling bug has
- * one place to look. Wide tables scroll sideways inside themselves; drawers and menus own their scroll.
+ * The application frame (DESIGN.md, Shell): the top bar over main. Main is a column of the page title, banners, and ONE scroll
+ * region (.ax-scroll) holding the page. The document itself never scrolls (base.css), so every scrolling bug has one place to
+ * look. Wide tables scroll sideways inside themselves; drawers and menus own their scroll.
  */
 export function Shell({
   route,
@@ -43,17 +43,18 @@ export function Shell({
   onSignOut: () => void;
   onSearch: () => void;
   paletteOpen: boolean;
-  /** One-line notices under the top bar (setup unfinished, connection lost). */
+  /** One-line notices under the page title (setup unfinished, connection lost). */
   banners?: ReactNode;
   children: ReactNode;
 }) {
-  const [collapsed, setCollapsed] = usePersisted("sidebar.collapsed", false);
   const drawer = useMedia("(max-width: 899px)");
   const [open, setOpen] = useState(false);
   const [slot, setSlot] = useState<HTMLElement | null>(null);
   const [rowSlot, setRowSlot] = useState<HTMLElement | null>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const title = titleFor(route);
+  // Overview's sentence is its title; every other page names itself.
+  const titled = route.view !== "batch";
 
   // Leaving a page starts the next one at its top. Profile's and Settings' tabs are whole pages, so they reset too; the
   // lists under Jobs and Applications share their page's place.
@@ -72,36 +73,15 @@ export function Shell({
       <a className="skip" href="#main">
         Skip to content
       </a>
-      <div className={"ax-app" + (collapsed && !drawer ? " is-rail" : "")}>
-        <Sidebar
-          route={route}
-          go={go}
-          needs={needs}
-          collapsed={collapsed}
-          onToggle={() => setCollapsed((v) => !v)}
-          drawer={drawer}
-          open={open}
-          onClose={() => setOpen(false)}
-          onSearch={onSearch}
-          who={who}
-          onSignOut={onSignOut}
-        />
-        <div className="ax-main">
-          <header className="ax-top">
-            {drawer && (
-              <button type="button" className="ax-icon-btn ax-top-menu" aria-label="Open menu" aria-expanded={open} onClick={() => setOpen(true)}>
-                <Menu size={18} aria-hidden="true" />
-              </button>
-            )}
-            <h1 className="ax-top-title">{title}</h1>
+      <div className="ax-app">
+        <TopBar route={route} go={go} needs={needs} who={who} drawer={drawer} menuOpen={open} onMenu={() => setOpen(true)} onSearch={onSearch} onSignOut={onSignOut} />
+        {drawer && <NavDrawer route={route} go={go} needs={needs} who={who} open={open} onClose={() => setOpen(false)} onSignOut={onSignOut} />}
+        <div className={"ax-main view-" + route.view}>
+          <div className={"ax-head" + (titled ? "" : " is-untitled")}>
+            <h1 className={"ax-top-title" + (titled ? "" : " sr-only")}>{title}</h1>
             {/* Under 900px the bar has no room for a page's buttons beside its title: they go in a row below it. */}
             <div className="ax-top-actions" ref={setSlot} />
-            {drawer && (
-              <button type="button" className="ax-icon-btn" aria-label="Search" onClick={onSearch}>
-                <Search size={17} aria-hidden="true" />
-              </button>
-            )}
-          </header>
+          </div>
           <div className="ax-top-row" ref={setRowSlot} />
           {banners}
           <div className={"ax-scroll" + (route.view === "editor" ? " is-fixed" : "")} ref={scroll}>

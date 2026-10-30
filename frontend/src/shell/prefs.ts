@@ -1,4 +1,4 @@
-// Per-viewer conveniences kept in localStorage: the theme, whether the sidebar is collapsed.
+// Per-viewer conveniences kept in localStorage: the theme.
 // Every read and write is wrapped: private windows and blocked site data throw on access, and a preference is never worth
 // failing a render. The page renders correctly without any of it.
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
@@ -18,7 +18,7 @@ export function readTheme(): ThemeId {
   }
 }
 
-// One current theme for the whole app, so the account menu and the palette never disagree.
+// One current theme for the whole app, so the top bar and the palette never disagree.
 let current: ThemeId = readTheme();
 const listeners = new Set<() => void>();
 
@@ -29,6 +29,13 @@ function syncThemeColor() {
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", ground);
 }
 syncThemeColor();
+
+// The sidebar went on 2026-10-30, and its remembered collapsed state with it.
+try {
+  localStorage.removeItem("axiom.sidebar.collapsed");
+} catch {
+  /* nothing to clear */
+}
 
 function setTheme(next: ThemeId) {
   current = next;
@@ -52,26 +59,6 @@ export function useTheme() {
   const theme = useSyncExternalStore(subscribe, () => current);
   const toggle = useCallback(() => setTheme(current === "dark" ? "light" : "dark"), []);
   return [theme, toggle] as const;
-}
-
-/** State that survives a reload. */
-export function usePersisted<T>(key: string, initial: T) {
-  const [value, setValue] = useState<T>(() => {
-    try {
-      const raw = localStorage.getItem("axiom." + key);
-      return raw == null ? initial : (JSON.parse(raw) as T);
-    } catch {
-      return initial;
-    }
-  });
-  useEffect(() => {
-    try {
-      localStorage.setItem("axiom." + key, JSON.stringify(value));
-    } catch {
-      /* private mode */
-    }
-  }, [key, value]);
-  return [value, setValue] as const;
 }
 
 /** Whether a media query matches, kept current as the window changes. */

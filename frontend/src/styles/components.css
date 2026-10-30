@@ -1,5 +1,5 @@
-/* Shared primitives: src/ui, worktools.tsx, pagination.tsx and setup-kit.tsx. A page built from these looks quiet without
-   writing CSS. Colours come only from tokens.css. No cards, no tints, no shadows except on overlays. */
+/* Shared primitives: src/ui, worktools.tsx, pagination.tsx and setup-kit.tsx. A page built from these belongs to the identity
+   without writing CSS: raised buttons, recessed wells, hairlines, a generous row. Colours come only from tokens.css. */
 
 @keyframes ax-rise {
   from {
@@ -78,6 +78,7 @@
 .ax-panel-head h2 {
   min-width: 0;
   overflow: hidden;
+  padding-bottom: 1px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -100,37 +101,38 @@
   padding-bottom: 0;
 }
 
-/* ---------- Pill: plain muted text; a dot only for what needs attention ---------- */
+/* ---------- Pill: one word of status, coloured text on the row, never a capsule ---------- */
 .ax-pill {
   display: inline-flex;
   align-items: center;
   flex: none;
   gap: 6px;
-  color: var(--ink-3);
+  color: var(--ink-2);
   font-size: var(--text-ui);
+  font-weight: 600;
   line-height: 1.4;
   white-space: nowrap;
 }
-.ax-pill.is-warn,
+.ax-pill.is-brand {
+  color: var(--st-work);
+}
+.ax-pill.is-ok {
+  color: var(--st-done);
+}
+.ax-pill.is-warn {
+  color: var(--st-ask);
+}
+.ax-pill.is-info {
+  color: var(--st-unc);
+}
+.ax-pill.is-fix {
+  color: var(--st-fix);
+}
 .ax-pill.is-bad {
-  color: var(--ink);
+  color: var(--bad);
 }
 .ax-pill-dot {
   display: none;
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-.ax-pill.is-warn .ax-pill-dot,
-.ax-pill.is-bad .ax-pill-dot {
-  display: block;
-}
-.ax-pill.is-warn .ax-pill-dot {
-  background: var(--warn);
-}
-.ax-pill.is-bad .ax-pill-dot {
-  background: var(--bad);
 }
 
 /* ---------- Tabs: text on a hairline, the first one flush with the page ---------- */
@@ -138,8 +140,8 @@
   display: flex;
   align-items: stretch;
   flex: none;
-  gap: var(--space-5);
-  min-height: 36px;
+  gap: 22px;
+  min-height: 42px;
   border-bottom: 1px solid var(--line);
   overflow-x: auto;
   scrollbar-width: none;
@@ -156,7 +158,10 @@
   border: 0;
   background: none;
   color: var(--ink-3);
-  font-size: var(--text-ui);
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-variation-settings: "opsz" 24, "wdth" 84;
+  font-weight: 650;
   text-decoration: none;
   white-space: nowrap;
   cursor: pointer;
@@ -167,18 +172,21 @@
 }
 .ax-tab[aria-current="page"],
 .ax-tab[aria-selected="true"] {
-  box-shadow: inset 0 -1px 0 var(--ink);
+  box-shadow: inset 0 -2.5px 0 var(--accent-text);
   color: var(--ink);
 }
 .ax-tab:focus-visible {
   outline-offset: -2px;
 }
 .ax-tab-count {
-  color: var(--ink-3);
+  color: var(--ink-2);
+  font-family: var(--font-text);
   font-size: var(--text-meta);
+  font-variation-settings: normal;
+  font-weight: 600;
 }
 
-/* ---------- Button ---------- */
+/* ---------- Button: raised, it presses down. The concept's power button and chip. ---------- */
 .ax-btn,
 .btn {
   display: inline-flex;
@@ -186,88 +194,111 @@
   justify-content: center;
   flex: none;
   gap: 6px;
-  height: 32px;
-  padding: 0 12px;
-  border: 1px solid var(--line-strong);
+  height: 36px;
+  margin-bottom: 2px;
+  padding: 0 var(--space-3);
+  border: 0;
   border-radius: var(--radius);
-  background: transparent;
+  background: var(--ground-2);
+  box-shadow:
+    inset 0 0 0 1px var(--line-strong),
+    0 2px 0 var(--line-strong);
   color: var(--ink);
   font: inherit;
   font-size: var(--text-ui);
-  font-weight: 400;
+  font-weight: 650;
   line-height: 1;
   white-space: nowrap;
   text-decoration: none;
   cursor: pointer;
   transition:
     background var(--dur) var(--ease),
-    border-color var(--dur) var(--ease);
+    transform 80ms,
+    box-shadow 80ms;
 }
 .ax-btn:hover:not(:disabled):not([aria-disabled="true"]),
 .btn:hover:not(:disabled) {
   background: var(--tint);
-  border-color: var(--line-strong);
+  box-shadow:
+    inset 0 0 0 1px var(--ink-3),
+    0 2px 0 var(--ink-3);
+}
+.ax-btn:active:not(:disabled):not([aria-disabled="true"]),
+.btn:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 .ax-btn:disabled,
 .ax-btn[aria-disabled="true"],
 .btn:disabled {
-  opacity: 0.5;
+  opacity: 0.55;
   cursor: not-allowed;
 }
 .ax-btn.is-sm,
 .btn.sm {
-  height: 28px;
+  height: 30px;
   padding: 0 10px;
   font-size: var(--text-ui);
 }
 .ax-btn.is-primary,
 .btn.primary {
+  margin-bottom: 3px;
+  padding: 0 var(--space-4);
   background: var(--brand);
-  border-color: var(--brand);
+  box-shadow: 0 3px 0 var(--brand-edge);
   color: var(--brand-ink);
-  font-weight: 500;
+  font-weight: 700;
 }
 .ax-btn.is-primary:hover:not(:disabled),
 .btn.primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--brand) 88%, var(--ink));
-  border-color: transparent;
-  filter: none;
+  background: var(--brand);
+  box-shadow: 0 3px 0 var(--brand-edge);
+  filter: brightness(1.06);
 }
-/* A primary that cannot be pressed yet is not the thing to look at: only a live one carries the accent. */
+.ax-btn.is-primary:active:not(:disabled),
+.btn.primary:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 var(--brand-edge);
+}
+/* A primary that cannot be pressed yet is not the thing to look at: only a live one is raised. */
 .ax-btn.is-primary:disabled,
 .btn.primary:disabled {
   background: var(--tint);
-  border-color: transparent;
+  box-shadow: none;
   color: var(--ink-3);
   opacity: 1;
 }
 .ax-btn.is-ghost,
 .btn.quiet {
+  margin-bottom: 0;
   background: transparent;
-  border-color: transparent;
+  box-shadow: none;
   color: var(--ink-2);
 }
 .ax-btn.is-ghost:hover:not(:disabled),
 .btn.quiet:hover:not(:disabled) {
   background: var(--tint);
-  border-color: transparent;
+  box-shadow: none;
   color: var(--ink);
+}
+.ax-btn.is-ghost:active:not(:disabled),
+.btn.quiet:active:not(:disabled) {
+  transform: none;
+  box-shadow: none;
 }
 .ax-btn.is-danger,
 .btn.danger,
 .btn.danger-solid,
 .btn.ask {
-  background: transparent;
-  border-color: var(--line-strong);
   color: var(--bad);
 }
 .ax-btn.is-danger:hover:not(:disabled),
 .btn.danger:hover:not(:disabled),
 .btn.danger-solid:hover:not(:disabled),
 .btn.ask:hover:not(:disabled) {
-  background: var(--tint);
-  border-color: var(--bad);
-  filter: none;
+  box-shadow:
+    inset 0 0 0 1px var(--bad),
+    0 2px 0 var(--bad);
 }
 .btn.ask {
   color: var(--ink);
@@ -288,11 +319,11 @@
 @media (pointer: coarse) {
   .ax-btn,
   .btn {
-    height: 40px;
+    height: 42px;
   }
   .ax-btn.is-sm,
   .btn.sm {
-    height: 36px;
+    height: 38px;
   }
   .ax-icon-btn {
     width: 36px;
@@ -308,7 +339,7 @@
   border: 0;
   border-radius: var(--radius);
   background: transparent;
-  color: var(--ink-3);
+  color: var(--ink-2);
   cursor: pointer;
   transition:
     background var(--dur) var(--ease),
@@ -327,13 +358,15 @@
   background: none;
   color: var(--accent-text);
   font: inherit;
-  text-decoration: none;
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
   cursor: pointer;
 }
 .ax-link:hover,
 .link:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  text-decoration-thickness: 2px;
 }
 .link.sm {
   color: var(--accent-text);
@@ -349,7 +382,7 @@
 .ax-label {
   color: var(--ink-2);
   font-size: var(--text-ui);
-  font-weight: 400;
+  font-weight: 550;
 }
 .ax-hint {
   color: var(--ink-3);
@@ -497,7 +530,7 @@
   font-size: var(--text-ui);
 }
 .ax-row-main > strong {
-  font-weight: 400;
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
 .ax-row-main > small {
@@ -535,7 +568,7 @@
 }
 .ax-switch[aria-checked="true"] {
   border: 0;
-  background: var(--ink);
+  background: var(--accent-text);
 }
 .ax-switch[aria-checked="true"] i {
   background: var(--ground);
@@ -592,7 +625,7 @@
   cursor: pointer;
 }
 .ax-fold > summary strong {
-  font-weight: 400;
+  font-weight: 600;
 }
 .ax-fold > summary:hover {
   color: var(--ink);
@@ -647,18 +680,18 @@
   position: sticky;
   top: 0;
   z-index: 2;
-  height: 32px;
+  height: 34px;
   padding: 0 var(--space-3);
   background: var(--ground);
   border-bottom: 1px solid var(--line);
-  color: var(--ink-3);
+  color: var(--ink-2);
   font-size: var(--text-meta);
-  font-weight: 400;
+  font-weight: 550;
   text-align: left;
   white-space: nowrap;
 }
 .ax-table td {
-  height: 40px;
+  height: 46px;
   padding: 0 var(--space-3);
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
@@ -689,7 +722,7 @@
 }
 .ax-table tbody tr:hover td,
 .ax-table tbody tr[aria-selected="true"] td {
-  background: var(--tint);
+  background: var(--ground-2);
 }
 .ax-table tbody tr.is-click {
   cursor: pointer;
@@ -707,19 +740,6 @@
 }
 .ax-table .is-check input {
   display: grid;
-}
-/* A row's checkbox shows when the row is in play. The select-all box in the head always shows. */
-@media (hover: hover) {
-  .ax-table tbody .is-check input {
-    opacity: 0;
-    transition: opacity var(--dur) var(--ease);
-  }
-  .ax-table tbody tr:hover .is-check input,
-  .ax-table tbody .is-check input:checked,
-  .ax-table tbody .is-check input:focus-visible,
-  .ax-table:has(tbody .is-check input:checked) tbody .is-check input {
-    opacity: 1;
-  }
 }
 @container ax-table (max-width: 859px) {
   .ax-table .is-hide-860 {
@@ -739,7 +759,7 @@
 }
 .ax-table tbody tr:hover td.is-pin,
 .ax-table tbody tr[aria-selected="true"] td.is-pin {
-  background: linear-gradient(var(--tint), var(--tint)), var(--ground);
+  background: var(--ground-2);
 }
 .ax-table thead .is-pin {
   z-index: 3;
@@ -755,7 +775,7 @@
 }
 .ax-skeleton {
   display: block;
-  height: 10px;
+  height: 12px;
   border-radius: var(--radius);
   background: var(--tint);
 }
@@ -764,7 +784,7 @@
   align-items: center;
   flex: none;
   gap: var(--space-3);
-  min-height: 36px;
+  min-height: 44px;
   border-bottom: 1px solid var(--line);
   font-size: var(--text-ui);
 }
@@ -822,13 +842,14 @@
   align-items: center;
   flex: none;
   gap: var(--space-3);
-  min-height: 56px;
+  min-height: 64px;
   padding: 0 var(--space-3) 0 var(--space-5);
 }
 .ax-drawer-head h2 {
   flex: 1;
   min-width: 0;
   overflow: hidden;
+  padding-bottom: 1px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -866,6 +887,10 @@
 .ax-empty > svg {
   display: none;
 }
+.ax-empty > .ax-fan {
+  display: block;
+  align-self: center;
+}
 .ax-empty-title {
   color: var(--ink-2);
 }
@@ -875,17 +900,23 @@
 /* The one action reads as a link: an empty state is not a place for a button. */
 .ax-empty-action .ax-btn {
   height: auto;
+  margin: 0;
   padding: 0;
-  border: 0;
   background: none;
+  box-shadow: none;
   color: var(--accent-text);
-  font-weight: 400;
+  font-weight: 600;
   line-height: inherit;
-}
-.ax-empty-action .ax-btn:hover:not(:disabled) {
-  background: none;
   text-decoration: underline;
+  text-decoration-thickness: 1px;
   text-underline-offset: 3px;
+}
+.ax-empty-action .ax-btn:hover:not(:disabled),
+.ax-empty-action .ax-btn:active:not(:disabled) {
+  background: none;
+  box-shadow: none;
+  text-decoration-thickness: 2px;
+  transform: none;
 }
 
 /* ---------- Toast ---------- */
@@ -910,12 +941,13 @@
   display: flex;
   align-items: flex-start;
   gap: var(--space-2);
-  padding: 10px var(--space-3);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-big);
   background: var(--raised);
   box-shadow: var(--overlay-shadow);
   font-size: var(--text-ui);
+  font-weight: 500;
   animation: ax-rise var(--dur) var(--ease);
 }
 .ax-toast > span {
@@ -946,8 +978,8 @@ body:has(.ax-savebar) .ax-toasts {
   min-width: 180px;
   max-width: min(320px, calc(100vw - 16px));
   padding: var(--space-1);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-big);
   background: var(--raised);
   box-shadow: var(--overlay-shadow);
   animation: ax-rise var(--dur) var(--ease);
@@ -961,7 +993,7 @@ body:has(.ax-savebar) .ax-toasts {
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  height: 30px;
+  height: 34px;
   padding: 0 var(--space-2);
   border: 0;
   border-radius: var(--radius);
@@ -969,12 +1001,15 @@ body:has(.ax-savebar) .ax-toasts {
   color: var(--ink);
   font: inherit;
   font-size: var(--text-ui);
+  font-weight: 550;
   text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
   cursor: pointer;
 }
 .ax-menu-item svg {
   flex: none;
-  color: var(--ink-3);
+  color: var(--ink-2);
 }
 .ax-menu-item:hover:not(:disabled),
 .ax-menu-item:focus-visible {
@@ -1031,13 +1066,14 @@ body:has(.ax-savebar) .ax-toasts {
 }
 .ax-search svg {
   position: absolute;
+  z-index: 1;
   left: 10px;
-  color: var(--ink-3);
+  color: var(--ink-2);
   pointer-events: none;
 }
 .ax-search input {
-  height: 32px;
-  padding: 0 10px 0 30px;
+  height: 36px;
+  padding: 0 10px 0 32px;
 }
 /* Filters: one quiet row of text with counts. Margin so the first label lines up with the page edge. */
 .ax-chips {
@@ -1051,13 +1087,14 @@ body:has(.ax-savebar) .ax-toasts {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 28px;
-  padding: 0 var(--space-2);
+  height: 32px;
+  padding: 0 10px;
   border: 0;
   border-radius: var(--radius);
   background: none;
-  color: var(--ink-3);
+  color: var(--ink-2);
   font-size: var(--text-ui);
+  font-weight: 550;
   white-space: nowrap;
   cursor: pointer;
   transition: color var(--dur) var(--ease);
@@ -1066,12 +1103,14 @@ body:has(.ax-savebar) .ax-toasts {
   color: var(--ink);
 }
 .ax-chip[aria-pressed="true"] {
-  background: var(--tint);
+  background: var(--ground-2);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
   color: var(--ink);
 }
 .ax-chip-n {
-  color: var(--ink-3);
-  font-size: var(--text-meta);
+  color: inherit;
+  font-size: var(--text-ui);
+  font-weight: 700;
 }
 .ax-job {
   display: flex;
@@ -1092,14 +1131,17 @@ body:has(.ax-savebar) .ax-toasts {
   max-width: 55%;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-weight: 500;
+  font-family: var(--font-display);
+  font-size: var(--text-sub);
+  font-variation-settings: var(--fv-sub);
+  font-weight: 680;
 }
 .ax-job span {
   flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--ink-3);
+  color: var(--ink-2);
 }
 .ax-job:hover strong {
   text-decoration: underline;
@@ -1126,7 +1168,7 @@ body:has(.ax-savebar) .ax-toasts {
     white-space: nowrap;
   }
   .ax-table td {
-    height: 48px;
+    height: 56px;
   }
 }
 .ax-note {
@@ -1191,22 +1233,24 @@ body:has(.ax-savebar) .ax-toasts {
   align-items: center;
 }
 .ax-pager-btn {
-  min-width: 28px;
-  height: 28px;
+  min-width: 30px;
+  height: 30px;
   padding: 0 var(--space-2);
   border: 0;
   border-radius: var(--radius);
   background: none;
-  color: var(--ink-3);
+  color: var(--ink-2);
   font: inherit;
   font-size: var(--text-meta);
+  font-weight: 550;
   cursor: pointer;
 }
 .ax-pager-btn:hover:not(:disabled) {
   color: var(--ink);
 }
 .ax-pager-btn[aria-current="page"] {
-  background: var(--tint);
+  background: var(--ground-2);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
   color: var(--ink);
 }
 .ax-pager-btn:disabled {
@@ -1223,8 +1267,8 @@ body:has(.ax-savebar) .ax-toasts {
 }
 .ax-pager-size select {
   width: auto;
-  min-height: 28px;
-  height: 28px;
+  min-height: 30px;
+  height: 30px;
   padding: 0 24px 0 var(--space-2);
   font-size: var(--text-meta);
 }
