@@ -18,7 +18,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from . import icims_protocol, phone_fields, taleo_protocol, widgets
 from . import profile_photo
-from .answers import HISTORY_UNKNOWN, WOTC, answer_key, job_catalog_search_box, normalize
+from .answers import CONTACT, HISTORY_UNKNOWN, WOTC, answer_key, job_catalog_search_box, normalize
 from .answers.text import strip_catalog_code
 from .knowledge import topic
 from .browser_contracts import ActionResult, action_result, field_identity, fingerprint
@@ -546,11 +546,16 @@ ACCOUNT_CREATE = re.compile(
 )
 # Widget messages that carry only the employer's own option labels (never an applicant value).
 SAFE_CONTROL_PREFIXES = ("No unique supported option in this ATS field's owned popup",)
+# An option id the control's open menu does not hold. The refusal tells the model what to do instead of repeating it:
+# ADP's Social Media Source (Midco, 2026-10-29) was refused this way on 7 of 30 decisions in a row.
+STALE_CHOICE = (
+    "Choice is stale or outside this control; read the open menu with inspect_options and choose one of its option ids"
+)
 SAFE_CONTROL_ERRORS = {
     "No matching option is offered",
     "Native option is ambiguous or changed",
     "The website did not commit the observed choice",
-    "Choice is stale or outside this control",
+    STALE_CHOICE,
 }
 
 
@@ -684,6 +689,49 @@ def implausible_link(field):
         return False
     value = str(field.get("value") or "").strip()
     return bool(value) and not re.search(r"https?://|www\.|\w\.[a-z]{2,}", value, re.I)
+
+
+# A link box named for one site holds that site's address. A resume parse put the GitHub URL in a LinkedIn box (found
+# applying by hand, 2026-10-29), and the applicant's saved GitHub link "confirmed" it.
+LINK_SITES = (
+    (re.compile(r"linked ?in", re.I), re.compile(r"linkedin\.com|lnkd\.in", re.I)),
+    (re.compile(r"git ?hub", re.I), re.compile(r"github\.(?:com|io)", re.I)),
+)
+LINK_SHAPED = re.compile(r"https?://|www\.|\b[\w-]+\.[a-z]{2,}(?:/|$)", re.I)
+
+
+def wrong_site_link(field):
+    """A link box that names one site (LinkedIn, GitHub) and holds another site's address."""
+    label = str(field.get("label") or "")
+    if re.search(r"\b(?:or|and)\b|[/&]|portfolio|website|personal|other", label, re.I):
+        return False  # A generic or shared link box takes any of the applicant's links.
+    sites = [host for word, host in LINK_SITES if word.search(label)]
+    value = str(field.get("value") or "").strip()
+    return len(sites) == 1 and bool(LINK_SHAPED.search(value)) and not sites[0].search(value)
+
+
+# A major is a subject, not a degree. Resume parsers (found applying by hand, 2026-10-29) put "Master of Science" or "BE"
+# in the Major box.
+MAJOR_LABEL = re.compile(
+    r"(?:primary |main )?(?:major|field of study|area of study|discipline|concentration|course of study)(?: \(.*\))?",
+    re.I,
+)
+DEGREE_NAME = re.compile(
+    r"(?:bachelor|master|doctorate?|associate)(?:'?s)?\b.*|(?:[bm]\.?\s?(?:s|a|e|sc|tech|eng|ba))\.?|mba|ph\.?\s?d\.?",
+    re.I,
+)
+
+
+def degree_as_major(field):
+    label = " ".join(str(field.get("label") or "").replace("*", " ").split())
+    value = " ".join(str(field.get("value") or "").split())
+    return bool(value) and bool(MAJOR_LABEL.fullmatch(label)) and bool(DEGREE_NAME.fullmatch(value))
+
+
+def implausible_prefill(field):
+    """A page-supplied value that cannot be right for its box: not shaped like a link, another site's link, a degree
+    name as the major. The profile's own answer replaces it; with none, it is cleared (optional) or asked (required)."""
+    return implausible_link(field) or wrong_site_link(field) or degree_as_major(field)
 
 
 def has_value(field):
@@ -2053,6 +2101,12 @@ class FormSession:
                     if field["type"] in {"select", "select-multiple"}
                     else await widgets.visible_options(frame, await widgets._popup_scope(el))
                 )
+                if not options and not inline and field["type"] not in {"select", "select-multiple"}:
+                    if not await widgets.owned_picker_open(el):
+                        # The menu the model read in an earlier step has closed since (a re-scan, a click elsewhere):
+                        # open it again. The options keep their ids while the page keeps their elements.
+                        await widgets.open_owned_picker(frame, el, field["type"])
+                        options = await widgets.visible_options(frame, await widgets._popup_scope(el))
                 option = next((o for o in options if o["id"] == option_id and not o["disabled"]), None)
                 decided = None
                 if not option and (inline or field["type"] in {"select", "select-multiple"}):
@@ -2064,7 +2118,7 @@ class FormSession:
                     if decided.disposition == "answer":
                         option = next((o for o in offered if o["text"] == decided.value), None)
                 if not option:
-                    raise ValueError("Choice is stale or outside this control")
+                    raise ValueError(STALE_CHOICE)
                 supported = None
                 if option["leaf"]:
                     partial = False
@@ -3914,6 +3968,22 @@ class FormSession:
         )
         return True
 
+    def prefill_conflict(self, field):
+        """True when a value the page supplied (a resume parse, the employer's saved candidate profile) contradicts the
+        applicant's profile or is the wrong kind for its box, so it is not accepted as pre-filled. The same mailbox
+        under another spelling (a plus-address, dots, googlemail.com) is not a contradiction."""
+        if field["type"] in {"password", "file", "checkbox"} or not has_value(field):
+            return False
+        if implausible_prefill(field):
+            return True
+        value, own = str(field.get("value") or "").strip(), str(self.resolver.profile.email or "")
+        if own and "@" in value and (field["type"] == "email" or normalize(field["label"]) in CONTACT["email"]):
+            from .answers.third_party import other_party_email
+            from .email_alias import same_mailbox
+
+            return not other_party_email(field) and not same_mailbox(value, own)
+        return False
+
     async def rematch(self, field):
         await self.scan()
         return self.matching_field(field)
@@ -4214,7 +4284,7 @@ class FormSession:
                         and not x["required"]
                         and topic(x["label"]) != "source"
                         and self.resolver.local(x) is None
-                        and not implausible_link(x)
+                        and not self.prefill_conflict(x)
                     )
                 ):
                     continue
@@ -4392,7 +4462,7 @@ class FormSession:
                             retryable=getattr(answer, "retryable", False),
                             supporting_facts=getattr(answer, "supporting_facts", []),
                         )
-                    elif implausible_link(field) or (
+                    elif implausible_prefill(field) or (
                         answer.disposition == "skip"
                         and not getattr(answer, "retryable", False)
                         and has_value(field)
@@ -5356,6 +5426,10 @@ class FormSession:
             if f["required"] and f["type"] != "file" and expected is None:
                 if not (self.accept_prefilled and has_value(f) and f["valid"]):
                     problems.append(f"Required field has no verified answer: {f['label']}")
+                elif self.prefill_conflict(f):
+                    # A value the website or its resume parser supplied is accepted only while it agrees with the
+                    # profile: another mailbox in the email box would register the account where no mail is read.
+                    problems.append(f"Pre-filled value contradicts the applicant's profile: {f['label']}")
         for q in self.pending:
             problems.append(f"Needs an approved answer: {q['question']}")
         for b in self.buttons.values():

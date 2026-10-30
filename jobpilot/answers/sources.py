@@ -21,11 +21,41 @@ NOT_A_SOURCE = re.compile(
 )
 
 
-def source_choice(options, rules):
+# A parent source menu's follow-up asks which one: "Social Media Source", "Job Board Source". It names the channel the
+# parent chose.
+FOLLOW_UP = re.compile(
+    r"(job boards?|job sites?|social media|social networks?|internet|online|advertising) sources?(?: details?| name| type)?",
+    re.I,
+)
+# "-" and the like are a menu's blank row, not a channel.
+BLANK_OPTION = re.compile(r"[\W_]*")
+# The follow-up offers nothing the applicant can truthfully pick: choose another channel in the parent menu. Short: the
+# model reads it in the refusal.
+DEAD_END = "{follow} offers no option the applicant can truthfully pick; choose another channel in the parent source menu"
+
+
+def follow_up_channel(label):
+    """The channel a follow-up source question names ("job board" for "Job Board Source"), else ""."""
+    found = FOLLOW_UP.fullmatch(" ".join(str(label or "").replace("*", " ").split()))
+    return " ".join(found[1].casefold().split()) if found else ""
+
+
+def same_channel(option, channel):
+    """An option is the channel that was marked unusable ("Job Boards" for "job board")."""
+    def one(text):
+        return re.sub(r"s$", "", " ".join(str(text).casefold().split()))
+
+    return bool(channel) and one(option) == one(channel)
+
+
+def source_choice(options, rules, employer="", avoid=()):
     """A listed source in the profile's own order (answer_rules.source_order), else, only if the profile allows it
-    (source_any_channel), any plain channel. A profile with neither answers nothing here: the applicant is asked."""
-    options = [o for o in options if str(o).strip()]
-    if hit := first_matching(options, source_patterns(rules.source_order)):
+    (source_any_channel), any plain channel. A profile with neither answers nothing here: the applicant is asked.
+    `employer` names the company-website channel; a channel in `avoid` had a follow-up with no truthful option."""
+    options = [
+        o for o in options if not BLANK_OPTION.fullmatch(str(o)) and not any(same_channel(o, a) for a in avoid)
+    ]
+    if hit := first_matching(options, source_patterns(rules.source_order, employer, options)):
         return hit
     if rules.source_any_channel:
         return next((o for o in options if not NOT_A_SOURCE.search(str(o))), None)

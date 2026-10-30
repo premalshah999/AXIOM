@@ -534,12 +534,16 @@ def test_source_falls_back_to_a_truthful_general_category(service):
         "Saw ICF on social media",
     ]
     f = {**field("How Did You Hear About Us?"), "type": "dropdown", "options": options}
-    assert resolver.local(f).value == "Saw ICF on social media"
-    f["options"] = ["Browsing the internet", "ICF Career Page", "Met ICF on campus"]
+    # The profile's own order decides (company website first), and the employer's careers page is that channel.
+    assert resolver.local(f).value == "ICF Career Page"
+    f["options"] = ["Browsing the internet", "Saw ICF on social media", "Met ICF on campus"]
     assert resolver.local(f).value == "Browsing the internet"
-    # The profile lists the employer's careers page as an accepted source.
     f["options"] = ["ICF Career Page", "Met ICF on campus"]
     assert resolver.local(f).value == "ICF Career Page"
+    # A profile with no order of its own keeps the general category for its saved source (LinkedIn: social media).
+    plain = Resolver(Profile(application_source="LinkedIn"), service.db, service.config, employer="ICF")
+    f["options"] = ["Browsing the internet", "ICF Career Page", "I was contacted by a Recruiter", "Saw ICF on social media"]
+    assert plain.local(f).value == "Saw ICF on social media"
     f["options"] = ["Met ICF on campus", "Employee referral"]
     assert resolver.local(f).disposition != "answer"
 

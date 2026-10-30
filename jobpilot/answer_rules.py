@@ -139,13 +139,56 @@ SOURCE_CHANNELS = {
 }
 
 
-def source_patterns(order) -> tuple:
-    """Patterns for the profile's source channels, in order; a name outside the known channels matches as a word."""
+# How an option names the employer's own site once the employer's name is in it: "Example Website", "Example Careers
+# Page", "example.com".
+EMPLOYER_SITE = r"(?:corporate |career |careers |official )?(?:web ?site|site|careers?(?: page| site| portal)?)"
+# Leading words that name a kind of channel, never an employer.
+NOT_A_BRAND = frozenset(
+    "job jobs career careers online internet web company corporate our employer social media search news campus college "
+    "university recruiting recruitment staffing agency internal external public professional other".split()
+)
+
+
+def employer_names(employer, options=()) -> set:
+    """The names an option may call the employer by: the job's employer, else (a job saved without a company, Midco on
+    ADP 2026-10-29) the brand that leads several options, as in "Midco Website", "Midco Billboard", "Midco Email"."""
+    text = " ".join(str(employer or "").split())
+    names = set()
+    if text and "://" not in text and not re.fullmatch(r"[\w.-]+\.[a-z]{2,}(?:/\S*)?", text, re.I):
+        base = re.sub(r",?\s+(?:inc\.?|llc|ltd\.?|corp(?:oration)?\.?|co\.?|plc|gmbh|company|group|holdings)$", "", text, flags=re.I)
+        names |= {n for n in (text, base) if len(n) >= 3}
+    options = [str(o).strip() for o in options or ()]
+    for option in options:
+        site = re.fullmatch(rf"(.+?)(?:'s)? {EMPLOYER_SITE}", option, re.I)
+        brand = site[1] if site else ""
+        words = brand.split()
+        if (
+            brand[:1].isupper()
+            and 0 < len(words) <= 3
+            and words[0].casefold() not in NOT_A_BRAND
+            and sum(o.casefold().startswith(brand.casefold() + " ") for o in options) >= 2
+        ):
+            names.add(brand)
+    return names
+
+
+def source_patterns(order, employer="", options=()) -> tuple:
+    """Patterns for the profile's source channels, in order; a name outside the known channels matches as a word.
+    The employer's own site is the "company website" channel under whatever the form calls it ("<Employer> Website",
+    "<Employer>.com"); `employer` and the offered `options` say what that is."""
     patterns = []
     for name in order or ():
         name = " ".join(str(name or "").split()).casefold()
-        if name:
-            patterns.append(re.compile(SOURCE_CHANNELS.get(name) or rf"\b{re.escape(name)}\b", re.I))
+        if not name:
+            continue
+        pattern = SOURCE_CHANNELS.get(name) or rf"\b{re.escape(name)}\b"
+        if name == "company website":
+            own = [
+                rf"\b{re.escape(n)}(?:'s)?\s+{EMPLOYER_SITE}\b|\b{re.escape(n)}\.(?:com|org|net|co)\b"
+                for n in sorted(employer_names(employer, options))
+            ]
+            pattern = "|".join([pattern, *own])
+        patterns.append(re.compile(pattern, re.I))
     return tuple(patterns)
 
 

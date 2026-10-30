@@ -83,6 +83,9 @@ class Resolver(
         self.context_labels = {}
         # Field id -> the closest offered options the answer model may choose from (rules "pick3").
         self.narrowed = {}
+        # Source channels ("social media") whose follow-up question offered no truthful option on this application: the
+        # parent menu is answered again without them (answers/sources.py).
+        self.dead_sources = set()
 
     @property
     def answer_rules(self):
