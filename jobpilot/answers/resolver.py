@@ -582,11 +582,47 @@ class Resolver(
                     evidence.append(f"fact:{key}")
         return self._ans(f, "; ".join(named), evidence, "Country of citizenship from the saved citizenship facts")
 
+    def experience_verdict(self, f):
+        """What the recorded work history says to a yes/no question asking N+ years of experience (see experience.py)."""
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from .experience import evaluate
+
+        today = datetime.now(ZoneInfo(self.config.timezone)).date()
+        return evaluate(
+            f.get("label", ""),
+            [w.model_dump() for w in self.profile.work],
+            [e.model_dump() for e in self.profile.education],
+            today,
+        )
+
+    def experience_years_answer(self, f):
+        """A years-of-experience question is arithmetic on the work history, answered from it and never recalled: the
+        same profile answered Apptronik's "MS with 3+ years of relevant experience, or a recent PhD" Yes six times and
+        No twice (2026-10-30). Only a settled verdict answers; a clause the profile cannot decide stays with the
+        model, which the validator then bars from a Yes that rests on nothing (validate.py)."""
+        from .experience import COMPUTED
+
+        options = [str(o) for o in f.get("options") or [] if str(o).strip()]
+        yes, no = (
+            [o for o in options if re.match(rf"\s*{word}\b", o, re.I)] for word in ("yes", "no")
+        )
+        if f.get("type") == "checkbox" or len(yes) != 1 or len(no) != 1 or len(options) != 2:
+            return None
+        verdict = self.experience_verdict(f)
+        if verdict is None or verdict.result is None:
+            return None
+        evidence = [f"profile:work.{i}" for i in verdict.work] + [f"profile:education.{i}" for i in verdict.education]
+        return self._ans(f, (yes if verdict.result else no)[0], evidence, f"{COMPUTED}: {verdict.reason}")
+
     def local(self, f):
         from .third_party import guard
 
         if answer := guard(self, f):
             return answer  # An employer's, supervisor's or reference's contact detail is never the applicant's own.
+        if answer := self.experience_years_answer(f):
+            return answer  # Before any saved answer: a stored Yes the work history contradicts must not stand.
         if answer := self.repair_override(f):
             return answer
         if answer := self.signature_block(f):

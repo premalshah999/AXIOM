@@ -19,6 +19,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from . import icims_protocol, phone_fields, taleo_protocol, widgets
 from . import profile_photo
 from .answers import CONTACT, HISTORY_UNKNOWN, WOTC, answer_key, job_catalog_search_box, normalize
+from .answers.experience import COMPUTED as EXPERIENCE_COMPUTED
 from .answers.text import strip_catalog_code
 from .knowledge import topic
 from .browser_contracts import ActionResult, action_result, field_identity, fingerprint
@@ -3893,7 +3894,9 @@ class FormSession:
             if previous:
                 known = self.resolver.local(field)
                 if (
-                    field["type"] not in {"prompt", "combobox", "dropdown"}
+                    # A years-of-experience answer computed from the work history outranks every stored one, in
+                    # menus too (Apptronik's combobox kept an earlier No for a Yes the history supports, 2026-10-30).
+                    (field["type"] not in {"prompt", "combobox", "dropdown"} or EXPERIENCE_COMPUTED in (known.reason if known else ""))
                     and known
                     and known.disposition == "answer"
                     and not widgets.same_value(field, field["value"], known.value)
