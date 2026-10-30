@@ -61,7 +61,11 @@ def nothing_sent_streak(rows):
 
 
 # A deterministic stall (a control or an answer the engine could not get past) repeats exactly while the code is the same.
-STALLED = re.compile(r"^(?:Recovery stopped:|The browser did not advance)")
+# A sign-in form that came back unchanged is one (accounts/flow_handle.py): Allen Institute's ClearCompany sign-in came back
+# unchanged on run after run (2026-10-30) because the employer signs in by an emailed link the password form never uses.
+STALLED = re.compile(
+    r"^(?:Recovery stopped:|The browser did not advance|The employer returned its sign-in page without accepting)"
+)
 
 
 def repeats_unchanged(rows, repeats=2):

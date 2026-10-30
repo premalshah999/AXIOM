@@ -431,14 +431,14 @@ class QueueingMixin:
                 if job.status != "ready" and not (retry and job.status in RETRYABLE):
                     raise ValueError("Approve or classify this job before submission")
             packet_profile = profile.model_dump()
-            from ..email_alias import ats_address, employer_alias_key
+            from ..email_alias import applying_email, employer_alias_key
 
             # A platform that bound the profile address to an unusable identity applies with a plus-address (iCIMS);
-            # so does one employer whose identity for it was abandoned (Adapter.fresh_identity).
-            aliases = dict(profile.ats_email_aliases or {})
-            if employer_alias := s.get(Setting, employer_alias_key(job.url) or "-"):
-                aliases[job.ats] = (employer_alias.value or {}).get("tag") or aliases.get(job.ats, "")
-            packet_profile["email"] = ats_address(packet_profile.get("email", ""), job.ats, aliases)
+            # so does one employer, on any platform, whose identity for it was abandoned (Adapter.fresh_identity).
+            employer_alias = s.get(Setting, employer_alias_key(job.url) or "-")
+            packet_profile["email"] = applying_email(
+                packet_profile.get("email", ""), job.ats, profile.ats_email_aliases, employer_alias.value if employer_alias else None
+            )
             if job.demo:
                 packet_profile = {
                     "name": "Alex Example",
