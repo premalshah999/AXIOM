@@ -15,6 +15,8 @@ decision here; the ranker still reads the full posting.
 import re
 from datetime import UTC, datetime
 
+from .degree import doctorate_gate
+
 MONTHS = {
     "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
     "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
@@ -144,7 +146,10 @@ def _label(index: int | None) -> str:
 
 
 def graduation_gate(job: dict, profile: dict, today: datetime | None = None) -> str:
-    """'' when compatible or undecidable; otherwise a short rejection reason."""
+    """'' when compatible or undecidable; otherwise a short rejection reason. A posting that requires a PhD is
+    refused first for a profile without one (degree.py), then the stated graduation window is compared."""
+    if reason := doctorate_gate(job, profile):
+        return reason
     text = " ".join(str(job.get(k) or "") for k in ("title", "description"))
     stated = windows(text, today)
     dates = degree_dates(profile)

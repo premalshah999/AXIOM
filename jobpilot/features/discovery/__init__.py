@@ -8,7 +8,7 @@ Public interface (decisions only; Codex's DBOS workers execute them):
 - classify(db, jobs, classify_fn, policy, profile) -> report; existing_rank_adapter(db, config)
 - register(session, job, source_id, posted, basis) -> (canonical_job_id, duplicate)
 - gate(job, policy) -> reason | None;  fresh(posted, basis, first_seen, policy) -> (bool, basis)
-- graduation_gate(job, profile, today) -> "" | reason  (posting's stated graduation window vs degree dates)
+- graduation_gate(job, profile, today) -> "" | reason  (posting's stated graduation window vs degree dates; a required PhD vs recorded degrees)
 - defer(db, job_id, reason, seconds);  record_source(db, source_id, ok, error)
 - status(db, policy, capacity) -> counts and bottleneck
 - router(service) -> APIRouter mounted at /api/v2/discovery

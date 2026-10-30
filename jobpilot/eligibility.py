@@ -152,8 +152,25 @@ def policy_findings(text, profile, source="posting"):
             )
 
 
-def check_eligibility(posting, profile, form_evidence=()):
+def degree_findings(job, profile, source="posting"):
+    """A required PhD against the profile's recorded degrees (features/discovery/degree.py): unmet when education is
+    recorded without a doctorate, unknown when none is recorded. Two postings titled "... (PhD)" were applied to
+    repeatedly for a Master's applicant (2026-10-29/30)."""
+    from .features.discovery.degree import doctorate_requirement, holds_doctorate
+
+    quote = doctorate_requirement(job)
+    if not quote:
+        return
+    education = list(getattr(profile, "education", None) or [])
+    verdict = "unknown" if not education else "met" if holds_doctorate(education) else "unmet"
+    yield PolicyFinding(
+        "degree", verdict, _normalized(quote), tuple(f"education:{i}" for i in range(len(education))), source
+    )
+
+
+def check_eligibility(posting, profile, form_evidence=(), title=""):
     findings = list(policy_findings(posting, profile))
+    findings.extend(degree_findings({"title": title, "description": posting}, profile))
     for source, text in form_evidence:
         findings.extend(policy_findings(text, profile, source))
     return EligibilityCheck(tuple(dict.fromkeys(findings)))
@@ -211,7 +228,9 @@ def observed_form_evidence(session, job, data_dir):
 
 
 def eligibility_for_job(session, job, profile, data_dir=None):
-    return check_eligibility(job.description, profile, observed_form_evidence(session, job, data_dir))
+    return check_eligibility(
+        job.description, profile, observed_form_evidence(session, job, data_dir), title=job.title or ""
+    )
 
 
 def require_eligibility(session, job, profile, data_dir=None):

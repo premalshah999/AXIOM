@@ -169,7 +169,9 @@ def validate_classification(result, job, profile, eligibility=None):
     """A boolean approval cannot override conflicting or unsupported findings."""
     from .answer_context import boolean
 
-    eligibility = eligibility or check_eligibility(job.get("description", ""), profile)
+    eligibility = eligibility or check_eligibility(
+        job.get("description", ""), profile, title=job.get("title", "")
+    )
     if eligibility.conflicts:
         result.eligible = False
         result.reason += " | Eligibility check: " + "; ".join(
