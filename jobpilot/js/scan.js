@@ -1337,8 +1337,16 @@
     return false;
   };
   const nodesById = new Map(all.filter(n => n.dataset.jpId).map(n => [n.dataset.jpId, n]));
+  // Some desktop headers expose their persistent navigation as an aria-modal dialog.
+  // A compact navigation bar is not the active application dialog; a full-screen menu still is.
+  const compactNavigation = d => {
+    const r = d.getBoundingClientRect();
+    return !!d.closest('header,[role=banner]') && /\bnav(?:igation)?\b/i.test(
+      [d.getAttribute('aria-label'), d.getAttribute('id'), d.className].join(' '))
+      && r.height < innerHeight * 0.5;
+  };
   const dialogs = all.filter(d => d.matches('[role=dialog],[role=alertdialog],[aria-modal=true],[data-sdf-modal],dialog[open],[data-automation-id="popUpDialog"],[data-automation-id="wd-Popup"]'))
-    .filter(d => visible(d) && !d.closest(CAPTCHA_BOX) && d.getBoundingClientRect().width > 120)
+    .filter(d => visible(d) && !compactNavigation(d) && !d.closest(CAPTCHA_BOX) && d.getBoundingClientRect().width > 120)
     .map(d => ({
       title: clean(d.querySelector('h1,h2,h3,[role=heading]')?.innerText || d.getAttribute('aria-label') || ''),
       text: textOf(d).slice(0, 4000),

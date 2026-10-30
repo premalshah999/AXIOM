@@ -897,7 +897,7 @@ async def ensure_uncovered(el):
         const covers=d=>{const b=d.getBoundingClientRect();return cx>=b.left&&cx<=b.right&&cy>=b.top&&cy<=b.bottom};
         const dialogs=[...e.ownerDocument.querySelectorAll('[aria-modal="true"],[role="dialog"]')]
           .filter(d=>{const b=d.getBoundingClientRect();return b.width&&b.height&&getComputedStyle(d).visibility!=='hidden'})
-          .filter(d=>!CHAT.test(name(d)) && (d.getAttribute('aria-modal')==='true' || covers(d)));
+          .filter(d=>!CHAT.test(name(d)) && !(d.closest('header,[role=banner]') && /\bnav(?:igation)?\b/i.test(name(d)) && d.getBoundingClientRect().height < innerHeight * 0.5 && !covers(d)) && (d.getAttribute('aria-modal')==='true' || covers(d)));
         if(e.closest('[inert]'))return true;
         // Dropdown/menu options render in portals outside the modal that owns
         // their combobox (Microsoft sign-up country list). They are part of the
