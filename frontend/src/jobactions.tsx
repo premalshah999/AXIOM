@@ -1,13 +1,14 @@
 // What can be done to a job, decided once. A table row shows the one call to action (Answer) and puts the rest in its
-// overflow menu; the job drawer shows the same actions as buttons. Every action goes through the same endpoint as
-// before, so every server-side guard still decides (owner 2026-10-29: no red Delete button on every row).
-import { api, applyJob, approveReserved } from "./api";
+// overflow menu; the job drawer shows the one action as a button and the rest under More. Every action goes through the
+// same endpoint as before, so every server-side guard still decides (owner 2026-10-29: no red Delete button on every row).
+import { ChevronDown } from "lucide-react";
+import { api, applyJob, approveReserved, PREPARING, queueJob } from "./api";
 import { useWorkspace } from "./context";
 import { useAction } from "./hooks";
 import { appliedState, COMMITTED, RETRYABLE, STATES, stateInfo, type JobRow } from "./model";
 import type { ControlResult } from "./types";
 import { Button } from "./ui/index";
-import { ConfirmButton, RowMenu, type MenuAction } from "./worktools";
+import { RowMenu, type MenuAction } from "./worktools";
 
 export type Act = {
   id: string;
@@ -150,7 +151,10 @@ const asMenu = (acts: Act[], busy: boolean): MenuAction[] =>
     disabled: busy || a.disabled,
   }));
 
-/** The actions cell of a table row: the one lead action as a button, everything else in the overflow menu. */
+/**
+ * The actions cell of a table row: the one lead action as a button, everything else in the overflow menu. The lead is
+ * a hairline button (a screen has one primary), and a phone leaves it to the job's drawer so the status stays readable.
+ */
 export function RowActions({ row, promote }: { row: JobRow; promote?: string }) {
   const { acts, busy, protectedNote } = useJobActions(row);
   const lead = acts.find((a) => a.lead || a.id === promote);
@@ -159,7 +163,7 @@ export function RowActions({ row, promote }: { row: JobRow; promote?: string }) 
   return (
     <div className="ax-act" onClick={(e) => e.stopPropagation()}>
       {lead && (
-        <Button size="sm" variant={lead.tone === "primary" ? "primary" : "secondary"} disabled={busy} onClick={() => void lead.run()}>
+        <Button size="sm" className="ax-lead" disabled={busy} onClick={() => void lead.run()}>
           {lead.label}
         </Button>
       )}
@@ -169,37 +173,91 @@ export function RowActions({ row, promote }: { row: JobRow; promote?: string }) 
   );
 }
 
-/** The same actions as buttons, for the job drawer. */
-export function DrawerActions({ row }: { row: JobRow }) {
-  const { acts, busy, pending } = useJobActions(row, true);
-  const normal = acts.filter((a) => a.tone !== "danger");
-  const danger = acts.filter((a) => a.tone === "danger");
-  if (!acts.length) return null;
+// A job with no attempt yet. One click applies (owner, 2026-10-18): no reason to type and no separate ranking step. The
+// server approves the job and starts it, or keeps the request until a worker, pacing or a shared email sender allows it.
+function useStartActions(row: JobRow, started: boolean) {
+  const { snapshot, refresh, markJobs } = useWorkspace();
+  const { pending, run } = useAction();
+  const job = row.job;
+  const ready = job.status === "ready";
+  if (started || row.state === "job:paused" || row.state === "pending:waiting" || row.state === "reserved" || snapshot.resumes.length === 0)
+    return { acts: [] as Act[], pending };
+  const applyNow = () =>
+    run(
+      "submit",
+      async () => {
+        const r = await applyJob(job.id);
+        // Reads as queued (or waiting) at once; the lists confirm with their next read.
+        markJobs([job.id], appliedState(r.state));
+        void refresh();
+        return r;
+      },
+      (r) => r?.message,
+    );
+  const dryRun = () =>
+    run(
+      "dry_run",
+      async () => {
+        const r = await queueJob(`/jobs/${job.id}/queue`, { mode: "dry_run", resume_id: job.resume_id || undefined });
+        await refresh();
+        return r;
+      },
+      (r) => (r?.preparing ? PREPARING : r?.message || "Dry run queued. It stops before submitting."),
+    );
+  const rank = () =>
+    run(
+      "rank",
+      async () => {
+        const r = await api<{ score: number; eligible: boolean }>(`/jobs/${job.id}/rank`, "POST");
+        await refresh();
+        return r;
+      },
+      (r) => r && `Ranked ${r.score}/100 · ${r.eligible ? "eligible" : "below your minimum; Apply still works"}.`,
+    );
+  const acts: Act[] = [{ id: "submit", label: ready ? "Apply now" : "Apply", tone: "primary", run: applyNow }];
+  if (ready) acts.push({ id: "dry_run", label: "Dry run", run: dryRun });
+  acts.push({ id: "rank", label: job.score == null ? "Rank" : "Rank again", run: rank });
+  return { acts, pending };
+}
+
+/**
+ * The job drawer's action: the one thing to do as a button, everything else under More. A question on screen is the
+ * action for a job that needs an answer, so it gets no second button.
+ */
+export function DrawerActions({ row, started, asking }: { row: JobRow; started: boolean; asking?: boolean }) {
+  const base = useJobActions(row, true);
+  const start = useStartActions(row, started);
+  const busy = base.busy || start.pending !== null;
+  const pending = base.pending ?? start.pending;
+  const all = [...start.acts, ...base.acts];
+  const danger = all.filter((a) => a.tone === "danger");
+  const normal = all.filter((a) => a.tone !== "danger");
+  const lead = normal.find((a) => a.tone === "primary") ?? (asking ? undefined : normal[0]);
+  const rest = [...normal.filter((a) => a !== lead), ...danger];
+  if (!lead && rest.length === 0) return null;
   return (
-    <div className="ax-drawer-acts">
-      {normal.map((a) => (
+    <div className="ax-toolbar">
+      {lead && (
         <Button
-          key={a.id}
-          size="sm"
-          variant={a.tone === "primary" ? "primary" : "secondary"}
-          loading={pending === a.id || (a.id === "confirm" && pending === "confirm")}
+          variant={lead.tone === "primary" ? "primary" : "secondary"}
+          loading={pending === lead.id}
           disabled={busy}
-          onClick={() => void a.run()}
+          onClick={() => void lead.run()}
         >
-          {a.label}
+          {lead.label}
         </Button>
-      ))}
-      {danger.map((a) => (
-        <ConfirmButton
-          key={a.id}
-          label={a.label}
-          question={a.confirm || "Are you sure?"}
-          confirmLabel={a.confirmLabel || a.label}
-          loading={pending === "delete"}
-          disabled={busy && pending !== "delete"}
-          onConfirm={() => a.run()}
-        />
-      ))}
+      )}
+      <RowMenu
+        label="More actions"
+        actions={asMenu(rest, busy)}
+        busy={busy}
+        trigger={() => (
+          <>
+            More
+            <ChevronDown size={14} aria-hidden="true" />
+          </>
+        )}
+      />
     </div>
   );
 }
