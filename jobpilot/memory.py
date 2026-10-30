@@ -85,7 +85,9 @@ def children_kb(pid=None, root="/proc"):
 
 def log_line(before, after, took, children):
     """One line per report: resident now, what the trim freed, how long it took, and each child process."""
-    mb = lambda kb: f"{kb / 1024:.0f}MB"
+    def mb(kb):
+        return f"{kb / 1024:.0f}MB"
+
     parts = [
         f"rss={mb(after.get('VmRSS', 0))}",
         f"anon={mb(after.get('RssAnon', 0))}",

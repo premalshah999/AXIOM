@@ -447,7 +447,10 @@ def test_the_whole_table_match_is_kept_until_a_job_is_added_or_archived(service)
         s.add(Job(id="a", identity="a", url="https://example.test/a", company="ExampleSoft", title="T", ats="custom", created_at="2026-10-30T01"))
         s.add(Job(id="b", identity="b", url="https://example.test/b", company="Other", title="T", ats="custom", created_at="2026-10-30T02"))
     seen = []
-    record = lambda conn, cursor, statement, *rest: seen.append(statement)
+
+    def record(conn, cursor, statement, *rest):
+        seen.append(statement)
+
     event.listen(service.db.engine, "before_cursor_execute", record)
     try:
         with service.db.session() as s:

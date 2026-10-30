@@ -42,7 +42,10 @@ def test_without_worker_bots_a_questions_packet_is_not_loaded(service):
         s.add(Review(id="q", run_id="run", question="Start date?", options=[], key="a", reason="", created_at="2026-10-21T00:00:00"))
 
     seen = []
-    record = lambda conn, cursor, statement, *rest: seen.append(statement)
+
+    def record(conn, cursor, statement, *rest):
+        seen.append(statement)
+
     event.listen(service.db.engine, "before_cursor_execute", record)
     try:
         chosen = telegram.next_question(service, False)

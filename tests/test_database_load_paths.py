@@ -278,7 +278,10 @@ def test_candidates_create_no_orm_object_per_listing(service):
 
     one = seed_listed(service, "one")
     built = []
-    listener = lambda target, context: built.append(target)
+
+    def listener(target, context):
+        built.append(target)
+
     event.listen(Listing, "load", listener)
     try:
         jobs, _ = _candidates(service.db, DiscoveryPolicy(), datetime.now(UTC))

@@ -18,7 +18,7 @@ from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from .db import Job, JobListing, Run, Setting, Source, now, record
+from .db import Job, JobListing, Run, Setting, Source, now
 from .network import fetch
 from .schemas import JobInput, Profile
 from .widgets import US_STATES

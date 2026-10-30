@@ -196,11 +196,16 @@ async def test_a_finished_runs_engine_is_read_from_its_packet_once(service, monk
             run.packet, run.finished_at = {"engine_version": "v1"}, run.created_at
     monkeypatch.setattr("jobpilot.autopilot.datetime", type("D", (), {"now": staticmethod(lambda tz=None: datetime(2026, 10, 17, 5, tzinfo=UTC))}))
     seen = []
-    record = lambda conn, cursor, statement, *rest: seen.append(statement)
+
+    def record(conn, cursor, statement, *rest):
+        seen.append(statement)
+
     event.listen(service.db.engine, "before_cursor_execute", record)
     try:
         await persist_stalled(service, 1, [], {})
-        engine_reads = lambda: [q for q in seen if "JSON_EXTRACT(runs.packet" in q and "runs.id IN" in q]
+        def engine_reads():
+            return [q for q in seen if "JSON_EXTRACT(runs.packet" in q and "runs.id IN" in q]
+
         with service.db.session() as s:
             one_stalled_run = len(list(s.scalars(select(Run.id).where(Run.job_id == stalled))))
         assert len(engine_reads()) == 1 and len(autopilot._RUN_ENGINES) == one_stalled_run

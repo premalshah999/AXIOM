@@ -56,7 +56,10 @@ def test_the_sweep_logs_on_schedule_and_on_a_jump_not_on_every_pass(monkeypatch)
     monkeypatch.setattr(memory, "process_kb", lambda *a: {"VmRSS": next(sizes)})
     monkeypatch.setattr(memory, "children_kb", lambda *a: {})
     lines, seen, clock = [], {}, {"t": 1000.0}
-    sweep = lambda: memory.sweep(seen, clock=lambda: clock["t"], emit=lines.append, trim_function=lambda pad: None)
+
+    def sweep():
+        memory.sweep(seen, clock=lambda: clock["t"], emit=lines.append, trim_function=lambda pad: None)
+
     sweep()
     assert len(lines) == 1  # the first pass reports where the process starts
     clock["t"] += 60
