@@ -178,6 +178,8 @@ RECEIPT_WORDING = re.compile(
     r"(?:received|reviewing) your application|application.{0,60}(?:received|submitted|landed successfully|is in good hands)|"
     r"(?:confirms?|acknowledges?)\s+(?:our\s+)?receipt of your (?:application|resume)|"
     r"\breceipt of your (?:application|resume)\b|we(?:'ve| have)? received your (?:application|resume)|"
+    # Workday tenants that mail "<Employer> your resume/CV has been received" (American Cancer Society, 2026-10-30).
+    r"\byour (?:resume|cv)(?:\s*/\s*cv)?\s+(?:has|have) been (?:received|submitted)|"
     # German, French and Spanish career sites (Sopra Steria's SmartRecruiters mails "Bewerbung", 2026-10-27).
     r"vielen dank f(?:ü|ue)r ihre bewerbung|ihre bewerbung.{0,80}(?:eingegangen|eingereicht|erhalten)|"
     r"eingangsbest(?:ä|ae)tigung|merci pour votre candidature|votre candidature.{0,60}(?:reçue|bien été)|"
@@ -189,6 +191,10 @@ RECEIPT_WORDING = re.compile(
 RECEIPT_SEARCH = "(application OR applying OR resume OR Bewerbung OR candidature OR solicitud OR postulación)"
 # How firmly an acknowledgement names its job: by its link, by its title, or only by arriving after the submit.
 BASIS_STRENGTH = {"job_url": 3, "title": 2, "submit_window": 1}
+# The "submitting" event is logged after the click that sends the application, and some employers' systems answer within
+# seconds: Snap-on's iCIMS "Thank you for applying" was delivered 5 s before its run's event (2026-10-29), and the check
+# "received after the event" refused it. A receipt may precede the event by this much, never the run's own start.
+SUBMIT_GRACE = timedelta(minutes=2)
 # Words of employer names too common to narrow a mailbox search.
 GENERIC_NAME_WORDS = {"the", "and", "inc", "llc", "ltd", "corp", "corporation", "company", "group", "holdings",
                       "university", "college", "health", "bank", "services", "solutions", "technologies", "systems"}
@@ -272,7 +278,9 @@ def acknowledgement(message, job, run, allow_missing_title=False):
     recipient = run["packet"]["profile"]["email"].lower()
     if recipient not in facts["recipients"]:
         return None
-    if facts["received"] < datetime.fromisoformat(run["created_at"]).timestamp():
+    # A committed run's floor is its commit event less SUBMIT_GRACE, never before the run itself began.
+    floor = run.get("receipt_floor") or run["created_at"]
+    if facts["received"] < datetime.fromisoformat(floor).timestamp():
         return None
     company = re.sub(r"[^a-z0-9]", "", job["company"].casefold())
     first = job["company"].split()[0].casefold() if job["company"].split() else ""
@@ -654,6 +662,10 @@ async def check_receipts(mail, run_id=None):
     competitors, submit_times = await asyncio.to_thread(load_competitors)
     for run, _ in competitors:
         if run["id"] in submit_times:
+            # The commit event stands for the run's time; a receipt may precede it by SUBMIT_GRACE, but not the run.
+            run["receipt_floor"] = max(
+                datetime.fromisoformat(run["created_at"]), datetime.fromisoformat(submit_times[run["id"]]) - SUBMIT_GRACE
+            ).isoformat()
             run["created_at"] = submit_times[run["id"]]
             run["submitted_at"] = submit_times[run["id"]]
     # Messages fetched for this batch are matched against every unconfirmed
@@ -894,6 +906,11 @@ async def reconcile_approved_drafts(mail, job_ids, max_pages=8):
                     )
                     if not window_start:
                         continue
+                    # Same grace as the minute poll, and never before the run itself.
+                    window_start = max(
+                        runs[0].created_at,
+                        (datetime.fromisoformat(window_start) - SUBMIT_GRACE).isoformat(),
+                    )
                 candidates.append((record(job), latest, window_start))
         return candidates, boxes
 
