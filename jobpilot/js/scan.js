@@ -487,6 +487,26 @@
   walk(document);
 
   const fields = [], consumed = new Set(), seen = new Set();
+  // A returning applicant's login box beside the application form (Avature's "Already registered?", Lenovo
+  // 2026-10-29): its own small <form> with one password, the application's inputs outside it. It is not a sign-in
+  // gate; read as one, the saved login was posted to /Login, refused, and the run ended in a reset loop.
+  const sideLogins = new Map();
+  const sideLogin = el => {
+    const form = el.form || el.closest?.('form');
+    if (!form) return false;
+    if (sideLogins.has(form)) return sideLogins.get(form);
+    const owner = x => x.form || x.closest('form');
+    const live = [...document.querySelectorAll('input,select,textarea')]
+      .filter(x => x.type !== 'hidden' && !/^(?:submit|button|reset|image)$/.test(x.type) && visible(x));
+    const own = live.filter(x => owner(x) === form && x.type !== 'checkbox');
+    const others = live.filter(x => owner(x) !== form);
+    const near = [form.innerText, form.previousElementSibling?.innerText, form.parentElement?.innerText?.slice(0, 400)].join(' ');
+    const side = own.length <= 2 && own.filter(x => x.type === 'password').length === 1
+      && others.length >= 6 && !others.some(x => x.type === 'password')
+      && /already registered|returning (?:user|applicant|candidate)|(?:already )?have an account/i.test(near);
+    sideLogins.set(form, side);
+    return side;
+  };
   const push = (el, f) => {
     const error = fieldError(el, f.type === 'checkboxgroup' ? f.valid ?? null : null);
     const help = (el.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean)
@@ -516,7 +536,7 @@
       name: el.getAttribute('name') || '', html_id: el.id || '', automation_id: el.dataset.automationId || '',
       placeholder: el.getAttribute('placeholder') || '', error, widget: f.widget || '', search_box: searchBox(el),
       parts: f.parts || [], accept: el.getAttribute('accept') || '', hint: clean([f.hint || '', help, description].join(' ')).slice(0,2500),
-      date_format: f.date_format || '',
+      date_format: f.date_format || '', side_login: sideLogin(el),
       members: (f.members || []).map(id),
     });
   };

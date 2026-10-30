@@ -803,8 +803,9 @@ class Adapter:
             return Step.FORM  # Its Submit and thank-you page belong to the questionnaire, never the application.
         text = obs["text"]
         fields = self.app_fields(obs)
-        passwords = [f for f in obs["fields"] if f["type"] == "password"]
-        meaningful = [f for f in fields if f["type"] != "checkbox"]
+        # A returning applicant's login box beside the application form is not a sign-in step (scan.js sideLogin).
+        passwords = [f for f in obs["fields"] if f["type"] == "password" and not f.get("side_login")]
+        meaningful = [f for f in fields if f["type"] != "checkbox" and not f.get("side_login")]
         # A job page saying "thank you for your interest" still has an Apply button.
         if (
             confirmation_wording(text, self.committed)
@@ -2693,7 +2694,7 @@ class Adapter:
     def sign_in_shown(obs):
         """The sign-in form is still the step: a password box, and no open dialog without one."""
         view = Adapter.dialog_view(obs)
-        return any(f["type"] == "password" for f in (view or obs)["fields"])
+        return any(f["type"] == "password" and not f.get("side_login") for f in (view or obs)["fields"])
 
     def one_page_reset(self, obs):
         """A password reset form that asks for the email and the new password together (see RESET_FORM_PATH). The sign-in

@@ -44,6 +44,7 @@ class FlowHandleMixin:
             f
             for f in obs["fields"]
             if f["type"] == "password" and not re.search(r"code|otp|one.time", f["label"], re.I)
+            and not f.get("side_login")  # a returning applicant's login box beside the application form
         ]
         if not passwords:
             return await self.open_create_account_form(obs) or await self.open_sign_in_gate(obs)

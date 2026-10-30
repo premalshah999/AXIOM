@@ -163,7 +163,11 @@ def mark_account_secrets(fields):
     from .accounts.pages import SECURITY_ANSWER, SECURITY_QUESTION
 
     fields = list(fields)
-    frames = {f.get("frame_url") for f in fields if f.get("type") == "password"}
+    for f in fields:
+        if f.get("side_login"):
+            # A returning applicant's login box beside the application form (scan.js sideLogin) is not answered.
+            f["site_account"] = True
+    frames = {f.get("frame_url") for f in fields if f.get("type") == "password" and not f.get("side_login")}
     for question, answer in zip(fields, fields[1:]):
         if (
             question.get("frame_url") in frames
