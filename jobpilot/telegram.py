@@ -124,8 +124,11 @@ def current_rows(service):
         owned = None
         if worker_slot:
             latest_slots = {}
-            for run in s.scalars(select(Run).order_by(Run.created_at.desc())):
-                latest_slots.setdefault(run.job_id, run_slot(run))
+            # Every run's whole packet (3.6 GB of JSON at 9,782 runs) to read one small number.
+            for job_id, slot in s.execute(
+                select(Run.job_id, Run.packet["worker_slot"].as_integer()).order_by(Run.created_at.desc())
+            ):
+                latest_slots.setdefault(job_id, run_slot({"worker_slot": slot}))
             owned = {jid for jid, slot in latest_slots.items() if slot == worker_slot}
         rows = s.execute(
             select(Run.id, Run.job_id, Run.state, Run.reason, Run.receipt, Job.company, Job.title, Job.url)
@@ -2041,12 +2044,19 @@ async def poll(service):
 
         def pending_ids():
             # Thousands of delivery markers: read them off the application loop.
+            # The database picks them: all 9,533 markers said false and were loaded as objects each pass (2026-10-30).
             with service.db.session() as s:
                 return [
-                    row.key.removeprefix("telegram_run_pending:")
-                    for row in s.scalars(select(Setting).where(Setting.key.like("telegram_run_pending:%")))
-                    if row.value.get("pending")
-                ][:6]
+                    key.removeprefix("telegram_run_pending:")
+                    for key in s.scalars(
+                        select(Setting.key)
+                        .where(
+                            Setting.key.like("telegram_run_pending:%"),
+                            Setting.value["pending"].as_boolean().is_(True),
+                        )
+                        .limit(6)
+                    )
+                ]
 
         pending = await asyncio.to_thread(pending_ids)
         for run_id in pending:

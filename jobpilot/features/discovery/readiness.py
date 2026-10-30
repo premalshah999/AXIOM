@@ -7,7 +7,6 @@ submission guard authoritative.
 """
 
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
@@ -91,19 +90,23 @@ def _candidates(db, policy: DiscoveryPolicy, at, manual_only=False) -> tuple[lis
                 )
             )
         }
-        # Every column but the description: it is most of a 16,000-row, 100 MB read, and only the postings that
-        # survive the filters below need it (fetched after them).
-        columns = [c for c in Job.__table__.columns if c.name != "description"]
+        # Only the columns the checks below read: not the description (most of a 16,000-row, 100 MB read; the postings
+        # that survive the filters fetch it after them) and no ORM object per listing, which was 10.8% of the
+        # interpreter's samples for rows that were read once and dropped (py-spy 2026-10-30).
         query = (
-            select(*columns, JobListing)
+            select(
+                Job.id, Job.url, Job.identity, Job.title, Job.company, Job.location, Job.ats, Job.status, Job.score,
+                Job.resume_id, JobListing.job_id.label("listed"), JobListing.posted_at, JobListing.date_basis,
+                JobListing.first_seen, JobListing.last_seen, JobListing.active, JobListing.country,
+            )
             .outerjoin(JobListing, JobListing.job_id == Job.id)
             .where(Job.demo.is_(False), Job.status.not_in(["archived", "closed"]))
         )
         rows = s.execute(query.where(Job.id.in_(manual)) if manual_only else query).all()
         guards = guard_keys(s)
         out = []
-        for *values, listing in rows:
-            job = SimpleNamespace(**dict(zip((c.name for c in columns), values)))
+        for job in rows:
+            listing = job if job.listed is not None else None
             if job.ats in excluded_ats:
                 stats["out_of_scope"] += 1
                 continue

@@ -313,6 +313,7 @@ class Database:
         self.Session = sessionmaker(self.engine, expire_on_commit=False)
         Base.metadata.create_all(self.engine)
         self.add_missing_columns()
+        self.add_settings_prefix_index()
         with self.session() as s:
             if not s.get(Setting, "control"):
                 s.add(Setting(key="control", value={"paused": False, "auto_submit": False}))
@@ -331,6 +332,21 @@ class Database:
                 except Exception:
                     if name not in {c["name"] for c in inspect(self.engine).get_columns(table)}:
                         raise
+
+    def add_settings_prefix_index(self):
+        """Let `key LIKE 'prefix%'` use an index: the primary key cannot under en_US collation, so each such read scanned
+        all 62,000 settings (2.9 scans/s, 179,000 rows/s, 2026-10-30). Built once, here, before any worker starts; it takes
+        well under a second and only writers wait, of which there are none yet. Not CONCURRENTLY: that cannot run in a
+        transaction and a failed build would leave an invalid index that IF NOT EXISTS then keeps."""
+        if self.engine.dialect.name != "postgresql":
+            return
+        with self.engine.begin() as connection:
+            # Asked first: CREATE INDEX IF NOT EXISTS takes the table's SHARE lock even when the index exists, and every
+            # CLI command that opens the database would wait for writers.
+            if connection.exec_driver_sql("SELECT to_regclass('ix_settings_key_prefix')").scalar() is None:
+                connection.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_settings_key_prefix ON settings (key text_pattern_ops)"
+                )
 
     @contextmanager
     def session(self):

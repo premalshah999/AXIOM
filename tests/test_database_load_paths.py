@@ -238,3 +238,86 @@ def test_a_new_posting_finds_its_older_identity_without_loading_descriptions(ser
     assert row["id"] == "older" and new is False
     scans = [q for q in seen if "jobs.ats =" in q]
     assert scans and all("description" not in q for q in scans), seen
+
+
+def test_the_autopilots_board_read_leaves_sources_and_scans_alone(service):
+    """It read all 4,479 sources and their scans up to three times a tick and used only the jobs (2026-10-30)."""
+    from jobpilot.db import Setting, Source
+    from jobpilot.jobboard import board_snapshot
+
+    listed = seed_listed(service, "listed")
+    service.db.set_setting("job_board_sources", {"ids": ["s1"]})
+    with service.db.exclusive() as s:
+        s.add(Source(id="s1", name="Managed", kind="greenhouse", url="https://example.test/s1", cron="@daily"))
+        s.add(Source(id="s2", name="Mine", kind="greenhouse", url="https://example.test/s2", cron="@daily"))
+        s.add(Setting(key="job_board_scan:s1", value={"state": "done", "started_at": "2026-10-30T00:00:00+00:00"}))
+        s.add(Setting(key="job_board_scan:s2", value={"state": "running", "started_at": "2026-10-30T00:00:00+00:00"}))
+    seen, stop = statements(service)
+    try:
+        light = board_snapshot(service.db, limit=None, jobs_only=True)
+    finally:
+        stop()
+    assert listed in {job["id"] for job in light["jobs"]} and set(light) == {"settings", "jobs"}
+    assert not [q for q in seen if "FROM sources" in q or "job_board_scan" in q]
+    seen, stop = statements(service)
+    try:
+        full = board_snapshot(service.db, limit=None)
+    finally:
+        stop()
+    # Only managed sources and their own scans, without a bound parameter per source.
+    assert [s["id"] for s in full["sources"]] == ["s1"] and full["sources"][0]["scan"]["state"] == "done"
+    assert full["scanning"] == 0 and full["last_requested_at"] == "2026-10-30T00:00:00+00:00"
+    assert not [q for q in seen if "settings.key IN" in q and "?" in q and q.count("?") > 3]
+
+
+def test_candidates_create_no_orm_object_per_listing(service):
+    """10.8% of the interpreter's samples built a JobListing for rows that were read once and dropped (2026-10-30)."""
+    from sqlalchemy import event
+
+    from jobpilot.db import JobListing as Listing
+
+    one = seed_listed(service, "one")
+    built = []
+    listener = lambda target, context: built.append(target)
+    event.listen(Listing, "load", listener)
+    try:
+        jobs, _ = _candidates(service.db, DiscoveryPolicy(), datetime.now(UTC))
+    finally:
+        event.remove(Listing, "load", listener)
+    assert [job["id"] for job in jobs] == [one] and not built
+    assert jobs[0]["posted_basis"] and jobs[0]["country"] == "US" and jobs[0]["description"]
+
+
+def test_a_settings_prefix_index_is_created_only_on_postgres_and_only_once():
+    from jobpilot.db import Database
+
+    calls = []
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def exec_driver_sql(self, statement):
+            calls.append(statement)
+            return type("R", (), {"scalar": staticmethod(lambda: None if len(calls) == 1 else "ix_settings_key_prefix")})
+
+    class Engine:
+        class dialect:
+            name = "postgresql"
+
+        begin = staticmethod(Connection)
+
+    db = Database.__new__(Database)
+    db.engine = Engine
+    db.add_settings_prefix_index()
+    assert len(calls) == 2 and "text_pattern_ops" in calls[1]
+    calls.append("second start")
+    db.add_settings_prefix_index()
+    assert not [c for c in calls[3:] if "CREATE INDEX" in c]
+    Engine.dialect.name = "sqlite"
+    calls.clear()
+    db.add_settings_prefix_index()
+    assert calls == []
