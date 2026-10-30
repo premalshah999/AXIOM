@@ -32,6 +32,7 @@ ADD = {
 class Workday(Adapter):
     id = "workday"
     name = "Workday"
+    link_resume = False  # its own continuation of a parked mail wait
     max_steps = 50
     back_ids = BACK_IDS
     next_ids = ("bottom-navigation-next-button", "pageFooterNextButton", "wd-CommandButton_next")

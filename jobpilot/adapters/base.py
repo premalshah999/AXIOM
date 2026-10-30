@@ -461,6 +461,9 @@ class Adapter:
     email_submit_ids: tuple[str, ...] = ()
     # How long a questionnaire page without questions or a way forward is given to open its pop-up.
     ASSESSMENT_SETTLE_SECONDS = 2.5
+    # A run released by a matched emailed sign-in link opens it first (matched_link_waiting). Workday, Oracle and iCIMS
+    # keep their own continuations of a parked mail wait.
+    link_resume = True
 
     def __init__(self, engine, ats_id=None, name=None):
         if ats_id:
@@ -841,6 +844,8 @@ class Adapter:
     def classify_page(self, obs):
         if self.in_assessment():
             return Step.FORM  # Its Submit and thank-you page belong to the questionnaire, never the application.
+        if self.link_resume and not self.committed and self.matched_link_waiting():
+            return Step.VERIFY_LINK
         text = obs["text"]
         fields = self.app_fields(obs)
         # A returning applicant's login box beside the application form is not a sign-in step (scan.js sideLogin).
@@ -1024,6 +1029,40 @@ class Adapter:
         with self.service.db.session() as session:
             source = session.get(Run, handle["source_run_id"])
             return bool(source and source.job_id == self.job["id"])
+
+    def matched_link_waiting(self):
+        """This run was released by an emailed sign-in link that has arrived and not been opened yet.
+
+        ClearCompany (Allen Institute, 2026-10-30): signing in is an emailed link. The run that pressed "Next" parked,
+        the link matched 16 s later and released a new run, which walked the sign-in again from the top. Its own "Next"
+        was answered with no "check your email" page (a second link inside a minute), so nothing recognised the matched
+        link, the model took the password route instead, and the run ended on a sign-in form that never changed. The
+        link is the sign-in: it is opened first, whatever the page says. Only a link counts (a matched code is typed by
+        the code step), from a run of this job, inside its window."""
+        packet = (getattr(self, "run_record", None) or {}).get("packet", {})
+        handle = packet.get("email_wait_resume") or {}
+        challenge_id = handle.get("challenge_id") or handle.get("id")
+        if not challenge_id or not handle.get("source_run_id") or self.attempts["verify_link"]:
+            return False
+        from ..db import MailChallenge, Run
+
+        with self.service.db.session() as session:
+            row = session.get(MailChallenge, challenge_id)
+            source = session.get(Run, handle["source_run_id"])
+            if (
+                not row
+                or row.state != "matched"
+                or row.kind not in {"auto", "link"}
+                or row.expires <= time.time()
+                or not source
+                or source.job_id != self.job["id"]
+            ):
+                return False
+            payload = row.payload
+        try:
+            return (self.service.mail.vault.open(payload) or {}).get("kind") == "link"
+        except Exception:
+            return False  # an unreadable token is never opened
 
     # ----- step handlers ------------------------------------------------------------------------
     async def on_job_details(self, obs):
