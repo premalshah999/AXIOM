@@ -1,8 +1,17 @@
 # Front door for the common tasks. Everything real lives in scripts/ and compose.yaml.
-.PHONY: help up down restart logs ps token verify update chrome twin test lint frontend
+.PHONY: help up down restart logs ps token verify update chrome twin test lint frontend start stop status
 
 help: ## List the tasks
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | sed -E 's/:.*## /\t/' | sort
+
+start: ## Without Docker: start the database, the app and the Chromes, then open the dashboard (docs/NATIVE.md)
+	@scripts/axiom start
+
+stop: ## Without Docker: drain safely and stop everything
+	@scripts/axiom stop
+
+status: ## Without Docker: what is running, its memory, sleep, power and disk
+	@scripts/axiom status
 
 up: ## First start and every later start: create .env, build, start, print the URL
 	@scripts/setup.sh

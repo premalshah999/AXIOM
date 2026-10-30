@@ -1,0 +1,30 @@
+# The services AXIOM runs, as data: adding one is an entry here, not a change to the supervisor (docs/NATIVE.md).
+# `axiom start` opens as one app whatever is listed. PostgreSQL and the Chromes are not listed, because each needs code of
+# its own (creating the cluster, the flags in scripts/chrome-*.sh); a service names them in `after`.
+#
+#   name                What logs, `axiom status` and `axiom restart <name>` call it.
+#   command             {python} {port} {data_dir} {root} are filled in. It must listen on 127.0.0.1 only.
+#   port                The port it listens on, checked free before anything starts. Optional.
+#   port_setting        The `.env` key that may change the port. Optional.
+#   health_url          Answers 200 once it is ready, on this computer. {port} is filled in. Optional: without one, a
+#                       service counts as up once it is running.
+#   restart             always: after any exit, as `restart: unless-stopped`. on-failure: unless it exited 0, which also
+#                       counts as ready for whatever waits on it. never.
+#   required            true (default): if it cannot be kept running, everything stops with a message. false: reported only.
+#   after               Names it waits for, started first and stopped last. Optional.
+#   restart_with        Names whose restart restarts it too. Optional.
+#   drains              true: a stop waits SHUTDOWN_DRAIN_SECONDS + 30 for it, as compose.yaml's stop_grace_period.
+#   stop_grace_seconds  Otherwise how long a stop waits (default 10).
+#   env                 A table of extra environment on top of what every service gets (env.py, app_environment).
+
+[[service]]
+name = "app"
+command = ["{python}", "-m", "jobpilot.cli", "serve", "--host", "127.0.0.1", "--port", "{port}"]
+port = 8080
+port_setting = "APP_PORT"
+health_url = "http://127.0.0.1:{port}/healthz"
+restart = "always"
+after = ["postgres", "worker", "twin"]
+# In-flight runs stay `running` until the app restarts after the database comes back (docs/INFRA.md).
+restart_with = ["postgres"]
+drains = true
