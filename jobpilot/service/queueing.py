@@ -29,6 +29,22 @@ async def off_loop(fn, *args, **kwargs):
     return await asyncio.get_running_loop().run_in_executor(ADMISSION, call)
 
 
+def fit_blocker(profile, board, title):
+    """(message, code) of the fit filter that refuses a title for the autopilot, or None. The owner's own pick skips
+    these; a run that reads a title the job did not have at queue time applies them again (posting_read.py)."""
+    from ..features.discovery.feeds import INTERN
+    from ..features.discovery.policy import SENIOR
+    from ..features.discovery.roles import matching_role
+
+    if profile.target_roles and not matching_role(title, profile.target_roles):
+        return "Outside the profile's target roles", "target_role"
+    if INTERN.search(title) and not profile.include_internships:
+        return "Internships are excluded from application discovery", "internship"
+    if board.get("early_career_only", False) and SENIOR.search(title):
+        return "Outside the saved career-level policy", "seniority"
+    return None
+
+
 class QueueingMixin:
     @staticmethod
     def cooldown_key(job):
@@ -242,19 +258,9 @@ class QueueingMixin:
             # Automatic retries of the owner's pick (stalls, repair, tiers) keep the owner's say.
             owner_pick = owner_pick or picked(s, job_id)
             if mode == "submit" and not job.demo and not owner_pick:
-                from ..features.discovery.roles import matching_role
-                from ..features.discovery.policy import SENIOR
-                from ..features.discovery.feeds import INTERN
-
-                if profile.target_roles and not matching_role(job.title, profile.target_roles):
-                    raise QueueBlocked("Outside the profile's target roles", code="target_role")
-                if INTERN.search(job.title) and not profile.include_internships:
-                    raise QueueBlocked(
-                        "Internships are excluded from application discovery", code="internship"
-                    )
                 board = self.db.get_setting("job_board_settings", {}) or {}
-                if board.get("early_career_only", False) and SENIOR.search(job.title):
-                    raise QueueBlocked("Outside the saved career-level policy", code="seniority")
+                if blocker := fit_blocker(profile, board, job.title):
+                    raise QueueBlocked(blocker[0], code=blocker[1])
             from ..pipeline_comparison import routed_pool
             from ..specialist import pool_boost
             from ..tiers import job_over_budget

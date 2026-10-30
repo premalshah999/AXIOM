@@ -1041,6 +1041,13 @@ class BrowserEngine:
             ):
                 self.result = {"state": "closed", "reason": gone}
                 return self.result
+            from .posting_read import refuse_unread_page, refuse_unread_posting
+
+            if not job.get("demo") and (refused := await refuse_unread_posting(self, job, run)):
+                # A link-only job's posting is read before anything else, so its own eligibility wording (U.S.
+                # citizenship required, a clearance, a PhD) closes it before account work (posting_read.py).
+                self.result = refused
+                return self.result
             if external:
                 import httpx
 
@@ -1486,6 +1493,9 @@ class BrowserEngine:
                         }
                     self.result = await self.finish()
                 else:
+                    if not (resumed or reopened_route) and (refused := await refuse_unread_page(self, job, run)):
+                        self.result = refused
+                        return self.result
                     if resumed and (receipt := await self.form.proof()):
                         # Only new evidence counts: the app's own earlier submit attempt, or a
                         # confirmation that appeared after you finished the step in the tab. The
