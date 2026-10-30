@@ -100,6 +100,11 @@ async def stop_if_sensitive(engine, observation):
     """
     if getattr(engine, "armed", False) or not observation:
         return False
+    # Every owned page passes here: an account the employer holds under another email stops the run as well.
+    from .account_identity import stop_if_identity_conflict
+
+    if await stop_if_identity_conflict(engine, observation):
+        return True
     matches = sensitive_matches(observation.get("fields") or [])
     if not matches:
         return False

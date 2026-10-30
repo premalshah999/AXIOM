@@ -925,6 +925,10 @@ class Adapter:
 
             if not self.committed and missing_posting_notice(obs, self.job["url"]):
                 return await self.on_closed(obs)
+            from ..account_identity import stop_if_identity_conflict
+
+            if await stop_if_identity_conflict(self.e, obs):
+                return self.e.result  # an account under another email holds the phone number: no code, reset or Create
             shell_recovery = getattr(self.e, "recover_oracle_job_shell", None)
             if shell_recovery and await shell_recovery(obs):
                 continue
