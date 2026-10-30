@@ -11,6 +11,8 @@ already exists with the provided email address. Login using an alternate mobile 
 to the same inbox and which is a distinct address to the platform.
 """
 
+from urllib.parse import urlsplit
+
 GMAIL_DOMAINS = {"gmail.com", "googlemail.com"}
 
 
@@ -33,6 +35,16 @@ def mailbox_key(address):
 
 def same_mailbox(first, second):
     return bool(first and second) and mailbox_key(first) == mailbox_key(second)
+
+
+def employer_alias_key(url):
+    """The setting that holds one employer's alias tag ({"tag": ...}), keyed by the job's origin: an identity that
+    employer bound to the profile address and that can never be signed in to is replaced there only."""
+    p = urlsplit(str(url or ""))
+    return f"email_alias:{p.scheme}://{(p.hostname or '').lower()}" if p.scheme and p.hostname else ""
+
+
+EMPLOYER_ALIAS_TAG = "apply"
 
 
 def ats_address(address, ats, aliases):

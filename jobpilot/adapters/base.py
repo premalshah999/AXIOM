@@ -2447,6 +2447,37 @@ class Adapter:
                 await self.click(proceed)
         return True
 
+    def fresh_identity(self, record):
+        """An iCIMS identity bound to the applicant's address that never signed in and mails no reset is abandoned for
+        this employer: its next run applies with a plus-address, which iCIMS reads as a new candidate and Gmail
+        delivers to the same inbox (email_alias). HERE, Berry, American Systems and Publicis (2026-10-29): Central
+        accepted the email, refused the shared password, and no reset ever reached the mailbox. Once per employer."""
+        from ..email_alias import EMPLOYER_ALIAS_TAG, GMAIL_DOMAINS, employer_alias_key
+
+        db = getattr(self.service, "db", None)
+        key = employer_alias_key(self.job.get("url", ""))
+        local, _, domain = str(self.accounts.email or "").partition("@")
+        host = (urlsplit(self.job.get("url", "")).hostname or "").lower()
+        if (
+            not (self.job.get("ats") == "icims" or host.endswith(".icims.com"))
+            or record.get("confirmed_at")
+            or not db
+            or not key
+            or db.get_setting(key)
+            or "+" in local
+            or domain not in GMAIL_DOMAINS
+        ):
+            return None
+        db.set_setting(key, {"tag": EMPLOYER_ALIAS_TAG, "at": now(), "reason": "identity never signed in; no reset mail"})
+        self.emit("account", "This employer's identity for your email cannot be signed in to and mails no reset; the "
+                  "next attempt applies here with a fresh plus-address of the same inbox")
+        return self.defer(
+            "This employer's sign-in for your email cannot be recovered; the next attempt applies with a new address "
+            "for the same inbox",
+            state="waiting_browser",
+            blocker_type="account",
+        )
+
     def login_value(self, f, credentials):
         """A "User name"/"User ID" field gets the applicant's username when one is configured."""
         username = getattr(getattr(getattr(self, "e", None), "profile", None), "account_username", "")
@@ -2596,6 +2627,8 @@ class Adapter:
             # recover it; a password saved under Setup > Accounts (state password_reset) is used from then on.
             if unanswered:
                 self.accounts.mark(url, "password_unknown", self.accounts.saved(url), password_unknown_at=now())
+            if fresh := self.fresh_identity(record):
+                return fresh
             return self.defer(
                 PASSWORD_UNKNOWN,
                 [{"question": PASSWORD_UNKNOWN, "options": [], "key": "manual", "reason": detail[:200]}],

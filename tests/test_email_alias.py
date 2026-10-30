@@ -77,3 +77,47 @@ def test_every_answer_source_takes_the_runs_platform_address(service):
     assert aliased.platform_address("Reach me at applicant@gmail.com") == "Reach me at applicant@gmail.com"
     plain = Resolver(Profile(email="applicant@gmail.com"), service.db, service.config)
     assert plain.platform_address("applicant@gmail.com") == "applicant@gmail.com"
+
+
+def test_one_employer_can_get_its_own_alias():
+    from jobpilot.email_alias import EMPLOYER_ALIAS_TAG, employer_alias_key
+
+    key = employer_alias_key("https://Careers-Acme.icims.com/jobs/1/engineer/job?mode=apply")
+    assert key == "email_alias:https://careers-acme.icims.com"
+    assert employer_alias_key("") == ""
+    tagged = ats_address("alex.doe.applicant@gmail.com", "icims", {"icims": EMPLOYER_ALIAS_TAG})
+    assert tagged == "alex.doe.applicant+apply@gmail.com" and base_address(tagged) == "alex.doe.applicant@gmail.com"
+
+
+def test_an_unusable_icims_identity_is_abandoned_once_for_that_employer():
+    """HERE, Berry, American Systems, Publicis (2026-10-29): iCIMS Central accepted the address, refused the shared
+    password, and no reset ever reached the mailbox. The next run applies there with a plus-address."""
+    from collections import Counter
+    from types import SimpleNamespace
+
+    from jobpilot.adapters.base import Adapter
+
+    settings = {}
+    db = SimpleNamespace(get_setting=lambda k, d=None: settings.get(k, d), set_setting=settings.__setitem__)
+
+    def adapter(ats="icims", email="alex.doe.applicant@gmail.com", url="https://careers-acme.icims.com/jobs/1/engineer/job"):
+        value = Adapter.__new__(Adapter)
+        value.service, value.attempts = SimpleNamespace(db=db), Counter()
+        value.job = {"ats": ats, "url": url}
+        value.accounts = SimpleNamespace(email=email)
+        value.config = SimpleNamespace(browser_cdp_url="")
+        value.emit = lambda *a, **k: None
+        return value
+
+    assert adapter().fresh_identity({"confirmed_at": "2026-10-20T00:00:00"}) is None  # a real account is kept
+    assert adapter(ats="workday", url="https://acme.wd5.myworkdayjobs.com/x/job/1").fresh_identity({}) is None
+    assert adapter(email="alex+jobs@gmail.com").fresh_identity({}) is None
+    assert adapter(email="alex@example.edu").fresh_identity({}) is None
+    assert not settings
+    result = adapter().fresh_identity({"state": "password_unknown"})
+    assert result["state"] == "waiting_browser" and not result["reviews"]
+    assert settings["email_alias:https://careers-acme.icims.com"]["tag"] == "apply"
+    assert adapter().fresh_identity({"state": "password_unknown"}) is None  # once per employer
+    # An iCIMS career site filed under another ATS name is the same platform.
+    assert adapter(ats="custom", url="https://careers-other.icims.com/jobs/2/job").fresh_identity({})
+    assert "email_alias:https://careers-other.icims.com" in settings
