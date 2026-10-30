@@ -3913,6 +3913,8 @@ class BrowserEngine:
                 "recovery_cause": "validation_controls",
                 "report": fresh,
             }
+        if not self.armed and (refused := await self.not_the_final_step(final[0])):
+            return refused
         if self.job.get("ats") == "greenhouse":
             await self.email_verification.prepare_submission()
         try:
@@ -3994,6 +3996,25 @@ class BrowserEngine:
                       "receipt": created}
         self.emit_commit_requests()
         return result
+
+    async def not_the_final_step(self, control):
+        """The result that refuses a commit on a page with no evidence of being this application's last step, or None.
+
+        Two Sigma (Avature, 2026-10-30): signing in landed on a blank /careers/ApplicationFormWidget holding one hidden
+        Submit and no field. Every check passed: verify() had nothing on the page to read, and verified_fields (5) and the
+        resume were earlier steps' ledger, all of it the sign-in and account pages. The real application (15 questions, then
+        Confirm Application) was still ahead. The page itself has to show something of the application."""
+        evidence = getattr(self.form, "final_step_evidence", None)
+        if not evidence or evidence(await self.form.scan(), control):
+            return None
+        return {
+            "state": "waiting_browser",
+            "reason": f"This page shows nothing of the application, only '{control_name(control)}', so it is not the "
+            "final step; nothing was submitted. Continue the application, or re-enter it from the job's page",
+            "blocker_type": "control_failure",
+            "recovery_cause": "control_observation",
+            "recoverable": True,
+        }
 
     async def watch_commit_click(self, control_id, proof=None, rejection=None):
         """Set the witness of the click about to happen (COMMIT_WATCH). None when it cannot be set: that click, if it

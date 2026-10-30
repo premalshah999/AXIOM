@@ -1775,6 +1775,9 @@ class Adapter:
                 "fallback": True,
                 "reason": "This is a talent-community signup, not the job application; open the job's Apply",
             }
+        refuse = getattr(self.e, "not_the_final_step", None)
+        if not self.committed and refuse and (refused := await refuse(final)):
+            return refused
         if quality_blocker := await self.e.quality_gate():
             if await self.revisit_history(quality_blocker):
                 return None  # Walked back to the step that owns the flagged answer; the loop refills it.

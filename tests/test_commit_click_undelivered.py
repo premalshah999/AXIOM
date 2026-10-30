@@ -449,6 +449,19 @@ async def test_finish_refuses_before_the_reservation_when_the_control_cannot_be_
     assert engine.reservations == [] and form.clicks == 0 and "submitting" not in engine.events
 
 
+async def test_a_validation_retry_after_a_real_commit_is_not_held_by_the_pre_checks(monkeypatch):
+    """Armed means a commit already happened on this form. Its bounded resubmit keeps going as before."""
+    form = Review()
+    form.final_control_blocked = AsyncMock(return_value="it is hidden")
+    form.final_step_evidence = lambda obs, control: ""
+    engine = engine_for(monkeypatch, form)
+    engine.armed = True
+    engine.watch_submission = AsyncMock(return_value={"state": "submission_unknown", "reason": "no receipt"})
+    result = await engine.finish(reserved=True, validation_attempt=1)
+    assert result["state"] == "submission_unknown" and form.clicks == 1
+    form.final_control_blocked.assert_not_awaited()
+
+
 # ----- the adapters' commit --------------------------------------------------------------------------------------------
 
 
@@ -507,3 +520,12 @@ async def test_an_adapter_commit_with_any_doubt_stays_attempted(monkeypatch):
         await adapter.commit({"id": "submit-1", "label": "Submit application"})
     assert adapter.e.armed is True and adapter.committed is True and form.clicks == 1
     adapter.e.commit_not_delivered.assert_not_awaited()
+
+
+async def test_an_adapter_refuses_a_page_that_is_not_the_final_step(monkeypatch):
+    monkeypatch.setattr(widgets, "ensure_uncovered", noop)
+    form = AdapterForm(AssertionError("must not click"))
+    adapter = adapter_for(form, undelivered=False)
+    adapter.e.not_the_final_step = AsyncMock(return_value={"state": "waiting_browser", "recoverable": True, "reason": "x"})
+    assert (await adapter.commit({"id": "submit-1", "label": "Submit"}))["state"] == "waiting_browser"
+    assert form.clicks == 0 and adapter.e.armed is False and adapter.committed is False
