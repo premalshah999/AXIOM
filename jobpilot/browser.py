@@ -22,7 +22,7 @@ from .answers import UNOFFERED_SOURCE, Resolver
 from .ats import EMBED_JS, REGISTRY, detect, detect_embedded
 from .email_browser import EmailBrowser, redacted_url
 from .failure_reports import clean
-from .forms import AUTH, ENTRY, FINAL, FormSession, NetworkMonitor, ResumeAttachmentError
+from .forms import AUTH, ENTRY, FINAL, STALE_CHOICE, FormSession, NetworkMonitor, ResumeAttachmentError
 from .db import Event, Job, Run
 from .mail import origin
 from .sensitive_ids import stop_if_sensitive
@@ -693,6 +693,8 @@ def bind_navigation_choice(decision, obs):
     return decision
 
 
+# A field's choose refused as stale or outside its control this many times ends the recovery (answer_verdict).
+STALE_CHOICE_LIMIT = 3
 OBSERVATION_TEXT = 200
 _PHONE_LIKE = re.compile(r"\+?\(?\d(?:[\s().-]*\d){6,}")
 _SECRET_VALUE = re.compile(
@@ -4718,6 +4720,22 @@ class BrowserEngine:
         from .browser_contracts import field_identity
 
         category, detail = feedback.get("failure_category"), feedback.get("detail", "")
+        if category == "unavailable" and STALE_CHOICE.split(";")[0] in detail:
+            # The same refused choose, 7 of 30 decisions on ADP's Social Media Source (Midco, 2026-10-29; 245 production
+            # runs hit it): the model alternated choose with inspect_options and clicks, so neither the repeated-action
+            # refusal (reset by every other action) nor the progress tracker (the menu opens and closes) ever fired.
+            # Counted by field: a menu that cannot hold the model's choice 3 times is a control problem, not a
+            # decision to retry.
+            key = ("stale choice", *field_identity(target))
+            rejected[key] = rejected.get(key, 0) + 1
+            if rejected[key] >= STALE_CHOICE_LIMIT:
+                return {
+                    "state": "waiting_browser",
+                    "reason": f"The menu of {str(target.get('label', 'a field'))[:120]!r} refused the chosen option as "
+                    f"stale or outside the control {rejected[key]} times",
+                    "blocker_type": "control_failure",
+                    "recovery_cause": "control_observation",
+                }
         if category == "missing_fact":
             if not any(self.service.review_kind(q) == "missing_fact" for q in self.form.pending):
                 self.record_help_reviews(

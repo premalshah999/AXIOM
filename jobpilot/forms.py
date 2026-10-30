@@ -546,11 +546,16 @@ ACCOUNT_CREATE = re.compile(
 )
 # Widget messages that carry only the employer's own option labels (never an applicant value).
 SAFE_CONTROL_PREFIXES = ("No unique supported option in this ATS field's owned popup",)
+# An option id the control's open menu does not hold. The refusal tells the model what to do instead of repeating it:
+# ADP's Social Media Source (Midco, 2026-10-29) was refused this way on 7 of 30 decisions in a row.
+STALE_CHOICE = (
+    "Choice is stale or outside this control; read the open menu with inspect_options and choose one of its option ids"
+)
 SAFE_CONTROL_ERRORS = {
     "No matching option is offered",
     "Native option is ambiguous or changed",
     "The website did not commit the observed choice",
-    "Choice is stale or outside this control",
+    STALE_CHOICE,
 }
 
 
@@ -2096,6 +2101,12 @@ class FormSession:
                     if field["type"] in {"select", "select-multiple"}
                     else await widgets.visible_options(frame, await widgets._popup_scope(el))
                 )
+                if not options and not inline and field["type"] not in {"select", "select-multiple"}:
+                    if not await widgets.owned_picker_open(el):
+                        # The menu the model read in an earlier step has closed since (a re-scan, a click elsewhere):
+                        # open it again. The options keep their ids while the page keeps their elements.
+                        await widgets.open_owned_picker(frame, el, field["type"])
+                        options = await widgets.visible_options(frame, await widgets._popup_scope(el))
                 option = next((o for o in options if o["id"] == option_id and not o["disabled"]), None)
                 decided = None
                 if not option and (inline or field["type"] in {"select", "select-multiple"}):
@@ -2107,7 +2118,7 @@ class FormSession:
                     if decided.disposition == "answer":
                         option = next((o for o in offered if o["text"] == decided.value), None)
                 if not option:
-                    raise ValueError("Choice is stale or outside this control")
+                    raise ValueError(STALE_CHOICE)
                 supported = None
                 if option["leaf"]:
                     partial = False
