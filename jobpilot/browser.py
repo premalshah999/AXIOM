@@ -1703,18 +1703,9 @@ class BrowserEngine:
                                 )
                     if not self.result:
                         await self.handle_email()
-                    from .controller_policy import policy_for
-
-                    if not self.result and policy_for(run) in {"reasoning_first", "continuous_agent"}:
-                        self.endpoint_guard = True
-                        await self.run_desktop_navigator()
                     if not self.result and not recovery_needed:
                         self.result = await self.guided_flow()
-                    if (
-                        self.result
-                        and policy_for(run) != "continuous_agent"
-                        and self.recoverable_result(self.result)
-                    ):
+                    if self.result and self.recoverable_result(self.result):
                         self.emit(
                             "recovery",
                             "Known control failure is entering owned-page reasoning",
@@ -2301,13 +2292,7 @@ class BrowserEngine:
     def use_adapters(self, ats):
         """ENGINE=adapters: deterministic drivers for multi-page portals; single-page ATSs keep the
         guided flow that works live. ENGINE=guided: the guided flow everywhere."""
-        from .controller_policy import policy_for
-
-        if (
-            self.job["demo"]
-            or self.config.engine != "adapters"
-            or policy_for(getattr(self, "run_record", {})) in {"reasoning_first", "continuous_agent"}
-        ):
+        if self.job["demo"] or self.config.engine != "adapters":
             return False
         return ats not in AGENT_FIRST
 
@@ -5083,13 +5068,6 @@ class BrowserEngine:
         from .agent_settings import require
 
         require(self.db, "navigator")
-        from .controller_policy import policy_for
-
-        if policy_for(getattr(self, "run_record", {})) == "continuous_agent":
-            from .continuous_agent import drive
-
-            await drive(self)
-            return
         from .models import effective_thinking, structured
         from .vision import available as vision_available
         from .continuous_agent import navigation_context

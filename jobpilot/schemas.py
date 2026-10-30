@@ -206,9 +206,7 @@ class QueueInput(BaseModel):
     resume_artifact_id: str | None = Field(default=None, max_length=128)
     mode: Literal["dry_run", "submit"] = "dry_run"
     resume_id: str | None = None
-    controller_policy: Literal["hybrid", "reasoning_first", "vision_assisted", "continuous_agent"] | None = (
-        None
-    )
+    controller_policy: Literal["hybrid", "vision_assisted"] | None = None
 
 
 class SourceInput(BaseModel):

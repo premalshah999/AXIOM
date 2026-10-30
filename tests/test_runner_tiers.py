@@ -108,7 +108,6 @@ def test_budgets_grow_with_tier(service):
     cfg = service.config
     assert tiers.call_limit(cfg, 1) == cfg.max_model_calls
     assert tiers.call_limit(cfg, 3) > tiers.call_limit(cfg, 2) >= cfg.max_model_calls
-    assert tiers.agent_steps(3) > tiers.agent_steps(2) > tiers.agent_steps(1)
     assert tiers.time_budget(600, 1) == 600 and tiers.time_budget(600, 3) == 1200
     assert tiers.effort_for(1, "low") == "low" and tiers.effort_for(3, "low") == "high"
 
@@ -163,9 +162,9 @@ def test_deepseek_never_reasons_at_any_tier_or_override(service):
         assert MeteredTransport(service.db, cfg, None, thinking="enabled", tier=tier).thinking == "disabled"
 
 
-def test_tier_one_is_the_cheap_engine_and_higher_tiers_use_the_agent(service):
+def test_every_new_run_uses_the_current_engine(service):
     from jobpilot.db import Setting
-    from jobpilot.pipeline_comparison import AGENTIC, CURRENT, LEGACY, assign
+    from jobpilot.pipeline_comparison import CURRENT, assign
 
     job = Job(id="legacy", identity="legacy", url="https://fixture.test/legacy")
 
@@ -179,18 +178,14 @@ def test_tier_one_is_the_cheap_engine_and_higher_tiers_use_the_agent(service):
         )
 
     with service.db.session() as s:
-        # A job once handed to the agent (or the frozen Oct-4 engine) returns to the cheap engine.
-        assert assign(s, job, run(AGENTIC)) == CURRENT
-        assert assign(s, job, run(LEGACY)) == CURRENT
+        # A job once handed to the retired agent (or the frozen Oct-4 engine) returns to the current engine.
+        for retired in ("agent-led", "reasoning-first", "oct04-825c1b6"):
+            assert assign(s, job, run(retired)) == CURRENT
         assert assign(s, job, run(CURRENT)) == CURRENT
         # Receipt verification keeps the engine that submitted.
-        assert assign(s, job, run(LEGACY, verification_only=True)) == LEGACY
+        assert assign(s, job, run("oct04-825c1b6", verification_only=True)) == "oct04-825c1b6"
+        # A raised runner tier or a specialist escalation no longer hands the job to a model-led agent.
         s.add(Setting(key="runner_tier:legacy", value={"tier": 2}))
-        s.flush()
-        assert assign(s, job, run(CURRENT)) == AGENTIC
-        assert assign(s, job, run(LEGACY)) == AGENTIC
-        # Owner cost control: with runner tiers disabled, nothing runs the model-led agent.
-        s.add(Setting(key="runner_tiers", value={"enabled": False}))
         s.flush()
         assert assign(s, job, run(CURRENT)) == CURRENT
         assert assign(s, job, run(CURRENT, specialist_escalation={"eligible": True})) == CURRENT

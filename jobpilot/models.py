@@ -610,7 +610,6 @@ async def _structured(
         "ControlDecision",
         "OptionDecision",
         "RecoveryDecision",
-        "ApplicationDecision",
         "RepairPlan",
     }
     require(db, "navigator" if navigation else "answers")

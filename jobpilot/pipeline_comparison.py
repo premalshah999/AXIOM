@@ -1,7 +1,7 @@
 """Six ATS application owners and two reserved difficult-flow owners.
 
-Historical pipeline names remain readable for retained drafts. New applications
-use the current ATS controller; the scheduler persists any specialist handoff.
+Every application uses the current ATS controller; the scheduler persists any specialist handoff. Retained drafts
+named for a retired engine (the Oct 4 build, the reasoning-first and agent-led pipelines) continue on it too.
 """
 
 from sqlalchemy import select
@@ -10,11 +10,7 @@ from sqlalchemy.orm import defer
 from .config import MAX_WORKERS, Topology, legacy_topology
 from .db import Run
 
-LEGACY = "oct04-825c1b6"
 CURRENT = "current"
-REASONING = "reasoning-first"
-AGENTIC = "agent-led"
-EXPERIMENTAL = {LEGACY, REASONING, AGENTIC}
 KEY = "pipeline_comparison"
 NORMAL = "normal"
 SPECIALIST = "specialist"
@@ -93,29 +89,12 @@ def routed_pool(session, job, source_id=None):
 
 
 def assign(session, job, source=None):
-    """The engine for a new run. The runner tier decides: tier 1 is the cheap current engine
-    (hybrid controller, ~45k tokens a run); tier 2 and up use the model-led agent
-    (~500k tokens a run). A job once handed to the agent must not stay there for ever, since
-    each retry copies the previous run's pipeline."""
+    """The engine for a new run: always the current one, except that a receipt verification keeps the engine that
+    submitted. (A job's runner tier used to hand it to the model-led agent; that agent was retired on 2026-10-14.)"""
     packet = _packet(source)
-    pipeline = packet.get("application_pipeline", CURRENT)
     if packet.get("verification_only"):
-        return pipeline  # Receipt verification keeps the engine that submitted.
-    from .db import Setting
-
-    # Cost: the model-led agent costs ~575k input tokens a run against ~90k for the cheap
-    # engine (2026-10-13). It runs only while the owner keeps runner tiers enabled.
-    agent_allowed = ((session.get(Setting, "runner_tiers") or Setting(key="", value={})).value or {}).get(
-        "enabled"
-    ) is not False
-    if agent_allowed and packet.get("specialist_escalation", {}).get("eligible") is True:
-        return AGENTIC
-    tier = ((session.get(Setting, "runner_tier:" + job.id) or Setting(key="", value={})).value or {}).get(
-        "tier", 1
-    )
-    if agent_allowed and tier >= 2:
-        return AGENTIC
-    return CURRENT if pipeline in {LEGACY, AGENTIC, REASONING} else pipeline
+        return packet.get("application_pipeline", CURRENT)
+    return CURRENT
 
 
 def as_topology(limit):
@@ -302,18 +281,6 @@ def worker_context(job_ats, pool=NORMAL):
 
 
 def engine_for(service, run):
-    pipeline = run["packet"].get("application_pipeline")
-    # The model-led agent (~90% of model spend) runs only while the owner keeps runner tiers enabled;
-    # otherwise retained agent-led and reasoning-first drafts continue on the hybrid controller.
-    agent_allowed = (service.db.get_setting("runner_tiers", {}) or {}).get("enabled") is not False
-    if pipeline in {REASONING, AGENTIC} and agent_allowed:
-        run["packet"]["controller_policy"] = "continuous_agent" if pipeline == AGENTIC else "reasoning_first"
-    elif not agent_allowed and run["packet"].get("controller_policy") in {
-        "continuous_agent",
-        "reasoning_first",
-    }:
-        run["packet"]["controller_policy"] = "hybrid"
-    # Retained drafts named for the retired Oct 4 engine continue on the current one, as new runs do.
     from .browser import BrowserEngine
 
     return BrowserEngine(service, run["id"])

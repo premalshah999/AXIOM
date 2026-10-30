@@ -22,9 +22,9 @@ from .specialist import pool_boost
 
 MAX_TIER = 3
 TIERS = {
-    1: {"calls": 0, "steps": 24, "time": 1.0, "effort": None, "timeout": 0, "tokens": 0},
-    2: {"calls": 40, "steps": 36, "time": 1.5, "effort": "medium", "timeout": 75, "tokens": 16000},
-    3: {"calls": 70, "steps": 48, "time": 2.0, "effort": "high", "timeout": 120, "tokens": 24000},
+    1: {"calls": 0, "time": 1.0, "effort": None, "timeout": 0, "tokens": 0},
+    2: {"calls": 40, "time": 1.5, "effort": "medium", "timeout": 75, "tokens": 16000},
+    3: {"calls": 70, "time": 2.0, "effort": "high", "timeout": 120, "tokens": 24000},
 }
 FAILED = ("waiting_browser", "timed_out", "failed")
 BLOCKED_JOB = {
@@ -145,10 +145,6 @@ def time_budget(budget, tier, ats="", boost=1.0):
     # No Workday extension: confirmed Workday runs take 4-5 minutes; a longer budget only let
     # failing runs burn 20 minutes (owner, 2026-10-14). `boost` is a specialist's multiplier (pool_boost).
     return int(min(1200 * boost, budget * TIERS[clamp(tier)]["time"] * boost))
-
-
-def agent_steps(tier):
-    return TIERS[clamp(tier)]["steps"]
 
 
 def _candidates(db, limit):
