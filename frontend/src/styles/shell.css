@@ -1,5 +1,5 @@
-/* The application frame: the top bar, the page title, the one scroll region, the phone menu, command palette (DESIGN.md, Shell).
-   .ax-app = column [top bar | .ax-main];  .ax-main = column [page title | banners | .ax-scroll]. */
+/* The application frame: the top plate, the page title, the one scroll region, command palette (DESIGN.md, Shell).
+   .ax-app = column [top plate | .ax-main | the phone's tuner];  .ax-main = column [page title | banners | .ax-scroll]. */
 
 .skip {
   position: absolute;
@@ -10,7 +10,7 @@
   background: var(--brand);
   color: var(--brand-ink);
   border-radius: var(--radius);
-  font-weight: 650;
+  font-weight: 600;
 }
 .skip:focus {
   top: var(--space-3);
@@ -20,7 +20,6 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--ground);
 }
 .ax-main {
   display: flex;
@@ -30,197 +29,269 @@
   min-height: 0;
 }
 
-/* ---------- the top bar: pages left, wordmark centre, the rest right ---------- */
+/* ---------- the top plate: one grid with the panel below it, the rail and then the scale ---------- */
 .ax-bar {
   position: relative;
   z-index: 30;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  align-items: stretch;
+  grid-template-columns: var(--rail) minmax(0, 1fr);
   flex: none;
-  gap: var(--space-6);
   height: var(--bar-height);
-  padding: 0 var(--gutter);
-  border-bottom: 1px solid var(--line);
-  background: var(--ground);
+  padding-inline: var(--gutter);
+  border-bottom: 1px solid var(--ink);
 }
-.ax-bar-nav {
+.ax-rail {
   display: flex;
-  align-items: stretch;
-  gap: var(--space-1);
-  min-width: 0;
-  /* The first label lines up with the page's left edge. */
-  margin-left: -10px;
-}
-.ax-nav {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-  color: var(--ink);
-  font-weight: 550;
-  text-decoration: none;
-  white-space: nowrap;
-}
-.ax-nav:hover {
-  color: var(--accent-text);
-}
-.ax-nav:focus-visible {
-  outline-offset: -6px;
-}
-/* The current page has the sun coming up under it, sitting on the bar's rule. */
-.ax-nav[aria-current]::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  bottom: 0;
-  width: 20px;
-  height: 10px;
-  margin-left: -10px;
-  border-radius: 20px 20px 0 0;
-  background: var(--accent-text);
-}
-.ax-nav-count {
-  color: var(--accent-text);
-  font-weight: 700;
+  flex-direction: column;
+  justify-content: space-between;
+  padding-block: 15px 11px;
 }
 .ax-brand {
-  display: flex;
-  align-items: center;
-  gap: 9px;
+  display: block;
+  width: max-content;
   color: var(--ink);
-  font: 400 21px / 1 var(--font-mark);
-  font-synthesis: none;
-  letter-spacing: 0.015em;
   text-decoration: none;
 }
 .ax-mark {
-  flex: none;
-  fill: var(--accent-text);
+  display: block;
+  height: auto;
+  overflow: visible;
 }
-.ax-bar-end {
+.ax-mark path,
+.ax-mark .o {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+}
+.ax-mark .lamp {
+  fill: var(--live);
+}
+:root[data-run="on"] .ax-mark .lamp {
+  animation: ax-breathe 3.2s ease-in-out infinite;
+}
+.ax-theme {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-4);
-  min-width: 0;
-}
-.ax-soon {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  color: var(--ink-3);
+  gap: 7px;
+  color: var(--ink-2);
+  font-family: var(--font-data);
   font-size: var(--text-meta);
-  white-space: nowrap;
+  line-height: 1;
 }
-.ax-soon-link {
-  color: var(--ink-3);
-  text-decoration: none;
-}
-.ax-soon-link:hover,
-.ax-soon-link[aria-current] {
-  color: var(--ink);
-}
-.ax-soon-fold {
-  display: none;
-}
-.ax-soon-button {
-  height: 30px;
-  padding: 0 var(--space-1);
+.ax-theme-switch {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 18px;
+  padding: 0;
   border: 0;
-  background: none;
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-  white-space: nowrap;
+  border-radius: var(--radius-sm);
+  background: var(--ground-3);
+  box-shadow:
+    inset 0 1px 2px var(--shade),
+    0 0 0 1px var(--line-strong);
   cursor: pointer;
 }
-.ax-soon-button:hover,
-.ax-soon-button[aria-expanded="true"] {
+.ax-theme-switch::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 14px;
+  border-radius: 1px;
+  background: var(--key);
+  box-shadow:
+    inset 0 1px 0 var(--key-top),
+    0 1px 0 var(--key-bot);
+  transition: left 180ms cubic-bezier(0.3, 1.4, 0.6, 1);
+}
+:root[data-theme="dark"] .ax-theme-switch::before,
+:root:not([data-theme]) .ax-theme-switch::before {
+  left: 22px;
+}
+
+/* The scale. Nine stations, the last three narrower where the plate is short; the needle sits on whichever one you are on. */
+.ax-tuner {
+  --needle-at: calc((min(var(--i, 0), 6) + max(var(--i, 0) - 6, 0) * var(--soon)) / (6 + 3 * var(--soon)) * 100%);
+  position: relative;
+  min-width: 0;
+}
+.ax-stations {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  height: 100%;
+}
+.ax-st {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-width: 0;
+  padding: 0 4px 25px var(--inset);
+  color: var(--ink);
+  text-decoration: none;
+}
+/* A major tick at every station. */
+.ax-st::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 16px;
+  background: var(--ink);
+}
+.ax-st-name {
+  font-size: var(--text-ui);
+  font-stretch: var(--wide);
+  font-weight: 500;
+  line-height: 1.2;
+  text-shadow: var(--engrave);
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+.ax-st-val {
+  overflow: hidden;
+  min-height: 16px;
+  color: var(--ink-2);
+  font-family: var(--font-data);
+  font-size: 12px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ax-st:hover .ax-st-name {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.ax-st:focus-visible {
+  outline-offset: -3px;
+}
+.ax-st[aria-current] .ax-st-name {
+  font-weight: 700;
+}
+.ax-st.is-hot .ax-st-val {
+  color: var(--signal-ink);
+}
+/* Something needs you: the one lamp on the plate that is not the needle. */
+.ax-st.is-hot .ax-st-val::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+.ax-st.is-soon {
+  color: var(--ink-3);
+}
+.ax-st.is-soon .ax-st-name {
+  font-weight: 400;
+}
+.ax-st.is-soon[aria-current] {
   color: var(--ink);
 }
-/* Search: a small ⌘K, not a box. */
-.ax-kbd {
-  flex: none;
-  height: 26px;
-  padding: 0 7px;
-  border: 1px solid var(--line-strong);
-  border-radius: 7px;
-  background: none;
+.ax-band {
+  position: absolute;
+  top: 8px;
+  left: calc(6 / (6 + 3 * var(--soon)) * 100%);
+  height: 14px;
+  padding-left: var(--inset);
+  border-left: 1px solid var(--line-strong);
   color: var(--ink-2);
-  font-family: var(--font-text);
-  font-size: var(--text-meta);
+  font-size: 12px;
+  font-stretch: var(--wide);
+  line-height: 1.1;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.ax-scale {
+  position: absolute;
+  inset: auto 0 0;
+  height: 18px;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, var(--line-strong) 1px, transparent 1px) 0 100% / calc(100% / 108) 6px repeat-x,
+    linear-gradient(90deg, var(--ink-2) 1px, transparent 1px) 0 100% / calc(100% / 18) 10px repeat-x;
+}
+.ax-needle {
+  position: absolute;
+  top: 0;
+  bottom: -1px;
+  left: var(--needle-at);
+  width: 2px;
+  margin-left: -0.5px;
+  background: var(--live);
+  pointer-events: none;
+  transition: left 340ms cubic-bezier(0.3, 1.25, 0.55, 1);
+}
+.ax-needle::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--live);
+}
+
+/* Search and the account, in the corner the scale leaves free. */
+.ax-tools {
+  position: absolute;
+  top: 7px;
+  right: var(--gutter);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.ax-kbd {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  height: 24px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--key);
+  box-shadow:
+    inset 0 1px 0 var(--key-top),
+    0 1px 0 var(--key-bot);
+  color: var(--key-ink);
+  font-family: var(--font-data);
+  font-size: 12px;
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
-  transition:
-    border-color var(--dur) var(--ease),
-    color var(--dur) var(--ease);
 }
 .ax-kbd:hover {
-  border-color: var(--ink-2);
-  color: var(--ink);
-}
-/* The hour: an arched window whose orb sets as the theme turns to dawn. */
-.ax-hour {
-  display: flex;
-  align-items: center;
-  flex: none;
-  gap: 7px;
-  padding: var(--space-1) 2px;
-  border: 0;
-  background: none;
-  color: var(--ink);
-  font-size: var(--text-meta);
-  font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.ax-hour-window {
-  position: relative;
-  display: block;
-  width: 22px;
-  height: 24px;
-  overflow: hidden;
-  border-radius: 12px 12px 2px 2px;
-  background: var(--frame);
-  box-shadow: inset 0 0 0 1.5px var(--line-strong);
-}
-.ax-hour-window i {
-  position: absolute;
-  top: 5px;
-  left: 5px;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--orb);
-  transition: top 0.5s cubic-bezier(0.3, 1.3, 0.5, 1);
-}
-:root[data-theme="light"] .ax-hour-window {
-  background: var(--sky-2);
-}
-:root[data-theme="light"] .ax-hour-window i {
-  top: 11px;
+  background: var(--ground-2);
 }
 .ax-avatar {
   display: grid;
   place-items: center;
   flex: none;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   padding: 0;
-  border: 1px solid var(--line-strong);
+  border: 0;
   border-radius: 50%;
-  background: var(--ground-2);
-  color: var(--ink);
-  font-size: var(--text-meta);
-  font-weight: 650;
+  background: var(--key);
+  box-shadow:
+    inset 0 1px 0 var(--key-top),
+    0 1px 0 var(--key-bot);
+  color: var(--key-ink);
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
-  transition: border-color var(--dur) var(--ease);
 }
 .ax-avatar:hover,
 .ax-avatar[aria-expanded="true"] {
-  border-color: var(--ink-2);
+  background: var(--key-down);
 }
 .ax-bar-menu {
   position: relative;
@@ -254,7 +325,7 @@
   max-width: calc(var(--page-w) + 2 * var(--gutter));
   padding: var(--space-5) var(--gutter) var(--space-3);
 }
-/* Overview's title is the sentence on the page; only its buttons, if any, take a row here. */
+/* Overview's panel names it; only its buttons, if any, take a row here. */
 .ax-head.is-untitled {
   padding: 0;
 }
@@ -268,7 +339,6 @@
 .ax-top-title {
   min-width: 0;
   overflow: hidden;
-  /* The condensed face's descenders sit inside the line box only with a little room. */
   padding-bottom: 2px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -314,10 +384,10 @@
 .ax-banner.is-bad::before {
   content: "";
   flex: none;
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  background: var(--bad);
+  background: var(--signal);
 }
 .ax-banner > span {
   min-width: 0;
@@ -337,7 +407,7 @@
 .ax-scroll:has(> .main > .ax-page-fill) {
   overflow: hidden;
 }
-/* The page frame: left-aligned under the bar. Lists use the width; Profile and Settings are a calm form's width. */
+/* The page frame: left-aligned under the rail. Lists use the width; Profile and Settings are a calm form's width. */
 .main {
   max-width: calc(var(--page-w) + 2 * var(--gutter));
   margin: 0;
@@ -356,8 +426,9 @@
 }
 
 .ax-soon-about {
-  max-width: 60ch;
-  color: var(--ink-2);
+  max-width: 52ch;
+  font-size: var(--text-sub);
+  font-stretch: 112%;
 }
 
 /* The boot screen, before the workspace is up. */
@@ -378,116 +449,6 @@
   max-width: 420px;
 }
 
-/* ---------- the phone menu: a slide-over on the building's green, at either hour ---------- */
-.ax-sheet {
-  --ink: var(--cream);
-  --ink-2: var(--cream-2);
-  --ink-3: var(--cream-3);
-  --tint: var(--cream-tint);
-  --line: var(--cream-rule);
-  --accent-text: var(--on-green-ask);
-  --focus: var(--on-green-focus);
-  position: fixed;
-  inset: 0 auto 0 0;
-  z-index: 80;
-  display: flex;
-  flex-direction: column;
-  width: min(300px, 86vw);
-  padding: calc(var(--space-4) + env(safe-area-inset-top)) var(--space-5) calc(var(--space-4) + env(safe-area-inset-bottom));
-  overflow-y: auto;
-  background: var(--frame);
-  color: var(--ink);
-  box-shadow: var(--overlay-shadow);
-  transform: translateX(-102%);
-  visibility: hidden;
-  transition:
-    transform var(--dur) var(--ease),
-    visibility 0s linear var(--dur);
-}
-.ax-sheet.is-open {
-  transform: none;
-  visibility: visible;
-  transition:
-    transform var(--dur) var(--ease),
-    visibility 0s;
-}
-.ax-sheet-scrim {
-  position: fixed;
-  z-index: 75;
-}
-.ax-sheet-pages {
-  display: flex;
-  flex-direction: column;
-}
-.ax-sheet-link {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  padding: 9px 0;
-  color: var(--ink);
-  font-family: var(--font-display);
-  font-size: var(--text-title);
-  font-variation-settings: var(--fv-title);
-  font-weight: 680;
-  line-height: 1.15;
-  text-decoration: none;
-}
-.ax-sheet-link[aria-current] {
-  color: var(--on-green-work);
-}
-.ax-sheet-link .ax-nav-count {
-  font-family: var(--font-text);
-  font-size: var(--text-body);
-  font-variation-settings: normal;
-}
-.ax-sheet-soon {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  margin-top: var(--space-5);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--line);
-  color: var(--ink-2);
-  font-size: var(--text-meta);
-}
-.ax-sheet-soon-link {
-  padding: var(--space-1) 0;
-  color: var(--ink-3);
-  text-decoration: none;
-}
-.ax-sheet-soon-link[aria-current] {
-  color: var(--on-green-work);
-}
-.ax-sheet-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-top: auto;
-  padding-top: var(--space-5);
-  color: var(--ink-2);
-  font-size: var(--text-meta);
-}
-.ax-sheet-who {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ax-sheet-out {
-  display: flex;
-  align-items: center;
-  flex: none;
-  gap: 6px;
-  min-height: 36px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--ink);
-  font-weight: 600;
-  cursor: pointer;
-}
-
 /* ---------- command palette ---------- */
 .ax-palette-root {
   position: fixed;
@@ -506,7 +467,7 @@
   width: min(540px, 100%);
   max-height: min(460px, 72vh);
   border: 1px solid var(--line);
-  border-radius: var(--radius-big);
+  border-radius: var(--radius);
   background: var(--raised);
   box-shadow: var(--overlay-shadow);
   overflow: hidden;
@@ -534,7 +495,7 @@
   outline: none;
 }
 .ax-palette-input kbd {
-  font-family: var(--font-text);
+  font-family: var(--font-data);
   color: var(--ink-3);
 }
 .ax-palette-list {
@@ -594,88 +555,115 @@
   font-size: var(--text-ui);
 }
 
-/* ---------- crowded widths ---------- */
-/* Under 1240px the bar cannot hold a centred wordmark and everything else: the wordmark leads and coming soon folds. */
-@media (max-width: 1239px) {
-  .ax-bar {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    gap: var(--space-5);
+/* ---------- narrower plates: the coming-soon stations give up room, so the six pages keep their names ---------- */
+@media (max-width: 1339px) {
+  :root {
+    --soon: 0.72;
   }
-  .ax-bar > .ax-brand {
-    order: -1;
-  }
-  .ax-bar-nav {
-    margin-left: 0;
-  }
-  .ax-soon {
-    display: none;
-  }
-  .ax-soon-fold {
-    display: block;
-  }
-  .ax-hour-name {
-    display: none;
-  }
-  .ax-bar-end {
-    gap: var(--space-3);
+  .ax-stations {
+    grid-template-columns: repeat(6, minmax(0, 1fr)) repeat(3, minmax(0, 0.72fr));
   }
 }
-@media (max-width: 1023px) {
+@media (max-width: 1139px) {
   :root {
-    --gutter: 20px;
+    --rail: 88px;
+    --inset: 8px;
+    --gutter: 16px;
   }
-  .ax-bar {
-    gap: var(--space-3);
+  .ax-st-name {
+    font-size: var(--text-meta);
+    font-stretch: 110%;
   }
-  .ax-bar-nav {
-    gap: 0;
+  .ax-st.is-soon .ax-st-name {
+    font-stretch: 100%;
   }
-  .ax-nav {
-    padding: 0 7px;
-    font-size: var(--text-ui);
+  /* "ai interviewer" no longer fits under "axe"; it stays in the station's tooltip and on its page. */
+  .ax-st.is-soon .ax-st-val {
+    visibility: hidden;
   }
 }
 
-/* ---------- under 900px: the pages move to the slide-over ---------- */
+/* ---------- under 900px: the scale becomes a strip along the bottom, with real names, under a fixed needle ---------- */
 @media (max-width: 899px) {
-  :root {
-    --gutter: 16px;
-  }
   .ax-bar {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    gap: var(--space-1);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     height: calc(var(--bar-height) + env(safe-area-inset-top));
-    padding: env(safe-area-inset-top) var(--space-2) 0 var(--space-1);
+    padding-top: env(safe-area-inset-top);
+    padding-inline: var(--gutter);
   }
-  .ax-bar > .ax-brand {
-    order: 0;
-    font-size: 19px;
+  .ax-rail {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-4);
+    padding: 0;
   }
-  .ax-bar-burger {
-    align-self: center;
-    width: 40px;
-    height: 40px;
-    color: var(--ink);
+  .ax-theme-name {
+    display: none;
   }
-  .ax-bar-end {
-    gap: var(--space-2);
-    padding-right: var(--space-2);
+  .ax-tools {
+    position: static;
   }
-  .ax-bar-end .ax-icon-btn {
-    width: 40px;
-    height: 40px;
-    color: var(--ink);
+  .ax-kbd {
+    width: 36px;
+    height: 32px;
+    padding: 0;
+  }
+  .ax-avatar {
+    width: 32px;
+    height: 32px;
+  }
+  .ax-tuner.is-phone {
+    flex: none;
+    height: calc(68px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--ink);
+    background: var(--ground);
+  }
+  .ax-tuner.is-phone .ax-stations {
+    display: flex;
+    padding-inline: 50%;
+    padding-bottom: env(safe-area-inset-bottom);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .ax-tuner.is-phone .ax-stations::-webkit-scrollbar {
+    display: none;
+  }
+  .ax-tuner.is-phone .ax-st {
+    flex: none;
+    justify-content: flex-start;
+    width: 124px;
+    padding: 10px 0 22px 10px;
+  }
+  .ax-tuner.is-phone .ax-st::before {
+    display: none;
+  }
+  .ax-tuner.is-phone .ax-st-name {
+    font-size: var(--text-ui);
+    font-stretch: var(--wide);
+  }
+  .ax-tuner.is-phone .ax-st.is-soon .ax-st-val {
+    visibility: visible;
+  }
+  .ax-tuner.is-phone .ax-scale {
+    bottom: env(safe-area-inset-bottom);
+    background: linear-gradient(90deg, var(--line-strong) 1px, transparent 1px) 0 100% / 12px 6px repeat-x;
+  }
+  .ax-tuner.is-phone .ax-needle {
+    left: 50%;
+    transition: none;
   }
   .ax-head {
     padding-top: var(--space-4);
     padding-bottom: var(--space-2);
   }
   .ax-page {
-    padding-bottom: 56px;
+    padding-bottom: var(--space-8);
   }
   .ax-toasts {
     right: var(--space-4);
-    bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
+    bottom: calc(var(--space-4) + 68px + env(safe-area-inset-bottom));
   }
   .ax-palette-root {
     padding-top: 8vh;
@@ -687,8 +675,5 @@
   .ax-head {
     padding-top: var(--space-2);
     padding-bottom: var(--space-1);
-  }
-  :root {
-    --text-page: 26px;
   }
 }

@@ -179,7 +179,7 @@
   padding: var(--space-2);
   border-right: 1px solid var(--line);
   color: var(--ink-3);
-  font: var(--text-meta) / 1.6 var(--font-code);
+  font: var(--text-meta) / 1.6 var(--font-data);
   text-align: right;
   user-select: none;
 }
@@ -196,7 +196,7 @@
   border: 0;
   border-radius: 0;
   background: none;
-  font: var(--text-meta) / 1.6 var(--font-code);
+  font: var(--text-meta) / 1.6 var(--font-data);
   resize: none;
   white-space: pre;
 }

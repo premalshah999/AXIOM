@@ -124,7 +124,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     const switchTheme: Entry = {
       id: "act:theme",
       group: "Actions",
-      label: theme === "dark" ? "Switch to dawn theme" : "Switch to night theme",
+      label: theme === "dark" ? "Switch to the light theme" : "Switch to the dark theme",
       icon: theme === "dark" ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />,
       run: done(toggleTheme),
     };

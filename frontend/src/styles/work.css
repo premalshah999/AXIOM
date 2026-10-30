@@ -33,14 +33,6 @@
   font-size: var(--text-body);
 }
 
-/* A row's checkbox always shows (owner, 2026-10-30: they complained when it went missing). components.css still hides it
-   until hover; delete that rule there and this one can go. */
-@media (hover: hover) {
-  .ax-table tbody .is-check input {
-    opacity: 1;
-  }
-}
-
 /* Jobs: the paste box above the Pipeline */
 .ax-queue-box {
   display: flex;
@@ -98,6 +90,6 @@
   border-radius: var(--radius);
 }
 .ax-code textarea {
-  font-family: var(--font-code);
+  font-family: var(--font-data);
   font-size: var(--text-meta);
 }

@@ -1,236 +1,157 @@
-/* AXIOM design tokens (DESIGN.md): "Nocturne and Dawn". One building, two hours.
-   Two themes, set on <html data-theme="dark|light"> before first paint; a missing or unknown value is dark (Night).
-   Every colour and every font is declared in this file and nowhere else. The façade, its frames and the lamplight are the
-   same object in both themes; only the hour outside changes. tests/test_identity_contrast.py measures the pairs. */
+/* AXIOM design tokens (DESIGN.md): "The Instrument". A front panel: lines are the machine, dots are what it is doing.
+   Two themes, set on <html data-theme="dark|light"> before first paint; a missing or unknown value is dark. Every colour and
+   every font is declared in this file and nowhere else. tests/test_identity_contrast.py measures the pairs. */
 
-/* Latin subsets only, bundled: nothing is fetched from a font service at run time.
-   Bricolage's "standard" file is the one with all three axes. The wght, wdth and opsz files each carry one axis, and the
-   condensed display look needs wdth and opsz together: measured in Chromium at 54px, wdth 100 to 75 is 910 to 634px and
-   opsz 12 to 96 is 963 to 856px (2026-10-30). The faces declare their full weight ranges, so a page's font-weight: 700 is
-   a real 700. */
+/* Latin subsets only, bundled: nothing is fetched from a font service at run time. These files are the ones with the axes the
+   look depends on, measured in Chromium (2026-10-30): Doto "full" draws differently at ROND 0 and 100 and at wght 100 and 900;
+   Archivo "standard" runs 516px at wdth 100 and 649px at wdth 125, and its wght moves too. */
 @font-face {
-  font-family: "Bricolage Grotesque";
+  font-family: "Doto";
   font-style: normal;
   font-display: swap;
-  font-weight: 200 800;
-  font-stretch: 75% 100%;
-  src: url("@fontsource-variable/bricolage-grotesque/files/bricolage-grotesque-latin-standard-normal.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  src: url("@fontsource-variable/doto/files/doto-latin-full-normal.woff2") format("woff2-variations");
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 @font-face {
-  font-family: "Atkinson Hyperlegible Next";
+  font-family: "Archivo";
   font-style: normal;
   font-display: swap;
-  font-weight: 200 800;
-  src: url("@fontsource-variable/atkinson-hyperlegible-next/files/atkinson-hyperlegible-next-latin-wght-normal.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  src: url("@fontsource-variable/archivo/files/archivo-latin-standard-normal.woff2") format("woff2-variations");
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 @font-face {
-  font-family: "Dela Gothic One";
+  font-family: "Fragment Mono";
   font-style: normal;
   font-display: swap;
   font-weight: 400;
-  src: url("@fontsource/dela-gothic-one/files/dela-gothic-one-latin-400-normal.woff2") format("woff2");
+  src: url("@fontsource/fragment-mono/files/fragment-mono-latin-400-normal.woff2") format("woff2");
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
-/* ---------- the building: constant across hours ---------- */
-:root {
-  --lamp-1: #ffdd92;
-  --lamp-2: #fbb352;
-  --lamp-3: #ee7d31;
-  --lit-ink: #2a1206;
-  --lit-ink-2: #47210a;
-  --fan-on: #fff1cc;
-  --fan-off: #c35a20;
-  --fan-now: #fff8e4;
-  --oxblood: #4a1610;
-  --oxblood-2: #2e0d09;
-  --sign-ink: #ffd488;
-  --sign-edge: #7a3322;
-  --sign-off: #c99a78;
-  --glass-1: #0d2519;
-  --glass-2: #07160f;
-  --glass-fan: #102e20;
-  --hot-1: #ff8a4a;
-  --hot-2: #e2501c;
-  --lamp-low-1: #a5763a;
-  --lamp-low-2: #6a4823;
-  --lamp-low-fan: #8d6233;
-  --lamp-wall: rgba(255, 165, 90, 0.13);
-  --lamp-sheen: rgba(255, 250, 230, 0.28);
-  --lit-rule: rgba(42, 18, 6, 0.3);
-  --slat: #24553e;
-  --cream: #f6ebd6;
-  --cream-2: #bfd0bb;
-  --cream-3: #a9baa7;
-  --cream-rule: rgba(246, 235, 214, 0.18);
-  --cream-tint: rgba(246, 235, 214, 0.08);
-  --on-green-work: #ffc773;
-  --on-green-ask: #ff9a62;
-  --on-green-focus: #ffe9be;
-  --shade-wall: rgba(0, 0, 0, 0.22);
-  --shade-hard: rgba(0, 0, 0, 0.25);
-  --shade-inset: rgba(0, 0, 0, 0.35);
-
-  /* The print's grain and woodblock streaks. Monochrome noise, drawn once; nothing here moves. */
-  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='420'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  --woodgrain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1400' height='300'%3E%3Cfilter id='w'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.004 .32' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1.1 -.28'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23w)'/%3E%3C/svg%3E");
-}
-
-/* ---------- Night ---------- */
+/* ---------- Dark: a graphite plate ---------- */
 :root,
 :root[data-theme="dark"] {
   color-scheme: dark;
-  /* Surfaces. --ground is the page; overlays are the only thing raised; --field is a recessed well. */
-  --ground: #0a1c14;
-  --ground-2: #0f281d;
-  --raised: #133224;
-  --field: #07160f;
-  --field-edge: #68977e;
-  --tint: rgba(246, 235, 214, 0.07);
-  --line: rgba(246, 235, 214, 0.13);
-  --line-strong: rgba(246, 235, 214, 0.24);
+  /* The plate. --ground is the page; --ground-2 is a hover or a raised overlay; --ground-3 is a recess cut into the plate. */
+  --ground: #232321;
+  --ground-2: #2d2d2a;
+  --ground-3: #1b1b19;
+  --raised: #2d2d2a;
+  --field: #1b1b19;
+  --tint: rgba(236, 233, 223, 0.07);
+  --line: #41413d;
+  --line-strong: #7c7a72;
   /* Text */
-  --ink: #f6ebd6;
-  --ink-2: #bac6af;
-  --ink-3: #a3b3a1;
-  /* The primary button is cream on a darker edge, and --accent-text is persimmon lamplight. */
-  --brand: #f6ebd6;
-  --brand-ink: #14241b;
-  --brand-edge: #bfa67e;
-  --accent-text: #ff8a4a;
-  --focus: #ffe9be;
-  /* Status text. One word on a row, no pills. */
-  --st-work: #ffc773;
-  --st-ask: #ff9a62;
-  --st-fix: #ead685;
-  --st-unc: #cad7c7;
-  --st-done: #b8d994;
-  --st-stop: #dba79c;
-  --warn: var(--st-ask);
-  --bad: #ff9c90;
-  --glyph-off: rgba(246, 235, 214, 0.17);
+  --ink: #ece9df;
+  --ink-2: #b3b0a5;
+  --ink-3: #98958a;
+  /* Keys. A key is lit from above and stands on an edge; --brand is the one dark or light master key. */
+  --key: #32322f;
+  --key-ink: #ece9df;
+  --key-top: #494945;
+  --key-bot: #0f0f0e;
+  --key-down: #1e1e1c;
+  --brand: #e6e2d7;
+  --brand-ink: #171613;
+  /* Links are ink and underlined: vermilion is not for decoration. */
+  --accent-text: #ece9df;
+  --focus: #ece9df;
+  /* The display window stays dark at both hours. */
+  --window: #0b0b0a;
+  --window-edge: #000000;
+  --window-rule: #262623;
+  --window-ink: #ede9dd;
+  --window-ink-2: #a29e91;
+  --dot-off: #262623;
+  /* One lamp colour. It only ever means the machine is live or something needs you. */
+  --led: #ff4310;
+  --signal: #ff4a17;
+  --signal-ink: #ff7b50;
+  --signal-on-window: #ff6a3c;
+  --warn: var(--signal-ink);
+  --bad: var(--signal-ink);
+  --shade: rgba(0, 0, 0, 0.45);
+  --shade-deep: rgba(0, 0, 0, 0.9);
+  --engrave: 0 -1px 0 rgba(0, 0, 0, 0.65);
+  /* Bead-blasted plate: a tile of noise drawn once. It is a background, not a blend over the page, so it costs nothing to keep. */
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.15' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1.4 -.2'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)' opacity='.05'/%3E%3C/svg%3E");
   /* A resume page: white paper in both themes, because it is a picture of a printed page. */
   --paper: #ffffff;
   --paper-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), 0 12px 36px rgba(0, 0, 0, 0.35);
-  /* Overlays: drawers, menus, the palette, toasts. */
-  --overlay-shadow: 0 16px 40px rgba(2, 8, 5, 0.6);
-  --scrim: rgba(2, 8, 5, 0.6);
-
-  /* The hour outside */
-  --sky-0: #040e0a;
-  --sky-1: #08201a;
-  --sky-2: #0f3326;
-  --sky-3: #1a4a34;
-  --horizon: #8a4a22;
-  --orb: #f5e6c4;
-  --orb-shade: #e5cfa2;
-  --dot: #ffe9bc;
-  --grain-op: 0.1;
-  --wood-op: 0.07;
-
-  /* The façade by night */
-  --spill: #ffb366;
-  --spill-op: 1;
-  --wall-light: rgba(255, 190, 120, 0.05);
-  --facade: #1a4631;
-  --facade-hi: #2a5e44;
-  --facade-lo: #123324;
-  --frame: #0c2318;
-  --idle-1: #0d2519;
-  --idle-2: #07160f;
-  --idle-sky: rgba(246, 235, 214, 0.05);
-  --drape: rgba(246, 235, 214, 0.045);
-  --idle-text: #a9baa7;
-  --idle-fan: #0f2c1f;
-  --idle-hub: #16392a;
+  --overlay-shadow: 0 14px 34px rgba(0, 0, 0, 0.55);
+  --scrim: rgba(0, 0, 0, 0.5);
 }
 
-/* ---------- Dawn ---------- */
+/* ---------- Light: bone aluminium ---------- */
 :root[data-theme="light"] {
   color-scheme: light;
-  --ground: #faf0df;
-  --ground-2: #f4e3ca;
-  --raised: #fff8ea;
-  --field: #fff8ea;
-  --field-edge: #9a7b55;
-  --tint: rgba(18, 36, 27, 0.07);
-  --line: rgba(18, 36, 27, 0.14);
-  --line-strong: rgba(18, 36, 27, 0.28);
-  --ink: #12241b;
-  --ink-2: #44543f;
-  --ink-3: #566450;
-  --brand: #12241b;
-  --brand-ink: #faf0df;
-  --brand-edge: #000000;
-  --accent-text: #ac3a0b;
-  --focus: #12241b;
-  --st-work: #8a4f00;
-  --st-ask: #a23206;
-  --st-fix: #6f5e0c;
-  --st-unc: #44574c;
-  --st-done: #256236;
-  --st-stop: #8b3c32;
-  --warn: var(--st-ask);
-  --bad: #a51f17;
-  --glyph-off: rgba(18, 36, 27, 0.16);
+  --ground: #e5e3db;
+  --ground-2: #f0eee8;
+  --ground-3: #d4d2c9;
+  --raised: #f0eee8;
+  --field: #d4d2c9;
+  --tint: rgba(22, 21, 19, 0.06);
+  --line: #b8b6ac;
+  --line-strong: #7f7d73;
+  --ink: #161513;
+  --ink-2: #47463f;
+  --ink-3: #55534b;
+  --key: #f8f7f3;
+  --key-ink: #161513;
+  --key-top: #ffffff;
+  --key-bot: #a3a197;
+  --key-down: #d6d4cb;
+  --brand: #161513;
+  --brand-ink: #f4f3ee;
+  --accent-text: #161513;
+  --focus: #171613;
+  --window: #100f0d;
+  --window-edge: #8f8d83;
+  --window-rule: #2a2925;
+  --window-ink: #ede9dd;
+  --window-ink-2: #a29e91;
+  --dot-off: #2b2a26;
+  --led: #ff4310;
+  --signal: #f03a06;
+  --signal-ink: #a32a00;
+  --signal-on-window: #ff6a3c;
+  --warn: var(--signal-ink);
+  --bad: var(--signal-ink);
+  --shade: rgba(0, 0, 0, 0.33);
+  --shade-deep: rgba(0, 0, 0, 0.9);
+  --engrave: 0 1px 0 rgba(255, 255, 255, 0.55);
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.15' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1.4 -.2'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)' opacity='.07'/%3E%3C/svg%3E");
   --paper: #ffffff;
   --paper-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), 0 12px 36px rgba(0, 0, 0, 0.35);
-  --overlay-shadow: 0 16px 36px rgba(70, 40, 10, 0.22);
-  --scrim: rgba(40, 28, 14, 0.28);
-
-  --sky-0: #e9e6cf;
-  --sky-1: #f6e2c2;
-  --sky-2: #f9cda0;
-  --sky-3: #f6ae78;
-  --horizon: #ee8a52;
-  --orb: #e4532a;
-  --orb-shade: #cf4420;
-  --dot: #17392a;
-  --grain-op: 0.16;
-  --wood-op: 0.14;
-
-  --spill: #f08a4a;
-  --spill-op: 0.55;
-  --wall-light: rgba(255, 170, 110, 0.09);
-  --facade: #1e4e38;
-  --facade-hi: #2f6a4d;
-  --facade-lo: #153a29;
-  --frame: #0f2a1d;
-  --idle-1: #1d4332;
-  --idle-2: #0c2519;
-  --idle-sky: rgba(249, 205, 160, 0.34);
-  --drape: rgba(255, 240, 215, 0.1);
-  --idle-text: #f6ebd6;
-  --idle-fan: #edb98a;
-  --idle-hub: #d59a6c;
+  --overlay-shadow: 0 14px 34px rgba(50, 46, 34, 0.28);
+  --scrim: rgba(30, 28, 22, 0.35);
 }
 
 /* ---------- scale ---------- */
 :root {
-  /* Type. Bricolage speaks (condensed at display sizes), Atkinson informs, Dela Gothic is only the wordmark, the sign and
-     big data numerals. Body 14.5, controls 13.5, nothing under 13. */
-  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
-  --font-text: "Atkinson Hyperlegible Next", ui-sans-serif, system-ui, sans-serif;
-  --font-mark: "Dela Gothic One", "Bricolage Grotesque", ui-sans-serif, sans-serif;
-  --font-code: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  --font-sans: var(--font-text);
+  /* --live is what is lit when the machine runs: vermilion only then, plain ink otherwise. The shell sets data-run from real
+     state, and it starts off, so nothing claims to be live before the first answer. */
+  --live: var(--ink);
 
+  --font-read: "Doto", var(--font-data);
+  --font-text: "Archivo", Arial, sans-serif;
+  --font-data: "Fragment Mono", ui-monospace, Menlo, monospace;
+
+  /* Doto is for readouts of 56px and up. Under about 20px, data is Fragment Mono and sentences are Archivo. */
   --text-meta: 13px;
-  --text-ui: 13.5px; /* tables and controls */
-  --text-body: 14.5px;
-  --text-sub: 17px; /* a company on a row, a small heading */
-  --text-title: 23px; /* a section */
-  --text-page: 40px; /* a page */
+  --text-ui: 14px;
+  --text-body: 14px;
+  --text-sub: 16px;
+  --text-title: 20px;
+  --text-page: 30px;
+  /* Engraved labels: wide Archivo. */
+  --wide: 125%;
 
-  --fv-page: "opsz" 96, "wdth" 84;
-  --fv-title: "opsz" 28, "wdth" 84;
-  --fv-sub: "opsz" 18, "wdth" 88;
-
-  /* Controls are soft; overlays are softer. */
-  --radius: 9px;
-  --radius-big: 14px;
+  --radius: 3px;
+  --radius-sm: 2px;
 
   /* A 4px grid. */
   --space-1: 4px;
@@ -245,57 +166,24 @@
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --dur: 140ms;
 
-  --page-w: 1680px;
+  --page-w: 1720px;
   --form-w: 1080px;
-  --gutter: 28px;
-  --bar-height: 64px;
-
-  /* ---------- Legacy names ----------
-     What unconverted pages and style.css still read, so they take the new look without being rewritten. Do not use these
-     in new code. Delete a line once `grep` finds nothing reading it; the page branches remove most of them. */
-  --surface: var(--ground);
-  --surface-hover: var(--tint);
-  --card: var(--ground);
-  --chip: var(--ground-2);
-  --bg: var(--ground);
-  --raised-2: var(--ground-2);
-  --hover: var(--tint);
-  --sunken: var(--field);
-  --line-2: var(--line-strong);
-  --text: var(--ink);
-  --text-2: var(--ink-2);
-  --text-3: var(--ink-3);
-  --brand-soft: var(--tint);
-  --ok: var(--st-done);
-  --ok-soft: transparent;
-  --info: var(--st-unc);
-  --info-soft: transparent;
-  --warn-soft: transparent;
-  --bad-soft: transparent;
-  --hold: var(--st-unc);
-  --fix: var(--st-fix);
-  --idle: var(--ink-3);
-  --run: var(--st-work);
-  --ask: var(--st-ask);
-  --glow: transparent;
-  --shadow: var(--overlay-shadow);
-  --text-micro: var(--text-meta);
-  --text-emphasis: var(--text-body);
-  --text-display: var(--text-title);
-  --radius-sm: var(--radius);
-  --radius-md: var(--radius);
-  --radius-lg: var(--radius-big);
-  --dur-fast: var(--dur);
-  --dur-slow: var(--dur);
-  --font: var(--font-text);
-  --mono: var(--font-code);
+  --gutter: 24px;
+  --rail: 96px;
+  --inset: 12px;
+  --bar-height: 90px;
+  /* How wide a coming-soon station is against a page's, on the tuning scale. */
+  --soon: 1;
+}
+:root[data-run="on"] {
+  --live: var(--signal);
 }
 
-/* The phone gutter. (style.css sets --gutter too; this file loads after it.) */
 @media (max-width: 899px) {
   :root {
     --gutter: 16px;
-    --bar-height: 56px;
-    --text-page: 32px;
+    --bar-height: 52px;
+    --text-page: 24px;
+    --text-title: 18px;
   }
 }

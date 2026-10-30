@@ -24,7 +24,8 @@ import { ago } from "./format";
 import { NeedsView } from "./needs";
 import { countQuestions } from "./questions";
 import { Shell } from "./shell/Shell";
-import { BrandMark } from "./shell/Brand";
+import { isLive, panelState, STATE_WORD } from "./identity/state";
+import { Wordmark } from "./shell/Brand";
 import { CommandPalette } from "./shell/CommandPalette";
 import { ComingSoon } from "./shell/ComingSoon";
 import { ALL_ITEMS, titleFor } from "./shell/nav";
@@ -194,6 +195,13 @@ function App() {
         : `${label} · AXIOM`;
   }, [snap.data, route]);
 
+  // Vermilion means live, and only real state turns it on: the needle, the lamp in the wordmark, every running lamp.
+  const panel = snap.data ? panelState(snap.data, lost) : null;
+  const lit = !!snap.data && !!panel && isLive(snap.data, panel);
+  useEffect(() => {
+    document.documentElement.dataset.run = lit ? "on" : "off";
+  }, [lit]);
+
   // ⌘K / Ctrl-K opens the command palette from anywhere once the workspace is up.
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -248,7 +256,7 @@ function App() {
     return (
       <div className="ax-screen">
         <div className="ax-boot">
-          <BrandMark size={20} />
+          <Wordmark width={120} />
           {snap.error &&
           !(snap.error instanceof ApiError && snap.error.status === 401) ? (
             <div className="ax-boot-error" role="alert">
@@ -275,7 +283,12 @@ function App() {
           go={go}
           needs={questions}
           who={who}
-          paletteOpen={palette}
+          readouts={{
+            overview: panel ? STATE_WORD[panel] : undefined,
+            jobs: workspace.counts.pipeline?.toLocaleString(),
+            applications: (workspace.counts.states.confirmed ?? 0).toLocaleString(),
+            profile: who.name,
+          }}
           onSearch={() => setPalette(true)}
           onSignOut={async () => {
             try {
@@ -302,7 +315,8 @@ function App() {
                   </button>
                 </div>
               )}
-              {lost && (
+              {/* Overview's sentence already says so, first. */}
+              {lost && route.view !== "batch" && (
                 <div className="ax-banner is-bad" role="status">
                   <span>
                     Connection lost{snap.error ? ` (${snap.error.message})` : ""}. Showing data from {ago(snap.updatedAt)};

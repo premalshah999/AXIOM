@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Upload } from "lucide-react";
 import { api, ApiError } from "./api";
-import { BrandMark } from "./shell/Brand";
+import { Wordmark } from "./shell/Brand";
 import { Facts } from "./setup-kit";
 import { Button, Check, External, Field, Input, Loading, Panel, Pill, Segmented } from "./ui/index";
 import {
@@ -503,8 +503,7 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
     <main className="ax-ob">
       <header className="ax-ob-top">
         <div className="ax-brand">
-          <BrandMark size={22} />
-          <span>AXIOM</span>
+          <Wordmark />
         </div>
         <span className="ax-hint ax-ob-count">
           Step {at + 1} of {STEPS.length}

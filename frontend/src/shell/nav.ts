@@ -22,7 +22,7 @@ export type NavItem = {
   route: Route;
   /** Which count to show, named so the nav does not know what it counts. */
   badge?: "needs";
-  /** What the top bar says, when that is not the page's name. */
+  /** What its station reads under the name, when nothing live does. */
   barLabel?: string;
   /** Lives under the quiet "Coming soon" label and opens a page of one sentence. */
   soon?: boolean;
@@ -48,7 +48,7 @@ export const NAV: NavSection[] = [
       {
         id: "axe",
         label: "Axe",
-        barLabel: "Axe, AI interviewer",
+        barLabel: "ai interviewer",
         icon: Mic,
         route: { view: "soon-axe" },
         soon: true,

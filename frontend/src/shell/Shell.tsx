@@ -4,9 +4,9 @@ import type { Route } from "../context";
 import type { Who } from "./AccountMenu";
 import { PageBoundary } from "./ErrorBoundary";
 import { titleFor } from "./nav";
-import { NavDrawer } from "./NavDrawer";
 import { useMedia } from "./prefs";
 import { TopBar } from "./TopBar";
+import { Tuner, type Readouts } from "./Tuner";
 
 const SlotContext = createContext<HTMLElement | null>(null);
 
@@ -21,7 +21,7 @@ export function TopActions({ children }: { children: ReactNode }) {
 }
 
 /**
- * The application frame (DESIGN.md, Shell): the top bar over main. Main is a column of the page title, banners, and ONE scroll
+ * The application frame (DESIGN.md, Shell): the top plate over main. Main is a column of the page title, banners, and ONE scroll
  * region (.ax-scroll) holding the page. The document itself never scrolls (base.css), so every scrolling bug has one place to
  * look. Wide tables scroll sideways inside themselves; drawers and menus own their scroll.
  */
@@ -29,31 +29,31 @@ export function Shell({
   route,
   go,
   needs,
+  readouts,
   who,
   onSignOut,
   onSearch,
-  paletteOpen,
   banners,
   children,
 }: {
   route: Route;
   go: (route: Route) => void;
   needs: number;
+  /** What each station on the tuning scale reads under its name. */
+  readouts: Readouts;
   who: Who;
   onSignOut: () => void;
   onSearch: () => void;
-  paletteOpen: boolean;
   /** One-line notices under the page title (setup unfinished, connection lost). */
   banners?: ReactNode;
   children: ReactNode;
 }) {
-  const drawer = useMedia("(max-width: 899px)");
-  const [open, setOpen] = useState(false);
+  const phone = useMedia("(max-width: 899px)");
   const [slot, setSlot] = useState<HTMLElement | null>(null);
   const [rowSlot, setRowSlot] = useState<HTMLElement | null>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const title = titleFor(route);
-  // Overview's sentence is its title; every other page names itself.
+  // Overview's panel is its title; every other page names itself.
   const titled = route.view !== "batch";
 
   // Leaving a page starts the next one at its top. Profile's and Settings' tabs are whole pages, so they reset too; the
@@ -62,20 +62,14 @@ export function Shell({
   useEffect(() => {
     scroll.current?.scrollTo({ top: 0 });
   }, [page]);
-  // Choosing a page closes the drawer; growing the window past 900px leaves no stale open state behind.
-  useEffect(() => setOpen(false), [route.view, route.tab, drawer]);
-  useEffect(() => {
-    if (paletteOpen) setOpen(false);
-  }, [paletteOpen]);
 
   return (
-    <SlotContext.Provider value={drawer ? rowSlot : slot}>
+    <SlotContext.Provider value={phone ? rowSlot : slot}>
       <a className="skip" href="#main">
         Skip to content
       </a>
       <div className="ax-app">
-        <TopBar route={route} go={go} needs={needs} who={who} drawer={drawer} menuOpen={open} onMenu={() => setOpen(true)} onSearch={onSearch} onSignOut={onSignOut} />
-        {drawer && <NavDrawer route={route} go={go} needs={needs} who={who} open={open} onClose={() => setOpen(false)} onSignOut={onSignOut} />}
+        <TopBar route={route} go={go} needs={needs} readouts={readouts} who={who} phone={phone} onSearch={onSearch} onSignOut={onSignOut} />
         <div className={"ax-main view-" + route.view}>
           <div className={"ax-head" + (titled ? "" : " is-untitled")}>
             <h1 className={"ax-top-title" + (titled ? "" : " sr-only")}>{title}</h1>
@@ -90,6 +84,7 @@ export function Shell({
             </main>
           </div>
         </div>
+        {phone && <Tuner route={route} go={go} needs={needs} readouts={readouts} phone />}
       </div>
     </SlotContext.Provider>
   );

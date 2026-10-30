@@ -5,7 +5,7 @@ import { useAction, useNotify } from "./hooks";
 import { guideLater } from "./guide";
 import type { Profile } from "./types";
 import { day } from "./format";
-import { BrandMark } from "./shell/Brand";
+import { Wordmark } from "./shell/Brand";
 import { Facts, FormGrid } from "./setup-kit";
 import { Button, Check, ConfirmButton, ErrorLine, Field, Loading, Panel, Pill, Segmented } from "./ui/index";
 
@@ -268,8 +268,7 @@ function AuthCard({
   const body = (
     <>
       <div className="ax-brand">
-        <BrandMark size={22} />
-        <span>AXIOM</span>
+        <Wordmark width={120} />
       </div>
       <h1>{title}</h1>
       {lead && <p className="ax-hint">{lead}</p>}
