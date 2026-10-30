@@ -387,7 +387,6 @@ function GmailConnection() {
         <Actions>
           <Button
             type="submit"
-            variant="primary"
             loading={pending === "gmail"}
             disabled={!form.app_password.trim() || (pending !== null && pending !== "gmail")}
           >

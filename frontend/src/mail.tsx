@@ -304,7 +304,6 @@ export function MailSettings() {
             <Actions>
               <Button
                 type="submit"
-                variant="primary"
                 loading={pending === "rule"}
                 disabled={pending !== null && pending !== "rule"}
               >

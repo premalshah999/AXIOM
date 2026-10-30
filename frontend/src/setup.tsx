@@ -334,6 +334,7 @@ function SystemStatus() {
       : "";
   return (
     <Panel title="Status">
+      <div className="ax-stack">
       {health.error && !health.data && <ErrorLine error={health.error} retry={health.refresh} />}
       <Facts
         items={[
@@ -404,6 +405,7 @@ function SystemStatus() {
           />
         </details>
       )}
+      </div>
     </Panel>
   );
 }
@@ -759,7 +761,7 @@ function CustomSourceList() {
           <Check checked={auto} onChange={setAuto} label="Rank new jobs and queue eligible matches" />
         </FormGrid>
         <Actions>
-          <Button type="submit" variant="primary" loading={pending === "add"} disabled={pending !== null && pending !== "add"}>
+          <Button type="submit" loading={pending === "add"} disabled={pending !== null && pending !== "add"}>
             Add source
           </Button>
         </Actions>

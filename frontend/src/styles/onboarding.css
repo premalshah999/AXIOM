@@ -123,6 +123,17 @@
   flex: none;
   max-width: 100%;
 }
+.ax-ob-list > .ax-check {
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--line);
+}
+.ax-ob input[type="range"] {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  accent-color: var(--ink);
+}
 .ax-ob-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -30,18 +30,29 @@ function Questionnaires() {
   );
 }
 
-/** A section that loads only when opened. Which ones are open is remembered while you move around. */
-function Fold({ id, title, note, children }: { id: string; title: string; note?: string; children: ReactNode }) {
-  const [openIds, setOpenIds] = useDraft<Record<string, boolean>>("knowledge-open", {});
-  const open = !!openIds[id];
+/** A section that loads only when opened. The page remembers which ones are open while you move around. */
+function Fold({
+  id,
+  title,
+  note,
+  open,
+  onToggle,
+  children,
+}: {
+  id: string;
+  title: string;
+  note?: string;
+  open: boolean;
+  onToggle: (open: boolean) => void;
+  children: ReactNode;
+}) {
   return (
     <details
       id={"knowledge-" + id}
       className="ax-panel ax-fold"
       open={open}
       onToggle={(e) => {
-        const now = e.currentTarget.open;
-        if (now !== open) setOpenIds((o) => ({ ...o, [id]: now }));
+        if (e.currentTarget.open !== open) onToggle(e.currentTarget.open);
       }}
     >
       <summary>
@@ -63,7 +74,8 @@ export function KnowledgeView() {
     store_version: number;
   }>("knowledge", (signal) => api("/v2/knowledge/summary", "GET", undefined, signal), 120000);
   const { route } = useWorkspace();
-  const [, setOpenIds] = useDraft<Record<string, boolean>>("knowledge-open", {});
+  const [openIds, setOpenIds] = useDraft<Record<string, boolean>>("knowledge-open", {});
+  const fold = (id: string) => ({ id, open: !!openIds[id], onToggle: (open: boolean) => setOpenIds((o) => ({ ...o, [id]: open })) });
   const full = !probe.unavailable;
   useEffect(() => {
     const target = FILTER_TARGET[route.filter || ""];
@@ -79,7 +91,7 @@ export function KnowledgeView() {
         <ProfileSettings sections={["policies"]} />
       </div>
       {full && (
-        <Fold id="summary" title="Fact summary">
+        <Fold {...fold("summary")} title="Fact summary">
           {probe.data ? (
             <div className="ax-sections">
               <Attestations />
@@ -93,17 +105,17 @@ export function KnowledgeView() {
         </Fold>
       )}
       {full && (
-        <Fold id="employers" title="Employer memory" note={probe.data ? String(probe.data.employers) : undefined}>
+        <Fold {...fold("employers")} title="Employer memory" note={probe.data ? String(probe.data.employers) : undefined}>
           <EmployerMemory />
         </Fold>
       )}
-      <Fold id="answers" title="Saved answers">
+      <Fold {...fold("answers")} title="Saved answers">
         <LearnedAnswers />
       </Fold>
-      <Fold id="facts-json" title="Edit facts as JSON">
+      <Fold {...fold("facts-json")} title="Edit facts as JSON">
         <ProfileSettings sections={["facts"]} />
       </Fold>
-      <Fold id="rules" title="When options don't match">
+      <Fold {...fold("rules")} title="When options don't match">
         <ProfileSettings sections={["rules"]} />
       </Fold>
     </div>

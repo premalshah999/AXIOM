@@ -22,7 +22,7 @@ import {
   Textarea,
   type PillTone,
 } from "./ui/index";
-import { SearchBox } from "./worktools";
+import { RowMenu, SearchBox } from "./worktools";
 
 // ---------- Saved answers ----------
 export function LearnedAnswers() {
@@ -88,7 +88,7 @@ export function LearnedAnswers() {
             )}
           </FormGrid>
           <Actions>
-            <Button type="submit" variant="primary" loading={pending === "add"} disabled={pending !== null && pending !== "add"}>
+            <Button type="submit" loading={pending === "add"} disabled={pending !== null && pending !== "add"}>
               Save answer
             </Button>
           </Actions>
@@ -316,48 +316,48 @@ export function AccountSettings() {
               {
                 key: "actions",
                 header: <span className="sr-only">Actions</span>,
+                pin: true,
                 cell: (a) => (
-                  <span className="ax-act">
-                    {a.can_retry_verification && (
-                      <Button
-                        size="sm"
-                        loading={pending === "verify" + a.id}
-                        disabled={pending !== null && pending !== "verify" + a.id}
-                        onClick={() =>
+                  <RowMenu
+                    label={`Actions for ${a.host}`}
+                    busy={pending !== null}
+                    actions={[
+                      ...(a.can_retry_verification
+                        ? [
+                            {
+                              id: "verify",
+                              label: "Retry verification",
+                              onSelect: () =>
+                                run(
+                                  "verify" + a.id,
+                                  async () => {
+                                    await api(`/accounts/${encodeURIComponent(a.id)}/verify`, "POST");
+                                    await summary.refresh();
+                                  },
+                                  "Verification restarted. The paused application asks the employer for a new email.",
+                                ),
+                            },
+                          ]
+                        : []),
+                      { id: "reset", label: "I reset it myself", onSelect: () => setResetting(a) },
+                      {
+                        id: "forget",
+                        label: "Forget",
+                        danger: true,
+                        confirm: "Forget this account? The next application signs in again or creates it.",
+                        confirmLabel: "Forget account",
+                        onSelect: () =>
                           run(
-                            "verify" + a.id,
+                            "forget" + a.id,
                             async () => {
-                              await api(`/accounts/${encodeURIComponent(a.id)}/verify`, "POST");
+                              await api("/accounts/" + encodeURIComponent(a.id), "DELETE");
                               await summary.refresh();
                             },
-                            "Verification restarted. The paused application asks the employer for a new email.",
-                          )
-                        }
-                      >
-                        Retry verification
-                      </Button>
-                    )}
-                    <Button size="sm" onClick={() => setResetting(a)}>
-                      I reset it myself
-                    </Button>
-                    <ConfirmButton
-                      label="Forget"
-                      variant="secondary"
-                      confirm="Forget account"
-                      note="The next application signs in again or creates the account."
-                      pending={pending === "forget" + a.id}
-                      onConfirm={() =>
-                        run(
-                          "forget" + a.id,
-                          async () => {
-                            await api("/accounts/" + encodeURIComponent(a.id), "DELETE");
-                            await summary.refresh();
-                          },
-                          "Account record forgotten.",
-                        )
-                      }
-                    />
-                  </span>
+                            "Account record forgotten.",
+                          ),
+                      },
+                    ]}
+                  />
                 ),
               },
             ]}
@@ -508,7 +508,7 @@ function SessionImport() {
             />
           </FormGrid>
           <Actions>
-            <Button type="submit" variant="primary" loading={pending === "session"} disabled={!file}>
+            <Button type="submit" loading={pending === "session"} disabled={!file}>
               Import session
             </Button>
           </Actions>

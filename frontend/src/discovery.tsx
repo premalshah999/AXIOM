@@ -8,7 +8,7 @@ import { Actions, FormGrid, SaveBar, SwitchRow } from "./setup-kit";
 import type { Board, BoardSettings } from "./types";
 import { ago, plural } from "./format";
 import { SearchBox } from "./worktools";
-import { Button, ConfirmButton, Empty, External, Input, Loading, Panel, Pill, Select, Table } from "./ui/index";
+import { Button, ConfirmButton, Empty, External, Input, Loading, Panel, Select, Table } from "./ui/index";
 
 // The page needs the settings and the boards, not the listings: one listing keeps the answer from carrying them all.
 const BOARD = "/job-board?include_sources=true&page=1&size=1";
@@ -242,6 +242,7 @@ function EmployerBoards({ board: b, reload }: { board: Board; reload: () => Prom
         />
       }
     >
+      <div className="ax-stack">
       <p className="ax-hint">
         Checked every {interval} {interval === 1 ? "hour" : "hours"}
         {health
@@ -301,12 +302,7 @@ function EmployerBoards({ board: b, reload }: { board: Board; reload: () => Prom
           />
         </FormGrid>
         <Actions>
-          <Button
-            type="submit"
-            variant="primary"
-            loading={pending === "add"}
-            disabled={pending !== null && pending !== "add"}
-          >
+          <Button type="submit" loading={pending === "add"} disabled={pending !== null && pending !== "add"}>
             Add board
           </Button>
         </Actions>
@@ -371,15 +367,7 @@ function EmployerBoards({ board: b, reload }: { board: Board; reload: () => Prom
                             : ""
                         }`
                       : `${plural(s.scan?.matched ?? 0, "match", "matches")} · ${plural(s.scan?.checked ?? 0, "posting")} checked`;
-                return failed && s.enabled && !checking ? (
-                  <span title={text}>
-                    <Pill tone="warn" dot>
-                      {text}
-                    </Pill>
-                  </span>
-                ) : (
-                  <span title={text}>{text}</span>
-                );
+                return <span title={text}>{text}</span>;
               },
             },
             {
@@ -395,6 +383,7 @@ function EmployerBoards({ board: b, reload }: { board: Board; reload: () => Prom
           ]}
         />
         <Pagination paging={paging} label="Board pages" />
+      </div>
       </div>
     </Panel>
   );
