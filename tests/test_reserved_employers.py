@@ -432,3 +432,39 @@ def test_the_owner_edits_the_reserved_employers(client, service):
     assert off["enabled"] is False and off["sections"] == []
     with service.db.session() as s:
         assert reserved.held(s) == {}
+
+
+def test_the_whole_table_match_is_kept_until_a_job_is_added_or_archived(service):
+    """A poll asked up to four times a tick, and lower(company) LIKE '%term%' over every job was 10% of the database's
+    active samples (2026-10-30). A new or archived job must still change the answer at once."""
+    from sqlalchemy import event
+
+    from jobpilot.db import Job
+    from jobpilot.reserved import KEY, matched
+
+    service.db.set_setting(KEY, {"enabled": True, "sections": [{"id": "mine", "label": "Mine", "employers": [{"name": "ExampleSoft"}]}]})
+    with service.db.exclusive() as s:
+        s.add(Job(id="a", identity="a", url="https://example.test/a", company="ExampleSoft", title="T", ats="custom", created_at="2026-10-30T01"))
+        s.add(Job(id="b", identity="b", url="https://example.test/b", company="Other", title="T", ats="custom", created_at="2026-10-30T02"))
+    seen = []
+    record = lambda conn, cursor, statement, *rest: seen.append(statement)
+    event.listen(service.db.engine, "before_cursor_execute", record)
+    try:
+        with service.db.session() as s:
+            first = matched(s)
+            assert set(first) == {"a"}
+            scans = len([q for q in seen if "lower(jobs.company)" in q])
+            assert scans == 1
+            first.clear()  # a caller's own copy
+            assert set(matched(s)) == {"a"}
+            assert len([q for q in seen if "lower(jobs.company)" in q]) == scans
+        with service.db.exclusive() as s:
+            s.add(Job(id="c", identity="c", url="https://example.test/c", company="ExampleSoft", title="T", ats="custom", created_at="2026-10-30T03"))
+        with service.db.session() as s:
+            assert set(matched(s)) == {"a", "c"}
+        with service.db.exclusive() as s:
+            s.get(Job, "a").status = "archived"
+        with service.db.session() as s:
+            assert set(matched(s)) == {"c"}
+    finally:
+        event.remove(service.db.engine, "before_cursor_execute", record)

@@ -170,3 +170,60 @@ async def test_retries_stop_after_three_runs_on_the_same_blocker_until_something
     await persist_stalled(service, 10, [], {})
     assert looping not in resumed
     assert {new_build, other_blocker} <= set(resumed)
+
+
+async def test_a_finished_runs_engine_is_read_from_its_packet_once(service, monkeypatch):
+    """Every tick read Run.packet["engine_version"] for every run of 14 days: Postgres decompressed each whole packet,
+    36% of its active samples (2026-10-30). Only stalled jobs' runs are read, and a finished run only once."""
+    from sqlalchemy import event, select
+
+    from jobpilot import autopilot
+
+    autopilot._RUN_ENGINES.clear()
+
+    async def fake_manage(service, job_id, action, **kwargs):
+        return {"run_id": "r"}
+
+    monkeypatch.setattr("jobpilot.job_control.manage", fake_manage)
+    stalled, _ = seed(service, "ExampleSoft", "Software Engineer", "workday", "waiting_browser", "did not advance", 21)
+    with service.db.exclusive() as s:
+        done = Job(identity="ok", url="https://example.test/ok", company="Done", title="Software Engineer", ats="workday", status="confirmed")
+        s.add(done)
+        s.flush()
+        s.add(Run(job_id=done.id, state="confirmed", mode="submit", packet={"engine_version": "v1"},
+                  created_at=datetime(2026, 10, 17, 1, tzinfo=UTC).isoformat(), finished_at=datetime(2026, 10, 17, 2, tzinfo=UTC).isoformat()))
+        for run in s.query(Run).filter(Run.job_id == stalled):
+            run.packet, run.finished_at = {"engine_version": "v1"}, run.created_at
+    monkeypatch.setattr("jobpilot.autopilot.datetime", type("D", (), {"now": staticmethod(lambda tz=None: datetime(2026, 10, 17, 5, tzinfo=UTC))}))
+    seen = []
+    record = lambda conn, cursor, statement, *rest: seen.append(statement)
+    event.listen(service.db.engine, "before_cursor_execute", record)
+    try:
+        await persist_stalled(service, 1, [], {})
+        engine_reads = lambda: [q for q in seen if "JSON_EXTRACT(runs.packet" in q and "runs.id IN" in q]
+        with service.db.session() as s:
+            one_stalled_run = len(list(s.scalars(select(Run.id).where(Run.job_id == stalled))))
+        assert len(engine_reads()) == 1 and len(autopilot._RUN_ENGINES) == one_stalled_run
+        seen.clear()
+        await persist_stalled(service, 1, [], {})
+        assert not engine_reads()
+    finally:
+        event.remove(service.db.engine, "before_cursor_execute", record)
+
+
+async def test_stalled_reads_run_off_the_browsers_loop(service, monkeypatch):
+    import threading
+
+    from jobpilot import autopilot
+
+    loop_thread = threading.current_thread()
+    used = []
+    real = autopilot.stalled_candidates
+
+    def spy(db, roles):
+        used.append(threading.current_thread())
+        return real(db, roles)
+
+    monkeypatch.setattr(autopilot, "stalled_candidates", spy)
+    await persist_stalled(service, 1, [], {})
+    assert used and used[0] is not loop_thread

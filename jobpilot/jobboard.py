@@ -855,12 +855,16 @@ def _field(job, name):
     return job[name] if isinstance(job, dict) else getattr(job, name)
 
 
-def board_snapshot(db, limit=500):
+def board_snapshot(db, limit=500, *, jobs_only=False):
+    """The fresh listings and, unless `jobs_only`, every source with its last scan and the autopilot's state.
+
+    `jobs_only`: the autopilot reads this up to three times a tick and uses only "jobs"; the sources and scans it read and
+    dropped were 22% of the executor threads' interpreter time and most of this function's garbage (py-spy 2026-10-30)."""
     cfg = settings(db)
     at = datetime.now(UTC)
     cutoff = (at - timedelta(hours=cfg.max_age_hours)).isoformat()
     seen_cutoff = (at - timedelta(hours=max(6, cfg.interval_hours * 2 + 1))).isoformat()
-    ids = managed_ids(db)
+    ids = set() if jobs_only else managed_ids(db)
     with db.session() as s:
         # Columns, not whole rows: every fresh posting's description was read (and dropped) on each board poll and
         # each autopilot tick (2026-10-22). Listing fields win over the job's, as before.
@@ -912,18 +916,21 @@ def board_snapshot(db, limit=500):
         if cfg.early_career_only:
             jobs = [j for j in jobs if j["career_level"] != "Experience unspecified"]
         jobs = [j for j in jobs if us_location(j["location"], j["country"])]
+        # Nearly every source is managed: read them all and keep the managed, without an IN list of 4,479 bound
+        # parameters (a 70 KB statement parsed per read) or an ORM object per row.
         sources = (
-            [record(x) for x in s.scalars(select(Source).where(Source.id.in_(ids)).order_by(Source.name))]
+            [dict(row._mapping) for row in s.execute(select(*Source.__table__.columns).order_by(Source.name)) if row.id in ids]
             if ids
             else []
         )
+    if jobs_only:
+        return {"settings": cfg.model_dump(), "jobs": jobs}
     # Thousands of employers must not cause thousands of SQL requests per UI refresh.
     with db.session() as s:
         scans = {
-            row.key.removeprefix("job_board_scan:"): row.value
-            for row in s.scalars(
-                select(Setting).where(Setting.key.in_(["job_board_scan:" + sid for sid in ids]))
-            )
+            key.removeprefix("job_board_scan:"): value
+            for key, value in s.execute(select(Setting.key, Setting.value).where(Setting.key.like("job_board_scan:%")))
+            if key.removeprefix("job_board_scan:") in ids
         }
     for source in sources:
         source["scan"] = scans.get(source["id"], {})

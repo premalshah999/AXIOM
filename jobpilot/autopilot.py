@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import re
+import sys
 import time
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -560,17 +561,47 @@ async def resubmit_unknown(service, slots):
     return queued
 
 
-async def persist_stalled(service, slots, roles, batch):
-    """Resume stalled, still-open applications into free slots: one per employer, one Eightfold at a time
-    (shared code sender), never a job waiting on the owner, dead, closed, out of budget or outside the
-    profile's roles. Oldest failure first. Returns how many were started."""
+# {run_id: engine_version} of finished runs. Written when a run is queued and never changed, yet every tick read it with
+# Run.packet[...] for every run of the last 14 days (6,271 of them), and Postgres decompressed each whole packet: 36% of
+# the database's active samples, from a function on the event loop (2026-10-30).
+_RUN_ENGINES: dict = {}
+_RUN_ENGINES_LIMIT = 200_000
+
+
+def run_engines(session, runs):
+    """{run id: engine version} of `runs` (rows with id and finished_at); only runs not seen finished touch a packet."""
+    wanted = {run.id: run.finished_at for run in runs}
+    found = {rid: _RUN_ENGINES[rid] for rid in wanted if rid in _RUN_ENGINES}
+    missing = [rid for rid in wanted if rid not in found]
+    for start in range(0, len(missing), 200):
+        if len(_RUN_ENGINES) > _RUN_ENGINES_LIMIT:
+            _RUN_ENGINES.clear()
+        for rid, engine in session.execute(
+            select(Run.id, Run.packet["engine_version"].as_string()).where(Run.id.in_(missing[start : start + 200]))
+        ):
+            found[rid] = engine
+            if wanted[rid]:
+                _RUN_ENGINES[rid] = sys.intern(engine) if engine else engine
+    return found
+
+
+def same_stall_streak(runs, engines):
+    """Runs in a row, ending with the newest, stopped on the same blocker under the same build. A retry with nothing new
+    repeats it."""
+    key, streak = None, 0
+    for run in runs:
+        current = (engines.get(run.id), stall_key(run.reason))
+        streak = streak + 1 if current == key else 1
+        key = current
+    return streak
+
+
+def stalled_candidates(db, roles):
+    """persist_stalled's reads, for a worker thread: every run of the last 14 days and every reserved employer's job were
+    read on the loop that drives the browsers. (created_at, job id, employer, ATS) oldest first, and who is busy."""
     from .db import Review
     from .features.discovery.roles import matching_role
-    from .job_control import manage
 
-    db = service.db
-    if slots <= 0:
-        return 0
     exclude = set((db.get_setting("ats_focus", {}) or {}).get("exclude", []))
     current = datetime.now(UTC)
     since, day = (current - timedelta(days=14)).isoformat(), (current - timedelta(hours=24)).isoformat()
@@ -586,16 +617,11 @@ async def persist_stalled(service, slots, roles, batch):
 
         from .recovery import backoff_seconds, nothing_sent_streak, repeats_unchanged
 
-        streaks, history = {}, {}
+        history = {}
         for run in s.execute(select(
             Run.id, Run.job_id, Run.state, Run.reason, Run.created_at, Run.finished_at,
-            Run.packet["engine_version"].as_string().label("engine"),
         ).where(Run.created_at >= since).order_by(Run.created_at)):
             latest[run.job_id] = run
-            # Runs in a row that ended on the same blocker under the same build: a retry with nothing new repeats it.
-            key = (run.engine, stall_key(run.reason))
-            streak = streaks.get(run.job_id)
-            streaks[run.job_id] = (key, streak[1] + 1 if streak and streak[0] == key else 1)
             history.setdefault(run.job_id, []).append(run)
             # Deployment interruptions and sender waits sent nothing; they are not one of the day's retries
             # (Goldman Sachs' fixed job sat out its quota on two interrupted runs, 2026-10-18).
@@ -607,16 +633,23 @@ async def persist_stalled(service, slots, roles, batch):
         # Reserved employers are not retried until the owner approves them (2026-10-27); queue admission would refuse
         # them anyway, every tick.
         waiting = held(s)
+
+        def open_stall(job_id, run):
+            return (
+                run.state in {"waiting_browser", "timed_out", "needs_review"}
+                and job_id not in waiting
+                and run.id not in asking
+                and not PERSIST_SKIP.search(run.reason or "")
+                and today.get(job_id, 0) < PERSIST_DAILY
+            )
+
+        stalled = {job_id: run for job_id, run in latest.items() if open_stall(job_id, run)}
+        engines = run_engines(s, [run for job_id in stalled for run in history[job_id]])
         candidates = []
-        for job_id, run in latest.items():
+        for job_id, run in stalled.items():
             runs_today = today.get(job_id, 0)
             if (
-                run.state not in {"waiting_browser", "timed_out", "needs_review"}
-                or job_id in waiting
-                or run.id in asking
-                or PERSIST_SKIP.search(run.reason or "")
-                or runs_today >= PERSIST_DAILY
-                or streaks[job_id][1] >= SAME_STALL_RUNS
+                same_stall_streak(history[job_id], engines) >= SAME_STALL_RUNS
                 or (run.finished_at or run.created_at) > (current - persist_wait(runs_today, run.reason)).isoformat()
             ):
                 continue
@@ -628,7 +661,7 @@ async def persist_stalled(service, slots, roles, batch):
                 current - timedelta(seconds=backoff_seconds(streak, 60, 1800))
             ).isoformat():
                 continue
-            if repeats_unchanged((r.reason, r.engine) for r in history[job_id]):
+            if repeats_unchanged((r.reason, engines.get(r.id)) for r in history[job_id]):
                 continue
             job = s.get(Job, job_id)
             control = s.get(Setting, "job_control:" + job_id)
@@ -650,6 +683,19 @@ async def persist_stalled(service, slots, roles, batch):
             except QueueBlocked:
                 continue
             candidates.append((run.created_at, job.id, (job.company or "").casefold(), job.ats))
+    return candidates, busy, eightfold_busy
+
+
+async def persist_stalled(service, slots, roles, batch):
+    """Resume stalled, still-open applications into free slots: one per employer, one Eightfold at a time
+    (shared code sender), never a job waiting on the owner, dead, closed, out of budget or outside the
+    profile's roles. Oldest failure first. Returns how many were started."""
+    from .job_control import manage
+
+    db = service.db
+    if slots <= 0:
+        return 0
+    candidates, busy, eightfold_busy = await asyncio.to_thread(stalled_candidates, db, roles)
     started = 0
     for _, job_id, employer, ats in sorted(candidates):
         if started >= slots:
@@ -894,7 +940,7 @@ async def tick(service):
         # The dashboard page limit must not exclude the planner's fresh jobs.
         # Full-board scans and readiness scoring are read-only; run them off the
         # event loop that every browser owner's short deadlines depend on.
-        board = await asyncio.to_thread(board_snapshot, db, limit=None)
+        board = await asyncio.to_thread(board_snapshot, db, limit=None, jobs_only=True)
         revision = admission_revision(db, cfg)
         if db.get_setting("title_readmit_revision", {}).get("revision") != revision:
             from .discovery import readmit_by_title
@@ -906,7 +952,7 @@ async def tick(service):
             count += await asyncio.to_thread(readmit_by_threshold, db)
             db.set_setting("title_readmit_revision", {"revision": revision, "readmitted": count, "at": now()})
             if count:
-                board = await asyncio.to_thread(board_snapshot, db, limit=None)
+                board = await asyncio.to_thread(board_snapshot, db, limit=None, jobs_only=True)
         from .execution_services import enabled as services_enabled, master_policy
 
         integrated = services_enabled(db)
@@ -1151,7 +1197,7 @@ async def tick(service):
                 else:
                     await rank_batch(db, service.config, unranked)
                 batch.pop("last_error", None)
-                fresh_board = (await asyncio.to_thread(board_snapshot, db, limit=None))["jobs"]
+                fresh_board = (await asyncio.to_thread(board_snapshot, db, limit=None, jobs_only=True))["jobs"]
                 board_ids.update(j["id"] for j in fresh_board)
                 jobs = [
                     j

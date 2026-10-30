@@ -27,6 +27,7 @@ The first section that lists the employer is the job's section (Apple and Google
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from functools import lru_cache
+from weakref import WeakKeyDictionary
 import json
 import re
 import unicodedata
@@ -342,6 +343,9 @@ def require_approval(session, job):
         )
 
 
+_MATCHED = WeakKeyDictionary()
+
+
 def matched(session, *where):
     """{job id: Match} for every non-demo, non-archived job at a reserved employer, approved or not.
 
@@ -350,6 +354,17 @@ def matched(session, *where):
     rules_ = matcher(session)
     if not rules_:
         return {}
+    mark = None
+    if not where:
+        # The whole-table answer changes only when a job is added or archived, and a poll asks up to four times a tick:
+        # lower(company) LIKE '%term%' over every job was 10% of the database's active samples (2026-10-30). Counting the
+        # jobs costs a fraction of matching them. Queue admission still checks each job itself (`require_approval`).
+        mark = (rules_, *session.execute(
+            select(func.count(), func.max(Job.created_at)).where(Job.demo.is_(False), Job.status != "archived")
+        ).one())
+        kept = _MATCHED.get(session.get_bind())
+        if kept and kept[0] == mark:
+            return dict(kept[1])
     company, url = func.lower(Job.company), func.lower(Job.url)
     candidates = [company.contains(term, autoescape=True) for term in rules_.company_terms]
     candidates += [url.contains(term, autoescape=True) for term in rules_.site_terms]
@@ -358,7 +373,10 @@ def matched(session, *where):
             Job.demo.is_(False), Job.status != "archived", or_(*candidates), *where
         )
     )
-    return {row.id: found for row in rows if (found := rules_(row.company, row.url))}
+    answer = {row.id: found for row in rows if (found := rules_(row.company, row.url))}
+    if mark:
+        _MATCHED[session.get_bind()] = (mark, answer)
+    return dict(answer)
 
 
 def approvals(session, job_ids=None):
