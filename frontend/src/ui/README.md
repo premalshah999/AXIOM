@@ -1,7 +1,6 @@
 # src/ui: shared primitives
 
-Tokens only, no literal colours. Class names are prefixed `ax-` so they never collide with the legacy rules in
-`src/style.css` while pages migrate. CSS lives in `src/styles/components.css`.
+Tokens only, no literal colours. CSS lives in `src/styles/components.css`. A page built from these looks right without writing CSS (see `frontend/DESIGN.md`).
 
 Import from the barrel, spelled `./ui/index` (a bare `./ui` resolves to the legacy `src/ui.tsx` beside this folder):
 
@@ -11,54 +10,43 @@ import { Button, Panel, Pill, Table } from "./ui/index";
 
 ## Page scaffolding (CSS, no component)
 
-- `<div className="ax-page">` is a page inside the shell: 1320px max width, 24px padding, 20px rhythm. A page that
-  uses it removes the legacy `.main` padding automatically. Put no title in the page: the top bar owns it.
-- `<div className="ax-page ax-page-fill">` is one table or list filling the region; pair with `<Table fill />` so the
-  table is the page's only vertical scroller and its head stays sticky.
-- `<div className="ax-toolbar">` is a wrapping row of filters; `ax-toolbar-end` pushes controls to the right.
-- Top-bar actions: `import { TopActions } from "./shell/Shell"` then `<TopActions><Button>Export</Button></TopActions>`.
+- `<div className="ax-page">` is a page inside the shell: a column with 32px rhythm. Width and gutters come from the frame. Put no title in the page: the top bar owns it.
+- `<div className="ax-page ax-page-fill">` is one table or list filling the region; pair with `<Table fill />` so the table is the page's only vertical scroller and its head stays sticky.
+- `<div className="ax-toolbar">` is a wrapping row of search and filters; `ax-toolbar-end` pushes controls to the right.
+- Beside the page title: `import { TopActions } from "./shell/Shell"` then `<TopActions><Button>Export</Button></TopActions>`. One or two things at most, never a primary on every page.
 
 ## Panel
-`{ title?, actions?, children, flush?, className?, id? }` A titled card. `actions` sits right of the header. `flush`
-removes body padding (for a table inside).
+`{ title?, actions?, children, flush?, className?, id? }` A plain titled section on a hairline. `actions` sits right of the title. `flush` is for a table inside, which brings its own rules.
 
 ## Pill
-`{ tone?: "neutral" | "brand" | "ok" | "warn" | "bad" | "info", children, title?, dot? }` A status chip.
+`{ tone?: "neutral" | "brand" | "ok" | "warn" | "bad" | "info", children, title? }` A status as muted text. Only `warn` and `bad` add a small dot and full-strength text. `dot` is accepted and adds nothing.
 
 ## Tabs
-- `RouteTabs { view, tabs: {id, label, count?}[], label, current? }` Underline tabs that are real links and set the
-  route `tab` for `view` (`go({ view, tab })`). Unknown `route.tab` falls back to the first tab.
+- `RouteTabs { view, tabs: {id, label, count?}[], label, current? }` Quiet text tabs that are real links and set the route `tab` for `view` (`go({ view, tab })`). Unknown `route.tab` falls back to the first tab. Profile's and Settings' lists are `PAGE_TABS` in `src/shell/nav.ts`.
 - `Tabs { tabs, value, onChange(id), label }` The same look for local state.
 
 ## Button
 `{ variant?: "primary" | "secondary" | "ghost" | "danger", size?: "sm" | "md", loading?, block?, icon?, ...button props }`
-`loading` disables the button and shows a spinner. Defaults to `type="button"`.
+`loading` disables the button and shows a spinner. Defaults to `type="button"`. At most one primary on a screen; a disabled primary goes neutral.
 
 ## Field
-`Input`, `Select`, `Textarea`: `{ label, hint?, error?, className?, ...native props }`. The label is wired with
-`htmlFor`; `hint` and `error` are linked through `aria-describedby`, and `error` sets `aria-invalid`.
-`Select` takes `<option>` children.
+`Input`, `Select`, `Textarea`: `{ label, hint?, error?, className?, ...native props }`. The label is wired with `htmlFor`; `hint` and `error` are linked through `aria-describedby`, and `error` sets `aria-invalid`. `Select` takes `<option>` children. Keep `hint` only where a person would otherwise get it wrong.
+
+Inside `FormGrid` (`src/setup-kit.tsx`) on a page, fields become one column of labelled rows divided by hairlines; in a drawer they stack. `.ax-control` on a bare control is not needed for the look: `base.css` draws `input`, `select`, `textarea`, checkboxes and radios.
 
 ## Table
-`Table<T> { columns, rows, rowKey(row), label, onRowClick?, selected?, onSelectedChange?, bulk?, loading?, error?, empty?, fill?, minWidth? }`
-- `columns: { key, header, cell(row), num?, width?, truncate?, wrap? }[]`. Rows are one line of 40px; `truncate` ends
-  a cell in an ellipsis at `width` (default 280px); `wrap` lets it grow.
-- Pass `onSelectedChange` (and `selected`, a `Set` of row keys) for the checkbox column and the bulk bar; `bulk` is
-  the buttons shown beside "N selected".
-- States: `loading` with no rows shows skeletons, no rows shows `empty` (use `<Empty/>`), `error` shows its node.
-- Scrolls sideways inside its own panel. Sticky head against the page needs `fill` (see Page scaffolding).
+`Table<T> { columns, rows, rowKey(row), label, onRowClick?, selected?, onSelectedChange?, bulk?, loading?, error?, empty?, fill?, minWidth?, canSelect?, busy?, rowLabel? }`
+- `columns: { key, header, cell(row), num?, width?, truncate?, min?, hideBelow?, pin?, wrap? }[]`. No outer card; rows are one line of 40px with hairline rules. `truncate` ends a cell in an ellipsis and gives it the room left over; `hideBelow` drops a column under 860px or 600px; `pin` keeps the row's actions in view; `wrap` lets a cell grow.
+- Pass `onSelectedChange` (and `selected`, a `Set` of row keys) for the checkbox column and the bulk line; `bulk` is the buttons beside "N selected". A row's checkbox shows on hover; select-all always shows.
+- `canSelect(row)` disables a row's checkbox and leaves it out of select-all; `busy` dims the rows while the next page or filter loads (the table keeps its size, so nothing jumps); `rowLabel(row)` names each row's checkbox.
+- States: `loading` with no rows shows skeleton lines, no rows shows `empty` (use `<Empty/>`), `error` shows its node.
+- Scrolls sideways inside itself. A sticky head against the page needs `fill`.
 
 ## Drawer
-`{ open, onClose, title, children, footer?, width? }` A right-side drawer with its own scroll, Esc and scrim to
-close, focus moved in and returned on close, Tab kept inside.
+`{ open, onClose, title, children, footer?, width? }` A right-side drawer with its own scroll, Esc and scrim to close, focus moved in and returned on close, Tab kept inside. Mark a field `data-autofocus` to focus it on open.
 
 ## Empty
-`{ title, hint?, action?, icon? }` One line of what is missing and the one action that fixes it.
+`{ title, hint?, action? }` One line of what is missing and the one action that fixes it, which reads as a link. `icon` is accepted and not drawn.
 
 ## Toast
-`ToastStack { toasts, onDismiss }` is rendered once by `main.tsx`. Pages raise toasts with `useNotify()` from
-`src/hooks.ts`: `notify("ok" | "info" | "error", "text")`. Errors announce as alerts and stay until dismissed.
-
-### Table extras (work pages)
-`canSelect(row)` disables a row's checkbox and leaves it out of select-all; `busy` dims the rows that are shown while the
-next page or filter loads (the table keeps its size, so nothing jumps); `rowLabel(row)` names each row's checkbox.
+`ToastStack { toasts, onDismiss }` is rendered once by `main.tsx`. Pages raise toasts with `useNotify()` from `src/hooks.ts`: `notify("ok" | "info" | "error", "text")`. Errors announce as alerts and stay until dismissed.
