@@ -1,286 +1,55 @@
-/* Questionnaire forms (src/qform.tsx): the module list, one question per row, supervisor and reference cards.
-   Tokens only; ax- prefixed. Shared by Setup › Knowledge and the setup guide. */
-
-/* ---------- controls ---------- */
-.ax-seg {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
-  background: var(--field);
-  max-width: 100%;
-}
-.ax-seg.is-block {
-  display: flex;
-}
-.ax-seg button {
-  min-height: 30px;
-  padding: 0 14px;
-  border: 0;
-  border-radius: calc(var(--radius-md) - 2px);
-  background: transparent;
-  color: var(--ink-2);
-  font: inherit;
-  font-size: var(--text-ui);
-  font-weight: 540;
-  cursor: pointer;
-  transition:
-    background var(--dur-fast) var(--ease),
-    color var(--dur-fast) var(--ease);
-}
-.ax-seg button:hover {
-  background: var(--surface-hover);
-  color: var(--ink);
-}
-.ax-seg button[aria-checked="true"] {
-  background: var(--brand);
-  color: var(--brand-ink);
-}
-.ax-seg button:focus-visible {
-  outline: 2px solid var(--brand);
-  outline-offset: 1px;
-}
-
-.ax-link {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--accent-text);
-  font: inherit;
-  font-size: var(--text-meta);
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.ax-link:hover {
-  color: var(--ink);
-}
-.ax-link:focus-visible {
-  outline: 2px solid var(--brand);
-  outline-offset: 2px;
-  border-radius: 2px;
-}
-
-.ax-meter {
-  flex: 1;
-  min-width: 72px;
-  height: 4px;
-  border-radius: 999px;
-  background: var(--chip);
-  overflow: hidden;
-}
-.ax-meter i {
-  display: block;
-  height: 100%;
-  border-radius: 999px;
-  background: var(--brand);
-  transition: width var(--dur-slow) var(--ease);
-}
-
-.ax-save {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  margin-left: auto;
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-  min-height: 20px;
-}
-.ax-save.is-saved {
-  color: var(--ok);
-}
-.ax-save.is-error {
-  color: var(--bad);
-}
-.ax-save-msg {
-  max-width: 46ch;
-}
-
-/* ---------- module list ---------- */
-.ax-modules {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--card);
-  overflow: hidden;
-}
-.ax-modules li + li {
-  border-top: 1px solid var(--line);
-}
-.ax-module {
-  width: 100%;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 200px auto;
-  align-items: center;
-  gap: var(--space-5);
-  padding: var(--space-4) var(--space-5);
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background var(--dur-fast) var(--ease);
-}
-.ax-module:hover {
-  background: var(--surface-hover);
-}
-.ax-module:focus-visible {
-  outline: 2px solid var(--brand);
-  outline-offset: -2px;
-}
-.ax-module-main {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-.ax-module-title {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-.ax-module-title strong {
-  font-size: var(--text-emphasis);
-  font-weight: 600;
-}
-.ax-module-purpose {
-  color: var(--ink-2);
-  font-size: var(--text-ui);
-  line-height: 1.45;
-  max-width: 64ch;
-}
-.ax-module-progress {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.ax-module-progress small {
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-}
-.ax-module-go {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--accent-text);
-  font-size: var(--text-ui);
-  font-weight: 560;
-  white-space: nowrap;
-}
-
-/* ---------- a module's form ---------- */
+/* Questionnaire forms (src/qform.tsx), in Profile › Knowledge and the setup guide. Plain rows on hairlines, tokens only. */
 .ax-qf {
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
+  gap: var(--space-6);
   min-width: 0;
 }
 .ax-qf-head {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: var(--space-2);
+  gap: var(--space-1);
 }
-.ax-qf-title {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-}
-.ax-qf-title h2 {
-  font-size: var(--text-display);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-.ax-qf-purpose {
-  max-width: 68ch;
-  color: var(--ink-2);
-  font-size: var(--text-ui);
-  line-height: 1.5;
-}
+/* Stays in view while the form scrolls, so "Saved" or a failed save with Retry is never off screen. */
 .ax-qf-progress {
   position: sticky;
-  top: var(--qf-sticky, 0px);
-  z-index: 4;
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  width: 100%;
-  padding: var(--space-2) 0;
-  background: var(--qf-bg, var(--ground));
-  border-bottom: 1px solid var(--line);
-}
-.ax-qf-progress .ax-meter {
-  flex: 0 1 220px;
-}
-.ax-qf-progress small {
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-  white-space: nowrap;
-}
-
-.ax-qf-bulk {
+  top: 0;
+  z-index: 3;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--brand-soft);
-  font-size: var(--text-ui);
-  color: var(--ink);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--ground);
 }
-.ax-qf-confirm {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  max-width: 68ch;
+.ax-save {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--ink-3);
+  font-size: var(--text-meta);
 }
-.ax-qf-confirm p {
-  line-height: 1.5;
+.ax-save.is-error {
+  color: var(--bad);
 }
-.ax-qf-confirm-actions {
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-}
-
 .ax-qf-section {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--card);
-  overflow: hidden;
 }
-.ax-qf-section h3 {
-  padding: var(--space-3) var(--space-5);
+.ax-qf-section > h3 {
+  padding-bottom: var(--space-2);
   border-bottom: 1px solid var(--line);
-  color: var(--ink-2);
-  font-size: var(--text-meta);
-  font-weight: 600;
-  letter-spacing: 0.01em;
 }
 .ax-qf-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
-  align-items: center;
-  gap: var(--space-5);
-  padding: var(--space-3) var(--space-5);
-  min-height: 56px;
-}
-.ax-qf-row + .ax-qf-row {
-  border-top: 1px solid var(--line);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 360px);
+  gap: var(--space-2) var(--space-6);
+  align-items: start;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--text-ui);
 }
 .ax-qf-text {
   display: flex;
@@ -288,41 +57,20 @@
   gap: 2px;
   min-width: 0;
 }
-.ax-qf-prompt {
-  font-size: var(--text-ui);
-  line-height: 1.4;
-  color: var(--ink);
-}
-.ax-qf-help {
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-  line-height: 1.45;
-}
 .ax-qf-control {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2) var(--space-3);
   min-width: 0;
 }
-.ax-qf-control .ax-qf-input {
-  flex: 1;
-  min-width: 0;
-}
-.ax-qf-suggest {
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-  white-space: nowrap;
-}
-
 .ax-qf-block {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
-  align-items: flex-start;
-}
-.ax-qf-block + .ax-qf-block {
-  border-top: 1px solid var(--line);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--text-ui);
 }
 .ax-qf-block-head {
   display: flex;
@@ -332,81 +80,34 @@
 .ax-qf-cards {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  width: 100%;
+  gap: var(--space-4);
 }
 .ax-qf-card {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  padding: var(--space-4);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface);
 }
 .ax-qf-card > header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
   flex-wrap: wrap;
-}
-.ax-qf-card-meta {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-3);
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-}
-.ax-qf-dim {
-  color: var(--ink-2);
+  gap: var(--space-2);
 }
 .ax-qf-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-3) var(--space-4);
+  gap: var(--space-3);
 }
 .ax-qf-contact {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
 }
-
-.ax-qf-gone {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-5);
-  border: 1px dashed var(--line-strong);
-  border-radius: var(--radius-lg);
-  color: var(--ink-2);
-  font-size: var(--text-ui);
-}
-
-@media (max-width: 720px) {
-  .ax-module {
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--space-3);
-    padding: var(--space-4);
-  }
-  .ax-qf-row {
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--space-2);
-    padding: var(--space-3) var(--space-4);
-  }
+@media (max-width: 700px) {
+  .ax-qf-row,
   .ax-qf-grid {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .ax-qf-block {
-    padding: var(--space-4);
-  }
-  .ax-qf-progress {
-    flex-wrap: wrap;
-  }
-  .ax-save {
-    margin-left: 0;
-    width: 100%;
   }
 }

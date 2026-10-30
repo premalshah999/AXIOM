@@ -1,11 +1,11 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-// style.css first: it is legacy and on its way out, so the design system wins every tie with it.
-import "./style.css";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/components.css";
 import "./styles/shell.css";
+// Check, Segmented, folds and the other small pieces of Profile, Settings and sign-in that the primitives share.
+import "./styles/setup.css";
 import { api, ApiError, SIGNED_OUT, signedOut } from "./api";
 import {
   canonical,

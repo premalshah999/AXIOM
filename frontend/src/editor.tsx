@@ -15,7 +15,9 @@ import {
 import { api, ApiError, signedOut } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useDraft, useNotify, usePoll } from "./hooks";
-import { Confirm, ErrorLine, Loading } from "./ui";
+import { Button, Check, ConfirmButton, Empty, ErrorLine, Input, Loading, Pill, Segmented, Select, Tabs, Textarea, type PillTone } from "./ui/index";
+import { Chips } from "./worktools";
+import "./styles/editor.css";
 
 type Bullet = {
   id: string;
@@ -129,57 +131,46 @@ export function ResumeEditor() {
     loaded.error instanceof ApiError &&
     loaded.error.status === 404 &&
     !artifact;
-  if (
-    isMaster &&
-    loaded.error instanceof ApiError &&
-    loaded.error.status === 404
-  )
+  if (isMaster && loaded.error instanceof ApiError && loaded.error.status === 404)
     return (
-      <div className="page">
-        <p className="muted">
-          There is no master to edit yet. Import it from your resume in Setup ›
-          Resumes first.
-        </p>
-        <button
-          className="btn sm"
-          onClick={() => go({ view: "setup", tab: "resumes" })}
-        >
-          Go to Resumes
-        </button>
+      <div className="ax-page ax-ed-state">
+        <Empty
+          title="There is no master to edit yet."
+          hint="Import it from your resume in Profile › Resumes first."
+          action={
+            <button type="button" className="ax-link" onClick={() => go({ view: "profile", tab: "resumes" })}>
+              Go to Resumes
+            </button>
+          }
+        />
       </div>
     );
   if (unavailable)
     return (
-      <div className="page">
-        <p className="muted">
-          The resume editor becomes available once the resume service is enabled
-          on this installation.
-        </p>
+      <div className="ax-page ax-ed-state">
+        <Empty title="The resume editor becomes available once the resume service is enabled on this installation." />
       </div>
     );
   if (!loaded.data || !meta.data)
     return loaded.error || meta.error ? (
-      <div className="page">
+      <div className="ax-page ax-ed-state">
         <ErrorLine error={loaded.error || meta.error} retry={loaded.refresh} />
       </div>
     ) : (
-      <Loading label="Opening the editor…" />
+      <div className="ax-ed-state">
+        <Loading label="Opening the editor…" />
+      </div>
     );
   if (!Array.isArray(loaded.data.doc?.sections) || !loaded.data.style || !Array.isArray(meta.data.templates))
     return (
-      <div className="page">
-        <p className="muted">
-          The editor got an answer it could not read.{" "}
-          <button
-            className="link"
-            onClick={() => {
-              loaded.refresh();
-              meta.refresh();
-            }}
-          >
-            Try again
-          </button>
-        </p>
+      <div className="ax-page ax-ed-state">
+        <ErrorLine
+          error="The editor got an answer it could not read."
+          retry={() => {
+            loaded.refresh();
+            meta.refresh();
+          }}
+        />
       </div>
     );
   return (
@@ -187,7 +178,7 @@ export function ResumeEditor() {
       key={isMaster ? "master:" + loaded.data.master?.id : artifact || "new"}
       initial={loaded.data}
       meta={meta.data}
-      back={() => go({ view: "setup", tab: "resumes" })}
+      back={() => go({ view: "profile", tab: "resumes" })}
       reload={loaded.refresh}
     />
   );
@@ -317,65 +308,63 @@ function Workbench({
     setDraft((d) => ({ ...d, doc: fn(structuredClone(d.doc)) }));
   const setStyle = (patch: Partial<Style>) =>
     setDraft((d) => ({ ...d, style: { ...d.style, ...patch } }));
-  const status = problem
+  const status: { tone: PillTone; text: string } = problem
     ? {
-        tone: "fix",
+        tone: "bad",
         text: errors.length
           ? `${errors.length} error${errors.length === 1 ? "" : "s"}; showing the last good preview`
           : problem,
       }
     : compiling
-      ? { tone: "run", text: "Updating preview…" }
+      ? { tone: "neutral", text: "Updating preview…" }
       : preview
         ? {
-            tone: preview.pages > 1 ? "ask" : "ok",
+            tone: preview.pages > 1 ? "warn" : "neutral",
             text: `${preview.pages} page${preview.pages === 1 ? "" : "s"} · built in ${preview.ms} ms`,
           }
-        : { tone: "idle", text: "Building preview…" };
+        : { tone: "neutral", text: "Building preview…" };
   const fileName =
     (draft.doc.name || "Resume").replace(/\s+/g, "_") + "_Resume.pdf";
 
   return (
-    <div className="editor">
-      <header className="editor-bar">
-        <button className="btn sm quiet" onClick={back}>
-          <ArrowLeft size={15} aria-hidden="true" /> Resumes
-        </button>
-        <div className="editor-title">
-          <h1>{master ? "Master resume" : "Resume editor"}</h1>
-          {master && (
-            <span className="muted sm">
-              {master.status === "approved" ? "Approved" : "Draft"} ·{" "}
-              {(
+    <div className="ax-ed">
+      <header className="ax-ed-bar">
+        <Button variant="ghost" size="sm" icon={<ArrowLeft size={15} aria-hidden="true" />} onClick={back}>
+          Resumes
+        </Button>
+        {(master || draft.job) && (
+          <span className="ax-hint">
+            {master &&
+              `Master resume · ${master.status === "approved" ? "Approved" : "Draft"} · ${(
                 Math.floor((master.verification.coverage ?? 0) * 1000) / 10
-              ).toString()}
-              % of your original words
-            </span>
-          )}
-          {draft.job && (
-            <button className="link sm" onClick={() => openJob(draft.job!)}>
-              For a specific job
-            </button>
-          )}
-        </div>
-        <span
-          className={"editor-status tone-" + status.tone}
-          role="status"
-          aria-live="polite"
-        >
-          <i aria-hidden="true" />
-          {status.text}
+              ).toString()}% of your original words`}
+            {draft.job && (
+              <>
+                {master ? " · " : ""}
+                <button type="button" className="ax-link" onClick={() => openJob(draft.job!)}>
+                  For a specific job
+                </button>
+              </>
+            )}
+          </span>
+        )}
+        <span className="ax-ed-status" role="status" aria-live="polite">
+          <Pill tone={status.tone} dot={status.tone !== "neutral"}>
+            {status.text}
+          </Pill>
         </span>
-        <div className="editor-actions">
+        <div className="ax-ed-actions">
           {preview && (
-            <a className="btn sm" href={preview.url} download={fileName}>
+            <a className="ax-btn is-sm" href={preview.url} download={fileName}>
               <Download size={14} aria-hidden="true" /> PDF
             </a>
           )}
           {master ? (
-            <button
-              className="btn sm primary"
-              disabled={pending !== null || !!problem || draft.latex !== null}
+            <Button
+              variant="primary"
+              size="sm"
+              loading={pending !== null}
+              disabled={!!problem || draft.latex !== null}
               title={
                 draft.latex !== null
                   ? "A hand-edited source can't become the master. Reset the source to save."
@@ -403,12 +392,14 @@ function Workbench({
                 )
               }
             >
-              {pending ? "Saving…" : "Save draft"}
-            </button>
+              Save draft
+            </Button>
           ) : (
-            <button
-              className="btn sm primary"
-              disabled={pending !== null || !!problem}
+            <Button
+              variant="primary"
+              size="sm"
+              loading={pending !== null}
+              disabled={!!problem}
               onClick={() =>
                 run(
                   "save",
@@ -438,72 +429,45 @@ function Workbench({
                 )
               }
             >
-              {pending ? "Saving…" : "Save version"}
-            </button>
+              Save version
+            </Button>
           )}
         </div>
       </header>
-      <div className="editor-grid">
-        <aside className="editor-panel" aria-label="Edit resume">
-          <nav className="tabs sub" aria-label="Editor views">
-            {[
-              ["content", "Content"],
-              ["layout", "Layout"],
-              ["source", "Source"],
-            ].map(([id, label]) => (
-              <a
-                key={id}
-                href={"#" + id}
-                aria-current={tab === id ? "page" : undefined}
-                onClick={(e) => {
-                  e.preventDefault();
-                  setTab(id);
-                }}
-              >
-                {label}
-                {id === "source" && draft.latex !== null && (
-                  <span className="tab-flag" title="Edited by hand">
-                    •
-                  </span>
-                )}
-              </a>
-            ))}
+      <div className="ax-ed-grid">
+        <aside className="ax-ed-panel" aria-label="Edit resume">
+          <div className="ax-ed-tabs">
+            <Tabs
+              label="Editor views"
+              value={tab}
+              onChange={setTab}
+              tabs={[
+                { id: "content", label: "Content" },
+                { id: "layout", label: "Layout" },
+                { id: "source", label: draft.latex !== null ? "Source (edited)" : "Source" },
+              ]}
+            />
             {/* Below 960px the preview sits under the form: this jumps to it. */}
-            <a
-              className="editor-jump"
-              href="#preview"
-              onClick={(e) => {
-                e.preventDefault();
-                document.querySelector(".editor-preview")?.scrollIntoView({ block: "start" });
-              }}
+            <button
+              type="button"
+              className="ax-link ax-ed-jump"
+              onClick={() => document.querySelector(".ax-ed-preview")?.scrollIntoView({ block: "start" })}
             >
               Preview
-            </a>
-          </nav>
-          <div className="editor-scroll">
+            </button>
+          </div>
+          <div className="ax-ed-scroll">
             {draft.latex !== null && tab !== "source" ? (
-              <div className="inline-warn">
-                You are editing the source by hand, so content and layout
-                controls are paused.{" "}
-                <button className="link" onClick={() => setTab("source")}>
+              <div className="ax-notice is-warn">
+                <span>You are editing the source by hand, so content and layout controls are paused.</span>
+                <button type="button" className="ax-link" onClick={() => setTab("source")}>
                   Open source
                 </button>
               </div>
             ) : null}
-            {tab === "content" && (
-              <ContentPanel
-                doc={draft.doc}
-                setDoc={setDoc}
-                disabled={draft.latex !== null}
-              />
-            )}
+            {tab === "content" && <ContentPanel doc={draft.doc} setDoc={setDoc} disabled={draft.latex !== null} />}
             {tab === "layout" && (
-              <LayoutPanel
-                style={draft.style}
-                setStyle={setStyle}
-                meta={meta}
-                disabled={draft.latex !== null}
-              />
+              <LayoutPanel style={draft.style} setStyle={setStyle} meta={meta} disabled={draft.latex !== null} />
             )}
             {tab === "source" && (
               <SourcePanel
@@ -515,35 +479,20 @@ function Workbench({
                 notify={notify}
               />
             )}
-            {dirty && (
-              <p className="muted sm editor-note">
-                Unsaved changes are kept while you move around.
-                Saving creates a new version; the original stays.
-              </p>
-            )}
+            {dirty && <p className="ax-hint">Unsaved changes are kept while you move around. Saving creates a new version; the original stays.</p>}
           </div>
         </aside>
-        <section
-          className={"editor-preview" + (problem ? " stale" : "")}
-          aria-label="Preview"
-        >
+        <section className={"ax-ed-preview" + (problem ? " is-stale" : "")} aria-label="Preview">
           {master && (
-            <div className="preview-switch" role="group" aria-label="Show">
-              <button
-                className="chip"
-                aria-pressed={!showOriginal}
-                onClick={() => setShowOriginal(false)}
-              >
-                This copy
-              </button>
-              <button
-                className="chip"
-                aria-pressed={showOriginal}
-                onClick={() => setShowOriginal(true)}
-              >
-                Your original
-              </button>
-            </div>
+            <Chips
+              label="Show"
+              value={showOriginal ? "original" : "copy"}
+              onChange={(id) => setShowOriginal(id === "original")}
+              items={[
+                { id: "copy", label: "This copy" },
+                { id: "original", label: "Your original" },
+              ]}
+            />
           )}
           {showOriginal ? (
             original ? (
@@ -557,24 +506,19 @@ function Workbench({
             <Loading label="Building the first preview…" />
           )}
           {problem && !showOriginal && (
-            <div className="editor-errors" role="alert">
+            <div className="ax-notice is-bad ax-ed-errors" role="alert">
               <strong>The preview could not be updated.</strong>
               <ul>
-                {(errors.length ? errors : [{ line: null, message: problem }])
-                  .slice(0, 5)
-                  .map((e, i) => (
-                    <li key={i}>
-                      {e.line ? (
-                        <button
-                          className="link"
-                          onClick={() => setTab("source")}
-                        >
-                          Line {e.line}
-                        </button>
-                      ) : null}{" "}
-                      {e.message}
-                    </li>
-                  ))}
+                {(errors.length ? errors : [{ line: null, message: problem }]).slice(0, 5).map((e, i) => (
+                  <li key={i}>
+                    {e.line ? (
+                      <button type="button" className="ax-link" onClick={() => setTab("source")}>
+                        Line {e.line}
+                      </button>
+                    ) : null}{" "}
+                    {e.message}
+                  </li>
+                ))}
               </ul>
             </div>
           )}
@@ -603,203 +547,117 @@ function ContentPanel({
   disabled: boolean;
 }) {
   return (
-    <fieldset className="editor-fields" disabled={disabled}>
-      <section className="editor-group">
+    <fieldset className="ax-ed-fields" disabled={disabled}>
+      <section className="ax-ed-group">
         <h2>Header</h2>
-        <label className="field">
-          <span className="field-label">Name</span>
-          <input
-            value={doc.name}
-            onChange={(e) => setDoc((d) => ({ ...d, name: e.target.value }))}
-          />
-        </label>
-        <label className="field">
-          <span className="field-label">Contact line</span>
-          <input
-            value={doc.contact.join(" | ")}
-            onChange={(e) =>
-              setDoc((d) => ({
-                ...d,
-                contact: e.target.value.split("|").map((x) => x.trim()),
-              }))
-            }
-          />
-          <small className="field-hint">
-            Separate items with a vertical bar.
-          </small>
-        </label>
+        <Input label="Name" value={doc.name} onChange={(e) => setDoc((d) => ({ ...d, name: e.target.value }))} />
+        <Input
+          label="Contact line"
+          hint="Separate items with a vertical bar."
+          value={doc.contact.join(" | ")}
+          onChange={(e) =>
+            setDoc((d) => ({
+              ...d,
+              contact: e.target.value.split("|").map((x) => x.trim()),
+            }))
+          }
+        />
       </section>
       {doc.sections.map((section, si) => (
-        <section
-          key={section.id}
-          className={"editor-group" + (section.include ? "" : " off")}
-        >
-          <div className="editor-group-head">
+        <section key={section.id} className={"ax-ed-group" + (section.include ? "" : " is-off")}>
+          <div className="ax-ed-group-head">
             <input
-              className="editor-section-title"
+              className="ax-ed-title"
               aria-label="Section title"
               value={section.title}
-              onChange={(e) =>
-                setDoc((d) => ((d.sections[si].title = e.target.value), d))
-              }
+              onChange={(e) => setDoc((d) => ((d.sections[si].title = e.target.value), d))}
             />
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={section.include}
-                onChange={(e) =>
-                  setDoc(
-                    (d) => ((d.sections[si].include = e.target.checked), d),
-                  )
-                }
-              />
-              <span>Show</span>
-            </label>
-            <span className="row-actions">
+            <Check
+              label="Show"
+              checked={section.include}
+              onChange={(on) => setDoc((d) => ((d.sections[si].include = on), d))}
+            />
+            <span className="ax-act">
               <button
                 type="button"
-                className="icon-btn"
+                className="ax-icon-btn"
                 aria-label={`Move ${section.title} up`}
-                onClick={() =>
-                  setDoc((d) => ({ ...d, sections: move(d.sections, si, -1) }))
-                }
+                onClick={() => setDoc((d) => ({ ...d, sections: move(d.sections, si, -1) }))}
               >
                 <ArrowUp size={14} />
               </button>
               <button
                 type="button"
-                className="icon-btn"
+                className="ax-icon-btn"
                 aria-label={`Move ${section.title} down`}
-                onClick={() =>
-                  setDoc((d) => ({ ...d, sections: move(d.sections, si, 1) }))
-                }
+                onClick={() => setDoc((d) => ({ ...d, sections: move(d.sections, si, 1) }))}
               >
                 <ArrowDown size={14} />
               </button>
             </span>
           </div>
           {section.kind === "skills" || section.kind === "text" ? (
-            <label className="field">
-              <span className="field-label">Lines</span>
-              <textarea
-                rows={3}
-                value={section.text}
-                onChange={(e) =>
-                  setDoc((d) => ((d.sections[si].text = e.target.value), d))
-                }
-              />
-              <small className="field-hint">
-                “Label: items” lines get a bold label.
-              </small>
-            </label>
+            <Textarea
+              label="Lines"
+              hint="“Label: items” lines get a bold label."
+              rows={3}
+              value={section.text}
+              onChange={(e) => setDoc((d) => ((d.sections[si].text = e.target.value), d))}
+            />
           ) : (
             section.entries.map((entry, ei) => (
-              <details
-                key={entry.id}
-                className={"editor-entry" + (entry.include ? "" : " off")}
-                open={ei === 0}
-              >
+              <details key={entry.id} className={"ax-fold ax-entry" + (entry.include ? "" : " is-off")} open={ei === 0}>
                 <summary>
-                  <span>
-                    <strong>{entry.heading || "Untitled"}</strong>
-                    {entry.subheading && (
-                      <span className="muted"> · {entry.subheading}</span>
-                    )}
-                  </span>
-                  <span className="muted sm">
-                    {entry.bullets.filter((b) => b.include).length}/
-                    {entry.bullets.length} bullets
+                  <strong>{entry.heading || "Untitled"}</strong>
+                  {entry.subheading && <span className="ax-hint"> {entry.subheading}</span>}
+                  <span className="ax-hint">
+                    {entry.bullets.filter((b) => b.include).length}/{entry.bullets.length} bullets
                   </span>
                 </summary>
-                <div className="editor-entry-body">
-                  <label className="check">
-                    <input
-                      type="checkbox"
-                      checked={entry.include}
-                      onChange={(e) =>
-                        setDoc(
-                          (d) => (
-                            (d.sections[si].entries[ei].include =
-                              e.target.checked),
-                            d
-                          ),
-                        )
-                      }
+                <div className="ax-ed-entry">
+                  <Check
+                    label="Show this entry"
+                    checked={entry.include}
+                    onChange={(on) => setDoc((d) => ((d.sections[si].entries[ei].include = on), d))}
+                  />
+                  {(
+                    [
+                      ["heading", "Heading"],
+                      ["subheading", "Subheading"],
+                      ["dates", "Dates"],
+                      ["location", "Location"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <Input
+                      key={key}
+                      label={label}
+                      value={entry[key]}
+                      onChange={(e) => setDoc((d) => ((d.sections[si].entries[ei][key] = e.target.value), d))}
                     />
-                    <span>Show this entry</span>
-                  </label>
-                  <div className="form-grid">
-                    {(
-                      [
-                        ["heading", "Heading"],
-                        ["subheading", "Subheading"],
-                        ["dates", "Dates"],
-                        ["location", "Location"],
-                      ] as const
-                    ).map(([key, label]) => (
-                      <label className="field" key={key}>
-                        <span className="field-label">{label}</span>
-                        <input
-                          value={entry[key]}
-                          onChange={(e) =>
-                            setDoc(
-                              (d) => (
-                                (d.sections[si].entries[ei][key] =
-                                  e.target.value),
-                                d
-                              ),
-                            )
-                          }
-                        />
-                      </label>
-                    ))}
-                  </div>
+                  ))}
                   {entry.bullets.map((b, bi) => (
-                    <div
-                      key={b.id}
-                      className={"editor-bullet" + (b.include ? "" : " off")}
-                    >
+                    <div key={b.id} className={"ax-ed-bullet" + (b.include ? "" : " is-off")}>
                       <input
                         type="checkbox"
                         aria-label="Include bullet"
                         checked={b.include}
-                        onChange={(e) =>
-                          setDoc(
-                            (d) => (
-                              (d.sections[si].entries[ei].bullets[bi].include =
-                                e.target.checked),
-                              d
-                            ),
-                          )
-                        }
+                        onChange={(e) => setDoc((d) => ((d.sections[si].entries[ei].bullets[bi].include = e.target.checked), d))}
                       />
                       <textarea
                         aria-label="Bullet text"
                         rows={2}
                         value={b.text}
-                        onChange={(e) =>
-                          setDoc(
-                            (d) => (
-                              (d.sections[si].entries[ei].bullets[bi].text =
-                                e.target.value),
-                              d
-                            ),
-                          )
-                        }
+                        onChange={(e) => setDoc((d) => ((d.sections[si].entries[ei].bullets[bi].text = e.target.value), d))}
                       />
-                      <span className="editor-bullet-tools">
+                      <span className="ax-ed-tools">
                         <button
                           type="button"
-                          className="icon-btn"
+                          className="ax-icon-btn"
                           aria-label="Move bullet up"
                           onClick={() =>
                             setDoc(
                               (d) => (
-                                (d.sections[si].entries[ei].bullets = move(
-                                  d.sections[si].entries[ei].bullets,
-                                  bi,
-                                  -1,
-                                )),
+                                (d.sections[si].entries[ei].bullets = move(d.sections[si].entries[ei].bullets, bi, -1)),
                                 d
                               ),
                             )
@@ -809,16 +667,12 @@ function ContentPanel({
                         </button>
                         <button
                           type="button"
-                          className="icon-btn"
+                          className="ax-icon-btn"
                           aria-label="Move bullet down"
                           onClick={() =>
                             setDoc(
                               (d) => (
-                                (d.sections[si].entries[ei].bullets = move(
-                                  d.sections[si].entries[ei].bullets,
-                                  bi,
-                                  1,
-                                )),
+                                (d.sections[si].entries[ei].bullets = move(d.sections[si].entries[ei].bullets, bi, 1)),
                                 d
                               ),
                             )
@@ -829,18 +683,10 @@ function ContentPanel({
                         {b.source_text && b.text !== b.source_text ? (
                           <button
                             type="button"
-                            className="icon-btn"
+                            className="ax-icon-btn"
                             aria-label="Restore your original wording"
                             title="Restore your original wording"
-                            onClick={() =>
-                              setDoc(
-                                (d) => (
-                                  (d.sections[si].entries[ei].bullets[bi].text =
-                                    b.source_text),
-                                  d
-                                ),
-                              )
-                            }
+                            onClick={() => setDoc((d) => ((d.sections[si].entries[ei].bullets[bi].text = b.source_text), d))}
                           >
                             <RotateCcw size={13} />
                           </button>
@@ -848,15 +694,12 @@ function ContentPanel({
                         {!b.unit_id && (
                           <button
                             type="button"
-                            className="icon-btn"
+                            className="ax-icon-btn"
                             aria-label="Delete bullet"
                             onClick={() =>
                               setDoc(
                                 (d) => (
-                                  (d.sections[si].entries[ei].bullets =
-                                    d.sections[si].entries[ei].bullets.filter(
-                                      (_, k) => k !== bi,
-                                    )),
+                                  (d.sections[si].entries[ei].bullets = d.sections[si].entries[ei].bullets.filter((_, k) => k !== bi)),
                                   d
                                 ),
                               )
@@ -868,34 +711,33 @@ function ContentPanel({
                       </span>
                     </div>
                   ))}
-                  <button
-                    type="button"
-                    className="btn sm quiet"
-                    onClick={() =>
-                      setDoc((d) => {
-                        d.sections[si].entries[ei].bullets.push({
-                          id: "new-" + Date.now(),
-                          text: "",
-                          unit_id: null,
-                          source_text: "",
-                          include: true,
-                        });
-                        return d;
-                      })
-                    }
-                  >
-                    <Plus size={14} aria-hidden="true" /> Add bullet
-                  </button>
+                  <div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={<Plus size={14} aria-hidden="true" />}
+                      onClick={() =>
+                        setDoc((d) => {
+                          d.sections[si].entries[ei].bullets.push({
+                            id: "new-" + Date.now(),
+                            text: "",
+                            unit_id: null,
+                            source_text: "",
+                            include: true,
+                          });
+                          return d;
+                        })
+                      }
+                    >
+                      Add bullet
+                    </Button>
+                  </div>
                 </div>
               </details>
             ))
           )}
         </section>
       ))}
-      <p className="muted sm">
-        Your edits are saved as your own wording. Bullets that came from your
-        history keep a link to it, so you can restore the original.
-      </p>
     </fieldset>
   );
 }
@@ -920,17 +762,9 @@ function Slider({
 }) {
   const id = "s-" + label.replace(/\W+/g, "-").toLowerCase();
   return (
-    <div className="slider">
+    <div className="ax-ed-slider">
       <label htmlFor={id}>{label}</label>
-      <input
-        id={id}
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-      />
+      <input id={id} type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
       <output htmlFor={id}>
         {value}
         {unit}
@@ -938,6 +772,13 @@ function Slider({
     </div>
   );
 }
+
+const MARGINS = [
+  ["Top", "margin_top", "margin_bottom"],
+  ["Bottom", "margin_bottom", "margin_top"],
+  ["Left", "margin_left", "margin_right"],
+  ["Right", "margin_right", "margin_left"],
+] as const;
 
 function LayoutPanel({
   style,
@@ -951,27 +792,23 @@ function LayoutPanel({
   disabled: boolean;
 }) {
   const [linked, setLinked] = useState(
-    style.margin_left === style.margin_right &&
-      style.margin_top === style.margin_bottom,
+    style.margin_left === style.margin_right && style.margin_top === style.margin_bottom,
   );
   return (
-    <fieldset className="editor-fields" disabled={disabled}>
-      <section className="editor-group">
+    <fieldset className="ax-ed-fields" disabled={disabled}>
+      <section className="ax-ed-group">
         <h2>Template</h2>
-        <div className="template-pick" role="radiogroup" aria-label="Template">
+        <div className="ax-ed-templates" role="radiogroup" aria-label="Template">
           {meta.templates.map((t) => (
             <button
               key={t.id}
               type="button"
               role="radio"
               aria-checked={style.template === t.id}
-              className="template-option"
               onClick={() =>
                 setStyle({
                   template: t.id,
-                  font: meta.fonts.find((f) => f.id === t.font)?.available
-                    ? t.font
-                    : style.font,
+                  font: meta.fonts.find((f) => f.id === t.font)?.available ? t.font : style.font,
                   header: t.header,
                   headings: t.headings,
                   ...(t.id === "compact"
@@ -991,179 +828,70 @@ function LayoutPanel({
           ))}
         </div>
       </section>
-      <section className="editor-group">
+      <section className="ax-ed-group">
         <h2>Type</h2>
-        <label className="field">
-          <span className="field-label">Font</span>
-          <select
-            value={style.font}
-            onChange={(e) => setStyle({ font: e.target.value })}
-          >
-            {meta.fonts.map((f) => (
-              <option key={f.id} value={f.id} disabled={!f.available}>
-                {f.label}
-                {f.available ? "" : " (not installed)"}
-              </option>
-            ))}
-          </select>
-        </label>
-        <Slider
-          label="Body size"
-          value={style.font_size}
-          min={9}
-          max={12.5}
-          step={0.5}
-          unit=" pt"
-          onChange={(v) => setStyle({ font_size: v })}
-        />
-        <Slider
-          label="Name size"
-          value={style.name_size}
-          min={12}
-          max={26}
-          step={1}
-          unit=" pt"
-          onChange={(v) => setStyle({ name_size: v })}
-        />
-        <Slider
-          label="Line spacing"
-          value={style.line_spacing}
-          min={0.85}
-          max={1.4}
-          step={0.05}
-          unit="×"
-          onChange={(v) => setStyle({ line_spacing: v })}
-        />
-        <div className="seg" role="group" aria-label="Header alignment">
+        <Select label="Font" value={style.font} onChange={(e) => setStyle({ font: e.target.value })}>
+          {meta.fonts.map((f) => (
+            <option key={f.id} value={f.id} disabled={!f.available}>
+              {f.label}
+              {f.available ? "" : " (not installed)"}
+            </option>
+          ))}
+        </Select>
+        <Slider label="Body size" value={style.font_size} min={9} max={12.5} step={0.5} unit=" pt" onChange={(v) => setStyle({ font_size: v })} />
+        <Slider label="Name size" value={style.name_size} min={12} max={26} step={1} unit=" pt" onChange={(v) => setStyle({ name_size: v })} />
+        <Slider label="Line spacing" value={style.line_spacing} min={0.85} max={1.4} step={0.05} unit="×" onChange={(v) => setStyle({ line_spacing: v })} />
+        <div className="ax-ed-choice">
           <span>Header</span>
-          {(["center", "left"] as const).map((h) => (
-            <button
-              key={h}
-              type="button"
-              aria-pressed={style.header === h}
-              onClick={() => setStyle({ header: h })}
-            >
-              {h === "center" ? "Centered" : "Left"}
-            </button>
-          ))}
-        </div>
-        <div className="seg" role="group" aria-label="Section headings">
-          <span>Headings</span>
-          {(["rule", "plain"] as const).map((h) => (
-            <button
-              key={h}
-              type="button"
-              aria-pressed={style.headings === h}
-              onClick={() => setStyle({ headings: h })}
-            >
-              {h === "rule" ? "With rule" : "Plain"}
-            </button>
-          ))}
-        </div>
-      </section>
-      <section className="editor-group">
-        <h2>Margins</h2>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={linked}
-            onChange={(e) => setLinked(e.target.checked)}
+          <Segmented
+            label="Header alignment"
+            value={style.header}
+            options={[
+              { value: "center", label: "Centered" },
+              { value: "left", label: "Left" },
+            ]}
+            onChange={(h) => setStyle({ header: h })}
           />
-          <span>Keep opposite sides equal</span>
-        </label>
-        <Slider
-          label="Top"
-          value={style.margin_top}
-          min={0.25}
-          max={1.25}
-          step={0.05}
-          unit=" in"
-          onChange={(v) =>
-            setStyle(
-              linked ? { margin_top: v, margin_bottom: v } : { margin_top: v },
-            )
-          }
-        />
-        <Slider
-          label="Bottom"
-          value={style.margin_bottom}
-          min={0.25}
-          max={1.25}
-          step={0.05}
-          unit=" in"
-          onChange={(v) =>
-            setStyle(
-              linked
-                ? { margin_top: v, margin_bottom: v }
-                : { margin_bottom: v },
-            )
-          }
-        />
-        <Slider
-          label="Left"
-          value={style.margin_left}
-          min={0.25}
-          max={1.25}
-          step={0.05}
-          unit=" in"
-          onChange={(v) =>
-            setStyle(
-              linked ? { margin_left: v, margin_right: v } : { margin_left: v },
-            )
-          }
-        />
-        <Slider
-          label="Right"
-          value={style.margin_right}
-          min={0.25}
-          max={1.25}
-          step={0.05}
-          unit=" in"
-          onChange={(v) =>
-            setStyle(
-              linked
-                ? { margin_left: v, margin_right: v }
-                : { margin_right: v },
-            )
-          }
-        />
+        </div>
+        <div className="ax-ed-choice">
+          <span>Headings</span>
+          <Segmented
+            label="Section headings"
+            value={style.headings}
+            options={[
+              { value: "rule", label: "With rule" },
+              { value: "plain", label: "Plain" },
+            ]}
+            onChange={(h) => setStyle({ headings: h })}
+          />
+        </div>
       </section>
-      <section className="editor-group">
+      <section className="ax-ed-group">
+        <h2>Margins</h2>
+        <Check label="Keep opposite sides equal" checked={linked} onChange={setLinked} />
+        {MARGINS.map(([label, key, opposite]) => (
+          <Slider
+            key={key}
+            label={label}
+            value={style[key]}
+            min={0.25}
+            max={1.25}
+            step={0.05}
+            unit=" in"
+            onChange={(v) => setStyle(linked ? { [key]: v, [opposite]: v } : { [key]: v })}
+          />
+        ))}
+      </section>
+      <section className="ax-ed-group">
         <h2>Spacing</h2>
-        <Slider
-          label="Before sections"
-          value={style.section_gap}
-          min={0}
-          max={20}
-          step={1}
-          unit=" pt"
-          onChange={(v) => setStyle({ section_gap: v })}
-        />
-        <Slider
-          label="Between entries"
-          value={style.entry_gap}
-          min={0}
-          max={14}
-          step={1}
-          unit=" pt"
-          onChange={(v) => setStyle({ entry_gap: v })}
-        />
-        <Slider
-          label="Between bullets"
-          value={style.bullet_gap}
-          min={0}
-          max={8}
-          step={0.5}
-          unit=" pt"
-          onChange={(v) => setStyle({ bullet_gap: v })}
-        />
-        <button
-          type="button"
-          className="btn sm quiet"
-          onClick={() => setStyle({ ...meta.defaults })}
-        >
-          <RotateCcw size={14} aria-hidden="true" /> Reset layout
-        </button>
+        <Slider label="Before sections" value={style.section_gap} min={0} max={20} step={1} unit=" pt" onChange={(v) => setStyle({ section_gap: v })} />
+        <Slider label="Between entries" value={style.entry_gap} min={0} max={14} step={1} unit=" pt" onChange={(v) => setStyle({ entry_gap: v })} />
+        <Slider label="Between bullets" value={style.bullet_gap} min={0} max={8} step={0.5} unit=" pt" onChange={(v) => setStyle({ bullet_gap: v })} />
+        <div>
+          <Button variant="ghost" size="sm" icon={<RotateCcw size={14} aria-hidden="true" />} onClick={() => setStyle({ ...meta.defaults })}>
+            Reset layout
+          </Button>
+        </div>
       </section>
     </fieldset>
   );
@@ -1193,53 +921,50 @@ function SourcePanel({
   const bad = new Set(errors.map((e) => e.line).filter(Boolean));
   if (draft.latex === null)
     return (
-      <div className="editor-group">
+      <section className="ax-ed-group">
         <h2>LaTeX source</h2>
-        <p className="muted sm">
-          The source is generated from your content and layout. Edit it by hand
-          only for something the controls can't do; content and layout controls
-          pause while you do.
+        <p className="ax-hint">
+          Generated from your content and layout. Edit it by hand only for something the controls can't do; they pause while
+          you do.
         </p>
-        <pre className="source-view">{generated.slice(0, 4000)}</pre>
-        <button
-          type="button"
-          className="btn sm"
-          onClick={async () => {
-            try {
-              const r = await api<{ latex: string }>(
-                "/v2/resumes/editor/render",
-                "POST",
-                {
+        <pre>{generated.slice(0, 4000)}</pre>
+        <div>
+          <Button
+            size="sm"
+            onClick={async () => {
+              try {
+                const r = await api<{ latex: string }>("/v2/resumes/editor/render", "POST", {
                   doc: draft.doc,
                   style: draft.style,
-                },
-              );
-              edit(r.latex);
-            } catch {
-              edit(generated);
-            }
-          }}
-        >
-          Edit source by hand
-        </button>
-      </div>
+                });
+                edit(r.latex);
+              } catch {
+                edit(generated);
+              }
+            }}
+          >
+            Edit source by hand
+          </Button>
+        </div>
+      </section>
     );
   const lines = text.split("\n").length;
   return (
-    <div className="editor-group">
-      <div className="editor-group-head">
+    <section className="ax-ed-group">
+      <div className="ax-ed-group-head">
         <h2>LaTeX source</h2>
-        <Confirm
+        <ConfirmButton
           label="Back to visual editing"
           confirm="Discard source edits"
           note="Your hand edits to the source are discarded."
+          variant="secondary"
           onConfirm={reset}
         />
       </div>
-      <div className="code">
-        <div className="code-gutter" ref={gutter} aria-hidden="true">
+      <div className="ax-ed-code">
+        <div className="ax-ed-gutter" ref={gutter} aria-hidden="true">
           {Array.from({ length: lines }, (_, i) => (
-            <span key={i} className={bad.has(i + 1) ? "bad" : ""}>
+            <span key={i} className={bad.has(i + 1) ? "is-bad" : ""}>
               {i + 1}
             </span>
           ))}
@@ -1251,18 +976,14 @@ function SourcePanel({
           wrap="off"
           value={text}
           onScroll={(e) => {
-            if (gutter.current)
-              gutter.current.scrollTop = (
-                e.target as HTMLTextAreaElement
-              ).scrollTop;
+            if (gutter.current) gutter.current.scrollTop = (e.target as HTMLTextAreaElement).scrollTop;
           }}
           onKeyDown={(e) => {
             if (e.key === "Tab") {
               e.preventDefault();
               const t = e.currentTarget;
               const at = t.selectionStart;
-              const next =
-                text.slice(0, at) + "  " + text.slice(t.selectionEnd);
+              const next = text.slice(0, at) + "  " + text.slice(t.selectionEnd);
               setText(next);
               edit(next);
               requestAnimationFrame(() => t.setSelectionRange(at + 2, at + 2));
@@ -1274,10 +995,6 @@ function SourcePanel({
           }}
         />
       </div>
-      <p className="muted sm">
-        Runs in a locked-down compiler: no shell commands and no files outside
-        the document.
-      </p>
-    </div>
+    </section>
   );
 }

@@ -3,6 +3,7 @@
 // and swaps in when complete, so the preview never flickers while typing.
 import { useEffect, useRef, useState } from "react";
 import { Minus, Plus } from "lucide-react";
+import { Button } from "./ui/index";
 
 type PdfJs = typeof import("pdfjs-dist");
 let loader: Promise<PdfJs> | null = null;
@@ -41,7 +42,7 @@ export function PdfPages({ data }: { data: ArrayBuffer | null }) {
         const task = lib.getDocument({ data: data.slice(0) });
         const doc = await task.promise;
         const frame = document.createElement("div");
-        frame.className = "pdf-stack";
+        frame.className = "ax-pdf-stack";
         const ratio = window.devicePixelRatio || 1;
         for (let n = 1; n <= doc.numPages; n++) {
           const page = await doc.getPage(n);
@@ -54,7 +55,7 @@ export function PdfPages({ data }: { data: ArrayBuffer | null }) {
           canvas.height = Math.floor(viewport.height);
           canvas.style.width = Math.floor(viewport.width / ratio) + "px";
           canvas.style.height = Math.floor(viewport.height / ratio) + "px";
-          canvas.className = "pdf-page";
+          canvas.className = "ax-pdf-page";
           canvas.setAttribute("role", "img");
           canvas.setAttribute("aria-label", `Page ${n} of ${doc.numPages}`);
           await page.render({ canvas, viewport }).promise;
@@ -62,7 +63,7 @@ export function PdfPages({ data }: { data: ArrayBuffer | null }) {
           frame.append(canvas);
         }
         if (!cancelled) {
-          el.querySelector(".pdf-stack")?.replaceWith(frame) ??
+          el.querySelector(".ax-pdf-stack")?.replaceWith(frame) ??
             el.append(frame);
           if (!el.contains(frame)) el.append(frame);
           setError("");
@@ -83,36 +84,34 @@ export function PdfPages({ data }: { data: ArrayBuffer | null }) {
 
   const level = zoom === "fit" ? "Fit" : Math.round(zoom * 100) + "%";
   return (
-    <div className="pdf-view">
-      <div className="pdf-tools" role="group" aria-label="Zoom">
+    <div className="ax-pdf">
+      <div className="ax-pdf-tools" role="group" aria-label="Zoom">
         <button
-          className="icon-btn"
+          type="button"
+          className="ax-icon-btn"
           aria-label="Zoom out"
-          onClick={() =>
-            setZoom((z) => Math.max(0.5, (z === "fit" ? 1 : z) - 0.15))
-          }
+          onClick={() => setZoom((z) => Math.max(0.5, (z === "fit" ? 1 : z) - 0.15))}
         >
           <Minus size={14} />
         </button>
-        <button
-          className="pdf-level"
-          onClick={() => setZoom((z) => (z === "fit" ? 1 : "fit"))}
-          title="Toggle fit to width"
-        >
+        <Button variant="ghost" size="sm" title="Toggle fit to width" onClick={() => setZoom((z) => (z === "fit" ? 1 : "fit"))}>
           {level}
-        </button>
+        </Button>
         <button
-          className="icon-btn"
+          type="button"
+          className="ax-icon-btn"
           aria-label="Zoom in"
-          onClick={() =>
-            setZoom((z) => Math.min(2.5, (z === "fit" ? 1 : z) + 0.15))
-          }
+          onClick={() => setZoom((z) => Math.min(2.5, (z === "fit" ? 1 : z) + 0.15))}
         >
           <Plus size={14} />
         </button>
       </div>
-      <div className="pdf-host" ref={host} />
-      {error && <p className="pdf-error">{error}</p>}
+      <div className="ax-pdf-host" ref={host} />
+      {error && (
+        <p className="ax-error" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
