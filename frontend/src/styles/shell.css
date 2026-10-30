@@ -276,6 +276,11 @@
 .ax-nav svg {
   flex: none;
   color: var(--ink-3);
+  stroke-width: 1.75;
+}
+/* The coming-soon list is muted text; its icons show only where the rail has nothing else to show. */
+.ax-side:not(.is-rail) .ax-nav.is-soon svg {
+  display: none;
 }
 .ax-nav:hover {
   background: var(--tint);

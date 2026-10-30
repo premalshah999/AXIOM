@@ -6,7 +6,6 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 export type ThemeId = "dark" | "light";
 
 export const THEME_KEY = "axiom.theme";
-const GROUND: Record<ThemeId, string> = { dark: "#0b1220", light: "#fbf9f7" };
 
 // Old stored values from the five-theme menu: maroon and ivory were light; navy, slate and system (which followed the
 // device, and now takes the default) become dark. index.html does the same before first paint.
@@ -23,10 +22,18 @@ export function readTheme(): ThemeId {
 let current: ThemeId = readTheme();
 const listeners = new Set<() => void>();
 
+// The browser's own chrome follows the page's ground, read from the token so tokens.css stays the only place with colours.
+// main.tsx imports the CSS before this module runs.
+function syncThemeColor() {
+  const ground = getComputedStyle(document.documentElement).getPropertyValue("--ground").trim();
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", ground);
+}
+syncThemeColor();
+
 function setTheme(next: ThemeId) {
   current = next;
   document.documentElement.dataset.theme = next;
-  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", GROUND[next]);
+  syncThemeColor();
   try {
     localStorage.setItem(THEME_KEY, next);
   } catch {

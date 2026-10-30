@@ -1,6 +1,5 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import "@fontsource-variable/geist-mono/index.css";
 // style.css first: it is legacy and on its way out, so the design system wins every tie with it.
 import "./style.css";
 import "./styles/tokens.css";

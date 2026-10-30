@@ -111,7 +111,7 @@ export function Sidebar({
         <div className="ax-side-nav">
           {rail && (
             <button type="button" className="ax-nav" aria-label="Search" title={MAC ? "Search (⌘K)" : "Search (Ctrl K)"} onClick={onSearch}>
-              <Search size={16} strokeWidth={1.75} aria-hidden="true" />
+              <Search size={16} aria-hidden="true" />
             </button>
           )}
           {NAV.map((section, i) => (
@@ -131,7 +131,7 @@ export function Sidebar({
         <div className="ax-side-foot">
           {rail && (
             <button type="button" className="ax-nav" aria-label="Expand sidebar" title="Expand sidebar" onClick={onToggle}>
-              <PanelLeft size={16} strokeWidth={1.75} aria-hidden="true" />
+              <PanelLeft size={16} aria-hidden="true" />
             </button>
           )}
           <AccountMenu who={who} rail={rail} onSignOut={onSignOut} />
@@ -158,8 +158,7 @@ function NavRow({ item, route, go, rail, needs }: { item: NavItem; route: Route;
         go(item.route);
       }}
     >
-      {/* The coming-soon list is muted text: its icons appear only where the rail has nothing else to show. */}
-      {(rail || !item.soon) && <Icon size={16} strokeWidth={1.75} aria-hidden="true" />}
+      <Icon size={16} aria-hidden="true" />
       {!rail && <span className="ax-nav-label">{item.label}</span>}
       {!rail && count > 0 && (
         <span className="ax-nav-count">

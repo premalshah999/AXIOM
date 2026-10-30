@@ -7,14 +7,13 @@ import { createPortal } from "react-dom";
 import { stateInfo, type Tone } from "./model";
 import { Button, Pill, type PillTone } from "./ui/index";
 
-// model.ts tones onto the primitives' tones. Only "ask" (needs an answer) and "bad" (failed) call for attention: a job the
-// system is still repairing or holding is not the owner's problem, so it reads as plain text.
+// model.ts tones onto the primitives' tones, one for one, so components.css can give each its own look.
 const TONE: Record<Tone, PillTone> = {
   ok: "ok",
-  run: "neutral",
+  run: "brand",
   ask: "warn",
-  hold: "neutral",
-  fix: "neutral",
+  hold: "info",
+  fix: "fix",
   bad: "bad",
   idle: "neutral",
 };
@@ -22,7 +21,7 @@ const TONE: Record<Tone, PillTone> = {
 export function StatusPill({ state, label, title }: { state: string; label?: string; title?: string }) {
   const info = stateInfo(state);
   return (
-    <Pill tone={TONE[info.tone]} title={title}>
+    <Pill tone={TONE[info.tone]} dot title={title}>
       {label || info.label}
     </Pill>
   );

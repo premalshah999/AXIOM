@@ -140,7 +140,7 @@ small {
 .btn.danger-solid {
   background: var(--bad);
   border-color: var(--bad);
-  color: #fff;
+  color: var(--brand-ink);
 }
 .btn.danger-solid:hover:not(:disabled) {
   filter: brightness(1.1);
@@ -1441,7 +1441,7 @@ select {
   border: 1px solid var(--line-2);
   border-radius: var(--radius-sm);
   overflow: hidden;
-  background: #fff;
+  background: var(--paper);
 }
 .shot img {
   display: block;
@@ -2693,8 +2693,8 @@ details:not(.fold) summary {
 }
 .pdf-page {
   display: block;
-  background: #fff;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), 0 12px 36px rgba(0, 0, 0, 0.35);
+  background: var(--paper);
+  box-shadow: var(--paper-shadow);
 }
 .preview-switch {
   position: absolute;

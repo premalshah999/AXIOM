@@ -1,5 +1,7 @@
 /* AXIOM design tokens (DESIGN.md). Two themes, set on <html data-theme="dark|light"> before first paint.
-   A missing or unknown data-theme is dark. Nothing outside this file may use a literal colour. */
+   A missing or unknown data-theme is dark. Every colour and every font is declared in this file and nowhere else. */
+
+@import "@fontsource-variable/geist-mono/index.css";
 
 /* Weights 400 and 500 are the only ones this product uses. The faces declare that range, so a stray font-weight: 700
    renders at 500, and font-synthesis-weight in base.css keeps the browser from faking a bold on top of it. */
@@ -62,6 +64,9 @@
   --brand: #4170e4;
   --brand-ink: #ffffff;
   --accent-text: #94b4ff;
+  /* A resume page: white paper in both themes, because it is a picture of a printed page. */
+  --paper: #ffffff;
+  --paper-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), 0 12px 36px rgba(0, 0, 0, 0.35);
   /* Status: only for a small dot or the text of something that needs attention. Success is plain muted text. */
   --warn: #e5b567;
   --bad: #f28b92;
@@ -84,6 +89,8 @@
   --brand: #8c1d40;
   --brand-ink: #ffffff;
   --accent-text: #8c1d40;
+  --paper: #ffffff;
+  --paper-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), 0 12px 36px rgba(0, 0, 0, 0.35);
   /* A clear red, never to be read as the maroon accent. */
   --warn: #8a5200;
   --bad: #c0322c;

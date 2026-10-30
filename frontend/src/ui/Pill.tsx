@@ -1,25 +1,25 @@
 import type { ReactNode } from "react";
 
-export type PillTone = "neutral" | "brand" | "ok" | "warn" | "bad" | "info";
+export type PillTone = "neutral" | "brand" | "ok" | "warn" | "bad" | "info" | "fix";
 
 /**
- * A status as plain muted text. Only warn and bad (needs an answer, failed) get a small coloured dot and full-strength
- * text; success and everything else stay quiet. `dot` is accepted for older call sites and adds nothing on its own.
+ * A short status. Every tone and the dot are always in the markup (is-<tone>, has-dot when `dot` is passed), and
+ * components.css decides what each one looks like, so changing the look never means changing this file.
  */
 export function Pill({
   tone = "neutral",
   children,
   title,
+  dot,
 }: {
   tone?: PillTone;
   children: ReactNode;
   title?: string;
   dot?: boolean;
 }) {
-  const attention = tone === "warn" || tone === "bad";
   return (
-    <span className={"ax-pill" + (attention ? " is-" + tone : "")} title={title}>
-      {attention && <i className="ax-pill-dot" aria-hidden="true" />}
+    <span className={"ax-pill is-" + tone + (dot ? " has-dot" : "")} title={title}>
+      <i className="ax-pill-dot" aria-hidden="true" />
       {children}
     </span>
   );

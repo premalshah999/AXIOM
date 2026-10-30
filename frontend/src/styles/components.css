@@ -115,20 +115,21 @@
 .ax-pill.is-bad {
   color: var(--ink);
 }
-.ax-pill-dot,
-.ax-dot {
+.ax-pill-dot {
+  display: none;
   flex: none;
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--ink-3);
 }
 .ax-pill.is-warn .ax-pill-dot,
-.ax-dot.is-warn {
+.ax-pill.is-bad .ax-pill-dot {
+  display: block;
+}
+.ax-pill.is-warn .ax-pill-dot {
   background: var(--warn);
 }
-.ax-pill.is-bad .ax-pill-dot,
-.ax-dot.is-bad {
+.ax-pill.is-bad .ax-pill-dot {
   background: var(--bad);
 }
 
@@ -910,6 +911,9 @@
 }
 .inline-warn::before {
   background: var(--warn);
+}
+.ax-empty > svg {
+  display: none;
 }
 .ax-empty-title {
   color: var(--ink-2);

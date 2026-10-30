@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-    <meta name="theme-color" content="#0b1220" />
+    <meta name="theme-color" />
     <meta name="description" content="AXIOM: your autonomous job application engine." />
     <title>AXIOM</title>
     <!-- Applies the saved theme before first paint so a reload never flashes the default. Keep this in step with
@@ -16,9 +16,6 @@
           if (v === "light" || v === "maroon" || v === "ivory") t = "light";
         } catch (e) {}
         document.documentElement.setAttribute("data-theme", t);
-        document
-          .querySelector('meta[name="theme-color"]')
-          .setAttribute("content", t === "light" ? "#fbf9f7" : "#0b1220");
       })();
     </script>
   </head>

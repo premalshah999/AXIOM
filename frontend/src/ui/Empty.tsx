@@ -1,11 +1,12 @@
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
-/** One line: what is missing, and the one action that fixes it (drawn as a link). `icon` is accepted and not drawn. */
+/** What is missing and the one action that fixes it. The look, including whether `icon` shows, is in components.css. */
 export function Empty({
   title,
   hint,
   action,
+  icon: Icon,
 }: {
   title: string;
   hint?: ReactNode;
@@ -14,6 +15,7 @@ export function Empty({
 }) {
   return (
     <div className="ax-empty">
+      {Icon && <Icon size={20} aria-hidden="true" />}
       <p className="ax-empty-title">{title}</p>
       {hint && <p className="ax-empty-hint">{hint}</p>}
       {action && <div className="ax-empty-action">{action}</div>}
