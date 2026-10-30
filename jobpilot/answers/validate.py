@@ -70,6 +70,26 @@ class ValidateMixin:
         affirmative = re.fullmatch(r"(?:yes|y|true|checked)\.?", str(answer.value or "").strip(), re.I)
         return bool(affirmative) or topic(field["label"]) != "prior_employment"
 
+    def experience_cause(self, field, answer, yes):
+        """Why a Yes/No to a years-of-experience question is refused, or "". A settled verdict from the work history
+        decides the answer (Apptronik 2026-10-30: Yes six times, No twice for one profile). An undecided clause stays with
+        the model, but a Yes needs the profile not to rule it out and some work or resume evidence behind it; the
+        attestation that the history is complete, or an education row, says nothing about a duration or a specialty."""
+        from .experience import EXPERIENCE_EVIDENCE
+
+        verdict = self.experience_verdict(field)
+        if verdict is None:
+            return ""
+        if verdict.result is not None:
+            return "" if verdict.result == yes else "question_polarity"
+        if not yes:
+            return ""
+        if not verdict.possible:
+            return "question_polarity"
+        if not any(EXPERIENCE_EVIDENCE.match(x) for x in answer.evidence_ids):
+            return "unsupported_evidence"
+        return ""
+
     def _invalid(self, field, reason, blocker="model_output"):
         return Answer(
             field_id=field["id"],
@@ -376,6 +396,8 @@ class ValidateMixin:
                 )
             ):
                 cause = "question_polarity"
+        if not cause and value is not None and re.match(r"^(?:yes|no)\b", value, re.I):
+            cause = self.experience_cause(field, a, bool(re.match(r"^yes\b", value, re.I)))
         if not cause and value is not None and self.graduation_choice_valid(field, value) is False:
             cause = "question_time_scope"
         if value is not None and field.get("maxlength", -1) > 0 and len(value) > field["maxlength"]:

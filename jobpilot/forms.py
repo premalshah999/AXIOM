@@ -19,6 +19,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from . import icims_protocol, phone_fields, taleo_protocol, widgets
 from . import profile_photo
 from .answers import CONTACT, HISTORY_UNKNOWN, WOTC, answer_key, job_catalog_search_box, normalize
+from .answers.experience import COMPUTED as EXPERIENCE_COMPUTED
 from .answers.text import strip_catalog_code
 from .knowledge import topic
 from .browser_contracts import ActionResult, action_result, field_identity, fingerprint
@@ -3893,7 +3894,9 @@ class FormSession:
             if previous:
                 known = self.resolver.local(field)
                 if (
-                    field["type"] not in {"prompt", "combobox", "dropdown"}
+                    # A years-of-experience answer computed from the work history outranks every stored one, in
+                    # menus too (Apptronik's combobox kept an earlier No for a Yes the history supports, 2026-10-30).
+                    (field["type"] not in {"prompt", "combobox", "dropdown"} or EXPERIENCE_COMPUTED in (known.reason if known else ""))
                     and known
                     and known.disposition == "answer"
                     and not widgets.same_value(field, field["value"], known.value)
@@ -5699,6 +5702,18 @@ class FormSession:
         )
         return bool(account_form or consent_dialog)
 
+    def not_a_button(self, field):
+        """The refusal for a click on a field's id, and the action that can work instead. "Use fill" is wrong once fill
+        already failed on this control: Humana's Degree (2026-10-30) was refused a click with "use fill", fill was then
+        refused as repeated, and the navigator cycled click, fill and inspect_options for seven more decisions."""
+        label = f"'{field['label'][:60]}' is a {field['type'] or 'form'} field, not a button; "
+        if entry := self.stuck_write(field):
+            return (
+                label + f"fill already failed on it ({entry['signature'][1]}, {entry['count']}x on this page) and "
+                "will not be repeated. Use inspect_options on it, then choose, or help"
+            )
+        return label + "use fill, which sets it from the applicant's facts"
+
     async def click(
         self, control_id, auth_control=False, step_control=False, revision=None, owner_id=None, launch=False
     ):
@@ -5709,11 +5724,7 @@ class FormSession:
         if not button and control_id in self.fields:
             # City of SF (SmartRecruiters): the model "clicked" the "I currently attend" checkbox
             # field and was told "stale" five times. Say what it is and which action works.
-            field = self.fields[control_id]
-            raise ValueError(
-                f"'{field['label'][:80]}' is a {field['type'] or 'form'} field, not a button; use fill, "
-                "which sets it from the applicant's facts"
-            )
+            raise ValueError(self.not_a_button(self.fields[control_id]))
         if not button and control_id:
             # Re-rendered editors replace element ids between observation and action. Rebind only
             # to one current control with the same label, type and section.

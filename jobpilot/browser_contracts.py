@@ -134,6 +134,44 @@ def action_result(action, before, after, *, executed=True, failure=None, detail=
     )
 
 
+def control_failed(action, control_id, outcome):
+    """Whether a decision's outcome shows its control was not driven: an action that did not execute, a fill that left
+    the control pending, or an inspection that read no option."""
+    try:
+        result = json.loads(outcome)
+    except (ValueError, TypeError):
+        return False
+    if not isinstance(result, dict):
+        return False
+    if action == "fill":
+        return any(p.get("field_id") == control_id for p in result.get("pending") or [] if isinstance(p, dict))
+    if action == "inspect_options" and "options" in result:
+        return not result["options"]
+    return result.get("executed") is False
+
+
+def control_key(control):
+    """One control in one state: a changed value or error is a new situation, a changed neighbour is not."""
+    return (field_identity(control), str(control.get("value", "")), str(control.get("error", "")))
+
+
+class ControlFailures:
+    """Consecutive failed results on one control, whatever action produced them.
+
+    Humana's Degree (Workday, 2026-10-30): inspect_options was refused as covered, click as "use fill", and fill as
+    repeated; the navigator cycled the three for seven more decisions. The repeat refusal counts one action on one
+    control, and every other action reset it. A result that is not a failure ends the streak."""
+
+    def __init__(self, limit=3):
+        self.limit = limit
+        self.counts = Counter()
+
+    def record(self, control, failed):
+        """True once `control` has failed `limit` results in a row."""
+        self.counts[control] = self.counts[control] + 1 if failed else 0
+        return self.counts[control] >= self.limit
+
+
 class ProgressTracker:
     """Consecutive unchanged outcomes, independent of unstable DOM IDs."""
 

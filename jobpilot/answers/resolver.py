@@ -13,6 +13,7 @@ import hashlib
 import json
 import re
 from ..answer_context import CACHE_VERSION
+from ..answer_context import boolean
 from ..answer_context import defined_screening
 from ..answer_context import digest
 from ..answer_context import screening_text
@@ -45,6 +46,31 @@ HISTORY_ROW = re.compile(r"(?:work experience|experience|education|employment|la
 HISTORY_GROUP = re.compile(
     r"(?:work experience|experience|employment|education)\s*\d+|"
     r"^\s*(?:education|experience|work experience|employment)\s+at\s+\S",
+    re.I,
+)
+
+
+# A question that asks which country the applicant is a citizen of ("country of citizenship", "country of your
+# nationality", "citizenship (country)").
+CITIZENSHIP_COUNTRY_ASK = re.compile(
+    r"\bcountr(?:y|ies)\b[^.?]{0,25}?\b(?:citizenship|nationality)\b|\b(?:citizenship|nationality)\b\s*(?:\(\s*)?countr",
+    re.I,
+)
+# What else the question asks for beyond the first country; a further country is given only when it does.
+CITIZENSHIP_MORE_ASK = re.compile(
+    r"\bif different\b|\bdifferent\b|\bother\b|\badditional\b|\bdual\b|\bsecond\b|\ball\b|\bmost recently\b", re.I
+)
+# Facts that name the applicant's citizenship country, in the order they are read; and a further country they hold.
+CITIZENSHIP_COUNTRY_KEYS = ("country_of_citizenship", "citizenship", "nationality", "country_of_nationality")
+OTHER_CITIZENSHIP_KEY = re.compile(
+    r"^(?:second(?:ary)?|other|additional|dual)_(?:country_of_)?(?:citizenship|nationality)$|"
+    r"^(?:citizenship|nationality)_(?:2|two|second(?:ary)?|other|additional)$|"
+    r"^country_of_(?:second(?:ary)?|other|additional|dual)_(?:citizenship|nationality)$"
+)
+RESIDENCY_COUNTRY_KEY = re.compile(r"^(?:country_of_)?permanent_resid\w*(?:_country)?$")
+# A saved value that names a status, a yes/no or a document, not a country.
+NOT_A_COUNTRY = re.compile(
+    r"citizen|\bnational\b|resident|visa|status|permit|holder|green ?card|\bopt\b|h-?1b|\d|^(?:yes|no|true|false|n/?a|none)$",
     re.I,
 )
 
@@ -506,11 +532,97 @@ class Resolver(
             f, str(facts[dob]), [f"fact:{births[0]}", f"fact:{dob}"], "Citizenship acquired at birth: the date of birth"
         )
 
+    def citizenship_country_answer(self, f):
+        """A question for the applicant's country of citizenship, answered from the saved citizenship facts.
+
+        Apptronik (Greenhouse, 2026-10-30, nine runs): "a. If NO, please indicate your country of citizenship and, if
+        different, the country in which you have most recently obtained citizenship or permanent residency status. This
+        information will be used to determine whether ... a license from the U.S. government" was classed as a
+        government disclosure; the model's correct answer failed the scope check on every run and the repair agent
+        stopped on "identical failure repeated". The saved facts state it, so no model or scope check is involved. A
+        further country is given only when the question asks for one and the profile holds it; otherwise the one
+        country is the full answer.
+        """
+        label = str(f.get("label") or "")
+        options = [str(o) for o in f.get("options") or [] if str(o).strip()]
+        if (
+            f.get("type") == "checkbox"
+            or not CITIZENSHIP_COUNTRY_ASK.search(label)
+            or (options and all(re.match(r"\s*(?:yes|no)\b", o, re.I) for o in options))
+        ):
+            return None
+        facts = self._facts()
+
+        def country(key):
+            value = facts.get(key)
+            text = value.strip() if isinstance(value, str) else ""
+            return text if text and len(text) <= 60 and not NOT_A_COUNTRY.search(text) else ""
+
+        if (
+            re.match(r"\s*(?:\(?[a-z0-9]\)?\W+)?if (?:no|not)\b", label, re.I)
+            and re.search(r"\b(?:enter|write|put|type|answer|indicate)\b[^.]{0,20}\bn/?a\b", label, re.I)
+            and boolean(facts.get("us_citizen")) is True
+        ):
+            # "(Enter "N/A" if marked Yes above)": a U.S. citizen's follow-up for those who are not.
+            if answer := self._ans(f, "N/A", ["fact:us_citizen"], "The condition for naming a country does not apply"):
+                return answer
+        first = next((k for k in CITIZENSHIP_COUNTRY_KEYS if country(k)), None)
+        if first is None:
+            return None
+        named, evidence = [country(first)], [f"fact:{first}"]
+        if not options and CITIZENSHIP_MORE_ASK.search(label):
+            residency = bool(re.search(r"permanent resid", label, re.I))
+            for key in facts:
+                if (
+                    (OTHER_CITIZENSHIP_KEY.match(key) or (residency and RESIDENCY_COUNTRY_KEY.match(key)))
+                    and country(key)
+                    and normalize(country(key)) not in {normalize(c) for c in named}
+                ):
+                    named.append(country(key))
+                    evidence.append(f"fact:{key}")
+        return self._ans(f, "; ".join(named), evidence, "Country of citizenship from the saved citizenship facts")
+
+    def experience_verdict(self, f):
+        """What the recorded work history says to a yes/no question asking N+ years of experience (see experience.py)."""
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from .experience import evaluate
+
+        today = datetime.now(ZoneInfo(self.config.timezone)).date()
+        return evaluate(
+            f.get("label", ""),
+            [w.model_dump() for w in self.profile.work],
+            [e.model_dump() for e in self.profile.education],
+            today,
+        )
+
+    def experience_years_answer(self, f):
+        """A years-of-experience question is arithmetic on the work history, answered from it and never recalled: the
+        same profile answered Apptronik's "MS with 3+ years of relevant experience, or a recent PhD" Yes six times and
+        No twice (2026-10-30). Only a settled verdict answers; a clause the profile cannot decide stays with the
+        model, which the validator then bars from a Yes that rests on nothing (validate.py)."""
+        from .experience import COMPUTED
+
+        options = [str(o) for o in f.get("options") or [] if str(o).strip()]
+        yes, no = (
+            [o for o in options if re.match(rf"\s*{word}\b", o, re.I)] for word in ("yes", "no")
+        )
+        if f.get("type") == "checkbox" or len(yes) != 1 or len(no) != 1 or len(options) != 2:
+            return None
+        verdict = self.experience_verdict(f)
+        if verdict is None or verdict.result is None:
+            return None
+        evidence = [f"profile:work.{i}" for i in verdict.work] + [f"profile:education.{i}" for i in verdict.education]
+        return self._ans(f, (yes if verdict.result else no)[0], evidence, f"{COMPUTED}: {verdict.reason}")
+
     def local(self, f):
         from .third_party import guard
 
         if answer := guard(self, f):
             return answer  # An employer's, supervisor's or reference's contact detail is never the applicant's own.
+        if answer := self.experience_years_answer(f):
+            return answer  # Before any saved answer: a stored Yes the work history contradicts must not stand.
         if answer := self.repair_override(f):
             return answer
         if answer := self.signature_block(f):
@@ -560,6 +672,8 @@ class Resolver(
         if answer := self.named_employer_date(f):
             return answer
         if answer := self.citizenship_obtained_date(f):
+            return answer
+        if answer := self.citizenship_country_answer(f):
             return answer
         if f.get("type") == "checkbox":
             # A single checkbox's caption is a proposition, not an offered

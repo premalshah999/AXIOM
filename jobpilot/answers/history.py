@@ -109,9 +109,9 @@ DEGREE_FALLBACK = {
 def degree_level(text):
     t = normalize(str(text))
     # "ms", "m s", "msc", "m sc": the space before "c" is optional, not the one after "s" ("MA/MS" read as no level).
-    if re.search(r"\bmaster|\bm ?s ?c?\b|\bmeng\b|\bmtech\b", t):
+    if re.search(r"\bmaster|\bm ?s ?c?\b|\bm ?eng\b|\bm ?tech\b", t):
         return "master"
-    if re.search(r"\bbachelor|\bb ?s ?c?\b|\bb ?e\b|\bb ?tech\b|\bundergraduate\b", t):
+    if re.search(r"\bbachelor|\bb ?s ?c?\b|\bb ?e\b|\bb ?eng\b|\bb ?tech\b|\bundergraduate\b", t):
         return "bachelor"
     return None
 
