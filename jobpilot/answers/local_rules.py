@@ -45,8 +45,12 @@ CURRENCY = re.compile(
 from .history import EDUCATION
 from .history import WORK
 from .intents import INTENTS
+from ..answer_rules import source_patterns
+from .sources import BLANK_OPTION
+from .sources import DEAD_END
 from .sources import UNOFFERED_SOURCE
-from .sources import source_choice
+from .sources import follow_up_channel
+from .text import first_matching
 from .text import answer_key
 from .text import normalize
 from .text import option_value
@@ -600,13 +604,31 @@ class LocalRulesMixin:
                 "Confirm whether any circumstances, including professional disciplinary action, require disclosure; narrower criminal or privacy-discipline answers do not establish this",
                 "missing_fact",
             )
+        follow_up = follow_up_channel(f["label"]) if topic(f["label"]) == "source" else ""
+        if follow_up and options and not f.get("options_partial") and any(
+            not BLANK_OPTION.fullmatch(str(o)) for o in options
+        ):
+            # "Social Media Source" after "Social Media" (Midco on ADP, 2026-10-29): its only option was Facebook/Instagram/
+            # Meta, 30 decisions chose it or looped on "Value not accepted". The follow-up is truthful only for the
+            # applicant's own channel or one the owner's list names; the any-channel fallback never applies to it (it
+            # names a platform). With none, the parent channel is unusable: the parent menu is answered again without it.
+            shown = [o for o in options if not BLANK_OPTION.fullmatch(str(o))]
+            value = (p.application_source and option_value(p.application_source, shown)) or first_matching(
+                shown, source_patterns(self.answer_rules.source_order, self.employer, shown)
+            )
+            if value:
+                return Answer(field_id=f["id"], value=value, evidence_ids=["policy:source"], disposition="answer")
+            self.dead_sources.add(follow_up)
+            return self._invalid(f, DEAD_END.format(follow=f["label"].strip("* ")), "control_failure").model_copy(
+                update={"supporting_facts": ["policy:source"]}
+            )
         if (
             topic(f["label"]) == "source"
             and not p.application_source
             and options
             and not f.get("options_partial")
         ):
-            if value := source_choice(options, self.answer_rules):
+            if value := self.pick_source(options):
                 return Answer(
                     field_id=f["id"], value=value, evidence_ids=["policy:source"], disposition="answer"
                 )
@@ -619,7 +641,15 @@ class LocalRulesMixin:
                 disposition="answer",
             )
         if topic(f["label"]) == "source" and p.application_source:
-            value = option_value(p.application_source, options)
+            # A menu of only its blank row ("-") is not read yet; one whose channels were all marked unusable is.
+            observed = [o for o in options if not BLANK_OPTION.fullmatch(str(o))]
+            options = self.live_sources(observed)
+            value = option_value(p.application_source, options) if options or not observed else None
+            if value is None and self.answer_rules.source_order:
+                # The owner's order decides among the channels the saved source is not offered under: the channel it
+                # ranks first that this menu offers, the employer's own site ("<Employer> Website") included. The
+                # category fallbacks below are for a profile with no list of its own.
+                value = self.pick_source(options)
             if value is None and label == "source type" and p.application_source.casefold() == "linkedin":
                 value = next((o for o in options if normalize(o) == "social media"), None)
             if value is None:
@@ -656,7 +686,7 @@ class LocalRulesMixin:
             if value is None:
                 # Owner policy: any listed source (LinkedIn, company website, careers page,
                 # ZipRecruiter, Indeed, internet search, ...) is a true answer.
-                value = source_choice(options, self.answer_rules)
+                value = self.pick_source(options)
             if value is not None:
                 return Answer(
                     field_id=f["id"], value=value, evidence_ids=["policy:source"], disposition="answer"

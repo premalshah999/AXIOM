@@ -26,6 +26,7 @@ from .history import degree_status_options
 from .history import major_equivalent
 from .history import major_option, major_part
 from .sources import INTENT_SOURCE
+from .sources import same_channel
 from .sources import source_choice
 from .text import first_matching
 from .text import normalize
@@ -169,6 +170,16 @@ class PolicyRulesMixin:
                 )
         return None
 
+    def live_sources(self, options):
+        """The offered channels minus those whose follow-up question offered the applicant no truthful option."""
+        dead = getattr(self, "dead_sources", ())
+        return [o for o in options if not any(same_channel(o, d) for d in dead)]
+
+    def pick_source(self, options):
+        """The owner's best offered channel (answer_rules.source_order), the employer's own site included."""
+        company = self.employer or (self.job or {}).get("company", "")
+        return source_choice(options, self.answer_rules, company, getattr(self, "dead_sources", ()))
+
     def policy_choice(self, f, options):
         """The offered option for degree, major or source questions under the owner's fallback
         policy: the recorded value when offered, else its owner-approved equivalent."""
@@ -229,9 +240,10 @@ class PolicyRulesMixin:
         if phone_fields.is_phone_type({**f, "options": options}):
             return phone_fields.phone_type_option(options, getattr(p, "phone_type", "") or "")
         if topic(label) == "source" or INTENT_SOURCE.search(label):
-            if p.application_source and (hit := option_value(p.application_source, options)):
+            options = self.live_sources(options)
+            if p.application_source and options and (hit := option_value(p.application_source, options)):
                 return hit
-            return source_choice(options, self.answer_rules)
+            return self.pick_source(options)
         if (
             re.search(r"\bcity\b|^location$|^location \(city\)|current location", label, re.I)
             and p.address.city

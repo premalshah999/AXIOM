@@ -108,7 +108,12 @@ def _topic(text):
         ),
         (
             "source",
-            r"how (?:did|do) you (?:hear|learn|find)|where did you (?:hear|find)|application source|recruiting source|source of (?:this|your) application|^(?:please specify )?sources?(?: details| type)?$|^(?:job board|social media)$",
+            r"how (?:did|do) you (?:hear|learn|find)|where did you (?:hear|find)|application source|recruiting source|source of (?:this|your) application|^(?:please specify )?sources?(?: details| type)?$|^(?:job board|social media)$|"
+            # ADP's "Candidate Source" and its follow-ups "Social Media Source" / "Job Board Source" (Midco, 2026-10-29):
+            # unrecognised, the model answered them from an old saved answer and chose a channel whose follow-up
+            # offered no truthful option.
+            r"^(?:candidate|applicant|recruit(?:ing|ment)|hiring|careers?|job boards?|job sites?|social media|"
+            r"social networks?|internet|online|advertising) sources?(?: details?| name| type)?$",
         ),
         (
             "client_relationship",
