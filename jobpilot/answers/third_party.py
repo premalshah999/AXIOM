@@ -60,6 +60,16 @@ def third_party(f):
     return found[0].lower() if found else ""
 
 
+def other_party_email(f):
+    """True when an email box is someone else's: a reference's, supervisor's, employer's or emergency contact's, by the
+    label or by the block it sits in. The applicant's own box says neither."""
+    label = str(f.get("label") or "")
+    if OWN.search(label) and not OWNER_IN_LABEL.search(label):
+        return False
+    block = " ".join(str(f.get(k) or "") for k in ("section", "group"))
+    return bool(OWNER_IN_LABEL.search(label) or OWNER_IN_BLOCK.search(block))
+
+
 def current_row(profile, f):
     """The one work entry a "current employer" field describes, else None."""
     text = " ".join(str(f.get(k) or "") for k in ("label", "section", "group"))

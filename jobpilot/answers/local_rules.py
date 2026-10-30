@@ -52,6 +52,7 @@ from .text import normalize
 from .text import option_value
 from ..widgets import foreign_fallback
 from .text import yes_no
+from .third_party import other_party_email
 
 PAGE_LANGUAGE = re.compile(r"(?:select|choose|change) (?:a |your |the )?language|\b(?:rb|ddl|cbo|lst)language\b|"
                            r"(?:display|site|page) language")
@@ -870,15 +871,21 @@ class LocalRulesMixin:
             if choice:
                 return Answer(field_id=f["id"], value=choice, disposition="answer", evidence_ids=["fact:gender"])
         if f.get("type") == "url" and f.get("value"):
-            for attr in ("website", "linkedin", "github"):
+            # A link box that names its site holds that site's link and no other: a resume parse put the GitHub URL in
+            # "LinkedIn", and the saved GitHub link "confirmed" it. Only a generic "Website"/"Link" box takes any.
+            named = tuple(a for a, word in (("linkedin", "linked ?in"), ("github", "git ?hub")) if re.search(word, label))
+            for attr in named or ("website", "linkedin", "github"):
                 saved = getattr(p, attr)
                 current = str(f["value"]).removeprefix("https://").removeprefix("http://").rstrip("/")
                 known = str(saved).removeprefix("https://").removeprefix("http://").rstrip("/")
                 if known and current.casefold() == known.casefold():
                     return self._ans(f, saved, ["profile:" + attr])
         for attr, labels in CONTACT.items():
-            email_prompt = attr == "email" and re.fullmatch(
-                r"(?:(?:enter|type)(?: your)? |your )?email(?: address)?", label
+            email_prompt = attr == "email" and (
+                re.fullmatch(r"(?:(?:enter|type)(?: your)? |your )?email(?: address)?", label)
+                # An address box the page types as email, beside no other party's name: a resume parse pre-fills the
+                # address printed on the resume, which is not always the application mailbox.
+                or (f.get("type") == "email" and not other_party_email(f))
             )
             if attr == "location" and label in labels and f.get("type") == "combobox":
                 qualified = address_location_option(options, p.address)
