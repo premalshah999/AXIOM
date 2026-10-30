@@ -1,10 +1,9 @@
-/* Element defaults, type scale and the scroll model (DESIGN.md §2, §3).
+/* Element defaults and the scroll model (DESIGN.md).
 
    THE SCROLL MODEL. The document never scrolls: html, body and #root are exactly the viewport and body clips. The shell
-   (shell.css) is a grid of [sidebar | main]; main is a column of a 56px top bar and ONE scroll region (.ax-scroll).
-   Screens that are not the shell (sign-in, setup guide) wrap themselves in .ax-screen, which is their own scroll
-   region. Everything else must size to its content and let that region scroll. A page that needs a second vertical
-   scroller (a modal, a drawer, a table filling the page) owns it explicitly. */
+   (shell.css) is a grid of [sidebar | main]; main is a column of the top bar and ONE scroll region (.ax-scroll). Screens
+   that are not the shell (sign-in, setup guide) wrap themselves in .ax-screen, which is their own scroll region. A page
+   that needs a second vertical scroller (a modal, a drawer, a table filling the page) owns it explicitly. */
 
 *,
 *::before,
@@ -14,6 +13,7 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  font-synthesis-weight: none;
 }
 
 html,
@@ -28,9 +28,8 @@ body {
   background: var(--ground);
   color: var(--ink);
   font-family: var(--font-sans);
-  font-size: var(--text-ui);
+  font-size: var(--text-body);
   line-height: 1.5;
-  font-variant-numeric: tabular-nums;
   font-optical-sizing: auto;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -52,27 +51,36 @@ p {
 
 h1,
 h2,
+h3,
+b,
+strong {
+  font-weight: 500;
+}
+
+h1,
+h2,
 h3 {
   text-wrap: balance;
 }
 
 h1 {
   font-size: var(--text-title);
-  line-height: 1.2;
-  font-weight: 600;
-  letter-spacing: -0.015em;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
 }
 
 h2 {
-  font-size: var(--text-emphasis);
-  line-height: 1.35;
-  font-weight: 600;
+  font-size: var(--text-body);
+  line-height: 1.4;
 }
 
 h3 {
   font-size: var(--text-ui);
   line-height: 1.4;
-  font-weight: 600;
+}
+
+small {
+  font-size: var(--text-meta);
 }
 
 a {
@@ -98,21 +106,20 @@ code,
 }
 
 code {
-  background: var(--chip);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 1px 5px;
+  padding: 1px 4px;
+  border-radius: var(--radius);
+  background: var(--tint);
   overflow-wrap: anywhere;
 }
 
 pre {
-  margin: 8px 0 0;
-  padding: 12px;
-  background: var(--field);
+  margin: var(--space-2) 0 0;
+  padding: var(--space-3);
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  font: 12px/1.5 var(--font-code);
+  border-radius: var(--radius);
+  background: none;
   color: var(--ink-2);
+  font: var(--text-meta) / 1.5 var(--font-code);
   overflow: auto;
   max-height: 320px;
   white-space: pre-wrap;
@@ -120,15 +127,92 @@ pre {
 }
 
 kbd {
-  font-size: var(--text-micro);
+  font-size: var(--text-meta);
 }
 
-input,
-select,
-textarea,
 button {
   font: inherit;
   color: inherit;
+}
+
+/* The bare controls unconverted pages still use; .ax-control (components.css) is the same look. */
+input,
+select,
+textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--field);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-ui);
+}
+
+textarea {
+  resize: vertical;
+  line-height: 1.45;
+}
+
+textarea.code {
+  font: var(--text-meta) / 1.55 var(--font-code);
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  padding: 0;
+  flex: none;
+  accent-color: var(--ink-2);
+}
+
+input[type="file"] {
+  padding: 4px;
+  color: var(--ink-2);
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: var(--ink-3);
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+
+input[aria-invalid="true"],
+textarea[aria-invalid="true"],
+select[aria-invalid="true"] {
+  border-color: var(--bad);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.55;
+}
+
+select {
+  appearance: none;
+  padding-right: 28px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--ink-3) 50%), linear-gradient(135deg, var(--ink-3) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 52%,
+    calc(100% - 10px) 52%;
+  background-size:
+    4px 4px,
+    4px 4px;
+  background-repeat: no-repeat;
 }
 
 select option {
@@ -142,7 +226,7 @@ textarea::placeholder {
 }
 
 :focus-visible {
-  outline: 2px solid var(--brand);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -153,7 +237,7 @@ textarea::placeholder {
 }
 
 ::selection {
-  background: var(--brand-soft);
+  background: color-mix(in srgb, var(--accent-text) 28%, transparent);
   color: var(--ink);
 }
 

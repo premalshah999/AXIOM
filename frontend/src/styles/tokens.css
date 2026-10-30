@@ -1,201 +1,107 @@
-/* AXIOM design tokens (DESIGN.md §1).
+/* AXIOM design tokens (DESIGN.md). Two themes, set on <html data-theme="dark|light"> before first paint.
+   A missing or unknown data-theme is dark. Nothing outside this file may use a literal colour. */
 
-   Every colour is defined once per theme on :root[data-theme=…]. Components never use a literal colour.
-   Themes: navy (default, dark), maroon (light), slate (dark), ivory (light), system (navy when the OS is dark,
-   maroon when it is light). An unknown or missing data-theme is navy, so a first paint without the inline script in
-   index.html is still correct.
-
-   Status colours stay distinguishable from the accent: maroon's --bad is a clear red, navy's --info is cyan not blue.
-   --hold, --fix and --idle are extra tokens the legacy style.css tones need (purple, orange, grey). */
+/* Weights 400 and 500 are the only ones this product uses. The faces declare that range, so a stray font-weight: 700
+   renders at 500, and font-synthesis-weight in base.css keeps the browser from faking a bold on top of it. */
+@font-face {
+  font-family: "Geist Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 500;
+  src: url("@fontsource-variable/geist/files/geist-cyrillic-ext-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: "Geist Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 500;
+  src: url("@fontsource-variable/geist/files/geist-cyrillic-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Geist Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 500;
+  src: url("@fontsource-variable/geist/files/geist-vietnamese-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+@font-face {
+  font-family: "Geist Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 500;
+  src: url("@fontsource-variable/geist/files/geist-latin-ext-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Geist Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 500;
+  src: url("@fontsource-variable/geist/files/geist-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 
 :root,
-:root[data-theme="navy"],
-:root[data-theme="system"] {
-  --ground: #070b14;
-  --surface: #0b1020;
-  --surface-hover: rgba(255, 255, 255, 0.05);
-  --raised: #131a2b;
-  --card: #0e1424;
-  --field: #0a0f1c;
-  --chip: #1a2236;
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  /* Surfaces: the page and sidebar share one ground; overlays are the only thing raised. */
+  --ground: #0b1220;
+  --raised: #121b2e;
+  --field: rgba(255, 255, 255, 0.03);
+  --tint: rgba(255, 255, 255, 0.055);
   --line: rgba(255, 255, 255, 0.085);
   --line-strong: rgba(255, 255, 255, 0.17);
-  --ink: #eef1f8;
-  --ink-2: #a8b1c6;
-  --ink-3: #8791a8;
-  --brand: #5b8cff;
-  --brand-soft: rgba(91, 140, 255, 0.16);
-  --brand-ink: #050b1a;
-  --accent-text: #93b3ff;
-  --ok: #3ddc97;
-  --ok-soft: rgba(61, 220, 151, 0.13);
-  --warn: #f0b429;
-  --warn-soft: rgba(240, 180, 41, 0.13);
-  --bad: #ff6b7a;
-  --bad-soft: rgba(255, 107, 122, 0.13);
-  --info: #3cc8e0;
-  --info-soft: rgba(60, 200, 224, 0.13);
-  --hold: #b79cff;
-  --fix: #f59a6c;
-  --idle: #8b95ab;
-  --glow: rgba(91, 140, 255, 0.1);
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 24px 48px -12px rgba(0, 0, 0, 0.7);
-  --scrim: rgba(2, 4, 10, 0.62);
-  color-scheme: dark;
+  /* Text */
+  --ink: #eef1f7;
+  --ink-2: #aeb7ca;
+  --ink-3: #8e98ae;
+  /* Accent: the primary button, the current sidebar item, links and focus rings. Nothing else. */
+  --brand: #4170e4;
+  --brand-ink: #ffffff;
+  --accent-text: #94b4ff;
+  /* Status: only for a small dot or the text of something that needs attention. Success is plain muted text. */
+  --warn: #e5b567;
+  --bad: #f28b92;
+  /* Overlays: drawers, menus, the palette. Nothing else casts a shadow. */
+  --overlay-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --scrim: rgba(3, 6, 14, 0.55);
 }
 
-:root[data-theme="maroon"] {
-  --ground: #f8f6f5;
-  --surface: #ffffff;
-  --surface-hover: rgba(40, 18, 24, 0.05);
+:root[data-theme="light"] {
+  color-scheme: light;
+  --ground: #fbf9f7;
   --raised: #ffffff;
-  --card: #ffffff;
   --field: #ffffff;
-  --chip: #efebea;
-  --line: rgba(40, 18, 24, 0.11);
-  --line-strong: rgba(40, 18, 24, 0.22);
-  --ink: #1c1517;
-  --ink-2: #50464a;
-  --ink-3: #6f6469;
+  --tint: rgba(60, 30, 35, 0.055);
+  --line: rgba(60, 30, 35, 0.12);
+  --line-strong: rgba(60, 30, 35, 0.24);
+  --ink: #1d1719;
+  --ink-2: #574d50;
+  --ink-3: #6e6367;
   --brand: #8c1d40;
-  --brand-soft: rgba(140, 29, 64, 0.09);
   --brand-ink: #ffffff;
   --accent-text: #8c1d40;
-  --ok: #0c7a53;
-  --ok-soft: rgba(12, 122, 83, 0.11);
-  --warn: #944f04;
-  --warn-soft: rgba(148, 79, 4, 0.12);
-  --bad: #c23030;
-  --bad-soft: rgba(194, 48, 48, 0.1);
-  --info: #2160c4;
-  --info-soft: rgba(33, 96, 196, 0.1);
-  --hold: #6b4bb8;
-  --fix: #b8541f;
-  --idle: #7a6f74;
-  --glow: rgba(140, 29, 64, 0.05);
-  --shadow: 0 1px 2px rgba(40, 18, 24, 0.07), 0 16px 40px -12px rgba(40, 18, 24, 0.2);
-  --scrim: rgba(28, 16, 20, 0.34);
-  color-scheme: light;
+  /* A clear red, never to be read as the maroon accent. */
+  --warn: #8a5200;
+  --bad: #c0322c;
+  --overlay-shadow: 0 12px 32px rgba(40, 18, 24, 0.16);
+  --scrim: rgba(28, 16, 20, 0.28);
 }
 
-/* system, with the OS in light mode: the same values as maroon. */
-@media (prefers-color-scheme: light) {
-  :root[data-theme="system"] {
-    --ground: #f8f6f5;
-    --surface: #ffffff;
-    --surface-hover: rgba(40, 18, 24, 0.05);
-    --raised: #ffffff;
-    --card: #ffffff;
-    --field: #ffffff;
-    --chip: #efebea;
-    --line: rgba(40, 18, 24, 0.11);
-    --line-strong: rgba(40, 18, 24, 0.22);
-    --ink: #1c1517;
-    --ink-2: #50464a;
-    --ink-3: #6f6469;
-    --brand: #8c1d40;
-    --brand-soft: rgba(140, 29, 64, 0.09);
-    --brand-ink: #ffffff;
-    --accent-text: #8c1d40;
-    --ok: #0c7a53;
-    --ok-soft: rgba(12, 122, 83, 0.11);
-    --warn: #944f04;
-    --warn-soft: rgba(148, 79, 4, 0.12);
-    --bad: #c23030;
-    --bad-soft: rgba(194, 48, 48, 0.1);
-    --info: #2160c4;
-    --info-soft: rgba(33, 96, 196, 0.1);
-    --hold: #6b4bb8;
-    --fix: #b8541f;
-    --idle: #7a6f74;
-    --glow: rgba(140, 29, 64, 0.05);
-    --shadow: 0 1px 2px rgba(40, 18, 24, 0.07), 0 16px 40px -12px rgba(40, 18, 24, 0.2);
-    --scrim: rgba(28, 16, 20, 0.34);
-    color-scheme: light;
-  }
-}
-
-:root[data-theme="slate"] {
-  --ground: #0a0d10;
-  --surface: #0f1317;
-  --surface-hover: rgba(255, 255, 255, 0.05);
-  --raised: #171c22;
-  --card: #12171c;
-  --field: #0d1115;
-  --chip: #1d242c;
-  --line: rgba(255, 255, 255, 0.08);
-  --line-strong: rgba(255, 255, 255, 0.16);
-  --ink: #eceff2;
-  --ink-2: #a4aeb8;
-  --ink-3: #818c97;
-  --brand: #2dd4bf;
-  --brand-soft: rgba(45, 212, 191, 0.14);
-  --brand-ink: #031411;
-  --accent-text: #5eead4;
-  --ok: #4ade80;
-  --ok-soft: rgba(74, 222, 128, 0.13);
-  --warn: #f5b83d;
-  --warn-soft: rgba(245, 184, 61, 0.13);
-  --bad: #ff6b6b;
-  --bad-soft: rgba(255, 107, 107, 0.13);
-  --info: #6aa8ff;
-  --info-soft: rgba(106, 168, 255, 0.13);
-  --hold: #b9a3e8;
-  --fix: #f59a6c;
-  --idle: #8b959f;
-  --glow: rgba(45, 212, 191, 0.07);
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 24px 48px -12px rgba(0, 0, 0, 0.7);
-  --scrim: rgba(2, 4, 6, 0.62);
-  color-scheme: dark;
-}
-
-:root[data-theme="ivory"] {
-  --ground: #faf8f3;
-  --surface: #fffefb;
-  --surface-hover: rgba(40, 36, 20, 0.05);
-  --raised: #ffffff;
-  --card: #fffefb;
-  --field: #ffffff;
-  --chip: #f0ede3;
-  --line: rgba(40, 36, 20, 0.11);
-  --line-strong: rgba(40, 36, 20, 0.22);
-  --ink: #1d1c18;
-  --ink-2: #504d44;
-  --ink-3: #6b675d;
-  --brand: #2f6f4e;
-  --brand-soft: rgba(47, 111, 78, 0.1);
-  --brand-ink: #ffffff;
-  --accent-text: #2a6445;
-  --ok: #117038;
-  --ok-soft: rgba(17, 112, 56, 0.11);
-  --warn: #944f04;
-  --warn-soft: rgba(148, 79, 4, 0.12);
-  --bad: #bf3434;
-  --bad-soft: rgba(191, 52, 52, 0.1);
-  --info: #2160c4;
-  --info-soft: rgba(33, 96, 196, 0.1);
-  --hold: #6b4bb8;
-  --fix: #b8541f;
-  --idle: #78746a;
-  --glow: rgba(47, 111, 78, 0.05);
-  --shadow: 0 1px 2px rgba(40, 36, 20, 0.07), 0 16px 40px -12px rgba(40, 36, 20, 0.2);
-  --scrim: rgba(30, 28, 16, 0.34);
-  color-scheme: light;
-}
-
-/* Scale, radii, motion (DESIGN.md §2). */
 :root {
-  --text-micro: 11px;
+  /* Four sizes. */
   --text-meta: 12px;
-  --text-ui: 13.5px;
-  --text-emphasis: 15px;
-  --text-display: 22px;
-  --text-title: 24px;
+  --text-ui: 13px; /* tables and controls */
+  --text-body: 14px;
+  --text-title: 20px;
 
-  --radius-sm: 5px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  /* One radius, for controls and overlays. Tables and sections have no outer card. */
+  --radius: 6px;
 
+  /* A 4px grid. */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -203,16 +109,66 @@
   --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
+  --space-12: 48px;
 
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --dur-fast: 120ms;
-  --dur: 160ms;
-  --dur-slow: 200ms;
+  --dur: 140ms;
 
   --font-sans: "Geist Variable", "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-code: "Geist Mono Variable", "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
-  --side-w: 240px;
-  --side-w-collapsed: 64px;
-  --top-h: 56px;
+  --page-w: 1080px;
+  --gutter: 32px;
+  --side-w: 220px;
+  --side-w-collapsed: 56px;
+  --top-h: 64px;
+  --focus: var(--accent-text);
+
+  /* ---------- Legacy names ----------
+     What unconverted pages and style.css still read, mapped so they take the quiet system without being rewritten:
+     cards go flat, soft tints go neutral, and every status that is not a real problem goes muted. Do not use these in
+     new code. Delete a line once `grep` finds nothing reading it. */
+  --surface: var(--ground);
+  --surface-hover: var(--tint);
+  --card: var(--ground);
+  --chip: var(--tint);
+  --bg: var(--ground);
+  --raised-2: var(--tint);
+  --hover: var(--tint);
+  --sunken: var(--field);
+  --line-2: var(--line-strong);
+  --text: var(--ink);
+  --text-2: var(--ink-2);
+  --text-3: var(--ink-3);
+  --brand-soft: var(--tint);
+  --ok: var(--ink-2);
+  --ok-soft: transparent;
+  --info: var(--ink-2);
+  --info-soft: transparent;
+  --warn-soft: transparent;
+  --bad-soft: transparent;
+  --hold: var(--ink-2);
+  --fix: var(--ink-2);
+  --idle: var(--ink-3);
+  --run: var(--ink-2);
+  --ask: var(--warn);
+  --glow: transparent;
+  --shadow: var(--overlay-shadow);
+  --text-micro: var(--text-meta);
+  --text-emphasis: var(--text-body);
+  --text-display: var(--text-title);
+  --radius-sm: var(--radius);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius);
+  --dur-fast: var(--dur);
+  --dur-slow: var(--dur);
+  --font: var(--font-sans);
+  --mono: var(--font-code);
+}
+
+/* The phone gutter. (style.css sets --gutter too; this file loads after it.) */
+@media (max-width: 899px) {
+  :root {
+    --gutter: 16px;
+  }
 }
