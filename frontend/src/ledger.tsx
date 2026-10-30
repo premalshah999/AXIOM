@@ -114,7 +114,6 @@ function Confirmed() {
       truncate: true,
       cell: (r) => <JobCell company={r.company} role={r.title} onOpen={() => openJob(r.job_id, r.run_id)} />,
     },
-    { key: "ats", header: "Platform", hideBelow: 860, cell: (r) => <Note>{r.ats}</Note> },
     {
       key: "applied",
       header: "Applied",
@@ -138,7 +137,7 @@ function Confirmed() {
           onClick={(e) => e.stopPropagation()}
           title={`Open the posting (${linkHost(r.url)})`}
         >
-          Posting <ExternalLink size={12} aria-hidden="true" style={{ verticalAlign: "-1px" }} />
+          Posting <ExternalLink size={12} aria-hidden="true" />
           <span className="sr-only"> (opens in a new tab)</span>
         </a>
       ),
@@ -162,8 +161,7 @@ function Confirmed() {
         </select>
         <span className="ax-note ax-toolbar-note">
           {ledger.data ? plural(all.length, "confirmed application") : "…"} across all history · {snapshot.stats.confirmed_today} today
-          {rt.state === "active" && ` · ${rt.confirmed ?? 0} of ${rt.target ?? 100} this batch`}. Each has a page
-          acknowledgement or an authenticated employer receipt.
+          {rt.state === "active" && ` · ${rt.confirmed ?? 0} of ${rt.target ?? 100} this batch`}.
         </span>
       </div>
       {ledger.error && (
@@ -224,7 +222,6 @@ function Unconfirmed() {
     },
     { key: "status", header: "Status", cell: (r) => <StatusPill state={r.state} /> },
     { key: "detail", header: "Detail", hideBelow: 600, width: 300, truncate: true, cell: (r) => (r.run?.reason ? <Note>{r.run.reason}</Note> : null) },
-    { key: "ats", header: "Platform", hideBelow: 860, cell: (r) => <Note>{r.job.ats}</Note> },
     {
       key: "updated",
       header: "Updated",
@@ -239,10 +236,7 @@ function Unconfirmed() {
   ];
   return (
     <>
-      <Notice>
-        Submit was attempted but no acknowledgement or receipt was captured. They may have been sent, so they are
-        excluded from Confirmed and never retried. Open one to check email or record what you verified.
-      </Notice>
+      <Notice>No receipt was captured for these. They may have been sent, so they are not in Confirmed and are never retried.</Notice>
       {list.error && (
         <Notice
           tone="bad"
