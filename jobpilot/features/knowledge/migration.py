@@ -8,6 +8,8 @@ through the new API (non-`m:` IDs) are never touched by migration.
 """
 
 import re
+import time
+from weakref import WeakKeyDictionary
 
 from sqlalchemy import select
 
@@ -250,6 +252,7 @@ def migrate_profile(db, profile_id="default", dry_run=False) -> dict:
 def rollback(db, profile_id="default") -> dict:
     """Remove every migrated row. The profile setting was never modified, and
     facts saved through the new API are kept."""
+    _SYNCED.get(db, {}).pop(profile_id, None)
     with db.exclusive() as s:
         rows = list(s.scalars(select(KnFact).where(KnFact.profile_id == profile_id, KnFact.id.like("m:%"))))
         for row in rows:
@@ -294,8 +297,24 @@ def recategorize(db, profile_id="default") -> int:
     return moved
 
 
+# {database: {profile id: (the digest found current, when)}}. Every form question asked again: about 10 reads a second of
+# kn_migrations (all 252 rows each) on the loop the browsers share (2026-10-30), for an answer that changes when the
+# profile does. A profile edit gives a new digest, which misses here at once; the recheck covers a rollback elsewhere.
+_SYNCED = WeakKeyDictionary()
+SYNC_RECHECK_SECONDS = 60.0
+
+
 def sync(db, profile_id="default", source_digest=None):
     """Cheap lock-free check before retrieval; migrates only when the profile changed."""
+    kept = _SYNCED.setdefault(db, {})
+    current = kept.get(profile_id)
+    if (
+        source_digest
+        and current
+        and current[0] == source_digest
+        and time.monotonic() - current[1] < SYNC_RECHECK_SECONDS
+    ):
+        return {"status": "unchanged"}
     recategorize(db, profile_id)
     source_digest = source_digest or digest(db.get_setting("profile", {}) or {})
     with db.session() as s:
@@ -303,7 +322,10 @@ def sync(db, profile_id="default", source_digest=None):
             select(KnMigration.source_digest)
             .where(KnMigration.profile_id == profile_id, KnMigration.rolled_back.is_(False))
             .order_by(KnMigration.created_at.desc())
+            .limit(1)
         )
     if last == source_digest:
+        kept[profile_id] = (source_digest, time.monotonic())
         return {"status": "unchanged"}
+    kept.pop(profile_id, None)
     return migrate_profile(db, profile_id)

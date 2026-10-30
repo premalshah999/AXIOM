@@ -359,3 +359,38 @@ def test_the_archive_page_reads_no_packet_of_a_removed_job(service):
         stop()
     assert [(r["run_id"], r["state"], r["cost"], r["attempts"]) for r in rows] == [("r1", "failed", 0.25, 1)]
     assert not [q for q in seen if "runs.packet" in q], seen
+
+
+def test_a_form_question_does_not_ask_for_the_migration_again(service, monkeypatch):
+    """About 10 reads a second of kn_migrations, each returning all 252 rows, for an answer that changes with the profile
+    (2026-10-30). A new digest still migrates at once, and a rollback here is seen at once."""
+    from jobpilot.features.knowledge import migration
+    from jobpilot.features._store import digest
+
+    service.db.set_setting("profile", {"email": "alex@example.test", "first_name": "Alex"})
+    profile = service.db.get_setting("profile")
+    first = migration.sync(service.db, source_digest=digest(profile))
+    assert first.get("status") != "unchanged"
+    assert migration.sync(service.db, source_digest=digest(profile)) == {"status": "unchanged"}  # now remembered
+    seen, stop = statements(service)
+    try:
+        assert migration.sync(service.db, source_digest=digest(profile)) == {"status": "unchanged"}
+    finally:
+        stop()
+    assert seen == []
+    # An edited profile has another digest: it must not be answered from the memo.
+    service.db.set_setting("profile", {"email": "alex@example.test", "first_name": "Alexander"})
+    changed = service.db.get_setting("profile")
+    assert migration.sync(service.db, source_digest=digest(changed)).get("status") != "unchanged"
+    # The recheck notices what another process did.
+    migration.sync(service.db, source_digest=digest(changed))
+    clock = {"t": migration.time.monotonic() + migration.SYNC_RECHECK_SECONDS + 1}
+    monkeypatch.setattr(migration.time, "monotonic", lambda: clock["t"])
+    seen, stop = statements(service)
+    try:
+        assert migration.sync(service.db, source_digest=digest(changed)) == {"status": "unchanged"}
+    finally:
+        stop()
+    assert [q for q in seen if "kn_migrations" in q]
+    migration.rollback(service.db)
+    assert migration.sync(service.db, source_digest=digest(changed)).get("status") != "unchanged"
