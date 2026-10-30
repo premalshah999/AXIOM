@@ -9,7 +9,7 @@ import { TopActions } from "./shell/Shell";
 import type { Board, Listing } from "./types";
 import { ago, plural, stamp } from "./ui";
 import { Button, Empty, Table, type Column } from "./ui/index";
-import { JobCell, Notice, Note, StatusPill, Chips, SearchBox } from "./worktools";
+import { Chips, JobCell, LoadError, Notice, Note, SearchBox, StatusPill } from "./worktools";
 
 // A listing in any of these states is already owned or protected.
 const LOCKED = new Set([
@@ -258,18 +258,6 @@ export function DiscoveredJobs() {
         />
       </div>
       {bulk.last && <ApplyOutcomes result={bulk.last} onClose={bulk.dismiss} />}
-      {board.error && !b && (
-        <Notice
-          tone="bad"
-          action={
-            <Button size="sm" onClick={() => board.refresh()}>
-              Try again
-            </Button>
-          }
-        >
-          {board.error.message}
-        </Notice>
-      )}
       <Table
         fill
         label="Discovered jobs"
@@ -282,6 +270,7 @@ export function DiscoveredJobs() {
         canSelect={(j) => !locked(j.status)}
         rowLabel={(j) => `${j.title} at ${j.company}`}
         loading={!b && !board.error}
+        error={board.error && !b ? <LoadError error={board.error} retry={board.refresh} /> : undefined}
         busy={!!b && !current}
         bulk={
           <>

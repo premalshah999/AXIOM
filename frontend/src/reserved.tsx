@@ -12,7 +12,7 @@ import type { ReservedEmployer, ReservedPage, ReservedRules } from "./types";
 import { ago, linkHost, plural } from "./ui";
 import { Button, Drawer, Empty, Table, Textarea, type Column } from "./ui/index";
 import { TopActions } from "./shell/Shell";
-import { Chips, ConfirmButton, JobCell, Notice, Note, SearchBox, StatusPill } from "./worktools";
+import { Chips, ConfirmButton, JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
 
 export function ReservedJobs() {
   const { route, go, version, marks, markJobs, refresh, openJob } = useWorkspace();
@@ -178,18 +178,7 @@ export function ReservedJobs() {
           )}
         </div>
       )}
-      {list.error && (
-        <Notice
-          tone="bad"
-          action={
-            <Button size="sm" onClick={() => list.refresh()}>
-              Try again
-            </Button>
-          }
-        >
-          {list.error.message}
-        </Notice>
-      )}
+      {list.error && data && <LoadError error={list.error} retry={list.refresh} />}
       {(!data || data.enabled) && (
         <Table
           fill
@@ -199,6 +188,7 @@ export function ReservedJobs() {
           rowKey={(r) => r.job.id}
           onRowClick={(r) => openJob(r.job.id, r.run?.id)}
           loading={!data && !list.error}
+          error={list.error && !data ? <LoadError error={list.error} retry={list.refresh} /> : undefined}
           busy={!!data && data.key !== key}
           empty={
             <Empty

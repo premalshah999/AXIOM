@@ -12,7 +12,7 @@ import { QueuePanel } from "./queue";
 import { ReservedJobs } from "./reserved";
 import { ago, linkHost, plural, urlRole } from "./ui";
 import { Button, Empty, RouteTabs, Table, type Column } from "./ui/index";
-import { Chips, JobCell, Notice, Note, SearchBox, StatusPill } from "./worktools";
+import { Chips, JobCell, LoadError, Notice, Note, SearchBox, StatusPill } from "./worktools";
 
 const TABS = [
   { id: "pipeline", label: "Pipeline" },
@@ -131,18 +131,7 @@ function Pipeline() {
           {plural(counts.needs ?? 0, "application")} {(counts.needs ?? 0) === 1 ? "is" : "are"} waiting for an answer. Answer the questions on Needs you.
         </Notice>
       )}
-      {list.error && (
-        <Notice
-          tone="bad"
-          action={
-            <Button size="sm" onClick={() => list.refresh()}>
-              Try again
-            </Button>
-          }
-        >
-          {list.error.message}
-        </Notice>
-      )}
+      {list.error && list.loaded && <LoadError error={list.error} retry={list.refresh} />}
       <Table
         fill
         label="Application pipeline"
@@ -153,7 +142,8 @@ function Pipeline() {
         selected={selection.chosen}
         onSelectedChange={selection.replace}
         rowLabel={(r) => r.job.company || "job"}
-        loading={!list.loaded}
+        loading={!list.loaded && !list.error}
+        error={list.error && !list.loaded ? <LoadError error={list.error} retry={list.refresh} /> : undefined}
         busy={list.loaded && !list.current}
         bulk={
           <PipelineBulk

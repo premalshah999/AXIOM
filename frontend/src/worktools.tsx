@@ -395,3 +395,19 @@ export function Facts({ items }: { items: [ReactNode, ReactNode][] }) {
     </dl>
   );
 }
+
+/** A list that could not be read: the server's words and a way to try again. */
+export function LoadError({ error, retry }: { error: Error; retry: () => unknown }) {
+  return (
+    <Notice
+      tone="bad"
+      action={
+        <Button size="sm" onClick={() => void retry()}>
+          Try again
+        </Button>
+      }
+    >
+      {error.message}
+    </Notice>
+  );
+}

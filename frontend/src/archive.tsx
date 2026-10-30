@@ -8,7 +8,7 @@ import { Pagination, usePagination } from "./pagination";
 import type { Archived } from "./types";
 import { day, plural } from "./ui";
 import { Button, Empty, Table, type Column } from "./ui/index";
-import { ConfirmButton, JobCell, Notice, Note, SearchBox, StatusPill } from "./worktools";
+import { ConfirmButton, JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
 
 export function ArchiveList() {
   const { openJob } = useWorkspace();
@@ -85,18 +85,7 @@ export function ArchiveList() {
           />
         </div>
       </div>
-      {archive.error && (
-        <Notice
-          tone="bad"
-          action={
-            <Button size="sm" onClick={() => archive.refresh()}>
-              Try again
-            </Button>
-          }
-        >
-          {archive.error.message}
-        </Notice>
-      )}
+      {archive.error && archive.data && <LoadError error={archive.error} retry={archive.refresh} />}
       <Table
         fill
         label="Archived applications"
@@ -104,6 +93,7 @@ export function ArchiveList() {
         rows={paging.items}
         rowKey={(a) => a.job_id}
         loading={!archive.data && !archive.error}
+        error={archive.error && !archive.data ? <LoadError error={archive.error} retry={archive.refresh} /> : undefined}
         empty={
           <Empty
             title={q ? "No archived jobs match" : "The archive is empty"}

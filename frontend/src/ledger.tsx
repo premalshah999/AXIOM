@@ -15,7 +15,7 @@ import { PipelineBulk } from "./pipelinebulk";
 import { TopActions } from "./shell/Shell";
 import { ago, linkHost, plural, stamp, urlRole } from "./ui";
 import { Button, Empty, RouteTabs, Table, type Column } from "./ui/index";
-import { JobCell, Notice, Note, SearchBox, StatusPill } from "./worktools";
+import { JobCell, LoadError, Notice, Note, SearchBox, StatusPill } from "./worktools";
 
 const EVIDENCE = [
   ["all", "Any evidence"],
@@ -169,18 +169,7 @@ function Confirmed() {
             .join(" · ")}
         </span>
       </div>
-      {ledger.error && (
-        <Notice
-          tone="bad"
-          action={
-            <Button size="sm" onClick={() => ledger.refresh()}>
-              Try again
-            </Button>
-          }
-        >
-          {ledger.error.message}
-        </Notice>
-      )}
+      {ledger.error && ledger.data && <LoadError error={ledger.error} retry={ledger.refresh} />}
       <Table
         fill
         label="Confirmed applications"
@@ -189,6 +178,7 @@ function Confirmed() {
         rowKey={(r) => r.job_id}
         onRowClick={(r) => openJob(r.job_id, r.run_id)}
         loading={!ledger.data && !ledger.error}
+        error={ledger.error && !ledger.data ? <LoadError error={ledger.error} retry={ledger.refresh} /> : undefined}
         empty={
           <Empty
             title={all.length ? "No confirmed applications match" : "No confirmed applications yet"}
@@ -242,18 +232,7 @@ function Unconfirmed() {
   return (
     <>
       <Notice>No receipt was captured for these. They may have been sent, so they are not in Confirmed and are never retried.</Notice>
-      {list.error && (
-        <Notice
-          tone="bad"
-          action={
-            <Button size="sm" onClick={() => list.refresh()}>
-              Try again
-            </Button>
-          }
-        >
-          {list.error.message}
-        </Notice>
-      )}
+      {list.error && list.loaded && <LoadError error={list.error} retry={list.refresh} />}
       <Table
         fill
         label="Unconfirmed submissions"
@@ -264,7 +243,8 @@ function Unconfirmed() {
         selected={selection.chosen}
         onSelectedChange={selection.replace}
         rowLabel={(r) => r.job.company || "job"}
-        loading={!list.loaded}
+        loading={!list.loaded && !list.error}
+        error={list.error && !list.loaded ? <LoadError error={list.error} retry={list.refresh} /> : undefined}
         busy={list.loaded && !list.current}
         bulk={<PipelineBulk selection={selection} rows={list.rows} filter="unconfirmed" query="" total={list.paging.total} />}
         empty={
