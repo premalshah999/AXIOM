@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from jobpilot.native import migrate, pg
+from jobpilot.native import migrate, pg, services
 from jobpilot.native.env import NativeError, load, local_cdp, prepare, read_dotenv
 from jobpilot.native.migrate import Source
 
@@ -357,7 +357,11 @@ def test_max_connections_covers_the_real_pools():
     from jobpilot.db import POOL_OVERFLOW, POOL_SIZE
 
     DBOS_SYSTEM_POOL = 20
-    assert pg.MAX_CONNECTIONS >= POOL_SIZE + POOL_OVERFLOW + DBOS_SYSTEM_POOL + 5
+    cfg = load(ROOT, environ={"POSTGRES_PASSWORD": "synthetic"})
+    listed = services.read(cfg)
+    assert sum(s.database_connections for s in listed) >= POOL_SIZE + POOL_OVERFLOW + DBOS_SYSTEM_POOL
+    assert pg.max_connections(listed) >= POOL_SIZE + POOL_OVERFLOW + DBOS_SYSTEM_POOL + 5
+    assert pg.max_connections(listed) == pg.MAX_CONNECTIONS, "the small machine's setting, while there is one service"
 
 
 def test_a_cluster_of_another_major_version_is_not_used(cfg):

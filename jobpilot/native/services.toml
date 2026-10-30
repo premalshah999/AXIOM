@@ -15,6 +15,8 @@
 #   restart_with        Names whose restart restarts it too. Optional.
 #   drains              true: a stop waits SHUTDOWN_DRAIN_SECONDS + 30 for it, as compose.yaml's stop_grace_period.
 #   stop_grace_seconds  Otherwise how long a stop waits (default 10).
+#   database_connections  The most it may open, its pools together. PostgreSQL's max_connections is sized from these, and a
+#                       connection refused in the middle of a commit is an unknown submission. Default 0: it opens none.
 #   env                 A table of extra environment on top of what every service gets (env.py, app_environment).
 
 [[service]]
@@ -28,3 +30,5 @@ after = ["postgres", "worker", "twin"]
 # In-flight runs stay `running` until the app restarts after the database comes back (docs/INFRA.md).
 restart_with = ["postgres"]
 drains = true
+# jobpilot.db's pool (10 + 20 overflow) plus DBOS's system pool (20, no overflow). Production holds about 30.
+database_connections = 50

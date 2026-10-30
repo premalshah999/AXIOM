@@ -20,8 +20,9 @@ SEARCH = (
     "/Applications/Postgres.app/Contents/Versions/17/bin",
     "/Library/PostgreSQL/17/bin",
 )
-# Sized for the app's real pool: jobpilot.db (10 + 20 overflow) plus DBOS's system pool (20, no overflow, the default in
-# dbos/_dbos_config.py) is 50; the rest is the supervisor's poll, `axiom psql` and pg_dump. Production holds about 30.
+# The services' own connections, from services.toml, plus these: the supervisor's poll, `axiom psql` and pg_dump.
+TOOL_CONNECTIONS = 10
+# What a server with no service list needs (a restore), and the shipped list's 50 + 10.
 MAX_CONNECTIONS = 60
 SHARED_BUFFERS = "64MB"
 # Passed on the command line, not in a file, so that an update can never leave an old configuration on disk and `ps`
@@ -77,6 +78,11 @@ def find_bin(cfg):
         if f" {MAJOR}." in out:
             return Path(folder)
     raise NativeError(f"PostgreSQL {MAJOR} was not found. Install it with: brew install postgresql@{MAJOR}")
+
+
+def max_connections(listed):
+    """Sized to what the services can really open, so that listing another one cannot run the database out of slots."""
+    return max(MAX_CONNECTIONS, sum(s.database_connections for s in listed) + TOOL_CONNECTIONS)
 
 
 def server_env():

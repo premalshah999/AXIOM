@@ -551,6 +551,7 @@ def test_a_new_service_is_only_an_entry(tmp_path):
         ('[[service]]\nname = "a"\ncommand = ["x", "--host", "0.0.0.0"]', "127.0.0.1 only"),
         ('[[service]]\nname = "a"\ncommand = ["x"]\nhealth_url = "http://example.test/healthz"', "must be local"),
         ('[[service]]\nname = "a"\ncommand = ["x"]\nport = 70000', "port must be"),
+        ('[[service]]\nname = "a"\ncommand = ["x"]\ndatabase_connections = -1', "whole number"),
         ('[[service]]\nname = "a"\ncommand = ["x"]\nafter = ["b"]', "nothing starts"),
         ('[[service]]\nname = "a"\ncommand = ["x"]\nrestart_with = ["b"]', "nothing starts"),
         ('[[service]]\nname = "a"\ncommand = ["x"]\n[[service]]\nname = "a"\ncommand = ["y"]', "twice"),
@@ -727,6 +728,17 @@ def test_each_service_has_its_own_log_and_health(cfg, tmp_path, monkeypatch):
     environment = gateway.env()
     assert environment["ROLE"] == "edge" and environment["APP_PORT"] == "8090"
     assert environment["DATABASE_URL"] == cfg.database_url
+
+
+def test_listing_more_services_sizes_the_database_for_them(tmp_path, monkeypatch):
+    """Four services with the app's pools would otherwise run PostgreSQL out of slots in the middle of a commit."""
+    monkeypatch.setattr(pg, "find_bin", lambda _: Path("/nonexistent"))
+    monkeypatch.setattr(pg, "init_cluster", lambda *_: False)
+    entry = '[[service]]\nname = "{}"\ncommand = ["x"]\ndatabase_connections = 40\n'
+    path = write_list(tmp_path, entry.format("applier") + entry.format("discovery"))
+    env = {"POSTGRES_PASSWORD": "synthetic", "AXIOM_SERVICES": str(path), "DATA_DIR": str(tmp_path / "data")}
+    children = Supervisor(prepare(load(tmp_path, environ=env)), say=lambda _: None).plan()
+    assert f"max_connections={40 + 40 + pg.TOOL_CONNECTIONS}" in children[0].argv
 
 
 def test_a_stop_after_a_dead_supervisor_follows_the_recorded_order(cfg):

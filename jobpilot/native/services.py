@@ -22,7 +22,7 @@ ALL_INTERFACES = {"0.0.0.0", "::", "[::]", "*"}
 DEFAULT_STOP_GRACE = 10.0
 FIELDS = {
     "name", "command", "port", "port_setting", "health_url", "restart", "required", "after", "restart_with", "drains",
-    "stop_grace_seconds", "env",
+    "stop_grace_seconds", "database_connections", "env",
 }  # fmt: skip
 
 
@@ -38,6 +38,7 @@ class Service:
     restart_with: tuple = ()
     drains: bool = False
     stop_grace_seconds: float = DEFAULT_STOP_GRACE
+    database_connections: int = 0
     env: dict = field(default_factory=dict)
 
 
@@ -140,6 +141,9 @@ def _service(entry, cfg):
     grace = entry.get("stop_grace_seconds", DEFAULT_STOP_GRACE)
     if isinstance(grace, bool) or not isinstance(grace, (int, float)) or grace <= 0:
         raise problem(f"stop_grace_seconds must be a positive number, got {grace!r}")
+    connections = entry.get("database_connections", 0)
+    if isinstance(connections, bool) or not isinstance(connections, int) or connections < 0:
+        raise problem(f"database_connections must be a whole number, got {connections!r}")
     env = entry.get("env", {})
     if not isinstance(env, dict):
         raise problem("env must be a table")
@@ -154,6 +158,7 @@ def _service(entry, cfg):
         restart_with=_names(entry, "restart_with", problem),
         drains=entry.get("drains", False),
         stop_grace_seconds=float(grace),
+        database_connections=connections,
         env={str(k): fill(v, "env") for k, v in env.items()},
     )
 

@@ -253,9 +253,10 @@ class Supervisor:
         cfg = self.cfg
         self.pg_bin = pg.find_bin(cfg)
         pg.init_cluster(self.pg_bin, cfg)
+        listed = services.read(cfg, release.current(cfg))
         database = Child(
             "postgres",
-            pg.server_argv(self.pg_bin, cfg),
+            pg.server_argv(self.pg_bin, cfg, max_connections=pg.max_connections(listed)),
             env=pg.server_env(),
             log=cfg.logs / "postgres.log",
             ready=lambda: pg.is_ready(self.pg_bin, cfg),
@@ -303,7 +304,6 @@ class Supervisor:
                 )
             )
         infrastructure = [database, *browsers]
-        listed = services.read(cfg, release.current(cfg))
         by_name = {c.name: c for c in infrastructure}
         running = [self.service_child(s, by_name) for s in listed]
         for child in running:

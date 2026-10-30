@@ -68,6 +68,7 @@ required = true                                  # false: a failure is reported,
 after = ["postgres", "worker"]                   # Started once these answer, stopped before them.
 restart_with = ["postgres"]                      # Restarted when one of these restarts.
 drains = true                                    # A stop waits SHUTDOWN_DRAIN_SECONDS + 30. Otherwise stop_grace_seconds.
+database_connections = 50                        # The most it may open. PostgreSQL's max_connections is sized from these.
 [service.env]
 ROLE = "applier"                                 # On top of what every service gets: DATA_DIR, DATABASE_URL, BASE_URL, ...
 ```
@@ -126,7 +127,8 @@ container's non-root user, `no-new-privileges` or `cap_drop: ALL`: the app runs 
 | SQLite | **Not for production.** See below. |
 
 Settings are on the command line (`jobpilot/native/pg.py`), so `ps` shows what is in force: `shared_buffers=64MB` (the container has
-128 MB), `max_connections=60` (the app's pool of 30 and DBOS's 20, plus tools; a test keeps this above the pools), no JIT and no parallel
+128 MB), `max_connections=60` (the app's pool of 30 and DBOS's 20, plus tools; it grows with `database_connections` in the list, and a test keeps
+it above the pools), no JIT and no parallel
 workers. The app's date arithmetic stays in UTC, and text sorts as it did in the container (ICU `en-US`; macOS's own `en_US.UTF-8` sorts
 by byte).
 
