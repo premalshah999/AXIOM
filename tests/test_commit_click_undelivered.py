@@ -281,6 +281,53 @@ async def test_a_frame_that_refuses_the_witness_means_no_proof(page, service, tm
     assert await engine.watch_commit_click(control["id"]) is None
 
 
+# ----- before the commit: the actionability check ----------------------------------------------------------------------
+
+
+async def test_the_actionability_check_presses_nothing(page, service, tmp_path):
+    """It runs on the live Submit, so this is the test that it never submits. The page's own listeners on window, which
+    come before anything Playwright could use to stop an input, see no press at all."""
+    await serve(page, """<script>window.seen=[];for(const t of ['pointerdown','mousedown','pointerup','mouseup','click',
+          'dblclick','auxclick','keydown','submit'])window.addEventListener(t,()=>window.seen.push(t),true);</script>
+        <form action="/post" method="post" onsubmit="window.sent=true">
+        <button id="go" type="submit" onclick="window.clicked=true">Submit application</button></form>""")
+    posts = []
+    page.on("request", lambda r: posts.append(r.url) if r.method == "POST" else None)
+    form = await session(page, service, tmp_path)
+    assert await form.final_control_blocked(only_control(form)["id"], timeout=2000) == ""
+    await page.wait_for_timeout(200)
+    assert await page.evaluate("[window.clicked, window.sent]") == [None, None]
+    assert await page.evaluate("window.seen") == [] and posts == [] and page.url == APPLY
+
+
+async def test_a_control_that_turned_disabled_is_named_as_disabled(page, service, tmp_path):
+    await serve(page, SUBMIT)
+    form = await session(page, service, tmp_path)
+    await page.evaluate("document.querySelector('#go').disabled=true")
+    assert await form.final_control_blocked(only_control(form)["id"], timeout=300) == "it is disabled"
+
+
+async def test_a_control_that_appears_in_time_is_not_blocked(page, service, tmp_path):
+    await serve(page, SUBMIT + VEIL + "<script>setTimeout(()=>document.querySelector('#veil').remove(),300)</script>")
+    form = await session(page, service, tmp_path)
+    assert await form.final_control_blocked(only_control(form)["id"], timeout=3000) == ""
+
+
+@pytest.mark.parametrize(
+    "body,why",
+    [
+        (SUBMIT + VEIL, "covered by div#veil"),
+        ('<form><button id="go" style="width:0;height:0;padding:0;border:0;overflow:hidden">Submit</button></form>', "no size"),
+        ('<form><button id="go" style="pointer-events:none">Submit</button></form>', "ignores the pointer"),
+        ('<form><button id="go" style="position:fixed;left:-500px;top:-500px">Submit</button></form>', "outside"),
+    ],
+)
+async def test_a_control_no_one_can_click_is_named_before_anything_is_reserved(page, service, tmp_path, body, why):
+    await serve(page, body)
+    form = await session(page, service, tmp_path)
+    assert why in await form.final_control_blocked(only_control(form)["id"], timeout=300)
+
+
 class Review:
     """A verified page at its one final submit: only the real click's outcome varies."""
 
@@ -390,6 +437,16 @@ async def test_a_frame_lost_while_arming_is_not_an_attempted_submission(monkeypa
     assert result["state"] == "waiting_browser" and engine.armed is False
     assert form.clicks == 0 and "released" in engine.events
     assert "submitting" not in engine.events, "nothing started: the durable commit mark must not be left behind"
+
+
+async def test_finish_refuses_before_the_reservation_when_the_control_cannot_be_clicked(monkeypatch):
+    form = Review()
+    form.final_control_blocked = AsyncMock(return_value="it has no size on the page")
+    engine = engine_for(monkeypatch, form)
+    result = await engine.finish()
+    assert result["state"] == "waiting_browser" and "no size" in result["reason"] and "Submit application" in result["reason"]
+    assert result["recoverable"] is True and engine.armed is False
+    assert engine.reservations == [] and form.clicks == 0 and "submitting" not in engine.events
 
 
 # ----- the adapters' commit --------------------------------------------------------------------------------------------

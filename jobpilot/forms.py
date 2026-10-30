@@ -5121,6 +5121,22 @@ class FormSession:
                 final.append(button)
         return await self._reduce_submit_controls(final)
 
+    async def final_control_blocked(self, control_id, timeout=10000):
+        """Why the final control cannot take a click, or "" when it can. A trial hover runs the real click's own checks
+        (visible, stable, in view, the hit point its own), and the only input it sends is the pointer move the real click
+        starts with. A trial click was not used: it sends the press as well and relies on one listener to stop it, on the
+        live Submit. _reduce_submit_controls looks at liveness only among several candidates, so a lone Submit no one can
+        click reached the commit (Two Sigma's Avature widget page, 2026-10-30)."""
+        control = self.locator(control_id)
+        try:
+            await control.hover(trial=True, timeout=timeout)
+            return "it is disabled" if await control.is_disabled(timeout=2000) else ""
+        except PlaywrightTimeoutError:
+            try:
+                return await self.control_block_reason(control_id)
+            except PlaywrightError:
+                return "it never became clickable"
+
     async def control_block_reason(self, control_id):
         return await self.locator(control_id).evaluate(CONTROL_BLOCK_JS, timeout=2000)
 

@@ -3941,6 +3941,16 @@ class BrowserEngine:
                 "recovery_cause": "control_observation",
                 "recoverable": True,
             }
+        # Read before the one submission is reserved: a control that cannot take a click ends here with nothing started.
+        blocked = getattr(self.form, "final_control_blocked", None)
+        if not self.armed and blocked and (why := await blocked(final[0]["id"])):
+            return {
+                "state": "waiting_browser",
+                "reason": f"The final control '{control_name(final[0])}' cannot be clicked: {why}; nothing was submitted",
+                "blocker_type": "control_failure",
+                "recovery_cause": "control_observation",
+                "recoverable": True,
+            }
         if not reserved:
             refresh = getattr(self.form, "refresh_greenhouse_phone", None)
             if refresh:
