@@ -11,6 +11,7 @@ from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from .models import structured
+from .schemas import job_title
 
 
 class Letter(BaseModel):
@@ -56,7 +57,8 @@ async def cover_letter(resolver):
 
     integrated = enabled(resolver.db)
     context = {
-        "job": {k: str(resolver.job.get(k, ""))[:6000] for k in ("title", "company", "description")},
+        "job": {k: str(resolver.job.get(k, ""))[:6000] for k in ("title", "company", "description")}
+        | {"title": job_title(str(resolver.job.get("title", "")))},
         "resume": resolver.resume_text[:14000],
         "work": [e.model_dump() for e in resolver.profile.work],
         "stories": [e.model_dump() for e in resolver.profile.evidence],

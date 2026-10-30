@@ -16,7 +16,7 @@ from .ats import canonicalize, detect
 from .db import Job, Resume, Setting, record
 from .models import structured
 from .network import fetch
-from .schemas import FitResult, JobInput, Profile
+from .schemas import FitResult, JobInput, Profile, job_title
 from .eligibility import check_eligibility, confirmed_sponsorship, eligibility_for_job, policy_findings
 
 
@@ -357,6 +357,16 @@ async def posting_api_text(db, job_id, url):
     return None
 
 
+HIDDEN_LABEL = re.compile(r"^(?:sr-only|field-label)$")
+
+
+def listing_title(anchor):
+    """A listing link's visible text. iCIMS puts the field's screen-reader label ("Requisition Title") inside the link,
+    beside the title itself (26 jobs were titled "Requisition Title Lead Data Scientist", 2026-10-30)."""
+    parts = (t.strip() for t in anchor.find_all(string=True) if not t.find_parent(class_=HIDDEN_LABEL))
+    return job_title(" ".join(p for p in parts if p))
+
+
 async def enrich(db, config, job_id):
     with db.session() as s:
         job = record(s.get(Job, job_id))
@@ -415,7 +425,7 @@ async def enrich(db, config, job_id):
                 if obj.get("@type") == "JobPosting":
                     org = obj.get("hiringOrganization", {})
                     details = {
-                        "title": obj.get("title", ""),
+                        "title": job_title(obj.get("title", "")),
                         "company": org.get("name", "") if isinstance(org, dict) else "",
                         "description": BeautifulSoup(obj.get("description", ""), "html.parser").get_text(" "),
                     }
@@ -456,7 +466,7 @@ async def enrich(db, config, job_id):
     if not details:
         details = {
             "description": soup.get_text(" ", strip=True)[:40000],
-            "title": soup.title.get_text(strip=True) if soup.title else "",
+            "title": job_title(soup.title.get_text(strip=True)) if soup.title else "",
         }
     with db.session() as s:
         item = s.get(Job, job_id)
@@ -1012,7 +1022,7 @@ async def discover(source, db, config):
         soup = BeautifulSoup(body, "html.parser")
         for a in soup.select("a[href]"):
             link = urljoin(final, a["href"])
-            title = a.get_text(" ", strip=True)
+            title = listing_title(a)
             if title and (
                 detect(link).id != "custom" or re.search(r"/(?:job|jobs|position|positions)/", link)
             ):
