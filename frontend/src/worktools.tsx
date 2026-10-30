@@ -359,20 +359,39 @@ export function ConfirmButton({
   );
 }
 
-/** A single plain sentence with an action ("3 questions need you"). warn and bad add a small dot; nothing else is coloured. */
+/**
+ * A single plain sentence with an action ("3 questions need you"). warn and bad add a small dot; nothing else is
+ * coloured. `lead` is the sentence a page is about (Overview's state): body size and full-strength text.
+ */
 export function Notice({
   tone = "info",
   children,
   action,
+  lead,
 }: {
   tone?: "info" | "warn" | "bad";
   children: ReactNode;
   action?: ReactNode;
+  lead?: boolean;
 }) {
   return (
-    <div className={"ax-notice is-" + tone} role="status">
+    <div className={"ax-notice is-" + tone + (lead ? " is-lead" : "")} role="status">
       <span>{children}</span>
       {action}
     </div>
+  );
+}
+
+/** Rows of label and value for a read-only summary (the same markup as setup-kit's Facts, without its stylesheet). */
+export function Facts({ items }: { items: [ReactNode, ReactNode][] }) {
+  return (
+    <dl className="ax-kv">
+      {items.map(([k, v], i) => (
+        <div key={i}>
+          <dt>{k}</dt>
+          <dd>{v}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
