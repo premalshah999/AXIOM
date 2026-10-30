@@ -1,449 +1,7 @@
-/* What the work pages (Overview, Jobs, Applications, Needs you, the job drawer) still draw for themselves. The shared
-   pieces moved to components.css; page agents shrink this file as each page is converted. */
+/* What the work pages (Overview, Jobs, Applications, Needs you, the job drawer) still draw for themselves: layout only.
+   Every look comes from src/ui, worktools.tsx and the tokens. */
 
-.ax-outcomes {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.ax-outcome {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  min-height: 34px;
-  padding: 2px 0;
-}
-.ax-outcome > span:first-child {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ax-outcome-end {
-  display: flex;
-  justify-content: flex-end;
-}
-.ax-queue-box {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  flex: none;
-}
-.ax-queue {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-}
-.ax-queue .ax-control {
-  flex: 1;
-  resize: none;
-}
-.ax-lede strong {
-  color: var(--ink);
-}
-.ax-fit {
-  font-weight: 600;
-}
-.ax-fit.is-good {
-  color: var(--ok);
-}
-.ax-fit.is-low {
-  color: var(--warn);
-}
-.ax-fit.is-none {
-  color: var(--ink-3);
-  font-weight: 400;
-}
-.ax-whynot {
-  margin-left: 6px;
-  color: var(--ink-3);
-  font-size: var(--text-micro);
-  cursor: help;
-  border-bottom: 1px dotted var(--ink-3);
-}
-.spin {
-  animation: ax-spin 1s linear infinite;
-}
-
-.ax-editor {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-.ax-editor-actions {
-  display: flex;
-  gap: var(--space-2);
-}
-.ax-check {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-ui);
-}
-.ax-check input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--brand);
-}
-.ax-code textarea,
-textarea.ax-code {
-  font-family: var(--font-code);
-  font-size: var(--text-meta);
-}
-
-/* ---------- job drawer ---------- */
-.ax-dr {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  min-width: 0;
-}
-.ax-dr-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-1) var(--space-4);
-  color: var(--ink-2);
-  font-size: var(--text-ui);
-}
-.ax-dr-status {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--card);
-}
-.ax-dr-statushead {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-.ax-dr-status p {
-  color: var(--ink-2);
-  font-size: var(--text-ui);
-}
-.ax-dr-status p.ax-dr-reason {
-  color: var(--ink);
-}
-.ax-dr-sec {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--line);
-  min-width: 0;
-}
-.ax-dr-sec > h3 {
-  font-size: var(--text-ui);
-}
-details.ax-dr-sec > summary {
-  cursor: pointer;
-  font-weight: 600;
-  font-size: var(--text-ui);
-}
-details.ax-dr-sec[open] > summary {
-  margin-bottom: var(--space-2);
-}
-.ax-dr-foot {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-2);
-  width: 100%;
-}
-.ax-drawer-acts {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-}
-.ax-list {
-  margin: 0;
-  padding-left: 18px;
-  font-size: var(--text-ui);
-}
-.ax-ok {
-  color: var(--ok);
-}
-.ax-mini {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--text-meta);
-}
-.ax-mini th {
-  padding: 6px 8px 6px 0;
-  color: var(--ink-3);
-  font-weight: 560;
-  text-align: left;
-  border-bottom: 1px solid var(--line);
-}
-.ax-mini td {
-  padding: 6px 8px 6px 0;
-  vertical-align: top;
-  border-bottom: 1px solid var(--line);
-  overflow-wrap: anywhere;
-}
-.ax-timeline {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.ax-timeline li {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 2px var(--space-3);
-  font-size: var(--text-meta);
-}
-.ax-timeline time {
-  color: var(--ink-3);
-}
-.ax-timeline p {
-  grid-column: 1 / -1;
-  color: var(--ink);
-  font-size: var(--text-ui);
-  overflow-wrap: anywhere;
-}
-.ax-attempts {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.ax-attempts li {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  min-height: 30px;
-}
-.ax-attempts li[aria-current] {
-  font-weight: 600;
-}
-.ax-shot img {
-  display: block;
-  max-width: 100%;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-}
-.ax-reconcile {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-}
-
-/* ---------- Needs you ---------- */
-.needs-page {
-  max-width: 880px;
-}
-.nq-lede {
-  color: var(--ink-2);
-  font-size: var(--text-ui);
-}
-.nq-lede strong {
-  color: var(--ink);
-}
-.nq-jobs {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-.nq-job {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--card);
-}
-.nq-job-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--line);
-}
-.nq-job-name {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  flex: 1 1 260px;
-  min-width: 0;
-}
-.nq-job-name strong {
-  flex: none;
-  max-width: 50%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.nq-job-name span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink-2);
-}
-.nq-job-meta {
-  font-size: var(--text-meta);
-}
-.nq-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-4);
-  min-width: 0;
-}
-.nq-card + .nq-card {
-  border-top: 1px solid var(--line);
-}
-.nq-card.is-compact {
-  padding: 0;
-}
-.nq-card.is-compact + .nq-card {
-  padding-top: var(--space-4);
-}
-.nq-q {
-  font-size: var(--text-emphasis);
-  font-weight: 560;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-.nq-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-3);
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-}
-.nq-why {
-  color: var(--ink-2);
-  font-weight: 560;
-}
-.nq-also {
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-}
-.nq-answer {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin-top: var(--space-1);
-  max-width: 640px;
-}
-.nq-answer textarea.ax-control {
-  resize: vertical;
-}
-.nq-date {
-  max-width: 220px;
-}
-.nq-file {
-  padding: 5px 8px;
-}
-.nq-opts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-.nq-opt {
-  position: relative;
-  display: inline-flex;
-  cursor: pointer;
-}
-.nq-opt input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-.nq-opt span {
-  display: inline-flex;
-  align-items: center;
-  min-height: 36px;
-  padding: 0 14px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
-  background: var(--field);
-  color: var(--ink);
-  font-size: var(--text-ui);
-  font-weight: 540;
-  transition:
-    background var(--dur-fast) var(--ease),
-    border-color var(--dur-fast) var(--ease);
-}
-.nq-opt:hover span {
-  border-color: var(--ink-3);
-}
-.nq-opt input:checked + span {
-  border-color: var(--brand);
-  background: var(--brand-soft);
-}
-.nq-opt input:focus-visible + span {
-  outline: 2px solid var(--brand);
-  outline-offset: 2px;
-}
-.nq-multi {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-.nq-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-3);
-}
-.nq-page {
-  margin-left: auto;
-  font-size: var(--text-meta);
-}
-.nq-parked ul {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.nq-parked li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  min-height: 36px;
-}
-.nq-parked-q {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink-2);
-}
-.nq-parked-q strong {
-  color: var(--ink);
-}
-
-/* ---------- Overview ---------- */
+/* Overview */
 .ov-head {
   display: flex;
   flex-direction: column;
@@ -473,4 +31,73 @@ details.ax-dr-sec[open] > summary {
 .ax-notice.is-lead {
   color: var(--ink);
   font-size: var(--text-body);
+}
+
+/* A row's checkbox always shows (owner, 2026-10-30: they complained when it went missing). components.css still hides it
+   until hover; delete that rule there and this one can go. */
+@media (hover: hover) {
+  .ax-table tbody .is-check input {
+    opacity: 1;
+  }
+}
+
+/* Jobs: the paste box above the Pipeline */
+.ax-queue-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  flex: none;
+}
+.ax-queue {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+.ax-queue textarea {
+  flex: 1;
+  resize: none;
+}
+/* A phone keeps the job, its status and the row menu readable: the row's one button is in the job's drawer. */
+@container ax-table (max-width: 599px) {
+  .ax-table .ax-lead {
+    display: none;
+  }
+}
+
+/* Needs you and the job drawer */
+.dr-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.nq-q {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.nq-answer {
+  max-width: 640px;
+}
+.nq-opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.ax-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.ax-shot img {
+  display: block;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.ax-code textarea {
+  font-family: var(--font-code);
+  font-size: var(--text-meta);
 }

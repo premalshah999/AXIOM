@@ -4,7 +4,7 @@ import { useWorkspace } from "./context";
 import { useAction, useDraft } from "./hooks";
 import type { Job, Review } from "./types";
 import { ago, linkHost } from "./ui";
-import { Button, Pill } from "./ui/index";
+import { Button } from "./ui/index";
 import "./styles/work.css";
 
 export type QuestionGroup = { review: Review; job?: Job; others: Job[] };
@@ -74,10 +74,11 @@ function fromInput(value: string, format?: string) {
 }
 
 /**
- * One question the owner can answer: who asked it (company and role, unless the drawer already says), the complete
- * question, what kind of field it is and why it is asked, the control that fits (buttons for yes/no and short lists,
- * a select for long ones, a date field for dates, a file for uploads), the application page it came from, and
- * Save / Skip. Enter saves a one-line answer; Ctrl or ⌘ Enter saves a paragraph.
+ * One question the owner can answer: the complete question, what kind of answer it takes, the control that fits
+ * (options for yes/no and short lists, a select for long ones, a date field for dates, a file for uploads) and
+ * Save / Skip. Why it is asked and the application page it came from are one click away. Enter saves a one-line
+ * answer; Ctrl or ⌘ Enter saves a paragraph. Who asked it is the heading above it on Needs you, and the drawer's own
+ * title.
  */
 export function QuestionCard({
   group,
@@ -86,7 +87,7 @@ export function QuestionCard({
   onSkip,
 }: {
   group: QuestionGroup;
-  /** In the job drawer: no company line, no Skip. */
+  /** In the job drawer: the one action on screen (a primary Save), no Skip. */
   compact?: boolean;
   onSaved?: (reviewId: string) => void;
   onSkip?: (reviewId: string) => void;
@@ -97,6 +98,7 @@ export function QuestionCard({
   const [answer, setAnswer, clear] = useDraft("review:" + q.id, "");
   const [file, setFile] = useState<File | null>(null);
   const [showPage, setShowPage] = useState(false);
+  const [showWhy, setShowWhy] = useState(false);
   const [shot, setShot] = useState<"question" | "run" | "none">("question");
   const note = q.key === "session" || q.key === "manual";
   const kind = q.kind || (q.options.length ? "choice" : "text");
@@ -136,7 +138,7 @@ export function QuestionCard({
     kind === "upload" ? (
       <input
         data-answer
-        className="ax-control nq-file"
+        className="ax-control"
         type="file"
         aria-label="File to attach"
         accept={q.accept || ".pdf,.doc,.docx,.txt,.rtf,.odt,.png,.jpg,.jpeg"}
@@ -144,7 +146,7 @@ export function QuestionCard({
         onChange={(e) => setFile(e.target.files?.[0] || null)}
       />
     ) : kind === "choice" && q.multiple ? (
-      <fieldset className="nq-multi" aria-label="Your answers">
+      <fieldset className="nq-opts" aria-label="Your answers">
         {q.options.map((x, i) => {
           const picked = answer.split("\n").filter(Boolean);
           return (
@@ -182,7 +184,7 @@ export function QuestionCard({
     ) : buttons ? (
       <div className="nq-opts" role="radiogroup" aria-label={label}>
         {q.options.map((x, i) => (
-          <label key={x} className="nq-opt">
+          <label key={x} className="ax-check">
             <input
               data-answer={i === 0 ? "" : undefined}
               type="radio"
@@ -207,7 +209,7 @@ export function QuestionCard({
     ) : shape.input === "date" || shape.input === "month" ? (
       <input
         data-answer
-        className="ax-control nq-date"
+        className="ax-control"
         type={shape.input}
         aria-label={`${label} (${shape.format})`}
         required
@@ -248,7 +250,7 @@ export function QuestionCard({
 
   return (
     <form
-      className={"nq-card" + (compact ? " is-compact" : "")}
+      className="dr-stack"
       aria-labelledby={id}
       data-qid={q.id}
       onSubmit={(e) => {
@@ -256,26 +258,22 @@ export function QuestionCard({
         if (ready) save();
       }}
     >
-      <p className="nq-q" id={id}>
-        {text}
-      </p>
-      <p className="nq-meta">
-        {q.requirement && <Pill>{q.requirement}</Pill>}
-        {why && (
-          <span>
-            <span className="nq-why">Why you're asked:</span> {why}
-          </span>
-        )}
-      </p>
-      {others.length > 0 && (
-        <p className="nq-also">
-          Also waiting on this question: {others.slice(0, 3).map((j) => j.company || linkHost(j.url) || "another application").join(", ")}
-          {others.length > 3 ? ` and ${others.length - 3} more` : ""}. A reusable answer is applied to them too.
+      <div>
+        <p className="nq-q" id={id}>
+          {text}
         </p>
-      )}
+        {(q.requirement || others.length > 0) && (
+          <p className="ax-note">
+            {q.requirement}
+            {q.requirement && others.length > 0 && " · "}
+            {others.length > 0 &&
+              `Also waiting on this: ${others.slice(0, 3).map((j) => j.company || linkHost(j.url) || "another application").join(", ")}${others.length > 3 ? ` and ${others.length - 3} more` : ""}. A reusable answer is applied to them too.`}
+          </p>
+        )}
+      </div>
       <div className="nq-answer">{control}</div>
-      <div className="nq-actions">
-        <Button type="submit" variant="primary" size="sm" disabled={!ready} loading={pending === "save"}>
+      <div className="ax-toolbar">
+        <Button type="submit" variant={compact ? "primary" : "secondary"} size="sm" disabled={!ready} loading={pending === "save"}>
           {kind === "upload" ? "Attach file" : "Save answer"}
         </Button>
         {!compact && onSkip && (
@@ -283,16 +281,24 @@ export function QuestionCard({
             Skip for now
           </Button>
         )}
-        <button type="button" className="ax-link nq-page" aria-expanded={showPage} onClick={() => setShowPage(!showPage)}>
+        {why && (
+          <button type="button" className="ax-link" aria-expanded={showWhy} onClick={() => setShowWhy(!showWhy)}>
+            {showWhy ? "Hide why" : "Why am I asked?"}
+          </button>
+        )}
+        <button type="button" className="ax-link" aria-expanded={showPage} onClick={() => setShowPage(!showPage)}>
           {showPage ? "Hide the application page" : "Show the application page"}
         </button>
       </div>
-      <p className="ax-hint">
-        {kind === "upload"
-          ? "Kept with your documents, and attached when another application asks for it."
-          : "Saved to your profile, and this application continues once answered."}
-        {q.created_at && ` Asked ${ago(q.created_at)}.`}
-      </p>
+      {showWhy && (
+        <p className="ax-note">
+          {why}{" "}
+          {kind === "upload"
+            ? "It is kept with your documents and attached when another application asks for it."
+            : "The answer is saved to your profile, and this application continues once answered."}
+          {q.created_at && ` Asked ${ago(q.created_at)}.`}
+        </p>
+      )}
       {showPage &&
         (shot === "none" ? (
           <p className="ax-note">No screenshot was captured for this attempt. Its activity is in the job details.</p>
