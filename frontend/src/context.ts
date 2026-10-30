@@ -43,7 +43,8 @@ const VIEWS: View[] = [
 // ?view=setup&tab=… : Setup's old sections.
 const SETUP_TABS: Record<string, Route> = {
   connections: { view: "settings", tab: "connections" },
-  storage: { view: "settings", tab: "storage" },
+  // Storage held a placeholder sentence (Supabase is on hold): old links open Connections.
+  storage: { view: "settings", tab: "connections" },
   accounts: { view: "settings", tab: "accounts" },
   email: { view: "settings", tab: "email" },
   discovery: { view: "settings", tab: "discovery" },
@@ -106,6 +107,8 @@ export function canonical(route: AnyRoute): Route {
     // Setup opened on Connections when no section was named.
     return { ...route, ...(SETUP_TABS[tab || ""] ?? SETUP_TABS.connections!) };
   }
+  // Settings › Storage was removed; its address opens Connections.
+  if (view === "settings" && tab === "storage") return { ...route, tab: "connections" } as Route;
   // The archive moved from Jobs to Applications; the Pipeline's old "Not started" list is Discovered.
   if (view === "jobs" && tab === "archive") return { ...route, view: "ledger" };
   if (view === "jobs" && (!tab || tab === "pipeline") && filter === "new") return { ...route, view, tab: "discovered", filter: undefined };
