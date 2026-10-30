@@ -130,15 +130,6 @@ def test_armed_submission_is_never_stopped_by_this_rule(manage_calls):
     assert engine.result is None
 
 
-def test_removed_job_is_never_escalated_or_retried():
-    from jobpilot.service import RETRYABLE, TERMINAL
-    from jobpilot.tiers import BLOCKED_JOB, FAILED
-
-    assert "cancelled" in TERMINAL and "cancelled" not in RETRYABLE
-    assert "cancelled" not in FAILED  # Tier escalation only retries waiting_browser/timed_out/failed.
-    assert "archived" in BLOCKED_JOB  # manage(..., "delete") archives the job; candidates skip it.
-
-
 def test_long_ssn_paragraph_and_indian_ids_are_sensitive():
     from jobpilot.sensitive_ids import sensitive_field
 

@@ -614,10 +614,8 @@ async def _structured(
     }
     require(db, "navigator" if navigation else "answers")
     config = for_role(db, config, "navigator" if navigation else "answers")
-    from .tiers import apply_model, provider_for, tier_of
+    from .tiers import apply_model
 
-    if tier_of(db, run_id) >= 2:
-        config = provider_for(db, config, tier_of(db, run_id))
     if not config.llm_api_key:
         from .agent_settings import missing_key_message
 
