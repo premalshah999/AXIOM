@@ -1,4 +1,4 @@
-"""Load shedding and the browser circuit (docs/forensics/FAILURE_ANALYSIS.md, 4.2).
+"""Load shedding and the browser circuit (2026-10-20 failure analysis).
 
 From 2026-10-18 19:00 to 10-19 06:00 the host's event loop ran late: 940 field writes missed their deadline, 70 runs
 timed out, and each timed-out run spent one of its job's three starts while the scheduler kept dispatching. On

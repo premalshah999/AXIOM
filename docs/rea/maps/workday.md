@@ -7,15 +7,14 @@ Date: 2026-10-18. Read-only. Nothing was submitted, no account was created, and 
 - RTX: `globalhr.wd5.myworkdayjobs.com/rec_rtx_ext_gateway`, job `Platform-Engineer--Remote-_01882296`. Walked to the
   sign-in chooser.
 
-The coordinator called the form engine "already known", so this map adds what is new and points to REA_FINDINGS
-(10-17) for the rest.
+The coordinator called the form engine "already known", so this map adds what is new.
 
 **REA evidence**
 
 | Evidence | What it covers |
 |---|---|
 | `ev_ae8a4a149d9deca75ebe3824892ba05ba52d13cda07158015c86ac2ca5d502ad` | inspect-web-page, Cisco "Create Account" step (accessibility plus JSON shapes) |
-| `ev_cf201cb5…` | Prior, from REA_FINDINGS 10-17: `cx-jobs.min.js` from U.S. Bank, the server-metadata form renderer |
+| `ev_cf201cb5…` | Prior (10-17): `cx-jobs.min.js` from U.S. Bank, the server-metadata form renderer |
 
 **Other sources**
 - Network capture through Playwright, my own Chrome on 9341.
@@ -93,7 +92,7 @@ The coordinator called the form engine "already known", so this map adds what is
 `https://wd5.myworkdaycdn.com/wday/asset/candidate-experience-apply-flow/2026.40.17/compiled-lang/cxs_apply_flow/en-US.json`.
 The bundles `cxs_account_creation`, `generic` and `contact_information` follow the same path.
 
-**Form engine** (REA_FINDINGS 10-17, `cx-jobs.min.js`)
+**Form engine** (10-17, `cx-jobs.min.js`)
 - **Server-driven fields:** `formField-<id>`, with `type`, `required`, `formatMask`, `exitValidation`, `promptUrl`,
   `renderPrompt.{dependentOn,isMultiSelect,isSearchTypeAheadEnabled}`, and `items` for row lists.
 - **Prompt options** are complete JSON from `promptUrl`.
@@ -174,7 +173,7 @@ offered" from `widgets.py prompt`. That is consistent with a typeahead prompt be
 - "Your information has been submitted."
 - "Submitted Application"
 
-**Production dialogs** (REA_DIAGNOSIS 10-18)
+**Production dialogs** (10-18)
 - Adobe: "Congratulations! You've successfully submitted your application".
 - Chewy: "Congratulations! We have received your application." It was still fading in at 30 s.
 - HPE: "Application Submitted … more tasks: Complete Questionnaire".

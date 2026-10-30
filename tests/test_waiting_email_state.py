@@ -1,5 +1,5 @@
 """A run parked on a durable email wait is `waiting_email`, not a failed `waiting_browser`
-(docs/forensics/FAILURE_ANALYSIS.md, flow F9: 266 such runs on 143 jobs were counted, reported and messaged as failures).
+(2026-10-20 failure analysis, flow F9: 266 such runs on 143 jobs were counted, reported and messaged as failures).
 """
 
 import pytest

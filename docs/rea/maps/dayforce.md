@@ -163,7 +163,7 @@ every account-only tenant should sign in with the same email and password.
     plus `window.Errors = null` (server errors are injected here) and a hidden `__RequestVerificationToken`.
 - **No iframes** except reCAPTCHA. No shadow DOM on jobs.dayforcehcm.com.
 - **The permanent navbar is `ul.ant-menu.ant-menu-root.ant-menu-horizontal.navbar-menu[role=menu]`**, visible on every
-  jobs.dayforcehcm.com page (see REA_FINDINGS 10-17).
+  jobs.dayforcehcm.com page.
 
 ---
 

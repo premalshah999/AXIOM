@@ -35,7 +35,7 @@ async def lifespan(app):
     if config.enable_workers:
         from ..host_health import watch as watch_host
 
-        # Samples how late the event loop runs; the gates in host_health read it (docs/forensics, 4.2).
+        # Samples how late the event loop runs; the gates in host_health read it.
         load_task = asyncio.create_task(watch_host(db))
     retention_task = None
     if config.enable_workers and config.dbos_retention_days:

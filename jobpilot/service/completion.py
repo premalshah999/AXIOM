@@ -263,7 +263,7 @@ class CompletionMixin:
             if state == "waiting_browser" and result.get("waiting_kind") == "email":
                 # A run parked on a durable email wait is waiting, not broken: the matched email resumes it in a
                 # continuation run. It used to share "waiting_browser" with "a control needs repair" and was
-                # counted, reported and messaged as a failure (266 runs, 143 jobs; docs/forensics, F9).
+                # counted, reported and messaged as a failure (266 runs, 143 jobs).
                 state = "waiting_email"
             run.state, run.reason = state, result.get("reason", "")[:4000]
             job_id = run.job_id
