@@ -1,13 +1,13 @@
 import { useEffect, useId, useState } from "react";
-import { Search } from "lucide-react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useDraft, useNotify, usePoll } from "./hooks";
 import { Pagination, usePagination } from "./pagination";
-import { Actions, ConfirmButton, FormGrid, Lede, SecretInput } from "./setup-kit";
+import { Actions, FormGrid, SecretInput } from "./setup-kit";
 import type { MailChallenge, MailRule, MailStatus } from "./types";
-import { stamp, words } from "./ui";
-import { Button, Empty, Input, Panel, Pill, Select, Table, type PillTone } from "./ui/index";
+import { stamp, words } from "./format";
+import { SearchBox } from "./worktools";
+import { Button, ConfirmButton, Empty, External, Input, Loading, Panel, Pill, Select, Table, type PillTone } from "./ui/index";
 
 const LIVE = new Set(["pending", "matched", "consumed"]);
 const split = (value: string) =>
@@ -86,9 +86,7 @@ export function MailSettings() {
             }
           />
         ) : (
-          <p className="ax-hint" role="status">
-            Loading…
-          </p>
+          <Loading />
         )}
       </Panel>
     );
@@ -101,10 +99,6 @@ export function MailSettings() {
   return (
     <>
       <Panel title="Mailbox">
-        <Lede>
-          Used for one-time codes, activation and reset links, and employer receipts. Access is read-only; each message
-          is checked for recipient, sender, time and allowed link destinations. Codes and links never reach this page.
-        </Lede>
         {mailboxes.length > 0 && (
           <ul className="ax-rows">
             {mailboxes.map((box) => (
@@ -158,7 +152,6 @@ export function MailSettings() {
         )}
         {mailboxes.length === 0 || adding ? (
           <form
-            style={mailboxes.length ? { marginTop: "var(--space-4)" } : undefined}
             onSubmit={(e) => {
               e.preventDefault();
               change(
@@ -195,11 +188,8 @@ export function MailSettings() {
                   onChange={(v) => setImap((s) => ({ ...s, app_password: v }))}
                 />
                 <p className="ax-hint" id={passwordId + "-msg"}>
-                  16 letters from{" "}
-                  <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer">
-                    myaccount.google.com/apppasswords
-                  </a>{" "}
-                  (needs 2-Step Verification). Read-only use; stored encrypted.
+                  16 letters from <External href="https://myaccount.google.com/apppasswords">myaccount.google.com/apppasswords</External>{" "}
+                  (needs 2-Step Verification). Read-only; stored encrypted.
                 </p>
               </div>
             </FormGrid>
@@ -257,10 +247,7 @@ export function MailSettings() {
       </Panel>
 
       <Panel title={`Employer rules · ${rules.length}`}>
-        <Lede>
-          Only needed for employers outside the built-in rules. Use the employer's path on shared ATS domains, exact
-          sender domains and any extra verification origins.
-        </Lede>
+        <p className="ax-hint">Only for employers outside the built-in rules. Use the employer's path on shared ATS domains.</p>
         {mailboxes.length > 0 ? (
           <form
             onSubmit={(e) => {
@@ -329,18 +316,9 @@ export function MailSettings() {
           <p className="ax-hint">Connect a Google mailbox to add custom rules. The IMAP adapters don't need them.</p>
         )}
         {rules.length > 0 && (
-          <div className="ax-stack" style={{ marginTop: "var(--space-5)" }}>
+          <div className="ax-stack">
             <div className="ax-toolbar">
-              <label className="search">
-                <Search size={15} aria-hidden="true" />
-                <input
-                  type="search"
-                  aria-label="Search rules"
-                  placeholder="Search rules"
-                  value={ruleQuery}
-                  onChange={(e) => setRuleQuery(e.target.value)}
-                />
-              </label>
+              <SearchBox label="Search rules" placeholder="Search rules" value={ruleQuery} onChange={setRuleQuery} />
             </div>
             <Table
               label="Employer rules"
@@ -396,7 +374,6 @@ export function MailSettings() {
       </Panel>
 
       <Panel title="Recent verifications">
-        <Lede>The latest 50 email challenges requested by applications.</Lede>
         {challenges.length ? (
           <>
             <ul className="ax-rows">
@@ -406,11 +383,7 @@ export function MailSettings() {
                   <li className="ax-row" key={c.id}>
                     <span className="ax-row-main">
                       {row && (row.job.company || row.job.title) ? (
-                        <button
-                          className="link"
-                          style={{ textAlign: "left" }}
-                          onClick={() => openJob(row.job.id, c.run_id)}
-                        >
+                        <button type="button" className="ax-link" onClick={() => openJob(row.job.id, c.run_id)}>
                           <strong>{row.job.company || row.job.title}</strong>
                           {row.job.company && row.job.title ? ` — ${row.job.title}` : ""}
                         </button>

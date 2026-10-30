@@ -2,22 +2,25 @@
 // Until those routers are mounted, every component here falls back to the
 // existing interface; nothing in the core workflow depends on them.
 import { useEffect, useState } from "react";
-import { Search } from "lucide-react";
 import { api, ApiError } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useDraft, usePoll } from "./hooks";
-import { Actions, Facts as KV, Lede } from "./setup-kit";
-import { Button, Empty as AxEmpty, Panel, Pill, Table, type PillTone } from "./ui/index";
+import { ago, plural, stamp } from "./format";
+import { Pagination, type Paging } from "./pagination";
+import { Actions, Facts as KV } from "./setup-kit";
+import { Chips, SearchBox } from "./worktools";
 import {
-  ago,
+  Button,
+  Check,
   Empty,
   ErrorLine,
   External,
-  KeyValues,
   Loading,
-  plural,
-  stamp,
-} from "./ui";
+  Panel,
+  Pill,
+  Table,
+  type PillTone,
+} from "./ui/index";
 
 // ---------- types (mirror jobpilot/features/*) ----------
 type Page<T> = { items: T[]; total: number; page: number; size: number };
@@ -186,10 +189,10 @@ const CATEGORY_LABEL: Record<string, string> = {
   employer_relationship: "Employer relationships",
   additional: "Additional questions",
 };
-const LAYER: Record<string, { label: string; tone: string }> = {
-  confirmed: { label: "Confirmed fact", tone: "ok" },
-  narrative: { label: "Supported narrative", tone: "run" },
-  draft: { label: "Draft", tone: "idle" },
+const LAYER: Record<string, string> = {
+  confirmed: "Confirmed fact",
+  narrative: "Supported narrative",
+  draft: "Draft",
 };
 const SOURCE: Record<string, string> = {
   profile_migration: "Profile",
@@ -276,58 +279,7 @@ function show(value: unknown): string {
   return String(value ?? "");
 }
 
-// ---------- Batch: discovery → ranking → tailoring → ready ----------
-export function PipelineReadiness() {
-  const { go } = useWorkspace();
-  const status = useFeature<Readiness>(
-    "discovery",
-    (signal) => api("/v2/discovery/status", "GET", undefined, signal),
-    30000,
-  );
-  if (status.unavailable || !status.data) return null; // Unmounted service or first load: the batch view stands alone.
-  const s = status.data;
-  const building = s.tailoring.building || 0;
-  return (
-    <section className="block pipeline" aria-labelledby="pipeline-title">
-      <header className="block-head">
-        <h2 id="pipeline-title">Pipeline</h2>
-        <button
-          className="link"
-          onClick={() => go({ view: "setup", tab: "resumes" })}
-        >
-          Tailored resumes
-        </button>
-      </header>
-      <ol className="flow">
-        <li>
-          <b>{s.fresh_jobs}</b> fresh listings
-          {s.posting_basis.inferred ? (
-            <small> · {s.posting_basis.inferred} with inferred dates</small>
-          ) : null}
-        </li>
-        <li>
-          <b>{s.classification.eligible}</b> eligible
-          {s.classification.unclassified ? (
-            <small> · {s.classification.unclassified} not ranked</small>
-          ) : null}
-        </li>
-        <li>
-          <b>{s.tailoring.ready || 0}</b> resumes ready
-          {building ? <small> · {building} building</small> : null}
-          {s.tailoring.failed ? (
-            <small> · {s.tailoring.failed} need repair</small>
-          ) : null}
-        </li>
-        <li>
-          <b>{s.ready_to_apply}</b> ready to apply
-        </li>
-      </ol>
-      <p className="block-note">{s.bottleneck}</p>
-    </section>
-  );
-}
-
-// Setup › Knowledge is src/knowledge.tsx; it composes the exported pieces below.
+// Profile › Knowledge is src/knowledge.tsx; it composes the exported pieces below.
 
 // ---------- Statements confirmed once (e.g. a complete employment history) ----------
 type Attestation = {
@@ -358,140 +310,117 @@ export function Attestations() {
   if (list.unavailable || !list.data) return null;
   return (
     <Panel title="Confirmed once">
-      <Lede>
-        Broad statements you confirm in your own words. Withdraw one at any time and applications go back to asking.
-      </Lede>
-      {list.data.items.map((a) => (
-        <div key={a.id} className="stack">
-          <blockquote className="statement">
-            {a.confirmed?.statement || a.statement}
-          </blockquote>
-          <p className="muted sm">{ATTESTATION_USE[a.id]}</p>
-          {a.confirmed ? (
-            <p className="row-actions">
-              <Tag tone="ok">Confirmed</Tag>
-              <span className="muted sm">
-                {a.confirmed.confirmed_at ? ago(a.confirmed.confirmed_at) : ""}
-              </span>
-              <button
-                className="btn sm"
-                disabled={pending !== null}
-                onClick={() =>
-                  run(
-                    "withdraw:" + a.id,
-                    async () => {
-                      await api(
-                        `/v2/knowledge/facts/${a.confirmed!.fact_id}/retire`,
-                        "POST",
-                        {},
-                      );
-                      await list.refresh();
-                    },
-                    "Withdrawn. Applications will ask again.",
-                  )
-                }
-              >
-                Withdraw
-              </button>
-            </p>
-          ) : (
-            <p className="row-actions">
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={!!agreed[a.id]}
-                  onChange={(e) =>
-                    setAgreed((x) => ({ ...x, [a.id]: e.target.checked }))
-                  }
-                />
-                <span>This is accurate</span>
-              </label>
-              <button
-                className="btn sm primary"
-                disabled={pending !== null || !agreed[a.id]}
-                onClick={() =>
-                  run(
-                    "attest:" + a.id,
-                    async () => {
-                      await api(`/v2/knowledge/attestations/${a.id}`, "POST", {
-                        statement: a.statement,
-                      });
-                      await list.refresh();
-                    },
-                    "Confirmed.",
-                  )
-                }
-              >
-                Confirm
-              </button>
-            </p>
-          )}
-        </div>
-      ))}
+      <ul className="ax-rows">
+        {list.data.items.map((a) => (
+          <li className="ax-row" key={a.id}>
+            <span className="ax-row-main">
+              <strong>{a.confirmed?.statement || a.statement}</strong>
+              {ATTESTATION_USE[a.id] && <small>{ATTESTATION_USE[a.id]}</small>}
+            </span>
+            <span className="ax-row-end">
+              {a.confirmed ? (
+                <>
+                  <span className="ax-hint">Confirmed {a.confirmed.confirmed_at ? ago(a.confirmed.confirmed_at) : ""}</span>
+                  <Button
+                    size="sm"
+                    disabled={pending !== null}
+                    onClick={() =>
+                      run(
+                        "withdraw:" + a.id,
+                        async () => {
+                          await api(`/v2/knowledge/facts/${a.confirmed!.fact_id}/retire`, "POST", {});
+                          await list.refresh();
+                        },
+                        "Withdrawn. Applications will ask again.",
+                      )
+                    }
+                  >
+                    Withdraw
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Check
+                    label="This is accurate"
+                    checked={!!agreed[a.id]}
+                    onChange={(on) => setAgreed((x) => ({ ...x, [a.id]: on }))}
+                  />
+                  <Button
+                    size="sm"
+                    disabled={pending !== null || !agreed[a.id]}
+                    onClick={() =>
+                      run(
+                        "attest:" + a.id,
+                        async () => {
+                          await api(`/v2/knowledge/attestations/${a.id}`, "POST", { statement: a.statement });
+                          await list.refresh();
+                        },
+                        "Confirmed.",
+                      )
+                    }
+                  >
+                    Confirm
+                  </Button>
+                </>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
     </Panel>
   );
 }
 
-function FactTable({
-  facts,
-  employerNames,
-}: {
-  facts: Fact[];
-  employerNames?: Record<string, string>;
-}) {
+function FactTable({ facts, employerNames }: { facts: Fact[]; employerNames?: Record<string, string> }) {
   return (
-    <div className="table-wrap">
-      <table className="table">
-        <thead>
-          <tr>
-            <th scope="col">Question or field</th>
-            <th scope="col">Value</th>
-            <th scope="col">Kind</th>
-            <th scope="col">Source</th>
-          </tr>
-        </thead>
-        <tbody>
-          {facts.map((f) => (
-            <tr key={f.id}>
-              <td className="wrap">
-                {f.question || fieldLabel(f)}
-                {f.scope === "employer" && (
-                  <small className="muted">
-                    {" "}
-                    · only for{" "}
-                    {employerNames?.[f.employer_id || ""] || "one employer"}
-                  </small>
-                )}
-              </td>
-              <td className="wrap">{show(f.value)}</td>
-              <td data-label="Kind">
-                <Tag tone={LAYER[f.layer].tone}>{LAYER[f.layer].label}</Tag>
-                {f.valid_until && (
-                  <small className="muted">
-                    {" "}
-                    · until {stamp(f.valid_until)}
-                  </small>
-                )}
-              </td>
-              <td data-label="Source">
-                {SOURCE[f.provenance.source || ""] ||
-                  f.provenance.source ||
-                  "—"}
-                {f.provenance.at && (
-                  <small className="muted"> · {ago(f.provenance.at)}</small>
-                )}
-                {f.version > 1 && (
-                  <small className="muted"> · v{f.version}</small>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Table
+      label="Facts"
+      rows={facts}
+      rowKey={(f) => f.id}
+      minWidth={640}
+      columns={[
+        {
+          key: "q",
+          header: "Question or field",
+          wrap: true,
+          width: 260,
+          cell: (f) => (
+            <>
+              {f.question || fieldLabel(f)}
+              {f.scope === "employer" && (
+                <span className="ax-hint"> · only for {employerNames?.[f.employer_id || ""] || "one employer"}</span>
+              )}
+            </>
+          ),
+        },
+        { key: "v", header: "Value", wrap: true, width: 260, cell: (f) => show(f.value) },
+        {
+          key: "kind",
+          header: "Kind",
+          cell: (f) => (
+            <>
+              {LAYER[f.layer]}
+              {f.valid_until && <span className="ax-hint"> · until {stamp(f.valid_until)}</span>}
+            </>
+          ),
+        },
+        {
+          key: "src",
+          header: "Source",
+          cell: (f) => (
+            <>
+              {SOURCE[f.provenance.source || ""] || f.provenance.source || "—"}
+              {f.provenance.at && <span className="ax-hint"> · {ago(f.provenance.at)}</span>}
+              {f.version > 1 && <span className="ax-hint"> · v{f.version}</span>}
+            </>
+          ),
+        },
+      ]}
+    />
   );
 }
 
+/** The shared pager, driven by a server's page numbers instead of a list held in memory. */
 function ServerPager({
   page,
   total,
@@ -505,58 +434,21 @@ function ServerPager({
   setPage: (n: number) => void;
   label: string;
 }) {
-  const pages = Math.max(1, Math.ceil(total / size));
   if (total <= size) return null;
-  const nums = [...new Set([1, page - 1, page, page + 1, pages])]
-    .filter((n) => n >= 1 && n <= pages)
-    .sort((a, b) => a - b);
-  return (
-    <nav className="pager" aria-label={label}>
-      <span className="pager-range">
-        {(page - 1) * size + 1}–{Math.min(page * size, total)} of {total}
-      </span>
-      <div className="pager-pages">
-        <button
-          className="pager-btn"
-          disabled={page === 1}
-          onClick={() => setPage(page - 1)}
-          aria-label="Previous page"
-        >
-          ‹
-        </button>
-        {nums.map((n, i) => (
-          <span key={n} className="pager-item">
-            {i > 0 && n - nums[i - 1] > 1 && (
-              <span className="pager-gap">…</span>
-            )}
-            <button
-              className="pager-btn"
-              aria-label={`Page ${n}`}
-              aria-current={n === page ? "page" : undefined}
-              onClick={() => setPage(n)}
-            >
-              {n}
-            </button>
-          </span>
-        ))}
-        <button
-          className="pager-btn"
-          disabled={page === pages}
-          onClick={() => setPage(page + 1)}
-          aria-label="Next page"
-        >
-          ›
-        </button>
-      </div>
-    </nav>
-  );
+  const paging: Paging = {
+    items: [],
+    total,
+    page,
+    pages: Math.max(1, Math.ceil(total / size)),
+    size,
+    initialSize: size,
+    setPage: setPage as Paging["setPage"],
+    setSize: () => undefined,
+  };
+  return <Pagination paging={paging} label={label} sizes={false} />;
 }
 
-export function Facts({
-  summary,
-}: {
-  summary: Record<string, Record<string, number>>;
-}) {
+export function Facts({ summary }: { summary: Record<string, Record<string, number>> }) {
   const [category, setCategory] = useDraft("knowledge-category", "");
   const [layer, setLayer] = useDraft("knowledge-layer", "");
   const [q, setQ] = useDraft("knowledge-q", "");
@@ -573,86 +465,61 @@ export function Facts({
     120000,
     [query.toString()],
   );
-  const total = (c: string) =>
-    Object.values(summary[c] || {}).reduce((a, b) => a + b, 0);
+  const total = (c: string) => Object.values(summary[c] || {}).reduce((a, b) => a + b, 0);
   return (
     <Panel title="What applications can use">
-      <Lede>
-        Confirmed facts answer questions directly. Supported narratives inform written answers. Drafts are never used in
-        an application. Employer answers stay with that employer.
-      </Lede>
-      <div className="chips" role="group" aria-label="Category">
-        <button
-          className="chip"
-          aria-pressed={!category}
-          onClick={() => {
-            setCategory("");
+      <div className="ax-stack">
+        <Chips
+          label="Category"
+          value={category}
+          onChange={(id) => {
+            setCategory(id);
             setPage(1);
           }}
-        >
-          All
-        </button>
-        {Object.keys(CATEGORY_LABEL)
-          .filter((c) => total(c))
-          .map((c) => (
-            <button
-              key={c}
-              className="chip"
-              aria-pressed={category === c}
-              onClick={() => {
-                setCategory(c);
-                setPage(1);
-              }}
-            >
-              {CATEGORY_LABEL[c]} <span className="chip-n">{total(c)}</span>
-            </button>
-          ))}
-      </div>
-      <div className="toolbar">
-        <label className="search">
-          <Search size={15} aria-hidden="true" />
-          <input
-            type="search"
-            aria-label="Search facts"
+          items={[
+            { id: "", label: "All" },
+            ...Object.keys(CATEGORY_LABEL)
+              .filter((c) => total(c))
+              .map((c) => ({ id: c, label: CATEGORY_LABEL[c], count: total(c) })),
+          ]}
+        />
+        <div className="ax-toolbar">
+          <SearchBox
+            label="Search facts"
             placeholder="Search questions"
             value={q}
-            onChange={(e) => {
-              setQ(e.target.value);
+            onChange={(v) => {
+              setQ(v);
               setPage(1);
             }}
           />
-        </label>
-        <select
-          aria-label="Kind"
-          value={layer}
-          onChange={(e) => {
-            setLayer(e.target.value);
-            setPage(1);
-          }}
-        >
-          <option value="">Every kind</option>
-          <option value="confirmed">Confirmed facts</option>
-          <option value="narrative">Supported narratives</option>
-          <option value="draft">Drafts</option>
-        </select>
+          <select
+            className="ax-control"
+            aria-label="Kind"
+            value={layer}
+            onChange={(e) => {
+              setLayer(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">Every kind</option>
+            <option value="confirmed">Confirmed facts</option>
+            <option value="narrative">Supported narratives</option>
+            <option value="draft">Drafts (never used in an application)</option>
+          </select>
+        </div>
+        <ErrorLine error={facts.error} retry={facts.refresh} />
+        {!facts.data ? (
+          !facts.error && <Loading />
+        ) : facts.data.items.length ? (
+          <>
+            <FactTable facts={facts.data.items} />
+            <ServerPager page={facts.data.page} total={facts.data.total} size={facts.data.size} setPage={setPage} label="Fact pages" />
+          </>
+        ) : (
+          <Empty title="No facts match" hint="Clear a filter to see more." />
+        )}
       </div>
-      <ErrorLine error={facts.error} retry={facts.refresh} />
-      {!facts.data ? (
-        !facts.error && <Loading />
-      ) : facts.data.items.length ? (
-        <>
-          <FactTable facts={facts.data.items} />
-          <ServerPager
-            page={facts.data.page}
-            total={facts.data.total}
-            size={facts.data.size}
-            setPage={setPage}
-            label="Fact pages"
-          />
-        </>
-      ) : (
-        <Empty title="No facts match">Clear a filter to see more.</Empty>
-      )}
     </Panel>
   );
 }
@@ -663,108 +530,78 @@ export function EmployerMemory() {
   const [open, setOpen] = useState<Employer | null>(null);
   const list = usePoll<Page<Employer>>(
     (signal) =>
-      api(
-        `/v2/knowledge/employers?page=${page}&size=25&q=${encodeURIComponent(q.trim())}`,
-        "GET",
-        undefined,
-        signal,
-      ),
+      api(`/v2/knowledge/employers?page=${page}&size=25&q=${encodeURIComponent(q.trim())}`, "GET", undefined, signal),
     120000,
     [page, q],
   );
   return (
     <Panel title="Employer memory">
-      <Lede>
-        Answers about one company (prior employment, relatives, why this role) are only used for that company. Employers
-        are matched by their application site and exact names, never by partial text.
-      </Lede>
-      <div className="toolbar">
-        <label className="search">
-          <Search size={15} aria-hidden="true" />
-          <input
-            type="search"
-            aria-label="Search employers"
+      <div className="ax-stack">
+        <p className="ax-hint">Answers about one company are only used for that company, matched by its application site and exact names.</p>
+        <div className="ax-toolbar">
+          <SearchBox
+            label="Search employers"
             placeholder="Search employers"
             value={q}
-            onChange={(e) => {
-              setQ(e.target.value);
+            onChange={(v) => {
+              setQ(v);
               setPage(1);
             }}
           />
-        </label>
-      </div>
-      <ErrorLine error={list.error} retry={list.refresh} />
-      {!list.data ? (
-        !list.error && <Loading />
-      ) : list.data.items.length ? (
-        <>
-          <ul className="list">
-            {list.data.items.map((e) => (
-              <li key={e.id}>
-                <span>
-                  <strong>{e.display}</strong>
-                  <small className="muted">
-                    {e.aliases
-                      .filter((a) => a.kind === "tenant")
-                      .map((a) => a.alias)
-                      .join(", ") || "Matched by name"}
-                  </small>
-                </span>
-                <span className="row-actions">
-                  <span className="muted sm">
-                    {plural(e.memory, "saved answer")}
+        </div>
+        <ErrorLine error={list.error} retry={list.refresh} />
+        {!list.data ? (
+          !list.error && <Loading />
+        ) : list.data.items.length ? (
+          <>
+            <ul className="ax-rows">
+              {list.data.items.map((e) => (
+                <li className="ax-row" key={e.id}>
+                  <span className="ax-row-main">
+                    <strong>{e.display}</strong>
+                    <small>
+                      {e.aliases
+                        .filter((a) => a.kind === "tenant")
+                        .map((a) => a.alias)
+                        .join(", ") || "Matched by name"}
+                    </small>
                   </span>
-                  <button
-                    className="btn sm"
-                    aria-expanded={open?.id === e.id}
-                    disabled={!e.memory}
-                    onClick={() => setOpen(open?.id === e.id ? null : e)}
-                  >
-                    {open?.id === e.id ? "Hide" : "Show"}
-                  </button>
-                </span>
-              </li>
-            ))}
-          </ul>
-          <ServerPager
-            page={list.data.page}
-            total={list.data.total}
-            size={list.data.size}
-            setPage={setPage}
-            label="Employer pages"
-          />
-          {open && <EmployerFacts employer={open} />}
-        </>
-      ) : (
-        <Empty title="No employer memory yet">
-          Company-specific answers appear here after you give one.
-        </Empty>
-      )}
+                  <span className="ax-row-end">
+                    <span className="ax-hint">{plural(e.memory, "saved answer")}</span>
+                    <Button
+                      size="sm"
+                      aria-expanded={open?.id === e.id}
+                      disabled={!e.memory}
+                      onClick={() => setOpen(open?.id === e.id ? null : e)}
+                    >
+                      {open?.id === e.id ? "Hide" : "Show"}
+                    </Button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <ServerPager page={list.data.page} total={list.data.total} size={list.data.size} setPage={setPage} label="Employer pages" />
+            {open && <EmployerFacts employer={open} />}
+          </>
+        ) : (
+          <Empty title="No employer memory yet" hint="Company-specific answers appear here after you give one." />
+        )}
+      </div>
     </Panel>
   );
 }
 
 function EmployerFacts({ employer }: { employer: Employer }) {
   const facts = usePoll<Page<Fact>>(
-    (signal) =>
-      api(
-        `/v2/knowledge/facts?employer_id=${encodeURIComponent(employer.id)}&size=100`,
-        "GET",
-        undefined,
-        signal,
-      ),
+    (signal) => api(`/v2/knowledge/facts?employer_id=${encodeURIComponent(employer.id)}&size=100`, "GET", undefined, signal),
     120000,
     [employer.id],
   );
-  if (!facts.data)
-    return facts.error ? <ErrorLine error={facts.error} /> : <Loading />;
+  if (!facts.data) return facts.error ? <ErrorLine error={facts.error} /> : <Loading />;
   return (
-    <div className="stack">
+    <div className="ax-stack">
       <h3>{employer.display}</h3>
-      <FactTable
-        facts={facts.data.items}
-        employerNames={{ [employer.id]: employer.display }}
-      />
+      <FactTable facts={facts.data.items} employerNames={{ [employer.id]: employer.display }} />
     </div>
   );
 }
@@ -861,18 +698,17 @@ function MasterResume({
         )
       }
     >
-      <Lede>
-        {masterOnly
-          ? `Applications are sent with ${source?.name || "your uploaded resume"}, exactly as you uploaded it. Tailoring is paused.`
-          : "A job gets a tailored copy only when it reads at least as well as this master. Otherwise the master is sent."}
-      </Lede>
+      {masterOnly && (
+        <p className="ax-hint">
+          Applications are sent with {source?.name || "your uploaded resume"}, exactly as you uploaded it. Tailoring is paused.
+        </p>
+      )}
       {!master ? (
         <>
-          <Lede>
-            Tailoring needs an editable copy of your resume. Importing transcribes {source ? source.name : "your resume PDF"}{" "}
-            word for word. You compare it with the original, match the spacing, and approve it. Experience and education are
-            then never reworded.
-          </Lede>
+          <p className="ax-hint">
+            Tailoring needs an editable copy. Importing transcribes {source ? source.name : "your resume PDF"} word for word;
+            you compare it with the original and approve it.
+          </p>
           <Actions start note={!source ? "Upload your resume above first." : undefined}>
             {importButton(source ? `Import ${source.name}` : "Import", true)}
           </Actions>
@@ -907,7 +743,7 @@ function MasterResume({
             ]}
           />
           {(!!v.missing?.length || !!v.added?.length) && (
-            <div className="ax-notice" style={{ marginTop: "var(--space-3)", display: "block" }}>
+            <div className="ax-stack">
               {!!v.missing?.length && (
                 <p>
                   <strong>Missing from this copy:</strong> {v.missing.slice(0, 12).join(", ")}
@@ -921,7 +757,7 @@ function MasterResume({
             </div>
           )}
           {master.status === "draft" && approved_id && (
-            <p className="ax-hint" style={{ marginTop: "var(--space-3)" }}>
+            <p className="ax-hint">
               Your previously approved master stays in use until you approve this draft.
             </p>
           )}
@@ -932,12 +768,7 @@ function MasterResume({
             </Button>
             {master.status === "draft" && (
               <>
-                {!v.faithful && (
-                  <label className="check">
-                    <input type="checkbox" checked={accept} onChange={(e) => setAccept(e.target.checked)} />
-                    <span>These differences are intended</span>
-                  </label>
-                )}
+                {!v.faithful && <Check checked={accept} onChange={setAccept} label="These differences are intended" />}
                 <Button
                   size="sm"
                   variant="primary"
@@ -1004,13 +835,11 @@ export function TailoredResumes() {
           </Button>
         }
       >
-        <Lede>
-          {masterOnly
-            ? "Drafts for review only. None of these are attached to applications while tailoring is paused."
-            : "One per job. Projects and skills are chosen for the posting; experience, education and your contact line are copied from the master unchanged. A version is used only if it reads at least as well as the master."}
-        </Lede>
+        {masterOnly && (
+          <p className="ax-hint">Drafts for review only. None of these are attached to applications while tailoring is paused.</p>
+        )}
         {list.error && !list.data && (
-          <AxEmpty
+          <Empty
             title="Could not load tailored versions"
             hint={list.error.message}
             action={<Button size="sm" onClick={list.refresh}>Try again</Button>}
@@ -1021,7 +850,6 @@ export function TailoredResumes() {
             <div className="ax-toolbar">
               <select
                 className="ax-control"
-                style={{ width: "auto" }}
                 aria-label="Filter by status"
                 value={status}
                 onChange={(e) => {
@@ -1042,7 +870,7 @@ export function TailoredResumes() {
               rowKey={(a) => a.artifact_id}
               minWidth={720}
               empty={
-                <AxEmpty
+                <Empty
                   title="No tailored versions yet"
                   hint={
                     masterOnly
@@ -1064,13 +892,13 @@ export function TailoredResumes() {
                         </>
                       )}
                       {a.job_id ? (
-                        <button className="link" onClick={() => openJob(a.job_id!)}>
+                        <button type="button" className="ax-link" onClick={() => openJob(a.job_id!)}>
                           Open job
                         </button>
                       ) : (
                         <span className="ax-hint">Job removed</span>
                       )}
-                      {!a.employer_id && <small className="ax-mono ax-hint"> {(a.artifact_id || "").slice(3, 11)}</small>}
+                      {!a.employer_id && <small className="mono ax-hint"> {(a.artifact_id || "").slice(3, 11)}</small>}
                     </>
                   ),
                 },
@@ -1115,13 +943,11 @@ export function TailoredResumes() {
                   header: <span className="sr-only">Actions</span>,
                   cell: (a) =>
                     a.status === "ready" ? (
-                      <span className="ax-row-end" style={{ flexWrap: "nowrap" }}>
+                      <span className="ax-act">
                         <Button size="sm" onClick={() => go({ view: "editor", artifact: a.artifact_id })}>
                           Edit
                         </Button>
-                        <External href={`/api/v2/resumes/artifacts/${a.artifact_id}/pdf`} className="link">
-                          PDF
-                        </External>
+                        <External href={`/api/v2/resumes/artifacts/${a.artifact_id}/pdf`}>PDF</External>
                       </span>
                     ) : null,
                 },
@@ -1136,7 +962,7 @@ export function TailoredResumes() {
             />
           </div>
         )}
-        {!list.data && !list.error && <p className="ax-hint" role="status">Loading…</p>}
+        {!list.data && !list.error && <Loading />}
       </Panel>
       <SupportedMaterial />
     </>
@@ -1161,41 +987,42 @@ function SupportedMaterial() {
       <summary>
         <strong>Supported material</strong>
         <span className="ax-hint">
-          · {plural(roles.length, "role")}, {plural(education.length, "degree")}, {plural(projects.length, "project")},{" "}
+          {plural(roles.length, "role")}, {plural(education.length, "degree")}, {plural(projects.length, "project")},{" "}
           {plural(units.length, "bullet")}
         </span>
       </summary>
       <div className="ax-panel-body">
-        <Lede>
-          Projects and skills a tailored copy may draw on beyond your master. Tailoring never adds a metric, tool or
-          project that isn't in your master or here. Edit it in Profile.
-        </Lede>
         <div className="ax-stack">
+          <p className="ax-hint">Tailoring never adds a metric, tool or project that isn't in your master or here.</p>
           {roles.map((r) => (
             <div key={r.row}>
-              <h3 style={{ fontSize: "var(--text-ui)", fontWeight: 600 }}>
+              <h3>
                 {r.title}, {r.company}{" "}
                 <small className="ax-hint">
                   {r.start}–{r.current ? "present" : r.end}
                 </small>
               </h3>
-              <ul className="evidence">
+              <ul className="ax-rows">
                 {units
                   .filter((u) => u.source_row === r.row)
                   .map((u) => (
-                    <li key={u.id}>{u.text}</li>
+                    <li className="ax-row" key={u.id}>
+                      <span className="ax-row-main">{u.text}</span>
+                    </li>
                   ))}
               </ul>
             </div>
           ))}
           {projects.map((p) => (
             <div key={p.row}>
-              <h3 style={{ fontSize: "var(--text-ui)", fontWeight: 600 }}>{p.title}</h3>
-              <ul className="evidence">
+              <h3>{p.title}</h3>
+              <ul className="ax-rows">
                 {units
                   .filter((u) => u.source_row === p.row)
                   .map((u) => (
-                    <li key={u.id}>{u.text}</li>
+                    <li className="ax-row" key={u.id}>
+                      <span className="ax-row-main">{u.text}</span>
+                    </li>
                   ))}
               </ul>
             </div>

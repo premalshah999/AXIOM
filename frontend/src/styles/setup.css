@@ -1,4 +1,70 @@
-/* What the Setup kit still draws for itself (secrets, confirm, facts, photo). Shared pieces moved to components.css. */
+/* Pieces of Profile, Settings and sign-in that components.css does not draw. Tokens only, no colours, sizes and weights
+   from outside the scale. When the identity lands, move what belongs to a primitive into components.css. */
+
+/* Sections of a page that is built from several: Profile's tabs, Knowledge. */
+.ax-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+/* Check (src/ui/Field.tsx): a checkbox with its name and, only where needed, one line of what it does. */
+.ax-check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: var(--text-ui);
+  cursor: pointer;
+}
+.ax-check input {
+  margin-top: 2px;
+}
+.ax-check-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ax-row > .ax-check {
+  flex: 1 1 260px;
+}
+
+/* A fold's summary: a quiet chevron that turns when it is open. */
+.ax-fold > summary {
+  list-style: none;
+}
+.ax-fold > summary::-webkit-details-marker {
+  display: none;
+}
+.ax-fold > summary::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 0 var(--space-1) 0 2px;
+  border-right: 1.5px solid var(--ink-3);
+  border-bottom: 1.5px solid var(--ink-3);
+  transform: rotate(-45deg);
+  transition: transform var(--dur) var(--ease);
+}
+.ax-fold[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+/* A role or a degree: a fold on a hairline, its dates at the right. */
+.ax-entry {
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--line);
+}
+.ax-entry:last-child {
+  border-bottom: 0;
+}
+.ax-entry > summary > .ax-hint {
+  margin-left: auto;
+}
+
+/* Secrets and the photo. */
 .ax-secret {
   display: flex;
   gap: var(--space-2);
@@ -7,99 +73,132 @@
 .ax-secret > .ax-control {
   flex: 1;
 }
-.ax-confirm {
-  display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-.ax-confirm-note {
-  color: var(--ink-2);
-  font-size: var(--text-meta);
-}
 .ax-photo {
   display: flex;
   align-items: center;
-  gap: var(--space-4);
   flex-wrap: wrap;
+  gap: var(--space-4);
 }
 .ax-photo-frame {
   display: grid;
   place-items: center;
   flex: none;
-  width: 88px;
-  height: 88px;
-  border-radius: 50%;
+  width: 72px;
+  height: 72px;
   overflow: hidden;
-  background: var(--chip);
   border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--tint);
   color: var(--ink-2);
-  font-size: var(--text-display);
-  font-weight: 600;
+  font-size: var(--text-title);
 }
 .ax-photo-frame img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-.ax-mono {
-  font-family: var(--font-code);
-  font-size: var(--text-meta);
-}
-@media (max-width: 760px) {
-}
-/* ---------- Profile: legacy inner markup, brought in line with the ax- panels ---------- */
-.ax-page .rule-steps {
-  margin-bottom: var(--space-4);
-}
-.ax-page .rule-steps li {
-  align-items: center;
-}
-.ax-page .rules-table th,
-.ax-page .rules-table td {
-  vertical-align: middle;
-}
-.ax-page .rules-table td input[type="checkbox"] {
-  display: block;
-  margin: 0;
-}
-/* "Example keys" and similar disclosures read as quiet text, not as a heading. */
-.ax-page details.fold {
-  margin: var(--space-3) 0;
-}
-.ax-page details.fold > summary {
-  padding: 0;
-  color: var(--ink-2);
-  font-size: var(--text-ui);
-  font-weight: 500;
-}
-.ax-page details.fold > summary:hover {
-  color: var(--ink);
-}
-.ax-page .entry {
-  border-radius: var(--radius-md);
-  background: var(--ground);
-}
-.ax-page .entry legend {
-  font-size: var(--text-ui);
-  font-weight: 600;
-}
-.ax-page .entry .form-grid + .ax-confirm,
-.ax-page .entry .form-grid + .confirm {
-  margin-top: var(--space-3);
-}
-.ax-page .note-row textarea,
-.ax-page .entry textarea {
-  min-height: 72px;
-  resize: vertical;
+.ax-photo-body {
+  display: flex;
+  flex: 1 1 260px;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
-/* Resume editor: the preview is under the form on a phone, so the tabs carry a way down to it. */
-.editor-jump {
-  display: none;
+/* Segmented (src/ui/Segmented.tsx): a few buttons acting as one radio group. The chosen one is neutral. */
+.ax-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 100%;
+  padding: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--field);
 }
-@media (max-width: 960px) {
-  .editor-jump {
-    display: inline-flex;
-  }
+.ax-seg.is-block {
+  display: flex;
+}
+.ax-seg.is-block button {
+  flex: 1;
+}
+.ax-seg button {
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: var(--text-ui);
+  cursor: pointer;
+}
+.ax-seg button:hover {
+  color: var(--ink);
+}
+.ax-seg button[aria-checked="true"] {
+  background: var(--tint);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--ink);
+}
+
+/* Sign-in, outside the shell. */
+.ax-auth {
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+  padding: var(--space-6) var(--space-4);
+}
+.ax-auth-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: min(100%, 400px);
+}
+.ax-auth-help {
+  color: var(--ink-3);
+  font-size: var(--text-ui);
+  text-align: center;
+}
+.ax-rules-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+}
+.ax-rules-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.ax-rules-list svg {
+  opacity: 0.35;
+}
+.ax-rules-list .is-met {
+  color: var(--ink);
+}
+.ax-rules-list .is-met svg {
+  opacity: 1;
+}
+.ax-codes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-code);
+  font-size: var(--text-ui);
+}
+.ax-codes li {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+/* A form opened in place under its row (change password, new recovery codes). */
+.ax-inline {
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--line);
 }

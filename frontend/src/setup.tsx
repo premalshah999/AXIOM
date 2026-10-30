@@ -1,48 +1,73 @@
-import { useMemo, useState } from "react";
-import { Download, Search } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Download } from "lucide-react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useDraft, usePoll } from "./hooks";
-import { AccountSettings, ProfileSettings } from "./autonomy";
+import { AccountSettings } from "./autonomy";
 import { DiscoverySettings } from "./discovery";
 import { MailSettings } from "./mail";
 import { ConnectionSettings } from "./connections";
 import { SignInSettings } from "./account";
 import { TailoredResumes } from "./features";
 import { KnowledgeView } from "./knowledge";
+import { ProfileProvider, ProfileSettings } from "./profile";
 import { Pagination, usePagination } from "./pagination";
-import { Actions, ConfirmButton, FormGrid, Facts, Lede, SwitchRow } from "./setup-kit";
+import { Actions, Facts, FormGrid, RestartNotice, SwitchRow } from "./setup-kit";
 import type {
   AgentModelProvider,
   AgentSettings,
   AgentSettingsUpdate,
+  AutopilotRuntime,
   Limits,
   MailStatus,
   RuntimeHealth,
+  SchedulerHealth,
   Snapshot,
   Source,
 } from "./types";
-import { ago, day, External, plural } from "./ui";
+import { ago, day, plural } from "./format";
 import { PAGE_TABS } from "./shell/nav";
-import { Button, Empty, Input, Panel, Pill, RouteTabs, Select } from "./ui/index";
+import { SearchBox } from "./worktools";
+import {
+  Button,
+  Check,
+  ConfirmButton,
+  Empty,
+  ErrorLine,
+  External,
+  Input,
+  Loading,
+  Panel,
+  Pill,
+  RouteTabs,
+  Select,
+  Table,
+} from "./ui/index";
 
 // Profile and Settings are one page each with tabs (nav.ts lists them; context.ts sends old Setup links to the right one).
 export function ProfileView() {
   const { route } = useWorkspace();
   const tabs = PAGE_TABS.profile!;
   const tab = tabs.some((t) => t.id === route.tab) ? route.tab : tabs[0]!.id;
+  // Links such as ?view=profile&tab=experience&filter=preferences land on that section.
+  useEffect(() => {
+    if (tab === "experience" && route.filter === "preferences")
+      document.getElementById("profile-preferences")?.scrollIntoView({ block: "start" });
+  }, [tab, route.filter]);
   return (
     <div className="ax-page">
       <RouteTabs view="profile" tabs={tabs} label="Profile" current={tab} />
-      {tab === "identity" && <ProfileSettings sections={["identity"]} />}
-      {tab === "experience" && <ProfileSettings sections={["experience", "preferences"]} />}
-      {tab === "knowledge" && <KnowledgeView />}
-      {tab === "resumes" && (
-        <>
-          <Resumes />
-          <TailoredResumes />
-        </>
-      )}
+      <ProfileProvider>
+        {tab === "identity" && <ProfileSettings sections={["identity"]} />}
+        {tab === "experience" && <ProfileSettings sections={["experience"]} />}
+        {tab === "knowledge" && <KnowledgeView />}
+        {tab === "resumes" && (
+          <>
+            <Resumes />
+            <TailoredResumes />
+          </>
+        )}
+      </ProfileProvider>
     </div>
   );
 }
@@ -55,7 +80,6 @@ export function SettingsView() {
     <div className="ax-page">
       <RouteTabs view="settings" tabs={tabs} label="Settings" current={tab} />
       {tab === "connections" && <ConnectionSettings />}
-      {tab === "storage" && <StorageSettings />}
       {tab === "accounts" && <AccountSettings />}
       {tab === "email" && <MailSettings />}
       {tab === "discovery" && (
@@ -67,11 +91,6 @@ export function SettingsView() {
       {tab === "system" && <SystemSettings />}
     </div>
   );
-}
-
-// Nothing to configure yet: everything lives on this one server.
-function StorageSettings() {
-  return <Empty title="Applications, resumes and keys are stored on this server." />;
 }
 
 function Resumes() {
@@ -86,7 +105,6 @@ function Resumes() {
   return (
     <>
       <Panel title={`Library · ${resumes.length} of 10`}>
-        <Lede>Your resume PDFs. The exact file sent with each application is kept with it in the ledger.</Lede>
         {resumes.length ? (
           <ul className="ax-rows">
             {resumes.map((r) => (
@@ -95,7 +113,7 @@ function Resumes() {
                   <strong>{r.name}</strong>
                   <small>
                     {(r.roles || []).length ? (r.roles || []).join(", ") + " · " : ""}added {day(r.created_at)} ·{" "}
-                    <span className="ax-mono">{(r.sha256 || "").slice(0, 10)}</span>
+                    <span className="mono">{(r.sha256 || "").slice(0, 10)}</span>
                   </small>
                 </span>
                 <span className="ax-row-end">
@@ -123,10 +141,7 @@ function Resumes() {
             ))}
           </ul>
         ) : (
-          <Empty
-            title="No resumes yet"
-            hint="Add a text-based PDF below. Ranking and applications need at least one."
-          />
+          <Empty title="No resumes yet" hint="Add a text-based PDF below. Ranking and applications need at least one." />
         )}
       </Panel>
       <Panel title="Add a resume">
@@ -154,7 +169,6 @@ function Resumes() {
         >
           <FormGrid>
             <Input
-              className="is-wide"
               key={inputKey}
               label="PDF file"
               hint="Text-based PDF, up to 5 MB and 20 pages."
@@ -175,13 +189,7 @@ function Resumes() {
               onChange={(e) => setName(e.target.value)}
               placeholder="Backend engineering"
             />
-            <Input
-              label="Role tags"
-              hint="Comma separated"
-              value={roles}
-              onChange={(e) => setRoles(e.target.value)}
-              placeholder="Backend, Data"
-            />
+            <Input label="Role tags" hint="Comma separated" value={roles} onChange={(e) => setRoles(e.target.value)} placeholder="Backend, Data" />
           </FormGrid>
           <Actions note={full ? "The library is full. Remove a resume first." : undefined}>
             <Button
@@ -211,7 +219,6 @@ function LimitSettings() {
     value && (!Number.isInteger(company) || company < 1 || company > 25) ? "A whole number from 1 to 25." : undefined;
   return (
     <Panel title="Limits">
-      <Lede>Spending and pacing for every application. Changes apply right away.</Lede>
       {limits.error && !value ? (
         <Empty
           title="Could not load the limits"
@@ -223,9 +230,7 @@ function LimitSettings() {
           }
         />
       ) : !value ? (
-        <p className="ax-hint" role="status">
-          Loading…
-        </p>
+        <Loading />
       ) : (
         <form
           onSubmit={(e) => {
@@ -271,12 +276,7 @@ function LimitSettings() {
                 Discard
               </Button>
             )}
-            <Button
-              type="submit"
-              variant="primary"
-              loading={pending === "limits"}
-              disabled={!draft || !!tokenError || !!companyError}
-            >
+            <Button type="submit" variant="primary" loading={pending === "limits"} disabled={!draft || !!tokenError || !!companyError}>
               Save limits
             </Button>
           </Actions>
@@ -286,10 +286,131 @@ function LimitSettings() {
   );
 }
 
+// What the app is doing right now, in plain words: the worst thing that is true, first.
+function automation(rt: AutopilotRuntime, paused: boolean, sched: SchedulerHealth, workers: number) {
+  const done = rt.confirmed ?? 0;
+  const goal = rt.target ?? 100;
+  const progress = done > goal ? `${done} confirmed, target ${goal}` : `${done} of ${goal} confirmed`;
+  if (sched.degraded) return { tone: "bad" as const, text: "Needs a restart", note: "Automation is degraded." };
+  if (paused) return { tone: "warn" as const, text: "Paused", note: "New applications are paused." };
+  if (rt.state === "complete") return { tone: "neutral" as const, text: "Target reached", note: progress };
+  if (rt.intake_enabled)
+    return { tone: "neutral" as const, text: "Running", note: workers ? `${progress}, ${plural(workers, "worker")}` : progress };
+  if (rt.state === "active") return { tone: "warn" as const, text: "Held", note: rt.intake_reason || progress };
+  return { tone: "neutral" as const, text: "No batch", note: workers ? `${plural(workers, "worker")} ready` : "Start one on Overview." };
+}
+
+function modelState(model: NonNullable<RuntimeHealth["models"]>["answers"]) {
+  if (!model) return "";
+  return model.state === "ready"
+    ? "Requests enabled"
+    : model.state === "recovery_ready"
+      ? "Waiting for one recovery request"
+      : model.state === "recovering"
+        ? "One recovery request in progress"
+        : `Requests paused${model.retry_at ? " until " + new Date(model.retry_at).toLocaleTimeString() : ""}`;
+}
+
+/** The worker and host status the sidebar used to carry: what is running, how many workers, and whether it needs a restart. */
+function SystemStatus() {
+  const { snapshot } = useWorkspace();
+  const health = usePoll<RuntimeHealth>((signal) => api("/runtime-health", "GET", undefined, signal), 30000);
+  const conn = usePoll<{ fields: { name: string; label: string; pending: string; value: string }[] }>(
+    (signal) => api("/connections", "GET", undefined, signal),
+    60000,
+  );
+  const rt = snapshot.autopilot_runtime || {};
+  const sched = health.data?.scheduler || rt.scheduler || snapshot.scheduler_health || {};
+  const pool = health.data?.application_workers || rt.application_workers;
+  const slots = pool?.assignments || [];
+  const busy = slots.filter((s) => s.run_id || s.job_id).length;
+  const total = pool ? pool.normal_workers + pool.specialist_workers : 0;
+  const now = automation(rt, !!snapshot.control?.paused, sched, total);
+  const waiting = (Array.isArray(conn.data?.fields) ? conn.data!.fields : []).filter((f) => f.pending);
+  const restartFor = sched.degraded
+    ? "Automation is degraded. A restart fixes it."
+    : waiting.length
+      ? `Saved but not running yet: ${waiting.map((f) => f.label).join(", ")}. They apply after a restart.`
+      : "";
+  return (
+    <Panel title="Status">
+      {health.error && !health.data && <ErrorLine error={health.error} retry={health.refresh} />}
+      <Facts
+        items={[
+          [
+            "Automation",
+            <>
+              <Pill tone={now.tone} dot>
+                {now.text}
+              </Pill>
+              <span className="ax-hint"> {now.note}</span>
+            </>,
+          ],
+          [
+            "Workers",
+            pool
+              ? `${pool.normal_workers} regular and ${pool.specialist_workers} difficult-flow, ${busy} busy`
+              : snapshot.config?.workers_enabled
+                ? `${snapshot.config.workers ?? "—"} at most`
+                : "Disabled in configuration",
+          ],
+          [
+            "Scheduler",
+            <>
+              {sched.degraded ? (
+                <Pill tone="bad" dot>
+                  Needs a restart
+                </Pill>
+              ) : (
+                sched.state || "Unknown"
+              )}
+              {sched.checked_at && <span className="ax-hint"> checked {ago(sched.checked_at)}</span>}
+            </>,
+          ],
+          ["Last automation check", ago(health.data?.heartbeat?.at || snapshot.scheduler_heartbeat?.at)],
+          ["Notifications waiting", health.data ? `${health.data.outbox_pending ?? 0} pending` : "…"],
+          ...Object.entries(health.data?.models || {}).map(
+            ([role, model]): [string, string] => [
+              role === "answers" ? "Answer model" : "Navigation model",
+              model ? `${model.provider}. ${modelState(model)}` : "",
+            ],
+          ),
+          ["Engine", <span key="e" className="mono">{health.data?.engine_version || snapshot.engine_version || "—"}</span>],
+          ["Timezone", snapshot.config?.timezone || "—"],
+        ]}
+      />
+      {restartFor && <RestartNotice message={restartFor} />}
+      {slots.length > 0 && (
+        <details className="ax-fold">
+          <summary>
+            <strong>Worker slots</strong>
+            <span className="ax-hint">{slots.length}</span>
+          </summary>
+          <Table
+            label="Worker slots"
+            rows={slots}
+            rowKey={(s) => `${s.lane}-${s.slot}`}
+            minWidth={420}
+            columns={[
+              { key: "slot", header: "Slot", cell: (s) => s.slot },
+              { key: "lane", header: "Type", cell: (s) => (s.lane === "specialist" ? "Difficult-flow" : "Regular") },
+              { key: "ats", header: "Platform", cell: (s) => s.ats || "—" },
+              {
+                key: "state",
+                header: "Doing",
+                cell: (s) => (s.run_id || s.job_id ? [s.state, s.phase].filter(Boolean).join(", ") || "Working" : "Idle"),
+              },
+            ]}
+          />
+        </details>
+      )}
+    </Panel>
+  );
+}
+
 function SystemSettings() {
   const { snapshot, refresh } = useWorkspace();
   const { pending, run } = useAction();
-  const health = usePoll<RuntimeHealth>((signal) => api("/runtime-health", "GET", undefined, signal), 30000);
   const mail = usePoll<MailStatus>((signal) => api("/mail", "GET", undefined, signal), 60000);
   const inboxes = (mail.data?.mailboxes || []).filter((m) => m.state === "connected").map((m) => m.email);
   const cfg = snapshot.config || ({} as Snapshot["config"]);
@@ -307,77 +428,46 @@ function SystemSettings() {
       },
       label,
     );
-  const scheduler = health.data?.scheduler || snapshot.scheduler_health || {};
-  const workers = health.data?.application_workers;
   return (
     <>
+      <SystemStatus />
       <Panel title="Global controls">
-        <Lede>These apply to every job. To stop a single job, use its own Pause in Jobs.</Lede>
         <SwitchRow
           label="Automatic submission"
-          note="Lets verified applications submit. Off means applications stop before submitting. Dry runs never submit either way."
+          note="Off means applications stop before submitting. Dry runs never submit either way."
           checked={!!control.auto_submit}
           disabled={pending !== null}
           onChange={() =>
-            toggle(
-              "auto_submit",
-              control.auto_submit ? "Automatic submission turned off." : "Automatic submission turned on.",
-            )
+            toggle("auto_submit", control.auto_submit ? "Automatic submission turned off." : "Automatic submission turned on.")
           }
         />
         <SwitchRow
           label="Pause new applications"
-          note="Stops new applications and holds running ones before their final submit. A submission already in progress finishes its confirmation."
+          note="Holds running ones before their final submit. A submission already in progress finishes."
           checked={!!control.paused}
           disabled={pending !== null}
           onChange={() => toggle("paused", control.paused ? "New applications resumed." : "New applications paused.")}
         />
         <Facts
           items={[
-            [
-              "Applications at once",
-              workers
-                ? `${workers.normal_workers ?? 0} regular + ${workers.specialist_workers ?? 0} difficult-flow`
-                : `${cfg.workers ?? "—"} at most`,
-            ],
-            [
-              "Time per application",
-              `${cfg.timeout ?? "—"}s single page · ${cfg.multipage_timeout ?? "—"}s multi-page`,
-            ],
+            ["Time per application", `${cfg.timeout ?? "—"}s single page, ${cfg.multipage_timeout ?? "—"}s multi-page`],
             ["Daily submission cap", `${stats.submissions_reserved ?? 0} of ${cfg.daily_limit ?? "—"} used today`],
             ["Daily model budget", `${money(stats.spend_today)} of ${money(cfg.budget)} spent today`],
-            ["Timezone", cfg.timezone || "—"],
           ]}
         />
-        <p className="ax-hint" style={{ marginTop: "var(--space-3)" }}>
-          These come from Setup › Connections; worker counts apply after a restart. The limits below change right away.
-        </p>
       </Panel>
       <LimitSettings />
       <AgentControls />
       <Panel title="Services">
-        <Lede>Keys live only on the server and are never sent to this page.</Lede>
         <ul className="ax-rows">
           {(
             [
-              [
-                "Language model",
-                !!cfg.mimo,
-                `${cfg.model_provider ? cfg.model_provider + " · " : ""}${cfg.model || "not set"}`,
-              ],
-              [
-                "Application workers",
-                !!cfg.workers_enabled,
-                cfg.workers_enabled ? `Engine: ${cfg.engine}` : "Disabled in configuration",
-              ],
+              ["Language model", !!cfg.mimo, `${cfg.model_provider ? cfg.model_provider + " · " : ""}${cfg.model || "not set"}`],
+              ["Application workers", !!cfg.workers_enabled, cfg.workers_enabled ? `Engine: ${cfg.engine}` : "Disabled in configuration"],
               [
                 "Email inbox",
                 !!cfg.imap || inboxes.length > 0,
-                inboxes.length
-                  ? inboxes.join(", ")
-                  : cfg.imap
-                    ? "Gmail address and app password"
-                    : "Connect it in Setup › Email",
+                inboxes.length ? inboxes.join(", ") : cfg.imap ? "Gmail address and app password" : "Connect it in Settings › Email",
               ],
               [
                 "Telegram (optional)",
@@ -386,11 +476,7 @@ function SystemSettings() {
                   ? `Bot ${snapshot.telegram_health?.state || "configured"}. Answers sent there resume waiting jobs.`
                   : "Not configured. The app works without it.",
               ],
-              [
-                "2Captcha (optional)",
-                !!cfg.twocaptcha,
-                cfg.twocaptcha ? "Key saved." : "Add a key in Setup › Connections.",
-              ],
+              ["2Captcha (optional)", !!cfg.twocaptcha, cfg.twocaptcha ? "Key saved." : "Add a key in Settings › Connections."],
             ] as [string, boolean, string][]
           ).map(([name, ok, note]) => (
             <li className="ax-row" key={name}>
@@ -398,62 +484,16 @@ function SystemSettings() {
                 <strong>{name}</strong>
                 <small>{note}</small>
               </span>
-              <Pill tone={ok ? "ok" : "neutral"} dot>
-                {ok ? "Ready" : "Not set"}
-              </Pill>
+              <Pill tone="neutral">{ok ? "Ready" : "Not set"}</Pill>
             </li>
           ))}
         </ul>
       </Panel>
       <SignInSettings />
-      <Panel title="Technical details">
-        {health.error && !health.data && (
-          <p className="ax-error" role="alert">
-            {health.error.message}{" "}
-            <Button size="sm" variant="ghost" onClick={health.refresh}>
-              Try again
-            </Button>
-          </p>
-        )}
-        {Object.entries(health.data?.models || {}).map(
-          ([role, model]) =>
-            model && (
-              <p key={role} className="ax-lede" style={{ marginBottom: "var(--space-2)" }}>
-                {role === "answers" ? "Answers" : "Navigation"}: {model.provider} ·{" "}
-                {model.state === "ready"
-                  ? "Requests enabled"
-                  : model.state === "recovery_ready"
-                    ? "Waiting for one recovery request"
-                    : model.state === "recovering"
-                      ? "One recovery request in progress"
-                      : `Requests paused${model.retry_at ? " until " + new Date(model.retry_at).toLocaleTimeString() : ""}`}
-              </p>
-            ),
-        )}
-        <Facts
-          items={[
-            [
-              "Scheduler",
-              <span key="s" style={scheduler.degraded ? { color: "var(--warn)" } : undefined}>
-                {scheduler.degraded ? "Needs repair" : scheduler.state || "Unknown"}
-                {scheduler.checked_at && <span className="ax-hint"> · checked {ago(scheduler.checked_at)}</span>}
-              </span>,
-            ],
-            ["Last automation check", ago(health.data?.heartbeat?.at || snapshot.scheduler_heartbeat?.at)],
-            ["Notifications waiting", health.data ? `${health.data.outbox_pending ?? 0} pending` : "…"],
-            [
-              "Engine",
-              <span key="e" className="ax-mono">
-                {health.data?.engine_version || snapshot.engine_version || "—"}
-              </span>,
-            ],
-          ]}
-        />
-      </Panel>
       <details className="ax-panel ax-fold">
         <summary>
           <strong>Application platforms</strong>
-          <span className="ax-hint">· {plural((snapshot.ats || []).length, "adapter")}</span>
+          <span className="ax-hint">{plural((snapshot.ats || []).length, "adapter")}</span>
         </summary>
         <div className="ax-panel-body">
           <ul className="ax-rows">
@@ -534,10 +574,6 @@ function AgentControls() {
           );
         }}
       >
-        <Lede>
-          Choose the helpers available to application workers and the model used for answers and navigation. Credentials
-          stay on the server.
-        </Lede>
         {settings.error && !usable && (
           <Empty
             title="Could not load agent settings"
@@ -549,11 +585,7 @@ function AgentControls() {
             }
           />
         )}
-        {!current && !settings.error && (
-          <p className="ax-hint" role="status">
-            Loading agent settings…
-          </p>
-        )}
+        {!current && !settings.error && <Loading label="Loading agent settings…" />}
         {current && usable && (
           <>
             {AGENT_HELPERS.map(({ key, label, note }) => (
@@ -571,36 +603,34 @@ function AgentControls() {
                 }
               />
             ))}
-            <div style={{ marginTop: "var(--space-4)" }}>
-              <FormGrid>
-                {(["answers", "navigator"] as const).map((role) => {
-                  const provider = saved!.providers[current.models[role]];
-                  return (
-                    <Select
-                      key={role}
-                      label={role === "answers" ? "Answer model" : "Navigation model"}
-                      hint={provider?.available ? provider.model : undefined}
-                      error={provider?.available ? undefined : "Add its API key in Setup › Connections."}
-                      value={current.models[role]}
-                      disabled={pending !== null}
-                      onChange={(e) =>
-                        update({
-                          enabled: { ...current.enabled },
-                          models: { ...current.models, [role]: e.target.value as AgentModelProvider },
-                        })
-                      }
-                    >
-                      {AGENT_PROVIDERS.map(({ value, label }) => (
-                        <option key={value} value={value} disabled={!saved!.providers[value]?.available}>
-                          {label}
-                          {saved!.providers[value]?.available ? "" : " · not configured"}
-                        </option>
-                      ))}
-                    </Select>
-                  );
-                })}
-              </FormGrid>
-            </div>
+            <FormGrid>
+              {(["answers", "navigator"] as const).map((role) => {
+                const provider = saved!.providers[current.models[role]];
+                return (
+                  <Select
+                    key={role}
+                    label={role === "answers" ? "Answer model" : "Navigation model"}
+                    hint={provider?.available ? provider.model : undefined}
+                    error={provider?.available ? undefined : "Add its API key in Settings › Connections."}
+                    value={current.models[role]}
+                    disabled={pending !== null}
+                    onChange={(e) =>
+                      update({
+                        enabled: { ...current.enabled },
+                        models: { ...current.models, [role]: e.target.value as AgentModelProvider },
+                      })
+                    }
+                  >
+                    {AGENT_PROVIDERS.map(({ value, label }) => (
+                      <option key={value} value={value} disabled={!saved!.providers[value]?.available}>
+                        {label}
+                        {saved!.providers[value]?.available ? "" : " · not configured"}
+                      </option>
+                    ))}
+                  </Select>
+                );
+              })}
+            </FormGrid>
             <Actions note={changed ? "Unsaved changes" : undefined}>
               {changed && (
                 <Button variant="ghost" disabled={pending !== null} onClick={clearDraft}>
@@ -625,7 +655,7 @@ function CustomSources() {
     <details className="ax-panel ax-fold" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
       <summary>
         <strong>Custom sources</strong>
-        <span className="ax-hint">· advanced, with their own schedules</span>
+        <span className="ax-hint">advanced, with their own schedules</span>
       </summary>
       <div className="ax-panel-body">{open && <CustomSourceList />}</div>
     </details>
@@ -666,9 +696,7 @@ function CustomSourceList() {
         }
       />
     ) : (
-      <p className="ax-hint" role="status">
-        Loading…
-      </p>
+      <Loading />
     );
   const put = (s: Source, patch: Partial<Source>) =>
     api("/sources/" + s.id, "PUT", {
@@ -714,7 +742,6 @@ function CustomSourceList() {
             ))}
           </Select>
           <Input
-            className="is-wide"
             label="Board URL"
             hint="The company's board, not a single job."
             required
@@ -729,33 +756,16 @@ function CustomSourceList() {
             value={cron}
             onChange={(e) => setCron(e.target.value)}
           />
-          <label className="check" style={{ alignSelf: "center" }}>
-            <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
-            <span>Rank new jobs and queue eligible matches</span>
-          </label>
+          <Check checked={auto} onChange={setAuto} label="Rank new jobs and queue eligible matches" />
         </FormGrid>
         <Actions>
-          <Button
-            type="submit"
-            variant="primary"
-            loading={pending === "add"}
-            disabled={pending !== null && pending !== "add"}
-          >
+          <Button type="submit" variant="primary" loading={pending === "add"} disabled={pending !== null && pending !== "add"}>
             Add source
           </Button>
         </Actions>
       </form>
       <div className="ax-toolbar">
-        <label className="search">
-          <Search size={15} aria-hidden="true" />
-          <input
-            type="search"
-            aria-label="Search custom sources"
-            placeholder="Search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </label>
+        <SearchBox label="Search custom sources" placeholder="Search" value={query} onChange={setQuery} />
       </div>
       {sources.length ? (
         <>
@@ -765,9 +775,16 @@ function CustomSourceList() {
                 <span className="ax-row-main">
                   <strong>{s.name}</strong>
                   <small>
-                    <External href={s.url}>{(s.kind || "").replace("_", " ")}</External> ·{" "}
-                    <span className="ax-mono">{s.cron}</span> · last run {ago(s.last_run)} · {s.found ?? 0} new
-                    {s.error && <span style={{ color: "var(--warn)" }}> · {s.error}</span>}
+                    <External href={s.url}>{(s.kind || "").replace("_", " ")}</External> · <span className="mono">{s.cron}</span>{" "}
+                    · last run {ago(s.last_run)} · {s.found ?? 0} new
+                    {s.error && (
+                      <>
+                        {" · "}
+                        <Pill tone="warn" dot>
+                          {s.error}
+                        </Pill>
+                      </>
+                    )}
                   </small>
                 </span>
                 <span className="ax-row-end">
@@ -816,9 +833,7 @@ function CustomSourceList() {
           <Pagination paging={paging} label="Source pages" />
         </>
       ) : (
-        <p className="ax-hint">
-          {q ? "No custom sources match." : "No custom sources. The managed employer boards above cover discovery."}
-        </p>
+        <p className="ax-hint">{q ? "No custom sources match." : "No custom sources. The managed employer boards above cover discovery."}</p>
       )}
     </div>
   );

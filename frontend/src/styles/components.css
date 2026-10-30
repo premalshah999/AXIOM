@@ -528,7 +528,7 @@
   flex-wrap: wrap;
   gap: var(--space-2);
 }
-.switch {
+.ax-switch {
   position: relative;
   flex: none;
   width: 30px;
@@ -540,7 +540,7 @@
   cursor: pointer;
   transition: background var(--dur) var(--ease);
 }
-.switch i {
+.ax-switch i {
   position: absolute;
   top: 2px;
   left: 2px;
@@ -550,15 +550,15 @@
   background: var(--ground);
   transition: transform var(--dur) var(--ease);
 }
-.switch[aria-checked="true"] {
+.ax-switch[aria-checked="true"] {
   border: 0;
   background: var(--ink);
 }
-.switch[aria-checked="true"] i {
+.ax-switch[aria-checked="true"] i {
   background: var(--ground);
   transform: translateX(12px);
 }
-.switch:disabled {
+.ax-switch:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

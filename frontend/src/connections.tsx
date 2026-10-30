@@ -2,9 +2,9 @@ import { useId, useState, type ReactNode } from "react";
 import { api } from "./api";
 import { routeUrl, useWorkspace } from "./context";
 import { useAction, usePoll } from "./hooks";
-import { Actions, ConfirmButton, FormGrid, Lede, SaveBar, SecretInput } from "./setup-kit";
+import { Actions, FormGrid, RestartNotice, SaveBar, SecretInput } from "./setup-kit";
 import type { MailStatus } from "./types";
-import { Button, Empty, Input, Panel, Pill, Select } from "./ui/index";
+import { Button, Empty, ErrorLine, External, Input, Loading, Panel, Pill, Select } from "./ui/index";
 
 type ConnectionField = {
   name: string;
@@ -29,16 +29,17 @@ type ConnectionField = {
 
 type Connections = { fields: ConnectionField[]; provider: string; model_ready: boolean };
 
+// `tag` is the one thing a person needs to know before filling a group in: whether it can wait.
 const GROUPS = [
-  { id: "Model", title: "AI model", note: "Required. Reads job pages and writes your answers. One key is enough." },
-  { id: "Email", title: "Gmail", note: "Required. Reads verification codes, sign-in links and receipts." },
-  { id: "Accounts", title: "Employer accounts", note: "The login the app uses on career sites." },
-  { id: "Captcha", title: "Captcha solving", note: "Optional. Solves puzzles some employer sites show." },
-  { id: "Telegram", title: "Telegram", note: "Optional. Questions and alerts on your phone." },
-  { id: "Discovery", title: "Job search", note: "Optional. More job sources." },
-  { id: "Limits", title: "Limits", note: "Daily caps on applications and AI spending." },
-  { id: "Vision", title: "Screenshot model", note: "Optional. Only needed if your AI model cannot read images." },
-  { id: "Workers", title: "Workers", note: "How many applications run at once. Changes apply after a restart." },
+  { id: "Model", title: "AI model", tag: "Required" },
+  { id: "Email", title: "Gmail", tag: "Required" },
+  { id: "Accounts", title: "Employer accounts", tag: "" },
+  { id: "Captcha", title: "Captcha solving", tag: "Optional" },
+  { id: "Telegram", title: "Telegram", tag: "Optional" },
+  { id: "Discovery", title: "Job search", tag: "Optional" },
+  { id: "Limits", title: "Limits", tag: "" },
+  { id: "Vision", title: "Screenshot model", tag: "Optional" },
+  { id: "Workers", title: "Workers", tag: "Applies after a restart" },
 ];
 
 const PROVIDERS = [
@@ -54,7 +55,7 @@ type TestResult = { ok: boolean; message: string };
 /** The value a field shows when nothing is typed: what the next start will use. */
 const shown = (f: ConnectionField) => (f.pending || f.value || "") as string;
 
-/** Setup > Connections: every service key and setting is entered here; nothing needs editing in .env. */
+/** Settings › Connections: every service key and setting is entered here; nothing needs editing in .env. */
 export function ConnectionSettings() {
   const state = usePoll<Connections>((signal) => api("/connections", "GET", undefined, signal), 60000);
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -117,9 +118,7 @@ export function ConnectionSettings() {
   if (!data)
     return (
       <Panel title="Connections">
-        <p className="ax-hint" role="status">
-          Loading…
-        </p>
+        <Loading />
       </Panel>
     );
 
@@ -130,17 +129,13 @@ export function ConnectionSettings() {
     ...[...new Set(fields.map((f) => f.group).filter((g) => g && !known.has(g)))].map((g) => ({
       id: g,
       title: g,
-      note: "",
+      tag: "",
     })),
   ];
   const needsRestart = fields.some((f) => f.pending);
 
   return (
     <>
-      <p className="ax-lede" style={{ margin: 0 }}>
-        Everything the app needs, in one place. Keys are encrypted on this computer and never shown again; use Test to
-        check one. Nothing needs editing in the .env file; anything already set there shows as saved.
-      </p>
       {!data.model_ready && (
         <div className="ax-notice is-bad" role="alert">
           <span>
@@ -149,20 +144,18 @@ export function ConnectionSettings() {
           </span>
         </div>
       )}
-      {needsRestart && <RestartBar />}
+      {needsRestart && <RestartNotice message="New worker settings are saved. They take effect when the app restarts." />}
       {groups.map((group) => {
         const list = fields.filter((f) => f.group === group.id);
         if (group.id === "Email")
           return (
-            <Panel key={group.id} title={group.title}>
-              {group.note && <Lede>{group.note}</Lede>}
+            <Panel key={group.id} title={group.title} actions={group.tag && <span className="ax-hint">{group.tag}</span>}>
               <GmailConnection />
             </Panel>
           );
         if (!list.length) return null;
         return (
-          <Panel key={group.id} title={group.title}>
-            {group.note && <Lede>{group.note}</Lede>}
+          <Panel key={group.id} title={group.title} actions={group.tag && <span className="ax-hint">{group.tag}</span>}>
             <FormGrid>
               {list.map((f) => (
                 <ConnField
@@ -225,9 +218,11 @@ function ConnField({
     <strong> Applies after a restart.</strong>
   ) : null;
   const outcome = result && (
-    <span style={{ color: result.ok ? "var(--ok)" : "var(--bad)" }} role="status">
+    <span role="status">
       {" "}
-      {result.message}
+      <Pill tone={result.ok ? "neutral" : "bad"} dot>
+        {result.message}
+      </Pill>
     </span>
   );
   const hint: ReactNode = (
@@ -321,55 +316,6 @@ function ConnField({
   );
 }
 
-// Worker counts are sized when the app starts: saving keeps them for the next start, and this restarts now. New
-// starts pause, a final submit in progress finishes, then the app restarts on its own in under a minute.
-function RestartBar() {
-  const { pending: busy, run } = useAction();
-  const [restarting, setRestarting] = useState(false);
-  const restart = () =>
-    run(
-      "restart",
-      async () => {
-        await api("/system/restart", "POST");
-        setRestarting(true);
-        // Reload once the app answers again.
-        const started = Date.now();
-        const wait = async () => {
-          await new Promise((r) => setTimeout(r, 4000));
-          try {
-            await api("/runtime-health", "GET");
-            if (Date.now() - started > 8000) return location.reload();
-          } catch {
-            /* still restarting */
-          }
-          if (Date.now() - started < 180000) void wait();
-        };
-        void wait();
-      },
-      "Restarting. Running applications resume after the restart.",
-    );
-  return (
-    <div className="ax-notice" role="status">
-      <span>
-        {restarting
-          ? "Restarting… this page reloads when the app is back (under a minute)."
-          : "New worker settings are saved. They take effect when the app restarts."}
-      </span>
-      {!restarting && (
-        <ConfirmButton
-          label="Restart now"
-          confirm="Restart"
-          note="Applications pause, final submits finish, then it comes back."
-          variant="secondary"
-          size="md"
-          pending={busy === "restart"}
-          onConfirm={restart}
-        />
-      )}
-    </div>
-  );
-}
-
 // Gmail inside Connections: its status, and the same app-password connection as Setup › Email.
 function GmailConnection() {
   const { snapshot, go } = useWorkspace();
@@ -390,11 +336,7 @@ function GmailConnection() {
     );
   return (
     <div className="ax-stack">
-      {mail.error && !mail.data && (
-        <p className="ax-error" role="alert">
-          {mail.error.message}
-        </p>
-      )}
+      {mail.error && !mail.data && <ErrorLine error={mail.error} retry={mail.refresh} />}
       {boxes.length > 0 && (
         <ul className="ax-rows">
           {boxes.map((b) => (
@@ -411,10 +353,10 @@ function GmailConnection() {
                 </Pill>
                 <a
                   className="ax-btn is-sm"
-                  href={routeUrl({ view: "setup", tab: "email" })}
+                  href={routeUrl({ view: "settings", tab: "email" })}
                   onClick={(e) => {
                     e.preventDefault();
-                    go({ view: "setup", tab: "email" });
+                    go({ view: "settings", tab: "email" });
                   }}
                 >
                   Manage
@@ -473,11 +415,8 @@ function GmailPassword({ value, onChange }: { value: string; onChange: (v: strin
         onChange={onChange}
       />
       <p className="ax-hint" id={id + "-msg"}>
-        16 letters from{" "}
-        <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer">
-          myaccount.google.com/apppasswords
-        </a>{" "}
-        (needs 2-Step Verification). Read-only use: codes, links and receipts.
+        16 letters from <External href="https://myaccount.google.com/apppasswords">myaccount.google.com/apppasswords</External>{" "}
+        (needs 2-Step Verification).
       </p>
     </div>
   );
