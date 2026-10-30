@@ -164,20 +164,6 @@ details.ax-dr-sec[open] > summary {
   align-items: center;
   gap: var(--space-2);
 }
-.ax-kv {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: var(--space-2) var(--space-4);
-  margin: 0;
-}
-.ax-kv dt {
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-}
-.ax-kv dd {
-  margin: 0;
-  font-size: var(--text-ui);
-}
 .ax-list {
   margin: 0;
   padding-left: 18px;

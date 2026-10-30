@@ -1,12 +1,12 @@
-import { CornerDownLeft, Link2, Palette, Search } from "lucide-react";
+import { Link2, Moon, Search, Sun } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api } from "../api";
-import { useWorkspace, type Route } from "../context";
+import { useWorkspace } from "../context";
 import { OPEN_JOB_LINK } from "../jobintake";
 import { STATES, stateInfo } from "../model";
 import type { Listing, PipelinePage } from "../types";
-import { ALL_ITEMS } from "./nav";
-import { THEMES, useTheme } from "./prefs";
+import { ALL_ITEMS, PAGE_TABS } from "./nav";
+import { useTheme } from "./prefs";
 
 type Entry = {
   id: string;
@@ -22,13 +22,13 @@ type Hit = { id: string; company: string; title: string; status: string };
 const GROUP_ORDER = ["Pages", "Jobs", "Actions"] as const;
 
 /**
- * Command palette (⌘K or Ctrl-K): jump to any page, add a job link, switch theme, or search jobs by company or title.
+ * Command palette (⌘K or Ctrl-K): jump to any page or tab, add a job link, switch theme, or search jobs by company or title.
  * Jobs come from the same endpoints the Jobs view pages through (GET /api/jobs for the pipeline and GET /api/job-board
  * for discovered listings); choosing one opens its panel over the current page.
  */
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { go, openJob } = useWorkspace();
-  const [, setTheme] = useTheme();
+  const [theme, toggleTheme] = useTheme();
   const [q, setQ] = useState("");
   const [cursor, setCursor] = useState(0);
   const [hits, setHits] = useState<Hit[]>([]);
@@ -101,25 +101,33 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       label: i.label,
       note: i.soon ? "Coming soon" : undefined,
       icon: <i.icon size={15} aria-hidden="true" />,
-      run: done(() => go(i.route as Route)),
+      run: done(() => go(i.route)),
     }));
-    const actions: Entry[] = [
-      {
-        id: "act:link",
-        group: "Actions",
-        label: "Add a job link",
-        icon: <Link2 size={15} aria-hidden="true" />,
-        run: done(() => window.dispatchEvent(new Event(OPEN_JOB_LINK))),
-      },
-      ...THEMES.map<Entry>((t) => ({
-        id: "theme:" + t.id,
-        group: "Actions",
-        label: "Theme: " + t.label,
-        note: t.note,
-        icon: <Palette size={15} aria-hidden="true" />,
-        run: done(() => setTheme(t.id)),
+    // A page's tabs ("Discovered", "Accounts") are places to jump to as well, once something is typed.
+    const tabs: Entry[] = ALL_ITEMS.flatMap((i) =>
+      (PAGE_TABS[i.route.view] || []).map<Entry>((t) => ({
+        id: `tab:${i.id}:${t.id}`,
+        group: "Pages",
+        label: t.label,
+        note: i.label,
+        icon: <i.icon size={15} aria-hidden="true" />,
+        run: done(() => go({ view: i.route.view, tab: t.id })),
       })),
-    ];
+    );
+    const link: Entry = {
+      id: "act:link",
+      group: "Actions",
+      label: "Add a job link",
+      icon: <Link2 size={15} aria-hidden="true" />,
+      run: done(() => window.dispatchEvent(new Event(OPEN_JOB_LINK))),
+    };
+    const switchTheme: Entry = {
+      id: "act:theme",
+      group: "Actions",
+      label: theme === "dark" ? "Switch to light theme" : "Switch to dark theme",
+      icon: theme === "dark" ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />,
+      run: done(toggleTheme),
+    };
     const needle = term.toLowerCase();
     const match = (e: Entry) => !needle || (e.label + " " + (e.note || "")).toLowerCase().includes(needle);
     const jobs: Entry[] = hits.map((h) => ({
@@ -129,9 +137,10 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       note: stateInfo(h.status in STATES ? h.status : "job:" + h.status).label,
       run: done(() => openJob(h.id)),
     }));
-    // With no query, offer pages first and only the useful actions; with a query, pages then jobs then actions.
-    return [...pages.filter(match), ...jobs, ...actions.filter((a) => (needle ? match(a) : !a.id.startsWith("theme:")))];
-  }, [term, hits, go, openJob, onClose, setTheme]);
+    // With no query, offer the pages and adding a link; with a query, every match: pages and tabs, then jobs, then actions.
+    if (!needle) return [...pages, link];
+    return [...pages.filter(match), ...tabs.filter(match), ...jobs, ...[link, switchTheme].filter(match)];
+  }, [term, hits, go, openJob, onClose, theme, toggleTheme]);
 
   useEffect(() => setCursor(0), [term, hits.length]);
   useEffect(() => {
@@ -202,7 +211,6 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                       {e.icon}
                       <span className="ax-palette-label">{e.label}</span>
                       {e.note && <span className="ax-palette-note">{e.note}</span>}
-                      {on && <CornerDownLeft size={13} aria-hidden="true" />}
                     </li>
                   );
                 })}
@@ -212,13 +220,8 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           {term.length >= 2 && searching && hits.length === 0 && <li className="ax-palette-empty" role="presentation">Searching jobs…</li>}
           {term.length >= 2 && !searching && failed && <li className="ax-palette-empty" role="presentation">Could not search jobs. Pages still work.</li>}
           {term.length >= 2 && !searching && !failed && flat.length === 0 && <li className="ax-palette-empty" role="presentation">No match for “{term}”.</li>}
-          {term.length === 1 && flat.length === 0 && <li className="ax-palette-empty" role="presentation">No page matches. Keep typing to search jobs.</li>}
+          {term.length === 1 && flat.length === 0 && <li className="ax-palette-empty" role="presentation">Keep typing to search jobs.</li>}
         </ul>
-        <div className="ax-palette-foot">
-          <span>↑↓ to move</span>
-          <span>↵ to open</span>
-          <span>Jobs: type 2+ letters of a company or title</span>
-        </div>
       </div>
     </div>
   );

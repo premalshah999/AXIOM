@@ -4,17 +4,17 @@ import { useEffect, useId, useRef, useState, type InputHTMLAttributes, type Reac
 import "./styles/setup.css";
 import { Button } from "./ui/index";
 
-/** A muted paragraph under a panel's title: what the panel is for. */
+/** A muted paragraph under a panel's title. Almost none should remain: a person rarely reads them. */
 export function Lede({ children }: { children: ReactNode }) {
   return <p className="ax-lede">{children}</p>;
 }
 
-/** Fields in two columns (one on a phone). Give a child className="is-wide" to span both. */
+/** On a page, one column of labelled rows divided by hairlines; in a drawer, stacked fields. */
 export function FormGrid({ children }: { children: ReactNode }) {
   return <div className="ax-grid">{children}</div>;
 }
 
-/** The panel's actions row: right-aligned, primary last. `note` sits at the left. */
+/** A section's actions row, left-aligned on a page, right-aligned in a drawer. */
 export function Actions({ children, note, start }: { children: ReactNode; note?: ReactNode; start?: boolean }) {
   return (
     <div className={"ax-actions" + (start ? " is-start" : "")}>
@@ -64,7 +64,7 @@ export function SaveBar({
   );
 }
 
-/** A switch with its name and what it does. Matches the legacy .switch look until that class is retired. */
+/** A switch with its name and what it does. */
 export function SwitchRow({
   label,
   note,

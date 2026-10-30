@@ -29,8 +29,7 @@ import { BrandMark } from "./shell/Brand";
 import { CommandPalette } from "./shell/CommandPalette";
 import { ComingSoon } from "./shell/ComingSoon";
 import { ALL_ITEMS, titleFor } from "./shell/nav";
-import type { Status } from "./shell/Sidebar";
-import { ToastStack } from "./ui/index";
+import { Button, ToastStack } from "./ui/index";
 import { BatchView } from "./batch";
 import { JobsView } from "./jobs";
 import { LedgerView } from "./ledger";
@@ -247,18 +246,13 @@ function App() {
   if (!workspace)
     return (
       <div className="ax-screen">
-        <div className="boot">
-          <div className="brand">
-            <BrandMark size={22} />
-            <span>AXIOM</span>
-          </div>
+        <div className="ax-boot">
+          <BrandMark size={20} />
           {snap.error &&
           !(snap.error instanceof ApiError && snap.error.status === 401) ? (
-            <div className="boot-error" role="alert">
+            <div className="ax-boot-error" role="alert">
               <p>{snap.error.message}</p>
-              <button className="btn" onClick={() => snap.refresh()}>
-                Try again
-              </button>
+              <Button onClick={() => snap.refresh()}>Try again</Button>
             </div>
           ) : (
             <Loading label="Opening your workspace…" />
@@ -268,31 +262,8 @@ function App() {
     );
 
   const { snapshot } = workspace;
-  const rt = snapshot.autopilot_runtime || {};
-  // The Needs you badge counts what the page shows: one card per distinct question, not one per application.
+  // The Needs you count is what the page shows: one per distinct question, not one per application.
   const questions = countQuestions(snapshot.reviews);
-  const sched = rt.scheduler || snapshot.scheduler_health || {};
-  const pool = rt.application_workers;
-  const workers = pool ? pool.normal_workers + pool.specialist_workers : 0;
-  const done = rt.confirmed ?? 0;
-  const goal = rt.target ?? 100;
-  // Applications you started yourself count too, so a batch can finish above its target ("560/477" read as a mistake).
-  const progress = done > goal ? `${done} confirmed · target ${goal}` : `${done}/${goal} confirmed`;
-  // The sidebar's status dot: the worst thing true right now, in plain words.
-  const status: Status =
-    snap.failures >= 2
-      ? { tone: "bad", text: "Connection lost", sub: `Showing data from ${ago(snap.updatedAt)}` }
-      : sched.degraded
-        ? { tone: "bad", text: "Needs a restart", sub: "Automation is degraded" }
-        : snapshot.control.paused
-          ? { tone: "warn", text: "Paused", sub: "New applications are paused" }
-          : rt.state === "complete"
-            ? { tone: "ok", text: "Target reached", sub: progress }
-            : rt.intake_enabled
-              ? { tone: "ok", text: "Running", sub: workers ? `${progress} · ${workers} workers` : progress }
-              : rt.state === "active"
-                ? { tone: "warn", text: "Held", sub: rt.intake_reason || progress }
-                : { tone: "idle", text: "No batch", sub: workers ? `${workers} workers ready` : "Start one on Overview" };
   const soon = ALL_ITEMS.find((i) => i.route.view === route.view && i.soon);
 
   return (
@@ -302,7 +273,6 @@ function App() {
           route={route}
           go={go}
           needs={questions}
-          status={status}
           who={who}
           paletteOpen={palette}
           onSearch={() => setPalette(true)}
@@ -314,30 +284,14 @@ function App() {
               notify("error", (e as Error).message);
             }
           }}
-          end={
-            <div className="intake-slot">
-              <JobLinkIntake
-                request={api}
-                refresh={refresh}
-                autoApply={
-                  snapshot.profile.autonomous &&
-                  snapshot.control.auto_submit &&
-                  !snapshot.control.paused
-                }
-                onImported={(jobId, message) => {
-                  notify("ok", message);
-                  go({ ...route, job: jobId, run: undefined });
-                }}
-              />
-            </div>
-          }
           banners={
             <>
               {setupGuide === "later" && (
-                <div className="setup-banner" role="status">
-                  <span>Your profile setup isn't finished. AXIOM answers applications from it.</span>
+                <div className="ax-banner" role="status">
+                  <span>Your profile setup isn't finished.</span>
                   <button
-                    className="btn sm primary"
+                    type="button"
+                    className="ax-link"
                     onClick={() => {
                       guideLater(false);
                       setSetupGuide("needed");
@@ -348,10 +302,10 @@ function App() {
                 </div>
               )}
               {snap.failures >= 2 && (
-                <div className="conn" role="status">
+                <div className="ax-banner is-bad" role="status">
                   <span>
-                    Connection lost{snap.error ? ` (${snap.error.message})` : ""}.
-                    Showing data from {ago(snap.updatedAt)}; retrying automatically.
+                    Connection lost{snap.error ? ` (${snap.error.message})` : ""}. Showing data from {ago(snap.updatedAt)};
+                    retrying automatically.
                   </span>
                 </div>
               )}
@@ -377,6 +331,15 @@ function App() {
             close={() => go({ ...route, job: undefined, run: undefined })}
           />
         )}
+        <JobLinkIntake
+          request={api}
+          refresh={refresh}
+          autoApply={snapshot.profile.autonomous && snapshot.control.auto_submit && !snapshot.control.paused}
+          onImported={(jobId, message) => {
+            notify("ok", message);
+            go({ ...route, job: jobId, run: undefined });
+          }}
+        />
         <CommandPalette open={palette} onClose={() => setPalette(false)} />
         <ToastStack toasts={toasts} onDismiss={(id) => setToasts((list) => list.filter((x) => x.id !== id))} />
       </WorkspaceContext.Provider>

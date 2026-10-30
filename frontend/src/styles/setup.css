@@ -17,32 +17,6 @@
   color: var(--ink-2);
   font-size: var(--text-meta);
 }
-.ax-kv {
-  display: grid;
-  grid-template-columns: minmax(120px, 220px) minmax(0, 1fr);
-  margin: 0;
-}
-.ax-kv > div {
-  display: contents;
-}
-.ax-kv dt,
-.ax-kv dd {
-  margin: 0;
-  padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--line);
-  font-size: var(--text-ui);
-}
-.ax-kv dt {
-  color: var(--ink-3);
-  padding-right: var(--space-3);
-}
-.ax-kv > div:last-child dt,
-.ax-kv > div:last-child dd {
-  border-bottom: 0;
-}
-.ax-kv dd {
-  overflow-wrap: anywhere;
-}
 .ax-photo {
   display: flex;
   align-items: center;
@@ -73,13 +47,6 @@
   font-size: var(--text-meta);
 }
 @media (max-width: 760px) {
-  .ax-kv {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .ax-kv dt {
-    padding-bottom: 0;
-    border-bottom: 0;
-  }
 }
 /* ---------- Profile: legacy inner markup, brought in line with the ax- panels ---------- */
 .ax-page .rule-steps {

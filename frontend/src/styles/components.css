@@ -232,6 +232,14 @@
   border-color: transparent;
   filter: none;
 }
+/* A primary that cannot be pressed yet is not the thing to look at: only a live one carries the accent. */
+.ax-btn.is-primary:disabled,
+.btn.primary:disabled {
+  background: var(--tint);
+  border-color: transparent;
+  color: var(--ink-3);
+  opacity: 1;
+}
 .ax-btn.is-ghost,
 .btn.quiet {
   background: transparent;
@@ -381,7 +389,6 @@
 .ax-page .ax-grid,
 .ax-page .form-grid {
   display: block;
-  max-width: 760px;
 }
 .ax-page .ax-grid > *,
 .ax-page .form-grid > * {
@@ -399,7 +406,7 @@
 .ax-page .ax-grid > .ax-field,
 .ax-page .form-grid > .field {
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
+  grid-template-columns: 200px minmax(0, 536px);
   gap: 4px var(--space-6);
   align-items: start;
 }
@@ -554,6 +561,43 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* Read-only label and value rows (Facts in setup-kit, the job drawer). */
+.ax-kv {
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) minmax(0, 1fr);
+  margin: 0;
+  column-gap: var(--space-6);
+  font-size: var(--text-ui);
+}
+.ax-kv > div {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  border-bottom: 1px solid var(--line);
+}
+.ax-kv > div:last-child {
+  border-bottom: 0;
+}
+.ax-kv dt,
+.ax-kv dd {
+  margin: 0;
+  padding: var(--space-2) 0;
+  overflow-wrap: anywhere;
+}
+.ax-kv dt {
+  color: var(--ink-3);
+}
+@media (max-width: 760px) {
+  .ax-kv {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ax-kv dt {
+    padding-bottom: 0;
+  }
+  .ax-kv dd {
+    padding-top: 2px;
+  }
+}
 .ax-fold > summary {
   display: flex;
   align-items: center;
@@ -678,11 +722,20 @@
   padding-right: 0;
 }
 .ax-table .is-check input {
-  display: block;
-  width: 14px;
-  height: 14px;
-  min-height: 0;
-  padding: 0;
+  display: grid;
+}
+/* A row's checkbox shows when the row is in play. The select-all box in the head always shows. */
+@media (hover: hover) {
+  .ax-table tbody .is-check input {
+    opacity: 0;
+    transition: opacity var(--dur) var(--ease);
+  }
+  .ax-table tbody tr:hover .is-check input,
+  .ax-table tbody .is-check input:checked,
+  .ax-table tbody .is-check input:focus-visible,
+  .ax-table:has(tbody .is-check input:checked) tbody .is-check input {
+    opacity: 1;
+  }
 }
 @container ax-table (max-width: 859px) {
   .ax-table .is-hide-860 {
@@ -755,11 +808,21 @@
   animation: ax-fade var(--dur) ease;
   cursor: default;
 }
-.ax-drawer {
-  /* Inside the drawer the ground is the drawer: sticky heads and pinned cells stay opaque against it. */
+/* Inside an overlay the ground is the overlay: sticky heads and pinned cells stay opaque against it. */
+.ax-drawer,
+.dialog {
   --ground: var(--raised);
   --surface: var(--raised);
   --card: var(--raised);
+}
+.dialog {
+  border-color: var(--line);
+  box-shadow: var(--overlay-shadow);
+}
+.dialog.center {
+  border-radius: var(--radius);
+}
+.ax-drawer {
   position: relative;
   display: flex;
   flex-direction: column;
@@ -803,15 +866,50 @@
   border-top: 1px solid var(--line);
 }
 
-/* ---------- Empty: one line ---------- */
-.ax-empty {
+/* ---------- Empty: one line (ui.tsx's legacy Empty, ErrorLine and inline-warn read the same) ---------- */
+.ax-empty,
+.empty {
   display: flex;
   align-items: baseline;
+  flex-direction: row;
   flex-wrap: wrap;
   gap: 2px var(--space-2);
   padding: var(--space-3) 0;
+  border: 0;
+  border-radius: 0;
   color: var(--ink-3);
   font-size: var(--text-ui);
+}
+.empty strong {
+  color: var(--ink-2);
+  font-weight: 400;
+}
+.error-line,
+.inline-warn {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  margin: var(--space-2) 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink);
+  font-size: var(--text-ui);
+}
+.error-line::before,
+.inline-warn::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--bad);
+}
+.inline-warn::before {
+  background: var(--warn);
 }
 .ax-empty-title {
   color: var(--ink-2);
@@ -1055,6 +1153,26 @@ body:has(.ax-savebar) .ax-toasts {
 .ax-job:focus-visible,
 .ax-link:focus-visible {
   border-radius: var(--radius);
+}
+/* Too narrow for company and role side by side: they stack, so both can be read. */
+@container ax-table (max-width: 599px) {
+  .ax-job {
+    flex-direction: column;
+    gap: 0;
+    line-height: 1.35;
+  }
+  .ax-job strong {
+    max-width: 100%;
+    white-space: nowrap;
+  }
+  .ax-job span {
+    flex: none;
+    width: 100%;
+    white-space: nowrap;
+  }
+  .ax-table td {
+    height: 48px;
+  }
 }
 .ax-note {
   color: var(--ink-3);

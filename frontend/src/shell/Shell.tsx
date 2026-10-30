@@ -2,16 +2,18 @@ import { Menu, Search } from "lucide-react";
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { Route } from "../context";
+import type { Who } from "./AccountMenu";
 import { PageBoundary } from "./ErrorBoundary";
 import { titleFor } from "./nav";
 import { usePersisted, useMedia } from "./prefs";
-import { Sidebar, type Status, type Who } from "./Sidebar";
+import { Sidebar } from "./Sidebar";
 
 const SlotContext = createContext<HTMLElement | null>(null);
 
 /**
- * Put controls in the top bar's actions slot (right of the page title; a row under the bar on a phone) from inside any page:
- * `<TopActions><Button>Export</Button></TopActions>`. They unmount with the page.
+ * Put a control at the right of the page title (a row under the bar on a phone) from inside any page:
+ * `<TopActions><Button>Export</Button></TopActions>`. It unmounts with the page. Use it for at most one or two
+ * things a page really needs; the bar has no controls of its own.
  */
 export function TopActions({ children }: { children: ReactNode }) {
   const slot = useContext(SlotContext);
@@ -19,34 +21,29 @@ export function TopActions({ children }: { children: ReactNode }) {
 }
 
 /**
- * The application frame (DESIGN.md §3): a grid of [sidebar | main]. Main is a column of the top bar, banners, and ONE
+ * The application frame (DESIGN.md, Shell): a grid of [sidebar | main]. Main is a column of the top bar, banners, and ONE
  * scroll region (.ax-scroll) holding the page. The document itself never scrolls (base.css), so every scrolling bug has
- * one place to look. Wide tables scroll sideways inside their own panel; modals and drawers own their scroll.
+ * one place to look. Wide tables scroll sideways inside themselves; drawers and menus own their scroll.
  */
 export function Shell({
   route,
   go,
   needs,
-  status,
   who,
   onSignOut,
   onSearch,
   paletteOpen,
-  end,
   banners,
   children,
 }: {
   route: Route;
   go: (route: Route) => void;
   needs: number;
-  status: Status;
   who: Who;
   onSignOut: () => void;
   onSearch: () => void;
   paletteOpen: boolean;
-  /** Global top-bar controls (add a job link). */
-  end: ReactNode;
-  /** Full-width notices under the top bar (setup unfinished, connection lost). */
+  /** One-line notices under the top bar (setup unfinished, connection lost). */
   banners?: ReactNode;
   children: ReactNode;
 }) {
@@ -86,7 +83,6 @@ export function Shell({
           open={open}
           onClose={() => setOpen(false)}
           onSearch={onSearch}
-          status={status}
           who={who}
           onSignOut={onSignOut}
         />
@@ -94,20 +90,17 @@ export function Shell({
           <header className="ax-top">
             {drawer && (
               <button type="button" className="ax-icon-btn ax-top-menu" aria-label="Open menu" aria-expanded={open} onClick={() => setOpen(true)}>
-                <Menu size={18} />
+                <Menu size={18} aria-hidden="true" />
               </button>
             )}
             <h1 className="ax-top-title">{title}</h1>
             {/* Under 900px the bar has no room for a page's buttons beside its title: they go in a row below it. */}
             <div className="ax-top-actions" ref={setSlot} />
-            <div className="ax-top-end">
-              {drawer && (
-                <button type="button" className="ax-icon-btn" aria-label="Search" onClick={onSearch}>
-                  <Search size={17} />
-                </button>
-              )}
-              {end}
-            </div>
+            {drawer && (
+              <button type="button" className="ax-icon-btn" aria-label="Search" onClick={onSearch}>
+                <Search size={17} aria-hidden="true" />
+              </button>
+            )}
           </header>
           <div className="ax-top-row" ref={setRowSlot} />
           {banners}

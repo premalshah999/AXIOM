@@ -1,16 +1,16 @@
-import { LogOut, PanelLeftClose, PanelLeftOpen, Search } from "lucide-react";
+import { PanelLeft, Search } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { routeUrl, type Route } from "../context";
+import { AccountMenu, type Who } from "./AccountMenu";
 import { BrandMark } from "./Brand";
 import { isActive, NAV, type NavItem } from "./nav";
-import { ThemeMenu } from "./ThemeMenu";
 
-export type Status = { tone: "ok" | "warn" | "bad" | "idle"; text: string; sub: string };
-export type Who = { name?: string; email?: string };
+const MAC = /mac/i.test(navigator.platform);
 
 /**
- * The sidebar (DESIGN.md §3 and §4). 240px open, 64px collapsed to an icon rail with the labels as tooltips; the choice
- * is remembered by the caller. Under 900px it is a slide-over drawer opened from the top bar. Every group stays open.
+ * The sidebar (DESIGN.md, Navigation): six pages, a quiet "Coming soon" list, and the account row. 220px open, 56px
+ * collapsed to an icon rail with the labels as tooltips; the choice is remembered by the caller. Under 900px it is a
+ * slide-over drawer opened from the top bar.
  */
 export function Sidebar({
   route,
@@ -22,7 +22,6 @@ export function Sidebar({
   open,
   onClose,
   onSearch,
-  status,
   who,
   onSignOut,
 }: {
@@ -36,20 +35,22 @@ export function Sidebar({
   open: boolean;
   onClose: () => void;
   onSearch: () => void;
-  status: Status;
   who: Who;
   onSignOut: () => void;
 }) {
   const rail = collapsed && !drawer;
   const side = useRef<HTMLElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
 
-  // The drawer: Esc closes, focus moves in on open and returns to the opener, Tab stays inside.
+  // The drawer: Esc closes, focus moves in on open and returns to the opener, Tab stays inside. Only opening moves focus:
+  // the shell re-renders on every poll.
   useEffect(() => {
     if (!drawer || !open) return;
     const opener = document.activeElement as HTMLElement | null;
-    side.current?.querySelector<HTMLElement>("a[aria-current], a")?.focus();
+    (side.current?.querySelector<HTMLElement>(".ax-nav[aria-current]") ?? side.current?.querySelector<HTMLElement>("a"))?.focus();
     const key = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") close.current();
       else if (e.key === "Tab" && side.current) {
         const items = [...side.current.querySelectorAll<HTMLElement>("a[href],button:not(:disabled)")].filter((el) => el.offsetParent !== null);
         const first = items[0];
@@ -69,7 +70,7 @@ export function Sidebar({
       document.removeEventListener("keydown", key);
       opener?.focus?.();
     };
-  }, [drawer, open, onClose]);
+  }, [drawer, open]);
 
   const hidden = drawer && !open;
   return (
@@ -92,33 +93,30 @@ export function Sidebar({
               go({ view: "batch" });
             }}
           >
-            <BrandMark />
+            <BrandMark size={18} />
             {!rail && <span>AXIOM</span>}
           </a>
           {!rail && !drawer && (
-            <button type="button" className="ax-icon-btn" aria-label="Collapse sidebar" title="Collapse sidebar" onClick={onToggle}>
-              <PanelLeftClose size={16} />
-            </button>
+            <>
+              <button type="button" className="ax-icon-btn ax-side-toggle" aria-label="Collapse sidebar" title="Collapse sidebar" onClick={onToggle}>
+                <PanelLeft size={15} aria-hidden="true" />
+              </button>
+              <button type="button" className="ax-kbd" aria-label="Search" title="Search" onClick={onSearch}>
+                {MAC ? "⌘K" : "Ctrl K"}
+              </button>
+            </>
           )}
         </div>
 
-        <div className="ax-side-search">
-          <button type="button" className="ax-search-btn" onClick={onSearch} aria-label="Search" title={rail ? "Search (⌘K)" : undefined}>
-            <Search size={rail ? 17 : 15} aria-hidden="true" />
-            {!rail && (
-              <>
-                <span>Search</span>
-                <kbd>⌘K</kbd>
-              </>
-            )}
-          </button>
-        </div>
-
         <div className="ax-side-nav">
+          {rail && (
+            <button type="button" className="ax-nav" aria-label="Search" title={MAC ? "Search (⌘K)" : "Search (Ctrl K)"} onClick={onSearch}>
+              <Search size={16} strokeWidth={1.75} aria-hidden="true" />
+            </button>
+          )}
           {NAV.map((section, i) => (
             <div key={section.label ?? i} className="ax-side-group">
-              {section.label &&
-                (rail ? <div className="ax-side-rule" /> : <p className="ax-side-label">{section.label}</p>)}
+              {section.label && (rail ? <div className="ax-side-rule" /> : <p className="ax-side-label">{section.label}</p>)}
               <ul>
                 {section.items.map((item) => (
                   <li key={item.id}>
@@ -130,49 +128,13 @@ export function Sidebar({
           ))}
         </div>
 
-        {rail && (
-          <div className="ax-side-expand">
-            <button type="button" className="ax-icon-btn" aria-label="Expand sidebar" title="Expand sidebar" onClick={onToggle}>
-              <PanelLeftOpen size={16} />
-            </button>
-          </div>
-        )}
-
         <div className="ax-side-foot">
-          <a
-            className="ax-foot-row ax-status"
-            href={routeUrl({ view: "batch" })}
-            title={rail ? status.text + ". " + status.sub : undefined}
-            onClick={(e) => {
-              e.preventDefault();
-              go({ view: "batch" });
-            }}
-          >
-            <i className={"ax-dot is-" + status.tone} aria-hidden="true" />
-            {!rail && (
-              <span className="ax-foot-stack">
-                <span>{status.text}</span>
-                <small>{status.sub}</small>
-              </span>
-            )}
-            {rail && <span className="sr-only">{status.text}</span>}
-          </a>
-          <ThemeMenu collapsed={rail} />
-          <div className="ax-user">
-            {!rail && (
-              <>
-                <span className="ax-avatar" aria-hidden="true">
-                  {(who.name || who.email || "?").slice(0, 1).toUpperCase()}
-                </span>
-                <span className="ax-foot-stack" title={who.email}>
-                  <span>{who.name || who.email || "Signed in"}</span>
-                </span>
-              </>
-            )}
-            <button type="button" className="ax-icon-btn" aria-label="Sign out" title="Sign out" onClick={onSignOut}>
-              <LogOut size={15} />
+          {rail && (
+            <button type="button" className="ax-nav" aria-label="Expand sidebar" title="Expand sidebar" onClick={onToggle}>
+              <PanelLeft size={16} strokeWidth={1.75} aria-hidden="true" />
             </button>
-          </div>
+          )}
+          <AccountMenu who={who} rail={rail} onSignOut={onSignOut} />
         </div>
       </aside>
     </>
@@ -183,10 +145,10 @@ function NavRow({ item, route, go, rail, needs }: { item: NavItem; route: Route;
   const active = isActive(item, route);
   const count = item.badge === "needs" ? needs : 0;
   const Icon = item.icon;
-  const tip = rail ? item.label + (item.soon ? " (soon)" : count ? ` (${count})` : "") : undefined;
+  const tip = rail ? item.label + (item.soon ? " (coming soon)" : count ? ` (${count})` : "") : undefined;
   return (
     <a
-      className={"ax-nav" + (active ? " is-active" : "")}
+      className={"ax-nav" + (active ? " is-active" : "") + (item.soon ? " is-soon" : "")}
       href={routeUrl(item.route)}
       aria-current={active ? "page" : undefined}
       title={tip}
@@ -196,17 +158,22 @@ function NavRow({ item, route, go, rail, needs }: { item: NavItem; route: Route;
         go(item.route);
       }}
     >
-      <Icon size={17} strokeWidth={active ? 2.1 : 1.8} aria-hidden="true" />
+      {/* The coming-soon list is muted text: its icons appear only where the rail has nothing else to show. */}
+      {(rail || !item.soon) && <Icon size={16} strokeWidth={1.75} aria-hidden="true" />}
       {!rail && <span className="ax-nav-label">{item.label}</span>}
-      {!rail && item.soon && <span className="ax-soon">Soon</span>}
       {!rail && count > 0 && (
-        <b className="ax-badge">
+        <span className="ax-nav-count">
           {count > 99 ? "99+" : count}
           <span className="sr-only"> question{count === 1 ? "" : "s"} need you</span>
-        </b>
+        </span>
       )}
-      {rail && count > 0 && <i className="ax-badge-dot" aria-hidden="true" />}
-      {rail && <span className="sr-only">{item.label}{count > 0 ? `, ${count} need you` : ""}</span>}
+      {rail && count > 0 && <i className="ax-nav-dot" aria-hidden="true" />}
+      {rail && (
+        <span className="sr-only">
+          {item.label}
+          {count > 0 ? `, ${count} need you` : ""}
+        </span>
+      )}
     </a>
   );
 }
