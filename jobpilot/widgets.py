@@ -1213,6 +1213,10 @@ async def safe_click(el, timeout=4000, *, field_control=False, _reresolved=0):
                 # field action immediately. Final actions keep native clicks.
                 if await dispatch_owned_click(handle, pointer_sequence=True):
                     return
+                # A popup left open over the field is closed for real, once, instead of waiting out the 4 s native
+                # click only to be refused as covered (Humana Degree, 2026-10-30).
+                if await clear_cover(handle) and await dispatch_owned_click(handle, pointer_sequence=True):
+                    return
             position = await pointer_path(handle)
             await handle.evaluate("""e => {
                 if(e.__jpClickObserver)e.removeEventListener('click',e.__jpClickObserver,true);
@@ -1448,6 +1452,83 @@ DISMISS_PICKERS_JS = (
 )
 
 
+BLANK_POINT_JS = """() => {
+  const blocked='button,a,input,textarea,select,label,[role=button],[role=option],[role=listbox],[role=menu],[aria-haspopup],[onclick]';
+  for(const y of [6,30,60,100,150,200,window.innerHeight-8]) {
+    for(const x of [6,30,window.innerWidth-8,window.innerWidth*.5]) {
+      const e=document.elementFromPoint(x,y);
+      if(e && !e.closest(blocked)) return {x,y};
+    }
+  }
+  return null;
+}"""
+
+
+async def click_blank_point(frame):
+    """A real mouse click on a blank, noninteractive point of the page (False when there is none). Workday's popups
+    close on trusted pointer events only, so a synthetic outside click leaves them open."""
+    point = await frame.evaluate(BLANK_POINT_JS)
+    if not point:
+        return False
+    offset = {"x": 0, "y": 0}
+    if frame.parent_frame:
+        handle = await frame.frame_element()
+        box = await handle.bounding_box()
+        await handle.dispose()
+        if not box:
+            return False
+        offset = box
+    await frame.page.mouse.click(point["x"] + offset["x"], point["y"] + offset["y"])
+    return True
+
+
+# A field control whose click point another element owns: a popup left open over it. A modal dialog is the page's own
+# gate (ensure_uncovered handles it), and an option inside a menu is covered by that menu's own chrome.
+COVERED_BY_OVERLAY_JS = """e => {
+  if(!e.isConnected || e.disabled || e.getAttribute('aria-disabled')==='true') return false;
+  if(e.closest('[role=listbox],[role=option],[role=menu],[role=menuitem],[role=tree],[role=grid]')) return false;
+  const r=e.getBoundingClientRect();
+  if(!r.width || !r.height) return false;
+  const x=r.x+r.width/2, y=r.y+r.height/2;
+  let hit=e.ownerDocument.elementFromPoint(x,y);
+  for(let depth=0; depth<20 && hit?.shadowRoot; depth++){
+    const inner=hit.shadowRoot.elementFromPoint(x,y);
+    if(!inner || inner===hit) break;
+    hit=inner;
+  }
+  if(!hit) return false;
+  for(let n=hit; n; n=n.assignedSlot||n.parentElement||n.getRootNode()?.host) if(n===e) return false;
+  return !hit.closest('[aria-modal="true"],[role=dialog],dialog,[inert]');
+}"""
+
+
+async def clear_cover(handle):
+    """Close the popup standing over this field control, with real pointer input; True once the control is clear.
+
+    Humana (Workday, 2026-10-30): an optional Field of Study search left its results popup open, still loading, over
+    the Degree button above it. Every later click on Degree was refused as "intercepts pointer events", so its options
+    were never read and three runs stopped on that one required field. Popups that are still loading hold no listbox,
+    so dismiss_pickers did not see them; the cover is found from the control's own click point instead."""
+    try:
+        if not await handle.evaluate(COVERED_BY_OVERLAY_JS):
+            return False
+        frame = await handle.owner_frame()
+        if frame is None:
+            return False
+        for dismiss in (click_blank_point, lambda f: f.page.keyboard.press("Escape")):
+            await dismiss(frame)
+            try:
+                await frame.wait_for_function(
+                    f"e => !({COVERED_BY_OVERLAY_JS})(e)", arg=handle, timeout=700, polling=50
+                )
+                return True
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return False
+
+
 async def dismiss_pickers(frame):
     """Ensure a picker can only read its own choices, including ARIA-poor portals."""
     if not await frame.evaluate(DISMISS_PICKERS_JS):
@@ -1465,28 +1546,7 @@ async def dismiss_pickers(frame):
     if remaining:
         # Workday uses trusted pointer events for some outside-click listeners.
         # Observe a blank, noninteractive point; never force a click through a menu.
-        point = await frame.evaluate("""() => {
-          const blocked='button,a,input,textarea,select,label,[role=button],[role=option],[role=listbox],[role=menu],[aria-haspopup],[onclick]';
-          for(const y of [6,30,60,100,150,200,window.innerHeight-8]) {
-            for(const x of [6,30,window.innerWidth-8,window.innerWidth*.5]) {
-              const e=document.elementFromPoint(x,y);
-              if(e && !e.closest(blocked)) return {x,y};
-            }
-          }
-          return null;
-        }""")
-        if point:
-            offset = {"x": 0, "y": 0}
-            if frame.parent_frame:
-                handle = await frame.frame_element()
-                box = await handle.bounding_box()
-                await handle.dispose()
-                if box:
-                    offset = box
-                else:
-                    point = None
-            if point:
-                await frame.page.mouse.click(point["x"] + offset["x"], point["y"] + offset["y"])
+        await click_blank_point(frame)
         await frame.page.keyboard.press("Escape")
         await frame.evaluate(OUTSIDE_PICKER_CLICK)
         try:
