@@ -160,8 +160,13 @@ function Confirmed() {
           ))}
         </select>
         <span className="ax-note ax-toolbar-note">
-          {ledger.data ? plural(all.length, "confirmed application") : "…"} across all history · {snapshot.stats.confirmed_today} today
-          {rt.state === "active" && ` · ${rt.confirmed ?? 0} of ${rt.target ?? 100} this batch`}.
+          {[
+            ledger.data && `${plural(all.length, "confirmed application")} across all history`,
+            `${snapshot.stats.confirmed_today} today`,
+            rt.state === "active" && `${rt.confirmed ?? 0} of ${rt.target ?? 100} this batch`,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
         </span>
       </div>
       {ledger.error && (
