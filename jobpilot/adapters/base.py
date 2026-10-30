@@ -1241,11 +1241,16 @@ class Adapter:
             )
         if not self.mail_rule_known:
             return await self.discover_verification()
+        resumed = self.link_resume and not self.committed and self.matched_link_waiting()
         self.attempts["verify_link"] += 1
         if self.attempts["verify_link"] > 2:
             return self.defer("The employer kept asking for email verification")
         token = await self.wait_email("link")
         if not token:
+            if resumed:
+                # The matched link could not be claimed (the wait changed hands, or its window ended): nothing is
+                # lost, the page is driven as it was before this step existed.
+                return {"fallback": True, "reason": "The matched sign-in link could not be claimed"}
             return self.defer(self.mail_problem("verification link"))
         if token["kind"] != "link":
             self.finish_mail("failed", "Expected a verification link, received a code")

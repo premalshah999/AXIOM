@@ -95,3 +95,20 @@ def test_a_sign_in_form_that_came_back_unchanged_is_not_retried_on_the_same_buil
     assert repeats_unchanged(rows)  # the same failing step on the same engine: wait for a new build
     assert not repeats_unchanged([(UNCHANGED, "build-1"), (UNCHANGED, "build-2")])  # a new build tries again
     assert not repeats_unchanged([("Waiting for the employer verification email", "build-1"), (UNCHANGED, "build-1")])
+
+
+async def test_a_matched_link_that_cannot_be_claimed_hands_the_page_back_instead_of_ending_the_run(service, monkeypatch):
+    value = adapter(service, seed(service))
+    value.inbox = SimpleNamespace(configured=True)
+    monkeypatch.setattr(Adapter, "mail_rule_known", True)
+
+    async def nothing(kind):
+        return None  # the wait changed hands, or its window ended
+
+    value.wait_email = nothing
+    assert await value.on_verify_link(OBS) == {"fallback": True, "reason": "The matched sign-in link could not be claimed"}
+    ordinary = adapter(service, None)
+    ordinary.inbox, ordinary.wait_email = value.inbox, nothing
+    ordinary.mail_problem = lambda what: "did not arrive"
+    ordinary.defer = lambda reason, *a, **k: {"state": "needs_review", "reason": reason}
+    assert (await ordinary.on_verify_link(OBS))["state"] == "needs_review"  # a page that says "check your email" still defers
