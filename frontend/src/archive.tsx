@@ -6,7 +6,7 @@ import { useWorkspace } from "./context";
 import { useAction, useDraft, usePoll } from "./hooks";
 import { Pagination, usePagination } from "./pagination";
 import type { Archived } from "./types";
-import { day, plural } from "./ui";
+import { day, plural } from "./format";
 import { Button, Empty, Table, type Column } from "./ui/index";
 import { ConfirmButton, JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
 

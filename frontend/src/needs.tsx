@@ -6,7 +6,7 @@ import { useWorkspace } from "./context";
 import { useDraft } from "./hooks";
 import { Pagination, usePagination } from "./pagination";
 import { groupQuestions, QuestionCard, type QuestionGroup } from "./questions";
-import { ago, linkHost, plural, urlRole } from "./ui";
+import { ago, linkHost, plural, urlRole } from "./format";
 import { Button, Empty, Panel } from "./ui/index";
 import "./styles/work.css";
 import type { Job } from "./types";

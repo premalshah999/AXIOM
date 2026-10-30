@@ -3,7 +3,7 @@ import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useDraft } from "./hooks";
 import type { Job, Review } from "./types";
-import { ago, linkHost } from "./ui";
+import { ago, linkHost } from "./format";
 import { Button } from "./ui/index";
 import "./styles/work.css";
 

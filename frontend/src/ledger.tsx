@@ -13,7 +13,7 @@ import { RowActions } from "./jobactions";
 import type { JobRow } from "./model";
 import { PipelineBulk } from "./pipelinebulk";
 import { TopActions } from "./shell/Shell";
-import { ago, linkHost, plural, stamp, urlRole } from "./ui";
+import { ago, linkHost, plural, stamp, urlRole } from "./format";
 import { Button, Empty, RouteTabs, Table, type Column } from "./ui/index";
 import { JobCell, LoadError, Notice, Note, SearchBox, StatusPill } from "./worktools";
 

@@ -3,7 +3,7 @@ import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useAction } from "./hooks";
 import { appliedState } from "./model";
-import { linkHost, plural } from "./ui";
+import { linkHost, plural } from "./format";
 import { Button } from "./ui/index";
 import { StatusPill } from "./worktools";
 

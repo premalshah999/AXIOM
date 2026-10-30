@@ -8,7 +8,7 @@ import { useWorkspace } from "./context";
 import { useAction } from "./hooks";
 import { appliedState } from "./model";
 import type { ApplyManyResult, ApplyOutcome } from "./types";
-import { plural, shortId } from "./ui";
+import { plural, shortId } from "./format";
 import { Button, Panel } from "./ui/index";
 import { StatusPill } from "./worktools";
 

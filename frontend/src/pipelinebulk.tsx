@@ -5,7 +5,7 @@ import { useAction } from "./hooks";
 import type { Selection } from "./bulk";
 import { reconcileRun } from "./jobactions";
 import { appliedState, type Group, type JobRow } from "./model";
-import { plural } from "./ui";
+import { plural } from "./format";
 import { Button } from "./ui/index";
 import { ConfirmButton } from "./worktools";
 

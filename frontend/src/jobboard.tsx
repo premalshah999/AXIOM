@@ -7,7 +7,7 @@ import { useAction, useDraft, useNow, usePoll } from "./hooks";
 import { Pagination, type Paging } from "./pagination";
 import { TopActions } from "./shell/Shell";
 import type { Board, Listing } from "./types";
-import { ago, plural, stamp } from "./ui";
+import { ago, plural, stamp } from "./format";
 import { Button, Empty, Table, type Column } from "./ui/index";
 import { Chips, JobCell, LoadError, Notice, Note, SearchBox, StatusPill } from "./worktools";
 

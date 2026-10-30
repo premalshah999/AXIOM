@@ -14,7 +14,7 @@ import {
 } from "./model";
 import { groupQuestions, QuestionCard } from "./questions";
 import type { Detail, Job, JobRequest, Reserved, Run } from "./types";
-import { linkHost, plural, seconds, shortId, stamp, words } from "./ui";
+import { linkHost, plural, seconds, shortId, stamp, words } from "./format";
 import { Button, Drawer, Panel, Select, Textarea } from "./ui/index";
 import { Facts, Notice, StatusPill } from "./worktools";
 

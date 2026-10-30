@@ -7,7 +7,7 @@ import { Pagination, usePagination } from "./pagination";
 import { OPEN_JOB_LINK } from "./jobintake";
 import { countQuestions } from "./questions";
 import type { ApplicationWorkers, MailStatus, RuntimeHealth, Snapshot } from "./types";
-import { ago, clock, day, elapsed, plural } from "./ui";
+import { ago, clock, day, elapsed, plural } from "./format";
 import { Button, Empty, Panel, Table, type Column } from "./ui/index";
 import { Facts, JobCell, Notice, Note, StatusPill } from "./worktools";
 import "./styles/work.css";

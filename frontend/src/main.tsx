@@ -20,7 +20,7 @@ import {
 import { ToastContext, usePoll, type Toast } from "./hooks";
 import { deriveRows, withMarks, type Marks } from "./model";
 import type { Snapshot } from "./types";
-import { ago, Loading } from "./ui";
+import { ago } from "./format";
 import { NeedsView } from "./needs";
 import { countQuestions } from "./questions";
 import { Shell } from "./shell/Shell";
@@ -28,7 +28,7 @@ import { BrandMark } from "./shell/Brand";
 import { CommandPalette } from "./shell/CommandPalette";
 import { ComingSoon } from "./shell/ComingSoon";
 import { ALL_ITEMS, titleFor } from "./shell/nav";
-import { Button, ToastStack } from "./ui/index";
+import { Button, Loading, ToastStack } from "./ui/index";
 import { BatchView } from "./batch";
 import { JobsView } from "./jobs";
 import { LedgerView } from "./ledger";

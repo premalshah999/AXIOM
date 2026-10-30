@@ -167,15 +167,6 @@ export function useFeature<T>(
   return { ...poll, unavailable: !enabled || unmounted(poll.error) };
 }
 
-function Tag({ tone, children }: { tone: string; children: React.ReactNode }) {
-  return (
-    <span className={"pill tone-" + tone}>
-      <i aria-hidden="true" />
-      {children}
-    </span>
-  );
-}
-
 const CATEGORY_LABEL: Record<string, string> = {
   personal: "Personal details",
   education: "Education",

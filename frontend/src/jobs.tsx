@@ -10,7 +10,7 @@ import { Pagination } from "./pagination";
 import { usePipelinePage } from "./pipeline";
 import { QueuePanel } from "./queue";
 import { ReservedJobs } from "./reserved";
-import { ago, linkHost, plural, urlRole } from "./ui";
+import { ago, linkHost, plural, urlRole } from "./format";
 import { Button, Empty, RouteTabs, Table, type Column } from "./ui/index";
 import { Chips, JobCell, LoadError, Notice, Note, SearchBox, StatusPill } from "./worktools";
 

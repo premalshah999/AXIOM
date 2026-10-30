@@ -9,8 +9,8 @@ import { useAction, useDraft, useNow, usePoll } from "./hooks";
 import { appliedState, rowFromServer, stateInfo, STATES, withMarks, type JobRow } from "./model";
 import { Pagination, type Paging } from "./pagination";
 import type { ReservedEmployer, ReservedPage, ReservedRules } from "./types";
-import { ago, linkHost, plural } from "./ui";
-import { Button, Drawer, Empty, Table, Textarea, type Column } from "./ui/index";
+import { ago, linkHost, plural } from "./format";
+import { Button, Check, Drawer, Empty, Table, Textarea, type Column } from "./ui/index";
 import { TopActions } from "./shell/Shell";
 import { Chips, ConfirmButton, JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
 
@@ -259,10 +259,7 @@ function EmployerEditor({ rules }: { rules: ReservedRules }) {
     );
   return (
     <div className="ax-stack">
-      <label className="ax-check">
-        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-        <span>Hold these employers until I approve each job</span>
-      </label>
+      <Check checked={enabled} onChange={setEnabled} label="Hold these employers until I approve each job" />
       {rules.sections.map((s, i) => (
         <Textarea
           key={s.id}
