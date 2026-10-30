@@ -116,6 +116,23 @@ def employer_name(job):
     return (parsed.hostname or "Employer").removeprefix("www.")
 
 
+def pending_run_ids(db, limit=6):
+    """Runs whose outcome is still to be sent. The database picks them: all 9,533 markers said false and were loaded as
+    objects on each pass (2026-10-30)."""
+    with db.session() as s:
+        return [
+            key.removeprefix("telegram_run_pending:")
+            for key in s.scalars(
+                select(Setting.key)
+                .where(
+                    Setting.key.startswith("telegram_run_pending:", autoescape=True),
+                    Setting.value["pending"].as_boolean().is_(True),
+                )
+                .limit(limit)
+            )
+        ]
+
+
 def current_rows(service):
     from .telegram_workers import run_slot
 
@@ -2040,25 +2057,8 @@ async def poll(service):
         pass
 
     async def deliver_pending():
-        from .db import Setting
-
-        def pending_ids():
-            # Thousands of delivery markers: read them off the application loop.
-            # The database picks them: all 9,533 markers said false and were loaded as objects each pass (2026-10-30).
-            with service.db.session() as s:
-                return [
-                    key.removeprefix("telegram_run_pending:")
-                    for key in s.scalars(
-                        select(Setting.key)
-                        .where(
-                            Setting.key.startswith("telegram_run_pending:", autoescape=True),
-                            Setting.value["pending"].as_boolean().is_(True),
-                        )
-                        .limit(6)
-                    )
-                ]
-
-        pending = await asyncio.to_thread(pending_ids)
+        # Thousands of delivery markers: read them off the application loop.
+        pending = await asyncio.to_thread(pending_run_ids, service.db)
         for run_id in pending:
             await notify_run(service, run_id)
         for notify in (notify_milestones, ask_next_question, ask_next_browser):

@@ -397,3 +397,85 @@ def test_a_form_question_does_not_ask_for_the_migration_again(service, monkeypat
     assert [q for q in seen if "kn_migrations" in q]
     migration.rollback(service.db)
     assert migration.sync(service.db, source_digest=digest(changed)).get("status") != "unchanged"
+
+
+def test_pending_telegram_markers_are_picked_by_the_database(service):
+    from jobpilot.db import Setting
+    from jobpilot.telegram import pending_run_ids
+
+    with service.db.exclusive() as s:
+        s.add(Setting(key="telegram_run_pending:done", value={"pending": False}))
+        s.add(Setting(key="telegram_run_pending:open", value={"pending": True}))
+        s.add(Setting(key="telegramXrunXpending:other", value={"pending": True}))  # `_` must not act as a wildcard
+    assert pending_run_ids(service.db) == ["open"]
+
+
+def test_a_worker_bots_status_reads_one_number_per_run_not_every_packet(service):
+    """current_rows read every run's whole packet: 3.6 GB of JSON at 9,782 runs (2026-10-30)."""
+    from types import SimpleNamespace
+
+    from jobpilot.telegram import current_rows
+
+    with service.db.exclusive() as s:
+        for n, slot in enumerate((2, 3)):
+            s.add(Job(id=f"j{n}", identity=f"j{n}", url=f"https://careers.example.test/jobs/{n}", title="Engineer", company=f"Example{n}", ats="custom"))
+            s.add(Run(id=f"r{n}", job_id=f"j{n}", state="running", mode="submit", packet={"worker_slot": slot, "ledger": ["x"]}))
+    seen, stop = statements(service)
+    try:
+        rows = current_rows(SimpleNamespace(db=service.db, telegram_worker_slot=2))
+    finally:
+        stop()
+    assert [row["id"] if isinstance(row, dict) else row.id for row in rows] == ["r0"]
+    assert not [q for q in seen if "runs.resume_id" in q], seen
+
+
+def test_url_cache_stays_above_the_stored_jobs_and_below_what_it_used_to_hold():
+    from jobpilot.ats import identity_variants, url_identity
+
+    assert 20_000 < url_identity.cache_info().maxsize <= 32_768
+    assert identity_variants.cache_info().maxsize >= 20_000  # a scan over every job must not evict itself
+
+
+def test_employer_keys_of_an_old_alias_table_are_dropped(monkeypatch):
+    from jobpilot import application_pacing as pacing
+
+    pacing._KEYS.clear()
+    first = pacing.employer_keys({"alias one": "first"})
+    first("ExampleSoft", "https://careers.example.test/1")
+    first("Other", "https://careers.example.test/2")
+    assert len([k for k in pacing._KEYS if k != "version"]) == 2
+    second = pacing.employer_keys({"alias two": "second"})
+    assert not [k for k in pacing._KEYS if k != "version"]  # the previous table's keys can never be asked for again
+    second("ExampleSoft", "https://careers.example.test/1")
+    # A caller still holding the old function cannot serve the new table a key computed under the old one.
+    first("Late", "https://careers.example.test/3")
+    assert len({k[0] for k in pacing._KEYS if k != "version"}) == 2
+
+
+def test_a_gate_memo_entry_keeps_no_text_of_the_posting_or_the_policy(service):
+    from jobpilot.features.discovery import readiness
+
+    readiness._GATES.clear()
+    job = {"id": "job", "title": "Software Engineer", "url": "https://careers.example.test/jobs/1", "location": "Remote",
+           "country": "US", "description": "Build software. " * 40}
+    first = readiness.gated(job, DiscoveryPolicy())
+    assert readiness.gated(job, DiscoveryPolicy()) == first and len(readiness._GATES) == 1
+    readiness.gated({**job, "location": "Elsewhere"}, DiscoveryPolicy())
+    assert len(readiness._GATES) == 2  # a changed field is a new decision
+    for key in readiness._GATES:
+        assert [part for part in key if isinstance(part, str)] == ["job"]
+
+
+def test_job_control_and_the_unknown_scan_load_no_packet_they_do_not_read(service):
+    from jobpilot.autopilot import unknown_candidates
+
+    with service.db.exclusive() as s:
+        s.add(Job(id="u", identity="u", url="https://careers.example.test/jobs/u", title="Engineer", company="ExampleSoft", ats="custom", status="submission_unknown"))
+        for n in range(3):
+            s.add(Run(id=f"u{n}", job_id="u", state="failed", mode="submit", packet={"ledger": ["x"]}, created_at=f"2026-10-30T00:0{n}:00+00:00"))
+    seen, stop = statements(service)
+    try:
+        unknown_candidates(service.db)
+    finally:
+        stop()
+    assert not [q for q in seen if "runs.packet" in q], seen
