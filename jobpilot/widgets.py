@@ -143,7 +143,7 @@ DEGREE_LEVELS = [
 DEGREE_TYPES = [
     (0, {"ba", "b a", "bachelor of arts"}),
     (0, {"bs", "b s", "bsc", "b sc", "bachelor of science"}),
-    (0, {"be", "b e", "bachelor of engineering"}),
+    (0, {"be", "b e", "beng", "b eng", "bachelor of engineering"}),
     (0, {"btech", "b tech", "bachelor of technology"}),
     (1, {"ma", "m a", "master of arts"}),
     (1, {"ms", "m s", "msc", "m sc", "master of science"}),
