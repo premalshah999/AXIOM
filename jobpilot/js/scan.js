@@ -1069,6 +1069,21 @@
       seen.add(key);
       const root = el.getRootNode();
       group = el.name ? [...root.querySelectorAll('input[type=radio]')].filter(x => x.name === el.name && (x.form || x.getRootNode()) === radioOwner) : [el];
+      // Nameless radios in no fieldset or radiogroup (Gem's Yes/No questions, Nuvo 2026-10-31: no name, the question a
+      // bare span above) read as lone "Yes" and "No" fields, so the answer never stuck and four runs stalled on the
+      // unchanged page. The smallest container holding two or more of them, all nameless, is one question's choices.
+      let nameless = false;
+      if (!el.name && !el.closest('fieldset,[role=radiogroup]')) {
+        for (let box = el.parentElement, depth = 0; box && depth < 4; box = box.parentElement, depth++) {
+          const radios = [...box.querySelectorAll('input[type=radio]')].filter(visible);
+          if (radios.length < 2) continue;
+          if (radios.length <= 12 && radios.every(x => !x.name && (x.form || x.getRootNode()) === radioOwner)) {
+            group = radios; nameless = true;
+            for (const x of radios) seen.add((x.name || id(x)) + '|' + (x.form ? id(x.form) : 'document'));
+          }
+          break;
+        }
+      }
       // Lever wraps radios in .application-question with an .application-label (no fieldset).
       const parent = el.closest('fieldset,[role=radiogroup],.application-question');
       question = parent ? (parent.querySelector('legend,.application-label,.ashby-application-form-question-title')?.innerText || label(parent)) : '';
@@ -1091,6 +1106,18 @@
       }
       if (!question || question === 'Unlabelled field' || question === parent?.id) {
         question = wrapperLabel(el) || (parent && nearby(parent)) || nearby(el.parentElement || el) || el.name || label(el);
+      }
+      if (nameless) {
+        question = precedingText(group[0], new Set(group.map(x => clean(label(x))))) || question;
+        // The caption's own box holds the required asterisk beside the question's words.
+        let box = group[0].parentElement;
+        while (box && !box.contains(group[1])) box = box.parentElement;
+        for (let up = box, hops = 0; up && hops < 4 && !radioCaptionRequired; up = up.parentElement, hops++) {
+          const caption = up.previousElementSibling;
+          if (!caption) continue;
+          radioCaptionRequired = clean(caption.innerText || '').startsWith(clean(question)) && /[*✱]/.test(caption.innerText || '');
+          break;
+        }
       }
       // MAXIMUS's tax-credit survey (PepsiCo, 2026-10-24) prints "Are you a resident of the State of California?" as
       // plain text above an unlabelled Yes/No pair: the question read as "ctl00$MainContent$multipleChoice...".
