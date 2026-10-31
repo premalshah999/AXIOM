@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 from sqlalchemy import select
 
 from .ats import detect
-from .db import Job, Run, Setting
+from .db import Event, Job, Run, Setting
 
 
 class QueueBlocked(ValueError):
@@ -230,3 +230,54 @@ def unknown_resubmit_allowed(session, runs, at=None):
     if finished.tzinfo is None:
         finished = finished.replace(tzinfo=UTC)
     return now - finished >= timedelta(minutes=int(policy.get("receipt_wait_minutes", 30)))
+
+
+# A cancelled run that sent nothing to the employer is not an attempt. Only the app's own cancellations qualify; a
+# verdict on the job (the owner removing it, the SSN / government-ID rule, a closed posting, any reason not listed here)
+# keeps it out of the autopilot for good. 43 Ready jobs sat idle for a week, every worker free (2026-10-31): 23 Workable
+# runs cancelled while still queued to unblock a deploy (no reason, never started) and 20 drafts swept by the
+# 2026-10-10 maintenance, which the owner then resumed.
+APP_CANCELS = (
+    "Owner cancelled saved application during maintenance",  # the 2026-10-10 sweep of saved drafts
+    "Replaced by a newer attempt",  # operations.superseded: the newer run is the attempt
+)
+HOLD_WAIT = "; it waits for your approval"  # service.execution: queued before its employer was reserved
+
+
+def attempted_job_ids(session, only=None):
+    """Ids of the jobs (limited to `only` when given) that already have an attempt: any run except a cancellation by the
+    app before anything was sent. A cancelled run still counts when it has a `submitting` event or a receipt (a commit
+    may have reached the employer: a second application is worse than a missed one), when the owner removed the job, and
+    when its reason is not one the app writes for its own cancellations."""
+    scope = () if only is None else (Run.job_id.in_(list(only)),)
+    attempted = set(session.scalars(select(Run.job_id).where(Run.state != "cancelled", *scope).distinct()))
+    undecided = {}
+    for run_id, job_id, reason, started, receipt in session.execute(
+        select(Run.id, Run.job_id, Run.reason, Run.started_at, Run.receipt).where(Run.state == "cancelled", *scope)
+    ):
+        if job_id in attempted:
+            continue
+        reason = (reason or "").strip()
+        own = reason.startswith(APP_CANCELS) or (not started and (not reason or reason.endswith(HOLD_WAIT)))
+        if receipt or not own:
+            attempted.add(job_id)
+        else:
+            undecided[run_id] = job_id
+    # Only what is still undecided is looked up, by key and in chunks: a scan of every event or job control per tick is
+    # what the readiness reads were profiled for (py-spy, 2026-10-29).
+    pending = {run_id: job_id for run_id, job_id in undecided.items() if job_id not in attempted}
+    ids = list(pending)
+    for start in range(0, len(ids), 400):
+        run_ids = ids[start : start + 400]
+        sent = set(session.scalars(select(Event.run_id).where(Event.kind == "submitting", Event.run_id.in_(run_ids))))
+        removed = {
+            key.removeprefix("job_control:")
+            for key, state in session.execute(
+                select(Setting.key, Setting.value["state"].as_string()).where(
+                    Setting.key.in_(["job_control:" + pending[run_id] for run_id in run_ids])
+                )
+            )
+            if state == "deleted"
+        }
+        attempted.update(pending[run_id] for run_id in run_ids if run_id in sent or pending[run_id] in removed)
+    return attempted

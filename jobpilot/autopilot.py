@@ -15,7 +15,7 @@ from .db import Budget, Job, Run, Source, Setting, latest_runs, now
 from .discovery import rank_batch
 from .jobboard import FITS, FOREIGN, LOCKED, board_snapshot, fit_of, settings
 from .service import ACTIVE
-from .admission import active_runs, capacity, employer_partition, outcome_for
+from .admission import active_runs, attempted_job_ids, capacity, employer_partition, outcome_for
 
 
 PRODUCTION_TARGET = "production:100_new_confirmed_20261012"
@@ -802,9 +802,10 @@ def unlisted_ready(db, cfg, listed):
                 Job.status == "ready",
                 Job.demo.is_(False),
                 Job.created_at >= cutoff,
-                Job.id.not_in(select(Run.job_id)),
             )
         ).all()
+        # Not those with an attempt: a cancellation by the app before anything was sent is none (admission).
+        attempted = attempted_job_ids(s, [row.id for row in rows])
     return [
         {
             "id": row.id,
@@ -821,7 +822,7 @@ def unlisted_ready(db, cfg, listed):
             "career_level": row.career_level or "Imported",
         }
         for row in rows
-        if row.id not in listed and row.active is not False
+        if row.id not in listed and row.id not in attempted and row.active is not False
     ]
 
 
@@ -1000,7 +1001,9 @@ async def tick(service):
         from .reserved import held_ids
 
         with db.session() as s:
-            attempted = set(s.scalars(select(Run.job_id)))
+            # A cancellation by the app before anything was sent is no attempt (admission.attempted_job_ids): 43 Ready
+            # jobs whose queued run was cancelled sat idle for a week while every worker was free (2026-10-31).
+            attempted = attempted_job_ids(s)
         # FAANG, MANGO and the Big Four wait for the owner's approval (2026-10-27): never a candidate, so they never take
         # a slot. Queue admission refuses them too, whoever asks.
         reserved = await asyncio.to_thread(held_ids, db)
@@ -1027,7 +1030,7 @@ async def tick(service):
             a rejection raises ValueError."""
             jid = job["id"]
             with db.session() as s:
-                if s.scalar(select(Run.id).where(Run.job_id == jid)):
+                if attempted_job_ids(s, [jid]):
                     return "previous", None, None
                 current = s.get(Job, jid)
                 # Owner focus: platforms set aside for now are not dispatched.
