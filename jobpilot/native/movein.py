@@ -42,6 +42,7 @@ LOCATION_KEYS = {
     "CHROME_BIN", "CHROMIUM_PATH", "AXIOM_SERVICES", "COMPOSE_PROJECT_NAME", "DATABASE_URL", "DBOS_DATABASE_URL",
 }  # fmt: skip
 PROFILE_KEYS = {"CHROME_WORKER_PROFILE", "CHROME_TWIN_PROFILE"}
+MOVED_NOTE = "# Moved in; the app decides this itself"
 ALWAYS_HASH = {"access-token", "mail-key", "connections.enc"}
 
 
@@ -158,8 +159,16 @@ def moved_env(source_cfg, source_env):
     for raw in source_env.read_text().splitlines():
         key = raw.split("=", 1)[0].removeprefix("export ").strip() if "=" in raw and not raw.lstrip().startswith("#") else ""
         inside = key in PROFILE_KEYS and (values.get(key, "") + os.sep).startswith(data)
-        lines.append(f"# Moved in; the app decides this itself: {key}" if key in LOCATION_KEYS or inside else raw)
+        lines.append(f"{MOVED_NOTE}: {key}" if key in LOCATION_KEYS or inside else raw)
     return "\n".join(lines) + "\n"
+
+
+def _env_keys(source_cfg, source_env):
+    """Names only, for the plan: which settings come along and which do not. Values are never printed."""
+    lines = moved_env(source_cfg, source_env).splitlines()
+    dropped = [line.rsplit(": ", 1)[1] for line in lines if line.startswith(MOVED_NOTE)]
+    carried = [line.split("=", 1)[0].removeprefix("export ").strip() for line in lines if "=" in line and not line.lstrip().startswith("#")]
+    return carried, dropped
 
 
 def source_refusal(cfg):
@@ -197,6 +206,11 @@ def plan(layout, cfg, say=print):
     say(f"To          {layout.data}")
     say(f"How         {'APFS clones on one volume: almost no extra space' if same_volume else 'a full copy to another volume'}")
     say(f"Free        {human(free)} (needs {human(needs)})")
+    env_file = cfg.root / ".env"
+    carried, dropped = _env_keys(cfg, env_file) if env_file.exists() else ([], [])
+    say(f"Settings    {len(carried)} carried over. The app decides these itself, so they are commented out: {', '.join(dropped) or 'none'}")
+    say(f"Runs        {sum(1 for path in theirs if path.startswith('runs' + os.sep) and path.count(os.sep) == 1):,}")
+    say("Afterwards  A hold is on, so nothing applies until you release it. The source is never changed. Do not start both.")
     refusal = source_refusal(cfg)
     if refusal:
         say(f"Blocked     {refusal}")
@@ -324,5 +338,8 @@ def main(layout, argv):
     parser.add_argument("--sample", type=int, default=200, help="Files to hash beyond the database and keys")
     args = parser.parse_args(argv)
     if args.plan:
-        return plan(layout, load(Path(args.source).expanduser().resolve(), environ={}))
+        source = Path(args.source).expanduser().resolve()
+        if not (source / ".env").exists():
+            raise NativeError(f"{source} has no .env: that is not a checkout install.")
+        return plan(layout, load(source, environ={}))
     return move(layout, args.source, replace=args.replace, sample=args.sample)

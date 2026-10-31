@@ -573,7 +573,14 @@ def test_the_plan_changes_nothing(moving, capsys):
     before = movein.listing(source.data_dir)
     assert movein.main(layout, ["--from", str(source.root), "--plan"]) == 0
     assert not layout.support.exists() and movein.listing(source.data_dir) == before
-    assert "APFS clones" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "APFS clones" in out and "synthetic-password" not in out, "names only: a plan's output is pasted around"
+    assert "APP_PORT" in out and "CHROME_WORKER_PROFILE" in out and "Runs        70" in out
+
+
+def test_a_plan_for_something_that_is_not_a_checkout_says_so(layout, tmp_path):
+    with pytest.raises(NativeError, match="not a checkout"):
+        movein.main(layout, ["--from", str(tmp_path), "--plan"])
 
 
 def test_a_copy_that_differs_is_caught_at_every_level(tmp_path):
