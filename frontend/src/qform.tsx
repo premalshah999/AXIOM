@@ -95,22 +95,6 @@ export function useQuestionnaires() {
   return { data, error, reload: load, setModule };
 }
 
-/** The facts a module's saved answers amount to, so a caller holding a profile copy can stay current. */
-export function moduleFacts(module: Module): Record<string, unknown> {
-  const facts: Record<string, unknown> = {};
-  for (const q of module.questions) {
-    if (q.type === "work_rows") {
-      const saved: Record<string, unknown> = {};
-      for (const r of q.rows || []) if (r.answer && Object.keys(r.answer).length) saved[r.row_id] = r.answer;
-      facts[q.key] = Object.keys(saved).length ? saved : undefined;
-    } else if (q.type === "references") facts[q.key] = (q.answer as unknown[])?.length ? q.answer : undefined;
-    else facts[q.key] = q.answer === null || q.answer === "" ? undefined : q.answer;
-  }
-  if (module.id === "wotc")
-    facts.tax_credit_screening_no = module.questions.every((q) => q.answer === false) ? true : undefined;
-  return facts;
-}
-
 // ---------- controls ----------
 export function YesNo({
   value,
