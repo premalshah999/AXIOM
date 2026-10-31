@@ -157,18 +157,23 @@ def current_role_end_date(resolver, field):
 def net_failure(exc, diagnostics=None):
     """The outcome of a page the employer's site would not serve, or None. West Monroe's career site served an
     expired certificate and Amazon's dropped the connection (2026-10-25): each run read "Browser control failed at
-    browser.py:1408" and sat in repair as if the engine were broken."""
+    browser.py:1408" and sat in repair as if the engine were broken.
+
+    Never "closed": an infrastructure error (certificate, DNS, connection, timeout) says nothing about the posting.
+    West Monroe's six jobs were closed on a certificate error while three siblings of the same site had confirmed the day
+    before. A posting that is truly gone answers with its own page (a 404, a "no longer available" notice)."""
     match = NET_ERROR.search(str(exc))
     if not match or match[1] in {"ABORTED", "BLOCKED_BY_CLIENT", "BLOCKED_BY_RESPONSE"}:
         return None  # An aborted navigation is the page's own redirect; blocked ones are this browser's guard.
     code = "net::ERR_" + match[1]
     extra = {"diagnostics": diagnostics} if diagnostics else {}
-    if match[1].startswith(("CERT_", "SSL_")) or "CERTIFICATE" in match[1]:
-        # Nothing an applicant enters may go to a site whose identity the browser cannot verify.
-        return {"state": "closed", "reason": f"The employer's site failed the browser's security check ({code}); "
-                "no application data was sent to it", **extra}
-    return {"state": "waiting_browser", "reason": f"The employer's site did not load ({code}); it will be tried "
-            "again later", "blocker_type": "site_transient", "recovery_cause": "site_temporary", **extra}
+    # The browser stops at a certificate it cannot verify, so nothing an applicant enters can reach that site; trying
+    # again later reaches the same refusal until the site is fixed. The recovery attempts are bounded.
+    insecure = match[1].startswith(("CERT_", "SSL_")) or "CERTIFICATE" in match[1]
+    return {"state": "waiting_browser", "blocker_type": "site_transient", "recovery_cause": "site_temporary",
+            "reason": (f"The employer's site failed the browser's security check ({code}); no application data was "
+                       "sent to it, and it will be tried again later" if insecure else
+                       f"The employer's site did not load ({code}); it will be tried again later"), **extra}
 
 
 # Keys an API error body names its complaint with.
