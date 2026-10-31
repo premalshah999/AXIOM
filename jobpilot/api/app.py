@@ -12,6 +12,7 @@ from .sessions import Sessions, Throttle
 from .routes import (
     accounts,
     archive,
+    database,
     demo,
     frontend,
     health,
@@ -69,6 +70,7 @@ def create_app(config: Settings | None = None):
     app.include_router(archive.router(service))
     app.include_router(profile.router(service))
     app.include_router(owner_settings.router(service))
+    app.include_router(database.router(service))
     app.include_router(jobs.router(service))
     app.include_router(reserved.router(service))
     app.include_router(queue.router(service))
