@@ -1,10 +1,13 @@
+import { Empty } from "../ui/Empty";
 import type { NavItem } from "./nav";
 
-/** The page behind a coming-soon item: its name is the page title, and this is its one sentence. */
+/** The page behind a coming-soon item: its name is the page title, and this says what it will be. */
 export function ComingSoon({ item }: { item: NavItem }) {
   return (
     <div className="ax-page">
-      <p className="ax-soon-about">{item.about}</p>
+      <div className="ax-panel">
+        <Empty icon={item.icon} title="Coming soon" hint={item.about} />
+      </div>
     </div>
   );
 }

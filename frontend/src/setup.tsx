@@ -32,6 +32,7 @@ import {
   Button,
   Check,
   ConfirmButton,
+  Dropzone,
   Empty,
   ErrorLine,
   External,
@@ -61,12 +62,18 @@ export function ProfileView() {
         {tab === "identity" && <ProfileSettings sections={["identity"]} />}
         {tab === "experience" && <ProfileSettings sections={["experience"]} />}
         {tab === "knowledge" && <KnowledgeView />}
-        {tab === "resumes" && (
-          <>
-            <Resumes />
-            <TailoredResumes />
-          </>
-        )}
+      </ProfileProvider>
+    </div>
+  );
+}
+
+// Resumes: its own page since 2026-10-31 (it was a tab of Profile). The old address, ?view=profile&tab=resumes, opens it.
+export function ResumesView() {
+  return (
+    <div className="ax-page">
+      <ProfileProvider>
+        <Resumes />
+        <TailoredResumes />
       </ProfileProvider>
     </div>
   );
@@ -99,7 +106,6 @@ function Resumes() {
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState("");
   const [roles, setRoles] = useState("");
-  const [inputKey, setInputKey] = useState(0);
   const resumes = snapshot.resumes || [];
   const full = resumes.length >= 10;
   return (
@@ -160,7 +166,6 @@ function Resumes() {
                 setFile(null);
                 setName("");
                 setRoles("");
-                setInputKey((k) => k + 1);
                 await refresh();
               },
               "Resume uploaded.",
@@ -168,15 +173,13 @@ function Resumes() {
           }}
         >
           <FormGrid>
-            <Input
-              key={inputKey}
-              label="PDF file"
+            <Dropzone
+              label="Resume PDF"
+              title="Drop a resume, or click to choose"
               hint="Text-based PDF, up to 5 MB and 20 pages."
-              type="file"
-              accept="application/pdf"
-              required
-              onChange={(e) => {
-                const f = e.target.files?.[0] || null;
+              accept="application/pdf,.pdf"
+              file={file}
+              onFile={(f) => {
                 setFile(f);
                 if (f && !name) setName(f.name.replace(/\.pdf$/i, ""));
               }}

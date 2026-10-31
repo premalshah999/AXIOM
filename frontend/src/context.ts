@@ -2,12 +2,13 @@ import { createContext, useContext } from "react";
 import type { JobRow, Marks } from "./model";
 import type { Counts, Snapshot } from "./types";
 
-// The six pages (batch is Overview, ledger is Applications), the resume editor and the coming-soon pages.
+// The seven pages (batch is Overview, ledger is Applications), the resume editor and the coming-soon pages.
 export type View =
   | "batch"
   | "jobs"
   | "needs"
   | "ledger"
+  | "resumes"
   | "profile"
   | "settings"
   | "editor"
@@ -21,6 +22,8 @@ export type Route = {
   job?: string;
   run?: string;
   artifact?: string;
+  /** A list's search, so a number elsewhere can open the list behind it ("Workday" on Overview opens Jobs searched for it). */
+  q?: string;
 };
 /** A route as code or an old link may still spell it: "setup" is the old combined page, resolved by canonical(). */
 export type AnyRoute = Omit<Route, "view"> & { view: View | "setup" };
@@ -30,6 +33,7 @@ const VIEWS: View[] = [
   "jobs",
   "needs",
   "ledger",
+  "resumes",
   "profile",
   "settings",
   "editor",
@@ -52,7 +56,7 @@ const SETUP_TABS: Record<string, Route> = {
   profile: { view: "profile", tab: "identity" },
   answers: { view: "profile", tab: "knowledge" },
   knowledge: { view: "profile", tab: "knowledge" },
-  resumes: { view: "profile", tab: "resumes" },
+  resumes: { view: "resumes", tab: undefined },
 };
 
 // ?view=setup&tab=profile&filter=… : the old Profile page's sections, now spread over Profile's tabs.
@@ -107,6 +111,8 @@ export function canonical(route: AnyRoute): Route {
     // Setup opened on Connections when no section was named.
     return { ...route, ...(SETUP_TABS[tab || ""] ?? SETUP_TABS.connections!) };
   }
+  // Resumes was a tab of Profile until 2026-10-31.
+  if (view === "profile" && tab === "resumes") return { ...route, view: "resumes", tab: undefined };
   // Settings › Storage was removed; its address opens Connections.
   if (view === "settings" && tab === "storage") return { ...route, tab: "connections" } as Route;
   // The archive moved from Jobs to Applications; the Pipeline's old "Not started" list is Discovered.
@@ -134,6 +140,7 @@ export function parseRoute(href = location.href): Route {
     job: q.get("job") || undefined,
     run: q.get("run") || undefined,
     artifact: q.get("artifact") || undefined,
+    q: q.get("q") || undefined,
   });
 }
 
@@ -142,10 +149,10 @@ export function routeUrl(raw: AnyRoute) {
   const url = new URL(location.href);
   // A path-style entry (/settings) would otherwise outrank the batch view, which has no ?view=.
   if (isPageName(pathName(url))) url.pathname = "/";
-  for (const key of ["view", "tab", "filter", "job", "run", "artifact", "page"])
+  for (const key of ["view", "tab", "filter", "job", "run", "artifact", "q", "page"])
     url.searchParams.delete(key);
   if (route.view !== "batch") url.searchParams.set("view", route.view);
-  for (const key of ["tab", "filter", "job", "run", "artifact"] as const)
+  for (const key of ["tab", "filter", "job", "run", "artifact", "q"] as const)
     if (route[key]) url.searchParams.set(key, route[key]!);
   return url.pathname + url.search + url.hash;
 }

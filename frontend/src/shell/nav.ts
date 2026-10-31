@@ -1,14 +1,15 @@
-// Where everything lives (DESIGN.md, Navigation). Six pages, then the coming-soon group. Each item maps onto the route
-// table in context.ts, which is where old URLs are resolved.
+// Where everything lives (DESIGN.md, Navigation). Seven pages, then the coming-soon group. Each item maps onto the route table in
+// context.ts, which is where old URLs are resolved.
 import {
   Briefcase,
-  House,
+  CheckCheck,
+  FileText,
+  Gauge,
   Inbox,
   Mail,
   Mic,
   Network,
-  Send,
-  Settings,
+  Settings2,
   UserRound,
   type LucideIcon,
 } from "lucide-react";
@@ -22,26 +23,26 @@ export type NavItem = {
   route: Route;
   /** Which count to show, named so the nav does not know what it counts. */
   badge?: "needs";
-  /** What its station reads under the name, when nothing live does. */
-  barLabel?: string;
-  /** A coming-soon station: it opens a page of one sentence. */
+  /** Under the label, for a name that doesn't say what it is. */
+  note?: string;
+  /** A coming-soon item: it opens a page of one sentence. */
   soon?: boolean;
   /** The one sentence for the coming-soon page. */
   about?: string;
 };
 
-// In the order of the tuning scale. Tuner.tsx places the "coming soon" band over the last three.
 export const ALL_ITEMS: NavItem[] = [
-  { id: "overview", label: "Overview", icon: House, route: { view: "batch" } },
+  { id: "overview", label: "Overview", icon: Gauge, route: { view: "batch" } },
   { id: "jobs", label: "Jobs", icon: Briefcase, route: { view: "jobs" } },
   { id: "needs", label: "Needs you", icon: Inbox, route: { view: "needs" }, badge: "needs" },
-  { id: "applications", label: "Applications", icon: Send, route: { view: "ledger" } },
+  { id: "applications", label: "Applications", icon: CheckCheck, route: { view: "ledger" } },
+  { id: "resumes", label: "Resumes", icon: FileText, route: { view: "resumes" } },
   { id: "profile", label: "Profile", icon: UserRound, route: { view: "profile" } },
-  { id: "settings", label: "Settings", icon: Settings, route: { view: "settings" } },
+  { id: "settings", label: "Settings", icon: Settings2, route: { view: "settings" } },
   {
     id: "axe",
     label: "Axe",
-    barLabel: "ai interviewer",
+    note: "AI interviewer",
     icon: Mic,
     route: { view: "soon-axe" },
     soon: true,
@@ -65,10 +66,10 @@ export const ALL_ITEMS: NavItem[] = [
   },
 ];
 
-// Each page's tabs. The palette offers them as places to jump to; Profile and Settings render from these.
+// Each page's tabs. The palette offers them as places to jump to; the pages render from these.
 export const PAGE_TABS: Partial<Record<View, TabItem[]>> = {
   jobs: [
-    { id: "pipeline", label: "Pipeline" },
+    { id: "pipeline", label: "Started" },
     { id: "discovered", label: "Discovered" },
     { id: "reserved", label: "Reserved" },
   ],
@@ -81,7 +82,6 @@ export const PAGE_TABS: Partial<Record<View, TabItem[]>> = {
     { id: "identity", label: "Identity" },
     { id: "experience", label: "Experience" },
     { id: "knowledge", label: "Knowledge" },
-    { id: "resumes", label: "Resumes" },
   ],
   settings: [
     { id: "connections", label: "Connections" },
@@ -92,12 +92,12 @@ export const PAGE_TABS: Partial<Record<View, TabItem[]>> = {
   ],
 };
 
-/** Whether `item` is where `route` is. Routes are canonical, so one page is lit per view; the editor belongs to Profile. */
+/** Whether `item` is where `route` is. Routes are canonical, so one page is lit per view; the editor belongs to Resumes. */
 export function isActive(item: NavItem, route: Route): boolean {
-  return item.route.view === (route.view === "editor" ? "profile" : route.view);
+  return item.route.view === (route.view === "editor" ? "resumes" : route.view);
 }
 
-/** The page's own name, for the top bar and the document title. */
+/** The page's own name, for the page header and the document title. */
 export function titleFor(route: Route): string {
   if (route.view === "editor") return "Resume editor";
   return ALL_ITEMS.find((i) => isActive(i, route))?.label ?? "AXIOM";

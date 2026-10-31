@@ -11,9 +11,11 @@ import {
   Button,
   ConfirmButton,
   Drawer,
+  Dropzone,
   Empty,
   ErrorLine,
   External,
+  Field,
   Input,
   Panel,
   Pill,
@@ -465,7 +467,6 @@ function SessionImport() {
   const { pending, run } = useAction();
   const [url, setUrl] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  const [key, setKey] = useState(0);
   return (
     <details className="ax-panel ax-fold">
       <summary>
@@ -485,7 +486,6 @@ function SessionImport() {
               async () => {
                 const r = await api<{ host: string }>("/sessions", "POST", f);
                 setFile(null);
-                setKey((k) => k + 1);
                 return r;
               },
               (r) => r && `Session saved for ${r.host}.`,
@@ -494,8 +494,7 @@ function SessionImport() {
         >
           <FormGrid>
             <Input label="Employer URL" type="url" required value={url} onChange={(e) => setUrl(e.target.value)} />
-            <Input
-              key={key}
+            <Field
               label="Storage-state JSON"
               hint={
                 <>
@@ -503,11 +502,9 @@ function SessionImport() {
                   storage-state file. Only cookies for that exact host are kept.
                 </>
               }
-              type="file"
-              accept="application/json"
-              required
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
-            />
+            >
+              <Dropzone label="Storage-state JSON" title="Drop the file, or click to choose" accept="application/json,.json" file={file} onFile={setFile} />
+            </Field>
           </FormGrid>
           <Actions>
             <Button type="submit" loading={pending === "session"} disabled={!file}>

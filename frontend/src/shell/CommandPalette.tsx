@@ -4,6 +4,7 @@ import { api } from "../api";
 import { useWorkspace } from "../context";
 import { OPEN_JOB_LINK } from "../jobintake";
 import { STATES, stateInfo } from "../model";
+import { Monogram } from "../ui/Monogram";
 import type { Listing, PipelinePage } from "../types";
 import { ALL_ITEMS, PAGE_TABS } from "./nav";
 import { useTheme } from "./prefs";
@@ -135,6 +136,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       group: "Jobs",
       label: h.company + (h.title ? " · " + h.title : ""),
       note: stateInfo(h.status in STATES ? h.status : "job:" + h.status).label,
+      icon: <Monogram name={h.company} />,
       run: done(() => openJob(h.id)),
     }));
     // With no query, offer the pages and adding a link; with a query, every match: pages and tabs, then jobs, then actions.
@@ -222,6 +224,15 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           {term.length >= 2 && !searching && !failed && flat.length === 0 && <li className="ax-palette-empty" role="presentation">No match for “{term}”.</li>}
           {term.length === 1 && flat.length === 0 && <li className="ax-palette-empty" role="presentation">Keep typing to search jobs.</li>}
         </ul>
+        <div className="ax-palette-foot" aria-hidden="true">
+          <span>
+            <kbd>↑</kbd>
+            <kbd>↓</kbd> to move
+          </span>
+          <span>
+            <kbd>↵</kbd> to open
+          </span>
+        </div>
       </div>
     </div>
   );

@@ -24,7 +24,7 @@ import { ago } from "./format";
 import { NeedsView } from "./needs";
 import { countQuestions } from "./questions";
 import { Shell } from "./shell/Shell";
-import { isLive, panelState, STATE_WORD } from "./identity/state";
+import { isLive, panelState, statusLine } from "./identity/state";
 import { Wordmark } from "./shell/Brand";
 import { CommandPalette } from "./shell/CommandPalette";
 import { ComingSoon } from "./shell/ComingSoon";
@@ -34,13 +34,14 @@ import { BatchView } from "./batch";
 import { JobsView } from "./jobs";
 import { LedgerView } from "./ledger";
 import { JobPanel } from "./jobdetail";
-import { JobLinkIntake } from "./jobintake";
+import { AddJobDialog } from "./jobintake";
 import type { AccountStatus } from "./account";
 import { guideLater } from "./guide";
 
-// Profile, Settings, the resume editor, sign-in and the setup guide are most of the dashboard's code and are rarely open:
+// Profile, Resumes, Settings, the resume editor, sign-in and the setup guide are most of the dashboard's code and are rarely open:
 // they load when shown, so Batch and Jobs paint from a smaller bundle (2026-10-23).
 const ProfileView = lazy(() => import("./setup").then((m) => ({ default: m.ProfileView })));
+const ResumesView = lazy(() => import("./setup").then((m) => ({ default: m.ResumesView })));
 const SettingsView = lazy(() => import("./setup").then((m) => ({ default: m.SettingsView })));
 const ResumeEditor = lazy(() => import("./editor").then((m) => ({ default: m.ResumeEditor })));
 const AuthScreen = lazy(() => import("./account").then((m) => ({ default: m.AuthScreen })));
@@ -195,7 +196,7 @@ function App() {
         : `${label} · AXIOM`;
   }, [snap.data, route]);
 
-  // Vermilion means live, and only real state turns it on: the needle, the lamp in the wordmark, every running lamp.
+  // Vermilion means live, and only real state turns it on: the lamp in the wordmark, every running lamp.
   const panel = snap.data ? panelState(snap.data, lost) : null;
   const lit = !!snap.data && !!panel && isLive(snap.data, panel);
   useEffect(() => {
@@ -256,7 +257,7 @@ function App() {
     return (
       <div className="ax-screen">
         <div className="ax-boot">
-          <Wordmark width={120} />
+          <Wordmark width={108} />
           {snap.error &&
           !(snap.error instanceof ApiError && snap.error.status === 401) ? (
             <div className="ax-boot-error" role="alert">
@@ -283,12 +284,7 @@ function App() {
           go={go}
           needs={questions}
           who={who}
-          readouts={{
-            overview: panel ? STATE_WORD[panel] : undefined,
-            jobs: workspace.counts.pipeline?.toLocaleString(),
-            applications: (workspace.counts.states.confirmed ?? 0).toLocaleString(),
-            profile: who.name,
-          }}
+          status={statusLine(snapshot, panel!)}
           onSearch={() => setPalette(true)}
           onSignOut={async () => {
             try {
@@ -315,7 +311,7 @@ function App() {
                   </button>
                 </div>
               )}
-              {/* Overview's sentence already says so, first. */}
+              {/* Overview's own sentence already says so. */}
               {lost && route.view !== "batch" && (
                 <div className="ax-banner is-bad" role="status">
                   <span>
@@ -334,6 +330,7 @@ function App() {
           {soon && <ComingSoon item={soon} />}
           <Suspense fallback={<Loading />}>
             {route.view === "profile" && <ProfileView />}
+            {route.view === "resumes" && <ResumesView />}
             {route.view === "settings" && <SettingsView />}
             {route.view === "editor" && <ResumeEditor />}
           </Suspense>
@@ -346,15 +343,7 @@ function App() {
             close={() => go({ ...route, job: undefined, run: undefined })}
           />
         )}
-        <JobLinkIntake
-          request={api}
-          refresh={refresh}
-          autoApply={snapshot.profile.autonomous && snapshot.control.auto_submit && !snapshot.control.paused}
-          onImported={(jobId, message) => {
-            notify("ok", message);
-            go({ ...route, job: jobId, run: undefined });
-          }}
-        />
+        <AddJobDialog />
         <CommandPalette open={palette} onClose={() => setPalette(false)} />
         <ToastStack toasts={toasts} onDismiss={(id) => setToasts((list) => list.filter((x) => x.id !== id))} />
       </WorkspaceContext.Provider>
