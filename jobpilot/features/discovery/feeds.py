@@ -555,18 +555,32 @@ def ingest(db, postings: list[Posting], source_id="feed:new-grad") -> dict:
     from ...schemas import Profile
     from .roles import matching_role, related_role
 
+    from ... import shortlinks
+
     counts = {"created": 0, "existing": 0, "duplicate": 0, "protected": 0, "invalid": 0, "off_role": 0}
     # Each profile's target roles decide which curated postings become jobs (no target roles: all of them).
     roles = Profile.model_validate(db.get_setting("profile", {}) or {}).target_roles
+    lookups = MAX_SHORTLINK_LOOKUPS
     for p in postings:
         if roles and not (matching_role(p.title, roles) or related_role(p.title, roles)):
             counts["off_role"] += 1
             continue
+        # A feed's short link (go.vansh.nyc/XO) is stored as the posting it points to, so the job is the employer's own
+        # posting: its identity matches an application already made there. Answers are saved, so a sweep asks only for
+        # links it has not seen, a few per sweep; the rest keep the link and are resolved when first queued.
+        url = p.url
+        if shortlinks.is_shortlink(url):
+            with db.session() as s:
+                known, final = shortlinks.cached(s, url)
+            if not known and lookups > 0:
+                lookups -= 1
+                final = shortlinks.resolve(url, db)
+            url = final or url
         try:
             job, created = add_job(
                 db,
                 JobInput(
-                    url=p.url,
+                    url=url,
                     title=p.title[:500],
                     company=p.company[:300],
                     location="; ".join(p.locations)[:500],
@@ -577,7 +591,7 @@ def ingest(db, postings: list[Posting], source_id="feed:new-grad") -> dict:
             counts["invalid"] += 1
             continue
         with db.exclusive() as s:
-            if protected(s, p.url):
+            if protected(s, url):
                 counts["protected"] += 1
                 continue
             canonical, duplicate = register(
@@ -626,6 +640,7 @@ HISTORY_FEEDS = (
     ("simplify-history", "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json"),
     ("simplify-internships", "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/.github/scripts/listings.json"),
 )
+MAX_SHORTLINK_LOOKUPS = 60  # Short links asked per ingest (one HEAD each, at most one a second per host).
 HARVEST_KEY = "discovery_board_harvest"
 HARVEST_EVERY = timedelta(hours=20)
 HARVEST_RECHECK = timedelta(days=14)  # A board that failed validation is not asked again for this long.

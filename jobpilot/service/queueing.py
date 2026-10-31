@@ -10,8 +10,9 @@ import hashlib
 from sqlalchemy import select
 from sqlalchemy.orm import defer
 
-from ..db import Job, Resume, Run, Setting, now, record
+from ..db import Event, Job, Resume, Run, Setting, now, record
 from ..schemas import Profile
+from .. import shortlinks
 from ..admission import QueueBlocked, employer_partition, temporary_time, require_intake
 from ..runtime import engine_version, profile_version
 from .states import ACTIVE, RETRYABLE
@@ -22,6 +23,14 @@ from .states import ACTIVE, RETRYABLE
 # threads, so a slow mailbox or provider call queued on the default executor never delays a click. The lock, not the
 # loop, keeps two admissions of one job from both writing a run.
 ADMISSION = ThreadPoolExecutor(max_workers=2, thread_name_prefix="admission")
+
+
+class ShortlinkPending(Exception):
+    """The job's link is a short link nobody has asked yet; _queue resolves it outside the admission transaction."""
+
+    def __init__(self, url):
+        super().__init__(url)
+        self.url = url
 
 
 async def off_loop(fn, *args, **kwargs):
@@ -134,7 +143,32 @@ class QueueingMixin:
                 )
             elif exc.code == "eligibility_conflict":
                 await off_loop(self._close_ineligible, job_id, str(exc))
+            elif exc.code == "duplicate_posting":
+                await off_loop(self._record_duplicate, job_id, exc.detail or {})
             raise
+
+    def _record_duplicate(self, job_id, detail):
+        """A short link that resolves to a posting already applied to is recorded the way an employer's "already applied"
+        is, without a browser: an already_applied run saying why, and the job leaves the ready list. The run is exempt
+        from the employer cap (application_pacing): the application it duplicates already holds the slot."""
+        with self.db.exclusive() as session:
+            job = session.get(Job, job_id)
+            if not job or job.demo or job.status in {"confirmed", "already_applied"}:
+                return
+            reason = "The short link leads to a posting this account already applied to; no second application was made"
+            run = Run(
+                job_id=job_id,
+                state="already_applied",
+                mode="submit",
+                reason=reason,
+                created_at=now(),
+                finished_at=now(),
+                receipt={"type": "duplicate_posting", **detail},
+            )
+            session.add(run)
+            session.flush()
+            session.add(Event(run_id=run.id, kind="duplicate_posting", message=reason, data=detail))
+            job.status, job.reason = "already_applied", reason
 
     def _close_ineligible(self, job_id, reason):
         """An employer restriction the applicant cannot meet closes the job with the employer's own words, so it leaves
@@ -182,8 +216,7 @@ class QueueingMixin:
         owner_pick=False,
     ):
         """Admit and write the run off the event loop (_admit), then hand it to the workers."""
-        result, run_id = await off_loop(
-            self._admit,
+        args = (
             job_id,
             mode,
             resume_id,
@@ -194,6 +227,13 @@ class QueueingMixin:
             resume_artifact_id,
             owner_pick,
         )
+        try:
+            result, run_id = await off_loop(self._admit, *args)
+        except ShortlinkPending as pending:
+            # A short link is asked once, here, outside the database lock and off the event loop; its answer (or a
+            # failure, which never blocks) is saved, and the admission then reads it.
+            await asyncio.to_thread(shortlinks.resolve, pending.url, self.db)
+            result, run_id = await off_loop(self._admit, *args, resolved=True)
         if self.dispatch:
             try:
                 await self.dispatch(run_id)
@@ -217,6 +257,7 @@ class QueueingMixin:
         controller_policy=None,
         resume_artifact_id=None,
         owner_pick=False,
+        resolved=False,
     ):
         """`owner_pick`: the owner applied or pasted this job themselves. Owner, 2026-10-22: "if I say apply, then it
         should apply no questions asked." Fit and policy filters (target roles, internships, career level, the
@@ -277,12 +318,21 @@ class QueueingMixin:
                 raise QueueBlocked(
                     "This application is archived and is outside the active pipeline", code="archived"
                 )
-            from ..ats import canonicalize, icims_requisition_alias, identity_variants, url_identity
+            from ..ats import canonicalize, detect, icims_requisition_alias, identity_variants, url_identity
 
             identity = canonicalize(job.url)[1]
             from ..operations.reset import guard_key
 
-            if not job.demo and any(s.get(Setting, guard_key(i)) for i in identity_variants(job.url)):
+            # A short link is the posting it redirects to (Shield AI's feed link ran after its Lever twin was
+            # confirmed, 2026-10-29). The answer is saved before this runs; a link never asked raises ShortlinkPending,
+            # and one whose lookup failed is treated as before.
+            final = None
+            if not job.demo and shortlinks.is_shortlink(job.url):
+                known, final = shortlinks.cached(s, job.url)
+                if not known and not resolved:
+                    raise ShortlinkPending(job.url)
+            own_urls = [job.url, *([final] if final else [])]
+            if not job.demo and any(s.get(Setting, guard_key(i)) for u in own_urls for i in identity_variants(u)):
                 raise QueueBlocked(
                     "An archived application protects this job from duplicate submission.",
                     outcome="protected",
@@ -294,11 +344,36 @@ class QueueingMixin:
                 for candidate in s.execute(select(Job.id, Job.url, Job.ats, Job.company).where(Job.ats == job.ats))
                 if url_identity(candidate.url) == identity or icims_requisition_alias(job, candidate)
             ]
+            # The same posting under its other link: the target of this short link, or short links that lead here.
+            linked = []
+            if final and url_identity(final) != identity:
+                final_ats, final_identity = detect(final).id, url_identity(final)
+                linked = [
+                    candidate.id
+                    for candidate in s.execute(
+                        select(Job.id, Job.url, Job.ats, Job.company).where(Job.ats == final_ats)
+                    )
+                    if url_identity(candidate.url) == final_identity
+                ]
+            elif not shortlinks.is_shortlink(job.url) and not job.demo:
+                if urls := shortlinks.twins(s, job.url):
+                    linked = list(s.scalars(select(Job.id).where(Job.url.in_(urls), Job.id != job.id)))
+            aliases = [*aliases, *(i for i in linked if i not in aliases)]
             # A packet loads when asked for: admission holds the app lock, and most attempts read none of these.
             previous = list(s.scalars(select(Run).options(defer(Run.packet)).where(Run.job_id.in_(aliases))))
             if any(x.state in ACTIVE for x in previous):
                 raise QueueBlocked(
                     "This job already has an active run", outcome="protected", code="active_run"
+                )
+            # Applied through the other link: recorded as already applied (queue()), never a second application.
+            if duplicate := next(
+                (x for x in previous if x.job_id in linked and x.state in {"confirmed", "already_applied"}), None
+            ):
+                raise QueueBlocked(
+                    "The same posting was already applied to through another link.",
+                    outcome="protected",
+                    code="duplicate_posting",
+                    detail={"duplicate_of": duplicate.job_id, "resolved_url": final or job.url},
                 )
             from ..admission import unknown_resubmit_allowed
 

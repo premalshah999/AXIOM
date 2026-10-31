@@ -14,9 +14,10 @@ from .db import Job, Run, Setting
 class QueueBlocked(ValueError):
     """A queue guard with an explicit permanent/protected/temporary outcome."""
 
-    def __init__(self, message, *, outcome="excluded", code="queue_guard", not_before=None):
+    def __init__(self, message, *, outcome="excluded", code="queue_guard", not_before=None, detail=None):
         super().__init__(message)
         self.outcome, self.code, self.not_before = outcome, code, not_before
+        self.detail = detail  # What the caller that records this block needs (never serialized with as_dict).
 
     def as_dict(self):
         return {"outcome": self.outcome, "code": self.code, "not_before": self.not_before}
