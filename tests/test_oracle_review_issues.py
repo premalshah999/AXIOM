@@ -28,10 +28,10 @@ async def test_oracles_review_page_with_issues_is_a_refused_commit_that_names_th
     """Lazard 2026-10-23: "You have 2 issues that need to be fixed before you can submit" ended 61 runs as unverified."""
     body = (
         "<html><body><div role='alert'>You have 2 issues that need to be fixed before you can submit your application."
-        "</div><ul><li><div>Data Science</div><div>University of Maryland</div><div>Fields to fix: 2</div></li>"
+        "</div><ul><li><div>Data Science</div><div>Example State University</div><div>Fields to fix: 2</div></li>"
         "</ul></body></html>"
     )
     await serve(page, ORACLE_JOB + "/apply", body)
     rejection = await session(page, tmp_path).rejection()
     assert rejection["category"] == "validation" and rejection["type"] == "explicit_rejection_page"
-    assert rejection["issues"] == ["Data Science / University of Maryland (Fields to fix: 2)"]
+    assert rejection["issues"] == ["Data Science / Example State University (Fields to fix: 2)"]
