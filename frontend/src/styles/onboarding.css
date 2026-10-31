@@ -311,17 +311,6 @@ button.ax-ob-choice:hover {
   background: var(--brand);
   color: var(--brand-ink);
 }
-.ax-ob-tag {
-  margin-left: auto;
-  padding: 1px var(--space-2);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  color: var(--ink-2);
-  font-size: var(--text-meta);
-  line-height: 1.5;
-  white-space: nowrap;
-}
-
 /* Switches grouped on one hairline frame. */
 .ax-ob-switches {
   padding: 0 var(--space-4);

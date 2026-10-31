@@ -392,11 +392,6 @@
   margin-bottom: var(--space-1);
 }
 
-/* The Database slot (database.tsx mounts here). */
-.st-slot {
-  min-height: 160px;
-}
-
 /* A setting whose choice is a row of words: on a phone the words go under the name, full width. */
 @media (max-width: 599px) {
   .ax-switch-row.st-choice {

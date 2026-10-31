@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Check as Tick, FileText, HardDrive, Mail, SlidersHorizontal, Sparkles, UserRound, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check as Tick, FileText, Mail, SlidersHorizontal, Sparkles, UserRound, X } from "lucide-react";
 import { api, ApiError } from "./api";
 import { routeUrl } from "./context";
 import { Wordmark } from "./shell/Brand";
+import { DatabaseChoice } from "./database";
 import { SwitchRow } from "./setup-kit";
 import { YesNo } from "./qform";
 import { Button, Dropzone, ErrorLine, External, Input, Loading, Monogram, Pill, Segmented, Select } from "./ui/index";
@@ -751,32 +752,10 @@ function WelcomeStep() {
 }
 
 // ---------- Data ----------
-/**
- * The slot for the database choice. Local is the default and needs nothing from anyone, so this shows it as chosen. The
- * Local / Supabase / Server component built on agent8/db-config (`frontend/src/database.tsx`) mounts here: replace the body
- * of this function with it, and keep Continue enabled while Local is selected. Nothing else in the guide depends on it.
- */
+// Local is the default and needs nothing from anyone: DatabaseChoice (database.tsx) says so in a sentence until someone asks to
+// change it, so Continue never waits on it.
 function DatabaseStep() {
-  return (
-    <>
-      <div className="ax-ob-choices" role="radiogroup" aria-label="Where your data lives">
-        <div className="ax-ob-choice is-on" role="radio" aria-checked="true" tabIndex={0}>
-          <span className="ax-ob-tile">
-            <HardDrive size={16} aria-hidden="true" />
-          </span>
-          <span className="ax-ob-choice-main">
-            <strong>On this Mac</strong>
-            <small>Stored in AXIOM's own database on this computer. Nothing to set up, and nothing leaves your Mac.</small>
-          </span>
-          <span className="ax-ob-tag">Recommended</span>
-          <span className="ax-ob-tick" aria-hidden="true">
-            <Tick size={12} />
-          </span>
-        </div>
-      </div>
-      <p className="ax-hint">Want Supabase or your own server instead? That choice is in Settings once setup is done.</p>
-    </>
-  );
+  return <DatabaseChoice />;
 }
 
 // ---------- Resume ----------

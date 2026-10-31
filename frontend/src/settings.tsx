@@ -2,45 +2,29 @@
 // mailbox, how it applies, their account), and the engine's own switches are last, under Advanced. Old addresses resolve in
 // context.ts; the section is the route's `tab` (nav.ts lists them).
 import { Fragment, useEffect, useRef, type ComponentType } from "react";
-import { Database } from "lucide-react";
 import { routeUrl, useWorkspace } from "./context";
 import { AccountSettings } from "./accounts";
 import { SignInSettings } from "./account";
 import { ConnectionSettings } from "./connections";
+import { DatabaseSettings } from "./database";
 import { DiscoverySettings } from "./discovery";
 import { MailSettings } from "./mail";
 import { PAGE_TABS } from "./shell/nav";
 import { AdvancedSettings, ApplyingSettings } from "./system";
 import "./styles/settings.css";
-import { Empty, Panel } from "./ui/index";
 
-// The Database section. agent8/db-config builds src/database.tsx, a self-contained component for choosing Local (the default),
-// Supabase or a server. Mount it by importing it here and rendering it in place of <DatabasePending />; nothing else in
-// Settings changes. Its own heading is the one above it, so it needs none.
+// The Database section: where AXIOM keeps its data (database.tsx owns the choice and the move).
 function DatabaseSection() {
   return (
-    <section className="st-group st-slot" id="database" aria-labelledby="st-database">
+    <section className="st-group" id="database" aria-labelledby="st-database">
       <div className="st-head">
         <div>
           <h2 id="st-database">Database</h2>
           <p>Where AXIOM keeps its data.</p>
         </div>
       </div>
-      <DatabasePending />
+      <DatabaseSettings />
     </section>
-  );
-}
-
-function DatabasePending() {
-  return (
-    <Panel>
-      <Empty
-        compact
-        icon={Database}
-        title="The database choice is not connected yet"
-        hint="AXIOM keeps its data in a local database by default. Supabase and your own server will be offered here."
-      />
-    </Panel>
   );
 }
 
