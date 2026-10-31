@@ -314,6 +314,15 @@ def relevant_fact(label, key):
                 re.I,
             )
         )
+    if (
+        subject == "background_check"
+        and re.search(r"\b(?:able|ability|eligible|qualif\w*|pass|clear|meet)\b", label, re.I)
+        and not re.search(r"drug|substance|marijuana|cannabis|alcohol|credit|\bwilling|\bconsent|\bagree|\bauthori[sz]e", label, re.I)
+    ):
+        # "Are you able to meet these requirements [a fingerprint-based background check] if certification is required?"
+        # (Flock's CJIS question, 2026-10-29): what a criminal-records check finds is the applicant's conviction record, which
+        # the confirmed no-conviction fact states. A drug or credit check is another subject: no fact here covers it.
+        return bool(re.search(r"convict|criminal|background_check", key, re.I))
     patterns = {
         "export_control": r"export_control|sanction|restricted_country",
         "financial_regulatory": r"finra|securities|regulatory|licen[cs]e|convict|criminal",

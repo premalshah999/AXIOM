@@ -4,7 +4,7 @@ import { useWorkspace, type AnyRoute } from "../context";
 import { platformName, plural } from "../format";
 import { usePoll } from "../hooks";
 import { Empty, ErrorLine, Panel, Skeleton, Tooltip } from "../ui/index";
-import type { Success } from "../types";
+import type { Success, SuccessReport } from "../types";
 
 type Funnel = { discovered: number; eligible: number; applied: number; platforms: Record<string, number> };
 
@@ -62,77 +62,130 @@ function FunnelPanel({ data, error, retry, confirmed }: { data: Funnel | null; e
   );
 }
 
-// Past six platforms the tail folds into Other: it is a table of what matters, not an inventory.
-const SHOWN = 6;
+const pct = (n: number | null) => (n == null ? "—" : `${n.toLocaleString(undefined, { maximumFractionDigits: 1 })}%`);
 
-function PlatformPanel({ data, ledger }: { data: Funnel | null; ledger: Success[] | null }) {
+/** One platform: its name and what it confirmed, a dot bar against the target tick, and the percentage. Opens that platform's jobs. */
+function ScoreRow({ row, target, below }: { row: SuccessReport["platforms"][number]; target: number; below: boolean }) {
   const { go } = useWorkspace();
-  if (!data || !ledger) return null;
-  const confirmed = new Map<string, number>();
-  for (const a of ledger) confirmed.set(a.ats, (confirmed.get(a.ats) ?? 0) + 1);
-  const all = Object.entries(data.platforms)
-    .map(([ats, applied]) => ({ ats, applied, confirmed: confirmed.get(ats) ?? 0 }))
-    .filter((r) => r.applied > 0)
-    .sort((a, b) => b.applied - a.applied);
-  if (!all.length) return null;
-  const rows = all.slice(0, SHOWN);
-  const tail = all.slice(SHOWN);
-  const other = tail.length
-    ? { applied: tail.reduce((n, r) => n + r.applied, 0), confirmed: tail.reduce((n, r) => n + r.confirmed, 0) }
-    : null;
-  const bar = (part: number, whole: number) => (
-    <span className="ov-meter" aria-hidden="true">
-      <i style={{ width: percent(part, whole) === "—" ? 0 : percent(part, whole) }} />
-    </span>
-  );
+  const share = Math.max(0, Math.min(100, row.final_pct ?? 0));
   return (
-    <Panel title="Success by platform" flush>
-      <table className="ov-table">
-        <thead>
-          <tr>
-            <th scope="col">Platform</th>
-            <th scope="col" className="is-num">
-              Applied
-            </th>
-            <th scope="col" className="is-num">
-              Confirmed
-            </th>
-            <th scope="col" className="is-num">
-              Success
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.ats}>
-              <th scope="row">
-                <button type="button" className="ax-quiet-link" onClick={() => go({ view: "jobs", tab: "pipeline", q: r.ats })} title={`See ${plural(r.applied, "job")} on ${platformName(r.ats)}`}>
-                  {platformName(r.ats)}
-                </button>
-              </th>
-              <td className="is-num">{r.applied.toLocaleString()}</td>
-              <td className="is-num">{r.confirmed.toLocaleString()}</td>
-              <td className="is-num">
-                {bar(r.confirmed, r.applied)}
-                {percent(r.confirmed, r.applied)}
-              </td>
-            </tr>
+    <li>
+      <button
+        type="button"
+        className="ov-score-row"
+        onClick={() => go({ view: "jobs", tab: "pipeline", q: row.ats })}
+        title={`See ${plural(row.tried, "job")} on ${platformName(row.ats)}`}
+      >
+        <span className="ov-score-name">
+          {platformName(row.ats)}
+          <em>
+            {row.confirmed.toLocaleString()} of {row.eligible.toLocaleString()}
+          </em>
+        </span>
+        <span className={"ov-score-bar" + (below ? " is-below" : "")} aria-hidden="true">
+          <i style={{ width: `${share}%` }} />
+          <b style={{ left: `${target}%` }} />
+        </span>
+        <span className="ov-num">{pct(row.final_pct)}</span>
+      </button>
+    </li>
+  );
+}
+
+/**
+ * The number the owner asked for, where they will see it: of the jobs AXIOM could honestly apply to over the last week, how many
+ * were confirmed, against the 90% target. Platforms below the target come first, custom company sites included; the ones on target
+ * and the ones with too few jobs to judge are folded, and the counting rules are one fold away. `GET /api/success`, read-only.
+ */
+function SuccessPanel() {
+  const { data, error, refresh } = usePoll<SuccessReport>((signal) => api("/success?days=7", "GET", undefined, signal), 60000);
+  const { go } = useWorkspace();
+  if (!data) {
+    return (
+      <Panel title="Success, last 7 days">
+        {error ? <ErrorLine error={error} retry={refresh} /> : <Skeleton rows={4} mono={false} />}
+      </Panel>
+    );
+  }
+  const all = data.overall;
+  const judged = data.platforms.filter((p) => p.volume && p.final_pct != null);
+  const below = judged.filter((p) => !p.meets_target);
+  const on = judged.filter((p) => p.meets_target);
+  const small = data.platforms.filter((p) => !p.volume);
+  const week = data.days === 7 ? "the last 7 days" : `the last ${data.days} days`;
+  if (!all.tried) {
+    return (
+      <Panel title="Success, last 7 days">
+        <Empty compact title="No applications yet" hint={`Once AXIOM has tried jobs in ${week}, how many it confirmed shows here.`} />
+      </Panel>
+    );
+  }
+  return (
+    <Panel title={data.days === 7 ? "Success, last 7 days" : `Success, last ${data.days} days`}>
+      <div className="ov-score">
+        <span className="ov-score-big" aria-label={pct(all.final_pct)}>
+          {/* Whole points, rounded down: 89.7 never reads as 90. The decimal is in the sentence beside it. */}
+          <span className="ax-read ov-score-read" aria-hidden="true">
+            {all.final_pct == null ? "–" : Math.floor(all.final_pct)}
+          </span>
+          <span className="ov-score-unit" aria-hidden="true">
+            %
+          </span>
+        </span>
+        <div className="ov-score-say">
+          <p>
+            <button type="button" className="ax-quiet-link" onClick={() => go({ view: "ledger" })}>
+              {all.confirmed.toLocaleString()} confirmed
+            </button>{" "}
+            of {all.eligible.toLocaleString()} jobs it could apply to in {week}: {pct(all.final_pct)}.
+          </p>
+          <p className={all.meets_target ? "ov-caption" : "ov-caption is-short"}>
+            Target {data.target}%. {all.meets_target ? "On target overall" : "Below target overall"}
+            {below.length ? `; ${plural(below.length, "platform")} below it.` : "."}
+          </p>
+        </div>
+      </div>
+      <p className="ov-caption">A job counts unless its posting closed, you had already applied, or it waits on something only you can make.</p>
+      {below.length > 0 && (
+        <ul className="ov-score-rows" aria-label="Platforms below target">
+          {below.map((p) => (
+            <ScoreRow key={p.ats} row={p} target={data.target} below />
           ))}
-          {other && (
-            <tr>
-              <th scope="row">
-                Other <span className="ax-note">({tail.length})</span>
-              </th>
-              <td className="is-num">{other.applied.toLocaleString()}</td>
-              <td className="is-num">{other.confirmed.toLocaleString()}</td>
-              <td className="is-num">
-                {bar(other.confirmed, other.applied)}
-                {percent(other.confirmed, other.applied)}
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+        </ul>
+      )}
+      {on.length > 0 && (
+        <details className="ax-fold ov-score-fold">
+          <summary>
+            On target <strong>{on.length}</strong>
+          </summary>
+          <ul className="ov-score-rows">
+            {on.map((p) => (
+              <ScoreRow key={p.ats} row={p} target={data.target} below={false} />
+            ))}
+          </ul>
+        </details>
+      )}
+      <details className="ax-fold ov-score-fold">
+        <summary>How this is counted</summary>
+        <dl className="ov-score-facts">
+          <dt>Tried</dt>
+          <dd className="mono">{all.tried.toLocaleString()}</dd>
+          <dt>Closed or removed</dt>
+          <dd className="mono">{all.closed.toLocaleString()}</dd>
+          <dt>Already applied</dt>
+          <dd className="mono">{all.already_applied.toLocaleString()}</dd>
+          <dt>Only you can answer</dt>
+          <dd className="mono">{all.owner_only.toLocaleString()}</dd>
+          <dt>Counted</dt>
+          <dd className="mono">{all.eligible.toLocaleString()}</dd>
+          <dt>Confirmed on the first try</dt>
+          <dd className="mono">{pct(all.first_try_pct)}</dd>
+        </dl>
+        <p className="ov-caption">
+          Success is jobs confirmed on any try over the jobs counted. A closed posting or an application already sent had nothing left to send.
+          {small.length > 0 && ` Not judged, with fewer than 8 jobs: ${small.map((p) => platformName(p.ats)).join(", ")}.`}
+        </p>
+      </details>
     </Panel>
   );
 }
@@ -143,7 +196,7 @@ export function Results({ ledger }: { ledger: Success[] | null }) {
   return (
     <>
       <FunnelPanel data={funnel.data} error={funnel.error} retry={funnel.refresh} confirmed={ledger?.length ?? null} />
-      <PlatformPanel data={funnel.data} ledger={ledger} />
+      <SuccessPanel />
     </>
   );
 }

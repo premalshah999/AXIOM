@@ -746,6 +746,9 @@ DEPENDENT_TYPES = {"radio", "radiogroup", "select", "dropdown", "pills", "checkb
 
 def implausible_link(field):
     """A link/URL field holding something that is not shaped like a web address."""
+    if field.get("options") or field.get("type") in {"select", "dropdown", "combobox", "radio", "radiogroup", "pills"}:
+        # A pick list named for a site ("Company Website", Taleo's source detail, 2026-10-31) holds a choice, not a link.
+        return False
     if not (
         field.get("type") == "url"
         or re.search(r"\b(?:link|url|website|linkedin|github|portfolio)\b", field.get("label", ""), re.I)
@@ -3325,6 +3328,15 @@ class FormSession:
                     if str(exc) != widgets.NO_OPTIONS_READABLE:
                         raise
                     # A plain UI5 Input without suggestions keeps the typed value; the readback below checks it.
+            elif kind == "text" and await widgets.is_place_search(el):
+                from .answers import address_location_option
+
+                address = self.resolver.profile.address
+                choose = lambda texts: address_location_option(texts, address)  # noqa: E731
+                if picked := await widgets.pick_place(frame, el, value, choose):
+                    committed = picked
+                else:
+                    el = await widgets.human_type(el, value, timeout=4000)
             elif kind == "tel" or (
                 re.search(r"phone|mobile|telephone|\bcell(?:ular)?\b", field["label"], re.I) and "@" not in str(value)
             ):
