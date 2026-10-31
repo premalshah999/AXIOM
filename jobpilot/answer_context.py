@@ -206,10 +206,11 @@ DIRECTIVE = re.compile(
 # Capital One: "... support does include documentation needed for F-1 OPT ... your answer to this question will be
 # “Yes.”" The listed statuses come before the definition.
 ANSWER_WILL_BE_YES = re.compile(r"(?:answer|response)[^.]{0,60}?\b(?:will|should|must|would)\s+be\W{0,3}yes", re.I)
-# "Select Yes if you hold a visa other than F-1 OPT" and "(excluding OPT)" exclude the status they name.
+# "Select Yes if you hold a visa other than F-1 OPT" and "(excluding OPT)" exclude the status they name. "Including but
+# not limited to F-1, OPT" names it: seven applications answered No to that wording.
 NEGATION = re.compile(
-    r"\b(?:not|never|no longer|neither|nor|other than|except(?:ing)?|excluding|excludes?|exclusive of|besides|"
-    r"apart from|aside from|unless)\b|n['’]t\b",
+    r"\b(?:not(?!\s+limited\b)|never|no longer|neither|nor|other than|except(?:ing)?|excluding|excludes?|exclusive of|"
+    r"besides|apart from|aside from|unless)\b|n['’]t\b(?!\s+limited\b)",
     re.I,
 )
 

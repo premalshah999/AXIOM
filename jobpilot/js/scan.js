@@ -86,6 +86,26 @@
     }
     return '';
   };
+  // The words printed beside a box, up to the next control. iCIMS labels a box "Tick" and prints "I acknowledge ..." after it
+  // (National Louis University 2026-10-31): the owner was asked "Tick", with nothing to answer from.
+  const GENERIC_TICK = /^(?:tick|check|check ?box|click here|select|select here)\W*$/i;
+  const followingText = first => {
+    const root = first.getRootNode();
+    const walker = document.createTreeWalker(root.body || root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+    walker.currentNode = first;
+    const parts = [];
+    for (let n = walker.nextNode(), steps = 0; n && steps < 40 && parts.join(' ').length < 400; n = walker.nextNode(), steps++) {
+      if (n.nodeType === 1) {
+        if (n.matches('input:not([type=hidden]),select,textarea,button,[role=checkbox]')) break;
+        continue;
+      }
+      const t = clean(n.textContent), host = n.parentElement;
+      if (!t || !host || host.closest('script,style,noscript,option,a') || !visible(host) || GENERIC_TICK.test(t)) continue;
+      if (host.closest('label')) break;  // The next control's own caption.
+      if (/[a-z]{3}/i.test(t)) parts.push(t);
+    }
+    return parts.join(' ').slice(0, 500);
+  };
   // The document a file input asks for, read from the visible text just before it back to the previous file input.
   // ClearCompany's attachment page (Allen Institute 2026-10-28) prints "Upload your most recent Resume." and "Please
   // upload your Cover Letter ... *" as plain text above two identical "File name / Date submitted" tables, so both
@@ -198,6 +218,10 @@
           const statement = precedingText(el, new Set(['*', '✱']));
           if (/^I\s+(?:agree|accept|acknowledge|consent)\b/i.test(statement)) return statement;
         }
+      }
+      if (GENERIC_TICK.test(t) && el.matches('input[type=checkbox],[role=checkbox]')) {
+        const beside = followingText(el);
+        if (beside) return beside;
       }
       if (t) return t;
     }

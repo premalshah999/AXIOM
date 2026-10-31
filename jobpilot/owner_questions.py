@@ -68,6 +68,8 @@ def context_from(item):
         "maxlength": extra.get("maxlength") if isinstance(extra.get("maxlength"), int) and extra.get("maxlength") > 0
         else 0,
         "widget": str(extra.get("widget") or "")[:40],
+        # The other boxes beside a tick box: "None of the Above" means nothing without them.
+        "peers": str(extra.get("peers") or "")[:600],
         "field_id": str(item.get("field_id") or ""),
         "slot": item.get("slot") if isinstance(item.get("slot"), int) else 0,
         "source": extra.get("source") or "",
@@ -295,7 +297,7 @@ def defect(question, options=(), context=None, reason=""):
         return "This is the website's search box, not an application question"
     located = any(
         _human(context.get(k)) for k in ("section", "group", "heading")
-    ) or bool(context.get("history_identity") or context.get("caption"))
+    ) or bool(context.get("history_identity") or context.get("caption") or context.get("peers"))
     if (FRAGMENT.fullmatch(normalize(text)) or GENERIC.fullmatch(normalize(text))) and not located:
         # "None of the Above" with no group, "Make Selection Here" with no instruction, "Start & end date" with no row
         # (Smithfield, Westinghouse, TikTok 2026-10-29): there is no question to ask.
@@ -361,12 +363,14 @@ def requirement(question, options=(), context=None, reason=""):
         line = "File upload: send the document" + (f" ({accepted})" if accepted else " (PDF or Word)")
     elif question_kind == "choice":
         texts = [normalize(t) for _, t in listed]
-        if field_type in {"checkbox", "checkboxgroup", "select-multiple"} and len(listed) > 1:
+        if field_type == "checkbox" and sorted(texts) == ["no", "yes"]:
+            line = "Tick box: Yes ticks it, No leaves it empty"
+        elif field_type in {"checkbox", "checkboxgroup", "select-multiple"} and len(listed) > 1:
             line = f"Pick all that apply ({len(listed)} choices)"
         elif sorted(texts) == ["no", "yes"]:
             line = "Yes / No"
         elif field_type == "checkbox":
-            line = "Checkbox: tick or leave it"
+            line = "Tick box: tick or leave it"
         else:
             line = f"Dropdown: pick one of {len(listed)}" + (" (or type yours: the list is searchable)"
                                                             if free_text_allowed(options, context) else "")
@@ -379,6 +383,9 @@ def requirement(question, options=(), context=None, reason=""):
             line = "Paragraph: a few sentences" + (f", at most {limit} characters" if limit else "")
         else:
             line = "Short text" + (f", at most {limit} characters" if limit else "")
+    peers = " ".join(str(context.get("peers") or "").replace(" | ", ", ").split())
+    if peers and field_type == "checkbox":
+        line += " · other boxes here: " + (peers if len(peers) <= 200 else peers[:199].rstrip() + "…")
     return line + (" · required" if context.get("required") else "")
 
 

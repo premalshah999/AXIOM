@@ -12,9 +12,9 @@ INTENT_SOURCE = re.compile(
 )
 
 
-# Sources that would claim a relationship or status the applicant does not have.
+# Sources that would claim a relationship or status the applicant does not have. "Other/Non-Referral" (Thrivent) claims none.
 NOT_A_SOURCE = re.compile(
-    r"refer|employee|colleague|recruiter|agency|staffing|internal|displaced|\bloa\b|leave of absence|"
+    r"(?<!non-)(?<!non )refer|employee|colleague|recruiter|agency|staffing|internal|displaced|\bloa\b|leave of absence|"
     r"contractor|consultant|rehire|former|alumni|warn period|refugee|current (?:worker|associate)|"
     r"intern(?:ship)? program|campus|career fair|job fair|university|school|event|^other$|^none$|select",
     re.I,
@@ -82,7 +82,9 @@ def source_choice(options, rules, employer="", avoid=()):
     if hit := first_matching(options, source_patterns(rules.source_order, employer, options)):
         return hit
     if rules.source_any_channel:
-        return next((o for o in options if not NOT_A_SOURCE.search(str(o))), None)
+        plain = next((o for o in options if not NOT_A_SOURCE.search(str(o))), None)
+        # "Other" says only that none of the named channels applies, so it comes last and is true for an outside applicant.
+        return plain or next((o for o in options if re.fullmatch(r"\W*others?\W*", str(o), re.I)), None)
     return None
 
 

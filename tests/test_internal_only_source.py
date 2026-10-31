@@ -73,3 +73,38 @@ def test_internal_channels_alone_still_close_the_posting():
     assert internal_channels_only(["-- Select --", "Current Employee", "Former Employee", "Internal Transfer"])
     assert not internal_channels_only([])
     assert not internal_channels_only(["Select One"])
+
+
+def test_a_non_referral_choice_is_a_truthful_source_and_a_referral_is_not():
+    from jobpilot.answer_rules import AnswerRules
+    from jobpilot.answers.sources import source_choice
+
+    rules = AnswerRules(source_order=["linkedin"], source_any_channel=True)
+    assert source_choice(["Employee/Advisor Referral", "Other/Non-Referral"], rules) == "Other/Non-Referral"
+    assert source_choice(["Employee Referral", "Non Referral"], rules) == "Non Referral"
+    assert source_choice(["Employee Referral"], rules) is None
+    assert source_choice(["Agency / Search Firm", "Current Employee", "Example Recruiter"], rules) is None
+
+
+def test_a_profile_accepting_any_channel_closes_a_posting_with_no_true_source():
+    # Owner 2026-10-31 on GE Vernova: "leave and delete those jobs".
+    from jobpilot.answer_rules import AnswerRules
+
+    e = engine(["Agency / Search Firm", "Current Employee", "Example Recruiter"])
+    e.form.resolver = SimpleNamespace(answer_rules=AnswerRules(source_any_channel=True))
+    result = verdict(e)
+    assert result["state"] == "closed" and "true for this applicant" in result["reason"]
+
+    e = engine(["Agency / Search Firm", "Current Employee", "Example Recruiter"])
+    e.form.resolver = SimpleNamespace(answer_rules=AnswerRules(source_any_channel=False))
+    assert verdict(e)["state"] == "waiting_browser"
+
+
+def test_other_is_the_last_truthful_source():
+    from jobpilot.answer_rules import AnswerRules
+    from jobpilot.answers.sources import source_choice
+
+    rules = AnswerRules(source_any_channel=True)
+    assert source_choice(["Employee Referral", "Other"], rules) == "Other"
+    assert source_choice(["Other", "Indeed Listing"], AnswerRules(source_any_channel=True)) == "Indeed Listing"
+    assert source_choice(["Employee Referral", "Other"], AnswerRules(source_any_channel=False)) is None

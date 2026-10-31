@@ -155,7 +155,10 @@ class HistoryRulesMixin:
                 return False
             bounds = re.split(r"\s+(?:-|–|to|through)\s+", str(value), maxsplit=1)
             if len(bounds) == 2:
-                left, right = parse_date(bounds[0]), parse_date(bounds[1])
+                # "April - June 2026" states the year once (American Express on Oracle, 2026-10-31).
+                year_stated = re.search(r"\b\d{4}\s*$", bounds[1])
+                opening = bounds[0] if re.search(r"\d{4}", bounds[0]) or not year_stated else f"{bounds[0]} {year_stated[0]}"
+                left, right = parse_date(opening), parse_date(bounds[1])
                 return (int(left[2]), int(left[0])) <= known <= (int(right[2]), int(right[0]))
         except (TypeError, ValueError):
             pass

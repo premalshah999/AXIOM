@@ -3605,7 +3605,8 @@ class FormSession:
         self.pending.append(
             {
                 "question": field["label"],
-                "options": field["options"],
+                # A lone tick box has no options of its own: Yes and No make it a tap, not a reply with nothing to type.
+                "options": field["options"] or (["Yes", "No"] if field["type"] == "checkbox" else []),
                 "key": answer_key(field),
                 "reason": reason,
                 "blocker_type": blocker_type,
@@ -3630,6 +3631,7 @@ class FormSession:
                     "date_parts": field.get("date_parts") or [],
                     "maxlength": field.get("maxlength", -1),
                     "widget": field.get("widget", ""),
+                    "peers": str(field.get("peers") or "")[:600],
                 },
             }
         )

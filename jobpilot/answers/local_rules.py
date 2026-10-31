@@ -29,6 +29,7 @@ from .contact import ADDRESS
 from .contact import CONTACT
 from .contact import NAMES
 from .contact import address_location_option
+from .contact import address_region_option
 from .demographics import DECLINE
 from .eligibility import NO_OPTION
 from .demographics import DEMOGRAPHIC
@@ -936,7 +937,7 @@ class LocalRulesMixin:
                 or (f.get("type") == "email" and not other_party_email(f))
             )
             if attr == "location" and label in labels and f.get("type") == "combobox":
-                qualified = address_location_option(options, p.address)
+                qualified = address_location_option(options, p.address) or address_region_option(options, p.address)
                 if qualified:
                     return self._ans(
                         f,
