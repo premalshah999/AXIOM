@@ -51,13 +51,41 @@ export function seconds(total: number) {
   return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
 }
 
-/** "examplecorp · boards.greenhouse.io" for a pasted link whose title isn't known until ranking. */
+const PLATFORMS: Record<string, string> = {
+  adp: "ADP",
+  ashby: "Ashby",
+  custom: "Company site",
+  dayforce: "Dayforce",
+  eightfold: "Eightfold",
+  general: "Company site",
+  greenhouse: "Greenhouse",
+  icims: "iCIMS",
+  jazzhr: "JazzHR",
+  lever: "Lever",
+  oracle: "Oracle",
+  paycom: "Paycom",
+  paylocity: "Paylocity",
+  smartrecruiters: "SmartRecruiters",
+  successfactors: "SAP SuccessFactors",
+  taleo: "Taleo",
+  ukg: "UKG",
+  workable: "Workable",
+  workday: "Workday",
+};
+/** A platform's own name: "icims" reads as iCIMS. */
+export function platformName(ats?: string) {
+  const id = (ats || "").toLowerCase();
+  return PLATFORMS[id] || id.charAt(0).toUpperCase() + id.slice(1).replaceAll("_", " ") || "Unknown";
+}
+
 // A readable role for a job saved as a bare link: the last wordy path segment ("Exton-Associate%2C-Data-Science" ->
 // "Exton Associate, Data Science"), never a 300-character query string in the table (owner 2026-10-28: "cluttered").
 export function urlRole(url?: string) {
   try {
     const u = new URL(url || "");
-    const generic = /^(?:jobs?|careers?|details?|apply|en|us|en-us|posting|positions?|openings?|view|search)$/i;
+    const generic = /^(?:jobs?|careers?|details?|apply|applications?|en|us|en-us|postings?|positions?|openings?|view|search)$/i;
+    // A shared board's first segment is the employer, not the role.
+    const board = /greenhouse\.io$|lever\.co$|ashbyhq\.com$/.test(u.hostname) ? u.pathname.split("/").filter(Boolean)[0]?.toLowerCase() : "";
     const segment = u.pathname
       .split("/")
       .filter(Boolean)
@@ -69,16 +97,46 @@ export function urlRole(url?: string) {
         }
       })
       .reverse()
-      .find((s) => /[a-z]{3,}/i.test(s) && !generic.test(s) && !/^[0-9a-f-]{16,}$/i.test(s));
+      .find((s) => /[a-z]{3,}/i.test(s) && !generic.test(s) && s.toLowerCase() !== board && !/^[0-9a-f-]{16,}$/i.test(s));
     const title = (segment || u.searchParams.get("title") || "")
       .replace(/[-_+]+/g, " ")
       .replace(/\b(?=\w*\d)[0-9a-z]{8,}\b/gi, "")
       .replace(/\s+/g, " ")
       .trim();
-    return title || "Untitled role";
+    return title;
   } catch {
-    return "Untitled role";
+    return "";
   }
+}
+
+const ROLE_UNREAD = "Role not read yet";
+
+/**
+ * What a list shows for a job: the employer, the role, and, only when either was not read from the posting, the posting's own host as
+ * a muted hint. A link saved before ranking has neither a company nor a title; the address stands in for them and says so.
+ */
+export function jobWords(j: { company?: string; title?: string; url?: string }) {
+  const company = employerOf(j.company, j.url);
+  const read = j.title || urlRole(j.url);
+  return { company, role: read || ROLE_UNREAD, unread: !read, hint: !j.company || !read ? (linkHost(j.url).split(" · ").pop() ?? "") : "" };
+}
+
+/** Who a job is with, for a list: its company, or for a job saved as a bare link, the employer its address names ("Blossom Health"). */
+export function employerOf(company?: string, url?: string) {
+  if (company) return company;
+  const name = linkHost(url).split(" · ")[0] ?? "";
+  if (!name) return "Employer";
+  // A plain host ("careers.example.com") names its employer by the label before the suffix ("Example"); the host itself stays
+  // available as the hint (jobWords).
+  const label = name.includes(".") ? hostLabel(name) : name;
+  return label.replace(/[-_]+/g, " ").replace(/\b[a-z]/g, (c) => c.toUpperCase());
+}
+
+// "careers.example.com" -> "example", "jobs.example.co.uk" -> "example": the label left of the registrable suffix.
+function hostLabel(host: string) {
+  const parts = host.split(".");
+  const second = /^(?:co|com|org|net|gov|edu|ac)$/.test(parts[parts.length - 2] ?? "") && (parts[parts.length - 1]?.length ?? 0) === 2;
+  return parts[Math.max(0, parts.length - (second ? 3 : 2))] || host;
 }
 
 export function linkHost(url?: string) {

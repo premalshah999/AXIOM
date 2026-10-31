@@ -1,4 +1,6 @@
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Listbox } from "./ui/Listbox";
 
 export function usePagination<T>(items: T[], filterKey = "", initialSize = 25) {
   const [page, setPage] = useState(1);
@@ -61,7 +63,7 @@ export function Pagination({
             onClick={() => setPage(page - 1)}
             aria-label="Previous page"
           >
-            ‹
+            <ChevronLeft size={15} aria-hidden="true" />
           </button>
           {numbers.map((n, i) => (
             <span key={n} className="ax-pager-item">
@@ -86,27 +88,20 @@ export function Pagination({
             onClick={() => setPage(page + 1)}
             aria-label="Next page"
           >
-            ›
+            <ChevronRight size={15} aria-hidden="true" />
           </button>
         </div>
       )}
       {sizes && total > Math.min(25, paging.initialSize) && (
-        <label className="ax-pager-size">
-          <span>Rows</span>
-          <select
-            aria-label="Rows per page"
-            value={size}
-            onChange={(e) => setSize(Number(e.target.value))}
-          >
-            {[...new Set([paging.initialSize, 25, 50, 100])]
-              .sort((a, b) => a - b)
-              .map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-          </select>
-        </label>
+        <Listbox
+          size="sm"
+          align="end"
+          label="Rows per page"
+          prefix="Rows"
+          value={String(size)}
+          options={[...new Set([paging.initialSize, 25, 50, 100])].sort((a, b) => a - b).map((n) => ({ value: String(n), label: String(n) }))}
+          onChange={(v) => setSize(Number(v))}
+        />
       )}
     </nav>
   );

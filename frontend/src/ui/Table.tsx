@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import { Button } from "./Button";
+import { Skeleton } from "./Feedback";
 
 export type Column<T> = {
   key: string;
@@ -24,10 +25,10 @@ export type Column<T> = {
 };
 
 /**
- * A plain table: no outer card, hairline row rules, a sticky head, one-line 40px rows, row hover, optional selection with
- * a bulk-action line, and quiet loading, empty and error states. Scrolls sideways inside itself. For a sticky head against
- * the page, put the table on a page with className "ax-page ax-page-fill" and pass `fill`: the table then is the page's
- * only vertical scroller.
+ * A list as a raised panel (inside another panel or a drawer it drops its own surface): a sticky head, one-line 44px rows, row
+ * hover, optional selection with a bulk-action line, a skeleton while loading, and empty and error states. Scrolls sideways inside
+ * itself. For a sticky head against the page, put the table on a page with className "ax-page ax-page-fill" and pass `fill`: the
+ * table then is the page's only vertical scroller, and `footer` (its Pagination) stays at its foot.
  */
 export function Table<T>({
   columns,
@@ -42,6 +43,7 @@ export function Table<T>({
   error,
   empty,
   fill,
+  footer,
   minWidth,
   canSelect,
   busy,
@@ -63,6 +65,8 @@ export function Table<T>({
   /** Shown when there are no rows (an <Empty/>). */
   empty?: ReactNode;
   fill?: boolean;
+  /** At the table's foot, inside its panel: the Pagination. */
+  footer?: ReactNode;
   minWidth?: number;
   /** Rows this returns false for show a disabled checkbox and are left out of select-all. */
   canSelect?: (row: T) => boolean;
@@ -75,6 +79,7 @@ export function Table<T>({
   const chosen = selected ?? new Set<string>();
   const keys = rows.filter((r) => !canSelect || canSelect(r)).map(rowKey);
   const all = keys.length > 0 && keys.every((k) => chosen.has(k));
+  const some = !all && keys.some((k) => chosen.has(k));
   const toggle = (k: string) => {
     const next = new Set(chosen);
     if (next.has(k)) next.delete(k);
@@ -111,6 +116,9 @@ export function Table<T>({
                     aria-label="Select all rows"
                     disabled={keys.length === 0}
                     checked={all}
+                    ref={(el) => {
+                      if (el) el.indeterminate = some;
+                    }}
                     onChange={() => onSelectedChange?.(all ? new Set() : new Set(keys))}
                   />
                 </th>
@@ -163,10 +171,8 @@ export function Table<T>({
           )}
         </table>
         {state === "loading" && (
-          <div className="ax-table-state" role="status" aria-label="Loading">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <span key={i} className="ax-skeleton" style={{ marginBottom: 14, width: `${88 - i * 9}%` }} />
-            ))}
+          <div className="ax-table-state">
+            <Skeleton rows={8} />
           </div>
         )}
         {state === "empty" && <div className="ax-table-state">{empty}</div>}
@@ -176,6 +182,7 @@ export function Table<T>({
           </div>
         )}
       </div>
+      {footer && <div className="ax-table-foot">{footer}</div>}
     </div>
   );
 }

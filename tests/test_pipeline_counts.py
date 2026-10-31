@@ -106,6 +106,48 @@ def test_counts_are_exact_with_more_jobs_and_runs_than_the_old_snapshot_sent(cli
     assert counts["states"]["failed"] == 900 and counts["states"]["cancelled"] == 199
 
 
+def test_the_funnel_counts_what_really_happened_by_stage_and_platform(client, service):
+    """Overview's funnel is real numbers: unranked and below-fit jobs are not eligible unless started, a dry run is not applied,
+    and archived jobs that were tried stay in, as they do in the confirmed list beside it."""
+    def seeded(n, *, status, ats="greenhouse", demo=False):
+        return {**job(n, status=status), "ats": ats, "demo": demo}
+
+    def attempt(n, job_id, *, mode="submit", state="confirmed", started=True):
+        return {**run(n, job_id, state, created=at(5)), "mode": mode, "started_at": at(5) if started else None}
+
+    with service.db.session() as s:
+        s.execute(
+            insert(Job),
+            [
+                seeded(1, status="new"),
+                seeded(2, status="skipped"),
+                seeded(3, status="ready"),
+                seeded(4, status="confirmed", ats="workday"),
+                seeded(5, status="archived", ats="workday"),
+                seeded(6, status="archived"),
+                seeded(7, status="ready", ats="lever"),
+                seeded(8, status="skipped", ats="lever"),
+                seeded(9, status="confirmed", demo=True),
+            ],
+        )
+        s.execute(
+            insert(Run),
+            [
+                attempt(1, "job00004"),
+                attempt(2, "job00005", state="failed"),
+                attempt(3, "job00007", mode="dry_run", state="dry_run_passed"),
+                attempt(4, "job00008", state="queued", started=False),
+                attempt(5, "job00009"),
+            ],
+        )
+    assert client.get("/api/funnel").json() == {
+        "discovered": 8,
+        "eligible": 4,
+        "applied": 2,
+        "platforms": {"workday": 2},
+    }
+
+
 def test_today_and_total_confirmations_count_every_run(client, service):
     seed_history(service)
     stats = client.get("/api/snapshot?include_sources=false").json()["stats"]

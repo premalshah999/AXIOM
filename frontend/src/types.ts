@@ -61,12 +61,26 @@ export type Review = {
   // what kind of answer it takes, why it is asked in plain words, and whether a choice list takes typed text.
   display_question?: string;
   requirement?: string;
-  kind?: "choice" | "upload" | "text";
+  /** What the answer takes. `cannot_automate`: nothing the owner could type or send fits (a video of them); `input_kind` then keeps the shape. */
+  kind?: "choice" | "upload" | "text" | "cannot_automate";
+  input_kind?: "choice" | "upload" | "text";
+  /** The server's plain reason when no answer from the profile or the owner's words completes this field ("" when one does). */
+  cannot_automate?: string;
   why?: string;
   allow_other?: boolean;
   /** The form takes several answers ("select all that apply"): sent one option per line. */
   multiple?: boolean;
   accept?: string;
+  /** Where on the form it sits, and the row of the work history it belongs to. */
+  context?: {
+    type?: string;
+    section?: string;
+    group?: string;
+    caption?: string;
+    hint?: string;
+    history_kind?: string;
+    history_identity?: { company?: string; title?: string; school?: string };
+  } | null;
 };
 export type Source = {
   id: string;
@@ -117,7 +131,7 @@ export type ReviewedAnswer = {
   scope: "personal" | "employer";
   layer: "fact" | "narrative";
 };
-export type AccountState =
+type AccountState =
   | "created_locally"
   | "signing_in"
   | "authenticated"
@@ -229,7 +243,7 @@ export type SchedulerHealth = {
   last_fired_at?: string;
   error?: string;
 };
-export type ApplicationWorkerAssignment = {
+type ApplicationWorkerAssignment = {
   slot: number;
   lane: "normal" | "specialist";
   ats: string;
@@ -277,7 +291,7 @@ export type AutopilotRuntime = {
   next_action?: string;
   scheduler?: SchedulerHealth;
 };
-export type JobControl = {
+type JobControl = {
   state?: string;
   at?: string;
   previous_status?: string;
@@ -414,7 +428,7 @@ export type ApplyManyResult = {
   }[];
   summary: Partial<Record<ApplyOutcome, number>>;
 };
-export type FailureReport = {
+type FailureReport = {
   summary: string;
   likely_cause: string;
   next_steps: string[];
@@ -472,12 +486,12 @@ export type Listing = Job & {
   // Why the batch has not started this job (autopilot.remember_rejection); absent once anything is done to it.
   rejection?: { reason: string; code?: string; outcome?: string; at?: string };
 };
-export type SourceHealth = {
+type SourceHealth = {
   failures: number;
   last_error: string;
   last_ok: string | null;
 };
-export type Scan = {
+type Scan = {
   state?: string;
   started_at?: string;
   checked?: number;
@@ -512,6 +526,7 @@ export type Board = {
   fits?: Record<"all" | "eligible" | "unranked" | "below" | "uncertain", number>;
 };
 
+export type Proof = "page" | "both" | "email" | "existing" | "platform" | "final_page" | "dashboard" | "applicant" | "none";
 export type Success = {
   job_id: string;
   run_id: string;
@@ -523,6 +538,8 @@ export type Success = {
   website_confirmed: boolean;
   email_confirmed: boolean;
   existing_application: boolean;
+  /** What proved it (the server decides from the receipt): see PROOF in model.ts. */
+  proof: Proof;
 };
 export type Archived = {
   job_id: string;
@@ -556,6 +573,13 @@ export type Mailbox = {
   state: string;
   error: string;
   provider?: "gmail_imap" | "gmail_oauth" | "unknown";
+  checked_at?: string | null;
+  created_at?: string | null;
+  // When a request to the mailbox last worked and last failed, and whether AXIOM is still trying (agent8/fix-mail). The page
+  // reads them when they are there and falls back to `error` and `checked_at` when they are not.
+  last_ok_at?: string | null;
+  last_error_at?: string | null;
+  retrying?: boolean;
 };
 export type MailRule = {
   id: string;

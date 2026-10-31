@@ -1,18 +1,29 @@
-// What the machine is doing, once, for everything that says so: Overview's sentence and key, the overview station's readout,
-// and whether the plate is live. One priority order, the worst true thing first.
+// What the machine is doing, once, for everything that says so: Overview's sentence and key, the sidebar's status line, and
+// whether vermilion is lit. One priority order, the worst true thing first.
 import type { Snapshot } from "../types";
 
-type PanelState = "lost" | "restart" | "paused" | "complete" | "running" | "held" | "none";
+export type PanelState = "lost" | "restart" | "paused" | "complete" | "running" | "held" | "none";
 
-export const STATE_WORD: Record<PanelState, string> = {
-  lost: "no connection",
-  restart: "needs a restart",
-  paused: "paused",
-  complete: "target reached",
-  running: "running",
-  held: "held",
-  none: "no batch",
-};
+/** How many applications are in a browser now, out of how many can be: from the slots themselves when they have reported. */
+function capacity(snapshot: Snapshot) {
+  const lanes = snapshot.autopilot_runtime?.application_workers;
+  const limit = lanes ? lanes.normal_workers + lanes.specialist_workers + (lanes.custom_workers ?? 0) : Math.max(0, snapshot.config.workers || 0);
+  const owners = snapshot.runs.filter((r) => r.state === "running" || r.state === "submitting").length;
+  const slots = lanes ? new Set(lanes.assignments.map((a) => a.run_id).filter(Boolean)).size : 0;
+  return { limit, busy: Math.max(slots, owners) };
+}
+
+/** The sidebar's one line, and how its lamp behaves. */
+export function statusLine(snapshot: Snapshot, state: PanelState): { text: string; lamp: "live" | "ask" | "off" | "ok" } {
+  const { busy, limit } = capacity(snapshot);
+  if (state === "lost") return { text: "Connection lost", lamp: "ask" };
+  if (state === "restart") return { text: "Needs a restart", lamp: "ask" };
+  if (state === "paused") return { text: "Paused", lamp: "off" };
+  if (state === "complete") return { text: "Target reached", lamp: "ok" };
+  if (state === "running") return { text: `Applying · ${busy} of ${limit} busy`, lamp: "live" };
+  if (state === "held") return { text: "Held", lamp: "off" };
+  return busy ? { text: `${busy} applying`, lamp: "live" } : { text: "No batch running", lamp: "off" };
+}
 
 /**
  * Confirmations since local midnight, as epoch ms. A notice that the employer already had an application is not one AXIOM just

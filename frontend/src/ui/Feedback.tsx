@@ -1,13 +1,28 @@
 import type { ReactNode } from "react";
 import { Button } from "./Button";
 
-/** A quiet "still loading" line. Pages keep their own layout while it shows. */
+/** A quiet "still loading" line. Lists use Skeleton instead, so the page keeps its shape. */
 export function Loading({ label = "Loading…" }: { label?: string }) {
   return (
-    <p className="ax-empty" role="status">
+    <p className="ax-loading" role="status">
       <span className="ax-spinner" aria-hidden="true" />
       {label}
     </p>
+  );
+}
+
+/** Rows of placeholder in the shape of a list of jobs: a monogram and two lengths of text. */
+export function Skeleton({ rows = 5, mono = true }: { rows?: number; mono?: boolean }) {
+  return (
+    <div className="ax-skel-rows" role="status" aria-label="Loading">
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="ax-skel-row">
+          {mono && <span className="ax-skeleton is-mono" />}
+          <span className="ax-skeleton" style={{ width: `${22 - (i % 3) * 4}%` }} />
+          <span className="ax-skeleton" style={{ width: `${44 - ((i * 2) % 5) * 5}%` }} />
+        </div>
+      ))}
+    </div>
   );
 }
 

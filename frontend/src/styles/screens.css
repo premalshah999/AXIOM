@@ -1,0 +1,178 @@
+/* The coming-soon pages (src/shell/ComingSoon.tsx) and the screen for a page that crashed (src/shell/ErrorBoundary.tsx). Tokens only. */
+.ax-soon {
+  --surface: var(--raised);
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  box-shadow: var(--shadow-panel);
+}
+.ax-soon-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-5);
+  padding: var(--space-8);
+}
+.ax-soon-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  font-weight: 500;
+}
+.ax-soon-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--inset);
+  color: var(--ink-2);
+}
+.ax-soon-copy h2 {
+  max-width: 30ch;
+  font-size: var(--text-page);
+  font-stretch: var(--wide);
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.012em;
+}
+.ax-soon-copy ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ax-soon-copy li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  max-width: 46ch;
+  color: var(--ink-2);
+}
+.ax-soon-copy li::before {
+  content: "";
+  flex: none;
+  width: 5px;
+  height: 5px;
+  margin-top: 9px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--ink-3);
+}
+.ax-soon-pic {
+  display: grid;
+  place-items: center;
+  min-height: 320px;
+  padding: var(--space-8);
+  border-left: 1px solid var(--line);
+  background-color: var(--inset);
+  background-image: radial-gradient(circle, var(--dot-plate) 1px, transparent 1.5px);
+  background-size: 16px 16px;
+}
+.ax-soon-pic svg {
+  width: min(100%, 360px);
+  height: auto;
+  overflow: visible;
+}
+.ax-soon-pic .s-card {
+  fill: var(--raised);
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+.ax-soon-pic .s-bar {
+  fill: var(--ink-3);
+}
+.ax-soon-pic .s-bar.is-soft {
+  fill: var(--line-strong);
+}
+.ax-soon-pic .s-wave {
+  fill: var(--ink-2);
+}
+.ax-soon-pic .s-line {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+.ax-soon-pic .s-node {
+  fill: var(--raised);
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+.ax-soon-pic .s-node.is-core {
+  stroke: var(--ink-2);
+}
+.ax-soon-pic .s-dot {
+  fill: var(--ink-3);
+}
+
+@media (max-width: 899px) {
+  .ax-soon {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ax-soon-copy {
+    padding: var(--space-5);
+  }
+  .ax-soon-pic {
+    min-height: 220px;
+    padding: var(--space-5);
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+}
+
+/* A page that threw: what happened, that the rest still works, and the way out. */
+.ax-fail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-4);
+  max-width: 520px;
+  margin: var(--space-12) auto 0;
+  padding: var(--space-8);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+  box-shadow: var(--shadow-panel);
+}
+.ax-fail h2 {
+  font-size: var(--text-page);
+  font-stretch: var(--wide);
+  line-height: 1.25;
+  letter-spacing: -0.012em;
+}
+.ax-fail p {
+  color: var(--ink-2);
+}
+.ax-fail-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--inset);
+  color: var(--ink-2);
+}
+.ax-fail details {
+  width: 100%;
+}
+.ax-fail summary {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  cursor: pointer;
+}
+.ax-fail pre {
+  margin-top: var(--space-2);
+}
+@media (max-width: 640px) {
+  .ax-fail {
+    margin-top: var(--space-4);
+    padding: var(--space-5);
+  }
+}

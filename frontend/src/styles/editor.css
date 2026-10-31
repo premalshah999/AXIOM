@@ -1,12 +1,21 @@
-/* The resume editor (src/editor.tsx) and its PDF preview (src/pdfpages.tsx): a form at the left, the page at the right.
-   It fills the region (.ax-scroll.is-fixed) and each side scrolls inside itself. Tokens only. */
+/* The resume editor (src/editor.tsx): a full-height workspace with a slim bar, the form at the left and the page at the right. It fills
+   the region (.ax-scroll.is-fixed) and each side scrolls inside itself. Tokens only. */
+.ax-main.view-editor > .ax-head {
+  display: none;
+}
 .main.view-editor {
   height: 100%;
   padding: 0;
 }
-/* The states before the editor opens (no master, an unreadable answer) keep the page gutter that the editor itself drops. */
 .ax-ed-state {
-  padding: var(--space-4) var(--gutter);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--gutter);
+}
+.ax-ed-state > .ax-empty {
+  width: 100%;
 }
 .ax-ed {
   display: flex;
@@ -14,52 +23,100 @@
   height: 100%;
   min-height: 0;
 }
+
+/* ---------- The slim bar: back, name, build status, download, save ---------- */
 .ax-ed-bar {
   display: flex;
+  flex: none;
   align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
-  padding: var(--space-2) var(--gutter);
+  gap: var(--space-3);
+  min-height: 52px;
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-2);
   border-bottom: 1px solid var(--line);
 }
+.ax-ed-name {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-width: 0;
+  line-height: 1.25;
+}
+.ax-ed-name h1 {
+  overflow: hidden;
+  font-size: var(--text-title);
+  font-stretch: 100%;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ax-ed-name span {
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ax-ed-job {
+  flex: none;
+}
 .ax-ed-status {
+  flex: none;
   margin-left: auto;
+  font-size: var(--text-meta);
+}
+.ax-ed-status .ax-pill {
+  font-size: var(--text-meta);
 }
 .ax-ed-actions {
   display: flex;
+  flex: none;
   gap: var(--space-2);
 }
+
+/* ---------- Two sides ---------- */
 .ax-ed-grid {
   display: grid;
   flex: 1;
-  grid-template-columns: minmax(340px, 440px) minmax(0, 1fr);
+  grid-template-columns: minmax(360px, 460px) minmax(0, 1fr);
   min-height: 0;
+}
+.ax-ed-grid.is-form-closed {
+  grid-template-columns: minmax(0, 1fr);
 }
 .ax-ed-panel {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   border-right: 1px solid var(--line);
 }
 .ax-ed-tabs {
   display: flex;
+  flex: none;
   align-items: flex-end;
-  gap: var(--space-4);
-  padding: var(--space-2) var(--space-4) 0 var(--gutter);
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4) 0;
 }
 .ax-ed-tabs .ax-tabs {
   flex: 1;
 }
-.ax-ed-jump {
-  display: none;
+.ax-ed-tabs > .ax-btn {
+  margin-bottom: var(--space-1);
 }
 .ax-ed-scroll {
   display: flex;
   flex: 1;
   flex-direction: column;
   gap: var(--space-4);
-  overflow: auto;
-  padding: var(--space-4) var(--space-4) var(--space-12) var(--gutter);
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-4) var(--space-4) var(--space-8);
+}
+.ax-ed-scroll.is-source {
+  overflow: hidden;
+  padding-bottom: var(--space-4);
 }
 .ax-ed-fields {
   display: flex;
@@ -76,110 +133,378 @@
 .ax-ed-group {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
+  min-width: 0;
 }
 .ax-ed-group > h2 {
   padding-bottom: var(--space-2);
-  border-bottom: 1px solid var(--line);
-}
-.is-off {
-  opacity: 0.55;
 }
 .ax-ed-group-head {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  min-width: 0;
 }
+.ax-ed-group-head .ax-hint {
+  flex: 1;
+  margin: 0;
+}
+/* A section title reads as a title and edits in place: it gains a field's edge only when you point at it. */
 .ax-ed-title {
   flex: 1;
+  width: 0;
+  min-width: 0;
+  min-height: 28px;
+  padding: 2px var(--space-2);
+  margin-left: calc(-1 * var(--space-2));
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-title);
+  font-weight: 600;
 }
-.ax-ed-entry {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-2) 0 var(--space-1);
+.ax-ed-title:hover {
+  border-color: var(--line);
 }
-.ax-ed-bullet {
-  display: grid;
-  grid-template-columns: 14px minmax(0, 1fr) auto;
-  gap: var(--space-2);
-  align-items: start;
-}
-.ax-ed-bullet input[type="checkbox"] {
-  margin-top: var(--space-3);
+.ax-ed-title:focus {
+  border-color: var(--line-strong);
+  background: var(--field);
 }
 .ax-ed-tools {
   display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+.ax-ed-tools.is-column {
   flex-direction: column;
 }
-.ax-ed-tools .ax-icon-btn {
-  width: 24px;
-  height: 24px;
+.is-hidden > .ax-ed-entry-head .ax-ed-entry-text,
+.is-hidden > .ax-ed-title,
+.ax-ed-group.is-hidden > .ax-ed-group-head .ax-ed-title,
+.ax-ed-group.is-hidden > .ax-ed-entry,
+.ax-ed-bullet.is-hidden .ax-ed-bullet-text {
+  opacity: 0.55;
 }
-.ax-ed-templates {
+
+/* Contact: one field per item. */
+.ax-ed-contacts {
   display: flex;
   flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ax-ed-contacts li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* ---------- An entry: a row that opens ---------- */
+.ax-ed-entry {
+  --surface: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+}
+.ax-ed-entry-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-right: var(--space-2);
+}
+.ax-ed-entry-open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 48px;
+  padding: var(--space-2) var(--space-1) var(--space-2) var(--space-2);
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ax-ed-entry-open > svg {
+  flex: none;
+  color: var(--ink-3);
+  transition: transform var(--dur) var(--ease);
+}
+.ax-ed-entry-open[aria-expanded="true"] > svg {
+  transform: rotate(90deg);
+}
+.ax-ed-entry-open:focus-visible {
+  outline-offset: -2px;
+}
+.ax-ed-entry-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+.ax-ed-entry-text strong,
+.ax-ed-entry-text small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ax-ed-entry-text strong {
+  font-weight: 500;
+}
+.ax-ed-entry-text small {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.ax-ed-entry-count {
+  flex: none;
+  color: var(--ink-3);
+  font-family: var(--font-data);
+  font-size: var(--text-data);
+}
+/* Reordering and hiding stay out of the way until you point at the row. A touch screen always shows them. */
+@media (hover: hover) {
+  .ax-ed-entry-head .ax-ed-tools > :not([aria-pressed="true"]),
+  .ax-ed-group-head .ax-ed-tools > :not([aria-pressed="true"]),
+  .ax-ed-bullet .ax-ed-tools > * {
+    opacity: 0;
+    transition: opacity var(--dur) var(--ease);
+  }
+  .ax-ed-entry-head:hover .ax-ed-tools > *,
+  .ax-ed-entry-head:focus-within .ax-ed-tools > *,
+  .ax-ed-group-head:hover .ax-ed-tools > *,
+  .ax-ed-group-head:focus-within .ax-ed-tools > *,
+  .ax-ed-bullet:hover .ax-ed-tools > *,
+  .ax-ed-bullet:focus-within .ax-ed-tools > * {
+    opacity: 1;
+  }
+}
+.ax-ed-entry-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  border-top: 1px solid var(--line-soft);
+}
+.ax-ed-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.ax-ed-pair > .ax-field {
+  margin: 0;
+}
+.ax-ed-bullets-head {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  font-weight: 400;
+}
+.ax-ed-bullet {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 24px;
+  align-items: start;
+  gap: var(--space-2);
+}
+.ax-ed-bullet input[type="checkbox"] {
+  margin-top: 9px;
+}
+.ax-ed-bullet-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ax-ed-bullet-text small {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+/* Grows with the text: no scrollbar, no handle. */
+.ax-ed-grow {
+  display: block;
+  overflow: hidden;
+  resize: none;
+  line-height: 1.45;
+}
+
+/* ---------- Layout ---------- */
+.ax-ed-templates {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
 }
 .ax-ed-templates button {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: var(--space-2) 0;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  background: none;
+  align-items: stretch;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
   color: var(--ink-2);
   font: inherit;
-  font-size: var(--text-ui);
-  text-align: left;
+  font-size: var(--text-meta);
+  text-align: center;
   cursor: pointer;
+  transition:
+    border-color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+.ax-ed-templates button:hover {
+  border-color: var(--line-strong);
 }
 .ax-ed-templates button[aria-checked="true"] {
-  padding-right: var(--space-2);
-  padding-left: var(--space-2);
-  background: var(--tint);
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
   color: var(--ink);
 }
-.ax-ed-templates small {
-  color: var(--ink-3);
+.ax-ed-templates strong {
+  font-weight: 500;
+}
+/* A small drawing of the page each template makes. */
+.ax-ed-tpl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  height: 58px;
+  padding: 7px 8px;
+  overflow: hidden;
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.ax-ed-tpl i {
+  display: block;
+  flex: none;
+  height: 2px;
+  background: var(--dot-off);
+  opacity: 0.55;
+}
+.ax-ed-tpl i:first-child {
+  align-self: center;
+  width: 46%;
+  height: 4px;
+  opacity: 1;
+}
+.ax-ed-tpl i:nth-child(2) {
+  align-self: center;
+  width: 70%;
+}
+.ax-ed-tpl i:nth-child(3) {
+  height: 1px;
+  margin-top: 3px;
+  opacity: 1;
+}
+.ax-ed-tpl i:nth-child(5) {
+  width: 80%;
+}
+.ax-ed-tpl.is-modern i:first-child,
+.ax-ed-tpl.is-modern i:nth-child(2),
+.ax-ed-tpl.is-compact i:first-child,
+.ax-ed-tpl.is-compact i:nth-child(2) {
+  align-self: flex-start;
+}
+.ax-ed-tpl.is-compact {
+  gap: 2px;
+}
+.ax-ed-tpl.is-compact i:nth-child(3) {
+  height: 2px;
+  margin-top: 1px;
+  opacity: 0.55;
 }
 .ax-ed-slider,
 .ax-ed-choice {
   display: grid;
-  grid-template-columns: 110px minmax(0, 1fr) 56px;
+  grid-template-columns: 112px minmax(0, 1fr) 60px;
   align-items: center;
   gap: var(--space-2);
+  min-height: 32px;
   color: var(--ink-2);
-  font-size: var(--text-ui);
+  font-size: var(--text-body);
 }
 .ax-ed-choice {
-  grid-template-columns: 110px minmax(0, 1fr);
+  grid-template-columns: 112px minmax(0, 1fr);
+  justify-items: start;
 }
 .ax-ed-slider input[type="range"] {
+  --fill: 50%;
+  appearance: none;
+  width: 100%;
   min-height: 0;
+  height: 20px;
   padding: 0;
   border: 0;
   background: none;
-  accent-color: var(--ink);
+  cursor: pointer;
+}
+.ax-ed-slider input[type="range"]::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--ink) var(--fill), var(--line-strong) var(--fill));
+}
+.ax-ed-slider input[type="range"]::-moz-range-track {
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--ink) var(--fill), var(--line-strong) var(--fill));
+}
+.ax-ed-slider input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5.5px;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  background: var(--surface, var(--sheet));
+  transition: transform var(--dur) var(--ease);
+}
+.ax-ed-slider input[type="range"]::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  background: var(--sheet);
+}
+.ax-ed-slider input[type="range"]:hover::-webkit-slider-thumb {
+  transform: scale(1.12);
 }
 .ax-ed-slider output {
   color: var(--ink);
+  font-size: var(--text-data);
   text-align: right;
+  white-space: nowrap;
+}
+
+/* ---------- Source: the code fills the side ---------- */
+.ax-ed-source {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
 }
 .ax-ed-code {
   display: grid;
+  flex: 1;
   grid-template-columns: auto minmax(0, 1fr);
-  height: min(62vh, 640px);
+  min-height: 260px;
   overflow: hidden;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
+  background: var(--inset);
 }
 .ax-ed-gutter {
   overflow: hidden;
   padding: var(--space-2);
   border-right: 1px solid var(--line);
   color: var(--ink-3);
-  font: var(--text-meta) / 1.6 var(--font-data);
+  font: var(--text-data) / 1.6 var(--font-data);
   text-align: right;
   user-select: none;
 }
@@ -188,107 +513,131 @@
 }
 .ax-ed-gutter .is-bad {
   color: var(--bad);
+  font-weight: 600;
 }
 .ax-ed-code textarea {
+  width: 100%;
   height: 100%;
+  min-height: 0;
   padding: var(--space-2);
   overflow: auto;
   border: 0;
   border-radius: 0;
   background: none;
-  font: var(--text-meta) / 1.6 var(--font-data);
+  color: var(--ink);
+  font: var(--text-data) / 1.6 var(--font-data);
   resize: none;
   white-space: pre;
 }
+/* The well is the field: its edge says it has focus. */
+.ax-ed-code:focus-within {
+  border-color: var(--line-strong);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+.ax-ed-code textarea:focus-visible {
+  outline: 0;
+}
+.ax-ed-code textarea[readonly] {
+  color: var(--ink-2);
+}
 
-/* The preview: the page on a neutral ground; a failed compile leaves the last good page, dimmed, and lists why under it. */
+/* ---------- The page: on an inset well. A failed build leaves the last good page, dimmed, and says why under it. ---------- */
 .ax-ed-preview {
   position: relative;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
-  background: var(--tint);
+  background: var(--inset);
 }
-.ax-ed-preview > .ax-chips {
-  padding: var(--space-2) var(--space-4) 0;
+.ax-ed-views {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 40px;
+  padding: var(--space-1) var(--space-2);
+}
+.ax-ed-check {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.ax-ed-compare {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-height: 0;
+}
+.ax-ed-compare figure {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+}
+.ax-ed-compare figure + figure {
+  border-left: 1px solid var(--line);
+}
+.ax-ed-compare figcaption {
+  flex: none;
+  padding: var(--space-1) var(--space-4) 0;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  text-align: center;
+}
+.ax-ed-compare .ax-pdf-host {
+  padding: var(--space-3);
 }
 .ax-ed-preview.is-stale .ax-pdf-stack {
   opacity: 0.55;
 }
 .ax-ed-errors {
+  flex: none;
   align-items: flex-start;
   flex-direction: column;
+  max-height: 40%;
+  overflow-y: auto;
   padding: var(--space-3) var(--space-4);
   border-top: 1px solid var(--line);
-  background: var(--plate);
+  background: var(--raised);
 }
 .ax-ed-errors ul {
   margin: 0;
   padding-left: var(--space-4);
 }
-.ax-pdf {
-  position: relative;
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-}
-.ax-pdf-tools {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-1);
-  padding: var(--space-1) var(--space-3);
-}
-.ax-pdf-host {
-  flex: 1;
-  overflow: auto;
-  padding: var(--space-4) var(--space-6) var(--space-6);
-}
-.ax-pdf-stack {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-5);
-}
-.ax-pdf-page {
-  display: block;
-  background: var(--paper);
-  box-shadow: var(--paper-shadow);
-}
 
-/* Narrow: the form is above the page and the region scrolls as a whole. */
-@media (max-width: 960px) {
-  .ax-scroll.is-fixed {
-    overflow-y: auto;
-  }
-  .main.view-editor,
-  .ax-ed {
-    height: auto;
-  }
-  .ax-ed-grid {
+/* Under 960px one side at a time: the buttons swap them, and each still scrolls by itself. */
+@media (max-width: 959px) {
+  .ax-ed-grid,
+  .ax-ed-grid.is-form-closed {
     grid-template-columns: minmax(0, 1fr);
   }
   .ax-ed-panel {
     border-right: 0;
-    border-bottom: 1px solid var(--line);
   }
-  .ax-ed-scroll {
-    overflow: visible;
+  .ax-ed-bar {
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
   }
-  .ax-ed-preview {
-    height: 80vh;
+  /* Two rows: back and the name, then the status and the actions. */
+  .ax-ed-name {
+    flex: 1 1 calc(100% - 56px);
   }
-  .ax-ed-jump {
-    display: inline-flex;
-    align-self: center;
+  .ax-ed-job,
+  .ax-ed-bar > .ax-mono {
+    display: none;
   }
   .ax-ed-status {
-    order: 3;
-    width: 100%;
-    margin-left: 0;
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-left: var(--space-1);
   }
-  .ax-ed-tabs {
-    padding-left: var(--gutter);
+  .ax-ed-status .ax-pill {
+    white-space: normal;
+  }
+}
+@media (max-width: 480px) {
+  .ax-ed-pair {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

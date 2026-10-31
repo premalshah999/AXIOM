@@ -1,6 +1,9 @@
 import type { ReactNode } from "react";
 
-/** A plain titled section on a hairline, not a card. `actions` sits at the right of the title; `flush` is for a table inside. */
+/**
+ * A raised surface that groups something, with a title and `actions` at its right; inside a drawer, a dialog or another panel it is
+ * a plain section. `flush` drops the padding for a list or table that brings its own rules.
+ */
 export function Panel({
   title,
   actions,

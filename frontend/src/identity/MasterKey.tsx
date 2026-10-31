@@ -1,6 +1,6 @@
 import type { ButtonHTMLAttributes } from "react";
 
-/** The round key: the one thing on the panel you press. Its face says one word; `aria-label` says what it does in full. */
+/** The round key: the one thing on Overview you press. Its face says one word; `aria-label` says what it does in full. */
 export function MasterKey({
   word,
   icon,
