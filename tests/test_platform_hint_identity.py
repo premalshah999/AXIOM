@@ -94,7 +94,7 @@ async def test_a_confirmed_application_under_one_url_blocks_the_other(service):
         s.add(Run(id="done", job_id="plain", mode="submit", state="confirmed", receipt={}))
     with pytest.raises(QueueBlocked) as caught:
         await service._queue("hinted", "submit")
-    assert caught.value.code == "submitted_or_uncertain"
+    assert caught.value.code == "duplicate_posting"
 
 
 def test_the_retry_budget_is_shared_by_both_urls(service):
@@ -164,7 +164,7 @@ async def test_a_confirmed_smartrecruiters_application_blocks_its_slug_twin(serv
         s.add(Run(id="sr-done", job_id="plain-sr", mode="submit", state="confirmed", receipt={}))
     with pytest.raises(QueueBlocked) as caught:
         await service._queue("slug-sr", "submit")
-    assert caught.value.code == "submitted_or_uncertain"
+    assert caught.value.code == "duplicate_posting"
 
 
 def test_a_reposted_workday_requisition_is_one_job():

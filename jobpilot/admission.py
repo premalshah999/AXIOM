@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from .ats import detect
 from .db import Event, Job, Run, Setting
@@ -46,6 +46,24 @@ SHARED_LINK_HOSTS = {
     "go.vansh.nyc", "bit.ly", "lnkd.in", "tinyurl.com", "t.co", "ow.ly", "buff.ly", "rebrand.ly", "cutt.ly",
     "short.gy", "simplify.jobs", "jobright.ai",
 }
+
+
+def requisition_twins(session, job_id, urls):
+    """(id, url) of every other job that is the same requisition as one of `urls` under another link, on any platform:
+    the employer's page around a Greenhouse or Ashby form beside the board URL, an embed, an /apply tail, a Workday or
+    iCIMS portal variant (ats.requisition_keys). Roblox, Abnormal, Rubrik and IXL applied twice that way (2026-10)."""
+    from .ats import requisition_keys
+
+    wanted = {key: needle for url in urls for key, needle in requisition_keys(url)}
+    if not wanted:
+        return []
+    # The id is searched in the stored links first (one pass over the url column); keys decide.
+    rows = session.execute(
+        select(Job.id, Job.url).where(
+            Job.id != job_id, Job.demo.is_(False), or_(*[Job.url.icontains(n, autoescape=True) for n in set(wanted.values())])
+        )
+    )
+    return [(row.id, row.url) for row in rows if wanted.keys() & {key for key, _ in requisition_keys(row.url)}]
 
 
 def employer_partition(job):
@@ -193,13 +211,28 @@ def outcome_for(exc):
 UNKNOWN_RESUBMIT = {"enabled": False, "max_resubmits": 2, "receipt_wait_minutes": 30}
 
 
-def unknown_resubmit_allowed(session, runs, at=None):
+# How long a search of the mailbox for an uncertain application's acknowledgement stays good for a resubmission.
+RECEIPT_CHECK_VALID = timedelta(hours=1)
+
+
+def newest_unknown(runs):
+    """The uncertain run a resubmission and its mailbox search are about: the one that finished last."""
+    return max(
+        (r for r in runs if r.state == "submission_unknown"), key=lambda r: r.finished_at or r.created_at, default=None
+    )
+
+
+def unknown_resubmit_allowed(session, runs, at=None, *, checked=True):
     """When the installation enables it: retry uncertain submissions until confirmed.
 
     Bounded so a site that silently accepts cannot collect a pile of duplicates:
     no confirmed/already-applied run, no matched receipt email, the newest
-    uncertain attempt is old enough for its receipt to have arrived, and at most
-    `max_resubmits` retries after the first uncertain attempt.
+    uncertain attempt is old enough for its receipt to have arrived, at most
+    `max_resubmits` retries after the first uncertain attempt, and (`checked`) the mailbox was searched for this
+    application's acknowledgement after that wait (autopilot.receipt_first writes `unknown_receipt_check:<job>`).
+    Asana, Assured Guaranty and Perseus were resubmitted on the matcher's silence while the employer's
+    acknowledgement sat in the mailbox (2026-10-12); every caller passes through here, so none can skip the search.
+    `checked=False` asks whether the search is the only thing missing.
     """
     saved = session.get(Setting, "unknown_resubmit_policy")
     policy = {**UNKNOWN_RESUBMIT, **(saved.value if saved else {})}
@@ -221,15 +254,31 @@ def unknown_resubmit_allowed(session, runs, at=None):
     )
     if triage and triage.value.get("verdict") == "submitted":
         return False
-    newest = max((r.finished_at or r.created_at) for r in unknown)
+    last = newest_unknown(runs)
     try:
-        finished = datetime.fromisoformat(newest)
+        finished = datetime.fromisoformat(last.finished_at or last.created_at)
     except (TypeError, ValueError):
         return False
     now = at or datetime.now(UTC)
     if finished.tzinfo is None:
         finished = finished.replace(tzinfo=UTC)
-    return now - finished >= timedelta(minutes=int(policy.get("receipt_wait_minutes", 30)))
+    wait = timedelta(minutes=int(policy.get("receipt_wait_minutes", 30)))
+    if now - finished < wait:
+        return False
+    if not checked:
+        return True
+    search = session.get(Setting, "unknown_receipt_check:" + str(getattr(last, "job_id", "")))
+    try:
+        searched = datetime.fromisoformat(search.value["at"])
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return False
+    if searched.tzinfo is None:
+        searched = searched.replace(tzinfo=UTC)
+    return (
+        search.value.get("run_id") == getattr(last, "id", None)
+        and finished + wait <= searched
+        and now - searched <= RECEIPT_CHECK_VALID
+    )
 
 
 # A cancelled run that sent nothing to the employer is not an attempt. Only the app's own cancellations qualify; a
