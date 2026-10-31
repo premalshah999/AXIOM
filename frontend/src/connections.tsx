@@ -1,10 +1,15 @@
-import { useId, useState, type ReactNode } from "react";
+// Settings › Connections: the services AXIOM talks to, one card each, with what is true about it (a key is saved, it works, it is in
+// use). Keys are masked by the server and are never read back: a card replaces one, it cannot show one.
+import { useEffect, useId, useState, type ReactNode } from "react";
+import { KeyRound, ListChecks, Mail, Search, Send, ShieldCheck, type LucideIcon } from "lucide-react";
 import { api } from "./api";
-import { routeUrl, useWorkspace } from "./context";
+import { useWorkspace } from "./context";
 import { useAction, usePoll } from "./hooks";
-import { Actions, FormGrid, RestartNotice, SaveBar, SecretInput } from "./setup-kit";
+import { mailHealth } from "./mail";
+import { RestartNotice, SaveBar, SecretInput, SwitchRow } from "./setup-kit";
 import type { MailStatus } from "./types";
-import { Button, Empty, ErrorLine, External, Input, Loading, Panel, Pill, Select } from "./ui/index";
+import "./styles/settings.css";
+import { Button, Check, Empty, Input, Monogram, Pill, Select } from "./ui/index";
 
 type ConnectionField = {
   name: string;
@@ -28,51 +33,33 @@ type ConnectionField = {
 };
 
 type Connections = { fields: ConnectionField[]; provider: string; model_ready: boolean };
-
-// `tag` is the one thing a person needs to know before filling a group in: whether it can wait.
-const GROUPS = [
-  { id: "Model", title: "AI model", tag: "Required" },
-  { id: "Email", title: "Gmail", tag: "Required" },
-  { id: "Accounts", title: "Employer accounts", tag: "" },
-  { id: "Captcha", title: "Captcha solving", tag: "Optional" },
-  { id: "Telegram", title: "Telegram", tag: "Optional" },
-  { id: "Discovery", title: "Job search", tag: "Optional" },
-  { id: "Limits", title: "Limits", tag: "" },
-  { id: "Vision", title: "Screenshot model", tag: "Optional" },
-  { id: "Workers", title: "Workers", tag: "Applies after a restart" },
-];
-
-const PROVIDERS = [
-  { id: "deepseek", label: "DeepSeek (recommended, lowest cost)" },
-  { id: "haiku", label: "Anthropic Claude Haiku" },
-  { id: "mimo", label: "Xiaomi MiMo" },
-  { id: "openai", label: "OpenAI GPT-6 Luna (cheapest setting)" },
-  { id: "openrouter", label: "OpenRouter: DeepSeek V4.1 Flash (choose its host below)" },
-];
-
 type TestResult = { ok: boolean; message: string };
 
 /** The value a field shows when nothing is typed: what the next start will use. */
 const shown = (f: ConnectionField) => (f.pending || f.value || "") as string;
 
-/** Settings › Connections: every service key and setting is entered here; nothing needs editing in .env. */
-export function ConnectionSettings() {
+/**
+ * One form over /api/connections. Several parts of Settings edit different fields of it (the cards here, the limits under
+ * Applying, the workers under Advanced), each with its own copy of this and its own save bar. A field counts as changed only
+ * when its draft differs from what is saved, so typing a value back is not a change.
+ */
+export function useConnections() {
   const state = usePoll<Connections>((signal) => api("/connections", "GET", undefined, signal), 60000);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [results, setResults] = useState<Record<string, TestResult>>({});
+  // Bumped when a save or discard settles, so a card that was open for typing closes.
+  const [epoch, setEpoch] = useState(0);
   const { pending, run } = useAction();
   const data = state.data && Array.isArray(state.data.fields) ? state.data : null;
   const fields = data?.fields ?? [];
-  const byName = (name: string) => fields.find((f) => f.name === name);
-
-  // A field is changed only when its draft differs from what is saved, so typing a value back is not a change.
+  const by = (name: string) => fields.find((f) => f.name === name);
   const same = (name: string, value: string) => {
-    const f = byName(name);
+    const f = by(name);
     if (!f) return false;
     if (name === "llm_provider") return value === data?.provider;
     return f.kind === "secret" ? value === "" : value === shown(f);
   };
-  const setField = (name: string, value: string) =>
+  const set = (name: string, value: string) =>
     setDraft((d) => {
       const next = { ...d };
       if (same(name, value)) delete next[name];
@@ -80,173 +67,181 @@ export function ConnectionSettings() {
       return next;
     });
   const changes = Object.keys(draft);
-  const changed = changes.length > 0;
-  const restartNeeded = changes.some((name) => byName(name)?.restart);
+  const restartNeeded = changes.some((name) => by(name)?.restart);
+  return {
+    state,
+    data,
+    fields,
+    by,
+    draft,
+    set,
+    results,
+    pending,
+    epoch,
+    changes,
+    restartNeeded,
+    value: (name: string) => draft[name] ?? (by(name) ? shown(by(name)!) : ""),
+    discard: () => {
+      setDraft({});
+      setEpoch((e) => e + 1);
+    },
+    save: () =>
+      run(
+        "save",
+        async () => {
+          await api<Connections>("/connections", "PUT", { values: draft });
+          setDraft({});
+          setEpoch((e) => e + 1);
+          await state.refresh();
+        },
+        restartNeeded ? "Saved. Worker settings apply after the app restarts." : "Settings saved.",
+      ),
+    test: (name: string) =>
+      run(`test:${name}`, async () => {
+        const result = await api<TestResult>(`/connections/${name}/test`, "POST");
+        setResults((r) => ({ ...r, [name]: result }));
+        return result;
+      }),
+  };
+}
+export type Conn = ReturnType<typeof useConnections>;
 
-  const save = () =>
-    run(
-      "save",
-      async () => {
-        await api<Connections>("/connections", "PUT", { values: draft });
-        setDraft({});
-        await state.refresh();
-      },
-      restartNeeded ? "Saved. Worker settings apply after the app restarts." : "Settings saved.",
-    );
+/** The sticky Save for any form built on useConnections. */
+function ConnectionBar({ c }: { c: Conn }) {
+  const n = c.changes.length;
+  return (
+    <SaveBar
+      dirty={n > 0}
+      saving={c.pending === "save"}
+      onSave={c.save}
+      onDiscard={c.discard}
+      label={n > 1 ? `Save ${n} changes` : "Save"}
+      note={c.restartNeeded ? "Unsaved changes. Worker settings apply after a restart." : undefined}
+    />
+  );
+}
 
-  const test = (name: string) =>
-    run(`test:${name}`, async () => {
-      const result = await api<TestResult>(`/connections/${name}/test`, "POST");
-      setResults((r) => ({ ...r, [name]: result }));
-      return result;
-    });
-
-  if (state.error && !data)
+/** What a failed load or a first load looks like, in the shape of the page it replaces. */
+export function ConnectionsGate({ c, children }: { c: Conn; children: (data: Connections) => ReactNode }) {
+  if (c.state.error && !c.data)
     return (
-      <Panel title="Connections">
-        <Empty
-          title="Could not load the connections"
-          hint={state.error.message}
-          action={
-            <Button size="sm" onClick={state.refresh}>
-              Try again
-            </Button>
-          }
-        />
-      </Panel>
+      <Empty
+        title="Could not load the connections"
+        hint={c.state.error.message}
+        action={
+          <Button size="sm" onClick={c.state.refresh}>
+            Try again
+          </Button>
+        }
+      />
     );
-  if (!data)
+  if (!c.data)
     return (
-      <Panel title="Connections">
-        <Loading />
-      </Panel>
+      <div className="st-cards" role="status" aria-label="Loading">
+        {[0, 1, 2, 3].map((i) => (
+          <div className="st-card" key={i}>
+            <span className="ax-skeleton" style={{ width: "42%" }} />
+            <span className="ax-skeleton" style={{ width: "78%" }} />
+            <span className="ax-skeleton" style={{ height: 34 }} />
+          </div>
+        ))}
+      </div>
     );
+  return <>{children(c.data)}</>;
+}
 
-  const known = new Set(GROUPS.map((g) => g.id));
-  const groups = [
-    ...GROUPS,
-    // A setting in a group this page does not know yet still gets a panel rather than vanishing.
-    ...[...new Set(fields.map((f) => f.group).filter((g) => g && !known.has(g)))].map((g) => ({
-      id: g,
-      title: g,
-      tag: "",
-    })),
-  ];
-  const needsRestart = fields.some((f) => f.pending);
+// ---------- Field editors ----------
 
+/** A saved secret: the masked value, Test, and Replace. Typing a new one never shows the old. */
+function SecretField({ c, name, lead, label }: { c: Conn; name: string; lead?: ReactNode; label?: string }) {
+  const f = c.by(name);
+  const id = useId();
+  const [editing, setEditing] = useState(false);
+  useEffect(() => setEditing(false), [c.epoch]);
+  if (!f) return null;
+  const typed = c.draft[name];
+  const open = editing || typed !== undefined;
+  const result = c.results[name];
+  const cancel = () => {
+    c.set(name, "");
+    setEditing(false);
+  };
   return (
     <>
-      {!data.model_ready && (
-        <div className="ax-notice is-bad" role="alert">
-          <span>
-            Add a key for the selected AI model below. Until then the guide cannot read your resume and no application
-            can run.
-          </span>
+      {open ? (
+        <div className="ax-field">
+          <label className="ax-label" htmlFor={id}>
+            {label ?? f.label}
+          </label>
+          <SecretInput
+            id={id}
+            label={f.label}
+            placeholder={f.set ? "Paste the new key" : "Paste the key"}
+            value={typed ?? ""}
+            onChange={(v) => c.set(name, v)}
+            extra={
+              <Button size="sm" variant="ghost" onClick={cancel}>
+                Cancel
+              </Button>
+            }
+          />
+          {f.restart && <p className="ax-hint">Applies after a restart.</p>}
         </div>
+      ) : f.set ? (
+        <div className="st-key" aria-label={`${f.label}, saved`}>
+          <span>{f.value}</span>
+          <small>{f.source === "env" ? "From the server" : "Saved in AXIOM"}</small>
+        </div>
+      ) : (
+        <div className="st-key is-empty">No key saved</div>
       )}
-      {needsRestart && <RestartNotice message="New worker settings are saved. They take effect when the app restarts." />}
-      {groups.map((group) => {
-        const list = fields.filter((f) => f.group === group.id);
-        if (group.id === "Email")
-          return (
-            <Panel key={group.id} title={group.title} actions={group.tag && <span className="ax-hint">{group.tag}</span>}>
-              <GmailConnection />
-            </Panel>
-          );
-        if (!list.length) return null;
-        return (
-          <Panel key={group.id} title={group.title} actions={group.tag && <span className="ax-hint">{group.tag}</span>}>
-            <FormGrid>
-              {list.map((f) => (
-                <ConnField
-                  key={f.name}
-                  f={f}
-                  provider={data.provider}
-                  value={draft[f.name]}
-                  onChange={(v) => setField(f.name, v)}
-                  result={results[f.name]}
-                  testing={pending === `test:${f.name}`}
-                  busy={pending !== null}
-                  onTest={() => test(f.name)}
-                />
-              ))}
-            </FormGrid>
-          </Panel>
-        );
-      })}
-      <SaveBar
-        dirty={changed}
-        saving={pending === "save"}
-        onSave={save}
-        onDiscard={() => setDraft({})}
-        label={changed ? `Save ${changes.length} change${changes.length > 1 ? "s" : ""}` : "Save"}
-        note={restartNeeded ? "Unsaved changes. Worker settings apply after a restart." : undefined}
-      />
+      <div className="st-card-foot">
+        {lead}
+        {!open && f.set && (
+          <Button size="sm" loading={c.pending === `test:${name}`} disabled={c.pending !== null && c.pending !== `test:${name}`} onClick={() => c.test(name)}>
+            Test
+          </Button>
+        )}
+        {!open && (
+          <Button size="sm" variant={f.set ? "ghost" : "secondary"} onClick={() => setEditing(true)}>
+            {f.set ? "Replace key" : "Add key"}
+          </Button>
+        )}
+        {result && !open && (
+          <span className={"st-result" + (result.ok ? "" : " is-bad")} role="status">
+            <Pill tone={result.ok ? "ok" : "bad"} dot>
+              {result.ok ? "Works" : "Failed"}
+            </Pill>
+            <span title={result.message}>{result.message}</span>
+          </span>
+        )}
+      </div>
     </>
   );
 }
 
-function ConnField({
-  f,
-  provider,
-  value,
-  onChange,
-  result,
-  testing,
-  busy,
-  onTest,
-}: {
-  f: ConnectionField;
-  provider: string;
-  value: string | undefined;
-  onChange: (value: string) => void;
-  result?: TestResult;
-  testing: boolean;
-  busy: boolean;
-  onTest: () => void;
-}) {
-  const id = useId();
-  const options = f.options ?? [];
-  const dirty = value !== undefined;
-  const pendingNote = f.pending ? (
-    <strong>
-      {" "}
-      Running {f.kind === "bool" ? (f.value === "true" ? "on" : "off") : f.value || "unset"}; saved{" "}
-      {f.kind === "bool" ? (f.pending === "true" ? "on" : "off") : f.pending}, used after a restart.
-    </strong>
-  ) : f.restart && dirty ? (
-    <strong> Applies after a restart.</strong>
-  ) : null;
-  const outcome = result && (
-    <span role="status">
-      {" "}
-      <Pill tone={result.ok ? "neutral" : "bad"} dot>
-        {result.message}
-      </Pill>
-    </span>
-  );
-  const hint: ReactNode = (
+/** Any other field, by its own type. `hint` replaces the server's help line. */
+export function FieldInput({ c, name, hint, label }: { c: Conn; name: string; hint?: ReactNode; label?: string }) {
+  const f = c.by(name);
+  if (!f) return null;
+  const value = c.draft[name] ?? shown(f);
+  const dirty = c.draft[name] !== undefined;
+  const text = f.kind === "bool" ? (v: string) => (v === "true" ? "on" : "off") : (v: string) => v || "unset";
+  const note = f.pending ? (
     <>
-      {f.help}
-      {pendingNote}
-      {outcome}
+      {hint ?? f.help} <strong>Running {text(f.value)}; saved {text(f.pending)}, used after a restart.</strong>
     </>
+  ) : f.restart && dirty ? (
+    <>
+      {hint ?? f.help} <strong>Applies after a restart.</strong>
+    </>
+  ) : (
+    (hint ?? f.help)
   );
-
-  if (f.name === "llm_provider")
+  if (f.options?.length)
     return (
-      <Select label={f.label} hint={f.help} value={value ?? provider} onChange={(e) => onChange(e.target.value)}>
-        {PROVIDERS.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.label}
-          </option>
-        ))}
-      </Select>
-    );
-  if (options.length)
-    return (
-      <Select label={f.label} hint={hint} value={value ?? shown(f)} onChange={(e) => onChange(e.target.value)}>
-        {[...new Set([...options, shown(f)].filter(Boolean))].map((o) => (
+      <Select label={label ?? f.label} hint={note} value={value} onChange={(e) => c.set(name, e.target.value)}>
+        {[...new Set([...f.options, shown(f)].filter(Boolean))].map((o) => (
           <option key={o} value={o}>
             {f.option_labels?.[o] || o}
           </option>
@@ -254,169 +249,404 @@ function ConnField({
       </Select>
     );
   if (f.kind === "bool")
-    return (
-      <Select
-        label={f.label}
-        hint={hint}
-        value={value ?? (shown(f) === "true" ? "true" : "false")}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="true">On</option>
-        <option value="false">Off</option>
-      </Select>
-    );
-  if (f.kind === "secret") {
-    // Saved keys are masked by the API ("····5d30") and cannot be revealed; the control either replaces them or sets
-    // a first one. Show/Hide reveals only what is being typed.
-    return (
-      <div className="ax-field">
-        <label className="ax-label" htmlFor={id}>
-          {f.label} <Pill tone={f.set ? "ok" : "neutral"}>{f.set ? `Saved ${f.value || ""}`.trim() : "Not set"}</Pill>
-        </label>
-        <SecretInput
-          id={id}
-          label={f.label}
-          describedBy={id + "-msg"}
-          placeholder={f.set ? "Paste a new key to replace it" : "Paste here"}
-          value={value ?? ""}
-          onChange={onChange}
-          extra={
-            f.set ? (
-              <Button
-                size="sm"
-                loading={testing}
-                disabled={busy || dirty}
-                title={dirty ? "Save first, then test" : undefined}
-                onClick={onTest}
-              >
-                Test
-              </Button>
-            ) : null
-          }
-        />
-        <p className="ax-hint" id={id + "-msg"}>
-          {hint}
-        </p>
-      </div>
-    );
-  }
+    return <Check checked={value === "true"} onChange={(v) => c.set(name, v ? "true" : "false")} label={label ?? f.label} note={note} />;
   return (
     <Input
-      label={f.label}
-      hint={hint}
+      label={label ?? f.label}
+      hint={note}
       type={f.kind === "number" ? "number" : "text"}
       inputMode={f.kind === "number" ? "decimal" : undefined}
       step={f.kind === "number" ? "any" : undefined}
       autoComplete="off"
       spellCheck={false}
       placeholder="Not set"
-      value={value ?? shown(f)}
-      onChange={(e) => onChange(e.target.value)}
+      value={value}
+      onChange={(e) => c.set(name, e.target.value)}
     />
   );
 }
 
-// Gmail inside Connections: its status, and the same app-password connection as Setup › Email.
-function GmailConnection() {
-  const { snapshot, go } = useWorkspace();
-  const mail = usePoll<MailStatus>((signal) => api("/mail", "GET", undefined, signal), 60000);
-  const [form, setForm] = useState({ email: "", app_password: "" });
-  const { pending, run } = useAction();
-  const boxes = mail.data?.mailboxes || [];
-  const profileEmail = snapshot.profile?.email || "";
-  const connect = () =>
-    run(
-      "gmail",
-      async () => {
-        await api("/mail/imap", "POST", { ...form, email: form.email || profileEmail });
-        setForm({ email: "", app_password: "" });
-        await mail.refresh();
-      },
-      "Gmail connected. Verification codes and receipts are read automatically.",
-    );
+/** Fields that belong to Settings but not to a card (the limits, the workers): a plain grid under one save bar. */
+export function ConnectionFields({
+  names,
+  hints,
+  restart,
+}: {
+  names: string[];
+  hints?: Record<string, ReactNode>;
+  restart?: boolean;
+}) {
+  const c = useConnections();
   return (
-    <div className="ax-stack">
-      {mail.error && !mail.data && <ErrorLine error={mail.error} retry={mail.refresh} />}
-      {boxes.length > 0 && (
-        <ul className="ax-rows">
-          {boxes.map((b) => (
-            <li className="ax-row" key={b.id}>
-              <span className="ax-row-main">
-                <strong>{b.email}</strong>
-                <small>
-                  {b.provider === "gmail_imap" ? "App password" : b.provider === "gmail_oauth" ? "Google sign-in" : ""}
-                </small>
-              </span>
-              <span className="ax-row-end">
-                <Pill tone={b.state === "connected" ? "ok" : "warn"} dot>
-                  {(b.state || "unknown").replaceAll("_", " ")}
-                </Pill>
-                <a
-                  className="ax-btn is-sm"
-                  href={routeUrl({ view: "settings", tab: "email" })}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    go({ view: "settings", tab: "email" });
-                  }}
-                >
-                  Manage
-                </a>
-              </span>
-            </li>
-          ))}
-        </ul>
+    <ConnectionsGate c={c}>
+      {() => (
+        <>
+          {restart && c.fields.some((f) => f.pending) && (
+            <RestartNotice message="New worker settings are saved. They take effect when the app restarts." />
+          )}
+          <div className="st-fields">
+            {names.map((n) => (
+              <FieldInput key={n} c={c} name={n} hint={hints?.[n]} />
+            ))}
+          </div>
+          <ConnectionBar c={c} />
+        </>
       )}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          connect();
-        }}
-      >
-        <FormGrid>
-          <Input
-            label={boxes.length ? "Connect another Gmail" : "Gmail address"}
-            hint="Empty: the email in your profile."
-            type="email"
-            autoComplete="off"
-            placeholder={profileEmail || "you@gmail.com"}
-            value={form.email}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
-          />
-          <GmailPassword value={form.app_password} onChange={(v) => setForm({ ...form, app_password: v })} />
-        </FormGrid>
-        <Actions>
-          <Button
-            type="submit"
-            loading={pending === "gmail"}
-            disabled={!form.app_password.trim() || (pending !== null && pending !== "gmail")}
-          >
-            Connect
-          </Button>
-        </Actions>
-      </form>
-    </div>
+    </ConnectionsGate>
   );
 }
 
-function GmailPassword({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const id = useId();
+// ---------- Cards ----------
+
+export function Card({
+  icon,
+  mono,
+  name,
+  sub,
+  state,
+  current,
+  wide,
+  children,
+}: {
+  icon?: LucideIcon;
+  mono?: string;
+  name: string;
+  sub: ReactNode;
+  state?: ReactNode;
+  current?: boolean;
+  wide?: boolean;
+  children?: ReactNode;
+}) {
+  const Icon = icon;
   return (
-    <div className="ax-field">
-      <label className="ax-label" htmlFor={id}>
-        Gmail app password
-      </label>
-      <SecretInput
-        id={id}
-        label="app password"
-        describedBy={id + "-msg"}
-        placeholder="xxxx xxxx xxxx xxxx"
-        value={value}
-        onChange={onChange}
+    <article className={"st-card" + (current ? " is-current" : "") + (wide ? " is-wide" : "")} aria-label={name}>
+      <header className="st-card-head">
+        {mono ? (
+          <Monogram name={mono} size="md" />
+        ) : (
+          Icon && (
+            <span className="st-ico">
+              <Icon size={16} aria-hidden="true" />
+            </span>
+          )
+        )}
+        <div className="st-card-title">
+          <h3>{name}</h3>
+          <p>{sub}</p>
+        </div>
+        {state && <div className="st-card-state">{state}</div>}
+      </header>
+      {children}
+    </article>
+  );
+}
+
+// Which company runs OpenRouter's model, and what to do when it is busy. Read by the AI model card's owner, set under Advanced.
+const OPENROUTER = ["openrouter_provider", "openrouter_model", "openrouter_fallback_hosts"];
+
+const MODELS = [
+  { id: "deepseek", key: "deepseek_api_key", name: "DeepSeek", sub: "Recommended: the lowest cost." },
+  {
+    id: "openrouter",
+    key: "openrouter_api_key",
+    name: "OpenRouter",
+    sub: "DeepSeek V4.1 Flash. Choose which company runs it under Advanced.",
+  },
+  { id: "haiku", key: "haiku_api_key", name: "Anthropic Claude", sub: "Claude Haiku." },
+  { id: "openai", key: "openai_api_key", name: "OpenAI", sub: "GPT-6 Luna at its cheapest setting." },
+  { id: "mimo", key: "mimo_api_key", name: "Xiaomi MiMo", sub: "An optional third provider." },
+];
+
+function ModelCard({ c, m, current }: { c: Conn; m: (typeof MODELS)[number]; current: string }) {
+  const f = c.by(m.key);
+  const picked = current === m.id;
+  const unsaved = picked && c.data?.provider !== m.id;
+  const state = picked ? (
+    f?.set ? (
+      <Pill tone="ok" dot>
+        {unsaved ? "Selected" : "In use"}
+      </Pill>
+    ) : (
+      <Pill tone="warn" dot>
+        Needs a key
+      </Pill>
+    )
+  ) : (
+    <Pill tone="neutral" dot>
+      {f?.set ? "Key saved" : "No key"}
+    </Pill>
+  );
+  return (
+    <Card name={m.name} mono={m.name} sub={m.sub} state={state} current={picked}>
+      <SecretField
+        c={c}
+        name={m.key}
+        lead={
+          !picked && (
+            <Button
+              size="sm"
+              disabled={!f?.set}
+              title={f?.set ? undefined : "Add a key first"}
+              onClick={() => c.set("llm_provider", m.id)}
+            >
+              Use this one
+            </Button>
+          )
+        }
       />
-      <p className="ax-hint" id={id + "-msg"}>
-        16 letters from <External href="https://myaccount.google.com/apppasswords">myaccount.google.com/apppasswords</External>{" "}
-        (needs 2-Step Verification).
-      </p>
-    </div>
+    </Card>
+  );
+}
+
+type Service = {
+  id: string;
+  name: string;
+  icon: LucideIcon;
+  sub: string;
+  key: string;
+  fields?: string[];
+  more?: string[];
+  toggle?: { name: string; label: string; note: string };
+};
+
+const SERVICES: Service[] = [
+  {
+    id: "telegram",
+    name: "Telegram",
+    icon: Send,
+    sub: "Optional. Questions and alerts reach your phone; an answer sent there resumes the waiting job.",
+    key: "telegram_bot_token",
+    fields: ["telegram_user_id"],
+    toggle: { name: "telegram_enabled", label: "Send messages", note: "Questions and alerts go to Telegram." },
+  },
+  {
+    id: "captcha",
+    name: "2Captcha",
+    icon: ShieldCheck,
+    sub: "Optional, paid per solve. Solves the captchas that stop an application.",
+    key: "twocaptcha_api_key",
+    more: ["captcha_image_rounds", "captcha_timeout"],
+  },
+  {
+    id: "serper",
+    name: "Serper",
+    icon: Search,
+    sub: "Optional. Adds Google results when AXIOM searches for new employers.",
+    key: "serper_api_key",
+  },
+  {
+    id: "typesafe",
+    name: "TypeSafe",
+    icon: ListChecks,
+    sub: "Optional. Answers multiple-choice questions before the AI model does.",
+    key: "typesafe_api_key",
+  },
+  {
+    id: "employer",
+    name: "Employer sign-in",
+    icon: KeyRound,
+    sub: "The email and shared password AXIOM uses when it creates an employer account.",
+    key: "application_password",
+    fields: ["account_email"],
+  },
+];
+
+function ServiceCard({ c, s }: { c: Conn; s: Service }) {
+  const f = c.by(s.key);
+  if (!f) return null;
+  const on = s.toggle ? c.value(s.toggle.name) === "true" : true;
+  const state = f.set ? (
+    <Pill tone={on ? "ok" : "neutral"} dot>
+      {on ? "On" : "Off"}
+    </Pill>
+  ) : (
+    <Pill tone="neutral" dot>
+      Not set
+    </Pill>
+  );
+  return (
+    <Card name={s.name} icon={s.icon} sub={s.sub} state={state}>
+      {s.fields?.map((n) => (
+        <FieldInput
+          key={n}
+          c={c}
+          name={n}
+          hint={n === "account_email" ? "Empty: the email on your profile." : n === "telegram_user_id" ? "A number, from @userinfobot in Telegram." : undefined}
+        />
+      ))}
+      <SecretField c={c} name={s.key} />
+      {s.toggle && c.by(s.toggle.name) && (
+        <SwitchRow
+          label={s.toggle.label}
+          note={s.toggle.note}
+          checked={on}
+          onChange={() => c.set(s.toggle!.name, on ? "false" : "true")}
+        />
+      )}
+      {s.more && (
+        <details className="ax-fold st-more">
+          <summary>
+            <strong>Options</strong>
+          </summary>
+          <div className="st-fields">
+            {s.more.map((n) => (
+              <FieldInput key={n} c={c} name={n} />
+            ))}
+          </div>
+        </details>
+      )}
+    </Card>
+  );
+}
+
+/** Gmail's card tells the mailbox's real state; the mailbox itself is managed under Mailbox. */
+function GmailCard() {
+  const { go } = useWorkspace();
+  const mail = usePoll<MailStatus>((signal) => api("/mail", "GET", undefined, signal), 60000);
+  const boxes = mail.data?.mailboxes ?? [];
+  const health = boxes.length ? mailHealth(boxes[0]) : null;
+  const worst = boxes.map(mailHealth).find((h) => h.tone !== "ok") ?? health;
+  return (
+    <Card
+      name="Gmail"
+      icon={Mail}
+      sub="Required. Reads the verification codes and receipts employers send."
+      state={
+        !mail.data ? null : worst ? (
+          <Pill tone={worst.tone} dot>
+            {worst.label}
+          </Pill>
+        ) : (
+          <Pill tone="neutral" dot>
+            Not connected
+          </Pill>
+        )
+      }
+    >
+      {mail.error && !mail.data ? (
+        <div className="st-key is-empty">Could not read the mailbox</div>
+      ) : boxes.length ? (
+        boxes.map((b) => {
+          const h = mailHealth(b);
+          return (
+            <div className="st-key" key={b.id}>
+              <span>{b.email}</span>
+              <small>{h.when ? `${h.tone === "ok" ? "Checked" : "Worked"} ${h.when}` : ""}</small>
+            </div>
+          );
+        })
+      ) : (
+        <div className="st-key is-empty">{mail.data ? "No mailbox connected" : "Loading…"}</div>
+      )}
+      {worst && worst.tone !== "ok" && (
+        <div className="st-state">
+          <i className="ax-lamp is-ask" aria-hidden="true" />
+          <div>
+            <strong>{worst.detail}</strong>
+          </div>
+        </div>
+      )}
+      <div className="st-card-foot">
+        <Button size="sm" variant={boxes.length ? "secondary" : "primary"} onClick={() => go({ view: "settings", tab: "email" })}>
+          {boxes.length ? "Manage mailbox" : "Connect Gmail"}
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+/** Settings › Connections. */
+export function ConnectionSettings() {
+  const c = useConnections();
+  return (
+    <ConnectionsGate c={c}>
+      {(data) => {
+        const claimed = new Set([
+          "llm_provider",
+          ...MODELS.map((m) => m.key),
+          ...OPENROUTER,
+          ...SERVICES.flatMap((s) => [s.key, ...(s.fields ?? []), ...(s.more ?? []), ...(s.toggle ? [s.toggle.name] : [])]),
+        ]);
+        // Limits and workers are edited under Applying and Advanced; anything else the server adds still gets a field here.
+        const rest = c.fields.filter((f) => !claimed.has(f.name) && f.group !== "Limits" && f.group !== "Workers");
+        const current = c.draft.llm_provider ?? data.provider;
+        return (
+          <>
+            {!data.model_ready && (
+              <div className="ax-notice is-bad" role="alert">
+                <span>
+                  Add a key for the AI model in use. Until then AXIOM cannot read your resume and no application can run.
+                </span>
+              </div>
+            )}
+            <section className="st-group" aria-labelledby="st-ai">
+              <div className="st-head">
+                <div>
+                  <h2 id="st-ai">AI model</h2>
+                  <p>Reads job pages and writes your answers. One is in use at a time; the others stay ready as a backup.</p>
+                </div>
+              </div>
+              <div className="st-cards">
+                {MODELS.map((m) => (
+                  <ModelCard key={m.id} c={c} m={m} current={current} />
+                ))}
+              </div>
+            </section>
+            <section className="st-group" aria-labelledby="st-services">
+              <div className="st-head">
+                <div>
+                  <h2 id="st-services">Services</h2>
+                  <p>What AXIOM uses beside the AI model.</p>
+                </div>
+              </div>
+              <div className="st-cards">
+                <GmailCard />
+                {SERVICES.map((s) => (
+                  <ServiceCard key={s.id} c={c} s={s} />
+                ))}
+              </div>
+            </section>
+            <details className="ax-fold st-adv">
+              <summary>
+                <strong>Advanced</strong>
+                <span>OpenRouter hosting{rest.length ? " and a screenshot model" : ""}</span>
+              </summary>
+              <div className="st-adv-body">
+                <div>
+                  <h3>OpenRouter hosting</h3>
+                  <p className="ax-hint">Which company runs the model for OpenRouter, and what happens when it is busy. Prices are per million tokens.</p>
+                </div>
+                <div className="st-fields">
+                  {OPENROUTER.map((n) => (
+                    <FieldInput key={n} c={c} name={n} />
+                  ))}
+                </div>
+                {rest.length > 0 && (
+                  <>
+                    <div>
+                      <h3>Screenshot model</h3>
+                      <p className="ax-hint">Only needed if your AI model cannot read images.</p>
+                    </div>
+                    <div className="st-fields">
+                      {rest.map((f) =>
+                        f.kind === "secret" ? (
+                          <div className="ax-field" key={f.name}>
+                            <span className="ax-label">{f.label}</span>
+                            <SecretField c={c} name={f.name} />
+                          </div>
+                        ) : (
+                          <FieldInput key={f.name} c={c} name={f.name} />
+                        ),
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </details>
+            <ConnectionBar c={c} />
+          </>
+        );
+      }}
+    </ConnectionsGate>
   );
 }

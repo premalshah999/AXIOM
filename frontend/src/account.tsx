@@ -6,12 +6,13 @@ import { guideLater } from "./guide";
 import type { Profile } from "./types";
 import { day } from "./format";
 import { Wordmark } from "./shell/Brand";
-import { Facts, FormGrid } from "./setup-kit";
-import { Button, Check, ConfirmButton, ErrorLine, Field, Loading, Panel, Pill, Segmented } from "./ui/index";
+import { FormGrid } from "./setup-kit";
+import "./styles/settings.css";
+import { Button, Check, ConfirmButton, ErrorLine, Field, Loading, Monogram, Panel, Pill, Segmented, Skeleton } from "./ui/index";
 
 // ---------------------------------------------------------------------------
 // The owner's account (server: owner_account.py, api/routes/owner.py): sign-up with recovery codes, sign-in,
-// forgot password (recovery code, access token or the host command), and Settings › System › Your sign-in.
+// forgot password (recovery code, access token or the host command), and Settings › Your account.
 // ---------------------------------------------------------------------------
 
 export type AccountStatus = {
@@ -345,7 +346,7 @@ export function AuthScreen({ onSignedIn, notice = "" }: { onSignedIn: () => Prom
               {reset.left === 0
                 ? "That was your last recovery code."
                 : `${reset.left} recovery code${reset.left === 1 ? "" : "s"} left.`}{" "}
-              Generate new ones in Settings › System.
+              Generate new ones in Settings › Your account.
             </span>
           </div>
         )}
@@ -576,7 +577,7 @@ function TokenSignIn({
     status.installation === "has_data" ? (
       <>
         This installation already holds a profile or jobs, so it can't be claimed by signing up here. Sign in
-        with its access token, then add an email and password in Settings › System.
+        with its access token, then add an email and password in Settings › Your account.
       </>
     ) : (
       "Sign in with this installation's access token."
@@ -767,19 +768,32 @@ function Forgot({
 }
 
 // ---------------------------------------------------------------------------
-// Settings › System › Your sign-in
+// Settings › Your account
 // ---------------------------------------------------------------------------
 
-/** A labelled row of Settings: what it is and when it was last true, with its action at the right. */
-function SettingRow({ title, note, children }: { title: string; note?: React.ReactNode; children?: React.ReactNode }) {
+/** A row of Settings › Your account: what it is and when it was last true, with its action at the right. */
+function SettingRow({
+  title,
+  note,
+  children,
+  lead,
+}: {
+  title: string;
+  note?: React.ReactNode;
+  children?: React.ReactNode;
+  lead?: React.ReactNode;
+}) {
   return (
-    <div className="ax-row">
-      <span className="ax-row-main">
-        <strong>{title}</strong>
-        {note && <small>{note}</small>}
-      </span>
-      {children && <span className="ax-row-end">{children}</span>}
-    </div>
+    <li>
+      <div className="st-who">
+        {lead}
+        <div>
+          <strong>{title}</strong>
+          {note && <small>{note}</small>}
+        </div>
+      </div>
+      {children && <div className="st-rows-end">{children}</div>}
+    </li>
   );
 }
 
@@ -797,17 +811,36 @@ export function SignInSettings() {
     load();
   }, []);
   return (
-    <Panel title="Your sign-in">
+    <section className="st-group" aria-labelledby="st-account">
+      <div className="st-head">
+        <div>
+          <h2 id="st-account">Your account</h2>
+          <p>How you sign in to this dashboard.</p>
+        </div>
+      </div>
       <ErrorLine error={error} retry={load} />
       {!status ? (
-        !error && <Loading />
+        !error && <Skeleton rows={4} mono={false} />
       ) : status.exists ? (
-        <SignedInAccount status={status} reload={load} />
+        <Panel flush>
+          <ul className="st-rows">
+            <SignedInAccount status={status} reload={load} />
+            <GuideRow />
+          </ul>
+        </Panel>
       ) : (
-        <AddSignIn onAdded={load} />
+        <>
+          <Panel>
+            <AddSignIn onAdded={load} />
+          </Panel>
+          <Panel flush>
+            <ul className="st-rows">
+              <GuideRow />
+            </ul>
+          </Panel>
+        </>
       )}
-      <GuideRow />
-    </Panel>
+    </section>
   );
 }
 
@@ -824,13 +857,7 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
   const fewCodes = !codes || codes.left <= 3;
   return (
     <>
-      <Facts
-        items={[
-          ["Email", status.email || "—"],
-          ["Name", status.name || "—"],
-          ["This browser", browserSession(status)],
-        ]}
-      />
+      <SettingRow title={status.name || "Your account"} note={status.email || undefined} lead={<Monogram name={status.name || status.email} size="md" />} />
       <SettingRow
         title="Password"
         note={`${status.password_changed_at ? `Set ${day(status.password_changed_at)}. ` : ""}Changing it signs out every other browser.`}
@@ -838,13 +865,15 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
         {open !== "password" && <Button onClick={() => setOpen("password")}>Change password</Button>}
       </SettingRow>
       {open === "password" && (
-        <ChangePassword
-          close={() => setOpen("")}
-          done={() => {
-            setOpen("");
-            reload();
-          }}
-        />
+        <li className="is-open">
+          <ChangePassword
+            close={() => setOpen("")}
+            done={() => {
+              setOpen("");
+              reload();
+            }}
+          />
+        </li>
       )}
       <SettingRow
         title="Recovery codes"
@@ -858,16 +887,18 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
         {open !== "codes" && <Button onClick={() => setOpen("codes")}>{codes ? "Generate new codes" : "Generate codes"}</Button>}
       </SettingRow>
       {open === "codes" && (
-        <RegenerateCodes
-          close={() => setOpen("")}
-          done={() => {
-            setOpen("");
-            reload();
-          }}
-          replacing={!!codes}
-        />
+        <li className="is-open">
+          <RegenerateCodes
+            close={() => setOpen("")}
+            done={() => {
+              setOpen("");
+              reload();
+            }}
+            replacing={!!codes}
+          />
+        </li>
       )}
-      <SettingRow title="Sign out of this browser" note="Applications keep running on the server.">
+      <SettingRow title="This browser" note={`${browserSession(status)}. Applications keep running on the server.`}>
         <Button
           disabled={pending !== null}
           onClick={() =>
@@ -880,7 +911,7 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
           Sign out
         </Button>
       </SettingRow>
-      <SettingRow title="Sign out everywhere" note="Every browser, this one included, must sign in again. The access token keeps working.">
+      <SettingRow title="Every browser" note="Each one, this one included, must sign in again. The access token keeps working.">
         <ConfirmButton
           label="Sign out everywhere"
           confirm="Sign out every browser"
@@ -1109,7 +1140,7 @@ function GuideRow() {
           })
         }
       >
-        Open setup guide
+        Open the setup guide
       </Button>
     </SettingRow>
   );
