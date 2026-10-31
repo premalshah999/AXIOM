@@ -46,14 +46,21 @@ def test_saved_workday_posting_page_is_still_reopened():
 def test_one_not_found_at_the_posting_url_never_closes(service):
     result = missing_posting_result(service.db, job_row(), "run-1", JOB_URL)
     assert result["state"] == "waiting_browser"
-    assert result["recovery_cause"] == "posting_unavailable"
-    assert result["reason"] == POSTING_MISSING_REASON
+    assert result["recovery_cause"] == "site_temporary"  # the employer's search said nothing: tried again later
+    assert "tried again later" in result["reason"]
+    # The employer's search still listing the requisition is a different answer, and waits for the owner.
+    listed = missing_posting_result(service.db, job_row("j2"), "run-1", JOB_URL, listed=True)
+    assert listed["recovery_cause"] == "posting_unavailable" and listed["reason"] == POSTING_MISSING_REASON
 
 
-def test_two_distinct_runs_at_the_posting_url_close_the_job(service):
-    missing_posting_result(service.db, job_row(), "run-1", JOB_URL)
-    result = missing_posting_result(service.db, job_row(), "run-2", JOB_URL)
-    assert result == {"state": "closed", "reason": CLOSED_REASON}
+def test_repeated_not_found_pages_never_close_the_job_without_the_employers_search(service):
+    # Two runs used to close it (2026-10-17..31: 88 Workday postings, 23 thought still listed); now only the employer's
+    # own search closes, and the job stops retrying on a reason that says its availability is unknown.
+    results = [missing_posting_result(service.db, job_row(), f"run-{n}", JOB_URL) for n in range(1, 6)]
+    assert all(r["state"] == "waiting_browser" for r in results)
+    assert results[-1]["recovery_cause"] == "posting_unavailable" and "not closed" in results[-1]["reason"]
+    assert missing_posting_result(service.db, job_row(), "run-6", JOB_URL, listed=False) == {
+        "state": "closed", "reason": CLOSED_REASON}
 
 
 def test_the_same_run_observed_twice_counts_once(service):
