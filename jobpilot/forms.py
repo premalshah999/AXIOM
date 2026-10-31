@@ -6661,7 +6661,7 @@ class FormSession:
     @staticmethod
     def review_issues(text):
         """The items a review page marks "Fields to fix: N" (Oracle's education, experience and language tiles), each named
-        by the two lines above its notice: ["Data Science / University of Maryland (Fields to fix: 2)"]."""
+        by the two lines above its notice: ["Data Science / Example State University (Fields to fix: 2)"]."""
         lines = [line.strip() for line in str(text).splitlines() if line.strip()]
         found = []
         for i, line in enumerate(lines):
