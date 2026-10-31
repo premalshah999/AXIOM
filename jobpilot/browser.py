@@ -134,6 +134,8 @@ COMMIT_TRACKING = re.compile(
 # A page load the network refused once and may answer on a second try.
 NET_RETRY = re.compile(r"net::ERR_(?:CONNECTION_(?:CLOSED|RESET|TIMED_OUT)|NETWORK_CHANGED|TIMED_OUT|FAILED|EMPTY_RESPONSE)\b")
 NET_ERROR = re.compile(r"net::ERR_([A-Z_]+)")
+# Statuses a bot check or an access rule answers with while the platform may still have processed the write.
+AUTH_REFUSALS = {401, 403}
 WORKDAY_FAILURE = re.compile(
     r"something went wrong|unexpected (?:system )?error|session (?:has )?expired|"
     r"system (?:is )?(?:temporarily )?unavailable|server error",
@@ -4307,10 +4309,14 @@ class BrowserEngine:
         if not url or getattr(self.page, "url", "") != url or getattr(self, "commit_inflight", None):
             return False
         # A write the employer refused with a 4xx accepted nothing (Dallas County: its work-history item answered 400
-        # and the application was never posted). A 5xx may have been partly processed and stays uncertain.
+        # and the application was never posted). A 5xx may have been partly processed and stays uncertain, and so does
+        # a 401/403: Rippling answered its apply POST 401 "turnstile_verification_failure" and still created the
+        # application (Go Fish Digital 2026-10-28: both submits answered 401, both sent "Thank you for applying" mail,
+        # and the second was a duplicate; TheGuarantors the same). A bot-check refusal is no evidence of nothing sent.
         writes = [
             r for r in getattr(self, "commit_requests", None) or []
-            if not COMMIT_TRACKING.search(r.get("path", "")) and not 400 <= int(r.get("status") or 0) < 500
+            if not COMMIT_TRACKING.search(r.get("path", ""))
+            and (not 400 <= int(r.get("status") or 0) < 500 or int(r["status"]) in AUTH_REFUSALS)
         ]
         if writes or len(getattr(self, "commit_requests", None) or []) >= 40:  # a full log may have dropped writes
             return False
