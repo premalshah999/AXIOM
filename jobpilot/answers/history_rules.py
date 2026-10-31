@@ -15,7 +15,7 @@ from .history import WORK
 from .history import degree_level
 from .history import history_region
 from .history import month_year
-from .text import normalize
+from .text import FROM_RECORD, normalize
 
 
 
@@ -169,7 +169,9 @@ class HistoryRulesMixin:
         label = field["label"]
         proposition = label.partition("?")[0]
         if topic(label) != "prior_employment" or re.search(
-            r"\b(?:clients?|member sites?|related|relatives?|family|spouse|referr\w*|never|not)\b",
+            # "Quintiles family of companies" and "including but not limited to" are the employer's own wording
+            # (IQVIA, Cigna 2026-10-22), not a family relationship or a negated question.
+            r"\b(?:clients?|member sites?|related|relatives?|family(?! of)|spouse|referr\w*|never|not(?! limited))\b",
             proposition,
             re.I,
         ):
@@ -203,7 +205,7 @@ class HistoryRulesMixin:
             "Applicant explicitly confirmed No to prior employment at the company being applied to"
             if explicit_no
             else "Applicant confirmed that all past employment is listed; this employer is absent"
-        )
+        ) + f" ({FROM_RECORD})"
         if field.get("type") in {"text", "textarea", "date", "date_parts", "month"}:
             # No previous employment is not a company name, employment type or
             # last-worked date. Optional conditional details remain empty.

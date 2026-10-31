@@ -38,3 +38,11 @@ def test_the_pending_question_supplies_the_catalog_when_the_field_record_has_non
     e.form.pending = [{"question": "How Did You Hear About Us?", "options": ["Displaced (US)", "LOA - Job Search (US)"]}]
     result = verdict(e)
     assert result["state"] == "closed" and "Internal-only" in result["reason"]
+
+
+def test_an_other_non_referral_choice_is_a_way_in_for_an_external_applicant():
+    # Thrivent (Workday 2026-10-14): "Employee/Advisor Referral" and "Other/Non-Referral" were closed as internal-only
+    # because "refer" matched both; the second names the plain external applicant.
+    result = verdict(engine(["Employee/Advisor Referral", "Other/Non-Referral"]))
+    assert result["state"] != "closed"
+    assert verdict(engine(["Select One", "Employee Referral", "Other"]))["state"] != "closed"

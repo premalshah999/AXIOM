@@ -7,7 +7,8 @@ from jobpilot.jobboard import BoardSettings, role_matches, screen
 from jobpilot.features.discovery.policy import DiscoveryPolicy
 from jobpilot.schemas import Profile
 
-NOW = datetime.now(UTC)
+# A fixed anchor, not the clock at collection: keep() compares postings with the `now` it is given, so only the offsets matter.
+NOW = datetime(2026, 10, 31, 12, tzinfo=UTC)
 ROLES = ["Software Development Engineer"]
 
 

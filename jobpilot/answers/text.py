@@ -9,6 +9,11 @@ from ..knowledge import relevant_fact
 from .intents import INTENTS
 
 
+# In an Answer's reason: decided from the applicant's recorded history (work rows, education rows, address). Such an
+# answer outranks every stored one, in menus too (forms.py keeps a menu's earlier value otherwise).
+FROM_RECORD = "From the recorded history"
+
+
 def normalize(text):
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", text.lower())).strip()
 

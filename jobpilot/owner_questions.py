@@ -256,6 +256,27 @@ EMPLOYER_ENTITY_FOLLOWUP = re.compile(
 SITE_CHROME = re.compile(r"(?:search(?: for)?|keywords?|search jobs|job search)\W*", re.I)
 
 
+# Wording that says the form's own question was never read: a repair question about "field-59" or "three required
+# Yes/No questions whose text wasn't captured", a quoted bare "What?"/"Where?", a reason admitting the text is unavailable.
+# The owner cannot answer these. Caesars (2026-10-26) got "provide the exact wording of each question", answered "Yes",
+# and that one blind Yes went into three radio groups, one asking whether the applicant is currently unemployed.
+UNREAD = re.compile(
+    r"\bfield[-_ ]?\d+\b|\bno (?:visible |readable |stated |real )?(?:label|question text|prompt|subject)\b|"
+    r"\bun-?label+ed\b|\bmis-?label+ed\b|\b(?:text|wording)\s+(?:wasn'?t|was not|isn'?t|is not|couldn'?t|could not"
+    r"|was never|is unavailable|is missing)\b|\b(?:text|wording) (?:of|for) (?:each|the) question\b|"
+    r"['\"“](?:what|where|when|who|why|how)\?['\"”]|\bquestion text (?:is )?(?:unavailable|missing|not (?:captured|read))",
+    re.I,
+)
+
+
+def unread(question, reason=""):
+    """True when the question or the reason it is asked says the form's wording was never read (see UNREAD)."""
+    return bool(UNREAD.search(" ".join(str(question or "").split()))) or bool(
+        re.search(r"question text (?:is )?(?:unavailable|missing)|un-?label+ed (?:masked|field|yes/no|radio)",
+                  str(reason or ""), re.I)
+    )
+
+
 def defect(question, options=(), context=None, reason=""):
     """Why a would-be owner question is the engine's failure to read the form, else None.
 
@@ -268,6 +289,8 @@ def defect(question, options=(), context=None, reason=""):
     text = tidy(question)
     if re.search(r"successfully uploaded", str(question or ""), re.I):
         return "The page shows this upload as already done"
+    if unread(question, reason):
+        return "The question's own wording was never read, so the owner cannot be asked it"
     if SITE_CHROME.fullmatch(text):
         return "This is the website's search box, not an application question"
     located = any(
@@ -465,16 +488,54 @@ def allows_several(question, context):
     return (context or {}).get("type") in {"checkboxgroup", "select-multiple"} or bool(MULTI_SELECT.search(question or ""))
 
 
+# What no answer can supply: a recording of the applicant, or a piece of work the applicant has not written. Appian,
+# Edmentum and Fab2 (2026-10-31) asked for a writing sample, a publication or a portfolio; Aurelian, Flexcompute and
+# Solace Health for a video. They read like any other question, so the owner was shown an answer box for each.
+VIDEO_ASK = re.compile(
+    r"\b(?:upload|attach|submit|record|share|send)\b[^.?]{0,60}\bvideo\b|"
+    r"\bvideo\b[^.?]{0,40}\b(?:file|upload|recording|pitch|introduction)\b|\bself[- ]recorded\b|"
+    r"\brecord(?:ed|ing)?\b[^.?]{0,40}\b(?:yourself|a video)\b|one[- ]way (?:video )?interview|hirevue",
+    re.I,
+)
+SAMPLE_ASK = re.compile(r"writing sample|work sample|\bpublications?\b|\bportfolio\b|research (?:paper|sample)", re.I)
+POLAR = re.compile(r"^(?:are|is|do|does|did|would|will|can|could|have|has)\b", re.I)
+
+
+def cannot_automate(question, options=(), context=None, reason=""):
+    """(plain reason, hard) when no answer from the saved profile or the owner's words completes this field, else ("", False).
+
+    `hard`: nothing the owner can type or send fits (a video). Otherwise the owner may send a file they already have
+    (a writing sample, publication or portfolio), or drop the job."""
+    context = context or {}
+    text = tidy(question) + " " + str(context.get("hint") or "")
+    if VIDEO_ASK.search(text) and not (POLAR.search(tidy(question)) and sorted(
+        normalize(t) for _, t in choices(options)) == ["no", "yes"]):
+        return "This application needs a video recording of you. The app can't record or upload video.", True
+    if kind(question, options, context, reason) == "upload" and SAMPLE_ASK.search(text):
+        return (
+            "This application needs a piece of your own work (a writing sample, publication or portfolio). The app "
+            "can't write one; send a file you already have, or drop this job.",
+            False,
+        )
+    return "", False
+
+
 def present(review):
-    """The owner-facing form of a review row (a dict from db.record) for the web app."""
+    """The owner-facing form of a review row (a dict from db.record) for the web app.
+
+    `cannot_automate` is a plain reason when no answer can complete the field ("" otherwise); `kind` is then
+    "cannot_automate" when nothing the owner could type or send fits, and `input_kind` keeps the answer type."""
     context = review.get("context") or {}
     options = review.get("options") or []
     question_kind = kind(review.get("question", ""), options, context, review.get("reason", ""))
+    blocked, hard = cannot_automate(review.get("question", ""), options, context, review.get("reason", ""))
     return {
         **review,
         "options": [text for _, text in choices(options)],
         "display_question": display(review.get("question", ""), context),
-        "kind": question_kind,
+        "kind": "cannot_automate" if hard else question_kind,
+        "input_kind": question_kind,
+        "cannot_automate": blocked,
         "requirement": requirement(review.get("question", ""), options, context, review.get("reason", "")),
         "why": owner_reason(review.get("reason", ""), question_kind),
         "allow_other": question_kind == "choice" and free_text_allowed(options, context),

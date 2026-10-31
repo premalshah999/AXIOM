@@ -144,11 +144,23 @@ def _topic(text):
             r"\bever been,? an? (?:employee|contractor|consultant|contract worker|intern) (?:of|for|at|with)\b|"
             # Amazon (2026-10-27): "Are you currently working as an intern at Amazon?" had no subject and the model
             # proposed "Yes".
-            r"\b(?:currently|presently) (?:working|employed|interning) (?:as an? [\w-]+ )?(?:at|for|with)\b",
+            r"\b(?:currently|presently) (?:working|employed|interning) (?:as an? [\w-]+ )?(?:at|for|with)\b|"
+            # Contractor, contingent, temp and third-party wordings (an internship is an experience question, not this) of "worked here before?" (T-Mobile, Target,
+            # PwC, PNC, Howmet, IQVIA, Sanofi 2026-10-14..26): unrecognised, the model copied "Yes" from the
+            # complete-history fact and 15 confirmed applications said the applicant had been a contractor there.
+            r"(?:\b(?:are|were|was|have|had|did) you|\byou (?:are|were|have|had))\b[^?]{0,80}?"
+            r"\b(?:contractors?|contract workers?|contingent workers?|temp(?:orary)? (?:workers?|employees?)|"
+            r"third.party labou?r)\b(?:\s*\([^)]{0,40}\))?"
+            r"(?:\s+or\s+[\w -]{1,30})?\s+(?:for|at|with|to|of)\b|"
+            r"\bwork(?:ed)? (?:previously|before) (?:for|at|with)\b|\bwork(?:ed)? (?:for|at|with)\b[^?]{0,60}\bbefore\b|"
+            r"\bcontract(?:ing|ed) (?:with|for)\b|\bex[- ]\w+ (?:employee|associate)\b|"
+            r"\bprovid(?:ed|ing) (?:any )?(?:contract |contingent )?(?:work|services?) (?:for|to)\b",
         ),
         (
             "sponsorship",
-            r"\bsponsor(?:ship|s|ing)?\b|\bsponsored\s+(?:visa|immigration|work)|(?:visa|employer|company)[- ]sponsored|"
+            # "company sponsored happy hour" (Interco's conduct quiz, 2026-10-30) is no immigration question.
+            r"\bsponsor(?:ship|s|ing)?\b|\bsponsored\s+(?:visa|immigration|work)|visa[- ]sponsored|"
+            r"(?:employer|company)[- ]sponsored\s+(?:visa|immigration|work|h-?1b|employment|status|permit|green card)|"
             + IMMIGRATION_VISA,
         ),
         (

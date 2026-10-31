@@ -13,7 +13,7 @@ from sqlalchemy.orm import defer
 from ..db import Event, Job, Resume, Run, Setting, now, record
 from ..schemas import Profile
 from .. import shortlinks
-from ..admission import QueueBlocked, employer_partition, temporary_time, require_intake
+from ..admission import QueueBlocked, employer_partition, requisition_twins, temporary_time, require_intake
 from ..runtime import engine_version, profile_version
 from .states import ACTIVE, RETRYABLE
 
@@ -148,14 +148,15 @@ class QueueingMixin:
             raise
 
     def _record_duplicate(self, job_id, detail):
-        """A short link that resolves to a posting already applied to is recorded the way an employer's "already applied"
-        is, without a browser: an already_applied run saying why, and the job leaves the ready list. The run is exempt
-        from the employer cap (application_pacing): the application it duplicates already holds the slot."""
+        """A job that is the same posting as one already applied to (a short link that resolves to it, the employer's
+        page around its Greenhouse form, its other identity) is recorded the way an employer's "already applied" is,
+        without a browser: an already_applied run saying why, and the job leaves the ready list. The run is exempt from
+        the employer cap (application_pacing): the application it duplicates already holds the slot."""
         with self.db.exclusive() as session:
             job = session.get(Job, job_id)
             if not job or job.demo or job.status in {"confirmed", "already_applied"}:
                 return
-            reason = "The short link leads to a posting this account already applied to; no second application was made"
+            reason = "This posting was already applied to through another link; no second application was made"
             run = Run(
                 job_id=job_id,
                 state="already_applied",
@@ -332,7 +333,13 @@ class QueueingMixin:
                 if not known and not resolved:
                     raise ShortlinkPending(job.url)
             own_urls = [job.url, *([final] if final else [])]
-            if not job.demo and any(s.get(Setting, guard_key(i)) for u in own_urls for i in identity_variants(u)):
+            # The same requisition under another link on any platform (the employer's page around a Greenhouse form
+            # and its board URL: Roblox, Abnormal, Rubrik, IXL applied twice, 2026-10): its guard and runs count as this
+            # job's own.
+            twins = [] if job.demo else requisition_twins(s, job.id, own_urls)
+            if not job.demo and any(
+                s.get(Setting, guard_key(i)) for u in [*own_urls, *(url for _, url in twins)] for i in identity_variants(u)
+            ):
                 raise QueueBlocked(
                     "An archived application protects this job from duplicate submission.",
                     outcome="protected",
@@ -358,6 +365,7 @@ class QueueingMixin:
             elif not shortlinks.is_shortlink(job.url) and not job.demo:
                 if urls := shortlinks.twins(s, job.url):
                     linked = list(s.scalars(select(Job.id).where(Job.url.in_(urls), Job.id != job.id)))
+            linked = [*linked, *(i for i, _ in twins if i not in linked)]
             aliases = [*aliases, *(i for i in linked if i not in aliases)]
             # A packet loads when asked for: admission holds the app lock, and most attempts read none of these.
             previous = list(s.scalars(select(Run).options(defer(Run.packet)).where(Run.job_id.in_(aliases))))
@@ -365,9 +373,12 @@ class QueueingMixin:
                 raise QueueBlocked(
                     "This job already has an active run", outcome="protected", code="active_run"
                 )
-            # Applied through the other link: recorded as already applied (queue()), never a second application.
-            if duplicate := next(
-                (x for x in previous if x.job_id in linked and x.state in {"confirmed", "already_applied"}), None
+            # Applied under another job row of the same posting (its other link, its other identity, a twin on another
+            # platform page): recorded as already applied (queue()), never a second application. A job's own
+            # confirmed run is the "submitted" case below.
+            applied = {"confirmed", "already_applied"}
+            if not job.demo and not any(x.job_id == job.id and x.state in applied for x in previous) and (
+                duplicate := next((x for x in previous if x.job_id != job.id and x.state in applied), None)
             ):
                 raise QueueBlocked(
                     "The same posting was already applied to through another link.",

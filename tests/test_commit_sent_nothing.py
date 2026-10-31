@@ -37,6 +37,15 @@ async def test_a_write_the_employer_refused_with_a_client_error_accepted_nothing
     assert await BrowserEngine.commit_sent_nothing(engine(requests=[*TRACKING, {**refused, "status": 500}])) is False
 
 
+@pytest.mark.parametrize("status", [401, 403])
+async def test_a_bot_check_refusal_of_the_apply_write_stays_uncertain_and_is_never_resubmitted(status):
+    # Rippling (Go Fish Digital, TheGuarantors 2026-10-28): the apply POST answered 401 "turnstile_verification_failure"
+    # and the employer still sent its "Thank you for applying" mail; the second submit was a duplicate.
+    apply = {"method": "POST", "host": "ats.rippling.com", "path": "/api/v1/board/acme/jobs/1/apply", "status": status}
+    assert await BrowserEngine.commit_sent_nothing(engine(requests=[*TRACKING, apply])) is False
+    assert await BrowserEngine.commit_sent_nothing(engine(requests=[apply, {**apply, "status": 400}])) is False
+
+
 @pytest.mark.parametrize("variant", [
     {"requests": [*TRACKING, {"method": "POST", "host": "api.ats.example", "path": "/v1/applications", "status": 200}]},
     {"requests": [*TRACKING, {"method": "POST", "host": "acme.fa.ocs.oraclecloud.com",

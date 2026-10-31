@@ -127,6 +127,21 @@ def compact_runs(config, apply, say=print) -> int:
     return 0
 
 
+def backfill_identities(config, apply, say=print) -> int:
+    """Fill jobs saved without an employer or title (or with the career site's hostname as the employer) from the pages
+    their runs saved. Reports first; writes only with --apply. Safe beside a live application."""
+    import json
+
+    from .db import Database
+    from .posting_identity import backfill
+
+    report = backfill(Database(config.database_url), config.data_dir / "runs", apply=apply)
+    say(json.dumps(report, indent=1))
+    if not apply:
+        say("Nothing changed. Run again with --apply to write this.")
+    return 0
+
+
 def prune_workflows(config, days, apply, say=print) -> int:
     import json
 
@@ -203,6 +218,10 @@ def main():
     trace.add_argument("run_id")
     compact = sub.add_parser("compact-runs", help="Drop duplicate profiles and unneeded checkpoints from runs not in flight")
     compact.add_argument("--apply", action="store_true", help="Write the changes; without it this only reports")
+    backfill = sub.add_parser(
+        "backfill-identities", help="Fill jobs with no employer or title from the pages their runs saved"
+    )
+    backfill.add_argument("--apply", action="store_true", help="Write the changes; without it this only reports")
     prune = sub.add_parser("prune-workflows", help="Delete finished DBOS workflows past the retention age")
     prune.add_argument("--days", type=int, help="Keep this many days (default DBOS_RETENTION_DAYS)")
     prune.add_argument("--apply", action="store_true", help="Delete them; without it this only counts")
@@ -235,10 +254,12 @@ def main():
         print(config.app_token)
     elif args.command == "reset-password":
         raise SystemExit(reset_password(config))
-    elif args.command in {"compact-runs", "prune-workflows"}:
+    elif args.command in {"compact-runs", "prune-workflows", "backfill-identities"}:
         import os
 
-        os.nice(10)  # Beside live browsers: both are background work.
+        os.nice(10)  # Beside live browsers: all are background work.
+        if args.command == "backfill-identities":
+            raise SystemExit(backfill_identities(config.prepare(), args.apply))
         if args.command == "compact-runs":
             raise SystemExit(compact_runs(config.prepare(), args.apply))
         raise SystemExit(prune_workflows(config.prepare(), args.days, args.apply))

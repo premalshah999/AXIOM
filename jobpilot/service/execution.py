@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
 from ..db import Budget, Job, Run, Setting, now, record
-from ..admission import QueueBlocked, employer_partition
+from ..admission import HOLD_WAIT, QueueBlocked, employer_partition
 
 
 class ExecutionMixin:
@@ -161,7 +161,7 @@ class ExecutionMixin:
                     # before it starts: left queued it would wait here forever, holding its pool's slot. A verification
                     # of an earlier submission sends nothing new and continues.
                     row.state, row.finished_at = "cancelled", now()
-                    row.reason = f"{hold.employer} is a reserved employer ({hold.label}); it waits for your approval"
+                    row.reason = f"{hold.employer} is a reserved employer ({hold.label}){HOLD_WAIT}"
                     s.get(Job, row.job_id).status = "ready"
                     return
                 if s.get(Setting, "control").value.get("paused"):

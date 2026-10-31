@@ -35,7 +35,7 @@ def adapter(committed=False):
 
 
 async def test_a_reached_application_cap_closes_the_job_with_its_notice():
-    obs = form("Application Information " + NOTICE + " Referral code Resume Name Email Submit")
+    obs = form("Application Information\n" + NOTICE + "\nReferral code\nResume\nName\nEmail\nSubmit")
     assert adapter().classify_page(obs) == Step.CLOSED
     result = await adapter().on_closed(obs)
     assert result["state"] == "closed"
@@ -54,3 +54,31 @@ def test_after_the_submit_the_cap_is_not_a_closure():
 ])
 def test_cap_wording(text, capped):
     assert bool(APPLICATION_LIMIT.search(text)) is capped
+
+
+PROSE = ("Candidates can apply to a maximum of two positions and will be considered in the order you apply. If you have "
+         "reached the application limit, this position has been filled or the job posting has closed, we will tell you; "
+         "keep this page for your records and write to us for any question about your application status. " * 2)
+
+
+def test_a_notice_inside_a_paragraph_of_prose_closes_nothing():
+    # A job description or help paragraph may quote the wording; only the page's own notice closes (headings, error
+    # banner, dialog, or a short line of its own).
+    obs = form("Job description\n" + PROSE + "\nSubmit")
+    assert adapter().classify_page(obs) != Step.CLOSED
+    bare = {**obs, "fields": [], "controls": [], "text": "Job description\n" + PROSE}
+    assert adapter().classify_page(bare) != Step.CLOSED
+
+
+@pytest.mark.parametrize("place", ["errors", "headings"])
+def test_a_notice_in_an_error_banner_or_heading_closes(place):
+    obs = {**form("Application Information\nName\nEmail\nSubmit"), place: [NOTICE]}
+    assert adapter().classify_page(obs) == Step.CLOSED
+
+
+def test_the_closed_check_reads_the_page_notice_not_the_body():
+    from jobpilot.adapters.base import closed_notice
+
+    assert closed_notice({"headings": ["This position has been filled"], "text": ""})
+    assert closed_notice({"errors": [], "text": "Sorry, this position has been filled.\nSearch jobs"})
+    assert closed_notice({"headings": ["Engineer"], "text": PROSE}) is None

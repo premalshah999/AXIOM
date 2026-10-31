@@ -328,6 +328,28 @@ async def test_smartrecruiters_refusals_end_the_commit_honestly(monkeypatch, cat
     assert engine.armed is False and form.clicks == 1
 
 
+async def test_an_employer_pacing_applications_is_retried_later_never_failed_or_closed(monkeypatch):
+    # Ashby (Applied Intuition 2026-10-31): "It looks like you've submitted a number of applications recently - please
+    # note that your most recent application has not been submitted." recorded the job as failed.
+    from jobpilot.browser import THROTTLED_PAUSE_SECONDS
+
+    refusal = {"type": "explicit_rejection_page", "category": "throttled", "url": "https://jobs.ashbyhq.com/x"}
+    form = CommitForm(shown=None, after_click=refusal)
+    engine = engine_for(monkeypatch, form, ats="ashby")
+    result = await engine.finish(reserved=True)
+    assert result["state"] == "waiting_browser" and result["recovery_cause"] == "site_temporary", result
+    assert result["site_cooldown_seconds"] == THROTTLED_PAUSE_SECONDS
+    assert engine.armed is False and form.clicks == 1
+
+
+def test_the_pacing_notice_is_read_from_the_employers_own_words():
+    from jobpilot.forms import PACED_APPLICATIONS
+
+    assert PACED_APPLICATIONS.search("It looks like you've submitted a number of applications recently - please note")
+    assert PACED_APPLICATIONS.search("We ask that candidates apply to one role at a time that best matches")
+    assert not PACED_APPLICATIONS.search("We've already received your application for this role")
+
+
 async def test_existing_application_refusal_is_terminal_without_claiming_a_new_submission(monkeypatch):
     rejection = {"type": "explicit_rejection_page", "category": "already_applied",
                  "evidence": "We've already received your application for this role"}

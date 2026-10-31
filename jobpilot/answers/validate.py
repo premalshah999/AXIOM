@@ -35,6 +35,29 @@ BARE_HISTORY_DATE = re.compile(r"\s*(?:start|end|from|to)(?: date)?(?: (?:month|
 
 
 
+# A multiple-choice question about the world, not the applicant ("Which of the following is the smallest storage unit
+# listed?", "What does CPU stand for?"): no saved fact can support or refute it. Interco's quiz (2026-10-30) was refused
+# as unsupported_evidence. It must not name the applicant, the employer or the role, touch a sensitive subject, or be a
+# multi-select, so an answer about the applicant still needs a saved fact.
+PERSONAL_PRONOUN = re.compile(r"\b(?:you|your|yours|yourself|i|me|my|mine|we|our|us)\b", re.I)
+EMPLOYER_WORD = re.compile(r"\b(?:company|employer|position|role|job|team|organi[sz]ation|hiring|candidate|applicant)\b", re.I)
+
+
+def general_knowledge(field):
+    options = [o for o in field.get("options") or [] if str(o).strip()]
+    label = str(field.get("label", ""))
+    return (
+        len(options) >= 2
+        and "?" in label  # a field label ("From Date Year") is no quiz question
+        and len(label.split()) >= 5
+        and field.get("type") not in {"checkboxgroup", "select-multiple", "checkbox"}
+        and not PERSONAL_PRONOUN.search(label)
+        and not EMPLOYER_WORD.search(label)
+        and not critical_question(label)
+        and not topic(label)
+    )
+
+
 def same_date(a, b):
     """Two spellings of one date ("10/25/2026" and "2026-10-25"): a consent form's signing date was refused as out of
     scope because the model and the policy wrote today differently (EPIC Retirement Plan Services, 2026-10-25)."""
@@ -45,6 +68,15 @@ def same_date(a, b):
     except ValueError:
         return False
     return all(first) and first == second
+
+# A question about where the applicant is now (not where they would move), and the way out some of them offer.
+PRESENT_LOCATION = re.compile(
+    r"commuting distance|within \d+ miles|(?:currently|presently) (?:meet|reside|live|located|based)\b|"
+    r"based on where you (?:currently )?(?:reside|live)|worksite location requirements|\blocal to\b",
+    re.I,
+)
+RELOCATION_ALTERNATIVE = re.compile(r"relocat|\bmove\b|\bwilling\b|\bif (?:no|not)\b", re.I)
+
 
 class ValidateMixin:
     def relationship_evidence_misused(self, field, answer, scoped_items):
@@ -69,6 +101,61 @@ class ValidateMixin:
             return False
         affirmative = re.fullmatch(r"(?:yes|y|true|checked)\.?", str(answer.value or "").strip(), re.I)
         return bool(affirmative) or topic(field["label"]) != "prior_employment"
+
+    def prior_yes_unsupported(self, field, answer):
+        """True for a Yes to "have you worked or contracted here before?" that cites no saved work row naming that
+        employer. Fifteen confirmed applications said the applicant had been a contractor at T-Mobile, PwC, PNC, the
+        Federal Reserve, Cigna and Target (2026-10-16..23) on the strength of the complete-history attestation, which
+        can only support a No. A page's own pre-selection and a stored earlier Yes are no evidence either; an answer
+        the applicant reviewed is theirs."""
+        if topic(field["label"]) != "prior_employment" or not re.fullmatch(
+            r"(?:yes|y|true|checked)\.?", str(answer.value or "").strip(), re.I
+        ):
+            return False
+        if any(x.startswith(("reviewed:", "knowledge:m:review:")) for x in answer.evidence_ids):
+            return False
+        from ..features.knowledge.employers import mention_aliases
+
+        question = " " + normalize(field["label"]) + " "
+        if not (
+            re.search(r"\b(?:this|our|the) (?:company|organi[sz]ation|employer)\b", question)
+            or any(
+                re.search(r"(?<!\w)" + re.escape(alias) + r"(?!\w)", field["label"], re.I) or f" {normalize(alias)} " in question
+                for alias in mention_aliases([getattr(self, "employer", "") or ""])
+                if alias
+            )
+        ):
+            return False  # A question about contracting in general ("... as a contractor before?") names no employer.
+        text = " " + normalize(f"{field['label']} {getattr(self, 'employer', '') or ''}") + " "
+        for x in answer.evidence_ids:
+            match = re.fullmatch(r"profile:work\.(\d+)(?:\..+)?", x)
+            if match and int(match[1]) < len(self.profile.work):
+                name = re.sub(
+                    r"\b(?:inc|llc|ltd|corp|corporation|co|company|the)\b",
+                    " ",
+                    normalize(self.profile.work[int(match[1])].company or ""),
+                )
+                if len(name := re.sub(r"\s+", " ", name).strip()) >= 3 and f" {name} " in text:
+                    return False
+        return True
+
+    def willingness_misused(self, field, answer):
+        """True when a Yes to a question about where the applicant lives now cites only relocation willingness. Lightcast
+        asked "within commuting distance of Moscow, ID ... based on where you currently reside, not your willingness to
+        relocate" and got Yes from fact:willing_to_relocate; Credence's "currently meet the worksite location
+        requirements" did too (2026-10-23, 10-27). Willingness answers a question that offers relocation as the way out."""
+        label = re.sub(r"\bnot (?:your )?willing(?:ness)?[^.?]*", " ", str(field["label"]))
+        if (
+            not PRESENT_LOCATION.search(label)
+            or RELOCATION_ALTERNATIVE.search(label)
+            or not re.fullmatch(r"(?:yes|y|true|checked)\.?", str(answer.value or "").strip(), re.I)
+        ):
+            return False
+        refs = answer.evidence_ids
+        return any("relocat" in x for x in refs) and not any(
+            re.search(r"(?:^|:)(?:city|state|county|metro_region|address|state_of_residence|country_of_residence)\b", x)
+            for x in refs
+        )
 
     def experience_cause(self, field, answer, yes):
         """Why a Yes/No to a years-of-experience question is refused, or "". A settled verdict from the work history
@@ -119,6 +206,14 @@ class ValidateMixin:
             # Exactly the option the applicant's stored facts and owner policy select
             # (Starbucks "Springfield, MD, USA"): no further evidence scoping is needed.
             return answer.model_copy(update={"disposition": "answer", "evidence_ids": ["policy:owner"]})
+        if (
+            answer
+            and answer.disposition == "answer"
+            and str(answer.value or "").strip()
+            and general_knowledge(field)
+            and any(normalize(str(answer.value)) == normalize(str(o)) for o in options)
+        ):
+            return answer.model_copy(update={"evidence_ids": ["policy:general_knowledge"]})
         if self.context_blockers.get(field["id"]):
             reason = self.context_blockers[field["id"]]
             return self._invalid(
@@ -216,6 +311,8 @@ class ValidateMixin:
             # The applicant's "my employment history is complete" attestation answered "Yes" to "Do you use
             # Duolingo?" and to "have you ever been a contractor for the Federal Reserve?" (2026-10-26). A fact about
             # past employers supports only a question about the applicant's own past employment, and never a Yes.
+            valid_evidence = False
+        if self.prior_yes_unsupported(field, a) or self.willingness_misused(field, a):
             valid_evidence = False
         if any("date_of_birth" in x or x.endswith(":dob") for x in a.evidence_ids) and not re.search(
             r"birth|\bdob\b|\bborn\b|\bages?\b|years? old|years of age|citizenship|nationality|permanent residency|"
