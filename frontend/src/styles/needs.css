@@ -1,0 +1,563 @@
+/* Needs you: an inbox. One raised panel, the list beside the answer pane, each scrolling by itself. QuestionCard's inbox form is here too. */
+.nd {
+  --surface: var(--raised);
+  display: grid;
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  box-shadow: var(--shadow-panel);
+}
+.nd-list {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+}
+.nd-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--line);
+}
+.nd-progress p {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--text-meta);
+  font-weight: 500;
+}
+.nd-progress small {
+  overflow: hidden;
+  color: var(--ink-3);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nd-track {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--inset);
+}
+.nd-track i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--ink);
+  transition: width var(--dur) var(--ease);
+}
+.nd-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.nd-sec,
+.nd-parked > summary {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  font-weight: 500;
+}
+.nd-sec span,
+.nd-parked > summary span {
+  color: var(--ink-3);
+  font-family: var(--font-data);
+  font-size: var(--text-data);
+  font-weight: 400;
+}
+.nd-parked > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.nd-parked > summary::-webkit-details-marker {
+  display: none;
+}
+.nd-parked > summary::after {
+  content: "Show";
+  margin-left: auto;
+  color: var(--ink-3);
+}
+.nd-parked[open] > summary::after {
+  content: "Hide";
+}
+.nd-foot {
+  padding: var(--space-3) var(--space-4);
+}
+
+/* A row: who, what, and how much it frees. */
+.nd-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: start;
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+.nd-row:hover {
+  background: var(--hover);
+}
+.nd-row[aria-current] {
+  background: var(--active);
+}
+.nd-row:focus-visible {
+  outline-offset: -2px;
+}
+/* A lone square in a selected row wants no cut-out: it only separates squares that overlap. */
+.nd-row .ax-mono-stack .ax-mono:only-child {
+  outline: 0;
+  box-shadow: none;
+}
+.nd-row {
+  scroll-margin-top: 44px;
+}
+.nd-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.nd-row-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: var(--text-body);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.nd-row small {
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nd-row-end {
+  display: flex;
+  align-items: center;
+  min-height: 19px;
+  color: var(--ink-3);
+}
+.nd-frees {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--signal-soft);
+  color: var(--signal-ink);
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+.nd-row.is-people .nd-row-title {
+  font-weight: 600;
+}
+.nd-row.is-people {
+  padding-block: var(--space-4);
+}
+.nd-people-mono {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* What no typed answer completes, and what has no question: quieter, with a mark saying why. */
+.nd-row.is-blocked .nd-row-title,
+.nd-row.is-none .nd-row-title {
+  color: var(--ink-2);
+}
+
+/* The pane. */
+.nd-pane {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-8);
+  background: var(--raised);
+}
+.nd-pane-in {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-width: 680px;
+  margin-inline: auto;
+}
+.nd-back {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.nd-parked-note {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.nd-asking {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.nd-asking-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: var(--text-meta);
+}
+.nd-asking-who strong {
+  font-weight: 500;
+}
+.nd-asking-who span {
+  overflow: hidden;
+  color: var(--ink-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.nd-asking {
+  width: fit-content;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.nd-asking:hover strong {
+  text-decoration: underline;
+}
+
+/* The inbox's form of a question. */
+.nd-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+.nd-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.nd-place {
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+  overflow-wrap: anywhere;
+}
+.nd-q {
+  font-size: var(--text-page);
+  font-weight: 600;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+/* A long question is read, not announced. */
+.nd-q.is-long {
+  font-size: var(--text-title);
+  font-weight: 500;
+  line-height: 1.5;
+}
+.nd-meta {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.nd-control {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.nd-control .ax-control {
+  width: 100%;
+}
+.nd-control > .ax-listbox {
+  align-self: flex-start;
+  max-width: 100%;
+}
+.nd-control textarea.ax-control {
+  resize: vertical;
+}
+.nd-control fieldset.nq-opts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-2) var(--space-4);
+}
+.nq-answer [role="radiogroup"].nq-opts.is-short {
+  display: flex;
+  flex-wrap: wrap;
+}
+.nq-answer [role="radiogroup"].nq-opts.is-short .ax-check {
+  min-width: 96px;
+}
+.nd-offers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+.nd-offers [aria-pressed="true"] {
+  background: var(--active);
+}
+.nd-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.nd-actions-end {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-left: auto;
+}
+.nd-enter {
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+}
+/* What no answer completes: marked out, never a colour of its own. */
+.nd-block {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  padding: var(--space-4);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--inset);
+  line-height: 1.45;
+}
+.nd-block > svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--ink-2);
+}
+.nd-block p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.nd-page {
+  min-width: 0;
+}
+.nd-page img {
+  width: 100%;
+}
+
+/* What answering frees. */
+.nd-reach-one {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.nd-reach {
+  --surface: var(--inset);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  border-radius: var(--radius);
+  background: var(--inset);
+}
+.nd-reach h3 {
+  font-size: var(--text-meta);
+  font-weight: 500;
+}
+.nd-reach ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.nd-reach li + li {
+  border-top: 1px solid var(--line-soft);
+}
+.nd-reach button {
+  display: grid;
+  grid-template-columns: 24px minmax(0, max-content) minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-meta);
+  text-align: left;
+  cursor: pointer;
+}
+.nd-reach button:disabled {
+  cursor: default;
+}
+.nd-reach button:not(:disabled):hover strong {
+  text-decoration: underline;
+}
+.nd-reach strong {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nd-reach-role {
+  overflow: hidden;
+  color: var(--ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nd-reach small {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+
+/* Supervisors and references: a card per person, one open at a time. */
+.nd-persons {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.nd-person + .nd-person {
+  border-top: 1px solid var(--line);
+}
+.nd-person-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+.nd-person-head:hover {
+  background: var(--hover);
+}
+.nd-person-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.nd-person-name strong {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nd-person-name small {
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nd-person-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+.nd-person.is-quiet .nd-person-state {
+  color: var(--ink-3);
+}
+.nd-person-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4) var(--space-4);
+}
+.nd-person-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-4);
+}
+.nd-person-contact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+}
+
+/* Phones: the list, or one question. The page itself scrolls. */
+@media (max-width: 899px) {
+  .nd {
+    display: block;
+    flex: none;
+    overflow: visible;
+  }
+  .nd-list {
+    border-right: 0;
+  }
+  .nd-scroll {
+    overflow: visible;
+  }
+  .nd-sec,
+  .nd-parked > summary {
+    position: static;
+  }
+  .nd-pane {
+    overflow: visible;
+    padding: var(--space-4);
+    border-radius: var(--radius);
+  }
+  .nd-pane-in {
+    gap: var(--space-5);
+  }
+  .nd-person-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .nd-person-contact .ax-seg {
+    display: flex;
+    width: 100%;
+  }
+  .nd-person-contact .ax-seg button {
+    flex: 1 1 auto;
+    padding-inline: var(--space-2);
+    white-space: nowrap;
+  }
+  .nd-person-head {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .nd-person-state {
+    grid-column: 2;
+  }
+  .nd-enter {
+    display: none;
+  }
+  .nd-reach button {
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+  }
+  .nd-reach-role {
+    display: none;
+  }
+}
