@@ -68,7 +68,7 @@ def test_the_map_has_one_home_per_module_and_every_step_is_covered(move):
     homes = [move.dest(rel) for rel in move.mm.MAP]
     assert len(homes) == len(set(homes))
     stepped = {rel for rel in move.mm.MAP if move.step_of(rel)}
-    held = set(move.GIANTS) | set(move.HOLD) | {"__init__.py"}
+    held = set(move.GIANTS) | set(move.HOLD) | {"__init__.py"} | {rel for rel in move.mm.MAP if move.facade(rel)}
     assert stepped | held == set(move.mm.MAP)
 
 

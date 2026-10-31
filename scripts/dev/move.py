@@ -38,6 +38,7 @@ import ast
 import builtins
 import collections
 import contextlib
+import functools
 import io
 import json
 import os
@@ -76,6 +77,12 @@ HOLD = {
     "imported (answer_context becomes domain/answers/propositions.py and knowledge.py imports that: a cycle through the resolver at import). "
     "The map ends the re-exports (callers name the module); do that, then the file moves",
 }
+
+FACADE = (
+    "a package __init__.py that imports its own package's modules: as the __init__ of a package other code imports a child of, it would run "
+    "those imports first. With the children spread over owners that is a cycle (the dry run found `answers`, `api`, `features.knowledge` and "
+    "`adapters`). The new package gets an empty __init__ and this file stays until its re-exports end, as the map says for answers and mail"
+)
 
 # Where a SYMBOL_MOVES group lands inside its owner. The map names only the owner; a path here is either what ARCHITECTURE.md
 # 6.1 / 6.2 or a note in the map says, or the default: the name of the module the group leaves.
@@ -180,8 +187,14 @@ PATH_FIXES = [
         step="b5",
         rel="native/services.py",
         nodes=["source_file"],
-        why="a release lays the packages out flat, so its services.toml is axiom_desktop/services.toml",
-        edits=[('Path(release_dir) / "jobpilot" / "native" / "services.toml"', 'Path(release_dir) / "axiom_desktop" / "services.toml"')],
+        why="a release lays the packages out flat, so its list is axiom_desktop/services.toml; a release made before the move (a rollback) still has jobpilot/native/",
+        edits=[
+            (
+                '        packaged = Path(release_dir) / "jobpilot" / "native" / "services.toml"\n        if packaged.exists():\n            return packaged\n',
+                '        for packaged in (Path(release_dir) / "axiom_desktop" / "services.toml", Path(release_dir) / "jobpilot" / "native" / "services.toml"):\n'
+                "            if packaged.exists():\n                return packaged\n",
+            )
+        ],
     ),
 ]
 # The lint commands name the directories; they gain the new ones as those appear. (path, regex)
@@ -234,8 +247,21 @@ def old_dotted(rel):
     return mm.dotted(rel)
 
 
+@functools.lru_cache(maxsize=None)
+def facade(rel):
+    path = PACKAGE / rel
+    if not rel.endswith("/__init__.py") or not path.exists():
+        return False
+    for st in ast.parse(path.read_text(encoding="utf-8")).body:
+        if isinstance(st, ast.ImportFrom) and (st.level or (st.module or "").startswith("jobpilot")):
+            return True
+        if isinstance(st, ast.Import) and any(a.name.startswith("jobpilot") for a in st.names):
+            return True
+    return False
+
+
 def step_of(rel):
-    if rel == "__init__.py" or rel in GIANTS or rel in HOLD:
+    if rel == "__init__.py" or rel in GIANTS or rel in HOLD or facade(rel):
         return None
     owner = split_target(rel)[0]
     return next(step for step, owners in STEPS.items() if owner in owners)
@@ -1071,9 +1097,10 @@ def cmd_plan(steps):
                 print(f"   edit  {fix['rel']}: {fix['why']}")
     deferred = [r for r in mm.MAP if r in GIANTS and (PACKAGE / r).exists()]
     print(f"== b6 (not this script): {', '.join(sorted(deferred))}")
-    for rel, why in HOLD.items():
-        if (PACKAGE / rel).exists():
-            print(f"== held: {rel}: {why}")
+    for rel in mm.MAP:
+        if (PACKAGE / rel).exists() and (rel in HOLD or facade(rel)):
+            print(f"== held: {rel}" + (f": {HOLD[rel]}" if rel in HOLD else ""))
+    print(f"   held because: {FACADE}")
 
 
 # ---------------------------------------------------------------------------------------------------------------- the checks
