@@ -47,6 +47,7 @@
   const GENERIC_PLACEHOLDER = /^[\s\-–—]*(search|select|choose(?!\s+not\s+to\s+disclose)|type|enter|start typing|make a selection|no selection|mm|dd|yyyy)\b|\.\.\.$|…$/i;
   const ownsFile = (box, el) => !!box && ![...box.querySelectorAll('input:not([type=hidden]),select,textarea,[role=combobox],[role=radiogroup]')]
     .some(other => other !== el && !other.contains(el) && !el.contains(other));
+  const REQUEST = /^(?:please\s+)?(?:share|describe|explain|tell us|provide|list|enter|include|detail|indicate|specify|summari[sz]e|write|add)\b/i;
   const nearby = el => {
     let node = el;
     // Rippling nests a custom question's control 5-6 levels below the div that
@@ -62,7 +63,9 @@
         const t = textOf(prev);
         // A long question is still the question when it ends asking one: Collier Aerospace's Rippling citizenship
         // radio group (2026-10-27) read "field-44" behind 330 characters of context ending "...through US citizenship?".
-        if (t && (t.length <= 250 || (t.length <= 700 && /\?\s*[*✱]?\s*$/.test(t)))) return t;
+        // Or a request printed as a paragraph above a lone control: DESRI's Rippling textarea "field-59" sat under "Please
+        // share links to applications, GitHub repositories, ... employer." (270 characters, no question mark; 2026-10-31).
+        if (t && (t.length <= 250 || (t.length <= 700 && (/\?\s*[*✱]?\s*$/.test(t) || REQUEST.test(t))))) return t;
       }
       node = node.parentElement;
     }

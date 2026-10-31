@@ -35,6 +35,29 @@ BARE_HISTORY_DATE = re.compile(r"\s*(?:start|end|from|to)(?: date)?(?: (?:month|
 
 
 
+# A multiple-choice question about the world, not the applicant ("Which of the following is the smallest storage unit
+# listed?", "What does CPU stand for?"): no saved fact can support or refute it. Interco's quiz (2026-10-30) was refused
+# as unsupported_evidence. It must not name the applicant, the employer or the role, touch a sensitive subject, or be a
+# multi-select, so an answer about the applicant still needs a saved fact.
+PERSONAL_PRONOUN = re.compile(r"\b(?:you|your|yours|yourself|i|me|my|mine|we|our|us)\b", re.I)
+EMPLOYER_WORD = re.compile(r"\b(?:company|employer|position|role|job|team|organi[sz]ation|hiring|candidate|applicant)\b", re.I)
+
+
+def general_knowledge(field):
+    options = [o for o in field.get("options") or [] if str(o).strip()]
+    label = str(field.get("label", ""))
+    return (
+        len(options) >= 2
+        and "?" in label  # a field label ("From Date Year") is no quiz question
+        and len(label.split()) >= 5
+        and field.get("type") not in {"checkboxgroup", "select-multiple", "checkbox"}
+        and not PERSONAL_PRONOUN.search(label)
+        and not EMPLOYER_WORD.search(label)
+        and not critical_question(label)
+        and not topic(label)
+    )
+
+
 def same_date(a, b):
     """Two spellings of one date ("10/25/2026" and "2026-10-25"): a consent form's signing date was refused as out of
     scope because the model and the policy wrote today differently (EPIC Retirement Plan Services, 2026-10-25)."""
@@ -119,6 +142,14 @@ class ValidateMixin:
             # Exactly the option the applicant's stored facts and owner policy select
             # (Starbucks "Springfield, MD, USA"): no further evidence scoping is needed.
             return answer.model_copy(update={"disposition": "answer", "evidence_ids": ["policy:owner"]})
+        if (
+            answer
+            and answer.disposition == "answer"
+            and str(answer.value or "").strip()
+            and general_knowledge(field)
+            and any(normalize(str(answer.value)) == normalize(str(o)) for o in options)
+        ):
+            return answer.model_copy(update={"evidence_ids": ["policy:general_knowledge"]})
         if self.context_blockers.get(field["id"]):
             reason = self.context_blockers[field["id"]]
             return self._invalid(
