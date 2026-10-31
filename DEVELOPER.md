@@ -17,6 +17,8 @@ First run and sign-in (`owner_account.py`, `api/sessions.py`, `frontend/src/acco
 
 ## Repository layout
 
+This is today's layout. The target is `services/`, `libs/`, `web/` and `desktop/` ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) section 5); `scripts/dev/module_map.py` holds the target of every module, so a new module needs a line there.
+
 - `jobpilot/`: queue, owners, shared browser/form controls, answers, accounts and mail.
 - `jobpilot/api/`: the FastAPI application. `app.py` builds it, `middleware.py` holds the sign-in and Origin rules, and `routes/<resource>.py` holds one router per resource (`def router(service) -> APIRouter`). Add a route to its resource's router, register a new router in `app.py` before `frontend`, and add a test in `tests/test_http_<resource>.py`.
 - `jobpilot/service/`: `Service` (queue, execute, complete, review), one mixin per concern. `jobpilot/answers/`: the question patterns and the `Resolver`, one mixin per rule family.
@@ -26,7 +28,7 @@ First run and sign-in (`owner_account.py`, `api/sessions.py`, `frontend/src/acco
 - `frontend/src/`: dashboard source; `jobpilot/static/` is generated build output.
 - `tests/`: focused regressions and synthetic shared fixtures.
 - `scripts/demo_instance.sh`: a throwaway local instance for showing sign-up and the setup guide.
-- `docs/`: `ARCHITECTURE.md` (system design and target layout), `API.md` (every route), `KNOWLEDGE.md` (answers), `SETUP.md` and `INFRA.md`, the per-ATS maps in `rea/`, third-party notices and licenses (copied into the image) and Telegram worker notes.
+- `docs/`: `ARCHITECTURE.md` (the target services, boundaries, the map of where every module is going and the migration plan), `RUNTIME.md` (how a run works today), `API.md` (every route), `KNOWLEDGE.md` (answers), `SETUP.md` and `INFRA.md`, the per-ATS maps in `rea/`, third-party notices and licenses (copied into the image) and Telegram worker notes.
 
 Applicant state belongs in the existing private storage and Docker volumes, never source fixtures or documentation. This file is the maintained guide. Earlier versions are branches, not folders: `v1-oct04` (commit `825c1b6`, the October 4 engine) and `v2-oct15` (the code before the October 15 cleanup).
 

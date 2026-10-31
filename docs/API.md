@@ -10,7 +10,8 @@ How this was produced: the route table was read from the running application obj
 routers), every handler was read, and each path was searched for in `frontend/src` and `tests/`. Four routes were
 deleted afterwards: **105 remain** (the reference tables no longer list the four deleted ones).
 
-Related: [ARCHITECTURE.md](ARCHITECTURE.md) (what the handlers call), [KNOWLEDGE.md](KNOWLEDGE.md), [SETUP.md](SETUP.md).
+Related: [ARCHITECTURE.md](ARCHITECTURE.md) (the target services and the conventions every `/v1` route follows, section 4),
+[RUNTIME.md](RUNTIME.md) (what the handlers call today), [KNOWLEDGE.md](KNOWLEDGE.md), [SETUP.md](SETUP.md).
 
 ## 1. Conventions
 
@@ -299,17 +300,18 @@ tests finds 94 of the 105 remaining routes called over HTTP. Not yet called over
 
 **Principles.**
 
-1. One prefix, `/api`. The `v2` routers move to their resource names.
+1. One versioned prefix, `/v1`, per [ARCHITECTURE.md](ARCHITECTURE.md) section 4. Read `/api/` as `/v1/` in the "Proposed" column below; today's
+   `/api/*` paths stay as legacy routes until the web app has moved. The `v2` routers move to their resource names.
 2. Collections are plural nouns; an action that is not create, read, update or delete is `POST /{resource}/{id}/{verb}`.
 3. One way to do each thing (D1–D9). Operator and diagnostic routes live under `/api/admin/…`.
-4. One error body, `{detail, code, retry_at?}`, and one status table: 400 invalid request, 401 not signed in, 403 not
+4. One error body, RFC 9457 problem+json with `detail`, `code` and `retry_at`, and one status table: 400 invalid request, 401 not signed in, 403 not
    allowed, 404 unknown id, 409 conflict with the current state (version, already running), 422 schema error,
    429 throttled, 202 accepted but deferred. The client switches on `code`, never on message text.
 5. GET is safe: no writes, no migration, no sync.
 6. Every list pages the same way (`page`, `size`, `q`, `total`), and the dashboard's big poll shrinks to counters and
    settings while `GET /api/jobs` and `GET /api/runs` serve the tables.
-7. Generate the OpenAPI schema in CI (`openapi_url` stays off in production), publish it as an artifact, and generate the
-   frontend client types from it, so the contract is checked by the build.
+7. Generate the OpenAPI schema per service in CI (`openapi_url` stays off in production), commit it under `contracts/openapi/`, and
+   generate the frontend client types from it, so the contract is checked by the build.
 
 **Route map** (current → proposed). Priority: **P1** fixes a duplicate, a dead route or a security finding; **P2** is naming.
 
