@@ -32,38 +32,37 @@ export type NavItem = {
 
 // In the order of the tuning scale. Tuner.tsx places the "coming soon" band over the last three.
 export const ALL_ITEMS: NavItem[] = [
-
-      { id: "overview", label: "Overview", icon: House, route: { view: "batch" } },
-      { id: "jobs", label: "Jobs", icon: Briefcase, route: { view: "jobs" } },
-      { id: "needs", label: "Needs you", icon: Inbox, route: { view: "needs" }, badge: "needs" },
-      { id: "applications", label: "Applications", icon: Send, route: { view: "ledger" } },
-      { id: "profile", label: "Profile", icon: UserRound, route: { view: "profile" } },
-      { id: "settings", label: "Settings", icon: Settings, route: { view: "settings" } },
-      {
-        id: "axe",
-        label: "Axe",
-        barLabel: "ai interviewer",
-        icon: Mic,
-        route: { view: "soon-axe" },
-        soon: true,
-        about: "An AI interviewer that runs mock interviews for the roles you apply to.",
-      },
-      {
-        id: "network",
-        label: "Network",
-        icon: Network,
-        route: { view: "soon-network" },
-        soon: true,
-        about: "Connects users and affiliates, so people applying to the same companies can introduce each other.",
-      },
-      {
-        id: "emails",
-        label: "Emails",
-        icon: Mail,
-        route: { view: "soon-emails" },
-        soon: true,
-        about: "Outreach and follow-up emails that send themselves on your schedule.",
-      },
+  { id: "overview", label: "Overview", icon: House, route: { view: "batch" } },
+  { id: "jobs", label: "Jobs", icon: Briefcase, route: { view: "jobs" } },
+  { id: "needs", label: "Needs you", icon: Inbox, route: { view: "needs" }, badge: "needs" },
+  { id: "applications", label: "Applications", icon: Send, route: { view: "ledger" } },
+  { id: "profile", label: "Profile", icon: UserRound, route: { view: "profile" } },
+  { id: "settings", label: "Settings", icon: Settings, route: { view: "settings" } },
+  {
+    id: "axe",
+    label: "Axe",
+    barLabel: "ai interviewer",
+    icon: Mic,
+    route: { view: "soon-axe" },
+    soon: true,
+    about: "An AI interviewer that runs mock interviews for the roles you apply to.",
+  },
+  {
+    id: "network",
+    label: "Network",
+    icon: Network,
+    route: { view: "soon-network" },
+    soon: true,
+    about: "Connects users and affiliates, so people applying to the same companies can introduce each other.",
+  },
+  {
+    id: "emails",
+    label: "Emails",
+    icon: Mail,
+    route: { view: "soon-emails" },
+    soon: true,
+    about: "Outreach and follow-up emails that send themselves on your schedule.",
+  },
 ];
 
 // Each page's tabs. The palette offers them as places to jump to; Profile and Settings render from these.
