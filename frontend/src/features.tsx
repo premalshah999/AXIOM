@@ -5,16 +5,14 @@ import { useEffect, useState } from "react";
 import { api, ApiError } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useDraft, usePoll } from "./hooks";
-import { ago, plural, stamp } from "./format";
+import { ago, day, plural, stamp } from "./format";
 import { Pagination, type Paging } from "./pagination";
-import { Actions, Facts as KV } from "./setup-kit";
 import { Chips, SearchBox } from "./worktools";
 import {
   Button,
   Check,
   Empty,
   ErrorLine,
-  External,
   Loading,
   Panel,
   Pill,
@@ -23,7 +21,7 @@ import {
 } from "./ui/index";
 
 // ---------- types (mirror jobpilot/features/*) ----------
-type Page<T> = { items: T[]; total: number; page: number; size: number };
+export type Page<T> = { items: T[]; total: number; page: number; size: number };
 type Fact = {
   id: string;
   category: string;
@@ -45,7 +43,7 @@ type Employer = {
   aliases: { alias: string; kind: string }[];
   memory: number;
 };
-type Artifact = {
+export type Artifact = {
   artifact_id: string;
   status:
     | "building"
@@ -81,9 +79,12 @@ type Artifact = {
   model_calls: number;
   created_at: string;
   finished_at: string | null;
+  /** The job it was made for, and whether an application went out with it. */
+  job?: { company: string; title: string; location: string } | null;
+  sent?: { state: "confirmed" | "unknown"; at: string | null } | null;
 };
 type Fill = { pages: number; fill: number };
-type MasterView = {
+export type MasterView = {
   id: string;
   status: "draft" | "approved" | "superseded";
   origin: "import" | "edited" | string;
@@ -101,17 +102,20 @@ type MasterView = {
   created_at: string;
   approved_at: string | null;
 };
-type MasterStatus = {
+export type MasterStatus = {
   master: MasterView | null;
   approved_id: string | null;
   source: { id: string; name: string } | null;
   policy: {
     mode?: "master" | "tailored" | string;
     automatic_tailoring?: boolean;
+    /** The resume every application sends while the mode is "master". */
+    resume_id?: string;
     source_resume_id?: string;
+    changed_at?: string;
   };
 };
-type Inventory = {
+export type Inventory = {
   roles: {
     row: string;
     company: string;
@@ -131,7 +135,7 @@ type Inventory = {
   units: { id: string; kind: string; source_row: string; text: string }[];
   skills: string[];
 };
-const unmounted = (e: Error | null) =>
+export const unmounted = (e: Error | null) =>
   e instanceof ApiError && (e.status === 404 || e.status === 405);
 
 // Poll a feature endpoint; stop for this session once the service proves absent.
@@ -584,41 +588,24 @@ function EmployerFacts({ employer }: { employer: Employer }) {
   );
 }
 
-// ---------- Setup › Resumes: tailored versions and supported material ----------
+// ---------- Resume facts shared by the Resumes page (resumes.tsx) and a job's drawer ----------
 // An employer id looks like "emp:acme-corp" or "emp:careers.acme.com": show it as a name a person can scan.
-function employerLabel(id: string) {
+export function employerLabel(id: string) {
   const slug = id.replace(/^emp:/, "");
   if (slug.includes(".")) return slug;
   return slug.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-const ARTIFACT_TONE: Record<string, [string, string]> = {
-  ready: ["ok", "Ready"],
-  building: ["run", "Building"],
-  failed: ["fix", "Needs repair"],
-  cancelled: ["idle", "Cancelled"],
-  invalid: ["idle", "Out of date"],
-  kept_master: ["idle", "Master kept"],
+export const ARTIFACT_WORD: Record<string, string> = {
+  ready: "Ready",
+  building: "Building",
+  failed: "Needs repair",
+  cancelled: "Cancelled",
+  invalid: "Out of date",
+  kept_master: "Master kept",
 };
 
-// One decimal below 100% so "2 words missing" never reads as a perfect match.
-const pct = (n?: number | null) =>
-  n == null
-    ? "—"
-    : (n < 1 && n > 0.99
-        ? (Math.floor(n * 1000) / 10).toFixed(1)
-        : Math.round(n * 100)) + "%";
-
-function useMasterStatus() {
-  return useFeature<MasterStatus>(
-    "resume-master",
-    (signal) => api("/v2/resumes/master", "GET", undefined, signal),
-    30000,
-  );
-}
-
-// ---------- Setup › Resumes: the master every tailored copy starts from ----------
-const ARTIFACT_PILL: Record<string, PillTone> = {
+export const ARTIFACT_PILL: Record<string, PillTone> = {
   ready: "ok",
   building: "info",
   failed: "warn",
@@ -627,388 +614,11 @@ const ARTIFACT_PILL: Record<string, PillTone> = {
   kept_master: "neutral",
 };
 
-function MasterResume({
-  status,
-  refresh,
-}: {
-  status: MasterStatus;
-  refresh: () => Promise<unknown> | void;
-}) {
-  const { go } = useWorkspace();
-  const { pending, run } = useAction();
-  const [accept, setAccept] = useState(false);
-  const { master = null, source = null, approved_id = null } = status;
-  const policy = status.policy || {};
-  const masterOnly = policy.mode === "master";
-  const v = master?.verification || {};
-  const importButton = (label: string, primary = false) => (
-    <Button
-      size="sm"
-      variant={primary ? "primary" : "secondary"}
-      loading={pending === "import"}
-      disabled={!source || (pending !== null && pending !== "import")}
-      onClick={() =>
-        run(
-          "import",
-          async () => {
-            const r = await api<MasterView>("/v2/resumes/master/import", "POST");
-            await refresh();
-            return r;
-          },
-          (r) =>
-            r?.verification?.faithful
-              ? "Imported. Compare it with the original, then approve it."
-              : "Imported with differences. Review them before approving.",
-        )
-      }
-    >
-      {pending === "import" ? "Transcribing…" : label}
-    </Button>
-  );
-  return (
-    <Panel
-      title="Master resume"
-      actions={
-        master && (
-          <Pill tone={master.status === "approved" ? "ok" : v.faithful ? "warn" : "bad"} dot>
-            {master.status === "approved" ? "Approved" : "Draft"}
-          </Pill>
-        )
-      }
-    >
-      {masterOnly && (
-        <p className="ax-hint">
-          Applications are sent with {source?.name || "your uploaded resume"}, exactly as you uploaded it. Tailoring is paused.
-        </p>
-      )}
-      {!master ? (
-        <>
-          <p className="ax-hint">
-            Tailoring needs an editable copy. Importing transcribes {source ? source.name : "your resume PDF"} word for word;
-            you compare it with the original and approve it.
-          </p>
-          <Actions start note={!source ? "Upload your resume above first." : undefined}>
-            {importButton(source ? `Import ${source.name}` : "Import", true)}
-          </Actions>
-        </>
-      ) : (
-        <>
-          <KV
-            items={[
-              [
-                "Matches the original",
-                <>
-                  {pct(v.coverage)} of {v.source_words ?? "its"} words
-                  {v.added_ratio ? `, ${pct(v.added_ratio)} added` : ""}
-                </>,
-              ],
-              [
-                "Page",
-                <>
-                  {v.render_fill
-                    ? `${plural(v.render_fill.pages, "page")}, ${pct(v.render_fill.fill)} full`
-                    : "Not built yet"}
-                  {v.source_fill && <span className="ax-hint"> · original {pct(v.source_fill.fill)} full</span>}
-                </>,
-              ],
-              [
-                master.status === "approved" ? "Approved" : "Created",
-                <>
-                  {ago(master.approved_at || master.created_at)}
-                  <span className="ax-hint"> · {master.origin === "edited" ? "edited by you" : "imported"}</span>
-                </>,
-              ],
-            ]}
-          />
-          {(!!v.missing?.length || !!v.added?.length) && (
-            <div className="ax-stack">
-              {!!v.missing?.length && (
-                <p>
-                  <strong>Missing from this copy:</strong> {v.missing.slice(0, 12).join(", ")}
-                </p>
-              )}
-              {!!v.added?.length && (
-                <p>
-                  <strong>Not in your original:</strong> {v.added.slice(0, 12).join(", ")}
-                </p>
-              )}
-            </div>
-          )}
-          {master.status === "draft" && approved_id && (
-            <p className="ax-hint">
-              Your previously approved master stays in use until you approve this draft.
-            </p>
-          )}
-          <Actions>
-            {importButton("Import again")}
-            <Button size="sm" onClick={() => go({ view: "editor", artifact: "master" })}>
-              Compare and edit
-            </Button>
-            {master.status === "draft" && (
-              <>
-                {!v.faithful && <Check checked={accept} onChange={setAccept} label="These differences are intended" />}
-                <Button
-                  size="sm"
-                  variant="primary"
-                  loading={pending === "approve"}
-                  disabled={(pending !== null && pending !== "approve") || (!v.faithful && !accept)}
-                  onClick={() =>
-                    run(
-                      "approve",
-                      async () => {
-                        const r = await api(`/v2/resumes/master/${master.id}/approve`, "POST", {
-                          accept_differences: accept,
-                        });
-                        await refresh();
-                        return r;
-                      },
-                      "Approved. Tailoring starts from this master.",
-                    )
-                  }
-                >
-                  Approve
-                </Button>
-              </>
-            )}
-          </Actions>
-        </>
-      )}
-    </Panel>
-  );
-}
-
-export function TailoredResumes() {
-  const { openJob, go } = useWorkspace();
-  const master = useMasterStatus();
-  const masterOnly = master.data?.policy?.mode === "master";
-  const [status, setStatus] = useDraft("artifact-status", "");
-  const [page, setPage] = useState(1);
-  const list = useFeature<Page<Artifact>>(
-    "resumes",
-    (signal) =>
-      api(
-        `/v2/resumes/artifacts?page=${page}&size=25${status ? "&status=" + status : ""}`,
-        "GET",
-        undefined,
-        signal,
-      ),
+export function useMasterStatus() {
+  return useFeature<MasterStatus>(
+    "resume-master",
+    (signal) => api("/v2/resumes/master", "GET", undefined, signal),
     30000,
-    [page, status],
-  );
-  if (list.unavailable) return null;
-  const items = Array.isArray(list.data?.items) ? list.data!.items : [];
-  return (
-    <>
-      {master.data && <MasterResume status={master.data} refresh={master.refresh} />}
-      {!master.unavailable && master.error && !master.data && (
-        <p className="ax-error" role="alert">
-          {master.error.message}
-        </p>
-      )}
-      <Panel
-        title="Tailored versions"
-        actions={
-          <Button size="sm" onClick={() => go({ view: "editor" })}>
-            Open resume editor
-          </Button>
-        }
-      >
-        {masterOnly && (
-          <p className="ax-hint">Drafts for review only. None of these are attached to applications while tailoring is paused.</p>
-        )}
-        {list.error && !list.data && (
-          <Empty
-            title="Could not load tailored versions"
-            hint={list.error.message}
-            action={<Button size="sm" onClick={list.refresh}>Try again</Button>}
-          />
-        )}
-        {list.data && (
-          <div className="ax-stack">
-            <div className="ax-toolbar">
-              <select
-                className="ax-control"
-                aria-label="Filter by status"
-                value={status}
-                onChange={(e) => {
-                  setStatus(e.target.value);
-                  setPage(1);
-                }}
-              >
-                <option value="">Any status</option>
-                <option value="ready">Ready</option>
-                <option value="building">Building</option>
-                <option value="failed">Needs repair</option>
-                <option value="kept_master">Master kept</option>
-              </select>
-            </div>
-            <Table
-              label="Tailored resumes"
-              rows={items}
-              rowKey={(a) => a.artifact_id}
-              minWidth={720}
-              empty={
-                <Empty
-                  title="No tailored versions yet"
-                  hint={
-                    masterOnly
-                      ? "Your master resume is used for every application."
-                      : "Eligible jobs get a tailored version before an application starts."
-                  }
-                />
-              }
-              columns={[
-                {
-                  key: "job",
-                  header: "Job",
-                  cell: (a) => (
-                    <>
-                      {a.employer_id && (
-                        <>
-                          <strong title={a.artifact_id}>{employerLabel(a.employer_id)}</strong>
-                          <span className="ax-hint"> · </span>
-                        </>
-                      )}
-                      {a.job_id ? (
-                        <button type="button" className="ax-link" onClick={() => openJob(a.job_id!)}>
-                          Open job
-                        </button>
-                      ) : (
-                        <span className="ax-hint">Job removed</span>
-                      )}
-                      {!a.employer_id && <small className="mono ax-hint"> {(a.artifact_id || "").slice(3, 11)}</small>}
-                    </>
-                  ),
-                },
-                {
-                  key: "status",
-                  header: "Status",
-                  cell: (a) => (
-                    <span
-                      title={
-                        a.status === "failed" && a.error?.code
-                          ? a.error.code.replaceAll("_", " ") + (a.error.retryable ? " · retried automatically" : "")
-                          : undefined
-                      }
-                    >
-                      <Pill tone={ARTIFACT_PILL[a.status] || "neutral"} dot>
-                        {ARTIFACT_TONE[a.status]?.[1] || a.status}
-                      </Pill>
-                    </span>
-                  ),
-                },
-                {
-                  key: "checks",
-                  header: "Checks",
-                  cell: (a) =>
-                    a.status === "ready" ? (
-                      <>
-                        {plural(a.validation?.pages || 1, "page")}
-                        {a.validation?.fill != null
-                          ? `, ${pct(a.validation.fill)} full`
-                          : ` · ${(a.selection || []).length} rows`}
-                        {a.validation?.keyword_coverage != null && (
-                          <span className="ax-hint"> · {Math.round(a.validation.keyword_coverage * 100)}% keyword overlap</span>
-                        )}
-                      </>
-                    ) : (
-                      "—"
-                    ),
-                },
-                { key: "built", header: "Built", cell: (a) => ago(a.finished_at || a.created_at) },
-                {
-                  key: "act",
-                  header: <span className="sr-only">Actions</span>,
-                  cell: (a) =>
-                    a.status === "ready" ? (
-                      <span className="ax-act">
-                        <Button size="sm" onClick={() => go({ view: "editor", artifact: a.artifact_id })}>
-                          Edit
-                        </Button>
-                        <External href={`/api/v2/resumes/artifacts/${a.artifact_id}/pdf`}>PDF</External>
-                      </span>
-                    ) : null,
-                },
-              ]}
-            />
-            <ServerPager
-              page={list.data.page ?? 1}
-              total={list.data.total ?? items.length}
-              size={list.data.size ?? 25}
-              setPage={setPage}
-              label="Tailored resume pages"
-            />
-          </div>
-        )}
-        {!list.data && !list.error && <Loading />}
-      </Panel>
-      <SupportedMaterial />
-    </>
-  );
-}
-
-function SupportedMaterial() {
-  const inv = usePoll<Inventory>((signal) => api("/v2/resumes/evidence", "GET", undefined, signal), 300000);
-  if (!inv.data)
-    return inv.error && !unmounted(inv.error) ? (
-      <p className="ax-error" role="alert">
-        {inv.error.message}
-      </p>
-    ) : null;
-  const d = inv.data;
-  const roles = d.roles || [];
-  const education = d.education || [];
-  const projects = d.projects || [];
-  const units = d.units || [];
-  return (
-    <details className="ax-panel ax-fold">
-      <summary>
-        <strong>Supported material</strong>
-        <span className="ax-hint">
-          {plural(roles.length, "role")}, {plural(education.length, "degree")}, {plural(projects.length, "project")},{" "}
-          {plural(units.length, "bullet")}
-        </span>
-      </summary>
-      <div className="ax-panel-body">
-        <div className="ax-stack">
-          <p className="ax-hint">Tailoring never adds a metric, tool or project that isn't in your master or here.</p>
-          {roles.map((r) => (
-            <div key={r.row}>
-              <h3>
-                {r.title}, {r.company}{" "}
-                <small className="ax-hint">
-                  {r.start}–{r.current ? "present" : r.end}
-                </small>
-              </h3>
-              <ul className="ax-rows">
-                {units
-                  .filter((u) => u.source_row === r.row)
-                  .map((u) => (
-                    <li className="ax-row" key={u.id}>
-                      <span className="ax-row-main">{u.text}</span>
-                    </li>
-                  ))}
-              </ul>
-            </div>
-          ))}
-          {projects.map((p) => (
-            <div key={p.row}>
-              <h3>{p.title}</h3>
-              <ul className="ax-rows">
-                {units
-                  .filter((u) => u.source_row === p.row)
-                  .map((u) => (
-                    <li className="ax-row" key={u.id}>
-                      <span className="ax-row-main">{u.text}</span>
-                    </li>
-                  ))}
-              </ul>
-            </div>
-          ))}
-          <KV items={education.map((e): [string, string] => [e.degree || "Degree", `${e.school}${e.end ? " · " + e.end : ""}`])} />
-        </div>
-      </div>
-    </details>
   );
 }
 
@@ -1044,7 +654,7 @@ export function JobResume({
       actions={
         a && (
           <Pill tone={ARTIFACT_PILL[a.status] || "neutral"} dot>
-            {ARTIFACT_TONE[a.status]?.[1] || a.status}
+            {ARTIFACT_WORD[a.status] || a.status}
           </Pill>
         )
       }
@@ -1052,9 +662,15 @@ export function JobResume({
       <div className="dr-stack">
         {masterOnly && (
           <p className="ax-note">
-            This application is sent with your master resume
-            {master.data?.source ? `, ${master.data.source.name}` : ""}.
-            {a ? " The draft below is for review only." : ""}
+            {a?.sent?.state === "confirmed" ? (
+              <>This application went out on {day(a.sent.at)} with the tailored version below.</>
+            ) : (
+              <>
+                This application is sent with your uploaded resume
+                {master.data?.source ? `, ${master.data.source.name}` : ""}.
+                {a ? " The draft below is for review only." : ""}
+              </>
+            )}
           </p>
         )}
         {list.error && (
@@ -1069,14 +685,9 @@ export function JobResume({
           <>
             {a.status === "ready" && (
               <div className="ax-toolbar">
-                <a
-                  className="ax-link"
-                  href={`/api/v2/resumes/artifacts/${a.artifact_id}/pdf`}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                >
-                  Open PDF<span className="sr-only"> (opens in a new tab)</span>
-                </a>
+                <Button size="sm" onClick={() => go({ view: "resumes", artifact: a.artifact_id, job: undefined })}>
+                  Preview
+                </Button>
                 <Button
                   size="sm"
                   onClick={() =>

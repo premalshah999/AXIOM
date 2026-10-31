@@ -1,0 +1,421 @@
+/* Resumes (src/resumes.tsx): what employers get, the path to change it, the files, the versions. Tokens only. */
+.rs-page {
+  gap: var(--space-4);
+}
+
+/* ---------- What employers get ---------- */
+.rs-state-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+}
+.rs-thumb {
+  display: grid;
+  place-items: center;
+  flex: none;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--paper);
+  box-shadow: var(--shadow-panel);
+  transition:
+    box-shadow var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
+}
+button.rs-thumb {
+  cursor: pointer;
+}
+button.rs-thumb:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-overlay);
+}
+.rs-thumb.is-blank {
+  width: 92px;
+  height: 119px;
+  border-style: dashed;
+  background: var(--inset);
+  box-shadow: none;
+  color: var(--ink-3);
+}
+.rs-thumb.is-small {
+  width: 46px;
+  height: 60px;
+}
+.rs-state-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.rs-sentence {
+  max-width: 62ch;
+  font-size: 20px;
+  font-stretch: 106%;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.008em;
+  text-wrap: pretty;
+}
+.rs-sentence b {
+  font-weight: 700;
+}
+.rs-sub {
+  max-width: 72ch;
+  color: var(--ink-2);
+  font-size: var(--text-body);
+}
+.rs-state-links {
+  display: flex;
+  gap: var(--space-1);
+  margin: var(--space-2) 0 0 calc(-1 * var(--space-2));
+}
+.rs-state-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+}
+.rs-state-control .ax-switch-row {
+  gap: var(--space-4);
+  padding: 0;
+  border: 0;
+}
+.rs-state-control .ax-row-main {
+  flex: none;
+}
+
+/* ---------- The guided path ---------- */
+.rs-path {
+  border-top: 1px solid var(--line-soft);
+  padding: var(--space-4) var(--space-5) var(--space-5);
+}
+.rs-path-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: var(--space-4);
+}
+.rs-path-head p {
+  color: var(--ink-2);
+  font-size: var(--text-body);
+}
+.rs-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--inset);
+}
+.rs-step {
+  --surface: var(--inset);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border-left: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.rs-step:first-child {
+  border-left: 0;
+}
+.rs-step h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--ink-2);
+}
+.rs-step.is-now h3,
+.rs-step.is-done h3 {
+  color: var(--ink);
+}
+.rs-step p b {
+  color: var(--ink);
+  font-weight: 500;
+}
+.rs-step > .ax-btn {
+  margin-top: auto;
+}
+.rs-step.is-now {
+  border-radius: var(--radius);
+  background: var(--raised);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+.rs-step.is-now + .rs-step {
+  border-left-color: transparent;
+}
+.ax-lamp.rs-lamp-now {
+  box-shadow: inset 0 0 0 3px var(--ink);
+}
+.rs-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+.rs-diff b {
+  color: var(--ink);
+  font-weight: 500;
+}
+.rs-points {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding-left: var(--space-5);
+  font-size: var(--text-body);
+}
+
+/* ---------- Files and versions, side by side ---------- */
+.rs-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 8fr);
+  align-items: start;
+  gap: var(--space-4);
+}
+/* The versions run long: the files stay in view beside them, until the fold makes the column long too. */
+.rs-side {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.rs-side:has(details[open]) {
+  position: static;
+}
+.rs-cols:has(> :only-child) {
+  grid-template-columns: minmax(0, 1fr);
+}
+.rs-line {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.rs-pad {
+  padding: var(--space-4);
+}
+.rs-count {
+  margin-left: var(--space-1);
+  color: var(--ink-3);
+  font-size: var(--text-data);
+  font-weight: 400;
+}
+.rs-files {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rs-file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-right: var(--space-3);
+  border-bottom: 1px solid var(--line-soft);
+  transition: background var(--dur) var(--ease);
+}
+.rs-file:hover {
+  background: var(--hover);
+}
+.rs-file-open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3) 0 var(--space-3) var(--space-4);
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.rs-file-open:focus-visible {
+  outline-offset: -2px;
+}
+.rs-file-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.rs-file-text strong {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rs-file-text small {
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rs-file-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+/* Positioned, so the dropzone's visually hidden input stays inside the scroll region instead of stretching the document. */
+.rs-add {
+  position: relative;
+  padding: var(--space-4);
+}
+.rs-add .rs-line {
+  padding: 0;
+  border: 0;
+}
+.rs-material {
+  padding: var(--space-2) var(--space-4);
+}
+.rs-material[open] {
+  padding-bottom: var(--space-4);
+}
+
+/* ---------- The preview panel: the PDF fills the drawer and scrolls by itself ---------- */
+.ax-drawer-body:has(> .rs-preview) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+.rs-preview {
+  --surface: var(--overlay);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.rs-preview > .ax-pdf {
+  border-top: 1px solid var(--line);
+  background: var(--inset);
+}
+.rs-block {
+  flex: none;
+  max-height: 44%;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-5);
+}
+.rs-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.rs-block-say {
+  margin-top: var(--space-1);
+  color: var(--ink-2);
+  font-size: var(--text-body);
+}
+.rs-changes {
+  margin-top: var(--space-2);
+}
+.rs-change-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-body);
+}
+.rs-change-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rs-change-list small {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.rs-preview-foot {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+}
+.rs-preview-steps,
+.rs-preview-acts {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.rs-preview-steps .mono {
+  color: var(--ink-2);
+}
+.rs-preview-acts {
+  margin-left: auto;
+}
+
+/* ---------- Narrower ---------- */
+@media (max-width: 1180px) {
+  .rs-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .rs-side {
+    position: static;
+  }
+  .rs-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .rs-step:nth-child(3) {
+    border-left: 0;
+  }
+  .rs-step:nth-child(n + 3) {
+    border-top: 1px solid var(--line);
+  }
+}
+@media (max-width: 640px) {
+  .rs-state-main {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: var(--space-3) var(--space-4);
+    padding: var(--space-4);
+  }
+  .rs-state-main .rs-thumb:not(.is-small) {
+    transform: none;
+  }
+  .rs-state-control {
+    grid-column: 1 / -1;
+    justify-content: stretch;
+  }
+  .rs-state-control .ax-btn {
+    width: 100%;
+  }
+  .rs-sentence {
+    font-size: 17px;
+  }
+  .rs-path {
+    padding: var(--space-4);
+  }
+  .rs-steps {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .rs-step {
+    border-left: 0;
+  }
+  .rs-step:nth-child(n + 2) {
+    border-top: 1px solid var(--line);
+  }
+  .rs-versions .ax-panel-head {
+    flex-wrap: wrap;
+  }
+}
