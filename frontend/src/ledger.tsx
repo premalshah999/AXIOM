@@ -171,7 +171,6 @@ function Confirmed({ ledger }: { ledger: ReturnType<typeof usePoll<{ application
     if (route.q) setQuery(route.q);
   }, [route.q, setQuery]);
   const all = useMemo(() => ledger.data?.applications || [], [ledger.data]);
-  const filters: Filters = { q, evidence, period, platform };
   const from = periodStart(period, now);
   const shown = useMemo(() => all.filter((r) => passes(r, { q, evidence, period, platform }, from)), [all, q, evidence, period, platform, from]);
   // What each menu would show if its option were chosen (every other filter kept).

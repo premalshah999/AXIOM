@@ -109,7 +109,7 @@ export function urlRole(url?: string) {
   }
 }
 
-export const ROLE_UNREAD = "Role not read yet";
+const ROLE_UNREAD = "Role not read yet";
 
 /**
  * What a list shows for a job: the employer, the role, and, only when either was not read from the posting, the posting's own host as
