@@ -3417,6 +3417,11 @@ class FormSession:
         if field["type"] == "combobox" and APPLICANT_LOCATION.fullmatch(field["label"].strip()) and await el.evaluate(
             "e => ['INPUT','TEXTAREA'].includes(e.tagName) && !e.readOnly && !e.disabled"
             " && ['list','both'].includes(e.getAttribute('aria-autocomplete'))"
+            # A Greenhouse custom question (question_<id>) is the employer's own, never the built-in geocoded
+            # location (candidate-location): Atto's bare "Location" listed New York / USA (other than New York) /
+            # Europe / Other, was taken for the applicant's city, answered with the applicant's own city, typed and refused as "No
+            # matching option" on every run (2026-10-31). Its list is read like any other choice.
+            " && !/^question_\\d+/.test(e.id)"
         ):
             # The applicant's own location is a search-only typeahead (Greenhouse Geocode Earth, Ashby, SmartRecruiters):
             # it lists nothing until typed, so opening it cost 1.4-2.3 s for zero choices. The resolver answers from
