@@ -114,6 +114,7 @@ class TransportMixin:
                 with self.db.exclusive() as s:
                     if box := s.get(Mailbox, mailbox_id):
                         box.checked_at, box.error = now(), ""
+                        self.mailbox_recovered(s, mailbox_id)
                 return cache(result)
             async with self.client() as client:
                 if token.get("expires_at", 0) < time.time() + 60:
@@ -174,6 +175,7 @@ class TransportMixin:
                     box = s.get(Mailbox, mailbox_id)
                     if box:
                         box.checked_at, box.error = now(), ""
+                        self.mailbox_recovered(s, mailbox_id)
                 return cache(r.json())
 
     def quarantine(self, mailbox_id, message_id, reason):

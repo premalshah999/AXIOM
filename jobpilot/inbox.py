@@ -152,8 +152,8 @@ class Inbox:
                 raise MailPending(self.mail.persist_wait(cid))
             try:
                 await self.mail.poll_once()
-            except Exception:
-                pass  # Mailbox status carries the diagnostic; errors may contain provider text.
+            except Exception as exc:
+                self.mail.note_failure("wait_poll", exc)  # counted and logged by class; its text can hold provider output
             if token := self.mail.claim(cid):
                 return token
             remaining = deadline - time.monotonic() if deadline is not None else self.config.mail_poll_seconds

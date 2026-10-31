@@ -496,15 +496,23 @@ class PollingMixin:
                                 "generation": generation,
                             },
                         )
-                except (ValueError, httpx.HTTPError, KeyError, TypeError):
+                except (ValueError, httpx.HTTPError, KeyError, TypeError) as exc:
                     # Do not include provider responses, URLs, codes, or credentials in diagnostics.
+                    count = self.note_failure("poll_scan", exc)
                     with self.db.exclusive() as s:
                         row = s.get(MailChallenge, c["id"])
                         box = s.get(Mailbox, c["mailbox_id"])
-                        if row:
+                        # Only a window that is still open: 16 finished challenges carried "Mailbox request failed" as
+                        # their reason although they had matched, expired or been verified (2026-10-31).
+                        if row and row.state == "pending":
                             row.reason = "Mailbox request failed; check the connection"
                             if not box or box.state != "connected":
                                 row.state, row.payload = "failed", ""
+                    if count <= 3 or count % 20 == 0:
+                        self.db.event(
+                            c["run_id"], "mail_poll_failed", "The mailbox search failed; it is tried again",
+                            {"error": type(exc).__name__, "failures_so_far": count},
+                        )
             if last_chance:
                 # A window past its end got its one search (or three failed ones): it is empty now.
                 with self.db.exclusive() as s:
@@ -616,8 +624,8 @@ class PollingMixin:
                             await asyncio.gather(draft_task, return_exceptions=True)
                         last_drafts = time.time()
                         draft_task = asyncio.create_task(reconcile_recent_drafts(self))
-                except Exception:
-                    pass  # Public connection/challenge diagnostics never expose raw secrets.
+                except Exception as exc:
+                    self.note_failure("poll_loop", exc)  # by class only: public diagnostics never expose raw secrets
                 await asyncio.sleep(self.config.mail_poll_seconds)
         finally:
             for task in (receipt_task, draft_task):
