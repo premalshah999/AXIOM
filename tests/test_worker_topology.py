@@ -4,7 +4,7 @@ import pytest
 
 from jobpilot.application_slots import claim_slot
 from jobpilot.config import Settings, Topology
-from jobpilot.db import Job, Run
+from jobpilot.db import Event, Job, Run
 from jobpilot.pipeline_comparison import (
     NORMAL,
     SPECIALIST,
@@ -136,3 +136,21 @@ def test_capacity_reads_only_the_packet_keys_it_decides_on(service):
         assert (capacity(s, 8).running, pool_capacity(s, SPECIALIST, Topology(6, 2)).available) == (1, 1)
     workers = snapshot(service.db, Topology(6, 2))
     assert [w["run_id"] for w in workers["assignments"] if w["run_id"]] == ["g-run"]
+
+
+def test_a_workers_phase_is_the_newest_event_that_says_where_the_run_is(service):
+    add_run(service, "alpha", NORMAL, 1)
+    add_run(service, "beta", NORMAL, 2)
+    with service.db.session() as s:
+        for run_id, kind in [
+            ("alpha-run", "form_page"),
+            ("alpha-run", "model_usage"),  # bookkeeping: never the phase
+            ("alpha-run", "answer_quality"),
+            ("alpha-run", "timing"),
+        ]:
+            s.add(Event(run_id=run_id, kind=kind, message="", data={}))
+    view = snapshot(service.db, Topology(4, 1))
+    phases = {w["slot"]: w["phase"] for w in view["assignments"]}
+    assert phases[1] == "answer_quality"
+    assert phases[2] == "running"  # nothing told yet: the state, as before
+    assert phases[3] == "idle"

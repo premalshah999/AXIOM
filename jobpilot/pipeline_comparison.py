@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import defer
 
 from .config import Topology, legacy_topology
-from .db import Run
+from .db import Event, Run
 
 CURRENT = "current"
 NORMAL = "normal"
@@ -95,6 +95,17 @@ def assign(session, job, source=None):
     return CURRENT
 
 
+# The events that say where an application is (the same kinds as TELLING in
+# frontend/src/identity/stages.ts). The newest of them is a worker's `phase`: the Overview reads its rung from the poll it
+# already makes instead of fetching every run's full trace (40 KB each) every six seconds.
+TELLING_EVENTS = (
+    "browser", "new_tab", "auth", "account", "captcha", "email_wait", "email_verified", "step", "form_page", "form_post",
+    "field_error", "agent_step", "agent_action_result", "recovery", "browser_recovery", "answer_quality",
+    "answer_validation", "knowledge_inference", "knowledge_inference_declined", "verification", "submitting",
+    "submission_requests",
+)
+
+
 def as_topology(limit):
     """A Topology from the settings object (config.topology) or, for older callers and tests, a legacy total."""
     return limit if isinstance(limit, Topology) else legacy_topology(limit)
@@ -148,6 +159,15 @@ def snapshot(db, limit=8, rows=None):
             for run, job in rows
             if run.state in {"running", "submitting"}
         }
+        told = {}
+        owned = [run.id for run, _ in active.values()]
+        if owned:
+            for run_id, kind in session.execute(
+                select(Event.run_id, Event.kind)
+                .where(Event.run_id.in_(owned), Event.kind.in_(TELLING_EVENTS))
+                .order_by(Event.id)
+            ):
+                told[run_id] = kind  # ascending ids: the last one written is the newest
         capacities = {}
         for pool in POOLS:
             value = pool_capacity(session, pool, limit, rows=rows)
@@ -171,7 +191,7 @@ def snapshot(db, limit=8, rows=None):
                     "lane": lane,
                     "pool": lane,
                     "state": owner[0].state if owner else "idle",
-                    "phase": owner[0].state if owner else "idle",
+                    "phase": told.get(owner[0].id, owner[0].state) if owner else "idle",
                     "run_id": owner[0].id if owner else None,
                     "job_id": owner[1].id if owner else None,
                     "ats": ats,

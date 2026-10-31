@@ -60,7 +60,7 @@ Rail plus nine columns, the same grid as the scale, so at nine workers each chan
 
 ### Channels: the rung mapping (`identity/stages.ts`)
 
-Six rungs, bottom to top. `running` alone only proves "open", so a channel reads the run's newest telling event from `GET /api/runs/{id}`, one run at a time, every few seconds, while the page is visible.
+Six rungs, bottom to top. `running` alone only proves "open", so a channel reads the run's newest telling event from its worker's `phase` in the snapshot poll it already makes (`pipeline_comparison.TELLING_EVENTS`, the same kinds as `TELLING` in `identity/stages.ts`).
 
 | Rung | Run events (`events.kind`) |
 |---|---|

@@ -6,8 +6,7 @@ import { ChannelBank, type Channel } from "./identity/ChannelBank";
 import { DayChart, DotPatterns } from "./identity/DayChart";
 import { MasterKey } from "./identity/MasterKey";
 import { confirmedToday, panelState, STATE_WORD } from "./identity/state";
-import { progressOf } from "./identity/stages";
-import { useRunProgress } from "./identity/useRunProgress";
+import { progressFrom, progressOf } from "./identity/stages";
 import "./identity/panel.css";
 import { appliedState, STATES, type JobRow } from "./model";
 import { Pagination, usePagination } from "./pagination";
@@ -29,6 +28,8 @@ type Working = {
   role: string;
   platform: string;
   state: string;
+  /** The newest event kind that says where the run is, or its state when none has: from the worker poll. */
+  phase?: string;
   open?: () => void;
   /** The job to pause, when it can be paused now. */
   pause?: string;
@@ -100,6 +101,7 @@ function useWorking(mail: MailStatus | null, workers?: ApplicationWorkers) {
         role: job?.title || "Details loading",
         platform: assignment.ats,
         state: assignment.state || "running",
+        phase: assignment.phase,
       });
       return;
     }
@@ -113,6 +115,7 @@ function useWorking(mail: MailStatus | null, workers?: ApplicationWorkers) {
       role: row.job.title,
       platform: assignment?.ats || row.job.ats,
       state: row.state,
+      phase: assignment?.phase,
       open: () => openJob(row.job.id, r.id),
       pause: r.state === "running" && row.state !== "pausing" ? row.job.id : undefined,
       since: r.started_at || r.created_at,
@@ -342,7 +345,6 @@ function Bank({ work, checking }: { work: WorkingState; checking: boolean }) {
   const { refresh, markJobs } = useWorkspace();
   const { pending, run } = useAction();
   const now = useNow(1000);
-  const told = useRunProgress(work.busy.flatMap((w) => (w.runId ? [w.runId] : [])));
   const channels: Channel[] = work.busy.map((w) => ({
     slot: w.slot,
     id: w.key,
@@ -351,7 +353,8 @@ function Bank({ work, checking }: { work: WorkingState; checking: boolean }) {
     platform: w.platform,
     state: w.state,
     since: w.since,
-    progress: progressOf(w.state, w.runId ? told[w.runId] : undefined),
+    // The worker's phase is the newest telling event kind (pipeline_comparison.TELLING_EVENTS), already in this poll.
+    progress: progressOf(w.state, w.phase ? progressFrom([{ kind: w.phase }]) : null),
     open: w.open,
     pause: w.pause ? (
       <button
