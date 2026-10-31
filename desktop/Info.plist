@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>AXIOM</string>
+  <key>CFBundleDisplayName</key><string>AXIOM</string>
+  <key>CFBundleIdentifier</key><string>app.axiom.desktop</string>
+  <key>CFBundleExecutable</key><string>AXIOM</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleShortVersionString</key><string>@VERSION@</string>
+  <key>CFBundleVersion</key><string>@BUILD@</string>
+  <key>LSMinimumSystemVersion</key><string>@MINIMUM_MACOS@</string>
+  <key>LSArchitecturePriority</key><array><string>arm64</string></array>
+  <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSHumanReadableCopyright</key><string>AGPL-3.0-only. Source and third-party licences are in the app's Resources folder.</string>
+  <!-- The window talks to its own server over plain http on 127.0.0.1, and to nothing else. -->
+  <key>NSAppTransportSecurity</key>
+  <dict><key>NSAllowsLocalNetworking</key><true/></dict>
+</dict>
+</plist>

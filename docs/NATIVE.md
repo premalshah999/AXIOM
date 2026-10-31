@@ -3,7 +3,7 @@
 One command, one process tree, on a Mac: `scripts/axiom start` (or `make start`) starts PostgreSQL, the worker and twin Chromes
 and every service in [`jobpilot/native/services.toml`](../jobpilot/native/services.toml), waits until they are healthy and opens
 the dashboard. Today that list holds one service, the app. Docker keeps working exactly as before; nothing in `compose.yaml` or the
-`Dockerfile` changed, and `make up` is still the Docker path.
+`Dockerfile` changed, and `make up` is still the Docker path. The same supervisor runs inside the installed Mac app, with no checkout or Homebrew: see [DESKTOP.md](DESKTOP.md).
 
 ## Why
 

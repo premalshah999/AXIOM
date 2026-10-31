@@ -40,6 +40,7 @@ ACTIVE_SECONDS = 20.0
 # Autopilot gaps (a retry due in two minutes) must not let the Mac sleep between applications.
 SLEEP_RELEASE_SECONDS = 300.0
 POWER_SECONDS = 60.0
+OWNER_SECONDS = 5.0
 ROTATE_SECONDS = 30.0
 LOG_BYTES, LOG_KEEP = 10 * 1024 * 1024, 3  # compose.yaml's json-file limits.
 CHROME_GRACE, POSTGRES_GRACE, CHROME_WAIT = 10.0, 30.0, 30.0
@@ -119,7 +120,7 @@ def chrome_argv(cfg, script, port_var, profile_var, url, profile, extra=""):
     port = str(urlsplit(url).port)
     env = {**os.environ, "DRY_RUN": "1", port_var: port, profile_var: str(profile)}
     done = subprocess.run(
-        ["sh", str(cfg.root / "scripts" / script)], capture_output=True, text=True, env=env, timeout=30
+        ["sh", str(cfg.scripts / script)], capture_output=True, text=True, env=env, timeout=30
     )
     if done.returncode:
         raise NativeError(done.stderr.strip() or f"scripts/{script} failed")
@@ -134,7 +135,8 @@ def chrome_argv(cfg, script, port_var, profile_var, url, profile, extra=""):
 class Child:
     def __init__(self, name, argv, *, env=None, cwd=None, log=None, required=True, after=(), ready=None,
                  stop_signal=signal.SIGTERM, grace=10.0, final_signal=signal.SIGKILL, url=None, service=False,
-                 restart="always", restart_with=(), health_url="", port=None):
+                 restart="always", restart_with=(), health_url="", port=None, profile=None):
+        self.profile = profile
         self.name, self.argv, self.env, self.cwd, self.log = name, argv, env, cwd, log
         self.required, self.after, self.ready = required, after, ready
         self.stop_signal, self.grace, self.final_signal, self.url = stop_signal, grace, final_signal, url
@@ -298,6 +300,7 @@ class Supervisor:
                     ready=lambda: http_ok(cfg.worker_cdp + "/json/version"),
                     url=cfg.worker_cdp,
                     grace=CHROME_GRACE,
+                    profile=cfg.get("CHROME_WORKER_PROFILE") or cfg.data_dir / "desktop-browser",
                 )
             )
         if cfg.twin_cdp:
@@ -316,6 +319,7 @@ class Supervisor:
                     ready=lambda: http_ok(cfg.twin_cdp + "/json/version"),
                     url=cfg.twin_cdp,
                     grace=CHROME_GRACE,
+                    profile=cfg.get("CHROME_TWIN_PROFILE") or cfg.data_dir / "twin-browser",
                 )
             )
         infrastructure = [*infrastructure, *browsers]
@@ -471,6 +475,8 @@ class Supervisor:
         if self.due("power", now, POWER_SECONDS):
             self.tick_power()
         self.tick_health(now)
+        if self.due("owner", now, OWNER_SECONDS):
+            self.tick_owner()
         if self.due("rotate", now, ROTATE_SECONDS):
             self.rotate_logs()
         self.write_state()
@@ -600,6 +606,14 @@ class Supervisor:
             self.timings["ready_seconds"] = round(now - self.began, 1)
             self.say(f"AXIOM is up at {self.cfg.base_url} after {self.timings['ready_seconds']} s.")
 
+    def tick_owner(self):
+        """The Mac app's window is how its owner sees and stops this. A force-quit or a crash must not leave an engine
+        submitting real applications with nothing on screen, so its loss is a normal, draining stop. `scripts/axiom` sets
+        no owner: production outlives its terminal."""
+        pid, started = self.cfg.get("AXIOM_OWNER_PID"), self.cfg.get("AXIOM_OWNER_LSTART")
+        if pid and not same_process(int(pid), started):
+            self.stop_reason = self.stop_reason or "The AXIOM window went away, so AXIOM stopped safely."
+
     # ---- the Mac: sleep, power, health, logs ----------------------------------------------------------------------------
 
     def tick_sleep(self, now):
@@ -684,12 +698,23 @@ class Supervisor:
                 if child.service and child.grace > 30:
                     self.say(f"Stopping {child.name}: it drains for up to {child.grace:.0f} s while commits finish.")
                 self.stop_and_wait(child)
+        self.stop_relaunched_chromes()
         if self.caffeinate and self.caffeinate.poll() is None:
             self.caffeinate.terminate()
             self.caffeinate.wait()
         self.phase = "stopped"
         self.write_state(force=True)
         self.say(self.reason or "Stopped.")
+
+    def stop_relaunched_chromes(self):
+        """Chrome can relaunch itself (a fresh worker profile did 143 s in, 2026-10-31). The new process is not our child, so
+        it reads as `external`, which a checkout leaves alone because someone may have started it by hand. In the Mac app
+        the port and the profile are private, so whatever holds the profile is ours, and Quit must leave nothing running."""
+        if not self.cfg.get("AXIOM_BUNDLE"):
+            return
+        for child in self.children or []:
+            if child.state == "external" and child.profile:
+                stop_chrome_holding(child.profile, say=self.say)
 
     def stop_and_wait(self, child):
         pid = child.pid
@@ -805,6 +830,25 @@ def stop_stray_postgres(cfg, say):
     say(f"Stopping a database left running on this data directory (pid {pid}).")
     stop_process(pid, signal.SIGINT, POSTGRES_GRACE, started)
     return True
+
+
+def chrome_holding(profile):
+    """The pid of the Chrome that holds this profile, from Chrome's own lock (a symlink to host-pid), or None. Checked against
+    the process's command line, because the lock outlives its process and a pid gets reused."""
+    try:
+        pid = int(os.readlink(os.path.join(profile, "SingletonLock")).rsplit("-", 1)[1])
+    except (OSError, ValueError, IndexError):
+        return None
+    command = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=5).stdout
+    return pid if f"--user-data-dir={profile}" in command else None
+
+
+def stop_chrome_holding(profile, say=print):
+    pid = chrome_holding(profile)
+    if pid:
+        say(f"Stopping the Chrome holding {os.path.basename(str(profile))} (pid {pid}).")
+        stop_process(pid, signal.SIGTERM, CHROME_GRACE, process_start(pid))
+    return bool(pid)
 
 
 def stop_process(pid, sig, grace, started):

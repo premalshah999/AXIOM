@@ -408,20 +408,21 @@ def restore(cfg, bin_dir, source, say=print):
         raise NativeError(f"The restore failed (pg_dump {dump_code}, pg_restore {loader.returncode}). See {errors}.")
 
 
-def rewrite_queued_paths(bin_dir, cfg):
+def rewrite_queued_paths(bin_dir, cfg, old="/app/.data/"):
     """Queued runs carry the absolute path of their resume, which in Docker is under /app/.data. Every other state goes
     back through Service.queue, which writes a new packet from DATA_DIR, so only these need it."""
     target = str(cfg.data_dir).replace("'", "''")
+    prior = old.replace("'", "''")
     pg.psql(
         bin_dir,
         cfg,
-        "update runs set packet = replace(packet::text, '/app/.data/', '" + target + "/')::json "
-        "where state = 'queued' and packet::text like '%/app/.data/%'",
+        f"update runs set packet = replace(packet::text, '{prior}', '{target}/')::json "
+        f"where state = 'queued' and packet::text like '%{prior}%'",
         timeout=300,
     )
-    left = pg.psql(bin_dir, cfg, "select count(*) from runs where state='queued' and packet::text like '%/app/.data/%'")
+    left = pg.psql(bin_dir, cfg, f"select count(*) from runs where state='queued' and packet::text like '%{prior}%'")
     if left != "0":
-        raise NativeError(f"{left} queued run(s) still point at /app/.data.")
+        raise NativeError(f"{left} queued run(s) still point at {old}.")
 
 
 def set_hold(bin_dir, cfg, stage, reason):

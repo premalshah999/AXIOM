@@ -85,7 +85,14 @@ class Native:
 
     @property
     def logs(self):
-        return self.home / "logs"
+        # The Mac app keeps its logs where Console.app looks (desktop.py).
+        return Path(self.get("AXIOM_LOG_DIR") or self.home / "logs")
+
+    @property
+    def scripts(self):
+        """Inside the Mac app `root` is the config folder, and the Chrome scripts travel with the code."""
+        bundle = self.get("AXIOM_BUNDLE")
+        return Path(bundle) / "app" / "scripts" if bundle else self.root / "scripts"
 
     @property
     def state_file(self):
@@ -118,6 +125,8 @@ class Native:
 
     def path_with_tools(self, environ=None):
         current = (environ if environ is not None else os.environ).get("PATH", "/usr/bin:/bin").split(os.pathsep)
+        if self.get("AXIOM_BUNDLE"):  # desktop.py has decided the PATH: an installed app must not lean on Homebrew.
+            return os.pathsep.join(current)
         return os.pathsep.join(dict.fromkeys([*current, *EXTRA_PATH]))
 
     def app_environment(self, release):
@@ -151,8 +160,9 @@ class Native:
 
 
 def load(root=None, environ=None):
-    root = Path(root or ROOT)
     environ = os.environ if environ is None else environ
+    # The Mac app's `.env` and working directory are in Application Support: an upgrade replaces the bundle (desktop.py).
+    root = Path(root or environ.get("AXIOM_CONFIG_DIR") or ROOT)
     values = {**read_dotenv(root / ".env"), **environ}  # The environment outranks `.env`, as in pydantic-settings.
     data_dir = Path(values.get("DATA_DIR") or ".data").expanduser()
     data_dir = data_dir if data_dir.is_absolute() else root / data_dir
