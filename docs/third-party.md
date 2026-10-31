@@ -9,6 +9,7 @@ Runtime and build dependencies retain their respective licenses. Exact dependenc
 - DBOS, Playwright, and their dependencies include their own license notices in installed distributions.
 - Archivo, Doto and Fragment Mono are self-hosted via Fontsource under SIL Open Font License 1.1. Their package distributions include the full license text.
 - Lucide icons retain the Lucide/Feather license notices included in the package.
+- The Mac app bundles pdfTeX, kpathsea and Metafont from TeX Live, with LaTeX, psnfss and the fonts they load: free software under the GPL, LGPL, LPPL, the GUST Font License and others, per file. `docs/licenses/TeXLive-LICENSE.TL.txt` and `TeXLive-LICENSE.CTAN.txt` are TeX Live's own statement of them. The corresponding source of TeX Live 2025 is at https://tug.org/texlive/ and https://ctan.org/, and each file's licence stays in its header. It also bundles PostgreSQL (the PostgreSQL License), ICU, OpenSSL, Kerberos, gettext, lz4, zstd and readline with it, and CPython (PSF License), each from that project's own release.
 - MiMo inference, Telegram, and CapSolver are external services with separate terms and billing. A source-available application does not make those services free.
 
 The dashboard build bundles only the selected fonts/icons and frontend code. Private profile data, uploaded resumes, employer sessions, model keys, and bot keys are not source-code assets.

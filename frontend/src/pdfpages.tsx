@@ -10,12 +10,14 @@ import "./styles/pdf.css";
 type PdfJs = typeof import("pdfjs-dist");
 let loader: Promise<PdfJs> | null = null;
 function pdfjs() {
+  // The legacy build, because the modern one needs Map.getOrInsertComputed, which WebKit on macOS 15 does not have: every
+  // preview in the installed app said "could not be drawn" (2026-10-31). Safari on that version fails the same way.
   loader ??= Promise.all([
-    import("pdfjs-dist"),
-    import("pdfjs-dist/build/pdf.worker.min.mjs?url"),
+    import("pdfjs-dist/legacy/build/pdf.mjs"),
+    import("pdfjs-dist/legacy/build/pdf.worker.min.mjs?url"),
   ]).then(([lib, worker]) => {
     lib.GlobalWorkerOptions.workerSrc = (worker as { default: string }).default;
-    return lib;
+    return lib as unknown as PdfJs;
   });
   return loader;
 }

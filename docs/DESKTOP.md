@@ -5,7 +5,7 @@ shows the same dashboard a browser shows; a loopback-only server stays inside it
 
 It runs the supervisor in `jobpilot/native` ([NATIVE.md](NATIVE.md)), unforked. `scripts/axiom` and a checkout keep working exactly as before.
 
-The disk image is 126 MB and the installed app 374 MB. On this 16 GB Mac, measured beside production with synthetic data: a first start takes about 8 s from the window opening to the dashboard (the
+The disk image is 163 MB and the installed app 435 MB. On this 16 GB Mac, measured beside production with synthetic data: a first start takes about 8 s from the window opening to the dashboard (the
 database created), a later start about 6 s, and a Quit with nothing active 3 to 4 s. `jobpilot verify` passes on the installed app.
 
 | At idle, resident | MB |
@@ -22,10 +22,11 @@ database created), a later start about 6 s, and a Quit with nothing active 3 to 
 | Inside `AXIOM.app/Contents` | What | Size |
 |---|---|---|
 | `MacOS/AXIOM` | The window (`desktop/AXIOM.m`) | 150 KB |
-| `Resources/python` | CPython 3.12 from uv's relocatable builds, with every package from `uv.lock` in its `site-packages` | 289 MB |
+| `Resources/python` | CPython 3.12 from uv's relocatable builds, with every package from `uv.lock` in its `site-packages` | 290 MB |
 | ... of which `playwright` | The driver and its Node, which is most of it | 133 MB |
 | `Resources/postgres` | PostgreSQL 17 with its libraries, relocated by `desktop/relocate_pg.py` | 69 MB |
-| `Resources/app` | `jobpilot/`, the built dashboard, the Chrome scripts, licences | 12 MB |
+| `Resources/tex` | pdfTeX, Metafont and the TeX files they use, by `desktop/bundle_tex.py` | 60 MB |
+| `Resources/app` | `jobpilot/`, the built dashboard, the Chrome scripts, licences | 14 MB |
 | `Resources/bin/axiom` | `scripts/axiom` for a bundle: `status`, `logs`, `psql`, `hold`, `jobpilot verify`, `move-in` | |
 
 There is no virtualenv. uv's Python needs no fixing up to be moved, and packages installed straight into it have no absolute paths to go stale,
@@ -80,9 +81,15 @@ The person's own Google Chrome if it is installed, in `/Applications` or `~/Appl
 
 ## Resume tailoring and LaTeX
 
-**Not bundled, and the app says so.** Tailoring runs `pdflatex`. On a clean Mac it is unavailable: the Status menu says "Resume tailoring is off: LaTeX is not installed", tailoring reports `compiler_missing`, and applications go on with the uploaded resume. If the person has installed MacTeX, BasicTeX or TinyTeX, the app finds it (`/Library/TeX/texbin`, `~/Library/TinyTeX`).
+Tailoring works on a Mac with no LaTeX: `pdflatex` is in the bundle, first on the app's PATH, and adds 60 MB installed (about 22 MB compressed).
 
-`tectonic` (about 20 MB compressed) is the lightest candidate and has not been tried here, because running a downloaded binary was not permitted on this build machine. Two things would need testing before bundling it. It runs XeTeX rather than pdfTeX, so a template using `\pdfgentounicode` or pdfTeX-only fonts may not compile. And it fetches its packages at first use from a third-party server, so offline tailoring would need a seeded cache.
+`desktop/bundle_tex.py` runs the app's own renderers across every template, font, base size and header with `pdflatex -recorder`, and copies what the `.fls` files say was opened. Then it widens, because the editor also takes hand-written LaTeX: every shape in each font family, all of `tex/latex` and `tex/generic`, and Metafont with the EC and CM sources, since `\\texttt` under T1 has no Type 1 font here and the compiler draws one in its scratch folder. TeX Live finds everything relative to its binary (`$SELFAUTOPARENT`), so no environment is needed; the trees are marked `!!` in `texmf.cnf`, so `ls-R` files are written. The build fails unless the copy, with `PATH=/usr/bin:/bin`, compiles all 92 combinations and opens nothing outside itself.
+
+**All five fonts are offered,** which is more than a TinyTeX checkout today: its TeX has no Charter or Palatino, so those two are greyed out there. They come from TeX Live's package archive, pinned by SHA-256 (`FONT_PACKAGES`). They are font data that pdfTeX reads; nothing in them is run.
+
+**Licences.** `docs/licenses/TeXLive-LICENSE.TL.txt` allows redistribution "with or without modification, for profit or not", asks that a changed distribution says so (`Resources/tex/README.AXIOM`), and forbids claiming copyright on the whole. Each file keeps its own licence (GPL for the binaries, LPPL for LaTeX, GUST and others for fonts). The GPL means the source of those binaries must be available: the README points to TeX Live and offers it on request, so whoever distributes the DMG has to be able to honour that.
+
+**A hand-written `\\usepackage` of something not installed** fails with LaTeX's own "not found", exactly as it does on a checkout's TinyTeX: every package that TeX has is bundled, and none is ever downloaded at run time.
 
 ## Upgrades
 
@@ -115,9 +122,21 @@ On one volume every file is an APFS clone, so it takes almost no space however m
 desktop/build.sh          # desktop/build/AXIOM.app and AXIOM.dmg. About 1.5 GB while it runs.
 ```
 
-It needs Command Line Tools, uv, npm and PostgreSQL 17 on the build machine, and none of them on the Mac that installs the result. It fails if any binary inside links outside the bundle or the system (`otool-proof.txt`), and declares the macOS the strictest binary allows.
+It needs Command Line Tools, uv, npm, PostgreSQL 17 and TeX Live or TinyTeX on the build machine, and none of them on the Mac that installs the result. It fails if any binary inside links outside the bundle or the system (`otool-proof.txt`), and declares the macOS the strictest binary allows.
 
-**Where PostgreSQL comes from.** `relocate_pg.py` takes the build machine's own Homebrew PostgreSQL, copies it and every library it links, rewrites the links to be relative, and signs them. The result has no link to Homebrew. Two things follow from Homebrew's build: the app's minimum is macOS 15, because that is what the bottle was built for, and its version is whatever that Mac has (17.8 today, while the image has 17.11). EDB's or Zonky's prebuilt binaries are the alternatives: running a downloaded binary was not permitted on this machine, so neither was tried. Zonky's 62 MB archive also lacks `psql`, `pg_isready` and `pg_dump`, which the supervisor and `move-in` use, and carries ICU 68, against production's 78, so it would force an index rebuild on moving in.
+**Where PostgreSQL comes from.** `relocate_pg.py` takes the build machine's own Homebrew PostgreSQL, copies it and every library it links, rewrites the links to be relative, and signs them. The result has no link to Homebrew. One thing follows from that: its version is whatever that Mac has (17.8 today, while the image has 17.11). EDB's or Zonky's prebuilt binaries are the alternatives: running a downloaded binary was not permitted on this machine, so neither was tried. Zonky's 62 MB archive also lacks `psql`, `pg_isready` and `pg_dump`, which the supervisor and `move-in` use, and carries ICU 68, against production's 78, so it would force an index rebuild on moving in.
+
+## macOS 15 minimum
+
+The window asks for 13, Python and pdfTeX for 11. Only PostgreSQL and the libraries it came with say 15.0, because that is what Homebrew's bottle for this Mac was built for. `build.sh` declares what the strictest binary allows.
+
+**It does not matter much.** The app is arm64 only, and every Apple Silicon Mac can run macOS 15, so nobody is locked out by hardware, only by not having updated; macOS 26 is current.
+
+What would lower it, none of it needing a downloaded binary to be run on the build machine beyond what is noted:
+
+1. **`vtool -set-build-version macos 13.0 15.0`** on the bundled PostgreSQL. Nothing is downloaded, but it only changes a claim: a symbol the build took from macOS 15 would still fail at load, on a Mac we do not have. `MacOSX13.3.sdk` is installed here, so its `.tbd` files could check the imported symbols statically first. This is the cheapest, and needs testing on a real older Mac.
+2. **Homebrew's older bottles** (`brew fetch --bottle-tag=arm64_sonoma postgresql@17`, and each library), which say 14. Those are downloaded binaries that the relocator's proof would run, so that needs the owner's permission.
+3. **Building PostgreSQL, ICU and OpenSSL from source** with `MACOSX_DEPLOYMENT_TARGET=13.0`. This reaches the lowest version and is the most work, and running their build scripts is also running downloaded code.
 
 ## Signing: what an Apple Developer ID adds
 

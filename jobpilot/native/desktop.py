@@ -35,10 +35,9 @@ BUNDLE_ID = "app.axiom.desktop"
 # What a checkout install uses by default, and what production holds on this Mac. An app beside a checkout never takes them.
 AVOID_PORTS = frozenset({8080, 9224, 9225, 9339, 54329})
 PORTS = ("app", "postgres", "worker", "twin")
-# A Finder launch has only the first four. Homebrew is deliberately absent, here and in env.py: if the app needed it, the
-# first clean Mac would be where we found out. MacTeX is the one tool it may use if the person installed it.
+# A Finder launch has only these. Homebrew is deliberately absent, here and in env.py: if the app needed it, the first clean
+# Mac would be where we found out. pdflatex comes from the bundle (desktop/bundle_tex.py), ahead of any on the Mac.
 TOOL_PATH = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
-LATEX_DIRS = ("/Library/TeX/texbin", "~/Library/TinyTeX/bin/universal-darwin")
 INSTALLED_CHROME = (
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -107,6 +106,10 @@ class Layout:
     @property
     def pg_bin(self):
         return self.resources / "postgres" / "bin"
+
+    @property
+    def tex_bin(self):
+        return self.resources / "tex" / "bin" / "universal-darwin"
 
     @property
     def bundle(self):
@@ -296,15 +299,6 @@ def download_chrome(layout, report, *, index=None):
     return str(layout.downloaded_chrome)
 
 
-def find_latex(layout):
-    """Resume tailoring runs pdflatex. It is not bundled (docs/DESKTOP.md): the app says so, and uses it if it is here."""
-    return next((str(Path(p)) for p in tool_dirs(layout) if os.access(Path(p) / "pdflatex", os.X_OK)), "")
-
-
-def tool_dirs(layout):
-    return [d.replace("~", str(layout.home), 1) for d in LATEX_DIRS]
-
-
 # ---- what the app runs with -----------------------------------------------------------------------------------------
 
 
@@ -316,7 +310,7 @@ def environment(layout, ports=None, chrome=""):
         "AXIOM_LOG_DIR": str(layout.logs),
         "AXIOM_PG_BIN": str(layout.pg_bin),
         "DATA_DIR": str(layout.data),
-        "PATH": os.pathsep.join([*TOOL_PATH, *tool_dirs(layout)]),
+        "PATH": os.pathsep.join([str(layout.tex_bin), *TOOL_PATH]),
         # A write inside the bundle would break its signature; the build compiles everything ahead of time.
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONNOUSERSITE": "1",
@@ -460,7 +454,6 @@ def _boot(layout, owner, report):
                 "token": access_token(cfg),
                 "chrome": chrome,
                 "chrome_source": source,
-                "latex": find_latex(layout),
                 "data": str(layout.data),
                 "logs": str(layout.logs),
             }

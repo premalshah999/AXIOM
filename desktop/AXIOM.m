@@ -82,6 +82,33 @@ static NSString *const SplashHTML =
 static NSString *const SignedOutScript =
     @"window.addEventListener('applypilot:signed-out',function(){window.webkit.messageHandlers.axiom.postMessage('signed-out')});";
 
+// What a drag from Finder hands the view, for the driver below.
+@interface DriveDrag : NSObject <NSDraggingInfo>
+@property(strong) NSPasteboard *board;
+@property(strong) NSWindow *window;
+@property(assign) NSPoint at;
+@property NSDraggingFormation draggingFormation;
+@property BOOL animatesToDestination;
+@property NSInteger numberOfValidItemsForDrop;
+@property(readonly) NSSpringLoadingHighlight springLoadingHighlight;
+@end
+
+@implementation DriveDrag
+- (NSWindow *)draggingDestinationWindow { return self.window; }
+- (NSDragOperation)draggingSourceOperationMask { return NSDragOperationEvery; }
+- (NSPoint)draggingLocation { return self.at; }
+- (NSPoint)draggedImageLocation { return self.at; }
+- (NSImage *)draggedImage { return nil; }
+- (NSPasteboard *)draggingPasteboard { return self.board; }
+- (id)draggingSource { return nil; }
+- (NSInteger)draggingSequenceNumber { return 1; }
+- (void)slideDraggedImageTo:(NSPoint)point {}
+- (NSArray<NSString *> *)namesOfPromisedFilesDroppedAtDestination:(NSURL *)destination { return nil; }
+- (void)enumerateDraggingItemsWithOptions:(NSDraggingItemEnumerationOptions)options forView:(NSView *)view classes:(NSArray<Class> *)classes searchOptions:(NSDictionary *)search usingBlock:(void (^)(NSDraggingItem *, NSInteger, BOOL *))block {}
+- (NSSpringLoadingHighlight)springLoadingHighlight { return NSSpringLoadingHighlightNone; }
+- (void)resetSpringLoading {}
+@end
+
 @interface AppDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate, WKNavigationDelegate, WKUIDelegate,
                                    WKDownloadDelegate, WKScriptMessageHandler>
 @property(strong) NSWindow *window;
@@ -111,6 +138,9 @@ static NSString *const SignedOutScript =
 @property(assign) int bootStatus;
 @property(assign) pid_t verifiedPid;
 @property(assign) NSInteger snapshots;
+@property(strong) NSString *driveFile;
+@property(strong) NSString *driveSaveDir;
+@property(strong) NSTimer *driveTimer;
 @end
 
 @implementation AppDelegate
@@ -150,6 +180,10 @@ static NSString *const SignedOutScript =
   self.timer = [NSTimer timerWithTimeInterval:1.0 target:self selector:@selector(tick) userInfo:nil repeats:YES];
   self.timer.tolerance = 0.4;
   [NSRunLoop.mainRunLoop addTimer:self.timer forMode:NSRunLoopCommonModes];
+  if (getenv("AXIOM_SHELL_DRIVE")) {
+    self.driveTimer = [NSTimer timerWithTimeInterval:0.2 target:self selector:@selector(driveTick) userInfo:nil repeats:YES];
+    [NSRunLoop.mainRunLoop addTimer:self.driveTimer forMode:NSRunLoopCommonModes];
+  }
 }
 
 // AppKit ignores Quit while a sheet or modal panel is up. Nobody is there to answer one when the Mac is shutting down.
@@ -178,6 +212,8 @@ static NSString *const SignedOutScript =
   WKWebViewConfiguration *config = [WKWebViewConfiguration new];
   // The default store persists: the theme and the guide's "later" live in localStorage, under the app's sticky port.
   config.websiteDataStore = WKWebsiteDataStore.defaultDataStore;
+  // "Open the site" runs after an await, by which time WebKit no longer counts it as a click.
+  config.preferences.javaScriptCanOpenWindowsAutomatically = YES;
   WKUserScript *script = [[WKUserScript alloc] initWithSource:SignedOutScript
                                                 injectionTime:WKUserScriptInjectionTimeAtDocumentStart
                                              forMainFrameOnly:YES];
@@ -474,7 +510,20 @@ static NSString *const SignedOutScript =
   // This window shows the app and nothing else. A link to an employer's page opens in the person's own browser, and a
   // frame from anywhere else simply does not load.
   decide(WKNavigationActionPolicyCancel);
-  if (!action.targetFrame || action.targetFrame.isMainFrame) [NSWorkspace.sharedWorkspace openURL:url];
+  if (!action.targetFrame || action.targetFrame.isMainFrame) [self openExternally:url];
+}
+
+// http, https, mail and phone links only. A file dropped outside a drop zone arrives here as a file:// navigation, and opening
+// that in another app is not what anyone meant by dropping it.
+- (void)openExternally:(NSURL *)url {
+  NSString *scheme = url.scheme.lowercaseString;
+  if (![@[ @"http", @"https", @"mailto", @"tel" ] containsObject:scheme ?: @""]) return;
+  [self openForReal:url];
+}
+
+- (void)openForReal:(NSURL *)url {
+  if ([self driveNoted:@"external" text:url.absoluteString]) return;
+  [NSWorkspace.sharedWorkspace openURL:url];
 }
 
 - (void)webView:(WKWebView *)webView
@@ -525,8 +574,9 @@ static NSString *const SignedOutScript =
                forNavigationAction:(WKNavigationAction *)action
                     windowFeatures:(WKWindowFeatures *)features {
   NSURL *url = action.request.URL;
-  if (![self sameOrigin:url]) {
-    if (url.scheme.length && ![url.scheme isEqual:@"about"]) [NSWorkspace.sharedWorkspace openURL:url];
+  // about:blank is how `window.open()` starts before it is given an address, and that address is then the one that matters.
+  if (![self sameOrigin:url] && url.absoluteString.length && ![url.scheme isEqual:@"about"]) {
+    [self openExternally:url];
     return nil;
   }
   NSWindow *extra = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1000, 800)
@@ -552,6 +602,7 @@ static NSString *const SignedOutScript =
 - (void)webView:(WKWebView *)webView runJavaScriptAlertPanelWithMessage:(NSString *)message initiatedByFrame:(WKFrameInfo *)frame completionHandler:(void (^)(void))done {
   NSAlert *alert = [NSAlert new];
   alert.messageText = message;
+  [self driveAnswer:alert kind:@"alert"];
   [alert runModal];
   done();
 }
@@ -561,6 +612,7 @@ static NSString *const SignedOutScript =
   alert.messageText = message;
   [alert addButtonWithTitle:@"OK"];
   [alert addButtonWithTitle:@"Cancel"];
+  [self driveAnswer:alert kind:@"confirm"];
   done([alert runModal] == NSAlertFirstButtonReturn);
 }
 
@@ -572,6 +624,7 @@ static NSString *const SignedOutScript =
   alert.accessoryView = field;
   [alert addButtonWithTitle:@"OK"];
   [alert addButtonWithTitle:@"Cancel"];
+  [self driveAnswer:alert kind:@"prompt"];
   done([alert runModal] == NSAlertFirstButtonReturn ? field.stringValue : nil);
 }
 
@@ -583,8 +636,12 @@ static NSString *const SignedOutScript =
   panel.canChooseFiles = YES;
   [panel beginSheetModalForWindow:webView.window ?: self.window
                 completionHandler:^(NSModalResponse result) {
-                  done(result == NSModalResponseOK ? panel.URLs : nil);
+                  NSString *chosen = self.driveFile;
+                  self.driveFile = nil;
+                  if (chosen) done(@[ [NSURL fileURLWithPath:chosen] ]);
+                  else done(result == NSModalResponseOK ? panel.URLs : nil);
                 }];
+  [self driveOpenPanel:panel];
 }
 
 - (void)webView:(WKWebView *)webView navigationAction:(WKNavigationAction *)action didBecomeDownload:(WKDownload *)download {
@@ -600,9 +657,13 @@ static NSString *const SignedOutScript =
   panel.nameFieldStringValue = name;
   [panel beginSheetModalForWindow:self.window
                 completionHandler:^(NSModalResponse result) {
-                  if (result == NSModalResponseOK) [NSFileManager.defaultManager removeItemAtURL:panel.URL error:nil];
-                  done(result == NSModalResponseOK ? panel.URL : nil);
+                  NSURL *target = result == NSModalResponseOK ? panel.URL : nil;
+                  if (self.driveSaveDir) target = [NSURL fileURLWithPath:[self.driveSaveDir stringByAppendingPathComponent:name]];
+                  self.driveSaveDir = nil;
+                  if (target) [NSFileManager.defaultManager removeItemAtURL:target error:nil];
+                  done(target);
                 }];
+  [self driveSavePanel:panel];
 }
 
 - (void)download:(WKDownload *)download didFailWithError:(NSError *)error resumeData:(NSData *)data {
@@ -824,7 +885,6 @@ static NSString *const SignedOutScript =
   }
   if (info.count) {
     [lines addObject:[info[@"chrome_source"] isEqual:@"downloaded"] ? @"Applying through Chrome for Testing" : @"Applying through Google Chrome"];
-    if (![info[@"latex"] length]) [lines addObject:@"Resume tailoring is off: LaTeX is not installed"];
   }
   for (NSString *line in lines) {
     NSMenuItem *row = [menu addItemWithTitle:line action:nil keyEquivalent:@""];
@@ -875,8 +935,171 @@ static NSString *const SignedOutScript =
 - (IBAction)zoomReset:(id)sender { self.web.pageZoom = 1.0; }
 - (IBAction)zoomIn:(id)sender { self.web.pageZoom = MIN(self.web.pageZoom + 0.1, 2.0); }
 - (IBAction)zoomOut:(id)sender { self.web.pageZoom = MAX(self.web.pageZoom - 0.1, 0.5); }
-- (IBAction)openLogs:(id)sender { [NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:Logs()]]; }
-- (IBAction)openData:(id)sender { [NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:Support()]]; }
+- (IBAction)openLogs:(id)sender { [self openForReal:[NSURL fileURLWithPath:Logs()]]; }
+- (IBAction)openData:(id)sender { [self openForReal:[NSURL fileURLWithPath:Support()]]; }
+
+// ---- the driver: how the parity list is proved in this very binary ---------------------------------------------------------
+//
+// With AXIOM_SHELL_DRIVE=<folder>, commands in <folder>/next.json run against the real window, its real panels and WebKit's real
+// drop path, and the answer lands in result-<id>.json. Nothing here runs without that variable, which grants nothing: whoever can
+// set it can already read the token file. Dialogs are really shown, and then answered, because nobody is there to click.
+
+- (BOOL)driveNoted:(NSString *)what text:(NSString *)text {
+  const char *dir = getenv("AXIOM_SHELL_DRIVE");
+  if (!dir) return NO;
+  NSString *path = [@(dir) stringByAppendingFormat:@"/%@.log", what];
+  NSFileHandle *file = [NSFileHandle fileHandleForWritingAtPath:path];
+  if (!file) {
+    [NSFileManager.defaultManager createFileAtPath:path contents:nil attributes:nil];
+    file = [NSFileHandle fileHandleForWritingAtPath:path];
+  }
+  [file seekToEndOfFile];
+  [file writeData:[[text stringByAppendingString:@"\n"] dataUsingEncoding:NSUTF8StringEncoding]];
+  [file closeFile];
+  return YES;
+}
+
+- (void)driveAnswer:(NSAlert *)alert kind:(NSString *)kind {
+  if (![self driveNoted:@"dialog" text:[NSString stringWithFormat:@"%@: %@", kind, alert.messageText]]) return;
+  if (!alert.buttons.count) [alert addButtonWithTitle:@"OK"];
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+    [alert.buttons.firstObject performClick:nil];
+  });
+}
+
+- (void)driveOpenPanel:(NSOpenPanel *)panel {
+  if (!self.driveFile) return;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    [self driveNoted:@"panel" text:[NSString stringWithFormat:@"open panel visible=%d", panel.isVisible]];
+    [panel cancel:nil];  // NSOpenPanel has no way to choose a file from code. The completion hands over driveFile instead.
+  });
+}
+
+- (void)driveSavePanel:(NSSavePanel *)panel {
+  if (!self.driveSaveDir) return;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    [self driveNoted:@"panel" text:[NSString stringWithFormat:@"save panel visible=%d name=%@", panel.isVisible, panel.nameFieldStringValue]];
+    [panel cancel:nil];  // On macOS 15 `ok:` from code leaves the panel open. The completion uses driveSaveDir instead.
+  });
+}
+
+- (void)driveReply:(id)commandId value:(id)value error:(NSString *)error {
+  NSDictionary *answer = @{@"value" : value ?: NSNull.null, @"error" : error ?: NSNull.null};
+  if (![NSJSONSerialization isValidJSONObject:answer]) answer = @{@"value" : [value description] ?: @"", @"error" : NSNull.null};
+  NSString *path = [@(getenv("AXIOM_SHELL_DRIVE")) stringByAppendingFormat:@"/result-%@.json", commandId];
+  [[NSJSONSerialization dataWithJSONObject:answer options:0 error:nil] writeToFile:path atomically:YES];
+}
+
+- (NSMenuItem *)driveMenuItem:(NSString *)title in:(NSMenu *)menu {
+  for (NSMenuItem *item in menu.itemArray) {
+    if ([item.title isEqual:title] && item.action) return item;
+    NSMenuItem *found = item.submenu ? [self driveMenuItem:title in:item.submenu] : nil;
+    if (found) return found;
+  }
+  return nil;
+}
+
+- (void)driveTick {
+  NSString *folder = @(getenv("AXIOM_SHELL_DRIVE"));
+  NSString *path = [folder stringByAppendingPathComponent:@"next.json"];
+  NSDictionary *command = ReadJSON(path);
+  if (!command.count) return;
+  [NSFileManager.defaultManager removeItemAtPath:path error:nil];
+  id commandId = command[@"id"];
+  NSString *op = command[@"op"];
+  if ([op isEqual:@"js"]) {
+    [self.web callAsyncJavaScript:command[@"body"]
+                        arguments:@{}
+                          inFrame:nil
+                   inContentWorld:WKContentWorld.pageWorld
+                completionHandler:^(id value, NSError *error) {
+                  [self driveReply:commandId value:value error:error ? error.userInfo[@"WKJavaScriptExceptionMessage"] ?: error.localizedDescription : nil];
+                }];
+  } else if ([op isEqual:@"snapshot"]) {
+    NSString *target = command[@"path"];
+    [self.web takeSnapshotWithConfiguration:nil
+                          completionHandler:^(NSImage *image, NSError *error) {
+                            NSBitmapImageRep *rep = image ? [NSBitmapImageRep imageRepWithData:image.TIFFRepresentation] : nil;
+                            BOOL ok = [[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:target atomically:YES];
+                            [self driveReply:commandId value:@(ok) error:nil];
+                          }];
+  } else if ([op isEqual:@"file"]) {  // The next open panel's answer.
+    self.driveFile = command[@"path"];
+    [self driveReply:commandId value:@YES error:nil];
+  } else if ([op isEqual:@"save_to"]) {  // Where the next save panel's OK lands.
+    self.driveSaveDir = command[@"path"];
+    [self driveReply:commandId value:@YES error:nil];
+  } else if ([op isEqual:@"key"]) {  // Through AppKit, not a synthetic DOM event: this is the path a keystroke takes.
+    [self.window makeFirstResponder:self.web];
+    for (NSNumber *type in @[ @(NSEventTypeKeyDown), @(NSEventTypeKeyUp) ]) {
+      NSEvent *event = [NSEvent keyEventWithType:type.unsignedIntegerValue
+                                        location:NSZeroPoint
+                                   modifierFlags:NSEventModifierFlagCommand
+                                       timestamp:NSProcessInfo.processInfo.systemUptime
+                                    windowNumber:self.window.windowNumber
+                                         context:nil
+                                      characters:command[@"chars"]
+                     charactersIgnoringModifiers:command[@"chars"]
+                                       isARepeat:NO
+                                         keyCode:(unsigned short)[command[@"code"] intValue]];
+      [self.window sendEvent:event];
+    }
+    [self driveReply:commandId value:@YES error:nil];
+  } else if ([op isEqual:@"status"]) {
+    NSMenu *menu = self.statusItem.menu;
+    [self menuNeedsUpdate:menu];
+    [self driveReply:commandId value:[menu.itemArray valueForKey:@"title"] error:nil];
+  } else if ([op isEqual:@"menu"]) {
+    NSMenuItem *item = [self driveMenuItem:command[@"title"] in:NSApp.mainMenu];
+    if (item) [NSApp sendAction:item.action to:item.target from:item];
+    [self driveReply:commandId value:@{@"found" : @(item != nil), @"state" : @(item.state)} error:nil];
+  } else if ([op isEqual:@"windows"]) {
+    NSMutableArray *urls = [NSMutableArray new];
+    for (NSWindow *extra in self.extraWindows) {
+      WKWebView *web = (WKWebView *)extra.contentView;
+      [urls addObject:web.URL.absoluteString ?: @""];
+    }
+    if ([command[@"close"] boolValue]) [[self.extraWindows copy] makeObjectsPerformSelector:@selector(performClose:) withObject:nil];
+    [self driveReply:commandId value:urls error:nil];
+  } else if ([op isEqual:@"pasteboard"]) {  // Read, or put back what a test replaced.
+    NSPasteboard *board = NSPasteboard.generalPasteboard;
+    NSString *before = [board stringForType:NSPasteboardTypeString] ?: @"";
+    if (command[@"set"]) {
+      [board clearContents];
+      [board setString:command[@"set"] forType:NSPasteboardTypeString];
+    }
+    [self driveReply:commandId value:before error:nil];
+  } else if ([op isEqual:@"front"]) {  // WebKit stops requestAnimationFrame in a covered window, and PDF.js draws on it.
+    [self.window orderFrontRegardless];
+    [self driveReply:commandId value:@(self.window.occlusionState & NSWindowOcclusionStateVisible) error:nil];
+  } else if ([op isEqual:@"drop"]) {
+    [self driveDrop:command[@"path"] x:[command[@"x"] doubleValue] y:[command[@"y"] doubleValue] reply:commandId];
+  } else {
+    [self driveReply:commandId value:nil error:@"unknown op"];
+  }
+}
+
+// WebKit's own drop path, from a pasteboard holding the file, as a drag from Finder delivers it.
+- (void)driveDrop:(NSString *)file x:(double)x y:(double)y reply:(id)commandId {
+  NSPasteboard *board = [NSPasteboard pasteboardWithUniqueName];
+  [board clearContents];
+  [board writeObjects:@[ [NSURL fileURLWithPath:file] ]];
+  DriveDrag *drag = [DriveDrag new];
+  drag.board = board;
+  drag.window = self.window;
+  drag.at = NSMakePoint(x, self.web.bounds.size.height - y);
+  id<NSDraggingDestination> web = (id<NSDraggingDestination>)self.web;
+  [web draggingEntered:drag];
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+    [web draggingUpdated:drag];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+      NSDragOperation operation = [web draggingUpdated:drag];
+      BOOL performed = [web prepareForDragOperation:drag] && [web performDragOperation:drag];
+      [web concludeDragOperation:drag];
+      [self driveReply:commandId value:@{@"operation" : @(operation), @"performed" : @(performed)} error:nil];
+    });
+  });
+}
 
 @end
 

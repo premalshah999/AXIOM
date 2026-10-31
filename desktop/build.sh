@@ -6,8 +6,9 @@
 #   AXIOM_SIGN_ID="Developer ID Application: ..."   sign for distribution (default: ad hoc)
 #   AXIOM_NOTARY_PROFILE=name         then notarize, with credentials stored by `xcrun notarytool store-credentials`
 #   AXIOM_PG_PREFIX=/path             the PostgreSQL 17 to relocate (default: brew --prefix postgresql@17)
+#   AXIOM_TEX_ROOT=/path              the TeX Live or TinyTeX to take pdfTeX from (default: wherever pdflatex is)
 #
-# Needs a build machine with Command Line Tools, uv, npm and PostgreSQL 17. The Mac that installs the result needs none of them.
+# Needs a build machine with Command Line Tools, uv, npm, PostgreSQL 17 and TeX Live or TinyTeX. The Mac that installs the result needs none of them.
 set -eu
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 build=${AXIOM_BUILD_DIR:-$root/desktop/build}
@@ -24,6 +25,9 @@ for tool in uv npm clang hdiutil iconutil codesign install_name_tool otool ditto
 done
 pg_prefix=${AXIOM_PG_PREFIX:-$(brew --prefix postgresql@17 2>/dev/null || true)}
 [ -x "$pg_prefix/bin/postgres" ] || fail "PostgreSQL 17 was not found. Set AXIOM_PG_PREFIX, or: brew install postgresql@17"
+
+tex_root=${AXIOM_TEX_ROOT:-$(pdflatex_path=$(command -v pdflatex || true); [ -n "$pdflatex_path" ] && "$(dirname "$pdflatex_path")/kpsewhich" -var-value=SELFAUTOPARENT 2>/dev/null || true)}
+[ -d "$tex_root/texmf-dist" ] || fail "TeX Live was not found. Set AXIOM_TEX_ROOT, or install TinyTeX"
 
 app="$build/AXIOM.app"
 contents="$app/Contents"
@@ -64,6 +68,9 @@ say "PostgreSQL 17 (relocated)"
 rm -rf "$resources/postgres"
 "$py" "$root/desktop/relocate_pg.py" "$pg_prefix" "$resources/postgres"
 
+say "pdfTeX, with the TeX files the app's templates open"
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$root:$root/desktop" "$py" "$root/desktop/bundle_tex.py" "$tex_root" "$resources/tex" "$build/tex-archives"
+
 say "The dashboard"
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$root" "$py" -c "
 import sys
@@ -91,6 +98,7 @@ for file in "$pg_prefix"/COPYRIGHT "$pg_prefix"/share/doc/postgresql*/COPYRIGHT;
   [ -f "$file" ] && cp "$file" "$resources/licenses/PostgreSQL-COPYRIGHT.txt" && break
 done
 [ -f "$base/lib/python$python_series/LICENSE.txt" ] && cp "$base/lib/python$python_series/LICENSE.txt" "$resources/licenses/Python-LICENSE.txt"
+cp "$root"/docs/licenses/TeXLive-* "$resources/licenses/"
 
 # `axiom status`, `jobpilot verify`, `move-in`: the same commands as a checkout's scripts/axiom, for anyone with a terminal.
 mkdir -p "$resources/bin"
@@ -139,7 +147,7 @@ while IFS= read -r binary; do
   # The app can only claim what its strictest binary allows.
   if [ -n "$seen" ] && [ "$(printf '%s\n%s\n' "$minimum" "$seen" | sort -t. -k1,1n -k2,2n | tail -1)" = "$seen" ]; then minimum=$seen; fi
 done <"$build/machos.txt"
-if grep -E '^[[:space:]]*(/opt/homebrew|/usr/local|/opt/anaconda|/Users/|/Library/)' "$proof"; then
+if grep -E '^[[:space:]]*(/opt/homebrew|/usr/local|/opt/anaconda|/Users/|/Library/TeX|/Library/PostgreSQL)' "$proof"; then
   fail "the lines above link outside the bundle"
 fi
 

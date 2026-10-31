@@ -2,6 +2,7 @@
 install moves in without the source being touched. Everything runs in a scratch HOME with synthetic data."""
 
 import http.server
+import importlib.util
 import json
 import os
 import plistlib
@@ -18,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from jobpilot.features.resumes import editor
 from jobpilot.native import desktop, movein, pg
 from jobpilot.native.desktop import Layout
 from jobpilot.native.env import NativeError, load, prepare
@@ -93,7 +95,8 @@ def test_a_saved_port_production_uses_is_not_trusted(layout):
 def test_the_environment_has_no_homebrew_and_the_app_keeps_it_that_way(layout, tmp_path):
     desktop.ensure_config(layout)
     env = desktop.environment(layout, {"app": 50001, "postgres": 50002, "worker": 50003, "twin": 50004}, "/fake/chrome")
-    assert "homebrew" not in env["PATH"] and "/usr/local" not in env["PATH"]
+    assert "homebrew" not in env["PATH"] and "/usr/local" not in env["PATH"] and "/Library/TeX" not in env["PATH"]
+    assert env["PATH"].split(os.pathsep)[0] == str(layout.tex_bin), "pdflatex is the bundle's, whatever else is on the Mac"
     cfg = load(environ=env)
     assert cfg.root == layout.support and cfg.data_dir == layout.data and cfg.logs == layout.logs
     assert cfg.base_url == "http://127.0.0.1:50001" and cfg.pg_port == 50002
@@ -386,6 +389,31 @@ def test_a_lock_whose_pid_was_reused_is_not_chrome(tmp_path):
     os.symlink(f"somehost-{os.getpid()}", profile / "SingletonLock")
     assert chrome_holding(profile) is None, "that pid is this test, which must never be signalled"
     assert chrome_holding(tmp_path / "none") is None
+
+
+def load_tex_bundler():
+    spec = importlib.util.spec_from_file_location("bundle_tex", ROOT / "desktop" / "bundle_tex.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_a_tex_tree_is_listed_as_kpathsea_expects(tmp_path):
+    """texmf.cnf marks these trees `!!`: kpathsea finds nothing in one except through its ls-R."""
+    write(tmp_path / "tree" / "fonts" / "tfm" / "a.tfm")
+    load_tex_bundler().write_ls_r(tmp_path / "tree")
+    text = (tmp_path / "tree" / "ls-R").read_text()
+    assert text.startswith("% ls-R -- filename database for kpathsea; do not change this line.\n./:\n")
+    assert "\n./fonts/tfm:\na.tfm\n" in text
+
+
+def test_every_template_and_font_is_bundled_for():
+    """A template or font added to the editor must reach the build's recorder, or it fails on a Mac with no LaTeX."""
+    names = [name for name, _ in load_tex_bundler().documents()]
+    for template in editor.TEMPLATES:
+        for font in editor.FONTS:
+            assert any(name.startswith(f"{template}-{font}-") for name in names)
+    assert "tailored" in names and "hand-written" in names
 
 
 # ---- moving in, on a real scratch cluster --------------------------------------------------------------------------------
