@@ -20,7 +20,7 @@ from openai import APIError
 from .models import AnswerModelUnavailable, BudgetExceeded
 
 from .answers import UNOFFERED_SOURCE, Resolver
-from .ats import EMBED_JS, LABEL_ONLY, REGISTRY, classify_embedded, detect, unsettled
+from .ats import EMBED_JS, LABEL_ONLY, REGISTRY, VENDORS, classify_embedded, detect, unsettled
 from .email_browser import EmailBrowser, redacted_url
 from .failure_reports import clean
 from .forms import AUTH, ENTRY, FINAL, STALE_CHOICE, FormSession, NetworkMonitor, ResumeAttachmentError
@@ -1124,6 +1124,7 @@ class BrowserEngine:
         # This run's copy only: the stored URL keeps its identity for duplicate checks.
         job = {**job, "url": english_posting_url(job.get("url", ""))}
         self.job, self.run_record = job, run
+        job["ats"] = self.starting_label(job)
         started = time.monotonic()
         process, browser, pw = None, None, None
         temp = tempfile.mkdtemp(prefix="applypilot-browser-")
@@ -2604,6 +2605,8 @@ class BrowserEngine:
             # link that led here, are the employer's identity for accounts and mail.
             self.emit("handoff", f"The career site is a {found} portal", {"found": found, "via": how})
             self.adopt_handoff(found)
+        else:
+            self.persist_observed_ats(found)
         return found
 
     embed_poll = 0.5  # seconds between looks for a frame that loads late
@@ -2680,6 +2683,48 @@ class BrowserEngine:
             # The observed ATS owns the account and verification mail. Keeping
             # a short-link host here selects that host's unrelated sender rule.
             self.job.update(url=url or self.page.url, ats=target)
+        self.persist_observed_ats(target)
+
+    def starting_label(self, job):
+        """The label a run starts with. A row whose platform was learned from an earlier run's hand-off (not from its
+        address) starts as the career site it is and finds the platform again: trusting "workday" on a short link would skip
+        the adoption that Workday's account check needs ("account origin does not match this employer"), and a platform
+        reached only after Apply would never be looked for."""
+        if job.get("demo"):
+            return job.get("ats")
+        seen = self.db.get_setting("observed_ats:" + str(job.get("id")), {})
+        return (seen.get("was") or "custom") if seen.get("ats") == job.get("ats") else job.get("ats")
+
+    def persist_observed_ats(self, target):
+        """Write the platform this run observed behind the career site to the job row, once it is known.
+
+        adopt_handoff changed only this run's copy, so 144 of 269 jobs that were routed to Greenhouse, Workday, iCIMS and
+        the rest still read "custom" (2026-10-31): the wrong worker lane, the custom site's sender rule and a list that
+        called them career sites. Only a label that had not found its platform is replaced, and only by a better one
+        (custom < named platform < one with a driver); the address stays the career site's, so nothing keyed on it moves.
+        The observation is remembered (observed_ats:<job>) because that label then comes from this page, not from the
+        address: the next run starts as a career site again and finds the platform itself, where trusting the label
+        would skip the adoption that Workday's account check needs."""
+        db, job_id = getattr(self, "db", None), self.job.get("id")
+        if not db or not job_id or self.job.get("demo") or unsettled(target) and target not in LABEL_ONLY:
+            return
+
+        def rank(name):
+            return 0 if name == "custom" or name in VENDORS else 1 if name in LABEL_ONLY else 2
+
+        marker = "observed_ats:" + job_id
+        seen = db.get_setting(marker, {})
+        with db.session() as s:
+            row = s.get(Job, job_id)
+            if row is None or row.ats == target:
+                return
+            observed = seen.get("ats") == row.ats
+            was = seen.get("was") if observed else row.ats
+            if rank(target) < rank(row.ats) or (rank(target) == rank(row.ats) and not observed):
+                return
+            row.ats = target
+        db.set_setting(marker, {"ats": target, "was": was, "at": time.time()})
+        self.emit("ats_observed", f"This job's platform is {target}", {"was": was, "ats": target})
 
     def adopt_icims_portal(self, url):
         """A career site that hands off to its iCIMS portal (Planview's careers.planview.com/jobs/5080 opened

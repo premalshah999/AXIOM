@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 
 from sqlalchemy import select
 
+from .ats import detect
 from .db import Job, Run, Setting
 
 
@@ -58,7 +59,10 @@ def employer_partition(job):
         return host + "/" + (company or parsed.path.strip("/").lower())
     parts = parsed.path.strip("/").split("/")
     ats = get("ats", "custom")
-    if ats in {"greenhouse", "lever", "ashby", "smartrecruiters", "rippling"} and parts[0]:
+    if ats in {"greenhouse", "lever", "ashby", "smartrecruiters", "rippling"} and parts[0] and detect(get("url", "")).id == ats:
+        # Only the platform's own address names its employer in the path. A run that finds Greenhouse behind a career site
+        # saves "greenhouse" on the job (persist_observed_ats), and its partition must not move from the site's host to
+        # "careers.example.com/jobs" while the application runs: a second job there would then start beside it.
         return host + "/" + parts[0].lower()
     if ats == "workday" and host.endswith(".myworkdaysite.com") and "recruiting" in parts:
         index = parts.index("recruiting")
