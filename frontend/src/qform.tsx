@@ -8,8 +8,8 @@ import { Button, Input, Segmented } from "./ui/index";
 import "./styles/qform.css";
 
 // ---------- types (mirror jobpilot/features/knowledge/questionnaires.py) ----------
-type Field = { key: string; prompt: string; type: string; options: string[] };
-type WorkRow = {
+export type Field = { key: string; prompt: string; type: string; options: string[] };
+export type WorkRow = {
   row_id: string;
   index: number;
   company: string;
@@ -58,7 +58,7 @@ function mergeAnswers(before: Record<string, unknown> | undefined, next: Record<
   return out;
 }
 
-const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+export const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const fail = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : "Could not save");
 
 // ---------- data ----------
@@ -189,7 +189,7 @@ export function ModuleList({ data, onOpen }: { data: Questionnaires; onOpen: (id
 type Local = Record<string, unknown>;
 
 const blank = (fields: Field[] = []) => Object.fromEntries(fields.map((f) => [f.key, ""])) as Record<string, string>;
-const entryOf = (fields: Field[] | undefined, saved: Record<string, string> | undefined) => ({
+export const entryOf = (fields: Field[] | undefined, saved: Record<string, string> | undefined) => ({
   ...blank(fields),
   ...(saved || {}),
 });
