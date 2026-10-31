@@ -131,6 +131,12 @@ def grant_fresh_try(session, job_id, reason, *, limit=ANSWER_TRIES):
     key = "application_budget_reset:" + job_id
     row = session.get(Setting, key)
     grants = int((row.value or {}).get("answer_grants", 0)) if row else 0
+    try:
+        recent = row and datetime.now(UTC) - datetime.fromisoformat(str(row.value["at"])) < timedelta(seconds=60)
+    except (KeyError, ValueError):
+        recent = False
+    if recent and grants and row.value.get("reason") == reason[:200]:
+        return True  # The click and the outbox wake both asked for this one answer: one grant.
     if grants >= limit:
         return False
     value = {"at": datetime.now(UTC).isoformat(), "reason": reason[:200], "answer_grants": grants + 1}

@@ -5,7 +5,7 @@ import re
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import aliased
 
-from ..db import Job, MailChallenge, Review, Run, Setting, now
+from ..db import Event, Job, MailChallenge, Review, Run, Setting, now
 from ..knowledge import learned_answer
 from .. import profile_photo
 from ..admission import QueueBlocked, temporary_time, require_intake
@@ -636,6 +636,11 @@ class ReviewsMixin:
             # A sibling attempt already started this job (the interactive click and the outbox wake race): no reason.
             if run and run.state in {"waiting_answer", "needs_review"} and refusal.code != "active_run":
                 run.reason = why[:500]
+        with self.db.session() as s:
+            last = s.scalar(select(Event.message).where(Event.run_id == run_id, Event.kind == "resume_refused")
+                            .order_by(Event.id.desc()).limit(1))
+        if last == why[:300]:
+            return  # The re-armed wake asks again every few minutes; say it once.
         self.db.event(
             run_id,
             "resume_refused",

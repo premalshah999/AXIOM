@@ -90,6 +90,9 @@ async def test_a_refusal_that_can_clear_re_arms_the_wake(service, monkeypatch):
         await service.resume_review(review_id)  # the outbox row is retried, not delivered
     assert raised.value.outcome == "deferred"
     assert events(service, run_id, "resume_refused")[0].data["retried"] is True
+    with pytest.raises(QueueBlocked):
+        await service.resume_review(review_id)  # the re-armed wake asks again: the event is not repeated
+    assert len(events(service, run_id, "resume_refused")) == 1
     # the owner's own click path (not durable) reports it and keeps the wake the answer already queued
     result = await service.resume_review(review_id, {"resolved": True, "message": "Saved."})
     assert "continues on its own" in result["message"]
@@ -106,3 +109,14 @@ async def test_answers_alone_cannot_retry_a_job_for_ever(service, monkeypatch):
         await service.resume_review(review_id)
     assert raised.value.code == "application_retry_limit"
     assert len(events(service, run_id, "fresh_try_refused")) == 1
+
+
+async def test_the_click_and_the_wake_for_one_answer_earn_one_fresh_try(service):
+    from jobpilot.application_budget import grant_fresh_try
+
+    job_id, _, _ = seed(service)
+    with service.db.exclusive() as s:
+        assert grant_fresh_try(s, job_id, "Owner answered a question")
+    with service.db.exclusive() as s:
+        assert grant_fresh_try(s, job_id, "Owner answered a question")
+    assert service.db.get_setting("application_budget_reset:" + job_id)["answer_grants"] == 1
