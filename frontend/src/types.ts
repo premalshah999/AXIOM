@@ -541,6 +541,25 @@ export type Success = {
   /** What proved it (the server decides from the receipt): see PROOF in model.ts. */
   proof: Proof;
 };
+/** One platform's (or everything's) success over the window: GET /api/success, defined as the 90% push's score (jobpilot/api/success.py). */
+export type SuccessRow = {
+  tried: number;
+  closed: number;
+  already_applied: number;
+  owner_only: number;
+  eligible: number;
+  confirmed: number;
+  /** Confirmed over eligible, to one decimal and never rounded up; null with nothing eligible. */
+  final_pct: number | null;
+  first_try_pct: number | null;
+  meets_target: boolean;
+};
+export type SuccessReport = {
+  days: number;
+  target: number;
+  overall: SuccessRow;
+  platforms: (SuccessRow & { ats: string; volume: boolean })[];
+};
 export type Archived = {
   job_id: string;
   run_id?: string;

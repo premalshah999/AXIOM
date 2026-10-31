@@ -90,6 +90,7 @@ exercised through the HTTP test client; every router now has an HTTP test module
 | GET | `/api/agents` | Which model providers and helper switches are available (never keys) | – | summary | ✔ |
 | PUT | `/api/agents` | Choose providers per role, switch helpers | `AgentSettings` | summary; 422 on a bad choice | ✔ |
 | GET | `/api/funnel` | All time, for Overview: jobs discovered, eligible and applied to, and applied per platform (confirmed is the ledger below) | – | `{discovered, eligible, applied, platforms:{ats: n}}` | ✔ |
+| GET | `/api/success` | The success number for Overview, for the last `?days=` (1-90, default 7): overall and per platform (`custom` included), lowest first among platforms with volume. Read-only, from the runs table only; same definitions as the 90% push's score query | – | `{days, target, overall, platforms:[{ats, volume, tried, closed, already_applied, owner_only, eligible, confirmed, final_pct, first_try_pct, meets_target}]}` (`final_pct` and `first_try_pct` to one decimal, null with nothing eligible) | ✔ |
 | GET | `/api/successful-applications` | The ledger: one confirmed run per job; `proof` says what proved it (`page`, `both`, `email`, `existing`, `platform`, `final_page`, `dashboard`, `applicant`, `none`) | – | `{applications:[{job_id, run_id, title, company, url, applied_at, ats, website_confirmed, email_confirmed, existing_application, proof}]}` | ✔ |
 | GET | `/api/successful-applications.csv` | The ledger as a spreadsheet download (attachment); `?evidence=` a proof id, `&ats=`, `&since=` an instant (what AXIOM sent from then), `&q=` | – | CSV | ✔ (link) |
 | GET | `/api/archive` | Archived failed applications | – | `{applications, log_bytes}` | ✔ |
@@ -371,7 +372,7 @@ tests found 94 of the 105 remaining routes called over HTTP (measured 2026-10-20
 | `resumes.py` | `/api/resumes` (GET, POST), `/api/resumes/{id}/download`, `DELETE /api/resumes/{id}` |
 | `knowledge.py` | `/api/knowledge` (legacy store) |
 | `settings.py` | `/api/control`, `/api/limits`, `/api/agents` |
-| `jobs.py` | `/api/funnel`, `/api/jobs`, `/api/jobs/{id}` (GET, DELETE) and `/rank`, `/apply`, `/queue`, `/pause`, `/resume` |
+| `jobs.py` | `/api/funnel`, `/api/success`, `/api/jobs`, `/api/jobs/{id}` (GET, DELETE) and `/rank`, `/apply`, `/queue`, `/pause`, `/resume` |
 | `runs.py` | `/api/runs/{id}` and `/screenshot`, `/reconcile`, `/check-email`; `/api/reviews/{id}` |
 | `sources.py` | `/api/sources`, `/api/sources/{id}`, `/api/sources/{id}/discover` |
 | `job_board.py` | `/api/job-board` and `/settings`, `/sources`, `/scrape`, `/autopilot/start` |
