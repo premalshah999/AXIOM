@@ -200,7 +200,14 @@
     // A placeholder is not a question ("Select", "Select...", "combobox").
     const rawAl = el.getAttribute('aria-label');
     const al = rawAl && !/^(?:select(?: one| an? option)?(?:\.\.\.|…)?|choose(?: one)?(?:\.\.\.)?|combobox|dropdown|search)$/i.test(rawAl.trim()) ? rawAl : null;
-    if (al && !opts.visibleFirst) return clean(al);
+    if (al && !opts.visibleFirst) {
+      // iCIMS names the box aria-label="Tick" and prints what it agrees to beside it (National Louis University 2026-10-31).
+      if (GENERIC_TICK.test(clean(al)) && el.matches('input[type=checkbox],[role=checkbox]')) {
+        const beside = followingText(el);
+        if (beside) return beside;
+      }
+      return clean(al);
+    }
     const labels = el.labels ? [...el.labels] : [];
     if (!labels.length && el.id) {
       const root = el.getRootNode();
