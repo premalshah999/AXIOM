@@ -6007,6 +6007,27 @@ class FormSession:
             "run_id": getattr(self.resolver, "run_id", ""),
         }
 
+    async def oracle_lists_job(self):
+        """True when a tile of Oracle's My Applications list is this job's: a link titled as the job, or its requisition."""
+        job = getattr(self.resolver, "job", {}) or {}
+
+        def norm(text):
+            return " ".join(re.sub(r"[^\w]+", " ", str(text or "")).casefold().split())
+
+        title = norm(job.get("title"))
+        req = (re.search(r"/job/(\d{4,})", str(job.get("url") or "")) or [None, ""])[1]
+        try:
+            tiles = await self.page.locator("li.cs-application-tile:visible").evaluate_all(
+                "els => els.map(el => ({text: el.innerText, links: [...el.querySelectorAll('a[href]')].map(a => a.textContent)}))"
+            )
+        except PlaywrightError:
+            return False
+        return any(
+            (title and any(norm(link) == title for link in tile["links"]))
+            or (req and re.search(rf"(?<!\d){req}(?!\d)", tile["text"]))
+            for tile in tiles
+        )
+
     async def proof(self):
         host = (urlsplit(self.page.url).hostname or "").lower()
         # Greenhouse can acknowledge a submitted requisition in its document
@@ -6416,6 +6437,11 @@ class FormSession:
                         "status_region": "job_application_status",
                         "observed_job_heading": card["heading"][:200],
                     }
+        if host.endswith(".oraclecloud.com") and "/my-profile" in current.path and not await self.oracle_lists_job():
+            # Oracle's My Applications list holds every application of the account, and its generic "Thank you for your
+            # job application" toast names no job: 28 receipts rested on the toast alone (2026-10-17..31). This job must
+            # have its own tile; the list is otherwise no evidence about it.
+            return None
         # Ashby lets employers customize the success copy (e.g. "Thanks,
         # got it!"). Its application-success component is stronger evidence
         # than a generic Success heading or a phrase in the job description.
