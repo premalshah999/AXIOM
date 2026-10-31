@@ -32,6 +32,12 @@ from .privacy import dismiss_cookies
 install_playwright_fast()
 
 SCAN = (Path(__file__).parent / "js" / "scan.js").read_text()
+# An employer pacing applications by the minute rather than capping them (no window is stated).
+PACED_APPLICATIONS = re.compile(
+    r"submitted a number of applications recently|apply to one role at a time|"
+    r"(?:most recent|latest) application has not been submitted",
+    re.I,
+)
 
 
 def major_by_name(value, fallback):
@@ -6575,6 +6581,11 @@ class FormSession:
                 return {"type": "explicit_rejection_page", "url": self.page.url, "category": "employer_limit",
                         "cap": cap, "evidence": text[max(0, match.start() - 20) : match.end() + 300],
                         "missing_fields": []}
+            if PACED_APPLICATIONS.search(tail):
+                # Ashby (Applied Intuition 2026-10-31, 24 minutes after another application of the same applicant was
+                # accepted): the employer paces one application at a time and says this one "has not been submitted".
+                return {"type": "explicit_rejection_page", "url": self.page.url, "category": "throttled",
+                        "evidence": text[max(0, match.start() - 20) : match.end() + 300], "missing_fields": []}
             if re.search(r"answered all questions|highlighted errors|answer all required questions", phrase):
                 return {"type": "explicit_rejection_page", "url": self.page.url, "category": "validation",
                         "evidence": text[max(0, match.start() - 20) : match.end() + 200],

@@ -134,6 +134,10 @@ COMMIT_TRACKING = re.compile(
 # A page load the network refused once and may answer on a second try.
 NET_RETRY = re.compile(r"net::ERR_(?:CONNECTION_(?:CLOSED|RESET|TIMED_OUT)|NETWORK_CHANGED|TIMED_OUT|FAILED|EMPTY_RESPONSE)\b")
 NET_ERROR = re.compile(r"net::ERR_([A-Z_]+)")
+# Statuses a bot check or an access rule answers with while the platform may still have processed the write.
+AUTH_REFUSALS = {401, 403}
+# How long an employer that paces applications (Ashby: "apply to one role at a time") is left alone.
+THROTTLED_PAUSE_SECONDS = 6 * 3600
 WORKDAY_FAILURE = re.compile(
     r"something went wrong|unexpected (?:system )?error|session (?:has )?expired|"
     r"system (?:is )?(?:temporarily )?unavailable|server error",
@@ -157,18 +161,23 @@ def current_role_end_date(resolver, field):
 def net_failure(exc, diagnostics=None):
     """The outcome of a page the employer's site would not serve, or None. West Monroe's career site served an
     expired certificate and Amazon's dropped the connection (2026-10-25): each run read "Browser control failed at
-    browser.py:1408" and sat in repair as if the engine were broken."""
+    browser.py:1408" and sat in repair as if the engine were broken.
+
+    Never "closed": an infrastructure error (certificate, DNS, connection, timeout) says nothing about the posting.
+    West Monroe's six jobs were closed on a certificate error while three siblings of the same site had confirmed the day
+    before. A posting that is truly gone answers with its own page (a 404, a "no longer available" notice)."""
     match = NET_ERROR.search(str(exc))
     if not match or match[1] in {"ABORTED", "BLOCKED_BY_CLIENT", "BLOCKED_BY_RESPONSE"}:
         return None  # An aborted navigation is the page's own redirect; blocked ones are this browser's guard.
     code = "net::ERR_" + match[1]
     extra = {"diagnostics": diagnostics} if diagnostics else {}
-    if match[1].startswith(("CERT_", "SSL_")) or "CERTIFICATE" in match[1]:
-        # Nothing an applicant enters may go to a site whose identity the browser cannot verify.
-        return {"state": "closed", "reason": f"The employer's site failed the browser's security check ({code}); "
-                "no application data was sent to it", **extra}
-    return {"state": "waiting_browser", "reason": f"The employer's site did not load ({code}); it will be tried "
-            "again later", "blocker_type": "site_transient", "recovery_cause": "site_temporary", **extra}
+    # The browser stops at a certificate it cannot verify, so nothing an applicant enters can reach that site; trying
+    # again later reaches the same refusal until the site is fixed. The recovery attempts are bounded.
+    insecure = match[1].startswith(("CERT_", "SSL_")) or "CERTIFICATE" in match[1]
+    return {"state": "waiting_browser", "blocker_type": "site_transient", "recovery_cause": "site_temporary",
+            "reason": (f"The employer's site failed the browser's security check ({code}); no application data was "
+                       "sent to it, and it will be tried again later" if insecure else
+                       f"The employer's site did not load ({code}); it will be tried again later"), **extra}
 
 
 # Keys an API error body names its complaint with.
@@ -251,6 +260,17 @@ async def icims_site_posting_gone(url):
     )
 
 
+COMPANY_NOISE = re.compile(r"\b(?:inc|llc|ltd|limited|corp|corporation|co|company|the)\b")
+
+
+def same_employer(board_name, company):
+    """Whether a Greenhouse board names itself as this company (case, punctuation and 'Inc.' aside)."""
+    def key(name):
+        return re.sub(r"[^a-z0-9]", "", COMPANY_NOISE.sub("", re.sub(r"[.,]", "", str(name or "").lower())))
+
+    return bool(key(company)) and key(board_name) == key(company)
+
+
 async def greenhouse_board(url, company=""):
     """(board, job id, listed) for an employer career page that names its Greenhouse job (?gh_jid=), or None.
 
@@ -271,9 +291,13 @@ async def greenhouse_board(url, company=""):
                 job = await client.get(f"https://boards-api.greenhouse.io/v1/boards/{name}/jobs/{job_id}")
                 if job.status_code == 200:
                     return name, job_id, True
-                if job.status_code == 404 and (await client.get(f"https://boards-api.greenhouse.io/v1/boards/{name}")).status_code == 200:
-                    return name, job_id, False
-    except httpx.HTTPError:
+                if job.status_code == 404:
+                    # A board that merely exists under the guessed name says nothing about this posting: it may be
+                    # another company's, or an old one. Only the employer's own board (it names itself) can close it.
+                    board = await client.get(f"https://boards-api.greenhouse.io/v1/boards/{name}")
+                    if board.status_code == 200 and same_employer(board.json().get("name"), company):
+                        return name, job_id, False
+    except (httpx.HTTPError, ValueError):  # ValueError: a board page that is not JSON
         return None
     return None
 
@@ -1967,25 +1991,39 @@ class BrowserEngine:
                         "evidence": "My Applications: applied-application view with Withdraw Application"},
         }
 
+    async def posting_closure(self, reason="The posting is closed or no longer available"):
+        """The result for a page that says its posting is gone. A Workday "The page you are looking for doesn't exist"
+        is also what a stale route or a busy tenant renders, so a Workday posting closes only on the employer's own
+        search (workday.missing_posting_result: not listed, or two runs at the posting itself); page_closed, the
+        controller and the adapter's closed step each closed such a page on its first sight (HNTB, Moffitt, Nordstrom,
+        Varian, WVU Medicine and Evolent, 2026-10-29: all six are still listed by their own career sites)."""
+        job = getattr(self, "job", None) or {}
+        if job.get("ats") == "workday":
+            from .workday import missing_posting_result, tenant_search_lists
+
+            return missing_posting_result(
+                self.db, job, self.run_id, self.page.url, listed=await tenant_search_lists(job.get("url", ""))
+            )
+        return {"state": "closed", "reason": reason}
+
     async def page_closed(self):
         """A stalled flow that ends on the posting's own "position has been filled" (four runs at one career site,
         2026-10-27, each parked as a repair): no application form is left, so the posting is closed."""
-        from .adapters.base import APPLICATION_LIMIT, CLOSED
+        from .adapters.base import closed_notice, form_open, limit_notice
 
         try:
             obs = await self.form.scan()
         except Exception:
             return None
-        fields = [f for f in obs.get("fields", []) if f["type"] not in {"search", "hidden"}
-                  and not re.search(r"search|keyword|location", f.get("label", ""), re.I)]
-        text = " ".join([*obs.get("headings", []), *obs.get("errors", []), str(obs.get("text", ""))])
-        if not getattr(self, "armed", False) and (limit := APPLICATION_LIMIT.search(text)):
-            # TikTok's cap notice sits over a full form (see APPLICATION_LIMIT): the form does not make it open.
+        if not getattr(self, "armed", False) and (limit := limit_notice(obs)):
+            # TikTok's cap notice sits over a full form (see APPLICATION_LIMIT): the form does not make it open. Its
+            # own limit_check answered it, and the mailbox holds four ByteDance applications of 2026-10-14.
             return {"state": "closed", "reason": "The employer's application limit for this applicant is reached, so "
-                    "nothing was submitted: " + limit[0][:120]}
-        if fields or not (match := CLOSED.search(text)):
+                    "nothing was submitted: " + limit[:300]}
+        if form_open(obs) or not (match := closed_notice(obs)):
             return None
-        return {"state": "closed", "reason": "The posting is closed: " + match[0][:120]}
+        verdict = await self.posting_closure("The posting is closed: " + match[0][:120])
+        return verdict if verdict["state"] == "closed" else None
 
     async def page_acknowledged(self):
         """A stalled flow that ends on the employer's acknowledgement. Sopra Steria (SmartRecruiters 2026-10-26): its
@@ -4167,6 +4205,20 @@ class BrowserEngine:
                 if rejection.get("category") == "employer_limit":
                     self.armed = False
                     return await self.employer_limit_result(rejection)
+                if rejection.get("category") == "throttled":
+                    # An employer pacing applications ("apply to one role at a time"): nothing was accepted, so it
+                    # is retried after a pause, not failed (Ashby, Applied Intuition 2026-10-31).
+                    self.armed = False
+                    await self.release_reservation()
+                    return {
+                        "state": "waiting_browser",
+                        "reason": "The employer is pacing this applicant's applications and did not accept this one; "
+                        "nothing was submitted, and it will be tried again later",
+                        "receipt": rejection,
+                        "blocker_type": "site_transient",
+                        "recovery_cause": "site_temporary",
+                        "site_cooldown_seconds": THROTTLED_PAUSE_SECONDS,
+                    }
                 if rejection.get("category") == "temporary":
                     # SmartRecruiters: "Cannot submit your application. Please try again in a while."
                     self.armed = False
@@ -4302,10 +4354,14 @@ class BrowserEngine:
         if not url or getattr(self.page, "url", "") != url or getattr(self, "commit_inflight", None):
             return False
         # A write the employer refused with a 4xx accepted nothing (Dallas County: its work-history item answered 400
-        # and the application was never posted). A 5xx may have been partly processed and stays uncertain.
+        # and the application was never posted). A 5xx may have been partly processed and stays uncertain, and so does
+        # a 401/403: Rippling answered its apply POST 401 "turnstile_verification_failure" and still created the
+        # application (Go Fish Digital 2026-10-28: both submits answered 401, both sent "Thank you for applying" mail,
+        # and the second was a duplicate; TheGuarantors the same). A bot-check refusal is no evidence of nothing sent.
         writes = [
             r for r in getattr(self, "commit_requests", None) or []
-            if not COMMIT_TRACKING.search(r.get("path", "")) and not 400 <= int(r.get("status") or 0) < 500
+            if not COMMIT_TRACKING.search(r.get("path", ""))
+            and (not 400 <= int(r.get("status") or 0) < 500 or int(r["status"]) in AUTH_REFUSALS)
         ]
         if writes or len(getattr(self, "commit_requests", None) or []) >= 40:  # a full log may have dropped writes
             return False
@@ -4692,7 +4748,7 @@ class BrowserEngine:
             key = field_identity(target)
             rejected[key] = rejected.get(key, 0) + 1
             if UNOFFERED_SOURCE in detail:
-                from .answers import NOT_A_SOURCE
+                from .answers.sources import internal_channels_only
 
                 options = [str(o) for o in target.get("options") or [] if str(o).strip()] or [
                     # The navigator's target may omit the catalog; the form observed it (Bank of America's
@@ -4716,11 +4772,7 @@ class BrowserEngine:
                         ),
                         [],
                     )
-                if (
-                    options
-                    and all(NOT_A_SOURCE.search(o) for o in options)
-                    and not any(re.fullmatch(r"\s*other\s*", o, re.I) for o in options)
-                ):
+                if internal_channels_only(options):
                     # Only internal channels (Displaced, LOA, Employee, Contractor, ...): the posting
                     # is not open to external applicants (BofA, Pfizer, Snap on 2026-10-13). Close it.
                     return {
@@ -5189,14 +5241,10 @@ class BrowserEngine:
                     elif unoffered := [
                         q for q in report["pending"] if str(q.get("reason", "")).startswith(UNOFFERED_SOURCE)
                     ]:
-                        from .answers import NOT_A_SOURCE
+                        from .answers.sources import internal_channels_only
 
                         offered = [str(o) for o in unoffered[0].get("options") or [] if str(o).strip()]
-                        if (
-                            offered
-                            and all(NOT_A_SOURCE.search(o) for o in offered)
-                            and not any(re.fullmatch(r"\s*other\s*", o, re.I) for o in offered)
-                        ):
+                        if internal_channels_only(offered):
                             # Only internal channels (BofA "Displaced (US)", "LOA - Job Search (US)"):
                             # the posting is internal-only, as in the answer-validation path.
                             self.result = {
@@ -5318,15 +5366,14 @@ class BrowserEngine:
                 elif decision.action == "wait":
                     await asyncio.sleep(1)
                 else:
-                    from .adapters.base import CLOSED
+                    from .adapters.base import closed_notice, form_open
 
-                    if not self.armed and CLOSED.search(obs.get("text", "") or ""):
+                    if not self.armed and not form_open(obs) and closed_notice(obs):
                         # The controller recognized a closed posting; retrying cannot help.
-                        self.result = {
-                            "state": "closed",
-                            "reason": "The posting is closed or no longer available",
-                        }
-                        return
+                        verdict = await self.posting_closure()
+                        if verdict["state"] == "closed":  # Workday's own search may still list it: carry on then.
+                            self.result = verdict
+                            return
                     if self.run_record["mode"] == "submit" and (receipt := await self.form.proof()):
                         # EY (SuccessFactors) 2026-10-16: the form's own Apply submitted and the page said so;
                         # the controller then stopped for help, and the run stayed "waiting".
