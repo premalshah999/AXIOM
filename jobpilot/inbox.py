@@ -66,7 +66,11 @@ class Inbox:
 
         existing = self.mail.rule_for(job["url"])
         family = set(KNOWN_SENDERS.get(job.get("ats"), []))
-        if existing is None or (family and not family <= set(existing.get("sender_domains") or [])):
+        if (
+            existing is None
+            or (family and not family <= set(existing.get("sender_domains") or []))
+            or self.mail.sibling_senders(existing)  # a sender a sibling brand's rule learned (ByteDance / TikTok)
+        ):
             return await self.mail.ensure_rule(job, recipient) or existing
         return existing
 
@@ -143,14 +147,17 @@ class Inbox:
             if token := self.mail.claim(cid):
                 return token
             if time.time() >= expires:
+                await self.mail.last_search(cid)  # the window gets its last search before it is called empty
+                if token := self.mail.claim(cid):
+                    return token
                 self.mail.outcome(cid, "expired", "No uniquely matching verification email arrived in time")
                 return None
             if deadline is not None and time.monotonic() >= deadline:
                 raise MailPending(self.mail.persist_wait(cid))
             try:
                 await self.mail.poll_once()
-            except Exception:
-                pass  # Mailbox status carries the diagnostic; errors may contain provider text.
+            except Exception as exc:
+                self.mail.note_failure("wait_poll", exc)  # counted and logged by class; its text can hold provider output
             if token := self.mail.claim(cid):
                 return token
             remaining = deadline - time.monotonic() if deadline is not None else self.config.mail_poll_seconds

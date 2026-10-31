@@ -21,7 +21,7 @@ from . import profile_photo
 from .answers import CONTACT, HISTORY_UNKNOWN, WOTC, answer_key, job_catalog_search_box, normalize
 from .answers.experience import COMPUTED as EXPERIENCE_COMPUTED
 from .answers.work_status import CITIZENSHIP_ASK, holds as work_status_holds
-from .answers.text import strip_catalog_code
+from .answers.text import FROM_RECORD, strip_catalog_code
 from .knowledge import topic
 from .browser_contracts import ActionResult, action_result, field_identity, fingerprint
 from .models import AnswerModelUnavailable
@@ -671,6 +671,13 @@ LIVE_CONTROL_JS = """b => {
   if (b.disabled || b.getAttribute('aria-disabled') === 'true') return false;
   return !b.closest('[hidden],[inert],[aria-hidden="true"]');
 }"""
+# A page's own rejection that quotes the question it wants answered: "Please enter a value for 'X'", "You must select
+# ... 'X'". The quote is the field's whole label, so it may be long; apostrophes inside words never open one.
+NAMED_BY_PAGE = re.compile(
+    r"(?:please (?:enter|choose|select|provide|answer|complete)|you must (?:enter|select|choose|provide|answer))"
+    r"[^'\"“‘\n]{0,60}(?<![\w])['\"“‘]([^'\"”’\n]{2,300}?)['\"”’](?![\w])",
+    re.I,
+)
 # Questions asking where the applicant is (not a fixed office list): their pickers are search-only typeaheads.
 APPLICANT_LOCATION = re.compile(
     r"(?:location(?: \(city\))?|city|current (?:city|location)|(?:what is your )?current location|"
@@ -1344,6 +1351,10 @@ class FormSession:
         self.control_recoveries = {}
         self.control_choices = {}
         self.optional_picker_omissions = set()
+        # Field label -> the (value, query) searches of its Workday prompt that returned nothing usable this run.
+        self.prompt_misses = {}
+        # Monotonic time the write in progress must end by (see fill).
+        self.write_ends = None
         # Field key -> the last identical write failure (count, signature, page context); see record_write_failure.
         self.field_failures = {}
         # Page fingerprint -> clean fill_current read-backs with no write in between; see fill_current.
@@ -1425,7 +1436,18 @@ class FormSession:
         REPEATED_WRITE_FAILURES times on a page that did not change in between. A changed page, new offered choices
         or a different value start the count again, so those retries still run."""
         key = self.field_key(field)
-        offered = json.dumps(getattr(exc, "offered", None), sort_keys=True, default=str)
+
+        def texts(node):
+            # What a picker offered, as the set of rows it showed. An empty search is no news: Asure's State box
+            # returned [[]], [[], []] and a one-row catalog in turn, each read as new choices that reset the count, and
+            # one Country/State write failed 8 times in a run (2026-10-29).
+            if isinstance(node, dict):
+                return {t for v in node.values() for t in texts(v)}
+            if isinstance(node, (list, tuple, set)):
+                return {t for v in node for t in texts(v)}
+            return {str(node).strip()} - {"", "None"}
+
+        offered = json.dumps(sorted(texts(getattr(exc, "offered", None))))
         signature = (self._digest(value), widgets.interaction_failure(exc), self._digest(offered))
         failing = frozenset(repr(k) for k in [*self.field_failures, key])
         context = self.write_context()
@@ -2166,14 +2188,28 @@ class FormSession:
                         options = await widgets.visible_options(frame, await widgets._popup_scope(el))
                 option = next((o for o in options if o["id"] == option_id and not o["disabled"]), None)
                 decided = None
-                if not option and (inline or field["type"] in {"select", "select-multiple"}):
+                # ADP's sdf-select lists its items in the host's own children and commits through its own driver
+                # (fill): the open pane read above is not its catalog, so a menu that closed or re-rendered left every
+                # option id stale (Midco 2026-10-30, 31 runs on one job).
+                catalog = field.get("widget") == "sdf-select" and bool(field.get("options"))
+                if not option and (inline or catalog or field["type"] in {"select", "select-multiple"}):
                     # The controller named an option this control does not have (PepsiCo's tax-credit "Select a
                     # Language" radio, 2026-10-23: eight refused chooses). Take the option the evidence supports.
-                    offered = [o for o in options if not o["disabled"]]
+                    offered = [o for o in options if not o["disabled"]] or [
+                        {"id": "", "text": t, "leaf": True, "disabled": False} for t in field["options"] if catalog
+                    ]
                     decided = (await self.resolver.resolve([{**field, "options": [o["text"] for o in offered]}]))[0]
                     AnswerModelUnavailable.raise_for(decided)
                     if decided.disposition == "answer":
                         option = next((o for o in offered if o["text"] == decided.value), None)
+                    elif decided.blocker_type == "missing_fact":
+                        # The menu is fine; the answer is what is missing. A "stale choice" refusal sent the model round
+                        # inspect_options and choose again until the run's time ran out (Midco, 2026-10-30).
+                        self._pending(
+                            {**field, "options": [o["text"] for o in offered]}, decided.reason, "missing_fact",
+                            supporting_facts=decided.supporting_facts,
+                        )
+                        raise ChoiceRejected("missing_fact", "Applicant fact required: " + decided.reason)
                 if not option:
                     raise ValueError(STALE_CHOICE)
                 supported = None
@@ -2226,7 +2262,7 @@ class FormSession:
                                 f"Applicant evidence supports the offered option {supported.value[:80]!r} instead",
                             )
                         option = alternative
-                if inline or field["type"] == "select":
+                if inline or field["type"] == "select" or (catalog and not option["id"]):
                     await self.fill(field, option["text"])
                     # SuccessFactors (Corning, live probe) keeps aria-invalid/"…is required" from an
                     # earlier validation until the control loses focus; the value is already set.
@@ -2741,6 +2777,7 @@ class FormSession:
         try:
             school = field.get("type") in {"prompt", "combobox"} and SCHOOL_LABEL.search(field.get("label") or "")
             budget = 30 if field.get("type") == "file" else SCHOOL_WRITE_SECONDS if school else FIELD_WRITE_SECONDS
+            self.write_ends = started + budget
             async with asyncio.timeout(budget):
                 return await self._fill(field, value)
         except Exception as exc:
@@ -3138,6 +3175,10 @@ class FormSession:
                     return self.resolver.policy_choice(field, options) if self.resolver else None
 
                 is_major = bool(EDUCATION["field_of_study"].search(field["label"]))
+                # One deadline for every search this field's write makes, a little inside the form's own limit so the
+                # picker is closed by us, not left open by the cancelled task.
+                prompt_deadline = (self.write_ends - 2.5) if self.write_ends else None
+                misses = self.prompt_misses.setdefault(normalize(field["label"]), set())
                 network = getattr(self, "network", None)
                 catalog = network.value_list("fieldsOfStudy") if is_major and network is not None else None
                 if catalog:
@@ -3145,8 +3186,13 @@ class FormSession:
 
                     rules = getattr(self.resolver, "answer_rules", None)
                     fallback = (getattr(rules, "major_fallback", "") or "").strip()
-                    # A partial catalog is not proof the major is absent; search the picker in that case.
-                    if not any(major_option(candidate, catalog) for candidate in (value, fallback) if candidate):
+                    # A partial catalog is not proof the major is absent; search the picker in that case. The list
+                    # decides by meaning, as the answer policy does: the tenant's own wording of the recorded or
+                    # fallback major ("Computer and Information Science") counts as offered, so no probe search runs
+                    # (REA 2026-10-25; 36 of 41 Workday education rows with a saved list, 2026-10-24..31).
+                    if not any(major_option(candidate, catalog) for candidate in (value, fallback) if candidate) and not (
+                        self.resolver and self.resolver.policy_choice(field, catalog)
+                    ):
                         catalog = None
                 if catalog:
                     # The page's own Field of Study list decides first; only the chosen exact name is searched, so no
@@ -3154,7 +3200,9 @@ class FormSession:
                     rules = getattr(self.resolver, "answer_rules", None)
                     fallback = (getattr(rules, "major_fallback", "") or "").strip()
                     wanted = [value] + ([fallback] if fallback and normalize(fallback) != normalize(value) else [])
-                    committed = await widgets.prompt(frame, el, wanted, choose=major_policy, catalog=catalog)
+                    committed = await widgets.prompt(
+                        frame, el, wanted, choose=major_policy, catalog=catalog, deadline=prompt_deadline
+                    )
                     if normalize(committed) != normalize(value):
                         self.emit(
                             "option_selected",
@@ -3169,6 +3217,8 @@ class FormSession:
                             value,
                             choose=major_policy if is_major else choose,
                             school_scope=bool(SCHOOL_LABEL.search(field["label"])),
+                            deadline=prompt_deadline,
+                            missed=misses,
                         )
                     except ValueError:
                         rules = getattr(self.resolver, "answer_rules", None)
@@ -3179,7 +3229,9 @@ class FormSession:
                         # (answer_rules.major_fallback; R1 RCM: "Data Science" was not offered).
                         # The fallback is policy-matched too: a model choosing among Jabil's alphabetical first page
                         # committed "Actuarial Science" for Data Science (2026-10-23).
-                        committed = await widgets.prompt(frame, el, fallback, choose=major_policy)
+                        committed = await widgets.prompt(
+                            frame, el, fallback, choose=major_policy, deadline=prompt_deadline, missed=misses
+                        )
                         self.emit(
                             "option_selected",
                             "Used the profile's fallback major for a catalog without the recorded one",
@@ -3445,6 +3497,11 @@ class FormSession:
         if field["type"] == "combobox" and APPLICANT_LOCATION.fullmatch(field["label"].strip()) and await el.evaluate(
             "e => ['INPUT','TEXTAREA'].includes(e.tagName) && !e.readOnly && !e.disabled"
             " && ['list','both'].includes(e.getAttribute('aria-autocomplete'))"
+            # A Greenhouse custom question (question_<id>) is the employer's own, never the built-in geocoded
+            # location (candidate-location): Atto's bare "Location" listed New York / USA (other than New York) /
+            # Europe / Other, was taken for the applicant's city, answered with the applicant's own city, typed and refused as "No
+            # matching option" on every run (2026-10-31). Its list is read like any other choice.
+            " && !/^question_\\d+/.test(e.id)"
         ):
             # The applicant's own location is a search-only typeahead (Greenhouse Geocode Earth, Ashby, SmartRecruiters):
             # it lists nothing until typed, so opening it cost 1.4-2.3 s for zero choices. The resolver answers from
@@ -3900,8 +3957,13 @@ class FormSession:
                 known = self.resolver.local(field)
                 if (
                     # A years-of-experience answer computed from the work history outranks every stored one, in
-                    # menus too (Apptronik's combobox kept an earlier No for a Yes the history supports, 2026-10-30).
-                    (field["type"] not in {"prompt", "combobox", "dropdown"} or EXPERIENCE_COMPUTED in (known.reason if known else ""))
+                    # menus too (Apptronik's combobox kept an earlier No for a Yes the history supports, 2026-10-30). So
+                    # does a prior-employment, enrolment or residence answer decided from the record (Federal Reserve's
+                    # menu kept a contractor Yes the work history contradicts, 2026-10-27).
+                    (
+                        field["type"] not in {"prompt", "combobox", "dropdown"}
+                        or any(m in (known.reason if known else "") for m in (EXPERIENCE_COMPUTED, FROM_RECORD))
+                    )
                     and known
                     and known.disposition == "answer"
                     and not widgets.same_value(field, field["value"], known.value)
@@ -4346,6 +4408,7 @@ class FormSession:
                 messages = await self.page.evaluate(PAGE_MESSAGES)
             except Exception:
                 messages = []
+            messages = [*messages, *await self.named_rejections()]
             named = self.error_named_fields(messages)
             ask = [
                 x
@@ -4535,6 +4598,10 @@ class FormSession:
                                 await widgets.close_picker(self.locator(field["id"]))
                             except ValueError:
                                 pass  # A dependent answer may have removed it.
+                        if field["type"] == "prompt" and field["id"] in self.frames:
+                            # A search that timed out leaves its still-loading popup over the fields below (Humana
+                            # 2026-10-30); Workday closes popups on a real click only.
+                            await widgets.release_prompt(self.frames[field["id"]])
                         structure = await self.control_structure(field["id"])
                         self.emit(
                             "field_error",
@@ -4827,6 +4894,15 @@ class FormSession:
         inside = set(data["inside"])
         return [f for f in fields if (self.fields.get(f["id"]) or {}).get("dom_id") in inside], data["text"]
 
+    async def named_rejections(self):
+        """The page's own sentences that name a question it refuses to leave blank, wherever it prints them: Adzuna's
+        red lines carry no alert role or error class, so the scan's error list never held them."""
+        try:
+            text = await self._page_text()
+        except PlaywrightError:
+            return []
+        return [m.group(0) for m in NAMED_BY_PAGE.finditer(text)][:12]
+
     def error_named_fields(self, messages=()):
         """Ids of fields a page-level error requires although they are not marked required.
 
@@ -4839,6 +4915,9 @@ class FormSession:
         if not text:
             return set()
         names = {normalize(n) for n in re.findall(r'"([^"]{2,60})"', text)}
+        # Adzuna's own rejection (2026-10-28) quotes the whole question in single quotes: "Please enter a value for
+        # 'Are you currently based in the USA?'", "Please choose at least one option for 'Do you certify that ...'".
+        names |= {normalize(n) for n in NAMED_BY_PAGE.findall(text)}
         complete = bool(re.search(r"select all (?:possible|required) values in the section", text, re.I))
         # "The value does not match the pattern 999-999-9999": a phone written in another shape is rewritten.
         mask = phone_fields.phone_mask(text) if re.search(r"pattern|format", text, re.I) else None
@@ -5366,6 +5445,10 @@ class FormSession:
             # without scoped keys must be verified again before counting them.
             if not key or field_id in self.fields or key in current_keys:
                 record["verified"] = False
+        # A question the page itself refuses to leave blank is required, whatever its markup says (Adzuna, 2026-10-28:
+        # a required "Yes, I certify" box, a select and a text answer read back as verified while the submit was
+        # refused for them).
+        self.error_named_fields(await self.named_rejections())
         problems = []
         if self.uploaded and not self.upload_verified and not self.workday and not self.resume_fields():
             # SuccessFactors replaces its upload control with an attachment
@@ -6018,6 +6101,27 @@ class FormSession:
             "run_id": getattr(self.resolver, "run_id", ""),
         }
 
+    async def oracle_lists_job(self):
+        """True when a tile of Oracle's My Applications list is this job's: a link titled as the job, or its requisition."""
+        job = getattr(self.resolver, "job", {}) or {}
+
+        def norm(text):
+            return " ".join(re.sub(r"[^\w]+", " ", str(text or "")).casefold().split())
+
+        title = norm(job.get("title"))
+        req = (re.search(r"/job/(\d{4,})", str(job.get("url") or "")) or [None, ""])[1]
+        try:
+            tiles = await self.page.locator("li.cs-application-tile:visible").evaluate_all(
+                "els => els.map(el => ({text: el.innerText, links: [...el.querySelectorAll('a[href]')].map(a => a.textContent)}))"
+            )
+        except PlaywrightError:
+            return False
+        return any(
+            (title and any(norm(link) == title for link in tile["links"]))
+            or (req and re.search(rf"(?<!\d){req}(?!\d)", tile["text"]))
+            for tile in tiles
+        )
+
     async def proof(self):
         host = (urlsplit(self.page.url).hostname or "").lower()
         # Greenhouse can acknowledge a submitted requisition in its document
@@ -6427,6 +6531,11 @@ class FormSession:
                         "status_region": "job_application_status",
                         "observed_job_heading": card["heading"][:200],
                     }
+        if host.endswith(".oraclecloud.com") and "/my-profile" in current.path and not await self.oracle_lists_job():
+            # Oracle's My Applications list holds every application of the account, and its generic "Thank you for your
+            # job application" toast names no job: 28 receipts rested on the toast alone (2026-10-17..31). This job must
+            # have its own tile; the list is otherwise no evidence about it.
+            return None
         # Ashby lets employers customize the success copy (e.g. "Thanks,
         # got it!"). Its application-success component is stronger evidence
         # than a generic Success heading or a phrase in the job description.
@@ -6457,6 +6566,9 @@ class FormSession:
             r"(?:thank you|thanks) for (?:applying|your (?:job )?(?:application|submission))|"
             r"(?:thank you|thanks) for (?:submitting|sending) your (?:job )?application|"
             r"application (?:has |was )?(?:successfully )?(?:been )?(?:successfully )?(?:submitted|received|sent)|"
+            # The role named in between (Gem, Imagen Technologies 2026-10-28: "Your application for Software Engineer has
+            # been received!" parked a run on a custom site while the page showed it).
+            r"your application for [^.!?\n]{1,140}? (?:has been|was) (?:successfully )?(?:submitted|received|sent)\b|"
             r"we(?:'ve| have)? received your application|successfully (?:applied|submitted)|"
             r"thank you for sending us your online job submission|"
             r"your application (?:is |has been |was )?(?:complete|submitted|received|sent|on its way)|"
@@ -6547,6 +6659,18 @@ class FormSession:
         return None
 
     @staticmethod
+    def review_issues(text):
+        """The items a review page marks "Fields to fix: N" (Oracle's education, experience and language tiles), each named
+        by the two lines above its notice: ["Data Science / University of Maryland (Fields to fix: 2)"]."""
+        lines = [line.strip() for line in str(text).splitlines() if line.strip()]
+        found = []
+        for i, line in enumerate(lines):
+            if notice := re.search(r"(?:^|\s)(fields? to fix: ?\d+)$", line, re.I):
+                name = line[: notice.start()].strip() or " / ".join(lines[max(0, i - 2) : i])
+                found.append(f"{name} ({notice[1]})"[:200])
+        return list(dict.fromkeys(found))[:10]
+
+    @staticmethod
     def inline_field_errors(obs):
         # Many forms report errors beside the fields, without a rejection banner.
         # Greenhouse's phone widget prints "Phone number is too short" after
@@ -6573,6 +6697,10 @@ class FormSession:
             r"(?im)^\s*you(?: have|['’]ve)? already applied (?:for|to) this (?:job|position|role)[.!]?\s*$",
             text,
         )
+        # Shield AI (2026-10-29): "Your application was already submitted. We received your previous application on ..."
+        duplicate = duplicate or re.search(
+            r"(?im)^\s*your application (?:was|has been) already (?:been )?(?:submitted|received)\b[^\n]{0,200}$", text
+        )
         if duplicate:
             return {"type": "explicit_rejection_page", "url": self.page.url,
                     "category": "already_applied", "evidence": duplicate[0].strip(), "missing_fields": []}
@@ -6597,13 +6725,17 @@ class FormSession:
             r"please fix the highlighted errors and try again|answer all required questions to submit this application|"
             # Workable's banner with HTTP 412 from /api/v1/jobs/<code>/apply when it throttles a candidate
             # (2026-10-23): nothing was accepted, and the same application went through later.
-            r"something went wrong\. we are working on this,? please try again later",
+            r"something went wrong\. we are working on this,? please try again later|"
+            # Oracle's review step after a refused Submit (Lazard 2026-10-23, 61 runs on 37 jobs): "You have 2 issues that
+            # need to be fixed before you can submit your application", the tiles say "Fields to fix: 2". Nothing was
+            # accepted; only the adapter's own poll knew this wording, so the guided flow ended as an uncertain submission.
+            r"you have \d+ issues? that needs? to be fixed before you can submit",
             text,
             re.I,
         )
         if match:
             missing = re.findall(r"Missing entry for required field:\s*([^\n]+)", text, re.I)
-            corrections = "correct the error" in match.group().lower()
+            corrections = "correct the error" in match.group().lower() or "fixed before you can submit" in match.group().lower()
             phrase = match.group().lower()
             tail = text[match.end() : match.end() + 600]
             from .adapters.base import ALREADY
@@ -6665,10 +6797,13 @@ class FormSession:
                         if normalize(subject) in labels
                     )
                 )
+            issues = self.review_issues(text) if "fixed before you can submit" in phrase else []
             return {
                 "type": "explicit_rejection_page",
                 "url": self.page.url,
                 "evidence": text[max(0, match.start() - 20) : match.end() + 400],
+                # What the employer lists as still to fix, for the owned page and the owner when no field names it.
+                **({"issues": issues} if issues else {}),
                 "category": "validation"
                 if missing or corrections
                 else (

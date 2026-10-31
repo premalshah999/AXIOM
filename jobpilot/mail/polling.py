@@ -23,13 +23,30 @@ from .extraction import UNBRANDED_MAX_CANDIDATES
 from .extraction import UNBRANDED_SEARCH_TERMS
 from .extraction import extract_message
 from .extraction import latest_employer_code
+from .extraction import names_employer
+from .extraction import newest_reset_link
 from .helpers import origin
 from .senders import EMPLOYER_SENDER_FAMILIES
 from .senders import KNOWN_SENDERS
+from .senders import decorated_senders
 from .senders import icims_names
 from .senders import oracle_pod
 from .senders import sender_domains_overlap
 from .senders import tenant_tokens
+
+
+# Platforms whose mail has no attribution rules of its own, so a message that names the employer is enough to learn them
+# (family_learning). Workday learns from an exact tenant link; Oracle, iCIMS and Greenhouse attribute by their own rules.
+LEARNABLE_FAMILIES = {"eightfold", "avature", "smartrecruiters", "jobvite", "taleo", "successfactors", "adp"}
+# A gap this long between two looks at the clocks is the machine asleep, not a slow poll.
+SLEEP_GAP_SECONDS = 4
+# Searches a window past its end still gets before it is called empty (a poll that fails does not use them up).
+LAST_SEARCHES = 3
+# How long a matched message stays claimable after it matched. The window decides what is accepted; once a mail is in
+# the vault its owner needs a worker slot to claim it. A SuccessFactors reset (Farmers 2026-10-26) matched 70 s before its
+# 180 s window closed and expired unclaimed; Allen Institute's link (2026-10-30) matched 5 s after its run parked and the
+# resume was still retrying when the window ended. A reset link outlives a code by hours.
+MATCH_HOLD_SECONDS = {"code": 600, "auto": 600, "link": 1800, "password_reset": 1800}
 
 
 def sf_tenant(session, job):
@@ -70,9 +87,33 @@ class PollingMixin:
             ended.append((run.id, run.reason))
         return ended
 
+    def sleep_credit(self, wall=None, mono=None):
+        """Seconds the machine slept since the last look at the clocks. Wall time runs through sleep, time.monotonic()
+        (mach_absolute_time on macOS) does not, so their difference is the sleep. A window is time awake: the Mac was
+        asleep 86% of 2026-10-31 and 20 of 63 windows ended while it slept, each expiring unsearched."""
+        wall = time.time() if wall is None else wall
+        mono = time.monotonic() if mono is None else mono
+        last_wall, last_mono = self.__dict__.get("awake_mark") or (wall, mono)
+        self.awake_mark = (wall, mono)
+        gap = (wall - last_wall) - (mono - last_mono)
+        return gap if gap > SLEEP_GAP_SECONDS else 0.0
+
+    async def last_search(self, challenge_id):
+        """The search a window gets after its end and before it is called empty. A mail that arrived inside the window
+        but is read after it (the poll was not running: asleep, or busy) still matches; one that arrived later never
+        does (extract_message). poll_once makes the search and expires the window; a sweep already in flight makes it."""
+        for _ in range(LAST_SEARCHES):
+            with self.db.session() as s:
+                row = s.get(MailChallenge, challenge_id)
+                if not row or row.state != "pending":
+                    return
+            await self.poll_once()
+            await asyncio.sleep(0.2)
+
     async def poll_once(self):
         from ..agent_settings import enabled
 
+        self.sleep_owed = self.__dict__.get("sleep_owed", 0.0) + self.sleep_credit()
         if not enabled(self.db, "email"):
             return
         # The active sweep already services all requests. Browser owners must
@@ -81,21 +122,31 @@ class PollingMixin:
         if self.poll_lock.locked():
             return
         async with self.poll_lock:
+            last_chance = []
             with self.db.exclusive() as s:
                 current = time.time()
+                slept, self.sleep_owed = self.sleep_owed, 0.0
                 for c in s.scalars(select(MailChallenge).where(MailChallenge.state.in_(LIVE))):
                     run = s.get(Run, c.run_id)
+                    if slept and c.state in {"pending", "matched"}:
+                        c.expires += slept
+                    proposed = c.expires
                     c.expires = self.window_deadline(run, c.expires)
-                    if (
+                    owner_gone = not run or (run.state not in {"running", "submitting"} and not self.waiting_owner(run, c.id))
+                    if owner_gone or (
                         c.expires < current
-                        or not run
-                        or (run.state not in {"running", "submitting"} and not self.waiting_owner(run, c.id))
-                    ):
-                        c.state, c.payload, c.reason = (
-                            "expired",
-                            "",
-                            "Application or verification deadline ended",
+                        and (
+                            c.state != "pending"
+                            or c.expires < proposed  # the application's own deadline, not the delivery window
+                            or self.final_attempts.get(c.id, 0) >= LAST_SEARCHES
                         )
+                    ):
+                        # A claimed mail (consumed) keeps the reason it was handed over with: Fortinet's code was typed at
+                        # 14:27 and the row then read "deadline ended" as if the mail had gone unused (2026-10-31).
+                        c.reason = c.reason if c.state == "consumed" else "Application or verification deadline ended"
+                        c.state, c.payload = "expired", ""
+                    elif c.expires < current:
+                        last_chance.append(c.id)
                 ended = self.end_dead_email_waits(s)
                 pending = [
                     record(c)
@@ -103,6 +154,7 @@ class PollingMixin:
                 ]
             for run_id, why in ended:
                 self.db.event(run_id, "email_wait_ended", why)
+            searched = set()
             for c in pending:
                 with self.db.session() as s:
                     row = s.get(MailRule, c["rule_id"])
@@ -111,7 +163,7 @@ class PollingMixin:
                     job = s.get(Job, run.job_id) if run else None
                     # Tenant identity: the employer this run applies to, never message text.
                     c["tenant_tokens"] = tenant_tokens(
-                        (job.url if job else "") or (rule or {}).get("employer_origin", ""),
+                        self.posting_url(job.url if job else "", s) or (rule or {}).get("employer_origin", ""),
                         job.company if job else "",
                         sf_tenant(s, job),
                     )
@@ -150,7 +202,7 @@ class PollingMixin:
                         peer_job = s.get(Job, peer_run.job_id) if peer_run else None
                         if peer_job and peer_job.id != (job.id if job else None):
                             c["peer_tokens"].append(
-                                tenant_tokens(peer_job.url or "", peer_job.company or "", sf_tenant(s, peer_job))
+                                tenant_tokens(self.posting_url(peer_job.url or "", s), peer_job.company or "", sf_tenant(s, peer_job))
                             )
                     c["oracle_pod"] = oracle_pod(job.url) if job and job.ats == "oracle" else ""
                     c["oracle_peers"] = []
@@ -192,7 +244,7 @@ class PollingMixin:
                     scan_started = time.monotonic()
                     senders = list(rule["sender_domains"])
                     if c["employer_senders"]:
-                        senders += c["tenant_tokens"]
+                        senders += c["tenant_tokens"] + decorated_senders(c["tenant_tokens"])
                     terms = ["from:" + d for d in senders]
                     if c["ats"] == "oracle" and c["kind"] in {"code", "auto"}:
                         terms.append('subject:"confirm your identity"')
@@ -213,6 +265,7 @@ class PollingMixin:
                         "/messages",
                         {"q": query, "maxResults": 20, "includeSpamTrash": "true"},
                     )
+                    searched.add(c["id"])
                     if listed.get("nextPageToken"):
                         self.outcome(
                             c["id"],
@@ -288,6 +341,11 @@ class PollingMixin:
                                         token = extract_message(msg, proof_rule, c)
                                         if token:
                                             learned_domain = domain
+                            elif not token and diagnostics.get("rejection") == "sender" and c["employer_senders"]:
+                                learned_domain = self.family_learning(msg, rule, c)
+                                if learned_domain:
+                                    token = extract_message(msg, {**rule, "sender_domains": [*rule["sender_domains"], *learned_domain]}, c)
+                                    learned_domain = learned_domain if token else None
                         except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
                             self.quarantine(c["mailbox_id"], m["id"], "invalid_message")
                             token, diagnostics = None, {"rejection": "invalid_message"}
@@ -339,7 +397,7 @@ class PollingMixin:
                                 "outside_senders": outside,
                             },
                         )
-                    matches = latest_employer_code(matches, c)
+                    matches = newest_reset_link(latest_employer_code(matches, c), rule, c)
                     if len(matches) != 1:
                         if len(matches) > 1:
                             self.outcome(
@@ -364,11 +422,12 @@ class PollingMixin:
                         if learned_domain:
                             # Learning must not create an overlapping active
                             # sender lease while another employer owns it.
+                            learned = [learned_domain] if isinstance(learned_domain, str) else list(learned_domain)
                             conflict = any(
                                 other.run_id != c["run_id"]
                                 and other.expires > time.time()
                                 and (other_rule := s.get(MailRule, other.rule_id))
-                                and sender_domains_overlap([learned_domain], other_rule.sender_domains)
+                                and sender_domains_overlap(learned, other_rule.sender_domains)
                                 for other in s.scalars(
                                     select(MailChallenge).where(MailChallenge.state.in_(LIVE))
                                 )
@@ -379,7 +438,7 @@ class PollingMixin:
                         if (
                             row
                             and row.state == "pending"
-                            and row.expires > time.time()
+                            and (row.expires > time.time() or row.id in last_chance)  # extract_message bounded the mail
                             and (
                                 row.kind in {"auto", token["kind"]}
                                 or row.kind == "password_reset"
@@ -397,21 +456,29 @@ class PollingMixin:
                                 "matched",
                                 "A correlated employer email is ready",
                             )
+                            # The window decided what was accepted; the matched mail stays claimable (MATCH_HOLD_SECONDS).
+                            row.expires = self.window_deadline(
+                                owner, max(row.expires, time.time() + MATCH_HOLD_SECONDS.get(row.kind, 600))
+                            )
                             if learned_domain:
-                                current_rule.sender_domains = list(
-                                    dict.fromkeys(current_rule.sender_domains + [learned_domain])
-                                )
+                                learned = [learned_domain] if isinstance(learned_domain, str) else list(learned_domain)
+                                current_rule.sender_domains = list(dict.fromkeys(current_rule.sender_domains + learned))
                                 s.add(
                                     Event(
                                         run_id=row.run_id,
                                         kind="mail_sender_learned",
-                                        message="Learned an authenticated sender from the exact Workday tenant link",
-                                        data={"sender_domain": learned_domain, "challenge_id": row.id},
+                                        message="Learned an authenticated sender from the exact Workday tenant link"
+                                        if isinstance(learned_domain, str)
+                                        else "Learned the employer's platform sender: its mail names the employer and no other open window's",
+                                        data={"sender_domain": learned[0], "sender_domains": learned, "challenge_id": row.id},
                                     )
                                 )
                             s.add(MailConsumption(key=key, challenge_id=row.id))
                             meta = s.get(Setting, "mail_request:" + row.id)
                             generation = (meta.value if meta else {}).get("generation", 1)
+                            if meta:
+                                # sender_blocker stops holding the sender for a match nobody has claimed in a while.
+                                meta.value = {**meta.value, "matched_at": time.time()}
                             matched = (row.run_id, row.id, generation)
                             if self.waiting_owner(owner, row.id):
                                 from ..outbox import enqueue
@@ -440,15 +507,59 @@ class PollingMixin:
                                 "generation": generation,
                             },
                         )
-                except (ValueError, httpx.HTTPError, KeyError, TypeError):
+                except (ValueError, httpx.HTTPError, KeyError, TypeError) as exc:
                     # Do not include provider responses, URLs, codes, or credentials in diagnostics.
+                    count = self.note_failure("poll_scan", exc)
                     with self.db.exclusive() as s:
                         row = s.get(MailChallenge, c["id"])
                         box = s.get(Mailbox, c["mailbox_id"])
-                        if row:
+                        # Only a window that is still open: 16 finished challenges carried "Mailbox request failed" as
+                        # their reason although they had matched, expired or been verified (2026-10-31).
+                        if row and row.state == "pending":
                             row.reason = "Mailbox request failed; check the connection"
                             if not box or box.state != "connected":
                                 row.state, row.payload = "failed", ""
+                    if count <= 3 or count % 20 == 0:
+                        self.db.event(
+                            c["run_id"], "mail_poll_failed", "The mailbox search failed; it is tried again",
+                            {"error": type(exc).__name__, "failures_so_far": count},
+                        )
+            if last_chance:
+                # A window past its end got its one search (or three failed ones): it is empty now.
+                with self.db.exclusive() as s:
+                    for cid in last_chance:
+                        self.final_attempts[cid] = self.final_attempts.get(cid, 0) + 1
+                        row = s.get(MailChallenge, cid)
+                        if row and row.state == "pending" and cid in searched:
+                            row.state, row.payload, row.reason = (
+                                "expired",
+                                "",
+                                "Application or verification deadline ended",
+                            )
+                while len(self.final_attempts) > 200:
+                    self.final_attempts.pop(next(iter(self.final_attempts)))
+
+    @staticmethod
+    def family_learning(msg, rule, c):
+        """The sender domains of the platform a rejected message comes from, when that mail is this employer's.
+
+        AARP's career site (apply.aarp.org) is Eightfold under a label of "custom", so its rule listed only aarp.org; the
+        mail ("AARP Careers" <confirm@eightfold.ai>, "Verify your email", 2026-10-31) was refused as `sender` on every poll.
+        A platform family's senders belong on the rule of an employer that uses it. The proof is the mail's own: the
+        sender is in a family without attribution rules of its own (Workday, Oracle, iCIMS and Greenhouse have theirs), the
+        message names this employer in its subject, sender name or snippet, and names none of the other open windows'
+        employers. Every other gate (DMARC, recipient, window, tenant label) still applies to the re-read."""
+        senders = getaddresses([h["value"] for h in msg["payload"]["headers"] if h["name"].lower() == "from"])
+        if len(senders) != 1 or not c.get("tenant_tokens"):
+            return None
+        domain = senders[0][1].rpartition("@")[2].lower()
+        for name, family in KNOWN_SENDERS.items():
+            if name in LEARNABLE_FAMILIES and any(domain == d or domain.endswith("." + d) for d in family):
+                if names_employer(msg, c["tenant_tokens"]) and not any(
+                    names_employer(msg, peer) for peer in c.get("peer_tokens") or []
+                ):
+                    return [d for d in family if d not in rule["sender_domains"]] or None
+        return None
 
     async def outside_senders(self, c):
         """Diagnosis only, for a link or reset wait whose sender search listed nothing: the sender domains of reset or
@@ -546,8 +657,8 @@ class PollingMixin:
                             await asyncio.gather(draft_task, return_exceptions=True)
                         last_drafts = time.time()
                         draft_task = asyncio.create_task(reconcile_recent_drafts(self))
-                except Exception:
-                    pass  # Public connection/challenge diagnostics never expose raw secrets.
+                except Exception as exc:
+                    self.note_failure("poll_loop", exc)  # by class only: public diagnostics never expose raw secrets
                 await asyncio.sleep(self.config.mail_poll_seconds)
         finally:
             for task in (receipt_task, draft_task):

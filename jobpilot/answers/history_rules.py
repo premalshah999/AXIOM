@@ -15,7 +15,7 @@ from .history import WORK
 from .history import degree_level
 from .history import history_region
 from .history import month_year
-from .text import normalize
+from .text import FROM_RECORD, normalize
 
 
 
@@ -169,7 +169,9 @@ class HistoryRulesMixin:
         label = field["label"]
         proposition = label.partition("?")[0]
         if topic(label) != "prior_employment" or re.search(
-            r"\b(?:clients?|member sites?|related|relatives?|family|spouse|referr\w*|never|not)\b",
+            # "Quintiles family of companies" and "including but not limited to" are the employer's own wording
+            # (IQVIA, Cigna 2026-10-22), not a family relationship or a negated question.
+            r"\b(?:clients?|member sites?|related|relatives?|family(?! of)|spouse|referr\w*|never|not(?! limited))\b",
             proposition,
             re.I,
         ):
@@ -203,7 +205,7 @@ class HistoryRulesMixin:
             "Applicant explicitly confirmed No to prior employment at the company being applied to"
             if explicit_no
             else "Applicant confirmed that all past employment is listed; this employer is absent"
-        )
+        ) + f" ({FROM_RECORD})"
         if field.get("type") in {"text", "textarea", "date", "date_parts", "month"}:
             # No previous employment is not a company name, employment type or
             # last-worked date. Optional conditional details remain empty.
@@ -327,8 +329,10 @@ class HistoryRulesMixin:
                 # Year box ("05/2026" became "05/2"), and refuses a date missing any part ("Please fill in all date
                 # fields", Schwab 2026-10-21). Each part gets its own component, all parts or none.
                 part = re.search(r"graduation (?:date )?(year|month|day)\b", label)
-                if part and part[1] == "month" and re.search(r"year", label):
-                    part = None  # "Graduation month/year" asks for both.
+                if part and part[1] == "month" and re.search(r"month\W*(?:and\W*|or\W*)?year", label):
+                    # "Graduation month/year" asks for both. A month box whose question merely says "year" ("What is
+                    # your expected year of graduation? Month", Oracle 2026-10-29) is the month part.
+                    part = None
                 evidence = [source]
                 if part:
                     whole = self.graduation_parts(f, entry.end, part[1])

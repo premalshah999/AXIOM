@@ -53,11 +53,27 @@ FRESH_SECONDS = 5.0
 SPAM_EVERY = 5
 
 
+# A connection whose machine slept has a dead TCP session: its next command waits out the 30 s socket timeout and closing
+# it waits another (since 2026-10-20, 38 polls took 29-33 s and 37 took 58-75 s). Wall time runs through sleep and
+# time.monotonic() does not, so the difference is the sleep: a pool last used before one is dropped without a command, and
+# a connection idle for a while is probed with a short timeout instead of the long one.
+SLEEP_GAP_SECONDS = 4.0
+PROBE_SECONDS = 5.0
+CLOSE_SECONDS = 2.0
+
+
 class _Pool:
     """One connection per folder for a mailbox, each selected read-only once."""
 
     def __init__(self, address, password):
         self.address, self.password, self.conns, self.listings = address, password, {}, 0
+        self.seen = (time.time(), time.monotonic())
+
+    def slept(self, wall=None, mono=None):
+        """Whether the machine slept since this pool last served a request."""
+        wall = time.time() if wall is None else wall
+        mono = time.monotonic() if mono is None else mono
+        return (wall - self.seen[0]) - (mono - self.seen[1]) > SLEEP_GAP_SECONDS
 
     def control(self):
         if None not in self.conns:
@@ -75,7 +91,11 @@ class _Pool:
             conn._jp_selected, conn._jp_refreshed = name, time.monotonic()
             self.conns[name] = conn
         elif time.monotonic() - getattr(conn, "_jp_refreshed", 0) > FRESH_SECONDS:
-            conn.noop()  # The open folder reports new mail without a re-SELECT.
+            _timeout(conn, PROBE_SECONDS)  # A dead session fails here in seconds, not after the 30 s socket timeout.
+            try:
+                conn.noop()  # The open folder reports new mail without a re-SELECT.
+            finally:
+                _timeout(conn, 30)
             conn._jp_refreshed = time.monotonic()
         return conn
 
@@ -118,7 +138,15 @@ def login_ok(address, password):
         return False
 
 
+def _timeout(client, seconds):
+    try:
+        client.socket().settimeout(seconds)
+    except Exception:
+        pass  # A connection without a live socket has nothing to time out.
+
+
 def _close(client):
+    _timeout(client, CLOSE_SECONDS)  # LOGOUT on a dead session would otherwise wait 30 s
     try:
         client.logout()
     except Exception:
@@ -130,6 +158,9 @@ def request(address, password, path, params=None, lane="live"):
     with _locks[lane]:
         for attempt in range(2):
             pool = _clients.pop(key, None) or _Pool(address, password)
+            if pool.conns and pool.slept():
+                pool.close()  # The machine slept since this pool's last request: its sessions are dead.
+                pool = _Pool(address, password)
             try:
                 result = _request(pool, address, path, params or {})
             except (imaplib.IMAP4.abort, OSError):
@@ -146,6 +177,7 @@ def request(address, password, path, params=None, lane="live"):
             except Exception:
                 pool.close()
                 raise
+            pool.seen = (time.time(), time.monotonic())
             _clients[key] = pool
             return result
     raise MailTransportError("Gmail connection was interrupted; retry later")

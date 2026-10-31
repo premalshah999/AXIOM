@@ -1487,8 +1487,16 @@ class BrowserEngine:
                     )
                 except PlaywrightError:
                     pass  # The scanner/navigator can handle an employer-hosted entry page.
-                # File upload clients initialize after React hydration.
-                await page.wait_for_timeout(2000)
+                # File upload clients initialize after React hydration. The job-boards form is React: wait for
+                # it to hydrate, reloading once if it does not, rather than a fixed pause (Esri, 2026-10-31).
+                if (urlsplit(page.url).hostname or "").startswith("job-boards"):
+                    from .widgets import wait_react_hydrated
+
+                    if not await wait_react_hydrated(page):
+                        self.emit("browser", "The Greenhouse form did not hydrate; continuing on the page as it is")
+                    await page.wait_for_timeout(500)
+                else:
+                    await page.wait_for_timeout(2000)
             from .run_profile import full as full_profile
 
             self.profile = Profile.model_validate(full_profile(run["packet"], self.db))
@@ -3922,6 +3930,18 @@ class BrowserEngine:
             "receipt": receipt,
         }
 
+    async def no_control_after_commit(self):
+        """No submit control is left on a page after the commit was sent: the click took effect, so this is no control
+        failure and nothing is clicked again. A new acknowledgement confirms it under the usual evidence rules; anything
+        else is an uncertain submission for the receipt check, never a retry."""
+        if confirmed := await self.confirm_post_commit():
+            return confirmed
+        return {
+            "state": "submission_unknown",
+            "reason": "Submission attempted; no submit control is left on the page and it shows no acknowledgement of "
+            "this application. Nothing is submitted again",
+        }
+
     async def record_finish_refusal(self, result):
         detail = {
             "state": result.get("state"),
@@ -4110,7 +4130,12 @@ class BrowserEngine:
                     "recovery_cause": "validation_controls",
                     "recoverable": True,
                 }
-            return {"state": "needs_review", "reason": "Final submit control was not unique"}
+            if not final and self.armed:
+                return await self.no_control_after_commit()
+            return {
+                "state": "needs_review",
+                "reason": "Final submit control was not unique" if final else "No final submit control is on this page",
+            }
         signup = getattr(self.form, "signup_form", None)
         if signup and await signup(final[0]["id"]) is True:
             # Roku: the "Join our Talent Community" sidebar was submitted as if it were the job.
@@ -4375,9 +4400,12 @@ class BrowserEngine:
                     self.armed = False  # The employer explicitly declined this incomplete form.
                     self.validation_refusal = rejection
                     await self.release_reservation()
+                    # Oracle's "You have 2 issues that need to be fixed" lists the items; the owned page opens them.
+                    issues = rejection.get("issues") or []
                     return {
                         "state": "waiting_browser",
-                        "reason": "Employer requested field corrections; automatic repair could not complete them",
+                        "reason": "Employer requested field corrections; automatic repair could not complete them"
+                        + (f" (still to fix: {'; '.join(issues[:4])})" if issues else ""),
                         "blocker_type": "validation",
                         "recovery_cause": "validation_controls",
                         "receipt": rejection,
