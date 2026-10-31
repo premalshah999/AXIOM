@@ -154,13 +154,6 @@ def apply(config, live=False):
         except ValueError:
             value = typed(name, env[name]) if env.get(name) not in (None, "") else getattr(config, name)
         object.__setattr__(config, name, value)
-    if not live and hasattr(config, "normal_workers"):
-        # The total the validator computed before these values were laid over the environment.
-        object.__setattr__(
-            config,
-            "workers",
-            config.normal_workers + config.specialist_workers + int(bool(getattr(config, "custom_ats_worker", False))),
-        )
     return config
 
 

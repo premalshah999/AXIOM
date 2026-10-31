@@ -1,6 +1,5 @@
 import os
 import secrets
-import warnings
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -193,8 +192,6 @@ class Settings(BaseSettings):
     specialist_workers: int = Field(default=1, ge=0, le=MAX_SPECIALIST_WORKERS)
     # One worker for jobs on custom career sites (Topology.custom); off: those applications wait.
     custom_ats_worker: bool = True
-    # Deprecated single knob for the total. While set it keeps the old implied layout (see legacy_topology).
-    workers: int = Field(default=0, ge=0, le=MAX_WORKERS)
     # Wall-clock time, model calls and the per-job token cap are this many times larger on a specialist.
     specialist_budget_multiplier: float = Field(default=1.5, ge=1, le=3)
     # Failures on ATS workers before a job moves to a specialist.
@@ -245,32 +242,20 @@ class Settings(BaseSettings):
     trace_steps: bool = True
     failure_reports_enabled: bool = True
     repair_agent_enabled: bool = True
-    # "adapters": deterministic ATS drivers for multi-page portals, the model only for answers,
-    # falling back to the guided flow. "guided": main's guided flow for every site.
-    engine: str = "adapters"
     enable_workers: bool = True
     enable_demo: bool = True
     allow_private_urls: bool = False  # Tests only. Never enabled by the production image.
 
     @model_validator(mode="after")
     def resolve_topology(self):
-        if "workers" in self.model_fields_set and self.workers:
-            if self.model_fields_set & {"normal_workers", "specialist_workers"}:
-                raise ValueError("Set NORMAL_WORKERS and SPECIALIST_WORKERS, or the deprecated WORKERS, not both")
-            layout = legacy_topology(self.workers)
-            warnings.warn(
-                f"WORKERS={self.workers} is deprecated and means {layout.normal} ATS workers + {layout.specialist} "
-                "specialists. Set NORMAL_WORKERS and SPECIALIST_WORKERS instead.",
-                UserWarning,
-                stacklevel=2,
-            )
-            self.normal_workers, self.specialist_workers = layout.normal, layout.specialist
-            if "custom_ats_worker" not in self.model_fields_set:
-                self.custom_ats_worker = False  # WORKERS keeps meaning the whole fleet.
         if self.normal_workers + self.specialist_workers + int(self.custom_ats_worker) > MAX_WORKERS:
             raise ValueError(f"NORMAL_WORKERS + SPECIALIST_WORKERS + the custom-site worker may not exceed {MAX_WORKERS}")
-        self.workers = self.normal_workers + self.specialist_workers + int(self.custom_ats_worker)
         return self
+
+    @property
+    def workers(self) -> int:
+        """Every browser owner: ATS workers, specialists and the custom-site worker."""
+        return self.normal_workers + self.specialist_workers + int(self.custom_ats_worker)
 
     @property
     def topology(self) -> Topology:
@@ -329,8 +314,6 @@ class Settings(BaseSettings):
             self.database_url = f"sqlite:///{self.data_dir / 'application.db'}"
         if not self.dbos_database_url:
             self.dbos_database_url = f"sqlite:///{self.data_dir / 'workflows.db'}"
-        os.environ.setdefault("ANONYMIZED_TELEMETRY", "false")
-        os.environ.setdefault("BROWSER_USE_LOGGING_LEVEL", "warning")
         from .connections import apply
 
         return apply(self)  # Keys saved in Setup > Connections win over .env.

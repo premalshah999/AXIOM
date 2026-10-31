@@ -2289,9 +2289,8 @@ class BrowserEngine:
         )
 
     def use_adapters(self, ats):
-        """ENGINE=adapters: deterministic drivers for multi-page portals; single-page ATSs keep the
-        guided flow that works live. ENGINE=guided: the guided flow everywhere."""
-        if self.job["demo"] or self.config.engine != "adapters":
+        """Deterministic drivers for multi-page portals; single-page ATSs keep the guided flow that works live."""
+        if self.job["demo"]:
             return False
         return ats not in AGENT_FIRST
 
