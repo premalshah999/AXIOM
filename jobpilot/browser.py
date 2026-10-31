@@ -679,8 +679,10 @@ def unoffered_source_result(question):
 
 
 REQUIRES_CITIZENSHIP = re.compile(
-    r"requires? (?:u\.?s\.?|united states) citizenship|must be (?:a )?(?:u\.?s\.?|united states) citizen|"
-    r"(?:u\.?s\.?|united states) citizenship (?:is )?(?:required|mandatory)",
+    r"requires? (?:current )?(?:u\.?\s?s\.?|united states) citizenship|must be (?:a )?(?:u\.?\s?s\.?|united states) citizen|"
+    r"(?:u\.?\s?s\.?|united states) citizenship (?:is )?(?:required|mandatory)|"
+    r"requires? you to be (?:a )?(?:u\.?\s?s\.?|united states) citizen|"
+    r"(?:limit|restrict)(?:s|ed)? (?:this \w+ )?to (?:individuals who are )?(?:u\.?\s?s\.?|united states) citizens",
     re.I,
 )
 
@@ -3837,7 +3839,7 @@ class BrowserEngine:
         """The final-submit path. Every refusal before the commit leaves a `finish_refused`
         event (state, reason, candidate submit controls, open dialogs), so a run that reached
         the review page but never submitted can be explained from the database."""
-        if not self.armed and (ineligible := self.citizenship_required_result()):
+        if not self.armed and (ineligible := self.citizenship_required_result() or self.status_gate_result()):
             return ineligible
         result = await self._finish(reserved=reserved, validation_attempt=validation_attempt)
         if result and not self.armed:
@@ -3857,6 +3859,26 @@ class BrowserEngine:
                 return {
                     "state": "closed",
                     "reason": "The posting requires US citizenship; the applicant is not a US citizen",
+                }
+        return None
+
+    def status_gate_result(self):
+        """The form's own wording closes the role to the applicant's recorded status, whatever was answered: Atlassian's
+        "not open to candidates whose work authorization is based on F-1 student status" was answered truthfully and
+        submitted anyway (2026-10). Every page's questions count, not only the one on show."""
+        form = getattr(self, "form", None)
+        profile = getattr(getattr(form, "resolver", None), "profile", None)
+        if not getattr(profile, "facts", None):
+            return None
+        from .eligibility import closed_by_statement
+
+        records = [*getattr(form, "fields", {}).values(), *getattr(form, "ledger", {}).values()]
+        for text in dict.fromkeys(" ".join(str(r.get(k) or "") for k in ("label", "hint")).strip() for r in records):
+            if finding := closed_by_statement(text, profile):
+                return {
+                    "state": "closed",
+                    "reason": f'The employer closes this role to the applicant\'s status: "{finding.quote[:240]}"',
+                    "blocker_type": "ineligible",
                 }
         return None
 

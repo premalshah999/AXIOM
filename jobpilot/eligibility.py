@@ -19,10 +19,10 @@ from .db import Run
 
 
 STATUS_KEYS = {"visa_status", "current_immigration_status_us", "current_visa_status_us"}
-VISA = re.compile(r"\bf[ -]?1\b|\b(?:stem[ -]?)?opt\b|\bcpt\b|\bh[ -]?1b\b", re.I)
+VISA = re.compile(r"\bf[ -]?1\b|\bj[ -]?1\b|\b(?:stem[ -]?)?opt\b|\bcpt\b|\bh[ -]?1b\b", re.I)
 INELIGIBLE = re.compile(
-    r"\b(?:not eligible|ineligible|not accepted|not permitted|excluded)\b|"
-    r"\b(?:cannot|will not|do not|does not)\s+(?:hire|consider|accept)\b",
+    r"\b(?:not eligible|ineligible|not accepted|not permitted|excluded|not open to|not available to|not accepting)\b|"
+    r"\b(?:cannot|will not|do not|does not|unable to|not able to)\s+(?:hire|consider|accept)\b",
     re.I,
 )
 SPONSOR_EXCLUSION = re.compile(
@@ -45,7 +45,15 @@ CITIZENSHIP_REQUIRED = re.compile(
     rf"\bcitizenship\s+(?:is\s+|are\s+)?(?:required|mandatory)\b|"
     rf"\b(?:must|need to|have to|should)\s+(?:be|hold|have)\s+(?:an?\s+|the\s+)?(?:current\s+|valid\s+)?{US}\s+citizen(?:ship)?\b|"
     rf"\bonly\s+{US}\s+citizens\b|\b{US}\s+citizens?\s+(?:only|required)\b|"
-    rf"\brequires?\s+{US}\s+citizenship\b",
+    rf"\brequires?\s+(?:current\s+)?{US}\s+citizenship\b|\brequires?\s+you\s+to\s+be\s+(?:an?\s+)?{US}\s+citizen\b|"
+    rf"\b(?:limit|restrict)(?:s|ed)?\s+(?:this\s+\w+\s+)?to\s+(?:individuals\s+who\s+are\s+)?{US}\s+citizens\b|"
+    rf"\b(?:open|available)\s+(?:only\s+)?to\s+(?:only\s+)?{US}\s+citizens\b",
+    re.I,
+)
+# A role closed to non-citizens in so many words; its "not" is the restriction, not a negation of it.
+NON_CITIZENS_BARRED = re.compile(
+    r"\bnot\s+(?:open|available)\s+to\s+(?:non-?\s?(?:u\.?\s?s\.?\s+)?citizens|foreign\s+nationals)\b|"
+    r"\bnon-?\s?citizens\s+(?:are|will)\s+not\s+(?:be\s+)?(?:eligible|considered|accepted)\b",
     re.I,
 )
 # A negation stays inside its clause: "Clearance ... not required on day one; U.S. Citizenship required." is a requirement.
@@ -57,7 +65,11 @@ CITIZEN_OR_RESIDENT = re.compile(
     r"\b(?:permanent\s+resident|green\s*card)s?\b",
     re.I,
 )
-CITIZEN_OR_AUTHORIZED = re.compile(r"\b(?:authori[sz]ed|eligible)\s+to\s+work|work\s+(?:authori[sz]ation|permit)|\bvisa\b|\bsponsor", re.I)
+CITIZEN_OR_AUTHORIZED = re.compile(
+    r"\b(?:authori[sz]ed|eligible)\s+to\s+work|work\s+(?:authori[sz]ation|permit)|\bvisa\b|\bsponsor|\bright\s+to\s+work\b|\baliens?\b|"
+    r"\bauthori[sz]ations?\b",
+    re.I,
+)
 # "must be able to obtain and maintain a Secret level DoD security clearance", "Must obtain and maintain a U.S.
 # Government Security Clearance", "active TS/SCI clearance required".
 CLEARANCE_WORD = re.compile(
@@ -228,20 +240,39 @@ def policy_findings(text, profile, source="posting"):
                 sponsor_ids,
                 source,
             )
-        if CITIZENSHIP_REQUIRED.search(quote) and not CITIZENSHIP_NEGATED.search(quote):
+        if NON_CITIZENS_BARRED.search(quote) or (
+            CITIZENSHIP_REQUIRED.search(quote) and not CITIZENSHIP_NEGATED.search(quote)
+        ):
             yield citizenship_finding(quote, profile.facts, source)
         if CLEARANCE_WORD.search(quote) and CLEARANCE_CUE.search(quote) and not CLEARANCE_OPTIONAL.search(quote):
             yield clearance_finding(quote, profile.facts, source)
         visas = _visa_tokens(quote)
         if visas and barred:
-            # Explicit visa exclusions stand independently of the sponsorship answer.
+            # Explicit visa exclusions stand independently of the sponsorship answer. OPT and CPT are F-1 status, so
+            # "not open to ... F-1 student status" names an applicant on OPT (Atlassian, 2026-10).
+            held = (status | ({"f1"} if status & {"opt", "cpt"} else set())) if status is not None else None
             yield PolicyFinding(
                 "visa_status",
-                "unknown" if status is None or exception else "unmet" if status & visas else "met",
+                "unknown" if held is None or exception else "unmet" if held & visas else "met",
                 quote,
                 status_ids,
                 source,
             )
+
+
+# "Many positions require U.S. citizenship" describes the employer, not this role.
+NOT_THIS_ROLE = re.compile(r"\b(?:many|some|most|certain|several|majority|may|might|could|if|typically|for which)\b", re.I)
+
+
+def closed_by_statement(text, profile):
+    """The finding when a form's own wording closes the role to this applicant: "This role is not open to candidates whose
+    work authorization is based on F-1 student status". Only visa and citizenship statements: a truthful "No" to a
+    clearance question is the employer's to weigh. Answering truthfully and submitting anyway applied to roles that had
+    said no (Atlassian, Guidehouse, York, 2026-10)."""
+    for finding in policy_findings(text or "", profile, "form"):
+        if finding.subject in {"visa_status", "citizenship"} and finding.verdict == "unmet" and not NOT_THIS_ROLE.search(finding.quote):
+            return finding
+    return None
 
 
 def degree_findings(job, profile, source="posting"):
