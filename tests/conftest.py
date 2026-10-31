@@ -21,8 +21,8 @@ from jobpilot.service import Service
 
 @pytest.fixture(autouse=True)
 def isolated_settings_environment(monkeypatch):
-    # browser-use can load the checkout's dotenv into os.environ on import.
-    # Fixture configurations must never inherit production identities or keys.
+    # A developer's shell or the checkout's dotenv can put production identities and keys in os.environ.
+    # Fixture configurations must never inherit them.
     names = set()
     for name, field in Settings.model_fields.items():
         names.add(name.casefold())

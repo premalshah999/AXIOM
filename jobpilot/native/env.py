@@ -137,8 +137,6 @@ class Native:
             CHROMIUM_PATH=self.get("CHROMIUM_PATH") or system_chrome(),
             PYTHONUNBUFFERED="1",
             PYTHONUTF8="1",
-            ANONYMIZED_TELEMETRY="false",
-            BROWSER_USE_LOGGING_LEVEL="warning",
             # The container's clock zone is UTC, and date.today() and PostgreSQL's now()::text rely on it; TIMEZONE in
             # `.env` remains what decides the daily limits and the dates written on forms. The Mac's own zone here would
             # shift every naive "today" for part of each day.
