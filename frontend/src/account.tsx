@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useRef, useState } from "react";
-import { Check as Tick, Copy, Download } from "lucide-react";
+import { Check as Tick, Copy, Download, Eye, EyeOff, KeyRound } from "lucide-react";
 import { api, ApiError, signedOut } from "./api";
 import { useAction, useNotify } from "./hooks";
 import { guideLater } from "./guide";
@@ -7,11 +7,13 @@ import type { Profile } from "./types";
 import { day } from "./format";
 import { Wordmark } from "./shell/Brand";
 import { Facts, FormGrid } from "./setup-kit";
-import { Button, Check, ConfirmButton, ErrorLine, Field, Loading, Panel, Pill, Segmented } from "./ui/index";
+import { Button, Check, ConfirmButton, ErrorLine, Field, IconButton, Loading, Panel, Pill, Segmented } from "./ui/index";
+import "./styles/auth.css";
 
 // ---------------------------------------------------------------------------
 // The owner's account (server: owner_account.py, api/routes/owner.py): sign-up with recovery codes, sign-in,
 // forgot password (recovery code, access token or the host command), and Settings › System › Your sign-in.
+// On a Mac that opens AXIOM in its own window none of the first three show unless a lock was set; they still have to look finished.
 // ---------------------------------------------------------------------------
 
 export type AccountStatus = {
@@ -34,8 +36,8 @@ const RULES: { label: string; test: (p: string) => boolean }[] = [
   { label: "Upper and lower case letters", test: (p) => p.toLowerCase() !== p && p.toUpperCase() !== p },
   { label: "At least one number", test: (p) => /\d/.test(p) },
 ];
-const TOKEN_COMMAND = "docker compose exec app jobpilot token";
-const RESET_COMMAND = "docker compose exec app jobpilot reset-password";
+const TOKEN_COMMAND = "jobpilot token";
+const RESET_COMMAND = "jobpilot reset-password";
 
 type Errors = Partial<Record<string, string>>;
 type NewPasswordValue = { password: string; confirm: string };
@@ -116,9 +118,64 @@ function FormError({ message }: { message: string }) {
   ) : null;
 }
 
+/** A password field with its own Show and Hide, inside the field: one control, not a checkbox under the form. */
+function PasswordInput({
+  label,
+  value,
+  onChange,
+  error,
+  hint,
+  autoComplete,
+  autoFocus,
+  describedBy,
+  shown,
+  onShown,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  error?: string;
+  hint?: React.ReactNode;
+  autoComplete: string;
+  autoFocus?: boolean;
+  describedBy?: string;
+  /** Owned by the caller when two fields share one toggle (a password and its confirmation). */
+  shown?: boolean;
+  onShown?: (shown: boolean) => void;
+}) {
+  const [own, setOwn] = useState(false);
+  const show = shown ?? own;
+  const toggle = onShown ?? setOwn;
+  return (
+    <Field label={label} error={error} hint={hint}>
+      <span className="ax-gate-pw">
+        <input
+          type={show ? "text" : "password"}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          autoComplete={autoComplete}
+          autoFocus={autoFocus}
+          maxLength={200}
+          spellCheck={false}
+          aria-invalid={!!error}
+          aria-describedby={describedBy}
+        />
+        {onShown !== undefined || shown === undefined ? (
+          <IconButton
+            label={show ? "Hide password" : "Show password"}
+            icon={show ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
+            aria-pressed={show}
+            onClick={() => toggle(!show)}
+          />
+        ) : null}
+      </span>
+    </Field>
+  );
+}
+
 function PasswordRules({ password, id }: { password: string; id: string }) {
   return (
-    <ul className="ax-rules-list" id={id}>
+    <ul className="ax-gate-rules" id={id}>
       {RULES.map((rule) => {
         const met = rule.test(password);
         return (
@@ -149,36 +206,32 @@ function NewPassword({
   const rules = useId();
   return (
     <>
-      <Field label={label} error={errors.password}>
-        <input
-          type={show ? "text" : "password"}
-          value={value.password}
-          onChange={(e) => onChange({ ...value, password: e.target.value })}
-          autoComplete="new-password"
-          maxLength={200}
-          aria-invalid={!!errors.password}
-          aria-describedby={rules}
-        />
-      </Field>
+      <PasswordInput
+        label={label}
+        value={value.password}
+        onChange={(password) => onChange({ ...value, password })}
+        error={errors.password}
+        autoComplete="new-password"
+        describedBy={rules}
+        shown={show}
+        onShown={setShow}
+      />
       <PasswordRules password={value.password} id={rules} />
-      <Field label="Confirm password" error={errors.confirm}>
-        <input
-          type={show ? "text" : "password"}
-          value={value.confirm}
-          onChange={(e) => onChange({ ...value, confirm: e.target.value })}
-          autoComplete="new-password"
-          maxLength={200}
-          aria-invalid={!!errors.confirm}
-        />
-      </Field>
-      <Check checked={show} onChange={setShow} label="Show passwords" />
+      <PasswordInput
+        label="Confirm password"
+        value={value.confirm}
+        onChange={(confirm) => onChange({ ...value, confirm })}
+        error={errors.confirm}
+        autoComplete="new-password"
+        shown={show}
+      />
     </>
   );
 }
 
 function KeepSignedIn({ value, onChange }: { value: boolean; onChange: (value: boolean) => void }) {
   return (
-    <Check checked={value} onChange={onChange} label="Keep me signed in on this browser" note="For 30 days without use. Otherwise 24 hours." />
+    <Check checked={value} onChange={onChange} label="Keep me signed in" note="For 30 days without use. Otherwise 24 hours." />
   );
 }
 
@@ -198,7 +251,7 @@ function RecoveryCodes({
     "AXIOM recovery codes\nEach code resets the dashboard password once.\n\n" + codes.join("\n") + "\n";
   return (
     <div className="ax-stack">
-      <ol className="ax-codes" aria-label="Recovery codes">
+      <ol className="ax-gate-codes" aria-label="Recovery codes">
         {codes.map((code) => (
           <li key={code}>{code}</li>
         ))}
@@ -206,7 +259,7 @@ function RecoveryCodes({
       <div className="ax-actions is-start">
         <Button
           size="sm"
-          icon={<Copy size={14} aria-hidden="true" />}
+          icon={copy === "copied" ? <Tick size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
           onClick={async () => {
             try {
               await navigator.clipboard.writeText(text);
@@ -216,7 +269,7 @@ function RecoveryCodes({
             }
           }}
         >
-          {copy === "copied" ? "Copied" : "Copy"}
+          {copy === "copied" ? "Copied" : "Copy all"}
         </Button>
         <Button
           size="sm"
@@ -233,11 +286,11 @@ function RecoveryCodes({
           Download .txt
         </Button>
         <span className="ax-hint" role="status">
-          {copy === "unavailable" ? "This browser blocked copying. Download them or write them down." : ""}
+          {copy === "unavailable" ? "Copying was blocked. Download them or write them down." : ""}
         </span>
       </div>
       <Check checked={saved} onChange={setSaved} label="I saved these codes somewhere safe" />
-      <Button variant="primary" disabled={!saved} onClick={onDone}>
+      <Button variant="primary" block disabled={!saved} onClick={onDone}>
         {doneLabel}
       </Button>
     </div>
@@ -250,11 +303,17 @@ function RecoveryCodes({
 
 type Mode = "signup" | "password" | "token" | "forgot";
 
+/**
+ * One card for every screen outside the app: the wordmark above it, a title and one line, the form, and under the card the
+ * quiet links to the other ways in (`foot`).
+ */
 function AuthCard({
   title,
   lead,
   notice,
   children,
+  foot,
+  icon,
   onSubmit,
   formRef,
 }: {
@@ -262,16 +321,18 @@ function AuthCard({
   lead?: React.ReactNode;
   notice?: string;
   children: React.ReactNode;
+  foot?: React.ReactNode;
+  icon?: React.ReactNode;
   onSubmit?: (e: React.FormEvent<HTMLFormElement>) => void;
   formRef?: React.Ref<HTMLFormElement>;
 }) {
   const body = (
     <>
-      <div className="ax-brand">
-        <Wordmark width={120} />
-      </div>
-      <h1>{title}</h1>
-      {lead && <p className="ax-hint">{lead}</p>}
+      <header>
+        {icon && <span className="ax-gate-icon">{icon}</span>}
+        <h1>{title}</h1>
+        {lead && <p>{lead}</p>}
+      </header>
       {notice && (
         <div className="ax-notice is-warn" role="status">
           <span>{notice}</span>
@@ -281,14 +342,20 @@ function AuthCard({
     </>
   );
   return (
-    <main className="ax-auth">
-      {onSubmit ? (
-        <form className="ax-auth-card" onSubmit={onSubmit} noValidate ref={formRef}>
-          {body}
-        </form>
-      ) : (
-        <div className="ax-auth-card">{body}</div>
-      )}
+    <main className="ax-gate">
+      <div className="ax-gate-in">
+        <div className="ax-brand">
+          <Wordmark width={120} />
+        </div>
+        {onSubmit ? (
+          <form className="ax-gate-card" onSubmit={onSubmit} noValidate ref={formRef}>
+            {body}
+          </form>
+        ) : (
+          <div className="ax-gate-card">{body}</div>
+        )}
+        {foot && <p className="ax-gate-foot">{foot}</p>}
+      </div>
     </main>
   );
 }
@@ -314,14 +381,18 @@ export function AuthScreen({ onSignedIn, notice = "" }: { onSignedIn: () => Prom
 
   if (!status)
     return (
-      <main className="ax-auth">
-        <Loading label="Opening AXIOM…" />
+      <main className="ax-gate">
+        <div className="ax-gate-in">
+          <Wordmark width={108} />
+          <Loading label="Opening AXIOM…" />
+        </div>
       </main>
     );
 
   if (codes)
     return (
       <AuthCard
+        icon={<KeyRound size={18} aria-hidden="true" />}
         title="Save your recovery codes"
         lead="If you forget your password, one of these codes lets you choose a new one. Each code works once, and this is the only time they're shown."
       >
@@ -335,7 +406,7 @@ export function AuthScreen({ onSignedIn, notice = "" }: { onSignedIn: () => Prom
         title="Password changed"
         lead={
           <>
-            You're signed in{reset.email ? <> as {reset.email}</> : null}. Every other browser was signed out.
+            You're signed in{reset.email ? <> as {reset.email}</> : null}. Every other device was signed out.
           </>
         }
       >
@@ -419,6 +490,11 @@ function SignUp({
       lead="AXIOM applies to jobs for you, answering every form from facts you confirm once. This is the only account on this installation."
       notice={notice}
       formRef={ref}
+      foot={
+        <button type="button" className="ax-link" onClick={toToken}>
+          Use the access token instead
+        </button>
+      }
       onSubmit={async (e) => {
         e.preventDefault();
         setTried(true);
@@ -457,14 +533,9 @@ function SignUp({
       <NewPassword value={secret} onChange={setSecret} errors={errors} />
       <KeepSignedIn value={form.keep} onChange={(keep) => setForm({ ...form, keep })} />
       <FormError message={submit.error} />
-      <Button type="submit" variant="primary" block disabled={submit.busy || submit.wait > 0}>
+      <Button type="submit" variant="primary" block loading={submit.busy} disabled={submit.wait > 0}>
         {submit.busy ? "Creating your account…" : "Create account"}
       </Button>
-      <p className="ax-auth-help">
-        <button type="button" className="ax-link" onClick={toToken}>
-          Use the access token instead
-        </button>
-      </p>
     </AuthCard>
   );
 }
@@ -498,9 +569,14 @@ function PasswordSignIn({
   return (
     <AuthCard
       title="Sign in"
-      lead="Welcome back."
+      lead="Welcome back to AXIOM."
       notice={submit.error ? "" : notice}
       formRef={ref}
+      foot={
+        <button type="button" className="ax-link" onClick={toToken}>
+          Use the access token instead
+        </button>
+      }
       onSubmit={async (e) => {
         e.preventDefault();
         setTried(true);
@@ -525,30 +601,17 @@ function PasswordSignIn({
           aria-invalid={!!errors.email}
         />
       </Field>
-      <Field label="Password" error={errors.password}>
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          autoComplete="current-password"
-          aria-invalid={!!errors.password}
-        />
-      </Field>
-      <p className="ax-auth-help">
+      <div className="ax-gate-pwrow">
+        <PasswordInput label="Password" value={password} onChange={setPassword} error={errors.password} autoComplete="current-password" />
         <button type="button" className="ax-link" onClick={forgot}>
           Forgot password?
         </button>
-      </p>
+      </div>
       <KeepSignedIn value={keep} onChange={setKeep} />
       <FormError message={submit.error} />
-      <Button type="submit" variant="primary" block disabled={submit.busy || submit.wait > 0}>
+      <Button type="submit" variant="primary" block loading={submit.busy} disabled={submit.wait > 0}>
         {submit.wait ? `Try again in ${submit.wait}s` : submit.busy ? "Signing in…" : "Sign in"}
       </Button>
-      <p className="ax-auth-help">
-        <button type="button" className="ax-link" onClick={toToken}>
-          Use the access token instead
-        </button>
-      </p>
     </AuthCard>
   );
 }
@@ -587,6 +650,18 @@ function TokenSignIn({
       lead={lead}
       notice={submit.error ? "" : notice}
       formRef={ref}
+      foot={
+        status.exists ? (
+          <>
+            <button type="button" className="ax-link" onClick={toPassword}>
+              Sign in with email and password
+            </button>
+            <button type="button" className="ax-link" onClick={forgot}>
+              Forgot password?
+            </button>
+          </>
+        ) : undefined
+      }
       onSubmit={async (e) => {
         e.preventDefault();
         setTried(true);
@@ -601,41 +676,24 @@ function TokenSignIn({
         }
       }}
     >
-      <Field
+      <PasswordInput
         label="Access token"
+        value={token}
+        onChange={setToken}
         error={error}
         hint={
           <>
-            Print it on the computer running AXIOM: <code>{TOKEN_COMMAND}</code>
+            Print it on the computer running AXIOM with <code>{TOKEN_COMMAND}</code>
           </>
         }
-      >
-        <input
-          type="password"
-          autoFocus
-          value={token}
-          onChange={(e) => setToken(e.target.value)}
-          autoComplete="current-password"
-          spellCheck={false}
-          aria-invalid={!!error}
-        />
-      </Field>
+        autoComplete="off"
+        autoFocus
+      />
       <KeepSignedIn value={keep} onChange={setKeep} />
       <FormError message={submit.error} />
-      <Button type="submit" variant="primary" block disabled={submit.busy || submit.wait > 0}>
+      <Button type="submit" variant="primary" block loading={submit.busy} disabled={submit.wait > 0}>
         {submit.wait ? `Try again in ${submit.wait}s` : submit.busy ? "Signing in…" : "Sign in"}
       </Button>
-      {status.exists && (
-        <p className="ax-auth-help">
-          <button type="button" className="ax-link" onClick={toPassword}>
-            Sign in with email and password
-          </button>
-          {" · "}
-          <button type="button" className="ax-link" onClick={forgot}>
-            Forgot password?
-          </button>
-        </p>
-      )}
     </AuthCard>
   );
 }
@@ -680,6 +738,11 @@ function Forgot({
       title="Reset your password"
       lead="This installation can't send email, so prove it's yours first, then choose a new password."
       formRef={ref}
+      foot={
+        <button type="button" className="ax-link" onClick={back}>
+          Back to sign in
+        </button>
+      }
       onSubmit={async (e) => {
         e.preventDefault();
         if (method === "cli") return;
@@ -706,9 +769,10 @@ function Forgot({
       {method === "cli" ? (
         <>
           <p className="ax-hint">
-            On the computer running AXIOM, run <code>{RESET_COMMAND}</code> (or <code>jobpilot reset-password</code>{" "}
-            without Docker). It asks for the new password without showing it, then signs every browser out.
+            On the computer running AXIOM, run this in a terminal. It asks for the new password without showing it, then
+            signs every device out.
           </p>
+          <pre className="ax-gate-cmd">{RESET_COMMAND}</pre>
           <Button variant="primary" block onClick={back}>
             Back to sign in
           </Button>
@@ -729,37 +793,26 @@ function Forgot({
               />
             </Field>
           ) : (
-            <Field
+            <PasswordInput
               label="Access token"
+              value={proof}
+              onChange={setProof}
               error={errors.proof}
               hint={
                 <>
-                  Print it on the computer running AXIOM: <code>{TOKEN_COMMAND}</code>
+                  Print it on the computer running AXIOM with <code>{TOKEN_COMMAND}</code>
                 </>
               }
-            >
-              <input
-                type="password"
-                autoFocus
-                value={proof}
-                onChange={(e) => setProof(e.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-                aria-invalid={!!errors.proof}
-              />
-            </Field>
+              autoComplete="off"
+              autoFocus
+            />
           )}
           <NewPassword value={secret} onChange={setSecret} errors={errors} label="New password" />
           <KeepSignedIn value={keep} onChange={setKeep} />
           <FormError message={submit.error} />
-          <Button type="submit" variant="primary" block disabled={submit.busy || submit.wait > 0}>
+          <Button type="submit" variant="primary" block loading={submit.busy} disabled={submit.wait > 0}>
             {submit.wait ? `Try again in ${submit.wait}s` : submit.busy ? "Saving…" : "Set new password"}
           </Button>
-          <p className="ax-auth-help">
-            <button type="button" className="ax-link" onClick={back}>
-              Back to sign in
-            </button>
-          </p>
         </>
       )}
     </AuthCard>
@@ -828,12 +881,12 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
         items={[
           ["Email", status.email || "—"],
           ["Name", status.name || "—"],
-          ["This browser", browserSession(status)],
+          ["This device", browserSession(status)],
         ]}
       />
       <SettingRow
         title="Password"
-        note={`${status.password_changed_at ? `Set ${day(status.password_changed_at)}. ` : ""}Changing it signs out every other browser.`}
+        note={`${status.password_changed_at ? `Set ${day(status.password_changed_at)}. ` : ""}Changing it signs out every other device.`}
       >
         {open !== "password" && <Button onClick={() => setOpen("password")}>Change password</Button>}
       </SettingRow>
@@ -867,7 +920,7 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
           replacing={!!codes}
         />
       )}
-      <SettingRow title="Sign out of this browser" note="Applications keep running on the server.">
+      <SettingRow title="Sign out" note="Applications keep running.">
         <Button
           disabled={pending !== null}
           onClick={() =>
@@ -880,16 +933,16 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
           Sign out
         </Button>
       </SettingRow>
-      <SettingRow title="Sign out everywhere" note="Every browser, this one included, must sign in again. The access token keeps working.">
+      <SettingRow title="Sign out everywhere" note="Every device, this one included, must sign in again. The access token keeps working.">
         <ConfirmButton
           label="Sign out everywhere"
-          confirm="Sign out every browser"
+          confirm="Sign out every device"
           variant="secondary"
           pending={pending === "everywhere"}
           onConfirm={() =>
             run("everywhere", async () => {
               await api("/account/sessions", "DELETE");
-              signedOut("You signed out of every browser.");
+              signedOut("You signed out everywhere.");
             })
           }
         />
@@ -927,7 +980,7 @@ function ChangePassword({ close, done }: { close: () => void; done: () => void }
           return true;
         });
         if (ok) {
-          notify("ok", "Password changed. Other browsers were signed out.");
+          notify("ok", "Password changed. Other devices were signed out.");
           done();
         }
       }}
@@ -1062,7 +1115,7 @@ function AddSignIn({ onAdded }: { onAdded: () => void }) {
         if (created) setCodes(created.recovery_codes);
       }}
     >
-      <p className="ax-hint">This installation opens only with the access token. Add an email and password to sign in with them.</p>
+      <p className="ax-hint">Anyone who can open AXIOM on this computer can use it. Add an email and password to require signing in.</p>
       <FormGrid>
         <Field label="Full name" error={errors.name}>
           <input
