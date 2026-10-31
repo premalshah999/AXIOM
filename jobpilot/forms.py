@@ -120,6 +120,33 @@ def name_phone_numbers(fields):
         previous = field
 
 
+CONSENT_OPTION = re.compile(r"^(?:yes|no)\s*[-–:]\s*(?:i\s+)?(?:do not\s+)?(?:consent|agree|authori[sz]e|opt)\b", re.I)
+
+
+def name_borrowed_consent(fields):
+    """A Yes/No consent group that took the label of the text box beside it is named by its own Yes choice.
+
+    Socure's Ashby phone field holds a "Yes - I consent to receiving WhatsApp messages" radio group under the label
+    "Phone Number": the group read as a second, unfilled phone field and the owner was asked for a phone number the
+    profile already had (2026-10-29). Two controls of different kinds never share one question."""
+    fields = list(fields)
+    text_labels = {
+        str(f.get("label", "")).strip().casefold()
+        for f in fields
+        if f.get("type") in {"text", "tel", "email", "number", "textarea"}
+    }
+    for field in fields:
+        options = [str(o) for o in field.get("options") or []]
+        if (
+            field.get("type") in {"radio", "radiogroup"}
+            and options
+            and all(CONSENT_OPTION.match(o.strip()) for o in options)
+            and str(field.get("label", "")).strip().casefold() in text_labels
+        ):
+            yes = next((o for o in options if o.strip().lower().startswith("yes")), options[0])
+            field["label"] = re.sub(r"^(?:yes|no)\s*[-–:]\s*", "", yes.strip(), flags=re.I).strip()
+
+
 SELF_ID_FORM = re.compile(r"self-identification|\bCC-305\b|\bVEVRAA\b", re.I)
 # A page the applicant signs by typing: its one bare "Date" is the signature's date (Hyundai's SuccessFactors "Typed
 # Signature" then "Date", 2026-10-27: today's date was refused as unsupported and the run stalled).
@@ -1874,6 +1901,7 @@ class FormSession:
         mark_history_rows(self.fields.values())
         apply_row_hints(self.fields.values(), self.row_hints, getattr(getattr(self, "resolver", None), "profile", None))
         name_phone_numbers(list(self.fields.values()))
+        name_borrowed_consent(self.fields.values())
         link_companion_text(self.fields.values())
         label_signature_date(list(self.fields.values()), "\n".join(texts))
         label_status_dates(self.fields.values())
