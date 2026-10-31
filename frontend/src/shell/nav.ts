@@ -85,10 +85,13 @@ export const PAGE_TABS: Partial<Record<View, TabItem[]>> = {
   ],
   settings: [
     { id: "connections", label: "Connections" },
-    { id: "accounts", label: "Accounts" },
-    { id: "email", label: "Email" },
-    { id: "discovery", label: "Discovery" },
-    { id: "system", label: "System" },
+    { id: "email", label: "Mailbox" },
+    { id: "discovery", label: "Job search" },
+    { id: "applying", label: "Applying" },
+    { id: "accounts", label: "Employer accounts" },
+    { id: "account", label: "Your account" },
+    { id: "database", label: "Database" },
+    { id: "system", label: "Advanced" },
   ],
 };
 

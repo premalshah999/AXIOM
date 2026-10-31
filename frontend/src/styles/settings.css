@@ -1,0 +1,453 @@
+/* Settings: the section list, service cards and the few pieces only Settings has. Tokens only (DESIGN.md, section 7). */
+
+/* ---------- Layout: a list of sections beside the one that is open ---------- */
+.st-layout {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  gap: var(--space-8) var(--space-12);
+  align-items: start;
+  padding-bottom: var(--space-12);
+}
+.st-nav {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.st-nav a {
+  display: flex;
+  align-items: center;
+  min-height: var(--control);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--ink-2);
+  text-decoration: none;
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+.st-nav a:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.st-nav a[aria-current="page"] {
+  background: var(--active);
+  color: var(--ink);
+  font-weight: 500;
+}
+.st-nav hr {
+  height: 1px;
+  margin: var(--space-2) var(--space-3);
+  border: 0;
+  background: var(--line);
+}
+@media (max-width: 899px) {
+  .st-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-5);
+  }
+  /* A phone's list of sections is one row that scrolls sideways and stays in view. */
+  .st-nav {
+    z-index: 3;
+    flex-direction: row;
+    gap: var(--space-1);
+    margin-inline: calc(-1 * var(--gutter));
+    padding: var(--space-2) var(--gutter);
+    overflow-x: auto;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+    scrollbar-width: none;
+  }
+  .st-nav::-webkit-scrollbar {
+    display: none;
+  }
+  .st-nav a {
+    flex: none;
+    white-space: nowrap;
+  }
+  .st-nav hr {
+    display: none;
+  }
+}
+
+/* ---------- Sections ---------- */
+.st-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+.st-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.st-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+}
+.st-head > div:first-child {
+  display: flex;
+  flex: 1 1 320px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.st-head p {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.st-head-end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ---------- Service cards ---------- */
+.st-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 292px), 1fr));
+  gap: var(--space-3);
+}
+.st-card {
+  --surface: var(--raised);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  box-shadow: var(--shadow-panel);
+  transition: border-color var(--dur) var(--ease);
+}
+.st-card.is-current {
+  border-color: var(--ink-2);
+  box-shadow: 0 0 0 1px var(--ink-2);
+}
+.st-card.is-wide {
+  grid-column: 1 / -1;
+}
+.st-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+.st-card-head {
+  flex-wrap: wrap;
+}
+.st-card-title {
+  display: flex;
+  flex: 1 1 148px;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.st-card-title h3 {
+  overflow-wrap: anywhere;
+}
+.st-card-title p {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  line-height: 1.4;
+}
+.st-card-state {
+  display: flex;
+  align-items: center;
+  flex: none;
+  min-height: 32px;
+  margin-left: auto;
+  font-size: var(--text-meta);
+}
+.st-card-state .ax-pill {
+  font-size: var(--text-meta);
+}
+.st-card-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: auto;
+}
+.st-ico {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--inset);
+  color: var(--ink-2);
+}
+
+/* A saved key: masked by the server, so the page never holds the real one. */
+.st-key {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--inset);
+  font-family: var(--font-data);
+  font-size: var(--text-data);
+}
+.st-key.is-empty {
+  color: var(--ink-3);
+  font-family: var(--font-text);
+  font-size: var(--text-meta);
+}
+.st-key > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.st-key > small {
+  margin-left: auto;
+  color: var(--ink-3);
+  font-family: var(--font-text);
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+.st-result {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.st-result.is-bad {
+  color: var(--bad);
+}
+.st-more > summary {
+  font-size: var(--text-meta);
+}
+.st-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 232px), 1fr));
+  gap: var(--space-4);
+}
+.st-more .st-fields {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* A line that says what is true right now: an inset well with a lamp. */
+.st-state {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--inset);
+  font-size: var(--text-body);
+}
+.st-state > i {
+  margin-top: 5px;
+}
+.st-state > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.st-state span {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Rows inside a panel: a name and what it does on the left, its control on the right ---------- */
+.st-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.st-rows > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  min-height: 56px;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--line-soft);
+}
+.st-rows > li:last-child {
+  border-bottom: 0;
+}
+.st-rows .st-who {
+  display: flex;
+  align-items: center;
+  flex: 1 1 260px;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.st-rows .st-who > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.st-rows small {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  overflow-wrap: anywhere;
+}
+.st-rows-end {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+/* A form opened under its row. */
+.st-rows > li.is-open {
+  display: block;
+  background: var(--inset);
+}
+.st-inline {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--inset);
+}
+.st-inline .ax-inline {
+  padding: 0;
+  border: 0;
+}
+
+/* A panel with a form in it: the fields, then the one thing to do. */
+.st-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.st-form .ax-actions {
+  margin-top: 0;
+}
+
+/* Tools above a table. */
+.st-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+}
+.st-tools .ax-chips {
+  min-width: 0;
+}
+
+/* A table's two lines: who, then where. */
+.st-who2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.st-who2 > span:last-child {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.st-who2 strong,
+.st-who2 small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.st-who2 strong {
+  font-weight: 500;
+}
+.st-who2 small {
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+}
+
+/* Advanced: one fold on a surface of its own, never open by default. */
+.st-adv {
+  --surface: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+}
+.st-adv > summary {
+  align-items: baseline;
+  flex-wrap: wrap;
+  min-height: 48px;
+  padding: var(--space-3) var(--space-4);
+  color: var(--ink);
+}
+.st-adv > summary span {
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+}
+.st-adv[open] > summary {
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.st-adv > .st-adv-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-4);
+}
+.st-adv .st-adv-body h3 {
+  margin-bottom: var(--space-1);
+}
+
+/* The Database slot (database.tsx mounts here). */
+.st-slot {
+  min-height: 160px;
+}
+
+/* A setting whose choice is a row of words: on a phone the words go under the name, full width. */
+@media (max-width: 599px) {
+  .ax-switch-row.st-choice {
+    flex-wrap: wrap;
+  }
+  .st-choice .ax-seg {
+    display: flex;
+    width: 100%;
+  }
+  .st-choice .ax-seg button {
+    flex: 1;
+    padding: 0 var(--space-1);
+  }
+  .st-choice .ax-listbox {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+/* What a table column says, repeated under the first column once the table is too narrow to show the column. */
+.st-sub {
+  display: none;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@container ax-table (max-width: 599px) {
+  .st-sub {
+    display: block;
+  }
+}
+
+/* A row's action in Employer accounts stays in view down to a narrow table: what needs you is the point of the list. */
+@container ax-table (max-width: 599px) {
+  .ax-table .ax-lead.st-lead {
+    display: inline-flex;
+  }
+}
+@container ax-table (max-width: 479px) {
+  .ax-table .ax-lead.st-lead {
+    display: none;
+  }
+}

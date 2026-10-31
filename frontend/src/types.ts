@@ -556,6 +556,13 @@ export type Mailbox = {
   state: string;
   error: string;
   provider?: "gmail_imap" | "gmail_oauth" | "unknown";
+  checked_at?: string | null;
+  created_at?: string | null;
+  // When a request to the mailbox last worked and last failed, and whether AXIOM is still trying (agent8/fix-mail). The page
+  // reads them when they are there and falls back to `error` and `checked_at` when they are not.
+  last_ok_at?: string | null;
+  last_error_at?: string | null;
+  retrying?: boolean;
 };
 export type MailRule = {
   id: string;
