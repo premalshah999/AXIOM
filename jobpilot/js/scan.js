@@ -1036,11 +1036,21 @@
       }
     } else if (type === 'radio') {
       const radioOwner = el.form || el.getRootNode();
-      const key = (el.name || id(el)) + '|' + (el.form ? id(el.form) : 'document');
-      if (seen.has(key)) continue;
-      seen.add(key);
       const root = el.getRootNode();
       group = el.name ? [...root.querySelectorAll('input[type=radio]')].filter(x => x.name === el.name && (x.form || x.getRootNode()) === radioOwner) : [el];
+      // Gem's Yes/No questions (Nuvo 2026-10-31) give their radios no name and no fieldset: each radio was its own
+      // question "Yes" and the run clicked it forever. The first ancestor holding two or more nameless radios is the group.
+      if (!el.name) {
+        for (let box = el.parentElement, i = 0; box && i < 6; box = box.parentElement, i++) {
+          const peers = [...box.querySelectorAll('input[type=radio]')].filter(x => !x.name);
+          if (peers.length < 2) continue;
+          if (peers.length <= 12 && peers.every(x => !x.closest('fieldset,[role=radiogroup]'))) group = peers;
+          break;
+        }
+      }
+      const key = (el.name || id(group[0])) + '|' + (el.form ? id(el.form) : 'document');
+      if (seen.has(key)) continue;
+      seen.add(key);
       // Lever wraps radios in .application-question with an .application-label (no fieldset).
       const parent = el.closest('fieldset,[role=radiogroup],.application-question');
       question = parent ? (parent.querySelector('legend,.application-label,.ashby-application-form-question-title')?.innerText || label(parent)) : '';
@@ -1066,7 +1076,9 @@
       }
       // MAXIMUS's tax-credit survey (PepsiCo, 2026-10-24) prints "Are you a resident of the State of California?" as
       // plain text above an unlabelled Yes/No pair: the question read as "ctl00$MainContent$multipleChoice...".
-      if ((question === el.name || question === 'Unlabelled field') && !/^icims_f_/i.test(el.name || '')) {
+      if ((question === el.name || question === 'Unlabelled field'
+          || (group.length > 1 && !el.name && group.some(x => clean(label(x)) === clean(question))))
+          && !/^icims_f_/i.test(el.name || '')) {
         question = precedingText(group[0], new Set(group.map(x => clean(label(x))))) || question;
       }
       // iCIMS's self-identification forms (icims2 servlet) give radios no label: every choice and the question read as
