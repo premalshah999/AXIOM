@@ -209,7 +209,7 @@ def guard_keys(s) -> set:
 
     from ...db import Setting
 
-    return set(s.scalars(select(Setting.key).where(Setting.key.like("submission_guard:%"))))
+    return set(s.scalars(select(Setting.key).where(Setting.key.startswith("submission_guard:", autoescape=True))))
 
 
 def protected(s, url: str, guards: set | None = None) -> bool:

@@ -6,8 +6,13 @@
 #
 # Order: hold new dispatch -> confirm no application is active -> build -> recreate the app -> wait for health ->
 # release the hold. The hold is always released, even when a step fails, so dispatch never stays stopped.
+# An installation running without Docker does the same through `scripts/axiom deploy` (docs/NATIVE.md).
 set -eu
 cd "$(dirname "$0")/.."
+
+if scripts/axiom status --running >/dev/null 2>&1; then
+  exec scripts/axiom deploy "$@"
+fi
 
 psql() { docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At' ; }
 hold() {

@@ -8,6 +8,7 @@ import functools
 import hashlib
 
 from sqlalchemy import select
+from sqlalchemy.orm import defer
 
 from ..db import Event, Job, Resume, Run, Setting, now, record
 from ..schemas import Profile
@@ -358,7 +359,8 @@ class QueueingMixin:
                 if urls := shortlinks.twins(s, job.url):
                     linked = list(s.scalars(select(Job.id).where(Job.url.in_(urls), Job.id != job.id)))
             aliases = [*aliases, *(i for i in linked if i not in aliases)]
-            previous = list(s.scalars(select(Run).where(Run.job_id.in_(aliases))))
+            # A packet loads when asked for: admission holds the app lock, and most attempts read none of these.
+            previous = list(s.scalars(select(Run).options(defer(Run.packet)).where(Run.job_id.in_(aliases))))
             if any(x.state in ACTIVE for x in previous):
                 raise QueueBlocked(
                     "This job already has an active run", outcome="protected", code="active_run"
@@ -504,14 +506,14 @@ class QueueingMixin:
                 if job.status != "ready" and not (retry and job.status in RETRYABLE):
                     raise ValueError("Approve or classify this job before submission")
             packet_profile = profile.model_dump()
-            from ..email_alias import ats_address, employer_alias_key
+            from ..email_alias import applying_email, employer_alias_key
 
             # A platform that bound the profile address to an unusable identity applies with a plus-address (iCIMS);
-            # so does one employer whose identity for it was abandoned (Adapter.fresh_identity).
-            aliases = dict(profile.ats_email_aliases or {})
-            if employer_alias := s.get(Setting, employer_alias_key(job.url) or "-"):
-                aliases[job.ats] = (employer_alias.value or {}).get("tag") or aliases.get(job.ats, "")
-            packet_profile["email"] = ats_address(packet_profile.get("email", ""), job.ats, aliases)
+            # so does one employer, on any platform, whose identity for it was abandoned (Adapter.fresh_identity).
+            employer_alias = s.get(Setting, employer_alias_key(job.url) or "-")
+            packet_profile["email"] = applying_email(
+                packet_profile.get("email", ""), job.ats, profile.ats_email_aliases, employer_alias.value if employer_alias else None
+            )
             if job.demo:
                 packet_profile = {
                     "name": "Alex Example",

@@ -89,12 +89,12 @@ def archive_failed(service):
 def summaries(db):
     with db.session() as s:
         rows = list(
-            row.value for row in s.scalars(select(Setting).where(Setting.key.like("archived_application:%")))
+            row.value for row in s.scalars(select(Setting).where(Setting.key.startswith("archived_application:", autoescape=True)))
         )
         known = {row["job_id"] for row in rows}
         removed = [
             row
-            for row in s.scalars(select(Setting).where(Setting.key.like("job_control:%")))
+            for row in s.scalars(select(Setting).where(Setting.key.startswith("job_control:", autoescape=True)))
             if row.value.get("state") == "deleted"
         ]
         for control in removed:
@@ -102,7 +102,10 @@ def summaries(db):
             job = s.get(Job, jid)
             if not job or jid in known:
                 continue
-            runs = list(s.scalars(select(Run).where(Run.job_id == jid).order_by(Run.created_at.desc())))
+            # Columns only: the archive page read every removed job's whole packets (18 of 121 JSON samples, 2026-10-30).
+            runs = s.execute(
+                select(Run.id, Run.state, Run.reason, Run.cost).where(Run.job_id == jid).order_by(Run.created_at.desc())
+            ).all()
             last = runs[0] if runs else None
             rows.append(
                 {

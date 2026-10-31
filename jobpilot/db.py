@@ -313,6 +313,7 @@ class Database:
         self.Session = sessionmaker(self.engine, expire_on_commit=False)
         Base.metadata.create_all(self.engine)
         self.add_missing_columns()
+        self.add_settings_prefix_index()
         with self.session() as s:
             if not s.get(Setting, "control"):
                 s.add(Setting(key="control", value={"paused": False, "auto_submit": False}))
@@ -332,6 +333,23 @@ class Database:
                     if name not in {c["name"] for c in inspect(self.engine).get_columns(table)}:
                         raise
 
+    def add_settings_prefix_index(self):
+        """Let a prefix read use an index: the primary key cannot serve one under en_US collation, so each scanned all
+        62,000 settings (2.9 scans/s, 179,000 rows/s, 6 ms each, 2026-10-30). Query with
+        `Setting.key.startswith(prefix, autoescape=True)`: in a plain LIKE every `_` is a wildcard, so "job_control:%" has
+        the fixed prefix "job" and the planner keeps scanning. Built once, here, before any worker starts: 0.2 s for 62,000
+        rows, and only writers wait, of which there are none yet. Not CONCURRENTLY: that cannot run in a transaction and a
+        failed build would leave an invalid index that IF NOT EXISTS then keeps."""
+        if self.engine.dialect.name != "postgresql":
+            return
+        with self.engine.begin() as connection:
+            # Asked first: CREATE INDEX IF NOT EXISTS takes the table's SHARE lock even when the index exists, and every
+            # CLI command that opens the database would wait for writers.
+            if connection.exec_driver_sql("SELECT to_regclass('ix_settings_key_prefix')").scalar() is None:
+                connection.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_settings_key_prefix ON settings (key text_pattern_ops)"
+                )
+
     @contextmanager
     def session(self):
         with self.Session.begin() as session:
@@ -344,8 +362,12 @@ class Database:
             if self.engine.dialect.name == "sqlite":
                 s.connection().exec_driver_sql("BEGIN IMMEDIATE")
             else:
-                # One per-app lock for budget/cap reservations and job transitions.
-                s.connection().exec_driver_sql("SELECT pg_advisory_xact_lock(72319001)")
+                # One per-app lock for budget/cap reservations and job transitions. These commits are the ones that must
+                # survive a crash ("submitting" before the click), so they wait for the disk even where plain commits do
+                # not (jobpilot/native/pg.py). Under Compose every commit waits already, and this changes nothing.
+                s.connection().exec_driver_sql(
+                    "SELECT pg_advisory_xact_lock(72319001), set_config('synchronous_commit', 'on', true)"
+                )
             try:
                 yield s
                 s.commit()

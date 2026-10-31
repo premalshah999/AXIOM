@@ -61,7 +61,11 @@ def nothing_sent_streak(rows):
 
 
 # A deterministic stall (a control or an answer the engine could not get past) repeats exactly while the code is the same.
-STALLED = re.compile(r"^(?:Recovery stopped:|The browser did not advance)")
+# A sign-in form that came back unchanged is one (accounts/flow_handle.py): Allen Institute's ClearCompany sign-in came back
+# unchanged on run after run (2026-10-30) because the employer signs in by an emailed link the password form never uses.
+STALLED = re.compile(
+    r"^(?:Recovery stopped:|The browser did not advance|The employer returned its sign-in page without accepting)"
+)
 
 
 def repeats_unchanged(rows, repeats=2):
@@ -702,7 +706,7 @@ async def retry_due(service):
         employers = set().union(*(pool.employers for pool in pools.values()))
         due = [
             (r.key.removeprefix("draft_recovery:"), dict(r.value))
-            for r in s.scalars(select(Setting).where(Setting.key.like("draft_recovery:%")))
+            for r in s.scalars(select(Setting).where(Setting.key.startswith("draft_recovery:", autoescape=True)))
             if r.value.get("scheduled")
         ]
     # A parked model outage does not wait out its timer once the provider is back (provider_health.recovered_since):

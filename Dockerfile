@@ -26,6 +26,10 @@ FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime
 COPY --from=uv /uv /uvx /bin/
 # MALLOC_ARENA_MAX: glibc's default 8x-cores malloc arenas let the threaded app grow 2 GB -> 5.4 GB in 15 minutes
 # under a 10-run load (2026-10-15); two arenas keep freed memory reusable.
+# MALLOC_MMAP_THRESHOLD_ and MALLOC_TRIM_THRESHOLD_: naming either turns off glibc's self-tuning, which raises both after
+# the first large free, up to 32 MB. After that a query's 460 KB packets came from the heaps, and small objects allocated
+# between them pinned the freed space: 763 MB free of 897 MB in malloc's heaps, 1.3 GB resident (2026-10-30). At these
+# values a large value is mapped on its own and unmapped when freed; jobpilot/memory.py returns the rest.
 ENV PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
     PLAYWRIGHT_BROWSERS_PATH=/opt/browsers \
@@ -34,6 +38,8 @@ ENV PYTHONUNBUFFERED=1 \
     DATA_DIR=/app/.data \
     APP_PORT=8080 \
     MALLOC_ARENA_MAX=2 \
+    MALLOC_MMAP_THRESHOLD_=131072 \
+    MALLOC_TRIM_THRESHOLD_=131072 \
     PATH=/app/.venv/bin:$PATH
 WORKDIR /app
 

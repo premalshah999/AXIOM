@@ -65,13 +65,13 @@ LIVE = ("queued", "running", "submitting", "waiting_email", "waiting_answer", "n
 def held_jobs():
     """Job ids the owner paused (job_control:<id> {"state": "paused"})."""
     return select(func.substr(Setting.key, len(CONTROL) + 1)).where(
-        Setting.key.like(CONTROL + "%"), Setting.value["state"].as_string() == "paused"
+        Setting.key.startswith(CONTROL, autoescape=True), Setting.value["state"].as_string() == "paused"
     )
 
 
 def requested_jobs():
     """Job ids with a waiting owner Apply (owner_apply:<id>)."""
-    return select(func.substr(Setting.key, len(REQUEST) + 1)).where(Setting.key.like(REQUEST + "%"))
+    return select(func.substr(Setting.key, len(REQUEST) + 1)).where(Setting.key.startswith(REQUEST, autoescape=True))
 
 
 def classified(*where, reserved=()):

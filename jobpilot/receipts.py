@@ -463,12 +463,18 @@ def receipt_claimed(session, message, receipt):
     remains a conservative barrier to reusing that same message under a new id.
     """
     ids = {message["id"], *message.get("legacyInboxIds", [])}
-    current = session.get(Run, receipt.get("run_id", ""))
+    # Narrow columns and the once-per-run recipient: this read all 673 receipted runs' whole packets (~300 MB of JSON) per
+    # message, under the app lock, and what it allocated stayed resident (heap census, 2026-10-30).
+    current = session.execute(select(Run.id, Run.job_id).where(Run.id == receipt.get("run_id", ""))).first()
     current_job = session.get(Job, current.job_id) if current else None
-    recipient = current.packet.get("profile", {}).get("email", "").casefold() if current else ""
-    for row in session.scalars(select(Run).where(Run.receipt["email"].as_string().is_not(None))):
+    claims = session.execute(
+        select(Run.id, Run.job_id, Run.receipt).where(Run.receipt["email"].as_string().is_not(None))
+    ).all()
+    facts = packet_facts(session, [row.id for row in claims] + ([current.id] if current else []))
+    recipient = facts.get(current.id, ("", False))[0].casefold() if current else ""
+    for row in claims:
         claimed = row.receipt.get("email") or {}
-        old_recipient = row.packet.get("profile", {}).get("email", "").casefold()
+        old_recipient = facts.get(row.id, ("", False))[0].casefold()
         if recipient and old_recipient and recipient != old_recipient:
             continue
         if claimed.get("message_id") in ids:
@@ -1044,18 +1050,24 @@ async def reconcile_approved_drafts(mail, job_ids, max_pages=8):
                 job = s.get(Job, jid)
                 if not job or job.demo:
                     continue
-                runs = list(s.scalars(select(Run).where(Run.job_id == jid).order_by(Run.created_at.desc())))
+                # Narrow columns: each job's every whole packet was read here, per sweep (2.3% of the executor threads).
+                runs = s.execute(
+                    select(Run.id, Run.state, Run.mode, Run.created_at)
+                    .where(Run.job_id == jid)
+                    .order_by(Run.created_at.desc())
+                ).all()
                 if (
                     not runs
                     or any(r.state == "confirmed" for r in runs)
                     or runs[0].state in {"queued", "running", "submitting"}
                 ):
                     continue
-                approved = [r for r in runs if r.mode == "submit" and r.packet.get("match_approved")]
+                facts = packet_facts(s, [r.id for r in runs])
+                approved = [r for r in runs if r.mode == "submit" and facts.get(r.id, ("", False))[1]]
                 if not approved:
                     continue
                 first = min(approved, key=lambda r: r.created_at)
-                email = runs[0].packet.get("profile", {}).get("email")
+                email = facts.get(runs[0].id, ("", False))[0]
                 if not email:
                     continue
                 # Matching needs identity, state and recipient, not the full packet.

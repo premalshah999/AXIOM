@@ -121,7 +121,10 @@ def accepts_run(service, run):
     slot = getattr(service, "telegram_worker_slot", None)
     if slot:
         return run_slot(run) == slot
-    return run_slot(run) not in configured_slots(service.config)
+    # Without worker bots every run is the main bot's: no need to load its packet to learn that (the Telegram question
+    # scan defers packets and this undid it, once per unsent question, 2026-10-30).
+    slots = configured_slots(service.config)
+    return not slots or run_slot(run) not in slots
 
 
 def owns_job(service, job_id):

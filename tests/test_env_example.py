@@ -9,6 +9,8 @@ from jobpilot.config import Settings
 EXAMPLE = Path(__file__).resolve().parent.parent / ".env.example"
 # Read by Docker Compose / scripts/setup.sh, not by the app.
 COMPOSE_ONLY = {"POSTGRES_PASSWORD", "APP_PORT", "APP_BIND", "COMPOSE_PROJECT_NAME", "GIT_SHA"}
+# Read by the native app's supervisor (jobpilot/native), not by the app.
+NATIVE_ONLY = {"AXIOM_PG_PORT", "AXIOM_PG_BIN", "AXIOM_SERVICES"}
 # Active lines whose value deliberately differs from the code default (each is explained in the file).
 RECOMMENDED_OVERRIDES = {"deepseek_thinking"}
 ENTRY = re.compile(r"^(#\s)?([A-Z][A-Z0-9_]*)=(.*)$")
@@ -48,7 +50,7 @@ def test_every_setting_is_documented():
 
 
 def test_no_stale_or_misspelled_entries():
-    unknown = sorted(set(entries()) - setting_names() - COMPOSE_ONLY)
+    unknown = sorted(set(entries()) - setting_names() - COMPOSE_ONLY - NATIVE_ONLY)
     assert not unknown, f".env.example lists variables nothing reads: {unknown}"
 
 

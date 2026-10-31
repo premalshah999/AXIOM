@@ -273,8 +273,11 @@ _KEYS: dict = {}
 def employer_keys(alias_rows):
     """employer_key bound to `alias_rows`, remembered across calls while the alias table is unchanged."""
     version = hash(frozenset(alias_rows.items()))
-    if len(_KEYS) > 200_000:
+    # A key computed under an older alias table can never be used again; it only held its strings (22,000 tuples of a name,
+    # a URL and a key in production, up to 200,000 allowed, 2026-10-30). ~17,000 jobs fit well under this.
+    if _KEYS.get("version") != version or len(_KEYS) > 50_000:
         _KEYS.clear()
+        _KEYS["version"] = version
 
     def identity(name, url=""):
         key = (version, name or "", url or "")
@@ -396,7 +399,7 @@ def require_company_limit(session, job, run_id=None):
         elif run.mode == "submit" and run.state in {"queued", "running", "submitting"}:
             if run.id != run_id:
                 reserved.add(candidate.identity)
-    for item in session.scalars(select(Setting).where(Setting.key.like(HISTORICAL_PREFIX + "%"))):
+    for item in session.scalars(select(Setting).where(Setting.key.startswith(HISTORICAL_PREFIX, autoescape=True))):
         data = item.value
         if identity(data.get("company", ""), data.get("url", "")) == target:
             confirmed.update(i for i in data.get("identities", []) if isinstance(i, str))

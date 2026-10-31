@@ -11,6 +11,7 @@ already exists with the provided email address. Login using an alternate mobile 
 to the same inbox and which is a distinct address to the platform.
 """
 
+import re
 from urllib.parse import urlsplit
 
 GMAIL_DOMAINS = {"gmail.com", "googlemail.com"}
@@ -46,6 +47,34 @@ def employer_alias_key(url):
 
 EMPLOYER_ALIAS_TAG = "apply"
 
+# A sign-up form that will not take the address itself. SuccessFactors and several custom forms validate the address
+# with a pattern that rejects "+"; the alias then cannot work there, and the run must say so instead of retrying it.
+ADDRESS_REFUSED = re.compile(
+    r"(?:in|not\s+a\s+)?valid\s+e-?mail|e-?mail(?:\s+address)?[^.\n]{0,40}\b(?:invalid|not valid|format|special characters|"
+    r"not allowed|not accepted|not supported)\b|(?:invalid|incorrect|malformed|unsupported)\s+e-?mail",
+    re.I,
+)
+
+
+def alias_refusal(db, url, email, errors):
+    """True when this employer's sign-up form refused the employer alias address in `errors`: the setting is marked, so
+    later runs apply with the profile address again and no further identity is created. Only an address that carries the
+    employer's alias tag can be the cause."""
+    key = employer_alias_key(url)
+    value = (db.get_setting(key) if key else None) or {}
+    local = str(email or "").partition("@")[0]
+    tag = str(value.get("tag") or "")
+    if not tag or value.get("refused_at") or f"+{tag}" not in local:
+        return False
+    # "Invalid email address or password" is a refused sign-in, not a refused address.
+    said = next((str(x) for x in errors or [] if ADDRESS_REFUSED.search(str(x)) and not re.search(r"password", str(x), re.I)), "")
+    if not said:
+        return False
+    from .db import now
+
+    db.set_setting(key, {**value, "refused_at": now(), "refusal": said[:160]})
+    return True
+
 
 def ats_address(address, ats, aliases):
     """The address to apply with on this platform, or the profile's own when it has no alias here."""
@@ -67,3 +96,13 @@ def ats_address(address, ats, aliases):
             return f"{local}@{alias_domain}"
         return address
     return f"{local}+{tag}@{domain}"
+
+
+def applying_email(email, ats, platform_aliases, employer_setting=None):
+    """The address a run applies with: the profile's, with its platform's alias, or the employer's own alias (the
+    setting Adapter.fresh_identity writes) on any platform. An employer whose sign-up form refused the plus-address
+    (alias_refusal) gets the profile's address again."""
+    aliases = dict(platform_aliases or {})
+    if employer_setting and not employer_setting.get("refused_at"):
+        aliases[ats] = employer_setting.get("tag") or aliases.get(ats, "")
+    return ats_address(email, ats, aliases)

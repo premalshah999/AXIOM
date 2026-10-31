@@ -348,7 +348,9 @@ def identity_variants(url: str):
     return tuple(dict.fromkeys(variants))
 
 
-@functools.lru_cache(maxsize=65536)
+# Above the ~17,000 stored jobs so a scan over all of them never evicts itself. This one sat full at 65,536 entries of two
+# URL-length strings each, ~25 MB holding postings scans had rejected long ago (heap census, 2026-10-30).
+@functools.lru_cache(maxsize=32768)
 def url_identity(url: str) -> str:
     """canonicalize(url)[1], cached. Admission compares one job with every job on its platform, once per waiting
     click per tick, on the event loop the browsers share (2026-10-21)."""

@@ -307,7 +307,7 @@ async def scheduled_tick(scheduled_time: datetime, context: dict):
         with SERVICE.db.session() as s:
             preparations = [
                 row.key.removeprefix("preparation_request:")
-                for row in s.scalars(select(Setting).where(Setting.key.like("preparation_request:%")))
+                for row in s.scalars(select(Setting).where(Setting.key.startswith("preparation_request:", autoescape=True)))
                 if row.value.get("state") == "pending" and row.value.get("not_before", "") <= now()
             ]
         for job_id in preparations[:12]:

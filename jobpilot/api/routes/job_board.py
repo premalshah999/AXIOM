@@ -252,7 +252,7 @@ def router(service) -> APIRouter:
         def read_selection():
             # One thread for every read: board_snapshot scans the whole board (~0.5 s) and it ran on the event loop
             # once per selected job, up to 51 times a click, while the browser owners waited (2026-10-29).
-            fresh = {j["id"] for j in board_snapshot(db)["jobs"]}
+            fresh = {j["id"] for j in board_snapshot(db, jobs_only=True)["jobs"]}
             with db.session() as s:
                 busy = set(s.scalars(select(Run.job_id).where(Run.state.in_(blocking))))
                 unranked = [

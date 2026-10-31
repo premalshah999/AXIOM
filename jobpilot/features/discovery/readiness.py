@@ -7,7 +7,6 @@ submission guard authoritative.
 """
 
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
@@ -65,7 +64,7 @@ def _candidates(db, policy: DiscoveryPolicy, at, manual_only=False) -> tuple[lis
     with db.session() as s:
         excluded_ats.update(
             row.key.removeprefix("ats_outage:")
-            for row in s.scalars(select(Setting).where(Setting.key.like("ats_outage:%")))
+            for row in s.scalars(select(Setting).where(Setting.key.startswith("ats_outage:", autoescape=True)))
             if row.value.get("until", "") > at.isoformat()
         )
         attempted = set(s.scalars(select(Run.job_id).distinct()))
@@ -76,7 +75,7 @@ def _candidates(db, policy: DiscoveryPolicy, at, manual_only=False) -> tuple[lis
             key.removeprefix("job_control:"): state
             for key, state in s.execute(
                 select(Setting.key, Setting.value["state"].as_string()).where(
-                    Setting.key.like("job_control:%"), Setting.value["state"].as_string().in_(["paused", "deleted"])
+                    Setting.key.startswith("job_control:", autoescape=True), Setting.value["state"].as_string().in_(["paused", "deleted"])
                 )
             )
         }
@@ -87,23 +86,27 @@ def _candidates(db, policy: DiscoveryPolicy, at, manual_only=False) -> tuple[lis
             key.removeprefix("job_origin:")
             for key in s.scalars(
                 select(Setting.key).where(
-                    Setting.key.like("job_origin:%"), Setting.value["kind"].as_string() == "manual"
+                    Setting.key.startswith("job_origin:", autoescape=True), Setting.value["kind"].as_string() == "manual"
                 )
             )
         }
-        # Every column but the description: it is most of a 16,000-row, 100 MB read, and only the postings that
-        # survive the filters below need it (fetched after them).
-        columns = [c for c in Job.__table__.columns if c.name != "description"]
+        # Only the columns the checks below read: not the description (most of a 16,000-row, 100 MB read; the postings
+        # that survive the filters fetch it after them) and no ORM object per listing, which was 10.8% of the
+        # interpreter's samples for rows that were read once and dropped (py-spy 2026-10-30).
         query = (
-            select(*columns, JobListing)
+            select(
+                Job.id, Job.url, Job.identity, Job.title, Job.company, Job.location, Job.ats, Job.status, Job.score,
+                Job.resume_id, JobListing.job_id.label("listed"), JobListing.posted_at, JobListing.date_basis,
+                JobListing.first_seen, JobListing.last_seen, JobListing.active, JobListing.country,
+            )
             .outerjoin(JobListing, JobListing.job_id == Job.id)
             .where(Job.demo.is_(False), Job.status.not_in(["archived", "closed"]))
         )
         rows = s.execute(query.where(Job.id.in_(manual)) if manual_only else query).all()
         guards = guard_keys(s)
         out = []
-        for *values, listing in rows:
-            job = SimpleNamespace(**dict(zip((c.name for c in columns), values)))
+        for job in rows:
+            listing = job if job.listed is not None else None
             if job.ats in excluded_ats:
                 stats["out_of_scope"] += 1
                 continue
@@ -188,8 +191,10 @@ _GATES: dict = {}
 def gated(job, policy):
     """gate(), remembered per posting and policy. Each autopilot tick (every 15 s) gated about 2,000 postings by
     scanning their full descriptions, on threads that hold the interpreter the browsers' event loop needs."""
-    key = (policy.model_dump_json(), job.get("id"), job.get("title"), job.get("url"), job.get("location"),
-           job.get("country"), len(job.get("description") or ""))
+    # Hashes, not the values: each entry kept its own copy of the 289-byte policy text, the title, URL and location (7,100
+    # entries, 50,000 allowed, 2026-10-30), and the policy was serialized again per job.
+    key = (hash(policy.model_dump_json()), job.get("id"), hash((job.get("title"), job.get("url"), job.get("location"),
+           job.get("country"), len(job.get("description") or ""))))
     if key not in _GATES:
         if len(_GATES) > 50_000:
             _GATES.clear()

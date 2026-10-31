@@ -49,7 +49,7 @@ def _ownership(session):
             value["target_id"].as_string(),
             value["inactive_target_id"].as_string(),
             value["inactive_target_ids"],
-        ).where(Setting.key.like("desktop_job:%"))
+        ).where(Setting.key.startswith("desktop_job:", autoescape=True))
     ).all()
 
 

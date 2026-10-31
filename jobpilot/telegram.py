@@ -116,6 +116,23 @@ def employer_name(job):
     return (parsed.hostname or "Employer").removeprefix("www.")
 
 
+def pending_run_ids(db, limit=6):
+    """Runs whose outcome is still to be sent. The database picks them: all 9,533 markers said false and were loaded as
+    objects on each pass (2026-10-30)."""
+    with db.session() as s:
+        return [
+            key.removeprefix("telegram_run_pending:")
+            for key in s.scalars(
+                select(Setting.key)
+                .where(
+                    Setting.key.startswith("telegram_run_pending:", autoescape=True),
+                    Setting.value["pending"].as_boolean().is_(True),
+                )
+                .limit(limit)
+            )
+        ]
+
+
 def current_rows(service):
     from .telegram_workers import run_slot
 
@@ -124,8 +141,11 @@ def current_rows(service):
         owned = None
         if worker_slot:
             latest_slots = {}
-            for run in s.scalars(select(Run).order_by(Run.created_at.desc())):
-                latest_slots.setdefault(run.job_id, run_slot(run))
+            # Every run's whole packet (3.6 GB of JSON at 9,782 runs) to read one small number.
+            for job_id, slot in s.execute(
+                select(Run.job_id, Run.packet["worker_slot"].as_integer()).order_by(Run.created_at.desc())
+            ):
+                latest_slots.setdefault(job_id, run_slot({"worker_slot": slot}))
             owned = {jid for jid, slot in latest_slots.items() if slot == worker_slot}
         rows = s.execute(
             select(Run.id, Run.job_id, Run.state, Run.reason, Run.receipt, Job.company, Job.title, Job.url)
@@ -916,7 +936,7 @@ def next_question(service, allow_live):
         ).all()
         sent = {
             key.removeprefix("telegram_question_sent:")
-            for key in s.scalars(select(Setting.key).where(Setting.key.like("telegram_question_sent:%")))
+            for key in s.scalars(select(Setting.key).where(Setting.key.startswith("telegram_question_sent:", autoescape=True)))
         }
         for review, run, job in candidates:
             if review.key in {"manual", "session"} or review.id in sent:
@@ -2037,18 +2057,8 @@ async def poll(service):
         pass
 
     async def deliver_pending():
-        from .db import Setting
-
-        def pending_ids():
-            # Thousands of delivery markers: read them off the application loop.
-            with service.db.session() as s:
-                return [
-                    row.key.removeprefix("telegram_run_pending:")
-                    for row in s.scalars(select(Setting).where(Setting.key.like("telegram_run_pending:%")))
-                    if row.value.get("pending")
-                ][:6]
-
-        pending = await asyncio.to_thread(pending_ids)
+        # Thousands of delivery markers: read them off the application loop.
+        pending = await asyncio.to_thread(pending_run_ids, service.db)
         for run_id in pending:
             await notify_run(service, run_id)
         for notify in (notify_milestones, ask_next_question, ask_next_browser):

@@ -9,7 +9,7 @@ from sqlalchemy import select
 from jobpilot import shortlinks
 from jobpilot.admission import QueueBlocked
 from jobpilot.ats import canonicalize
-from jobpilot.db import Event, Job, Run, Setting
+from jobpilot.db import Event, Job, Run
 
 SHORT = "https://go.vansh.nyc/AB"
 POSTING = "https://jobs.lever.co/examplecorp/11111111-2222-3333-4444-555555555555"

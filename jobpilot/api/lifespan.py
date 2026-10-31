@@ -28,6 +28,9 @@ async def lifespan(app):
 
     service.outbox_running = True
     outbox_task = asyncio.create_task(poll_outbox(service))
+    from ..memory import watch as watch_memory
+
+    memory_task = asyncio.create_task(watch_memory(config.memory_trim_seconds))
     load_task = None
     if config.enable_workers:
         from ..host_health import watch as watch_host
@@ -46,6 +49,8 @@ async def lifespan(app):
     if config.enable_workers and config.shutdown_drain_seconds:
         # First of all, while the workers, outbox and mail poller still run: a stop must not cut a commit.
         await service.drain(config.shutdown_drain_seconds)
+    memory_task.cancel()
+    await asyncio.gather(memory_task, return_exceptions=True)
     if load_task:
         load_task.cancel()
         await asyncio.gather(load_task, return_exceptions=True)

@@ -66,7 +66,7 @@ def router(service) -> APIRouter:
             ]
             requests = {
                 row.key.removeprefix(KEY): dict(row.value or {})
-                for row in s.scalars(select(Setting).where(Setting.key.like(KEY + "%")))
+                for row in s.scalars(select(Setting).where(Setting.key.startswith(KEY, autoescape=True)))
             }
             jobs = {
                 row.id: row for row in s.execute(select(*JOB_COLUMNS).where(Job.id.in_(list(requests))))
