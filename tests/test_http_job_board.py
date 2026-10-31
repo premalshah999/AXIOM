@@ -51,10 +51,9 @@ def test_board_settings_reject_an_interval_outside_the_choices(client):
     assert client.put("/api/job-board/settings", json={"interval_hours": 5}).status_code == 422
 
 
-def test_scan_apply_and_batch_need_workers(client):
+def test_scan_and_batch_need_workers(client):
     for call in (
         client.post("/api/job-board/scrape", json={}),
-        client.post("/api/job-board/apply", json={"job_ids": ["one"]}),
         client.post("/api/job-board/autopilot/start", json={"target": 10}),
     ):
         assert call.status_code == 409, call.text
@@ -63,4 +62,3 @@ def test_scan_apply_and_batch_need_workers(client):
 def test_the_batch_target_is_bounded(client):
     assert client.post("/api/job-board/autopilot/start", json={"target": 0}).status_code == 422
     assert client.post("/api/job-board/autopilot/start", json={"target": 501}).status_code == 422
-    assert client.post("/api/job-board/apply", json={"job_ids": []}).status_code == 422

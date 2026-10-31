@@ -33,9 +33,9 @@ def test_api_responses_are_not_cached_and_every_response_carries_the_hardening_h
 
 
 def test_a_value_error_in_a_handler_is_a_400_with_the_message(client):
-    answer = client.post("/api/runs/unknown/cancel", json={})
+    answer = client.post("/api/mail-challenges/unknown/cancel", json={})
     assert answer.status_code == 400
-    assert "Only queued runs can be cancelled" in answer.json()["detail"]
+    assert "No active challenge with this ID" in answer.json()["detail"]
 
 
 def test_a_schema_error_is_a_422(client):
