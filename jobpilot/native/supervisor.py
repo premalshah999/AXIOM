@@ -38,6 +38,7 @@ ACTIVE_SECONDS = 20.0
 # Autopilot gaps (a retry due in two minutes) must not let the Mac sleep between applications.
 SLEEP_RELEASE_SECONDS = 300.0
 POWER_SECONDS = 60.0
+OWNER_SECONDS = 5.0
 ROTATE_SECONDS = 30.0
 LOG_BYTES, LOG_KEEP = 10 * 1024 * 1024, 3  # compose.yaml's json-file limits.
 CHROME_GRACE, POSTGRES_GRACE, CHROME_WAIT = 10.0, 30.0, 30.0
@@ -117,7 +118,7 @@ def chrome_argv(cfg, script, port_var, profile_var, url, profile, extra=""):
     port = str(urlsplit(url).port)
     env = {**os.environ, "DRY_RUN": "1", port_var: port, profile_var: str(profile)}
     done = subprocess.run(
-        ["sh", str(cfg.root / "scripts" / script)], capture_output=True, text=True, env=env, timeout=30
+        ["sh", str(cfg.scripts / script)], capture_output=True, text=True, env=env, timeout=30
     )
     if done.returncode:
         raise NativeError(done.stderr.strip() or f"scripts/{script} failed")
@@ -451,6 +452,8 @@ class Supervisor:
         if self.due("power", now, POWER_SECONDS):
             self.tick_power()
         self.tick_health(now)
+        if self.due("owner", now, OWNER_SECONDS):
+            self.tick_owner()
         if self.due("rotate", now, ROTATE_SECONDS):
             self.rotate_logs()
         self.write_state()
@@ -560,6 +563,14 @@ class Supervisor:
             self.phase = "running"
             self.timings["ready_seconds"] = round(now - self.began, 1)
             self.say(f"AXIOM is up at {self.cfg.base_url} after {self.timings['ready_seconds']} s.")
+
+    def tick_owner(self):
+        """The Mac app's window is how its owner sees and stops this. A force-quit or a crash must not leave an engine
+        submitting real applications with nothing on screen, so its loss is a normal, draining stop. `scripts/axiom` sets
+        no owner: production outlives its terminal."""
+        pid, started = self.cfg.get("AXIOM_OWNER_PID"), self.cfg.get("AXIOM_OWNER_LSTART")
+        if pid and not same_process(int(pid), started):
+            self.stop_reason = self.stop_reason or "The AXIOM window went away, so AXIOM stopped safely."
 
     # ---- the Mac: sleep, power, health, logs ----------------------------------------------------------------------------
 

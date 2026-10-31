@@ -11,7 +11,7 @@ import sys
 import time
 
 from . import migrate, pg, release, services, supervisor
-from .env import ROOT, NativeError, load, prepare, system_chrome
+from .env import NativeError, load, prepare, system_chrome
 from .supervisor import read_state, same_process, stop_leftovers, supervisor_alive
 
 STARTUP_WAIT_SECONDS = 600
@@ -481,7 +481,7 @@ def main(argv=None):
     try:
         if args.command == "_supervise":
             return supervisor.run()
-        return COMMANDS[args.command](load(ROOT), args) or 0
+        return COMMANDS[args.command](load(), args) or 0
     except NativeError as exc:
         print(f"axiom: {exc}", file=sys.stderr)
         return 1
