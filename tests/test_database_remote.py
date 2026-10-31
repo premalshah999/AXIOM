@@ -171,3 +171,36 @@ def test_dbos_gets_a_small_pool_and_no_listeners_when_remote(remote, tmp_path):
     config = Settings(_env_file=None, data_dir=tmp_path, app_token="t", database_mode="server", dbos_pool_size=None)
     assert dbos_limits(config, db) == {"sys_db_pool_size": 5, "use_listen_notify": False}
     assert dbos_limits(config, type("Local", (), {"remote": False})()) == {}
+
+
+def test_an_idle_outbox_poll_is_one_read_and_a_due_row_is_still_claimed_once(remote):
+    """Four pollers ask every second; on a 30 ms link the locked claim was three quarters of what ran on the event loop (2026-10-31)."""
+    from jobpilot import outbox
+    from jobpilot.db import Outbox
+
+    db, _, _ = remote
+    before = db.audit.statements
+    assert outbox.claim(db, ["notify"]) is None
+    assert db.audit.statements - before == 1, "no lock, no transaction"
+    with db.session() as s:
+        s.add(Outbox(id="o1", kind="notify", state="pending", available_at=0))
+    first = outbox.claim(db, ["notify"])
+    assert first and first["id"] == "o1" and first["state"] == "processing"
+    assert outbox.claim(db, ["notify"]) is None, "the row is leased, so the second poller gets nothing"
+
+
+def test_off_loop_runs_remote_work_in_a_thread_and_local_work_inline(remote):
+    import asyncio
+    import threading
+
+    db, _, _ = remote
+
+    async def where(handle):
+        return await handle.off_loop(threading.get_ident), threading.get_ident()
+
+    ran, loop_thread = asyncio.run(where(db))
+    assert ran != loop_thread
+    local = type("Local", (Database,), {"__init__": lambda self: None})()
+    local.remote = False
+    ran, loop_thread = asyncio.run(where(local))
+    assert ran == loop_thread

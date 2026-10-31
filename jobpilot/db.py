@@ -1,3 +1,4 @@
+import asyncio
 import threading
 import time
 from contextlib import contextmanager, nullcontext
@@ -437,6 +438,13 @@ class Database:
                     raise
             if self.audit:
                 self.audit.hold(time.perf_counter() - started)
+
+    async def off_loop(self, call, *args, **kwargs):
+        """Run blocking database work where it cannot stall the browsers. Only a remote database needs it: locally a statement
+        is a fraction of a millisecond and the call stays inline, exactly as it has always run."""
+        if self.remote:
+            return await asyncio.to_thread(call, *args, **kwargs)
+        return call(*args, **kwargs)
 
     def event(self, run_id, kind, message, data=None):
         if self.events:
