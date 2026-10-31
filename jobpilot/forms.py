@@ -1350,6 +1350,10 @@ class FormSession:
         self.control_recoveries = {}
         self.control_choices = {}
         self.optional_picker_omissions = set()
+        # Field label -> the (value, query) searches of its Workday prompt that returned nothing usable this run.
+        self.prompt_misses = {}
+        # Monotonic time the write in progress must end by (see fill).
+        self.write_ends = None
         # Field key -> the last identical write failure (count, signature, page context); see record_write_failure.
         self.field_failures = {}
         # Page fingerprint -> clean fill_current read-backs with no write in between; see fill_current.
@@ -2761,6 +2765,7 @@ class FormSession:
         try:
             school = field.get("type") in {"prompt", "combobox"} and SCHOOL_LABEL.search(field.get("label") or "")
             budget = 30 if field.get("type") == "file" else SCHOOL_WRITE_SECONDS if school else FIELD_WRITE_SECONDS
+            self.write_ends = started + budget
             async with asyncio.timeout(budget):
                 return await self._fill(field, value)
         except Exception as exc:
@@ -3151,6 +3156,10 @@ class FormSession:
                     return self.resolver.policy_choice(field, options) if self.resolver else None
 
                 is_major = bool(EDUCATION["field_of_study"].search(field["label"]))
+                # One deadline for every search this field's write makes, a little inside the form's own limit so the
+                # picker is closed by us, not left open by the cancelled task.
+                prompt_deadline = (self.write_ends - 2.5) if self.write_ends else None
+                misses = self.prompt_misses.setdefault(normalize(field["label"]), set())
                 network = getattr(self, "network", None)
                 catalog = network.value_list("fieldsOfStudy") if is_major and network is not None else None
                 if catalog:
@@ -3158,8 +3167,13 @@ class FormSession:
 
                     rules = getattr(self.resolver, "answer_rules", None)
                     fallback = (getattr(rules, "major_fallback", "") or "").strip()
-                    # A partial catalog is not proof the major is absent; search the picker in that case.
-                    if not any(major_option(candidate, catalog) for candidate in (value, fallback) if candidate):
+                    # A partial catalog is not proof the major is absent; search the picker in that case. The list
+                    # decides by meaning, as the answer policy does: the tenant's own wording of the recorded or
+                    # fallback major ("Computer and Information Science") counts as offered, so no probe search runs
+                    # (REA 2026-10-25; 36 of 41 Workday education rows with a saved list, 2026-10-24..31).
+                    if not any(major_option(candidate, catalog) for candidate in (value, fallback) if candidate) and not (
+                        self.resolver and self.resolver.policy_choice(field, catalog)
+                    ):
                         catalog = None
                 if catalog:
                     # The page's own Field of Study list decides first; only the chosen exact name is searched, so no
@@ -3167,7 +3181,9 @@ class FormSession:
                     rules = getattr(self.resolver, "answer_rules", None)
                     fallback = (getattr(rules, "major_fallback", "") or "").strip()
                     wanted = [value] + ([fallback] if fallback and normalize(fallback) != normalize(value) else [])
-                    committed = await widgets.prompt(frame, el, wanted, choose=major_policy, catalog=catalog)
+                    committed = await widgets.prompt(
+                        frame, el, wanted, choose=major_policy, catalog=catalog, deadline=prompt_deadline
+                    )
                     if normalize(committed) != normalize(value):
                         self.emit(
                             "option_selected",
@@ -3182,6 +3198,8 @@ class FormSession:
                             value,
                             choose=major_policy if is_major else choose,
                             school_scope=bool(SCHOOL_LABEL.search(field["label"])),
+                            deadline=prompt_deadline,
+                            missed=misses,
                         )
                     except ValueError:
                         rules = getattr(self.resolver, "answer_rules", None)
@@ -3192,7 +3210,9 @@ class FormSession:
                         # (answer_rules.major_fallback; R1 RCM: "Data Science" was not offered).
                         # The fallback is policy-matched too: a model choosing among Jabil's alphabetical first page
                         # committed "Actuarial Science" for Data Science (2026-10-23).
-                        committed = await widgets.prompt(frame, el, fallback, choose=major_policy)
+                        committed = await widgets.prompt(
+                            frame, el, fallback, choose=major_policy, deadline=prompt_deadline, missed=misses
+                        )
                         self.emit(
                             "option_selected",
                             "Used the profile's fallback major for a catalog without the recorded one",
@@ -4556,6 +4576,10 @@ class FormSession:
                                 await widgets.close_picker(self.locator(field["id"]))
                             except ValueError:
                                 pass  # A dependent answer may have removed it.
+                        if field["type"] == "prompt" and field["id"] in self.frames:
+                            # A search that timed out leaves its still-loading popup over the fields below (Humana
+                            # 2026-10-30); Workday closes popups on a real click only.
+                            await widgets.release_prompt(self.frames[field["id"]])
                         structure = await self.control_structure(field["id"])
                         self.emit(
                             "field_error",
