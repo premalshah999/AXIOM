@@ -10,6 +10,7 @@ from ..db import MailRule
 from ..db import Mailbox
 from ..db import Run
 from ..db import record
+from ..ats import custom_like
 from ..network import public_url
 from .constants import LIVE
 from .extraction import extract_message
@@ -118,7 +119,9 @@ class RulesMixin:
                 existing["sender_domains"] = [*current, *missing]
             return existing
         known = KNOWN_SENDERS
-        own_site = job.get("ats") == "custom" and (urlsplit(job.get("url", "")).hostname or "")
+        # A named platform that only the generic driver runs (ats.LABEL_ONLY) keeps the custom site's rule: ClearCompany's
+        # sign-in link and Pinpoint's mail were matched through it before they had a name.
+        own_site = custom_like(job.get("ats")) and (urlsplit(job.get("url", "")).hostname or "")
         if job.get("ats") not in known and not own_site:
             return None
         with self.db.session() as s:

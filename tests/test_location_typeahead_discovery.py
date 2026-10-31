@@ -80,3 +80,20 @@ async def test_a_location_typeahead_is_searched_by_city_and_takes_the_applicants
     committed = await form.fill(field, "Springfield, Maryland, United States")
     assert committed == "Springfield, Maryland, United States"
     assert await page.locator("#loc").input_value() == "Springfield, Maryland, United States"
+
+
+async def test_a_greenhouse_custom_location_question_is_read_not_typed_into(page, service, tmp_path):
+    """Atto (Greenhouse) 2026-10-31: the employer's own "Location" question (id question_<n>) listed New York / USA (other
+    than New York) / Europe / Other. Taken for the applicant's city, it was answered with the applicant's own city, typed and refused as
+    "No matching option" on every run of the job; the built-in candidate-location typeahead is still skipped."""
+    custom = FIXED.replace("Preferred work location", "Location").replace('id=office ', 'id=question_8114450009 ')
+    await page.set_content(custom)
+    form = session(page, service, tmp_path, [])
+    field = next(f for f in (await form.scan())["fields"] if f["label"] == "Location")
+    await form.discover_options(field)
+    assert field["options"] == ["Denver, CO", "Long Beach, CA"] and not field.get("search_only")
+    await page.set_content(FIXED.replace("Preferred work location", "Location").replace("id=office ", "id=candidate-location "))
+    form = session(page, service, tmp_path, [])
+    field = next(f for f in (await form.scan())["fields"] if f["label"] == "Location")
+    await form.discover_options(field)
+    assert field["options"] == [] and field.get("search_only")

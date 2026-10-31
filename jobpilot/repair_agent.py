@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from .db import Event, Job, Review, Run, now
+from .owner_questions import unread
 
 MAX_DAILY = 2
 REPAIRABLE = {"waiting_browser", "needs_review", "submission_unknown", "failed", "timed_out"}
@@ -160,10 +161,19 @@ def already_asked(db, job_id, question):
     return False
 
 
+# A calendar date is not a phone number: masked, the answer "2026-05-13" reached the agent as "9999-99-99", which it
+# diagnosed as the app typing a placeholder into OmegaHires' "Current contract end date" (2026-10-27).
+DATE_SHAPE = re.compile(r"(?:\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{4})")
+
+
 def mask(text):
     """Emails hidden; digits of phone-like numbers shown as 9s so their format stays visible."""
     text = re.sub(r"[\w.+-]+@[\w-]+\.[\w.]+", "[email]", str(text))
-    return re.sub(r"\+?\d[\d ()+.-]{8,}\d", lambda m: re.sub(r"\d", "9", m[0]), text)
+    return re.sub(
+        r"\+?\d[\d ()+.-]{8,}\d",
+        lambda m: m[0] if DATE_SHAPE.fullmatch(m[0]) else re.sub(r"\d", "9", m[0]),
+        text,
+    )
 
 
 def label_key(label):
@@ -504,6 +514,14 @@ async def _repair_run(service, run_id):
     if question and INTERNAL_QUESTION.search(question.question):
         applied["rejected"] = [*applied["rejected"], (question.question[:200], "describes the app, not the applicant")]
         question = None
+    blind = False
+    if question and unread(question.question):
+        # Never a blind question (Caesars 2026-10-26, DESRI, Adzuna 2026-10-31): the owner cannot answer a field whose
+        # wording the engine never read. The page is read again instead.
+        applied["rejected"] = [
+            *applied["rejected"], (question.question[:200], "the field's own question was never read"),
+        ]
+        question, blind = None, True
     if question and (known := oq_inferable(db, config, profile, question, service, job_id)):
         applied["rejected"] = [*applied["rejected"], (question.question[:200], known)]
         question = None
@@ -533,6 +551,13 @@ async def _repair_run(service, run_id):
                 enqueue(s, "notify", "repair:" + run_id, run_id=run_id)
         applied["question"] = question.model_dump()
         outcome = "asked_owner"
+    if blind and outcome == "unchanged":
+        with db.exclusive() as s:
+            run = s.get(Run, run_id)
+            if run and run.state == "needs_review":
+                run.state = "waiting_browser"
+                run.reason = "The engine misread a field (its question text was never read); the page is read again"
+        outcome = "unread_field"
     retried = None
     if outcome in {"unchanged", "not_submitted"} and plan.retry and (accepted or applied["instruction"]):
         recovery = db.get_setting("draft_recovery:" + job_id, {}) or {}

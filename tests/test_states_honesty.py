@@ -187,6 +187,20 @@ def test_a_finished_run_whose_reason_says_the_posting_is_gone_is_closed(service)
         assert s.get(Run, "r").state == "closed" and s.get(Job, "j1").status == "closed"
 
 
+def test_a_workday_not_found_stop_waits_for_its_own_closing_rule(service):
+    # Resmed and five others (2026-10-29): "The employer reports that this posting page does not exist" also reads as
+    # gone, so completion closed live Workday postings on one sighting; workday.missing_posting_result owns that rule.
+    from jobpilot.workday import POSTING_MISSING_REASON
+
+    seed_job(service)
+    add_run(service, "r", "j1", "running", 0)
+    result = {"state": "waiting_browser", "reason": POSTING_MISSING_REASON, "recovery_cause": "posting_unavailable"}
+    service.complete("r", result, 1.0)
+    with service.db.session() as s:
+        assert s.get(Run, "r").state == "waiting_browser" and s.get(Job, "j1").status != "closed"
+    assert close_gone_postings(service.db) == []
+
+
 def test_stopped_runs_from_before_the_rule_are_closed_once(service):
     seed_job(service, "gone")
     add_run(service, "g", "gone", "waiting_browser", 0, "The posting is gone; stop attempting this application.")
@@ -290,6 +304,8 @@ async def test_a_parked_model_outage_resumes_once_the_provider_is_back(service, 
         seed_job(service, job_id, "greenhouse")
         with service.db.exclusive() as s:
             s.get(Job, job_id).company = "Company " + job_id
+            # Two employers on the platform's own address: a path elsewhere no longer names an employer (employer_partition).
+            s.get(Job, job_id).url = f"https://job-boards.greenhouse.io/{job_id}/jobs/1"
         add_run(service, "src-" + job_id, job_id, "waiting_browser", 0, PROVIDER,
                 {"match_approved": True, "profile": {"autonomous": True}})
         service.db.set_setting("draft_recovery:" + job_id, {

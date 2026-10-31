@@ -1,5 +1,7 @@
-# Runtime versions come from the repository, never from this file: .python-version (Python), .nvmrc (Node) and the
-# Dockerfile ARGs (uv). tests/test_infra_consistency.py keeps them in agreement.
+# Native first: the Python gate, the module map and the dashboard build need only uv and Node at the versions the
+# repository pins. Runtime versions come from the repository, never from this file: .python-version (Python), .nvmrc
+# (Node) and the Dockerfile ARGs (uv). tests/test_infra_consistency.py keeps them in agreement.
+# The image job is the secondary path: it proves the Dockerfile and compose.yaml that existing Docker installs still use.
 name: CI
 
 on:
@@ -17,7 +19,7 @@ concurrency:
 
 jobs:
   python:
-    name: Lint and tests (no real employer sites)
+    name: Native lint, module map and tests (no Docker, no real employer sites)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -30,13 +32,104 @@ jobs:
         run: uv lock --check
       - name: Lint, blocking (syntax errors and undefined names)
         run: uv run ruff check jobpilot tests --select E9,F63,F7,F82
-      - name: Lint, full (informational until the baseline of 30 findings is cleaned up)
+      - name: Lint, full (informational until the existing findings are cleaned up)
         run: uv run ruff check jobpilot tests
         continue-on-error: true
+      - name: Module map (every module has a target in docs/ARCHITECTURE.md section 6)
+        run: uv run python scripts/dev/module_map.py --check
       # tests/conftest.py marks every test that uses the `page` or `twin_chrome` fixture `browser`; the rest never
       # launch Chromium (checked 2026-10-20), so this job does not install it. The marked tests run in the next job.
       - name: Tests, everything not marked browser
         run: uv run pytest -q -m "not browser" -n 4 --dist loadfile
+
+  privacy:
+    name: No personal data in the added lines
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Generic shapes only: an email address other than name@example.test (the reserved .test domain), a phone number
+      # outside the placeholder forms, a US SSN shape. Only added lines are read, so old text is not judged again.
+      # Findings print the file and line, never the value: the logs of this public repository are public.
+      - name: Scan the added lines
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import subprocess
+          import sys
+
+          EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+          EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
+          PHONE = re.compile(r"(?<!\d)(?:\(\d{3}\) ?|\d{3}[-. ])\d{3}[-. ]\d{4}(?!\d)")
+          SSN = re.compile(r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)")
+
+
+          def exists(rev):
+              return subprocess.run(["git", "rev-parse", "--verify", "-q", rev + "^{commit}"], capture_output=True).returncode == 0
+
+
+          def base_range():
+              event, before = os.environ.get("EVENT", ""), os.environ.get("PUSH_BEFORE", "")
+              if event == "pull_request":
+                  return os.environ["PR_BASE"] + "...HEAD"
+              if event == "push" and before.strip("0") and exists(before):
+                  return before + "..HEAD"
+              return "HEAD^..HEAD" if exists("HEAD^") else EMPTY_TREE + "..HEAD"
+
+
+          def check(path, lineno, text, findings):
+              where = f"{path}:{lineno}"
+              for m in EMAIL.finditer(text):
+                  if m.group().rsplit("@", 1)[1].lower() != "example.test":
+                      findings.append(f"{where}: email address that is not name@example.test")
+              for m in PHONE.finditer(text):
+                  digits = re.sub(r"\D", "", m.group())
+                  # Placeholders: one or two distinct digits (555-555-5555, 999-999-9999) and the fictional 555-01xx lines.
+                  if len(set(digits)) > 2 and digits[3:8] != "55501":
+                      findings.append(f"{where}: phone number")
+              for m in SSN.finditer(text):
+                  if len(set(re.sub(r"\D", "", m.group()))) > 2:
+                      findings.append(f"{where}: number in the US SSN shape")
+
+
+          def main():
+              rng = base_range()
+              diff = subprocess.run(
+                  ["git", "diff", "--unified=0", "--no-color", "--no-ext-diff", rng, "--",
+                   ".", ":(exclude)*.lock", ":(exclude)*package-lock.json"],
+                  capture_output=True, text=True, encoding="utf-8", errors="replace", check=True,
+              ).stdout
+              findings, added, path, lineno, header = [], 0, None, 0, False
+              for line in diff.splitlines():
+                  if line.startswith("diff --git "):
+                      path, header = None, True
+                  elif header and line.startswith("+++ "):
+                      path = line[6:] if line.startswith("+++ b/") else None
+                  elif line.startswith("@@"):
+                      header = False
+                      lineno = int(re.search(r"\+(\d+)", line).group(1))
+                  elif line.startswith("+") and not header and path:
+                      added += 1
+                      check(path, lineno, line[1:], findings)
+                      lineno += 1
+              print(f"Scanned {added} added lines in {rng}.")
+              for item in findings:
+                  print(item)
+              if findings:
+                  print(f"{len(findings)} finding(s). Values are not printed: remove the data, or use name@example.test.")
+                  return 1
+              return 0
+
+
+          sys.exit(main())
+          PY
 
   browser:
     name: Tests that drive a real browser
@@ -98,7 +191,7 @@ jobs:
           fi
 
   image:
-    name: Image builds and a new installation starts
+    name: Container image (Docker path, secondary)
     needs: changes
     if: needs.changes.outputs.image == 'true'
     runs-on: ubuntu-latest

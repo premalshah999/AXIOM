@@ -26,7 +26,29 @@ CLOSED_POSTING = re.compile(
     r"\b(?:job|posting|requisition)\b[^.]{0,30}\bdoes not exist\b|\bjob\b[^.]{0,60}\bhas been filled\b",
     re.I,
 )
+# Stops whose closing rule is code, not wording: workday.missing_posting_result closes on the employer's own search or on
+# a second run at the posting, and its "posting page does not exist" reason also reads as gone. Promoting it here closed
+# live Workday postings on their first sight (HNTB, Moffitt, Nordstrom, Varian, WVU Medicine, Evolent 2026-10-29).
+OWN_CLOSING_RULE = {"posting_unavailable", "route_unavailable"}
 OWNER_FINISHABLE = {"waiting_browser", "waiting_email", "waiting_answer", "needs_review", "timed_out", "paused"}
+
+
+def _last_observed_url(folder):
+    """The last page the run observed, from its saved steps ("" when none were kept)."""
+    import json
+
+    try:
+        last = sorted((folder / "steps").glob("*.json"))[-1]
+        return str(json.loads(last.read_text()).get("url") or "")
+    except (OSError, ValueError, IndexError):
+        return ""
+
+
+def _saved_outline(folder):
+    try:
+        return (folder / "final_outline.txt").read_text()
+    except OSError:
+        return ""
 
 
 class CompletionMixin:
@@ -140,6 +162,7 @@ class CompletionMixin:
                 and run.state != "submitting"
                 and not result.get("reviews")
                 and not result.get("receipt")
+                and result.get("recovery_cause") not in OWN_CLOSING_RULE
                 and CLOSED_POSTING.search(str(result.get("reason") or ""))
             ):
                 state = "closed"
@@ -464,6 +487,7 @@ class CompletionMixin:
                     select(Event.id).where(Event.run_id == run_id, Event.kind == "submitting").limit(1)
                 )
             )
+            already = False
             if submitted_by_owner:
                 # The owner finished a parked application in the browser (Schwab 2026-10-21: the run parked on its
                 # profile page; the owner submitted and saw "Your application was submitted successfully"). That is the
@@ -477,8 +501,25 @@ class CompletionMixin:
                 # SmartRecruiters 2026-10-26: "Bewerbung eingereicht!" after "Absenden" was clicked as a step).
                 if not run or run.state not in OWNER_FINISHABLE | {"submission_unknown"} or not submitted:
                     raise ValueError("Only a parked run whose final page shows the acknowledgement can be recorded")
-                run.receipt = {"type": "final_page_confirmation", "evidence": evidence[:4000], "at": now()}
-                run.reason = "The employer's final page acknowledged the application"
+                # Only a page that acknowledges THIS application counts (ASSA ABLOY 2026-10-27: a read-only "Review" view of
+                # an application already on file was booked as the run's confirmation; Shield AI 2026-10-29 and another
+                # custom site: "Your application was already submitted" was too). An applied-application view or an
+                # already-on-file notice is the employer's record of an earlier application: already_applied.
+                from ..final_page import final_page_verdict
+
+                folder = self.config.data_dir / "runs" / run_id
+                verdict, why = final_page_verdict(
+                    evidence, url=_last_observed_url(folder), outline=_saved_outline(folder)
+                )
+                if verdict == "rejected":
+                    raise ValueError(why + "; the run is left as it is")
+                if verdict == "already_applied":
+                    run.receipt = {"type": "employer_already_applied", "evidence": evidence[:4000], "at": now()}
+                    run.reason = "The employer's page shows an application already on file: " + why
+                    already = True
+                else:
+                    run.receipt = {"type": "final_page_confirmation", "evidence": evidence[:4000], "at": now()}
+                    run.reason = "The employer's final page acknowledged the application"
             elif not run or (run.state not in {"submission_unknown", "already_applied"} and not committed):
                 raise ValueError("Only uncertain submissions or already-applied notices can be reconciled")
             elif submitted:
@@ -489,6 +530,6 @@ class CompletionMixin:
                 # "Needs you" with no question for five jobs (2026-10-29: the repair agent read each final page as unsent).
                 run.receipt = {"type": "unsent_reconciled", "evidence": evidence[:4000], "at": now()}
                 run.reason = "Not submitted: " + evidence[:300]
-            run.state = "confirmed" if submitted else "waiting_browser"
+            run.state = "already_applied" if already else "confirmed" if submitted else "waiting_browser"
             s.get(Job, run.job_id).status = run.state
-        self.db.event(run_id, "reconciled", "Applicant reconciled submission", {"submitted": submitted})
+        self.db.event(run_id, "reconciled", "Applicant reconciled submission", {"submitted": submitted and not already})

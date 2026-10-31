@@ -6,9 +6,10 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
-from .db import Job, Run, Setting
+from .ats import detect
+from .db import Event, Job, Run, Setting
 
 
 class QueueBlocked(ValueError):
@@ -47,6 +48,24 @@ SHARED_LINK_HOSTS = {
 }
 
 
+def requisition_twins(session, job_id, urls):
+    """(id, url) of every other job that is the same requisition as one of `urls` under another link, on any platform:
+    the employer's page around a Greenhouse or Ashby form beside the board URL, an embed, an /apply tail, a Workday or
+    iCIMS portal variant (ats.requisition_keys). Roblox, Abnormal, Rubrik and IXL applied twice that way (2026-10)."""
+    from .ats import requisition_keys
+
+    wanted = {key: needle for url in urls for key, needle in requisition_keys(url)}
+    if not wanted:
+        return []
+    # The id is searched in the stored links first (one pass over the url column); keys decide.
+    rows = session.execute(
+        select(Job.id, Job.url).where(
+            Job.id != job_id, Job.demo.is_(False), or_(*[Job.url.icontains(n, autoescape=True) for n in set(wanted.values())])
+        )
+    )
+    return [(row.id, row.url) for row in rows if wanted.keys() & {key for key, _ in requisition_keys(row.url)}]
+
+
 def employer_partition(job):
     get = job.get if isinstance(job, dict) else lambda key, default=None: getattr(job, key, default)
     parsed = urlsplit(get("url", ""))
@@ -58,7 +77,10 @@ def employer_partition(job):
         return host + "/" + (company or parsed.path.strip("/").lower())
     parts = parsed.path.strip("/").split("/")
     ats = get("ats", "custom")
-    if ats in {"greenhouse", "lever", "ashby", "smartrecruiters", "rippling"} and parts[0]:
+    if ats in {"greenhouse", "lever", "ashby", "smartrecruiters", "rippling"} and parts[0] and detect(get("url", "")).id == ats:
+        # Only the platform's own address names its employer in the path. A run that finds Greenhouse behind a career site
+        # saves "greenhouse" on the job (persist_observed_ats), and its partition must not move from the site's host to
+        # "careers.example.com/jobs" while the application runs: a second job there would then start beside it.
         return host + "/" + parts[0].lower()
     if ats == "workday" and host.endswith(".myworkdaysite.com") and "recruiting" in parts:
         index = parts.index("recruiting")
@@ -189,13 +211,28 @@ def outcome_for(exc):
 UNKNOWN_RESUBMIT = {"enabled": False, "max_resubmits": 2, "receipt_wait_minutes": 30}
 
 
-def unknown_resubmit_allowed(session, runs, at=None):
+# How long a search of the mailbox for an uncertain application's acknowledgement stays good for a resubmission.
+RECEIPT_CHECK_VALID = timedelta(hours=1)
+
+
+def newest_unknown(runs):
+    """The uncertain run a resubmission and its mailbox search are about: the one that finished last."""
+    return max(
+        (r for r in runs if r.state == "submission_unknown"), key=lambda r: r.finished_at or r.created_at, default=None
+    )
+
+
+def unknown_resubmit_allowed(session, runs, at=None, *, checked=True):
     """When the installation enables it: retry uncertain submissions until confirmed.
 
     Bounded so a site that silently accepts cannot collect a pile of duplicates:
     no confirmed/already-applied run, no matched receipt email, the newest
-    uncertain attempt is old enough for its receipt to have arrived, and at most
-    `max_resubmits` retries after the first uncertain attempt.
+    uncertain attempt is old enough for its receipt to have arrived, at most
+    `max_resubmits` retries after the first uncertain attempt, and (`checked`) the mailbox was searched for this
+    application's acknowledgement after that wait (autopilot.receipt_first writes `unknown_receipt_check:<job>`).
+    Asana, Assured Guaranty and Perseus were resubmitted on the matcher's silence while the employer's
+    acknowledgement sat in the mailbox (2026-10-12); every caller passes through here, so none can skip the search.
+    `checked=False` asks whether the search is the only thing missing.
     """
     saved = session.get(Setting, "unknown_resubmit_policy")
     policy = {**UNKNOWN_RESUBMIT, **(saved.value if saved else {})}
@@ -217,12 +254,79 @@ def unknown_resubmit_allowed(session, runs, at=None):
     )
     if triage and triage.value.get("verdict") == "submitted":
         return False
-    newest = max((r.finished_at or r.created_at) for r in unknown)
+    last = newest_unknown(runs)
     try:
-        finished = datetime.fromisoformat(newest)
+        finished = datetime.fromisoformat(last.finished_at or last.created_at)
     except (TypeError, ValueError):
         return False
     now = at or datetime.now(UTC)
     if finished.tzinfo is None:
         finished = finished.replace(tzinfo=UTC)
-    return now - finished >= timedelta(minutes=int(policy.get("receipt_wait_minutes", 30)))
+    wait = timedelta(minutes=int(policy.get("receipt_wait_minutes", 30)))
+    if now - finished < wait:
+        return False
+    if not checked:
+        return True
+    search = session.get(Setting, "unknown_receipt_check:" + str(getattr(last, "job_id", "")))
+    try:
+        searched = datetime.fromisoformat(search.value["at"])
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return False
+    if searched.tzinfo is None:
+        searched = searched.replace(tzinfo=UTC)
+    return (
+        search.value.get("run_id") == getattr(last, "id", None)
+        and finished + wait <= searched
+        and now - searched <= RECEIPT_CHECK_VALID
+    )
+
+
+# A cancelled run that sent nothing to the employer is not an attempt. Only the app's own cancellations qualify; a
+# verdict on the job (the owner removing it, the SSN / government-ID rule, a closed posting, any reason not listed here)
+# keeps it out of the autopilot for good. 43 Ready jobs sat idle for a week, every worker free (2026-10-31): 23 Workable
+# runs cancelled while still queued to unblock a deploy (no reason, never started) and 20 drafts swept by the
+# 2026-10-10 maintenance, which the owner then resumed.
+APP_CANCELS = (
+    "Owner cancelled saved application during maintenance",  # the 2026-10-10 sweep of saved drafts
+    "Replaced by a newer attempt",  # operations.superseded: the newer run is the attempt
+)
+HOLD_WAIT = "; it waits for your approval"  # service.execution: queued before its employer was reserved
+
+
+def attempted_job_ids(session, only=None):
+    """Ids of the jobs (limited to `only` when given) that already have an attempt: any run except a cancellation by the
+    app before anything was sent. A cancelled run still counts when it has a `submitting` event or a receipt (a commit
+    may have reached the employer: a second application is worse than a missed one), when the owner removed the job, and
+    when its reason is not one the app writes for its own cancellations."""
+    scope = () if only is None else (Run.job_id.in_(list(only)),)
+    attempted = set(session.scalars(select(Run.job_id).where(Run.state != "cancelled", *scope).distinct()))
+    undecided = {}
+    for run_id, job_id, reason, started, receipt in session.execute(
+        select(Run.id, Run.job_id, Run.reason, Run.started_at, Run.receipt).where(Run.state == "cancelled", *scope)
+    ):
+        if job_id in attempted:
+            continue
+        reason = (reason or "").strip()
+        own = reason.startswith(APP_CANCELS) or (not started and (not reason or reason.endswith(HOLD_WAIT)))
+        if receipt or not own:
+            attempted.add(job_id)
+        else:
+            undecided[run_id] = job_id
+    # Only what is still undecided is looked up, by key and in chunks: a scan of every event or job control per tick is
+    # what the readiness reads were profiled for (py-spy, 2026-10-29).
+    pending = {run_id: job_id for run_id, job_id in undecided.items() if job_id not in attempted}
+    ids = list(pending)
+    for start in range(0, len(ids), 400):
+        run_ids = ids[start : start + 400]
+        sent = set(session.scalars(select(Event.run_id).where(Event.kind == "submitting", Event.run_id.in_(run_ids))))
+        removed = {
+            key.removeprefix("job_control:")
+            for key, state in session.execute(
+                select(Setting.key, Setting.value["state"].as_string()).where(
+                    Setting.key.in_(["job_control:" + pending[run_id] for run_id in run_ids])
+                )
+            )
+            if state == "deleted"
+        }
+        attempted.update(pending[run_id] for run_id in run_ids if run_id in sent or pending[run_id] in removed)
+    return attempted

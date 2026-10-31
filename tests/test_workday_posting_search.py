@@ -2,6 +2,9 @@
 the link alive. The employer's own Workday search confirms it: a requisition it no longer lists is closed after one
 run, instead of waiting as a failure for a second run that never came."""
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
 
 from jobpilot import workday
@@ -55,3 +58,41 @@ async def test_the_tenant_search_decides_listed_or_unknown(monkeypatch, payload,
 
     monkeypatch.setattr(httpx, "AsyncClient", Client)
     assert await tenant_search_lists(next(iter(URLS))) is expected
+
+
+def test_a_requisition_the_employer_still_lists_is_never_closed_by_a_not_found_page(service):
+    # Disney, Cisco, Toyota, Motorola, Applied Materials (2026-10-14..29): two runs saw "page does not exist" at the
+    # posting URL and closed it; the employer's own search lists all of them today.
+    job = {"id": "live", "url": next(iter(URLS))}
+    for run in ("run-1", "run-2", "run-3"):
+        result = missing_posting_result(service.db, job, run, job["url"], listed=True)
+        assert result["state"] == "waiting_browser" and result["recovery_cause"] == "posting_unavailable"
+
+
+class Engine:
+    """A browser engine on a Workday posting whose not-found page the stall handlers have just read."""
+
+    def __init__(self, service, listed, ats="workday"):
+        from jobpilot.browser import BrowserEngine
+
+        self.db, self.run_id, self.page = service.db, "run-1", SimpleNamespace(url=next(iter(URLS)))
+        self.job = {"id": "stalled", "url": next(iter(URLS)), "ats": ats}
+        self.form = SimpleNamespace(scan=AsyncMock(return_value={
+            "fields": [], "headings": [], "errors": [], "text": "The page you are looking for doesn't exist."}))
+        self.armed = False
+        self.listed = listed
+        self.page_closed = lambda: BrowserEngine.page_closed(self)
+        self.posting_closure = lambda *a: BrowserEngine.posting_closure(self, *a)
+
+
+@pytest.mark.parametrize("listed,closed", [(True, False), (None, False), (False, True)])
+async def test_a_stalled_workday_not_found_page_closes_only_on_the_employers_own_search(service, monkeypatch, listed, closed):
+    # HNTB, Moffitt, Nordstrom, Varian, WVU Medicine, Evolent (2026-10-29): page_closed closed each on its first sight.
+    monkeypatch.setattr(workday, "tenant_search_lists", AsyncMock(return_value=listed))
+    result = await Engine(service, listed).page_closed()
+    assert (result is not None and result["state"] == "closed") is closed
+
+
+async def test_another_platforms_not_found_page_still_closes_at_once(service):
+    result = await Engine(service, None, ats="custom").page_closed()
+    assert result["state"] == "closed" and "does" in result["reason"]

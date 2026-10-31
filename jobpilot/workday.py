@@ -37,6 +37,13 @@ def english_posting_url(url):
     return urlunsplit(parts._replace(path="/en-US/" + parts.path[match.end():]))
 
 
+def is_workday_maintenance_host(host):
+    """Workday's own domain (community.workday.com, static.community.workday.com), never a tenant's career site
+    (*.myworkdayjobs.com, *.myworkdaysite.com) or a look-alike such as notworkday.com."""
+    host = (host or "").lower()
+    return host == "workday.com" or host.endswith(".workday.com")
+
+
 def planned_maintenance_until(url, text, at=None):
     """Only Workday's observed maintenance page can defer the whole platform."""
     from datetime import UTC, datetime, timedelta
@@ -46,8 +53,10 @@ def planned_maintenance_until(url, text, at=None):
     # Workday's own maintenance page. AAA SoCal and USC (2026-10-17) redirected to /maintenance-page?d=5&s=1&e=1
     # with wording the exact sentence check missed, and were parked as an "account origin" mismatch instead of
     # waiting for Workday. Any unavailability/maintenance wording there counts; an all-clear page does not.
-    if (page.scheme != "https" or page.hostname != "community.workday.com"
-            or page.path.rstrip("/") != "/maintenance-page"
+    # The same page is also served as a static file (static.community.workday.com/maintenance-page.html: three
+    # jobs on 2026-10-31, eight in a week), so the host is any Workday-owned one and the path may end in .html.
+    if (page.scheme != "https" or not is_workday_maintenance_host(page.hostname)
+            or page.path.rstrip("/") not in {"/maintenance-page", "/maintenance-page.html"}
             or not re.search(r"unavailable|maintenance|be back|downtime|down for", text, re.I)):
         return None
     at = at or datetime.now(UTC)
@@ -129,6 +138,11 @@ def missing_posting_result(db, job, run_id, page_url, listed=None):
         }
     if listed is False:
         return {"state": "closed", "reason": CLOSED_REASON}
+    if listed is True:
+        # The employer's own search still lists the requisition, so the "does not exist" page is this route or a
+        # busy tenant, not the posting: 23 live postings (Disney, Cisco, Toyota, Motorola, Applied Materials...) were
+        # closed on it by 2026-10-29 and still answer their own posting API today. Never closed on that evidence.
+        return {"state": "waiting_browser", "reason": POSTING_MISSING_REASON, "recovery_cause": "posting_unavailable"}
     key = "posting_gone:" + job["id"]
     seen = list((db.get_setting(key, {}) or {}).get("run_ids", []))
     if run_id not in seen:
@@ -849,7 +863,7 @@ class WorkdayAuth:
 
     async def defer_maintenance(self):
         e, page = self.engine, self.engine.page
-        if urlsplit(page.url).hostname != "community.workday.com":
+        if not is_workday_maintenance_host(urlsplit(page.url).hostname):
             return False
         until = planned_maintenance_until(page.url, await page.locator("body").inner_text(timeout=3000))
         if not until:
