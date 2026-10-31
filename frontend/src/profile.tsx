@@ -1,35 +1,27 @@
-// The profile: one draft and one Save for every field, whichever Profile tab or Knowledge section it sits on.
-// ProfileProvider (mounted once by the Profile page) owns the draft; ProfileSettings shows the sections a tab asks for.
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Plus } from "lucide-react";
+// The Profile page: a list of sections at the left and one section at a time at the right, over ONE draft and ONE Save.
+// ProfileProvider (mounted once by the page) owns the draft, so an edit made in Personal details and another made in Job
+// preferences go out together in a single PUT /api/profile. The sections themselves are in profile-work.tsx, profile-rules.tsx and
+// knowledge.tsx; the questionnaires (supervisors, references, FAQ) save on their own, as you go.
+import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { api } from "./api";
-import { useWorkspace } from "./context";
-import { useAction, useDraft } from "./hooks";
+import { routeUrl, useWorkspace, type Route } from "./context";
 import { plural } from "./format";
-import { ProfilePhoto } from "./profile-photo";
-import { Actions, FormGrid, ListInput, SaveBar } from "./setup-kit";
-import type {
-  AnswerRules,
-  DemographicRule,
-  EducationEntry,
-  EducationStep,
-  Profile,
-  WorkEntry,
-} from "./types";
-import { Button, Check, ConfirmButton, Field, Input, Loading, Panel, Select, Table, Textarea } from "./ui/index";
+import { useAction, useDraft } from "./hooks";
+import { ContactsSection, MemorySection, QuestionnairesSection, useWaitingOnContacts, type Waiting } from "./knowledge";
+import { Group, Pick, Range, SectionHead, Tags } from "./profile-fields";
+import { IdentityHeader } from "./profile-photo";
+import { AnswerRulesSection, PermissionsSection, permissionCount, rulesWithDefaults } from "./profile-rules";
+import { EMPTY_EDU, EMPTY_WORK, WorkSection } from "./profile-work";
+import { useQuestionnaires } from "./qform";
+import { TopLine } from "./shell/Shell";
+import type { Address, AnswerRules, EducationEntry, Profile, WorkEntry } from "./types";
+import { Button, Check, Input, Panel, Segmented, Skeleton } from "./ui/index";
+import "./styles/profile.css";
 
-type ProfileDraft = { value: Profile; base: string; dirty: boolean };
-// Learned answers are server-owned; they never travel back in a profile save.
-const comparable = (p: Profile) => {
-  const { reviewed_answers: _r, approved_answers: _a, ...rest } = p as Profile & Record<string, unknown>;
-  return JSON.stringify(rest);
-};
-const EMPTY_WORK: WorkEntry = { company: "", title: "", location: "", start: "", end: "", current: false, description: "" };
-const EMPTY_EDU: EducationEntry = { school: "", degree: "", field_of_study: "", start: "", end: "", gpa: "" };
+export type Setter = <K extends keyof Profile>(key: K, value: Profile[K]) => void;
+export type SectionId = "about" | "work" | "preferences" | "contacts" | "questionnaires" | "permissions" | "answers" | "memory";
 
-type ProfileSection = "identity" | "experience" | "facts" | "policies" | "rules";
-type Setter = <K extends keyof Profile>(key: K, value: Profile[K]) => void;
-
+// ---------- the profile, made safe to read ----------
 // A profile that arrives thin (a new account, an older server) is filled in so no section reads a missing list.
 const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 function normalizeProfile(raw: Partial<Profile> | null | undefined): Profile {
@@ -73,16 +65,60 @@ function normalizeProfile(raw: Partial<Profile> | null | undefined): Profile {
   };
 }
 
+// ---------- what changed, and where ----------
+// JSON with sorted keys, so two profiles that say the same thing compare equal however their keys were written.
+function canon(v: unknown): string {
+  return JSON.stringify(v, (_k, x) =>
+    x && typeof x === "object" && !Array.isArray(x)
+      ? Object.fromEntries(Object.entries(x as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : 1)))
+      : x,
+  );
+}
+// Learned answers are server-owned; they never travel back in a profile save.
+const comparable = (p: Profile) => {
+  const { reviewed_answers: _r, approved_answers: _a, ...rest } = p as Profile & Record<string, unknown>;
+  return canon(rest);
+};
+
+const OWN_KEYS: Partial<Record<SectionId, (keyof Profile)[]>> = {
+  about: ["name", "preferred_name", "first_name", "middle_name", "last_name", "email", "phone", "phone_country_code", "phone_type", "location", "linkedin", "github", "website", "address"],
+  work: ["work", "education", "skills", "languages", "evidence"],
+  preferences: ["target_roles", "job_priority", "target_locations", "excluded_keywords", "minimum_fit", "salary_expectation", "availability", "application_source", "include_internships"],
+  permissions: ["autonomous", "allow_account_creation", "allow_application_consents", "accept_all_application_terms", "accept_required_marketing", "decline_demographics"],
+  memory: ["approved_consents"],
+};
+// answer_rules is one object on the server but three sections on the page.
+const RULE_KEYS: Partial<Record<SectionId, (keyof AnswerRules)[]>> = {
+  preferences: ["salary_stance", "travel_willingness", "employment_type_sought"],
+  permissions: ["guest_apply_first", "join_talent_communities", "open_agreement_links"],
+  answers: ["education", "major_fallback", "source_order", "source_any_channel", "demographics"],
+};
+function changedSections(a: Profile, b: Profile, factsChanged: boolean): SectionId[] {
+  const ra = rulesWithDefaults(a);
+  const rb = rulesWithDefaults({ ...b, decline_demographics: a.decline_demographics });
+  const ids = Object.keys({ ...OWN_KEYS, ...RULE_KEYS }) as SectionId[];
+  const out = ids.filter(
+    (id) =>
+      OWN_KEYS[id]?.some((k) => canon(a[k]) !== canon(b[k])) ||
+      RULE_KEYS[id]?.some((k) => canon(ra[k]) !== canon(rb[k])) ||
+      (id === "memory" && factsChanged),
+  );
+  return out.length ? out : factsChanged ? ["memory"] : [];
+}
+
 // ---------- the shared draft ----------
-type ProfileState = {
-  /** null until the first read of the profile has landed. */
+type ProfileDraft = { value: Profile; origin: Profile; base: string; baseFacts: string };
+export type ProfileState = {
   p: Profile | null;
   set: Setter;
   factsText: string;
   setFactsText: (text: string) => void;
   factsError: string;
   parsedFacts: Record<string, unknown>;
+  /** Something really differs from what is saved (an edit undone is not a change). */
   dirty: boolean;
+  /** The sections that hold a change. */
+  changed: SectionId[];
   saving: boolean;
   save: () => void;
   discard: () => void;
@@ -96,10 +132,8 @@ const useProfile = () => {
   return value;
 };
 
-/**
- * Holds the one draft (kept in memory across tab switches and remounts, see useDraft) and the one Save. Edits made on
- * Identity, Experience and Knowledge all go out together in a single PUT /api/profile.
- */
+const factsOf = (p: Profile) => JSON.stringify(p.facts || {}, null, 2);
+
 export function ProfileProvider({ children }: { children: ReactNode }) {
   const { snapshot, refresh } = useWorkspace();
   const server = useMemo(() => normalizeProfile(snapshot.profile), [snapshot.profile]);
@@ -107,18 +141,21 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const [factsText, setFactsText] = useDraft<string | null>("profile-facts", null);
   const { pending, run } = useAction();
 
+  const text = factsText ?? (draft ? draft.baseFacts : "{}");
+  const factsChanged = !!draft && text !== draft.baseFacts;
+  const net = !!draft && (comparable(draft.value) !== draft.base || factsChanged);
+
   // Follow the server until the first edit; afterwards keep the draft and flag concurrent changes instead of silently
   // replacing either side. Saving or discarding clears the draft, which brings it back here to be rebased.
   useEffect(() => {
-    if (!draft || (!draft.dirty && draft.base !== comparable(server))) {
-      setDraft({ value: server, base: comparable(server), dirty: false });
-      setFactsText(JSON.stringify(server.facts || {}, null, 2));
+    if (!draft || (!net && draft.base !== comparable(server))) {
+      setDraft({ value: server, origin: server, base: comparable(server), baseFacts: factsOf(server) });
+      setFactsText(factsOf(server));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [server, draft === null, draft?.dirty]);
+  }, [server, draft === null, net]);
 
-  const p = draft?.value ?? null;
-  const text = factsText ?? JSON.stringify(p?.facts || {}, null, 2);
+  const p = draft?.value ?? server;
   let factsError = "";
   let parsedFacts: Record<string, unknown> = {};
   try {
@@ -130,14 +167,13 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   }
 
   // Functional updates: several fields can change in one event without losing any.
-  const set: Setter = (key, value) =>
-    setDraft((d) => d && { ...d, value: { ...d.value, [key]: value }, dirty: true });
+  const set: Setter = (key, value) => setDraft((d) => d && { ...d, value: { ...d.value, [key]: value } });
   const discard = () => {
     setDraft(null);
     setFactsText(null);
   };
   const save = () => {
-    if (!draft || factsError) return;
+    if (!draft || !net || factsError) return;
     const v = draft.value;
     run(
       "save",
@@ -156,19 +192,22 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       "Profile saved. New applications use it immediately.",
     );
   };
-  const changedElsewhere = !!draft?.dirty && draft.base !== comparable(server);
+  const changedElsewhere = net && draft!.base !== comparable(server);
+  const changed = useMemo(
+    () => (draft && net ? changedSections(draft.origin, draft.value, factsChanged) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [draft?.value, net, factsChanged],
+  );
 
   const state: ProfileState = {
     p,
     set,
     factsText: text,
-    setFactsText: (t) => {
-      setFactsText(t);
-      setDraft((d) => d && { ...d, dirty: true });
-    },
+    setFactsText,
     factsError,
     parsedFacts,
-    dirty: !!draft?.dirty,
+    dirty: net,
+    changed,
     saving: pending === "save",
     save,
     discard,
@@ -177,6 +216,22 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       discard();
     },
   };
+
+  // Ctrl or ⌘ S saves from anywhere on the page.
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  useEffect(() => {
+    if (!net) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        saveRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [net]);
+
   return (
     <ProfileContext.Provider value={state}>
       {changedElsewhere && (
@@ -191,758 +246,387 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         </div>
       )}
       {children}
-      <SaveBar
-        dirty={state.dirty}
-        saving={state.saving}
-        onSave={save}
-        onDiscard={discard}
-        disabled={!!factsError}
-        label="Save profile"
-        note={factsError ? "Fix the facts JSON to save." : "Unsaved changes are kept while you move between tabs."}
-      />
+      <SaveBar state={state} />
     </ProfileContext.Provider>
   );
 }
 
-const SECTION_VIEW: Record<ProfileSection, (props: { p: Profile; set: Setter }) => ReactNode> = {
-  identity: (a) => <Identity {...a} />,
-  experience: (a) => <Experience {...a} />,
-  facts: () => <FactsEditor />,
-  policies: (a) => <Policies {...a} />,
-  rules: (a) => <AnswerRulesEditor {...a} />,
-};
-
-/** The sections a tab shows, one after another. All of them read and write the shared draft. */
-export function ProfileSettings({ sections }: { sections: ProfileSection[] }) {
-  const { p, set, factsError, save } = useProfile();
-  if (!p) return <Loading />;
+/** Appears only when something differs from what is saved, and says where. Stays at the foot of the page while you scroll. */
+function SaveBar({ state }: { state: ProfileState }) {
+  const { dirty, saving, save, discard, factsError, changed } = state;
+  if (!dirty && !saving) return null;
+  const where = changed.map((id) => SECTIONS.find((s) => s.id === id)?.label).filter(Boolean) as string[];
+  const note = factsError
+    ? "Fix the facts JSON to save."
+    : saving
+      ? "Saving…"
+      : where.length
+        ? where.length > 2
+          ? `Unsaved changes in ${where.length} sections.`
+          : `Unsaved changes in ${where.join(" and ")}.`
+        : "You have unsaved changes.";
   return (
-    <form
-      className="ax-sections"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (!factsError) save();
-      }}
-    >
-      {sections.map((id) => (
-        <div key={id} id={"profile-" + id}>
-          {SECTION_VIEW[id]({ p, set })}
+    <div className="pf-savebar" role="group" aria-label="Save changes">
+      <span className="pf-savebar-note" role="status">
+        {note}
+      </span>
+      <Button variant="ghost" disabled={saving} onClick={discard}>
+        Discard
+      </Button>
+      <Button variant="primary" loading={saving} disabled={!dirty || !!factsError} onClick={save}>
+        Save changes
+      </Button>
+    </div>
+  );
+}
+
+// ---------- the sections ----------
+type SectionDef = { id: SectionId; label: string; group: string; tab: string; filter?: string };
+// Each section's address keeps the old ones working: tab says which of the three old tabs it grew out of, filter is the old section name.
+const SECTIONS: SectionDef[] = [
+  { id: "about", label: "Personal details", group: "About you", tab: "identity" },
+  { id: "work", label: "Work and education", group: "About you", tab: "experience" },
+  { id: "preferences", label: "Job preferences", group: "About you", tab: "experience", filter: "preferences" },
+  { id: "contacts", label: "Supervisors and references", group: "Applications ask for", tab: "knowledge", filter: "references" },
+  { id: "questionnaires", label: "Questionnaires", group: "Applications ask for", tab: "knowledge" },
+  { id: "permissions", label: "What AXIOM may do for you", group: "Rules", tab: "knowledge", filter: "policies" },
+  { id: "answers", label: "When options don't match", group: "Rules", tab: "knowledge", filter: "rules" },
+  { id: "memory", label: "Saved facts and memory", group: "Saved by AXIOM", tab: "knowledge", filter: "memory" },
+];
+const route_of = (s: SectionDef): Route => ({ view: "profile", tab: s.tab, filter: s.filter });
+
+// The old Knowledge link to the facts editor lands on the saved facts, with the editor open.
+function sectionOf(route: Route): SectionId {
+  const filter = route.filter === "facts" ? "memory" : route.filter;
+  const byFilter = SECTIONS.find((s) => s.filter && s.filter === filter && (!route.tab || s.tab === route.tab));
+  if (byFilter) return byFilter.id;
+  return SECTIONS.find((s) => !s.filter && s.tab === route.tab)?.id ?? "about";
+}
+
+// What each section shows beside its name: a count that is really waiting, or a quiet tally. Nothing is invented.
+function metaOf(
+  id: SectionId,
+  p: Profile | null,
+  qs: ReturnType<typeof useQuestionnaires>["data"],
+  waiting: Waiting,
+  changed: SectionId[],
+): ReactNode {
+  const dot = changed.includes(id) ? <i className="pf-nav-dot" title="Unsaved changes" /> : null;
+  let meta: ReactNode = null;
+  if (id === "about" && p) {
+    const gaps = missingBasics(p);
+    if (gaps) meta = <span className="ax-nav-count" title={`${plural(gaps, "basic detail")} missing`}>{gaps}</span>;
+  } else if (id === "preferences" && p && !p.target_roles.length) {
+    meta = <span className="ax-nav-count" title="No target roles yet">1</span>;
+  } else if (id === "contacts") {
+    const m = qs?.modules.find((x) => x.id === "contacts");
+    if (waiting.applications > 0)
+      meta = <span className="ax-nav-count" title={`${plural(waiting.applications, "application")} waiting`}>{waiting.applications}</span>;
+    else if (m && m.status !== "complete") meta = <span className="pf-nav-meta mono">{m.answered}/{m.total}</span>;
+  } else if (id === "questionnaires" && qs) {
+    const rest = qs.modules.filter((m) => m.id !== "contacts");
+    const answered = rest.reduce((n, m) => n + m.answered, 0);
+    const total = rest.reduce((n, m) => n + m.total, 0);
+    if (total && answered < total) meta = <span className="pf-nav-meta mono">{answered}/{total}</span>;
+  } else if (id === "permissions" && p) {
+    const { on, total } = permissionCount(p);
+    meta = <span className="pf-nav-meta mono">{on}/{total}</span>;
+  }
+  return dot || meta ? (
+    <span className="pf-nav-end">
+      {dot}
+      {meta}
+    </span>
+  ) : null;
+}
+
+/** The details nearly every application asks for. How many of them are still empty. */
+function missingBasics(p: Profile) {
+  const a = p.address;
+  return [p.first_name, p.last_name, p.email, p.phone, a.line1, a.city, a.state, a.postal_code, a.country].filter((v) => !String(v || "").trim()).length;
+}
+
+function SectionNav({
+  current,
+  go,
+  meta,
+}: {
+  current: SectionId;
+  go: (route: Route) => void;
+  meta: (id: SectionId) => ReactNode;
+}) {
+  const groups = [...new Set(SECTIONS.map((s) => s.group))];
+  const nav = useRef<HTMLElement>(null);
+  // On a phone the sections are one scrolling row: keep the current one in view.
+  useEffect(() => {
+    nav.current?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: "nearest", inline: "center" });
+  }, [current]);
+  return (
+    <nav className="pf-nav" aria-label="Profile sections" ref={nav}>
+      {groups.map((g) => (
+        <div className="pf-nav-group" key={g}>
+          <p className="ax-nav-group">{g}</p>
+          {SECTIONS.filter((s) => s.group === g).map((s) => (
+            <a
+              key={s.id}
+              className="ax-nav-item pf-nav-item"
+              href={routeUrl(route_of(s))}
+              aria-current={current === s.id ? "page" : undefined}
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                e.preventDefault();
+                go(route_of(s));
+              }}
+            >
+              <span className="pf-nav-label">{s.label}</span>
+              {meta(s.id)}
+            </a>
+          ))}
         </div>
       ))}
-    </form>
+    </nav>
   );
 }
 
-// ---------- Identity ----------
-function Text({
-  p,
-  set,
-  k,
-  label,
-  type = "text",
-  placeholder,
-  autoComplete,
-}: {
-  p: Profile;
-  set: Setter;
-  k: keyof Profile;
-  label: string;
-  type?: string;
-  placeholder?: string;
-  autoComplete?: string;
-}) {
+export function ProfilePage() {
   return (
+    <div className="ax-page pf-page">
+      <ProfileProvider>
+        <ProfileLayout />
+      </ProfileProvider>
+    </div>
+  );
+}
+
+function ProfileLayout() {
+  const state = useProfile();
+  const { p, set } = state;
+  const { route, go } = useWorkspace();
+  const qs = useQuestionnaires();
+  const waiting = useWaitingOnContacts();
+  const id = sectionOf(route);
+
+  // Each section starts at its top; the shell does this only when the tab changes.
+  useEffect(() => {
+    document.querySelector(".ax-scroll")?.scrollTo({ top: 0 });
+  }, [id]);
+
+  const contacts = SECTIONS.find((s) => s.id === "contacts")!;
+  return (
+    <>
+      <TopLine>
+        {waiting.applications > 0 && id !== "contacts" ? (
+          <>
+            {plural(waiting.applications, "application")} {waiting.applications === 1 ? "is" : "are"} waiting on supervisor or reference details.{" "}
+            <a
+              className="ax-link"
+              href={routeUrl(route_of(contacts))}
+              onClick={(e) => {
+                e.preventDefault();
+                go(route_of(contacts));
+              }}
+            >
+              Add them
+            </a>
+          </>
+        ) : (
+          "What AXIOM uses to fill in your applications."
+        )}
+      </TopLine>
+      <div className="pf">
+        <SectionNav current={id} go={go} meta={(s) => metaOf(s, p, qs.data, waiting, state.changed)} />
+        <div className="pf-content">
+          {id === "contacts" ? (
+            <ContactsSection qs={qs} waiting={waiting} />
+          ) : id === "questionnaires" ? (
+            <QuestionnairesSection qs={qs} waiting={waiting} />
+          ) : !p ? (
+            <Skeleton rows={6} mono={false} />
+          ) : id === "about" ? (
+            <About p={p} set={set} />
+          ) : id === "work" ? (
+            <WorkSection p={p} set={set} />
+          ) : id === "preferences" ? (
+            <Preferences p={p} set={set} />
+          ) : id === "permissions" ? (
+            <PermissionsSection p={p} set={set} />
+          ) : id === "answers" ? (
+            <AnswerRulesSection p={p} set={set} />
+          ) : (
+            <MemorySection state={state} />
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ---------- Personal details ----------
+const PHONE_TYPES = ["Mobile", "Home", "Work"];
+
+function About({ p, set }: { p: Profile; set: Setter }) {
+  const addr = p.address;
+  const setAddr = (k: keyof Address, v: string) => set("address", { ...addr, [k]: v });
+  const text = (k: keyof Profile, label: string, span: string, extra: { type?: string; placeholder?: string } = {}) => (
     <Input
+      className={span}
       label={label}
-      type={type}
-      placeholder={placeholder}
-      autoComplete={autoComplete || "off"}
+      autoComplete="off"
       value={String(p[k] ?? "")}
       onChange={(e) => set(k, e.target.value as never)}
+      {...extra}
     />
   );
-}
-
-function Identity({ p, set }: { p: Profile; set: Setter }) {
-  const addr = p.address;
-  const setAddr = (k: keyof Profile["address"], v: string) => set("address", { ...addr, [k]: v });
+  const phoneTypes = PHONE_TYPES.includes(p.phone_type) || !p.phone_type ? PHONE_TYPES : [...PHONE_TYPES, p.phone_type];
   return (
-    <div className="ax-sections">
-      <ProfilePhoto name={p.name || [p.first_name, p.last_name].filter(Boolean).join(" ")} />
-      <Panel title="Name and contact">
-        <FormGrid>
-          <Text p={p} set={set} k="name" label="Full legal name" />
-          <Text p={p} set={set} k="preferred_name" label="Preferred name" />
-          <Text p={p} set={set} k="first_name" label="Legal first name" />
-          <Text p={p} set={set} k="middle_name" label="Middle name" />
-          <Text p={p} set={set} k="last_name" label="Legal last name" />
-          <Text p={p} set={set} k="email" label="Email" type="email" />
-          <Text p={p} set={set} k="phone" label="Phone" type="tel" />
-          <Text p={p} set={set} k="phone_country_code" label="Phone country code" placeholder="+1" />
-          <Text p={p} set={set} k="phone_type" label="Phone type" />
-          <Text p={p} set={set} k="location" label="Current location" placeholder="City, State" />
-          <Text p={p} set={set} k="linkedin" label="LinkedIn URL" type="url" />
-          <Text p={p} set={set} k="github" label="GitHub URL" type="url" />
-          <Text p={p} set={set} k="website" label="Website or portfolio" type="url" />
-        </FormGrid>
-      </Panel>
-      <Panel title="Address">
-        <FormGrid>
-          {(
-            [
-              ["line1", "Address line 1"],
-              ["line2", "Address line 2"],
-              ["city", "City"],
-              ["state", "State or province"],
-              ["postal_code", "Postal code"],
-              ["county", "County"],
-              ["country", "Country"],
-            ] as [keyof Profile["address"], string][]
-          ).map(([k, label]) => (
-            <Input key={k} label={label} value={addr[k] || ""} onChange={(e) => setAddr(k, e.target.value)} />
-          ))}
-        </FormGrid>
+    <div className="pf-stack">
+      <IdentityHeader
+        name={p.preferred_name.trim() || p.name || [p.first_name, p.last_name].filter(Boolean).join(" ")}
+        detail={[p.email, p.location].filter(Boolean).join(" · ")}
+      />
+      <Panel flush className="pf-panel">
+        <Group title="Name" hint="As it appears on your ID. Forms ask for these exactly.">
+          {text("first_name", "Legal first name", "pf-s2")}
+          {text("middle_name", "Middle name", "pf-s2")}
+          {text("last_name", "Legal last name", "pf-s2")}
+          {text("name", "Full legal name", "pf-s3")}
+          {text("preferred_name", "Preferred name", "pf-s3")}
+        </Group>
+        <Group title="Contact">
+          {text("email", "Email", "pf-s3", { type: "email" })}
+          {text("location", "Current location", "pf-s3", { placeholder: "City, State" })}
+          {text("phone_country_code", "Phone country code", "pf-s2", { placeholder: "+1" })}
+          {text("phone", "Phone", "pf-s2", { type: "tel" })}
+          <Pick
+            className="pf-s2"
+            label="Phone type"
+            value={p.phone_type || "Mobile"}
+            options={phoneTypes.map((v) => ({ value: v, label: v }))}
+            onChange={(v) => set("phone_type", v)}
+          />
+        </Group>
+        <Group title="Links">
+          {text("linkedin", "LinkedIn", "pf-s2", { type: "url", placeholder: "https://" })}
+          {text("github", "GitHub", "pf-s2", { type: "url", placeholder: "https://" })}
+          {text("website", "Website or portfolio", "pf-s2", { type: "url", placeholder: "https://" })}
+        </Group>
+        <Group title="Address">
+          <Input className="pf-s3" label="Address line 1" value={addr.line1 || ""} onChange={(e) => setAddr("line1", e.target.value)} />
+          <Input className="pf-s3" label="Address line 2" value={addr.line2 || ""} onChange={(e) => setAddr("line2", e.target.value)} />
+          <Input className="pf-s2" label="City" value={addr.city || ""} onChange={(e) => setAddr("city", e.target.value)} />
+          <Input className="pf-s2" label="State or province" value={addr.state || ""} onChange={(e) => setAddr("state", e.target.value)} />
+          <Input className="pf-s2" label="Postal code" value={addr.postal_code || ""} onChange={(e) => setAddr("postal_code", e.target.value)} />
+          <Input className="pf-s3" label="County" value={addr.county || ""} onChange={(e) => setAddr("county", e.target.value)} />
+          <Input className="pf-s3" label="Country" value={addr.country || ""} onChange={(e) => setAddr("country", e.target.value)} />
+        </Group>
       </Panel>
     </div>
   );
 }
 
-// ---------- Experience ----------
-/** One role or degree: a fold titled with what it is, open when it is new and still empty. */
-function Entry({ title, meta, blank, children }: { title: string; meta?: string; blank: boolean; children: ReactNode }) {
-  const [open, setOpen] = useState(blank);
-  return (
-    <details className="ax-fold ax-entry" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary>
-        <strong>{title}</strong>
-        {meta && <span className="ax-hint">{meta}</span>}
-      </summary>
-      {children}
-    </details>
-  );
-}
-
-function Experience({ p, set }: { p: Profile; set: Setter }) {
-  const { pending, run } = useAction();
-  const [proposal, setProposal] = useState<{
-    work: WorkEntry[];
-    education: EducationEntry[];
-    skills: string[];
-    contact: Partial<Profile>;
-  } | null>(null);
-  const hasWork = (w: WorkEntry) =>
-    p.work.some(
-      (x) => x.company.trim().toLowerCase() === w.company.trim().toLowerCase() && x.title.trim().toLowerCase() === w.title.trim().toLowerCase(),
-    );
-  const hasEdu = (e: EducationEntry) =>
-    p.education.some(
-      (x) => x.school.trim().toLowerCase() === e.school.trim().toLowerCase() && x.degree.trim().toLowerCase() === e.degree.trim().toLowerCase(),
-    );
-  const updateWork = (i: number, patch: Partial<WorkEntry>) =>
-    set("work", p.work.map((w, j) => (j === i ? { ...w, ...patch } : w)));
-  const updateEdu = (i: number, patch: Partial<EducationEntry>) =>
-    set("education", p.education.map((x, j) => (j === i ? { ...x, ...patch } : x)));
-  const newWork = proposal?.work.filter((w) => !hasWork(w)) || [];
-  const newEdu = proposal?.education.filter((e) => !hasEdu(e)) || [];
-  const extract = () =>
-    run("extract", async () => {
-      const r = await api<{
-        work: WorkEntry[];
-        education: EducationEntry[];
-        skills: string[];
-        first_name: string;
-        last_name: string;
-        phone: string;
-        location: string;
-        linkedin: string;
-        github: string;
-        website: string;
-      }>("/profile/extract", "POST");
-      const contact: Partial<Profile> = {};
-      for (const k of ["first_name", "last_name", "phone", "location", "linkedin", "github", "website"] as const)
-        if (r[k] && !p[k]) contact[k] = r[k];
-      setProposal({ work: r.work || [], education: r.education || [], skills: r.skills || [], contact });
-    });
-  return (
-    <div className="ax-sections">
-      <Panel
-        title="Work history"
-        actions={
-          <>
-            <Button size="sm" loading={pending === "extract"} disabled={pending !== null} onClick={extract}>
-              Read from resume
-            </Button>
-            <Button size="sm" icon={<Plus size={14} aria-hidden="true" />} onClick={() => set("work", [...p.work, { ...EMPTY_WORK }])}>
-              Add role
-            </Button>
-          </>
-        }
-      >
-        {proposal && (
-          <div className="ax-stack">
-            <p className="ax-hint">
-              Found {plural(proposal.work.length, "role")} and {plural(proposal.education.length, "degree")};{" "}
-              {newWork.length + newEdu.length ? `${newWork.length + newEdu.length} not yet in your profile.` : "all are already in your profile."}
-            </p>
-            <ul className="ax-rows">
-              {[
-                ...newWork.map((w) => ({ kind: "work" as const, w })),
-                ...newEdu.map((e) => ({ kind: "edu" as const, e })),
-              ].map((item, i) => (
-                <li className="ax-row" key={i}>
-                  <span className="ax-row-main">
-                    {item.kind === "work" ? (
-                      <>
-                        <strong>{item.w.title}</strong>
-                        <small>
-                          {item.w.company} · {item.w.start}–{item.w.current ? "present" : item.w.end}
-                        </small>
-                      </>
-                    ) : (
-                      <>
-                        <strong>
-                          {item.e.degree}
-                          {item.e.field_of_study && ` in ${item.e.field_of_study}`}
-                        </strong>
-                        <small>
-                          {item.e.school} · {item.e.end}
-                        </small>
-                      </>
-                    )}
-                  </span>
-                  <Button
-                    size="sm"
-                    onClick={() =>
-                      item.kind === "work" ? set("work", [...p.work, item.w]) : set("education", [...p.education, item.e])
-                    }
-                  >
-                    Add
-                  </Button>
-                </li>
-              ))}
-            </ul>
-            <Actions start>
-              {newWork.length + newEdu.length > 1 && (
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    set("work", [...p.work, ...newWork]);
-                    set("education", [...p.education, ...newEdu]);
-                  }}
-                >
-                  Add all new
-                </Button>
-              )}
-              {Object.keys(proposal.contact).length > 0 && (
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    for (const [k, v] of Object.entries(proposal.contact)) set(k as keyof Profile, v as never);
-                  }}
-                >
-                  Fill {plural(Object.keys(proposal.contact).length, "empty contact field")}
-                </Button>
-              )}
-              {proposal.skills.length > 0 && !p.skills.length && (
-                <Button size="sm" onClick={() => set("skills", proposal.skills)}>
-                  Use {plural(proposal.skills.length, "skill")}
-                </Button>
-              )}
-              <Button size="sm" variant="ghost" onClick={() => setProposal(null)}>
-                Done
-              </Button>
-            </Actions>
-          </div>
-        )}
-        {p.work.length === 0 && !proposal && <p className="ax-hint">No roles yet.</p>}
-        {p.work.map((w, i) => (
-          <Entry
-            key={i}
-            blank={!w.company && !w.title}
-            title={w.title || w.company ? `${w.title || "Role"} · ${w.company || "Company"}` : `Role ${i + 1}`}
-            meta={[w.start, w.current ? "present" : w.end].filter(Boolean).join(" – ")}
-          >
-            <FormGrid>
-              <Input label="Company" value={w.company} onChange={(e) => updateWork(i, { company: e.target.value })} />
-              <Input label="Title" value={w.title} onChange={(e) => updateWork(i, { title: e.target.value })} />
-              <Input label="Location" value={w.location} onChange={(e) => updateWork(i, { location: e.target.value })} />
-              <Input label="Start" placeholder="YYYY-MM" value={w.start} onChange={(e) => updateWork(i, { start: e.target.value })} />
-              <Input
-                label="End"
-                placeholder={w.current ? "Present" : "YYYY-MM"}
-                disabled={w.current}
-                value={w.end}
-                onChange={(e) => updateWork(i, { end: e.target.value })}
-              />
-              <Check
-                label="Current role"
-                checked={w.current}
-                onChange={(on) => updateWork(i, { current: on, end: on ? "" : w.end })}
-              />
-              <Textarea
-                label="What you did"
-                rows={3}
-                value={w.description}
-                onChange={(e) => updateWork(i, { description: e.target.value })}
-              />
-            </FormGrid>
-            <Actions start>
-              <ConfirmButton label="Remove role" confirm="Remove" onConfirm={() => set("work", p.work.filter((_, j) => j !== i))} />
-            </Actions>
-          </Entry>
-        ))}
-      </Panel>
-
-      <Panel
-        title="Education"
-        actions={
-          <Button size="sm" icon={<Plus size={14} aria-hidden="true" />} onClick={() => set("education", [...p.education, { ...EMPTY_EDU }])}>
-            Add degree
-          </Button>
-        }
-      >
-        {p.education.length === 0 && <p className="ax-hint">No degrees yet.</p>}
-        {p.education.map((x, i) => (
-          <Entry
-            key={i}
-            blank={!x.school && !x.degree}
-            title={x.degree || x.school ? `${x.degree || "Degree"} · ${x.school || "School"}` : `Degree ${i + 1}`}
-            meta={x.end}
-          >
-            <FormGrid>
-              <Input label="School" value={x.school} onChange={(e) => updateEdu(i, { school: e.target.value })} />
-              <Input label="Degree" value={x.degree} onChange={(e) => updateEdu(i, { degree: e.target.value })} />
-              <Input label="Field of study" value={x.field_of_study} onChange={(e) => updateEdu(i, { field_of_study: e.target.value })} />
-              <Input label="Start" placeholder="YYYY-MM" value={x.start} onChange={(e) => updateEdu(i, { start: e.target.value })} />
-              <Input
-                label="End or expected"
-                placeholder="YYYY-MM"
-                hint="A future date means the degree is in progress."
-                value={x.end}
-                onChange={(e) => updateEdu(i, { end: e.target.value })}
-              />
-              <Input label="GPA" value={x.gpa} onChange={(e) => updateEdu(i, { gpa: e.target.value })} />
-            </FormGrid>
-            <Actions start>
-              <ConfirmButton label="Remove degree" confirm="Remove" onConfirm={() => set("education", p.education.filter((_, j) => j !== i))} />
-            </Actions>
-          </Entry>
-        ))}
-      </Panel>
-
-      <Panel title="Skills and languages">
-        <FormGrid>
-          <Field label="Skills" hint="Comma separated">
-            <ListInput value={p.skills} onChange={(v) => set("skills", v)} />
-          </Field>
-          <Field label="Languages" hint="Comma separated">
-            <ListInput value={p.languages || []} onChange={(v) => set("languages", v)} />
-          </Field>
-        </FormGrid>
-      </Panel>
-
-      <Panel
-        title="Stories and evidence"
-        actions={
-          <Button
-            size="sm"
-            icon={<Plus size={14} aria-hidden="true" />}
-            onClick={() => {
-              const used = new Set(p.evidence.map((e) => e.id));
-              let n = p.evidence.length + 1;
-              while (used.has("note-" + n)) n++;
-              set("evidence", [...p.evidence, { id: "note-" + n, text: "" }]);
-            }}
-          >
-            Add note
-          </Button>
-        }
-      >
-        {p.evidence.length === 0 && <p className="ax-hint">No notes yet. Projects and achievements here are used to write supported answers.</p>}
-        <FormGrid>
-          {p.evidence.map((note, i) => (
-            <div key={note.id}>
-              <Textarea
-                label={`Note ${i + 1}`}
-                rows={3}
-                maxLength={8000}
-                value={note.text}
-                onChange={(e) => set("evidence", p.evidence.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))}
-              />
-              <Actions start>
-                <ConfirmButton label="Remove" confirm="Remove note" onConfirm={() => set("evidence", p.evidence.filter((_, j) => j !== i))} />
-              </Actions>
-            </div>
-          ))}
-        </FormGrid>
-      </Panel>
-
-      <div id="profile-preferences">
-        <Preferences p={p} set={set} />
-      </div>
-    </div>
-  );
-}
-
-// ---------- Preferences ----------
-function rulesWithDefaults(p: Profile): AnswerRules {
-  const saved = p.answer_rules || {};
-  const demographics: Record<string, DemographicRule> = {};
-  for (const [key] of IDENTITY_TOPICS) {
-    demographics[key] = {
-      decline_first: p.decline_demographics,
-      answer: "",
-      when_missing: "ask",
-      ...(saved.demographics?.[key] || {}),
-    };
-  }
-  return {
-    education: saved.education || ["closest", "pick3", "other", "ask"],
-    major_fallback: saved.major_fallback ?? "",
-    source_order: saved.source_order ?? [],
-    source_any_channel: saved.source_any_channel ?? false,
-    salary_stance: saved.salary_stance ?? "",
-    travel_willingness: saved.travel_willingness ?? "",
-    employment_type_sought: saved.employment_type_sought ?? "",
-    join_talent_communities: saved.join_talent_communities ?? false,
-    demographics,
-    guest_apply_first: saved.guest_apply_first ?? true,
-    open_agreement_links: saved.open_agreement_links ?? true,
-  };
-}
-
+// ---------- Job preferences ----------
 function Preferences({ p, set }: { p: Profile; set: Setter }) {
   const rules = rulesWithDefaults(p);
   const rule = (next: Partial<AnswerRules>) => set("answer_rules", { ...rules, ...next });
   return (
-    <Panel title="Preferences">
-      <FormGrid>
-        <Field label="Target roles" hint="Comma separated. Usual alternate titles count too.">
-          <ListInput value={p.target_roles} onChange={(v) => set("target_roles", v)} />
-        </Field>
-        <Select
-          label="Apply first to"
-          value={p.job_priority ?? "new_grad_first"}
-          onChange={(e) => set("job_priority", e.target.value as Profile["job_priority"])}
-        >
-          <option value="new_grad_first">New grad roles, then best fit</option>
-          <option value="best_fit_first">Best fit, any level</option>
-        </Select>
-        <Field label="Target locations" hint="Comma separated">
-          <ListInput value={p.target_locations} onChange={(v) => set("target_locations", v)} />
-        </Field>
-        <Field label="Exclude titles containing" hint="Comma separated keywords">
-          <ListInput value={p.excluded_keywords} onChange={(v) => set("excluded_keywords", v)} />
-        </Field>
-        <Input
-          label="Minimum fit for ranking"
-          hint="0–100"
-          type="number"
-          min={0}
-          max={100}
-          value={p.minimum_fit}
-          onChange={(e) => set("minimum_fit", Number(e.target.value))}
-        />
-        <Input
-          label="Salary expectation"
-          hint="Leave blank to skip optional salary questions."
-          value={p.salary_expectation}
-          onChange={(e) => set("salary_expectation", e.target.value)}
-        />
-        <Input
-          label="Stance on desired pay"
-          hint="Said when pay is asked and no salary is saved, for example Negotiable."
-          maxLength={60}
-          value={rules.salary_stance}
-          onChange={(e) => rule({ salary_stance: e.target.value })}
-        />
-        <Input
-          label="Willingness to travel"
-          placeholder="Open to travel"
-          maxLength={100}
-          value={rules.travel_willingness}
-          onChange={(e) => rule({ travel_willingness: e.target.value })}
-        />
-        <Input
-          label="Employment sought"
-          placeholder="Full-time early-career employment"
-          maxLength={100}
-          value={rules.employment_type_sought}
-          onChange={(e) => rule({ employment_type_sought: e.target.value })}
-        />
-        <Check
-          label="Include internships and co-ops"
-          note="Off applies to full-time roles only."
-          checked={!!p.include_internships}
-          onChange={(v) => set("include_internships", v)}
-        />
-        <Input label="Availability or notice" value={p.availability} onChange={(e) => set("availability", e.target.value)} />
-        <Input
-          label="How you heard about the job"
-          value={p.application_source}
-          onChange={(e) => set("application_source", e.target.value)}
-        />
-      </FormGrid>
-    </Panel>
-  );
-}
-
-// ---------- Policies ----------
-function Policies({ p, set }: { p: Profile; set: Setter }) {
-  return (
-    <Panel title="What AXIOM may do for you">
-      <FormGrid>
-        <Check
-          checked={p.autonomous}
-          onChange={(v) => set("autonomous", v)}
-          label="Apply autonomously"
-          note="Applications missing a required personal fact wait for your answer while other jobs continue."
-        />
-        <Check
-          checked={p.allow_account_creation}
-          onChange={(v) => set("allow_account_creation", v)}
-          label="Create and reuse employer accounts"
-          note="Needed for Workday, iCIMS and other portals that require an account."
-        />
-        <Check
-          checked={p.allow_application_consents}
-          onChange={(v) => set("allow_application_consents", v)}
-          label="Accept privacy notices and certify accuracy"
-          note="Certifies that saved information is accurate where a form requires it."
-        />
-        <Check
-          checked={p.accept_all_application_terms}
-          onChange={(v) => set("accept_all_application_terms", v)}
-          label="Accept application terms and conditions"
-        />
-        <Check
-          checked={!!p.accept_required_marketing}
-          onChange={(v) => set("accept_required_marketing", v)}
-          label="Accept required marketing consent"
-          note="Only when a form refuses to continue without it."
-        />
-        <Check
-          checked={p.decline_demographics}
-          onChange={(v) => set("decline_demographics", v)}
-          label="Decline voluntary demographic questions"
-          note="Chooses “prefer not to say” unless you confirmed a specific answer."
-        />
-      </FormGrid>
-    </Panel>
-  );
-}
-
-// ---------- Facts ----------
-function FactsEditor() {
-  const { p, set, factsText, setFactsText, factsError, parsedFacts, dirty, reload } = useProfile();
-  const { pending, run } = useAction();
-  if (!p) return null;
-  return (
-    <Panel title="Confirmed facts">
-      <FormGrid>
-        <Textarea
-          label="Facts (JSON)"
-          mono
-          spellCheck={false}
-          rows={16}
-          value={factsText}
-          hint={factsError ? undefined : `${Object.keys(parsedFacts).length} facts. Missing facts are asked once, never guessed.`}
-          error={factsError || undefined}
-          onChange={(e) => setFactsText(e.target.value)}
-        />
-        <Textarea
-          label="Approved consent statements"
-          hint="One exact checkbox label per line. List only commitments you accept."
-          rows={4}
-          value={p.approved_consents.join("\n")}
-          onChange={(e) => set("approved_consents", e.target.value.split("\n").filter((x) => x.trim()))}
-        />
-      </FormGrid>
-      <Actions start note={dirty ? "Save or discard your edits first." : "Only restructures facts you already saved; nothing is invented."}>
-        <Button
-          size="sm"
-          loading={pending === "organize"}
-          disabled={pending !== null || dirty}
-          onClick={() =>
-            run(
-              "organize",
-              async () => {
-                const r = await api<{ saved?: number }>("/profile/organize", "POST");
-                await reload();
-                return r;
-              },
-              (r) => (r?.saved != null ? `Organized and saved ${plural(r.saved, "fact")}.` : "Saved facts organized."),
-            )
-          }
-        >
-          Organize saved facts with AI
-        </Button>
-      </Actions>
-    </Panel>
-  );
-}
-
-// ---------- When options don't match ----------
-const EDUCATION_STEPS: [EducationStep, string, string][] = [
-  ["closest", "Closest match", "Your fallback major (below) and the same-level degree first, then the most similar option."],
-  ["pick3", "Assistant chooses from the 3 closest", "Only options close to your value are offered; unrelated ones never are."],
-  ["other", "“Other” or “Not listed”", "When the list offers one."],
-  ["ask", "Ask me", "The application waits for your answer while other jobs continue."],
-];
-const IDENTITY_TOPICS: [string, string][] = [
-  ["gender", "Gender"],
-  ["race", "Race or ethnicity"],
-  ["hispanic", "Hispanic or Latino"],
-  ["veteran", "Veteran status"],
-  ["disability", "Disability"],
-  ["other", "Other identity questions"],
-];
-
-function AnswerRulesEditor({ p, set }: { p: Profile; set: Setter }) {
-  const rules = rulesWithDefaults(p);
-  const update = (next: Partial<AnswerRules>) => set("answer_rules", { ...rules, ...next });
-  const topic = (key: string, next: Partial<DemographicRule>) =>
-    update({ demographics: { ...rules.demographics, [key]: { ...rules.demographics[key], ...next } } });
-  // Enabled steps keep their saved order; disabled ones follow in their usual place.
-  const ordered = [...rules.education, ...EDUCATION_STEPS.map(([s]) => s).filter((s) => !rules.education.includes(s))];
-  const move = (step: EducationStep, by: number) => {
-    const list = [...rules.education];
-    const i = list.indexOf(step);
-    const j = i + by;
-    if (i < 0 || j < 0 || j >= list.length) return;
-    [list[i], list[j]] = [list[j], list[i]];
-    update({ education: list });
-  };
-  const toggle = (step: EducationStep, on: boolean) =>
-    update({
-      education: on ? ordered.filter((s) => s === step || rules.education.includes(s)) : rules.education.filter((s) => s !== step),
-    });
-  return (
-    <div className="ax-sections">
-      <Panel title="Degree, major or school not listed">
-        <ol className="ax-rows">
-          {ordered.map((step) => {
-            const [, title, note] = EDUCATION_STEPS.find(([s]) => s === step)!;
-            const on = rules.education.includes(step);
-            const i = rules.education.indexOf(step);
-            return (
-              <li key={step} className="ax-row">
-                <Check checked={on} onChange={(v) => toggle(step, v)} label={title} note={note} />
-                {on && (
-                  <span className="ax-row-end">
-                    <Button size="sm" variant="ghost" aria-label={`Move ${title} earlier`} disabled={i === 0} onClick={() => move(step, -1)}>
-                      ↑
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      aria-label={`Move ${title} later`}
-                      disabled={i === rules.education.length - 1}
-                      onClick={() => move(step, 1)}
-                    >
-                      ↓
-                    </Button>
-                  </span>
-                )}
-              </li>
-            );
-          })}
-        </ol>
-        <FormGrid>
+    <div className="pf-stack">
+      <SectionHead title="Job preferences" line="Which jobs AXIOM looks for, and what it says when an application asks about pay and availability." />
+      <Panel flush className="pf-panel">
+        <Group title="Roles you want">
+          <Tags
+            className="pf-s6"
+            label="Target roles"
+            hint="Usual alternate titles count too."
+            placeholder="Data Scientist, ML Engineer…"
+            value={p.target_roles}
+            onChange={(v) => set("target_roles", v)}
+          />
+          <Tags
+            className="pf-s6"
+            label="Target locations"
+            placeholder="Anywhere in the USA, Remote…"
+            value={p.target_locations}
+            onChange={(v) => set("target_locations", v)}
+          />
+          <Tags
+            className="pf-s6"
+            label="Skip titles containing"
+            hint="Jobs with these words in the title are left out."
+            placeholder="Senior, Director…"
+            value={p.excluded_keywords}
+            onChange={(v) => set("excluded_keywords", v)}
+          />
+          <div className="ax-field pf-s6">
+            <span className="ax-label">Apply first to</span>
+            <Segmented
+              label="Apply first to"
+              value={p.job_priority ?? "new_grad_first"}
+              options={[
+                { value: "new_grad_first", label: "New grad roles, then best fit" },
+                { value: "best_fit_first", label: "Best fit, any level" },
+              ]}
+              onChange={(v) => set("job_priority", v)}
+            />
+          </div>
+          <div className="pf-s6">
+            <Check
+              label="Include internships and co-ops"
+              note="Off applies to full-time roles only."
+              checked={!!p.include_internships}
+              onChange={(v) => set("include_internships", v)}
+            />
+          </div>
+          <Range
+            className="pf-s6"
+            label="Minimum fit"
+            hint="Jobs that score below this are not marked ready to apply. 0 to 100."
+            value={p.minimum_fit}
+            onChange={(v) => set("minimum_fit", v)}
+          />
+        </Group>
+        <Group title="Pay and availability" hint="Used when an application asks and the answer isn't already saved.">
           <Input
-            label="Fallback major"
-            hint="Chosen when a form’s list lacks your major, for example Computer Science. Empty chooses none."
+            className="pf-s3"
+            label="Salary expectation"
+            hint="Leave blank to skip optional salary questions."
+            value={p.salary_expectation}
+            onChange={(e) => set("salary_expectation", e.target.value)}
+          />
+          <Input
+            className="pf-s3"
+            label="If no salary is saved, say"
+            hint="For example Negotiable."
+            maxLength={60}
+            value={rules.salary_stance}
+            onChange={(e) => rule({ salary_stance: e.target.value })}
+          />
+          <Input className="pf-s3" label="Availability or notice" placeholder="Immediately" value={p.availability} onChange={(e) => set("availability", e.target.value)} />
+          <Input
+            className="pf-s3"
+            label="Employment sought"
+            placeholder="Full-time early-career employment"
             maxLength={100}
-            value={rules.major_fallback}
-            onChange={(e) => update({ major_fallback: e.target.value })}
+            value={rules.employment_type_sought}
+            onChange={(e) => rule({ employment_type_sought: e.target.value })}
           />
-          <Field label="“How did you hear about us” order" hint="Used when your own source isn’t offered. Comma separated, best first. Empty asks you.">
-            <ListInput value={rules.source_order} onChange={(v) => update({ source_order: v })} />
-          </Field>
-          <Check
-            checked={rules.source_any_channel}
-            onChange={(v) => update({ source_any_channel: v })}
-            label="Then any other plain channel"
-            note="Accepts an offered channel that claims no referral or insider relationship."
+          <Input
+            className="pf-s3"
+            label="Willingness to travel"
+            placeholder="Open to travel"
+            maxLength={100}
+            value={rules.travel_willingness}
+            onChange={(e) => rule({ travel_willingness: e.target.value })}
           />
-        </FormGrid>
-      </Panel>
-
-      <Panel title="Self-identification questions" flush>
-        <Table
-          label="Self-identification answers"
-          rows={IDENTITY_TOPICS}
-          rowKey={([key]) => key}
-          minWidth={680}
-          columns={[
-            { key: "q", header: "Question", width: 180, cell: ([, label]) => label },
-            {
-              key: "decline",
-              header: "Prefer not to say",
-              cell: ([key, label]) => (
-                <input
-                  type="checkbox"
-                  aria-label={`Prefer not to say for ${label}`}
-                  checked={rules.demographics[key].decline_first}
-                  onChange={(e) => topic(key, { decline_first: e.target.checked })}
-                />
-              ),
-            },
-            {
-              key: "answer",
-              header: "Your answer",
-              width: 240,
-              cell: ([key, label]) => (
-                <input
-                  aria-label={`Your answer for ${label}`}
-                  placeholder="From Knowledge"
-                  value={rules.demographics[key].answer}
-                  onChange={(e) => topic(key, { answer: e.target.value })}
-                />
-              ),
-            },
-            {
-              key: "missing",
-              header: "If your answer isn’t listed",
-              width: 200,
-              cell: ([key, label]) => (
-                <select
-                  aria-label={`If your ${label.toLowerCase()} answer isn’t listed`}
-                  value={rules.demographics[key].when_missing}
-                  onChange={(e) => topic(key, { when_missing: e.target.value as DemographicRule["when_missing"] })}
-                >
-                  <option value="closest">Closest option</option>
-                  <option value="other">“Other”</option>
-                  <option value="ask">Ask me</option>
-                </select>
-              ),
-            },
-          ]}
-        />
-      </Panel>
-
-      <Panel title="Buttons and steps">
-        <FormGrid>
-          <Check
-            checked={rules.guest_apply_first}
-            onChange={(v) => update({ guest_apply_first: v })}
-            label="Apply as a guest when the site allows it"
-            note="Skips sign-in and account creation when an employer offers “Apply without an account”."
+          <Input
+            className="pf-s3"
+            label="How you heard about the job"
+            placeholder="LinkedIn"
+            value={p.application_source}
+            onChange={(e) => set("application_source", e.target.value)}
           />
-          <Check
-            checked={rules.join_talent_communities}
-            onChange={(v) => update({ join_talent_communities: v })}
-            label="Join talent communities"
-            note="Opts in when a form offers to keep your data on file for other roles. Off declines."
-          />
-          <Check
-            checked={rules.open_agreement_links}
-            onChange={(v) => update({ open_agreement_links: v })}
-            label="Open linked documents before accepting an agreement"
-            note="Some sites accept an agreement only after its privacy and terms links were opened."
-          />
-        </FormGrid>
+        </Group>
       </Panel>
     </div>
   );
 }
+

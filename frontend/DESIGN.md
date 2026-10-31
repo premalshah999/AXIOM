@@ -1,6 +1,6 @@
 # AXIOM dashboard design system (2026-10-31)
 
-Read this before touching a page. It holds two stages: the **family** every page is made from, and the **reference pages** (Overview, Jobs and its drawer) to copy. Needs you, Applications, Resumes, Profile, Settings and the sign-in screens are on the new shell and tokens but not yet redesigned; section 7 says what each must become.
+Read this before touching a page. It holds two stages: the **family** every page is made from, and the **reference pages** (Overview, Jobs and its drawer) to copy. Needs you, Applications, Resumes, Settings and the sign-in screens are on the new shell and tokens but not yet redesigned (Profile is done: section 6b); section 7 says what each must become.
 
 ## 1. Rules
 
@@ -68,7 +68,7 @@ Doto (`.ax-read`) is for hero readouts of 56px and up, on Overview only. The Arc
 - **Page header:** the shell renders the title from `nav.ts`. From inside a page, `<TopActions>` puts the page's actions at its right and `<TopLine>` puts one short line under the title, only if it helps. They portal and unmount with the page. Don't put a title in a page.
 - **Phones (under 900px):** a slim top bar (wordmark, live status, search) and a five-item tab bar (Overview, Jobs, Needs you, Applications, More). More opens a bottom sheet with the other pages, the theme and sign out. Actions wrap under the title by themselves.
 - **Command palette:** `⌘K` or Ctrl-K: pages, tabs, jobs (with monograms), Add a job, switch theme.
-- **Scrolling:** a page that is one table uses `<div className="ax-page ax-page-fill">` and `<Table fill footer={<Pagination/>}>`: the table is the only scroller and its head stays put. Any other page is `<div className="ax-page">` and scrolls in `.ax-scroll`. Widths: `.ax-main` sets `--content-w`; Profile and Settings use `--form-w`.
+- **Scrolling:** a page that is one table uses `<div className="ax-page ax-page-fill">` and `<Table fill footer={<Pagination/>}>`: the table is the only scroller and its head stays put. Any other page is `<div className="ax-page">` and scrolls in `.ax-scroll`. Widths: `.ax-main` sets `--content-w`; Settings uses `--form-w`, Profile widens it (`profile.css`) to make room for its section list.
 
 ### Routes
 
@@ -81,7 +81,7 @@ Doto (`.ax-read`) is for hero readouts of 56px and up, on Overview only. The Arc
 | Needs you | `needs` | |
 | Applications | `ledger` | `confirmed`, `unconfirmed`, `archive` |
 | Resumes | `resumes` (the editor, `editor`, belongs to it) | |
-| Profile | `profile` | `identity`, `experience`, `knowledge` |
+| Profile | `profile` | `identity`, `experience`, `knowledge`, narrowed by `filter` to a section (see 6b) |
 | Settings | `settings` | `connections`, `accounts`, `email`, `discovery`, `system` |
 | Coming soon | `soon-axe`, `soon-network`, `soon-emails` | |
 
@@ -152,6 +152,19 @@ Copy this structure for Applications and any list.
 - **Views are named:** Started, Discovered, Reserved, each with a count, each saying what it is in one line. "Add job" is a button opening a small dialog (`AddJobDialog` in `jobintake.tsx`, mounted once in `main.tsx`; dispatch `OPEN_JOB_LINK`), never a permanent input.
 - **The drawer** (`JobPanel`): head with a large monogram, employer, role; a meta line (location, platform, fit, Open posting). Then the **status block** (`StatusBlock`, an inset surface): lamp and word, what it means, why, and inside it the question to answer or the next action. Then what stopped it, Proof, History (a line of attempts; click to open one), Final page. Folds: Answers, Activity, This attempt in detail, Raw receipt, Technical details.
 
+## 6b. Profile: the reference for a page of sections (`profile.tsx`, `profile-work.tsx`, `profile-rules.tsx`, `profile-photo.tsx`, `profile-fields.tsx`, `knowledge.tsx`, `qform.tsx`, `styles/profile.css`)
+
+Copy this for Settings. The page is a section list at the left and **one section at a time** at the right (a scrolling row of sections under the header below 1180px), over **one draft and one Save**.
+
+- **Sections and their addresses.** `SECTIONS` in `profile.tsx` holds them; each keeps an old address alive through `tab` (the old tab it grew out of) and `filter` (the old section name, or a new one): Personal details (`identity`), Work and education (`experience`), Job preferences (`experience` + `preferences`), Supervisors and references (`knowledge` + `references`), Questionnaires (`knowledge`), What AXIOM may do for you (`knowledge` + `policies`), When options don't match (`knowledge` + `rules`), Saved facts and memory (`knowledge` + `memory`; the old `facts` opens its JSON tab). Add a section there, not in `nav.ts`.
+- **What the list shows beside a name** is real or nothing: a vermilion count for applications actually waiting (Supervisors and references: open questions that ask for a supervisor or a reference, counted once per application from the live snapshot), a count of basic details still empty, a quiet tally (`26/37` answered, `7/9` permissions on), a dot where the draft has an unsaved change.
+- **One draft** (`ProfileProvider`, kept in memory across sections by `useDraft`). `dirty` means the draft really differs from what is saved (keys compared in sorted order, so an edit undone is not a change). The **save bar** (`pf-savebar`) exists only then, says which sections hold changes, and saves on Ctrl or ⌘ S. Questionnaires (supervisors, references, FAQ) save on their own as you go and say so.
+- **Fields** sit on a 6-column grid inside one Panel per section, in titled `Group`s: give a field `pf-s2` (a third), `pf-s3` (a half) or nothing (the row); everything is one column on a phone. First, middle and last name share a line. `Tags` (type and press Enter or a comma) replaces a comma-separated input, `Range` a number on a slider, `Pick` a choice in a form (a Listbox filled to the field's width).
+- **Experience, education and notes are cards** (`pf-card`: monogram, title, employer, dates, two lines of what you did). A card opens in a **Drawer** to edit, with Remove asking first. A card added and left empty is taken back on close.
+- **Supervisors and references** is where applications are waiting. The section leads with how many (the employers' monograms, "See them" opening Needs you), says AXIOM never invents these, and shows two meters. Below, one row per job in the work history that opens in place (`PersonCard` in `qform.tsx`; the first opens by itself while none is added), and up to three references. `ModuleForm` takes `bare` when the host supplies the title: only a floating save pill remains.
+- **Questionnaires are progress cards**: state, what it is for, which sections are still open, a meter, one button (Start, Continue, Review).
+- **Permissions** are plain sentences with a switch, grouped (Applying, Agreements and consents, Your privacy), with the count that are on.
+
 ## 7. Pages still to redesign, on this standard
 
 Their brief is in UI3_BRIEF.md. What each must do with the family above:
@@ -159,7 +172,6 @@ Their brief is in UI3_BRIEF.md. What each must do with the family above:
 - **Needs you** (`needs.tsx`, `questions.tsx`, the `nq-` styles in `work.css`): an inbox. Group the same question across jobs ("Supervisor phone, 6 applications") with MonogramStack; list and answer pane, or better. `QuestionCard` already handles every kind of answer, including uploads through Dropzone; Enter to send and move on, "skip", "not applicable to me", progress, what answering unblocks. Questions that text can't answer look different and offer to drop the job.
 - **Applications** (`ledger.tsx`, `archive.tsx`): copy Jobs. A confident header using `TopLine` (total, today), evidence words from `evidenceLabel`, Listbox for evidence, Export as `TopActions`, `footer` for the pager; replace the remaining `Pagination` after the table.
 - **Resumes** (`ResumesView` in `setup.tsx`, `features.tsx`, `editor.tsx`, `pdfpages.tsx`): lead with what is being sent and whether tailoring is on, in one sentence and one control (`application_resume_policy` in the snapshot). Guided path for setting it up. Do not turn tailoring on yourself. Library cards or rows with preview and download; the Dropzone is already wired for upload. Tailored versions open in a preview panel. Editor: a full-height workspace with a slim bar; it currently still shows the shell's page header (`main.view-editor`, `.ax-scroll.is-fixed`). Test every path.
-- **Profile** (`profile.tsx`, `knowledge.tsx`, `qform.tsx`): section navigation within the page, a two-column grid for related fields, cards that open to edit, a sticky save bar only with changes (`ax-savebar`), progress cards.
 - **Settings** (`connections.tsx`, `autonomy.tsx`, `mail.tsx`, `discovery.tsx`, `setup.tsx`): group by what people recognise; provider cards with status, masked key and Test; internals behind an Advanced fold. Fix the mailbox showing "connected" beside "Mailbox operation failed".
 - **Sign-in, sign-up, reset, setup guide** (`account.tsx`, `onboarding.tsx`, `styles/onboarding.css`, `styles/setup.css`), **coming-soon** (`ComingSoon.tsx`), **error boundary** (`ErrorBoundary.tsx`), **404**: the same family; the first thing anyone sees.
 

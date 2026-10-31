@@ -9,8 +9,7 @@ import { MailSettings } from "./mail";
 import { ConnectionSettings } from "./connections";
 import { SignInSettings } from "./account";
 import { TailoredResumes } from "./features";
-import { KnowledgeView } from "./knowledge";
-import { ProfileProvider, ProfileSettings } from "./profile";
+import { ProfileProvider } from "./profile";
 import { Pagination, usePagination } from "./pagination";
 import { Actions, Facts, FormGrid, RestartNotice, SwitchRow } from "./setup-kit";
 import type {
@@ -45,27 +44,8 @@ import {
   Table,
 } from "./ui/index";
 
-// Profile and Settings are one page each with tabs (nav.ts lists them; context.ts sends old Setup links to the right one).
-export function ProfileView() {
-  const { route } = useWorkspace();
-  const tabs = PAGE_TABS.profile!;
-  const tab = tabs.some((t) => t.id === route.tab) ? route.tab : tabs[0]!.id;
-  // Links such as ?view=profile&tab=experience&filter=preferences land on that section.
-  useEffect(() => {
-    if (tab === "experience" && route.filter === "preferences")
-      document.getElementById("profile-preferences")?.scrollIntoView({ block: "start" });
-  }, [tab, route.filter]);
-  return (
-    <div className="ax-page">
-      <RouteTabs view="profile" tabs={tabs} label="Profile" current={tab} />
-      <ProfileProvider>
-        {tab === "identity" && <ProfileSettings sections={["identity"]} />}
-        {tab === "experience" && <ProfileSettings sections={["experience"]} />}
-        {tab === "knowledge" && <KnowledgeView />}
-      </ProfileProvider>
-    </div>
-  );
-}
+// Settings is one page with tabs (nav.ts lists them; context.ts sends old Setup links to the right one). Profile is profile.tsx.
+export { ProfilePage as ProfileView } from "./profile";
 
 // Resumes: its own page since 2026-10-31 (it was a tab of Profile). The old address, ?view=profile&tab=resumes, opens it.
 export function ResumesView() {
