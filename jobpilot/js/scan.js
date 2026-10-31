@@ -741,7 +741,13 @@
     if (!shown.length) continue;
     group.forEach(c => consumed.add(c));
     const parent = group[0].closest('.application-question,fieldset,[role=group]');
-    const q = clean(parent?.querySelector('.application-label,legend')?.innerText || '') || label(group[0]) || name;
+    // Without a legend the question is the plain text just before the boxes; the first box's own caption ("Yes, I
+    // certify") is an answer, not the question (Adzuna 2026-10-28: the page's "Please choose at least one option for
+    // 'Do you certify that ...'" matched no field).
+    const asked = clean(parent?.querySelector('.application-label,legend')?.innerText || '')
+      || (() => { const t = precedingText(group[0], new Set(group.map(c => label(c))));
+                  return t.length >= 15 && !group.some(c => label(c) === t) ? t : ''; })();
+    const q = asked || label(group[0]) || name;
     const req = group.some(c => c.required || c.getAttribute('aria-required') === 'true') || /[*✱]/.test(q);
     const value = group.filter(c => c.checked).map(c => label(c)).join('\n');
     push(group[0], { label: q, type: 'checkboxgroup', options: group.map(c => label(c)), required: req,members:group,

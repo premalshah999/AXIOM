@@ -637,6 +637,13 @@ LIVE_CONTROL_JS = """b => {
   if (b.disabled || b.getAttribute('aria-disabled') === 'true') return false;
   return !b.closest('[hidden],[inert],[aria-hidden="true"]');
 }"""
+# A page's own rejection that quotes the question it wants answered: "Please enter a value for 'X'", "You must select
+# ... 'X'". The quote is the field's whole label, so it may be long; apostrophes inside words never open one.
+NAMED_BY_PAGE = re.compile(
+    r"(?:please (?:enter|choose|select|provide|answer|complete)|you must (?:enter|select|choose|provide|answer))"
+    r"[^'\"“‘\n]{0,60}(?<![\w])['\"“‘]([^'\"”’\n]{2,300}?)['\"”’](?![\w])",
+    re.I,
+)
 # Questions asking where the applicant is (not a fixed office list): their pickers are search-only typeaheads.
 APPLICANT_LOCATION = re.compile(
     r"(?:location(?: \(city\))?|city|current (?:city|location)|(?:what is your )?current location|"
@@ -4319,6 +4326,7 @@ class FormSession:
                 messages = await self.page.evaluate(PAGE_MESSAGES)
             except Exception:
                 messages = []
+            messages = [*messages, *await self.named_rejections()]
             named = self.error_named_fields(messages)
             ask = [
                 x
@@ -4800,6 +4808,15 @@ class FormSession:
         inside = set(data["inside"])
         return [f for f in fields if (self.fields.get(f["id"]) or {}).get("dom_id") in inside], data["text"]
 
+    async def named_rejections(self):
+        """The page's own sentences that name a question it refuses to leave blank, wherever it prints them: Adzuna's
+        red lines carry no alert role or error class, so the scan's error list never held them."""
+        try:
+            text = await self._page_text()
+        except PlaywrightError:
+            return []
+        return [m.group(0) for m in NAMED_BY_PAGE.finditer(text)][:12]
+
     def error_named_fields(self, messages=()):
         """Ids of fields a page-level error requires although they are not marked required.
 
@@ -4812,6 +4829,9 @@ class FormSession:
         if not text:
             return set()
         names = {normalize(n) for n in re.findall(r'"([^"]{2,60})"', text)}
+        # Adzuna's own rejection (2026-10-28) quotes the whole question in single quotes: "Please enter a value for
+        # 'Are you currently based in the USA?'", "Please choose at least one option for 'Do you certify that ...'".
+        names |= {normalize(n) for n in NAMED_BY_PAGE.findall(text)}
         complete = bool(re.search(r"select all (?:possible|required) values in the section", text, re.I))
         # "The value does not match the pattern 999-999-9999": a phone written in another shape is rewritten.
         mask = phone_fields.phone_mask(text) if re.search(r"pattern|format", text, re.I) else None
@@ -5339,6 +5359,10 @@ class FormSession:
             # without scoped keys must be verified again before counting them.
             if not key or field_id in self.fields or key in current_keys:
                 record["verified"] = False
+        # A question the page itself refuses to leave blank is required, whatever its markup says (Adzuna, 2026-10-28:
+        # a required "Yes, I certify" box, a select and a text answer read back as verified while the submit was
+        # refused for them).
+        self.error_named_fields(await self.named_rejections())
         problems = []
         if self.uploaded and not self.upload_verified and not self.workday and not self.resume_fields():
             # SuccessFactors replaces its upload control with an attachment

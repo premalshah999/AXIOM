@@ -164,6 +164,22 @@ def critical_question(label):
     }
 
 
+# "Do you certify that all the details in your resume and job application are accurate and truthful?" The owner's
+# "Accept privacy notices and certify accuracy" permission (allow_application_consents) covers certifying that the saved
+# information is accurate where a form requires it; anything else a certification says is not covered by it.
+CERTIFY_ACCURACY = re.compile(
+    r"\b(?:certify|attest|affirm)\b[^.?]{0,120}\b(?:details|information|answers|statements|data|facts)\b[^.?]{0,120}"
+    r"\b(?:accurate|truthful|true and correct|correct and complete)\b",
+    re.I,
+)
+# What a certification must not also say: an arbitration, waiver, release, authorisation or contact consent.
+CERTIFY_EXTRAS = re.compile(
+    r"marketing|arbitrat|waiv|releas|background|credit|authori[sz]|consent|contact|sms|text messag|"
+    r"non[\s-]?(?:compet|solicit|disclos)|indemnif|binding",
+    re.I,
+)
+
+
 # Routine acknowledgements (reported in the consent ledger; acceptance follows the profile policy).
 STANDARD_CONSENT = re.compile(
     r"privacy (?:policy|notice|statement)|terms (?:and|&) conditions|terms of (?:use|service)|data (?:privacy|protection|processing)|"
