@@ -71,6 +71,18 @@ def test_archiving_failed_applications_moves_them_to_the_archive_with_a_log(clie
     assert lines[0]["run"]["state"] == "failed"
 
 
+def test_archiving_never_takes_a_job_that_waits_on_the_owner_or_whose_submission_is_unconfirmed(client, service):
+    waiting, review, unsure, active, failed = (seed_job(service, n) for n in range(1, 6))
+    seed_run(service, waiting, state="waiting_answer")
+    seed_run(service, review, state="needs_review")
+    seed_run(service, unsure, state="submission_unknown")
+    seed_run(service, active, state="waiting_email")
+    seed_run(service, active, state="failed")  # an earlier failure does not hide that it is waiting for an emailed code now
+    seed_run(service, failed, state="timed_out")
+    assert client.post("/api/archive/failed", json={}).json()["archived"] == 1
+    assert [a["job_id"] for a in client.get("/api/archive").json()["applications"]] == [failed]
+
+
 def test_the_log_of_a_job_that_was_never_archived_is_a_400(client, service):
     assert client.get(f"/api/archive/{seed_job(service)}/log").status_code == 400
 
