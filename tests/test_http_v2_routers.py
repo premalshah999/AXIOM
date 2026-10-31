@@ -56,3 +56,94 @@ def test_resume_reads_that_need_no_master_answer(client):
     assert client.get("/api/v2/resumes/editor/templates").status_code == 200
     assert client.get("/api/v2/resumes/artifacts").status_code == 200
 
+
+def _an_uploaded_resume(client, resume_pdf, name="Example resume"):
+    answer = client.post("/api/resumes", data={"name": name}, files={"file": (f"{name}.pdf", resume_pdf, "application/pdf")})
+    assert answer.status_code == 200, answer.text
+    return answer.json()["id"]
+
+
+def test_tailoring_cannot_go_on_without_an_approved_master(client, service, resume_pdf):
+    resume = _an_uploaded_resume(client, resume_pdf)
+    service.db.set_setting("application_resume_policy", {"mode": "master", "resume_id": resume})
+    refused = client.put("/api/v2/resumes/policy", json={"mode": "tailored"})
+    assert refused.status_code == 409 and "approve" in refused.json()["detail"].lower()
+    assert service.db.get_setting("application_resume_policy")["mode"] == "master"
+
+
+def test_the_policy_switch_keeps_the_resume_it_sends(client, service, resume_pdf):
+    resume = _an_uploaded_resume(client, resume_pdf)
+    service.db.set_setting("application_resume_policy", {"mode": "master", "resume_id": resume})
+    from jobpilot.features.resumes import tables
+
+    with service.db.exclusive() as s:
+        s.add(
+            tables.RsMaster(
+                id="ms_example",
+                source_resume_id=resume,
+                source_resume_sha="sha",
+                origin="import",
+                status="approved",
+                doc={"name": "Alex Example", "contact": [], "sections": []},
+                style={},
+                verification={"faithful": True},
+                model_calls=0,
+            )
+        )
+    on = client.put("/api/v2/resumes/policy", json={"mode": "tailored"})
+    assert on.status_code == 200, on.text
+    assert on.json()["mode"] == "tailored" and on.json()["resume_id"] == resume
+    assert client.get("/api/v2/resumes/master").json()["policy"]["mode"] == "tailored"
+    off = client.put("/api/v2/resumes/policy", json={"mode": "master"})
+    assert off.json()["mode"] == "master" and off.json()["resume_id"] == resume
+    assert off.json()["automatic_tailoring"] is False and off.json()["source"] == "dashboard"
+
+
+def test_the_policy_can_only_name_a_real_resume(client):
+    assert client.put("/api/v2/resumes/policy", json={"mode": "master", "resume_id": "nope"}).status_code == 409
+    assert client.put("/api/v2/resumes/policy", json={"mode": "everything"}).status_code == 422
+
+
+def test_the_master_source_is_the_resume_the_policy_sends(client, service, resume_pdf):
+    first = _an_uploaded_resume(client, resume_pdf)
+    second = _an_uploaded_resume(client, resume_pdf + b"\n%second", name="Second resume")
+    assert first != second
+    for chosen, name in ((first, "Example resume"), (second, "Second resume")):
+        service.db.set_setting("application_resume_policy", {"mode": "master", "resume_id": chosen})
+        assert client.get("/api/v2/resumes/master").json()["source"] == {"id": chosen, "name": name}
+
+
+def test_a_version_says_its_job_and_whether_an_application_went_out_with_it(client, service):
+    from jobpilot.db import Job, Run
+    from jobpilot.features.resumes.tables import RsArtifact
+
+    with service.db.exclusive() as s:
+        for job_id, company in (("job-sent", "ExampleSoft"), ("job-held", "Example Labs")):
+            s.add(Job(id=job_id, identity=job_id, url="https://example.test/" + job_id, title="Engineer", company=company, location="Remote", description="", ats="general", status="ready", reason=""))
+        s.flush()
+        for artifact, job_id in (("ta_sent", "job-sent"), ("ta_held", "job-held")):
+            s.add(
+                RsArtifact(
+                    id=artifact,
+                    cache_key=artifact,
+                    status="ready",
+                    source_resume_id="r",
+                    source_resume_sha="s",
+                    profile_digest="p",
+                    job_identity=job_id,
+                    job_id=job_id,
+                    description_sha="d",
+                    policy_version="v",
+                    selection=[],
+                    validation={},
+                )
+            )
+        s.add(Run(id="run-sent", job_id="job-sent", state="confirmed", mode="submit", packet={"resume_artifact_id": "ta_sent"}, finished_at="2026-10-07T07:38:12+00:00", receipt={}, reason=""))
+        s.add(Run(id="run-other", job_id="job-held", state="cancelled", mode="submit", packet={"resume_artifact_id": "ta_held"}, receipt={}, reason=""))
+    items = {a["artifact_id"]: a for a in client.get("/api/v2/resumes/artifacts").json()["items"]}
+    assert items["ta_sent"]["job"]["company"] == "ExampleSoft"
+    assert items["ta_sent"]["sent"] == {"state": "confirmed", "at": "2026-10-07T07:38:12+00:00"}
+    # A run that was cancelled never sent it.
+    assert items["ta_held"]["sent"] is None
+    one = client.get("/api/v2/resumes/artifacts", params={"artifact_id": "ta_held"}).json()
+    assert one["total"] == 1 and one["items"][0]["artifact_id"] == "ta_held"
