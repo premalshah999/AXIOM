@@ -57,3 +57,27 @@ async def test_a_login_beside_a_registration_form_keeps_its_passwords(page, tmp_
     _, obs = await scanned(page, tmp_path, "<main>" + REGISTRATION + SIDE + "</main>")
     assert not any(f.get("side_login") for f in obs["fields"])
     assert adapter().classify_page(obs) in {Step.SIGN_IN, Step.CREATE_ACCOUNT}
+
+
+# City National Bank (iCIMS, 2026-10-31): the employer's own "Online Banking" login drawer opened over its job page.
+# Read as the applicant's sign-in, the saved login was typed into the bank's login and five runs ended on a 6 s click
+# timeout. A customer login in the site's chrome is not a sign-in step; the drawer is closed to reach Apply.
+BANK = """<header><a href="/">Example Bank</a><div id=drawer role=dialog><h2>Log in to your account.</h2>
+  <form action="/bank/login"><label>Select Account <select name=product><option>Online Banking</option></select></label>
+  <label>Username <input name=user required></label><label>Password <input type=password name=pw required></label>
+  <button>Submit</button></form><button aria-label="Close Online Banking" onclick="drawer.remove()">x</button></div></header>"""
+JOB = "<main><h1>Data Analyst</h1><p>Overview of the role.</p><a href='/apply' class=apply>Apply for this job online</a></main>"
+
+
+async def test_a_customer_login_drawer_in_the_site_chrome_is_not_a_sign_in(page, tmp_path):
+    form, obs = await scanned(page, tmp_path, BANK + JOB)
+    assert all(f.get("side_login") for f in obs["fields"] if f["type"] in {"password", "text"})
+    assert not await form.authentication_required()
+    assert adapter().classify_page(obs) != Step.SIGN_IN
+    assert await page.locator("[data-jp-chrome-close]").count() == 1
+
+
+async def test_an_applicant_sign_in_that_mentions_banking_roles_stays_a_sign_in(page, tmp_path):
+    html = "<main><h2>Candidate sign in for banking careers</h2>" + SIDE.replace("aside", "div") + "</main>"
+    _, obs = await scanned(page, tmp_path, html)
+    assert not any(f.get("side_login") for f in obs["fields"])

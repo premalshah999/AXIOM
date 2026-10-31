@@ -534,6 +534,34 @@
     sideLogins.set(form, side);
     return side;
   };
+  // The employer's own customer login in its site chrome (City National Bank's "Online Banking" drawer on its iCIMS
+  // job page, 2026-10-31): a login that belongs to a product the posting has nothing to do with. Read as the
+  // applicant's sign-in, the saved login was typed into the bank's login and five runs ended on a click timeout.
+  // The smallest container around the login that carries its heading decides: customer vocabulary and no
+  // applicant vocabulary. Its close control is tagged so the adapter can dismiss the drawer.
+  const CUSTOMER_LOGIN = /online banking|internet banking|mobile banking|(?:customer|client|member|patient|investor|policyholder|shareholder) (?:log ?in|sign ?in|portal|access)/i;
+  const APPLICANT_WORDS = /candidate|applicant|career|job ?seeker|application|talent/i;
+  const chromeLogins = new Map();
+  const chromeLogin = el => {
+    // The smallest ancestor holding a password box that names a customer product is the login's own container.
+    for (let box = el.parentElement, depth = 0; box && depth < 10; box = box.parentElement, depth++) {
+      const text = clean(box.innerText || '');
+      if (text.length > 1500) return false;
+      if (!box.querySelector('input[type=password]') || !CUSTOMER_LOGIN.test(text)) continue;
+      if (!chromeLogins.has(box)) {
+        const hit = !APPLICANT_WORDS.test(text);
+        chromeLogins.set(box, hit);
+        // The close control sits beside the form inside the drawer: look outward while the drawer stays small.
+        for (let up = box; hit && up && clean(up.innerText || '').length <= 1500; up = up.parentElement) {
+          const closer = [...up.querySelectorAll('button,a,[role=button]')]
+            .find(b => /^(?:close|dismiss)\b|^[×x]$/i.test(clean(b.getAttribute('aria-label') || b.innerText || '')));
+          if (closer) { closer.setAttribute('data-jp-chrome-close', '1'); break; }
+        }
+      }
+      return chromeLogins.get(box);
+    }
+    return false;
+  };
   const push = (el, f) => {
     const error = fieldError(el, f.type === 'checkboxgroup' ? f.valid ?? null : null);
     const help = (el.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean)
@@ -563,7 +591,7 @@
       name: el.getAttribute('name') || '', html_id: el.id || '', automation_id: el.dataset.automationId || '',
       placeholder: el.getAttribute('placeholder') || '', error, widget: f.widget || '', search_box: searchBox(el),
       parts: f.parts || [], accept: el.getAttribute('accept') || '', hint: clean([f.hint || '', help, description].join(' ')).slice(0,2500),
-      date_format: f.date_format || '', side_login: sideLogin(el),
+      date_format: f.date_format || '', side_login: sideLogin(el) || chromeLogin(el),
       members: (f.members || []).map(id),
     });
   };
