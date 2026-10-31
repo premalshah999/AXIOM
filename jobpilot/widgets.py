@@ -3014,6 +3014,7 @@ async def combobox(
     )
     scope = await _popup_scope(el)
     opts = []
+    listed = []
     choice = None
 
     def eligible(options):
@@ -3143,7 +3144,13 @@ async def combobox(
         choice = best_option(opts, value)
     if not choice:
         await el.press("Escape")
-        raise ValueError("No matching option is offered")
+        error = ValueError("No matching option is offered")
+        # The rows the control did offer, so the failure record says what format to match (a month list that offers
+        # "05 - May" refuses "May") and the repeat breaker sees a changed list as new; option labels only.
+        error.offered = {
+            "rows": list(dict.fromkeys(o["text"] for o in [*listed, *opts] if o.get("text")))[:20]
+        }
+        raise error
     await click_option(frame, choice, owner=el)
     await asyncio.sleep(0.1)
     if multi:

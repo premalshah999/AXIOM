@@ -1435,7 +1435,18 @@ class FormSession:
         REPEATED_WRITE_FAILURES times on a page that did not change in between. A changed page, new offered choices
         or a different value start the count again, so those retries still run."""
         key = self.field_key(field)
-        offered = json.dumps(getattr(exc, "offered", None), sort_keys=True, default=str)
+
+        def texts(node):
+            # What a picker offered, as the set of rows it showed. An empty search is no news: Asure's State box
+            # returned [[]], [[], []] and a one-row catalog in turn, each read as new choices that reset the count, and
+            # one Country/State write failed 8 times in a run (2026-10-29).
+            if isinstance(node, dict):
+                return {t for v in node.values() for t in texts(v)}
+            if isinstance(node, (list, tuple, set)):
+                return {t for v in node for t in texts(v)}
+            return {str(node).strip()} - {"", "None"}
+
+        offered = json.dumps(sorted(texts(getattr(exc, "offered", None))))
         signature = (self._digest(value), widgets.interaction_failure(exc), self._digest(offered))
         failing = frozenset(repr(k) for k in [*self.field_failures, key])
         context = self.write_context()

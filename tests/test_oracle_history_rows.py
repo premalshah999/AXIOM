@@ -117,6 +117,10 @@ def test_any_dates_month_part_is_a_month():
     from jobpilot.widgets_ats import component_value, month_component
 
     assert component_value("Projected Completion Date Month", "5") == "May"
+    # A whole month-and-year answer in a Month box is its month (2026-10-29: "05/2026" filtered every month out).
+    assert component_value("What is your expected year of graduation? Month", "05/2026") == "May"
+    assert component_value("Start Date Month", "2024-08") == "August"
+    assert component_value("What is your expected year of graduation? Year", "2026") == "2026"
     assert month_component("Date Available Month") and month_component("Month")
     assert not month_component("Number of months") and not month_component("Months of experience")
 
