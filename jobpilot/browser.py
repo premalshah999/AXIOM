@@ -21,6 +21,7 @@ from .models import AnswerModelUnavailable, BudgetExceeded
 
 from .answers import UNOFFERED_SOURCE, Resolver
 from .ats import EMBED_JS, LABEL_ONLY, REGISTRY, VENDORS, classify_embedded, detect, unsettled
+from .posting_identity import IDENTITY_JS, identity, placeholder_title, save as save_identity
 from .email_browser import EmailBrowser, redacted_url
 from .failure_reports import clean
 from .forms import AUTH, ENTRY, FINAL, STALE_CHOICE, FormSession, NetworkMonitor, ResumeAttachmentError
@@ -1583,6 +1584,7 @@ class BrowserEngine:
                     "runner_tier": run["packet"].get("runner_tier", 1),
                 },
             )
+            await self.remember_posting_identity(page)
             async with asyncio.timeout(max(1, budget - (time.monotonic() - started))) as cm:
                 self.timeout_cm = cm
                 if job["demo"]:
@@ -2610,6 +2612,25 @@ class BrowserEngine:
         return found
 
     embed_poll = 0.5  # seconds between looks for a frame that loads late
+
+    async def remember_posting_identity(self, page):
+        """Save the employer and title the open posting states about itself when the job has none (or has the career
+        site's hostname as its employer): jobs from pasted links and short links showed as "ats.rippling.com" or "Untitled
+        role", and an empty company kept receipts from matching (posting_identity). Best effort, and free for a job that
+        has both."""
+        job = self.job
+        company = str(job.get("company") or "").strip()
+        hostname_like = "." in company and " " not in company
+        if job.get("demo") or not (not company or hostname_like or placeholder_title(job.get("title"))):
+            return
+        try:
+            found = identity(await page.evaluate(IDENTITY_JS))
+            changes = await asyncio.to_thread(save_identity, self.db, job["id"], found) if found else {}
+        except Exception:
+            return
+        if changes:
+            job.update(changes)
+            self.emit("job_identity", "Saved the employer and title the posting states", changes)
 
     async def late_greenhouse_frame(self, page, seconds=6):
         """The application frame of a Greenhouse board embed that has not rendered yet: its holder (#grnhse_app) or loader
