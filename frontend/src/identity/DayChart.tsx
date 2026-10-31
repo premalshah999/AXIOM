@@ -64,7 +64,8 @@ export function DayChart({ times, now }: { times: readonly number[]; now: number
         {[0, 3, 6, 9, 12, 15, 18, 21].map((h) => {
           // An hour the "now" mark would sit on gives way to it.
           const past = h - ((now - start) / 3600000);
-          return <span key={h}>{past >= 0 && past < 1.6 ? "" : String(h).padStart(2, "0")}</span>;
+          const hidden = (past >= 0 && past < 1.6) || (each > 1 && h === 21);
+          return <span key={h}>{hidden ? "" : String(h).padStart(2, "0")}</span>;
         })}
         <i className="ax-hours-now" style={{ left: `${(Number(nowX) / W) * 100}%` }}>
           now

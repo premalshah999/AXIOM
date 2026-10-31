@@ -27,12 +27,12 @@ const comparable = (p: Profile) => {
 const EMPTY_WORK: WorkEntry = { company: "", title: "", location: "", start: "", end: "", current: false, description: "" };
 const EMPTY_EDU: EducationEntry = { school: "", degree: "", field_of_study: "", start: "", end: "", gpa: "" };
 
-export type ProfileSection = "identity" | "experience" | "facts" | "policies" | "rules";
+type ProfileSection = "identity" | "experience" | "facts" | "policies" | "rules";
 type Setter = <K extends keyof Profile>(key: K, value: Profile[K]) => void;
 
 // A profile that arrives thin (a new account, an older server) is filled in so no section reads a missing list.
 const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
-export function normalizeProfile(raw: Partial<Profile> | null | undefined): Profile {
+function normalizeProfile(raw: Partial<Profile> | null | undefined): Profile {
   const p = (raw || {}) as Partial<Profile>;
   const text = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
   return {

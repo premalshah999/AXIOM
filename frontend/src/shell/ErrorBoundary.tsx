@@ -2,7 +2,7 @@ import { Component, type ReactNode } from "react";
 import { Button, Empty } from "../ui/index";
 
 /**
- * A page that throws must not blank the whole app: the sidebar, the palette and every other page keep working. The
+ * A page that throws must not blank the whole app: the navigation, the palette and every other page keep working. The
  * shell keys this by page, so choosing another page clears the error.
  */
 export class PageBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {

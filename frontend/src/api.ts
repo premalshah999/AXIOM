@@ -74,17 +74,15 @@ export async function api<T = any>(
   return data as T;
 }
 
-export type Api = typeof api;
-
 // Queue admission defers a job while its tailored resume is prepared. That is
 // automatic preparation, not a failure; callers show it as progress.
 export const PREPARING =
   "Preparing a tailored resume first. The application starts on its own when it's ready.";
-export function isPreparing(error: unknown) {
+function isPreparing(error: unknown) {
   return error instanceof ApiError && /preparing a tailored resume/i.test(error.message);
 }
 
-export type QueueResult = { preparing: boolean; deferred?: boolean; message?: string };
+type QueueResult = { preparing: boolean; deferred?: boolean; message?: string };
 
 export async function queueJob(path: string, body: unknown): Promise<QueueResult> {
   try {
@@ -106,7 +104,7 @@ export async function queueJob(path: string, body: unknown): Promise<QueueResult
 
 // One click applies: the server approves the job (no reason needed) and starts it, or keeps the request until
 // workers, pacing or a shared email sender allow it. Waiting is progress, not an error.
-export type ApplyResult = {
+type ApplyResult = {
   job_id: string;
   state: string;
   message: string;
@@ -121,7 +119,7 @@ export function applyJob(jobId: string): Promise<ApplyResult> {
 
 // A reserved employer (FAANG, MANGO, the Big Four) applies only with the owner's approval of the job (2026-10-27).
 // `apply` (the default) also starts it, exactly as Apply does; false only lifts the hold.
-export type ApproveResult = ApplyResult & { approved: boolean; employer: string; label: string };
+type ApproveResult = ApplyResult & { approved: boolean; employer: string; label: string };
 
 export function approveReserved(jobId: string, apply = true): Promise<ApproveResult> {
   return api<ApproveResult>(`/jobs/${jobId}/approve-reserved`, "POST", { apply });

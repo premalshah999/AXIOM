@@ -79,8 +79,8 @@
   letter-spacing: -0.005em;
   text-wrap: balance;
 }
-.ax-sentence.is-bad,
-.ax-sentence.is-warn {
+/* Only what needs you takes the lamp colour. Paused and held are not a problem. */
+.ax-sentence.is-bad {
   color: var(--signal-ink);
 }
 .ax-meta {
@@ -199,8 +199,15 @@
   font-size: var(--text-meta);
   line-height: 1.25;
 }
+/* "Restart automation" beside the key: two lines rather than over the questions window. */
 .ax-legend .ax-btn {
+  height: auto;
+  max-width: 132px;
   margin-top: var(--space-2);
+  padding: 7px 10px;
+  line-height: 1.15;
+  text-align: right;
+  white-space: normal;
 }
 .ax-target {
   display: flex;
@@ -390,10 +397,11 @@
   font-weight: 600;
   line-height: 1.2;
 }
-.ax-lb b,
+.ax-ch-open,
+.ax-lb b > span,
 .ax-lb > span,
-.ax-chlist-who b,
-.ax-chlist-who span {
+.ax-chlist-who b > span,
+.ax-chlist-who > span {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -401,7 +409,7 @@
   overflow-wrap: anywhere;
 }
 .ax-lb > span,
-.ax-chlist-who span {
+.ax-chlist-who > span {
   margin-top: 2px;
   color: var(--ink-2);
   font-size: var(--text-meta);
@@ -409,7 +417,7 @@
   line-height: 1.25;
 }
 .ax-lb > .ax-lb-do,
-.ax-chlist-who .ax-lb-do {
+.ax-chlist-who > .ax-lb-do {
   -webkit-line-clamp: 3;
   margin-top: 5px;
   color: var(--ink);
@@ -458,7 +466,7 @@
 
 /* Compact: ladders in a row over a readable list of the busy ones. What a phone and a narrow window get, and many workers. */
 .ax-bank.is-compact .ax-ladders {
-  grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(36px, 1fr));
   padding: 10px 6px;
   row-gap: var(--space-3);
 }
@@ -478,7 +486,9 @@
 }
 .ax-bank.is-compact .ax-lad {
   width: 100%;
+  max-width: 32px;
   height: auto;
+  margin-inline: auto;
 }
 .ax-bank.is-compact .ax-bank-lead {
   display: flex;
@@ -571,6 +581,9 @@
     grid-row: 2;
     padding: 0;
   }
+  .ax-day {
+    max-width: 720px;
+  }
 }
 /* A phone: the same instrument, turned to fit a hand. */
 @media (max-width: 899px) {
@@ -606,6 +619,11 @@
   }
   .ax-hours-now {
     display: none;
+  }
+  .ax-hours em {
+    position: static;
+    grid-column: 1 / -1;
+    text-align: right;
   }
   .ax-wait {
     grid-column: 1 / -1;

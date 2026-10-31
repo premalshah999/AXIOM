@@ -1,112 +1,95 @@
-# AXIOM dashboard design system (v2, 2026-10-30)
+# AXIOM dashboard design system: The Instrument (2026-10-31)
 
-**Status: the structure here is settled; the look is not.** The owner rejected the navy-and-Geist look on 2026-10-30 ("supergeneric"), and a new visual identity (fonts, palette, component look) is being designed. Navigation, routes, the two-theme mechanism and the primitives' APIs stand. Where this document names a colour, a font, a size or a weight, treat it as a placeholder until the identity lands, and update it then.
+A front panel. Lines are the machine: ruled, fixed, engraved. Dots are what it is doing: live, lit, countable. The owner's rule for all of it: not generic, not cluttered, and it must stay true with real data.
 
-## Swapping the identity
+## 1. The rules
 
-Edit only these. No page or primitive TSX needs to change:
-
-- `src/styles/tokens.css`: every colour and every font, including `@font-face` and the font imports. It is the only file with colour literals.
-- `src/styles/base.css`: element defaults, including how checkboxes and radios are drawn.
-- `src/styles/components.css` and `shell.css`: what each primitive looks like.
-
-Three things to know when doing it:
-
-- The Geist faces declare `font-weight: 400 500`, and `base.css` sets `font-synthesis-weight: none`, so any heavier weight renders at 500 until those faces change.
-- Every status tone is in the markup (`.ax-pill.is-ok`, `is-brand`, `is-info`, `is-fix`, `is-warn`, `is-bad`, `is-neutral`, with the dot element always present), and only the CSS decides that just warn and bad show a dot.
-- The legacy names at the end of `tokens.css` map `--ok`, `--info`, `--hold` and `--fix` to neutral text and `--brand-soft` to a neutral tint. Those mappings set how unconverted pages look.
-
-The browser's `theme-color` is read from `--ground` at runtime, and the mark in `src/shell/Brand.tsx` draws in `--ink`.
-
-## Principles
-
-The test for every element: does the person need this right now to decide or act? If not, remove it, or put it one click away. When in doubt, delete. A screen has one obvious thing to look at and at most one primary button.
-
-## 1. What is not allowed
-
-- A bordered rounded card around anything; cards inside cards.
-- Coloured pills on rows; a tinted background on anything that isn't a real problem.
-- Glow, gradients, drop shadows, coloured left-border callouts, pulsing dots.
-- An explanatory paragraph at the top of a page or panel. Hint text under a field, unless a person would otherwise get it wrong.
-- Giant display numbers, and progress bars used as decoration.
-- Grids of stat tiles, decorative eyebrows, serif headings, uppercase labels, filler side rails.
-- More than one primary button on a screen, or a primary button in the top bar.
-- Any size or weight outside §3. Any colour outside `tokens.css`.
+- **One panel, one page.** The channel bank, the readouts, the lit window and the round key live on Overview only. Every other page carries the identity through type, the plate, hairlines and lamps, and stays calm and legible.
+- **Vermilion means the machine is live, or something needs you.** Never decoration. `--live` is vermilion only while real state says the machine runs (`data-run` on `<html>`, set in `main.tsx` from `identity/state.ts`, and off until the first answer).
+- **State is never a new colour.** It is lamp behaviour plus words: running pulses, a question is ringed, repairing is half lit, no receipt is dashed, confirmed is solid ink, stopped is hollow.
+- **Doto only at 56px and up.** It gets scratchy small. Under about 20px, data (time, count, platform) is Fragment Mono and sentences are Archivo.
+- **Copy says what it does.** "Pause applying", not poetry. Engraved labels are lowercase by CSS; the text in the DOM stays sentence case, and real names (company, role) keep their capitals.
+- No KPI tiles, no cards inside cards, no glassmorphism, no glow on surfaces, no pill on every row. A row's one action is a quiet link. At most one primary key on a screen, except Needs you's round send keys, one per question.
+- A screen has one obvious thing to look at. Keep real data and guidance; remove noise. Explanatory paragraphs mostly go.
+- Motion only where it means the machine is alive: CSS only, off under `prefers-reduced-motion`. No backdrop-filter, no blend modes over the page, no JS animation loops. The grain is one background tile.
 
 ## 2. Themes
 
-Exactly two, set on `<html data-theme>`. A missing or unknown value is dark.
+Exactly two, on `<html data-theme>`: `dark` (graphite `#232321`, the default for a missing or unknown value) and `light` (bone aluminium `#E5E3DB`). They are named Dark and Light. The display window stays dark in both. The switch is on the rail, and "Switch to the … theme" is in the palette. The choice is in `localStorage` under `axiom.theme`, set before first paint by the inline script in `index.html`. Old stored values still work: `navy`, `slate` and `system` read as dark; `maroon` and `ivory` read as light. `readTheme` in `src/shell/prefs.ts` and that script must agree.
 
-| Theme | Ground | Text | Accent |
-|---|---|---|---|
-| `dark` (default) | deep navy `#0b1220` | near-white | restrained blue |
-| `light` | warm white `#fbf9f7` | near-black | maroon `#8c1d40` |
-
-The toggle is the sun or moon item in the account menu (and "Switch to … theme" in the palette). The choice is saved in `localStorage` under `axiom.theme` and `data-theme` is set before first paint by the inline script in `index.html`. Old stored values still work: `navy`, `slate` and `system` read as dark; `maroon` and `ivory` read as light. `readTheme` in `src/shell/prefs.ts` and the inline script must agree.
-
-**The accent appears only on:** the primary button, the current sidebar item, links, focus rings. Everything else is neutral: tabs, filters, switches, checkboxes and the brand mark use the text colours.
-
-**Status colour** is only for a small dot or the text of something that needs attention: needs an answer (`--warn`), failed (`--bad`). Success and neutral states are plain muted text. `--bad` is a clear red, never to be read as the maroon accent.
-
-Contrast is WCAG AA in both themes on both surfaces, including `--ink-3` at 12px.
-
-### Tokens (`src/styles/tokens.css`)
+### Tokens (`src/styles/tokens.css`, the only file with colours and fonts)
 
 | Group | Tokens |
 |---|---|
-| Surfaces | `--ground` (page and sidebar), `--raised` (overlays only), `--field` (controls), `--tint` (hover, current, selected) |
-| Lines | `--line`, `--line-strong` |
-| Text | `--ink`, `--ink-2`, `--ink-3` |
-| Accent | `--brand` (button fill), `--brand-ink`, `--accent-text` (links, current item), `--focus` |
-| Status | `--warn`, `--bad` |
-| Overlays | `--overlay-shadow`, `--scrim` |
-| Resume pages | `--paper`, `--paper-shadow` |
-| Scale | `--text-meta`, `--text-ui`, `--text-body`, `--text-title`, `--radius`, `--space-1` to `--space-12` |
-| Layout | `--page-w`, `--gutter`, `--side-w`, `--side-w-collapsed`, `--top-h` |
+| Plate | `--ground`, `--ground-2` (hover), `--ground-3` (a recess), `--raised` (overlays), `--field` (controls), `--tint`, `--plate` (an opaque piece of plate, with its grain) |
+| Lines | `--line`, `--line-strong` (ticks, control edges: 3:1) |
+| Text | `--ink`, `--ink-2`, `--ink-3`, `--accent-text` (links are ink and underlined) |
+| Keys | `--key`, `--key-ink`, `--key-top`, `--key-bot`, `--key-down`; `--brand`, `--brand-ink` (the master key) |
+| Window | `--window`, `--window-edge`, `--window-rule`, `--window-ink`, `--window-ink-2`, `--dot-off` |
+| Lamp | `--led`, `--signal`, `--signal-ink`, `--signal-on-window`, `--bad`, `--live` |
+| Material | `--shade`, `--shade-deep`, `--engrave`, `--grain`, `--overlay-shadow`, `--scrim`, `--paper`, `--paper-shadow` |
+| Type | `--font-read` (Doto), `--font-text` (Archivo), `--font-data` (Fragment Mono), `--wide`, `--text-meta` 13, `--text-ui` and `--text-body` 14, `--text-sub` 16, `--text-title` 20, `--text-page` 30 |
+| Layout | `--radius` 3, `--radius-sm` 2, `--space-1` to `--space-12` (4px grid), `--page-w`, `--form-w`, `--gutter`, `--rail`, `--inset`, `--bar-height`, `--soon` |
 
-The block at the end of that file maps every older name (`--card`, `--surface`, `--ok`, `--brand-soft`, `--radius-lg`, `--text-micro`...) onto these, so unconverted pages go flat and neutral on their own. Never use those names in new code. Delete a line once nothing reads it.
+`tests/test_identity_contrast.py` measures every pair WCAG AA in both themes and fails on a literal colour outside `tokens.css`.
 
-## 3. Type and space
+### Fonts
 
-- **Geist only** (Geist Mono for IDs and code). Tabular numbers everywhere.
-- **Four sizes:** 12 meta, 13 tables and controls, 14 body, 20 page title.
-- **Two weights:** 400 and 500. The font faces in `tokens.css` declare that range, so a stray `font-weight: 700` renders at 500.
-- **No uppercase labels.** Sentence case everywhere.
-- **4px grid. One radius (6px)** for controls and overlays. Tables and sections have no outer card, only hairline rules.
-- **No shadows** except drawers, menus, toasts and the palette.
-- **Motion:** 140ms ease, honouring `prefers-reduced-motion`. Nothing pulses or shimmers.
+Bundled, Latin subsets only, 118 KB: Doto `full` (6 KB; has ROND and wght), Archivo `standard` (88 KB; has wdth and wght), Fragment Mono (25 KB). Those are the files with the axes the look depends on, measured in Chromium. Don't swap them for a package's default file, which lacks them.
 
-## 4. Shell
+## 3. Shell
 
 - `html`, `body` and `#root` are the viewport and `body` clips: **the document never scrolls.** Screens outside the shell (sign-in, setup guide) wrap themselves in `.ax-screen`.
-- `.ax-app` is a grid of `[sidebar | main]`. Main is a column: the top bar, one-line banners, then **one scroll region** (`.ax-scroll`) holding the page.
-- `.main` is the page frame: about 1080px of content, left-aligned in the main area, with a 32px gutter (16px under 900px). There is no horizontal page scroll at 390px.
-- **Top bar:** the page title in the title size, flush with the page's left edge. No border and no controls of its own. A page may put one or two things at its right with `<TopActions>` (in a row under the title on a phone).
-- **Sidebar:** 220px, on the same ground as the page, one hairline. It collapses to a 56px icon rail (the control shows while the sidebar is hovered; the choice is remembered). Under 900px it is a slide-over drawer opened from the top bar, and search moves to an icon in the bar.
-- **Search** is the small `⌘K` at the top of the sidebar, opening the palette. The palette jumps to any page or tab, finds jobs by company or title, adds a job link and switches theme.
-- **Footer:** only the account row (avatar and name). It opens a small menu: theme toggle, sign out. Worker and host status live on Overview and Settings › System.
+- `.ax-app` is a column of the top plate and main. Main is a column: page title, one-line banners, then **one scroll region** (`.ax-scroll`).
+- **The top plate** is the rail (wordmark, theme switch) and the **tuning scale**: nine stations and a needle that moves to the current page. Each station reads something live under its name: Overview's state word, the job and confirmed counts, Needs you's count with its lamp, the owner's name. Search (`⌘K`) and the account menu sit in the corner the scale leaves free.
+- Coming soon (Axe, Network, Emails) are the last three stations, under a "coming soon" band. Under 1340px they narrow to 0.72 of a page's station; under 1140px Axe drops its "ai interviewer" line.
+- **Phones (under 900px):** the scale becomes a strip along the bottom with real names at full size, sliding under a fixed needle; tapping a station goes there and centres it. This replaces the old slide-over drawer. Search, the theme switch and the account are in the top bar.
+- **The page title** is outside the scroll region, in engraved Archivo. Overview has none: its panel is its title. A page may add one or two things beside it with `<TopActions>`.
+- Lists use the page width; Profile and Settings keep a form's width.
+
+## 4. Overview: the panel
+
+Rail plus nine columns, the same grid as the scale, so at nine workers each channel stands under a station. All of it is in `src/identity/` and `batch.tsx`.
+
+- **Confirmed today:** a Doto readout, counted by `confirmedToday` from `GET /api/successful-applications` since local midnight. Applications' "today" reads the same function.
+- **The sentence.** One, the worst true thing first, from `panelState`: connection lost, needs a restart, paused, target reached, running, held, no batch. Actions: `start` (with "Apply until"), `resume`, or `pause`, and "Needs a restart" adds a primary Restart automation beside Pause. Only lost and restart take the lamp colour. "Connection lost" shows here and not again in the banner.
+- **The day:** `DayChart`, a matrix of half-hour columns, one lit dot per confirmation. A busy day goes to quarter hours, then says "each dot is N". Nothing is invented.
+- **The lit window:** the count of questions waiting, in the lamp colour; dark glass at zero.
+- **The round key:** `MasterKey`.
+- **The channel bank:** `ChannelBank`, one channel per worker slot (1 to 30), from runtime-health's workers. Under 120px a channel it becomes a row of ladders over a list of the busy ones, which is also what a phone gets. A lit channel carries company, role, what it is doing, platform, time on the job and Pause; the company opens the job. Long names clamp with the full text in a title attribute. A channel goes dark only when its run really stops, in order, so pausing puts them out one at a time.
+
+### Channels: the rung mapping (`identity/stages.ts`)
+
+Six rungs, bottom to top. `running` alone only proves "open", so a channel reads the run's newest telling event from `GET /api/runs/{id}`, one run at a time, every few seconds, while the page is visible.
+
+| Rung | Run events (`events.kind`) |
+|---|---|
+| open | `browser`, `new_tab` |
+| sign in | `auth`, `account`, `captcha`, `email_wait`, `email_verified` |
+| fill | `step`, `form_page`, `form_post`, `field_error`, `agent_step`, `agent_action_result`, `recovery`, `browser_recovery` |
+| questions | `answer_quality`, `answer_validation`, `knowledge_inference`, `knowledge_inference_declined` |
+| review | `verification` |
+| submit | `submitting`, `submission_requests`, or run state `submitting` |
 
 ## 5. Navigation
 
-Six items with no group labels, then a quiet "Coming soon" label over muted text, with no pills or badges. Needs you shows a small plain count.
-
-| Sidebar | `view` | Tabs (`tab`) |
+| Station | `view` | Tabs (`tab`) |
 |---|---|---|
 | Overview | `batch` | |
 | Jobs | `jobs` | `pipeline`, `discovered`, `reserved` |
 | Needs you | `needs` | |
 | Applications | `ledger` | `confirmed`, `unconfirmed`, `archive` |
 | Profile | `profile` | `identity`, `experience`, `knowledge`, `resumes` |
-| Settings | `settings` | `connections`, `storage`, `accounts`, `email`, `discovery`, `system` |
+| Settings | `settings` | `connections`, `accounts`, `email`, `discovery`, `system` |
 | *Coming soon:* Axe, Network, Emails | `soon-axe`, `soon-network`, `soon-emails` | |
 
 `src/shell/nav.ts` lists the items and tabs. The resume editor (`editor`) belongs to Profile.
 
-**Every URL the dashboard has ever had keeps working.** `src/context.ts` holds the one table: `canonical()` turns any old `view`, `tab` and `filter` into its new home, `parseRoute()` applies it to the address, `go()` and `routeUrl()` apply it to code, and `main.tsx` rewrites the address bar. Add a new old name there, nowhere else. Write new links with the new names.
+**Every URL the dashboard has ever had keeps working.** `src/context.ts` holds the one table: `canonical()` turns any old `view`, `tab` and `filter` into its new home, `parseRoute()` applies it to the address, `go()` and `routeUrl()` apply it to code, and `main.tsx` rewrites the address bar. Add a new old name there, nowhere else.
 
 | Old | New home |
 |---|---|
-| `?view=setup` (no or unknown tab), `/setup`, `?view=connections` | Settings › Connections |
+| `?view=setup` (no or unknown tab), `/setup`, `?view=connections`, `?view=setup&tab=storage` | Settings › Connections |
 | `?view=setup&tab=accounts\|email\|discovery\|system\|connections`, `?view=accounts\|email\|discovery\|system`, `?view=sources`, `?gmail=` | that tab of Settings (`sources` is Discovery; `gmail` is Email) |
 | `?view=setup&tab=profile`, `&filter=identity` | Profile › Identity |
 | `&tab=profile&filter=experience` | Profile › Experience |
@@ -126,36 +109,28 @@ Six items with no group labels, then a quiet "Coming soon" label over muted text
 
 Build pages from these and they look right without new CSS. API details are in `src/ui/README.md`.
 
-- **Panel:** a plain titled section on a hairline. Not a card.
-- **Pill / StatusPill:** muted text. A small dot and full-strength text only for `warn` and `bad`.
-- **Tabs:** text on a hairline, the first flush with the page.
-- **Filters (`Chips`):** one quiet row of text with counts.
-- **Button:** one primary look, used at most once a screen; a disabled primary goes neutral. Secondary is a hairline; ghost has none; danger is red text.
-- **Field:** a label over a control, with a hint only when needed. On a page, `FormGrid` turns fields into one column of labelled rows divided by hairlines.
-- **SaveBar:** a plain line at the foot of the region, shown only when something changed.
-- **Table:** no outer card, hairline row rules, one-line 40px rows, a row's checkbox shows on hover. Columns: company and role, status text, time, one row menu. At most one lead action per row, and only when action is needed. Two lines per row under 600px, so both company and role can be read.
-- **Drawer, menu, palette, toast:** the only raised things, and the only things with a shadow.
-- **Empty:** one line; its action reads as a link.
-- **Notice:** one plain line with an action.
+- **Button:** a key, lit from above, on its edge; it presses down. Primary is the dark master key; a disabled one stands down. `round` is the round commit key for one short word. Ghost has no key; danger is lamp-coloured text.
+- **Tabs and Segmented:** a slide switch cut into the plate. **Filters (`Chips`):** a row of keys in one recess, with counts in mono; the one that is down carries a thin line of `--live`.
+- **Pill / StatusPill:** a lamp and a word. Text is ink unless it needs you.
+- **Panel:** a titled section on a hairline. Not a card.
+- **Field:** a label over a recess with a real edge. On a page, `FormGrid` turns fields into labelled rows divided by hairlines; in a drawer they stack.
+- **Table:** no outer card, hairline rules, 40px rows. Company and role read as two columns inside `JobCell`, each clamped with its full text in a title. **Row checkboxes are always visible** (the owner's decision). At most one lead action per row, shown as a quiet link.
+- **Drawer, menu, palette:** the only raised things. **Toast:** one line in the display window. **Empty:** one line; its action reads as a link. **Notice:** one plain line, with a lamp only for what needs you.
 
-Status text is never the only signal of the action available, and every control has a visible focus ring.
+Every control has a visible focus ring in both themes.
 
 ## 7. Pages
 
-- **Overview:** one sentence of state ("Applying. 4 of 9 workers busy, 37 confirmed today."), one primary button (start or stop), one line linking to questions if any wait, the working workers only if any, then a plain recent-activity table.
-- **Jobs and Applications:** plain tables, as above. Adding a job link lives on Jobs › Pipeline and in the palette.
-- **Needs you:** a plain list of questions with the answer control inline; company and role muted above. "Why you're asked" only when expanded.
-- **Job drawer:** title, status sentence, the one action, then history. No nested panels.
-- **Settings and Profile:** one column of labelled rows divided by hairlines; section titles, no cards. Secrets stay masked.
-- **Setup guide:** one question group per step, a thin progress line, no rail, no marketing copy.
+- **Jobs and Applications:** tabs, filter keys and a table. No readouts.
+- **Needs you:** one sentence on what the questions hold back, then rows of who is asking and the question, with short choices as keys and a round send key.
+- **Job drawer:** title with real capitals, status sentence, the one action, then history. No nested panels.
+- **Settings and Profile:** one column of labelled rows on hairlines. Secrets stay masked.
+- **Setup guide:** one question group per step and a thin progress line.
 - **Coming soon pages:** the name and one sentence.
 
-## 8. Copy
+## 8. Quality bar
 
-Short, plain, sentence case. Cut every sentence that explains what the page is. No "Here you can...". No jargon a new user would not know ("draft", "run", "pool", "lane", "specialist").
-
-## 9. Quality bar
-
-- Every page keeps its loading, empty and error states, and they stay quiet. Every keyboard path keeps working.
+- Every page keeps its loading, empty and error states. Every keyboard path keeps working.
 - No layout shift on poll refresh; no document scroll; no horizontal page scroll at 390px.
-- Check every page in both themes, at 1440×900 and 390×844.
+- Check every page in both themes at 1440×900 and 390×844, and the scale at 1024, 1280 and 1920.
+- `npx knip` lists only the three font packages, which are used through `url()` in `tokens.css`.

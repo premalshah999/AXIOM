@@ -170,7 +170,7 @@ function Master({ work }: { work: WorkingState }) {
     restart: ["bad", "Needs a restart. Automation is degraded; restart it to keep applying."],
     paused: ["warn", "Paused. No new applications start; progress is kept."],
     complete: ["info", `Target reached. ${progress}.`],
-    running: ["info", `Applying. ${work.working} of ${work.limit} workers busy, ${progress}.`],
+    running: ["info", `Applying. ${work.working} of ${plural(work.limit, "worker")} busy, ${progress}.`],
     held: ["warn", `Held. ${(rt.intake_reason || "New applications are not starting").replace(/\.$/, "")}. ${progress}.`],
     none: ["info", work.limit ? `No batch running. ${plural(work.limit, "worker")} ready.` : "No batch running."],
   };
@@ -272,16 +272,17 @@ function Master({ work }: { work: WorkingState }) {
             {sentence}
           </p>
           {active && (
-            <p className="ax-meta">
-              {[
+            <p
+              className="ax-meta"
+              title={[
                 batch.started_at && `Started ${day(batch.started_at)}`,
                 rt.confirmed_by_owner ? `${rt.confirmed_by_batch ?? 0} by the batch, ${rt.confirmed_by_owner} you started` : "",
-                `${plural(rt.attempted_jobs ?? 0, "job")} attempted`,
-                `${rt.remaining ?? Math.max(0, target - confirmed)} to go`,
                 rt.last_tick && `checked ${ago(rt.last_tick, now)}`,
               ]
                 .filter(Boolean)
                 .join(" · ")}
+            >
+              {rt.remaining ?? Math.max(0, target - confirmed)} to go · {plural(rt.attempted_jobs ?? 0, "job")} attempted
             </p>
           )}
           <DayChart times={today} now={now} />
@@ -514,24 +515,21 @@ function Backlog({ work }: { work: WorkingState }) {
       ))}
     </>
   );
-  const rows: [ReactNode, ReactNode][] = [
-    [
-      "Waiting",
-      line([
-        tally(waiting.queued + waiting.starting, "queued", { tab: "pipeline", filter: "active" }),
-        tally(waiting.repairing, "being fixed", { tab: "pipeline", filter: "repair" }),
-        tally(waiting.answers, waiting.answers === 1 ? "needs your answer" : "need your answer", { tab: "pipeline", filter: "needs" }),
-        tally(waiting.email, "waiting for email"),
-      ]),
-    ],
-  ];
-  if (active)
+  // Only what is there: a row of zeros is noise on the one page that is already full.
+  const waitingNow = [
+    waiting.queued + waiting.starting > 0 && tally(waiting.queued + waiting.starting, "queued", { tab: "pipeline", filter: "active" }),
+    waiting.repairing > 0 && tally(waiting.repairing, "being fixed", { tab: "pipeline", filter: "repair" }),
+    waiting.answers > 0 && tally(waiting.answers, waiting.answers === 1 ? "needs your answer" : "need your answer", { tab: "pipeline", filter: "needs" }),
+    waiting.email > 0 && tally(waiting.email, "waiting for email"),
+  ].filter(Boolean);
+  const rows: [ReactNode, ReactNode][] = [["Waiting", waitingNow.length ? line(waitingNow) : <span className="ax-note">Nothing waiting</span>]];
+  if (active && ((rt.blocked ?? 0) > 0 || (rt.failed ?? 0) > 0))
     rows.push([
       "This batch",
       line([
-        tally(rt.blocked ?? 0, "blocked or unconfirmed", { tab: "pipeline", filter: "repair" }),
-        tally(rt.failed ?? 0, "not submitted", { tab: "pipeline", filter: "repair" }),
-      ]),
+        (rt.blocked ?? 0) > 0 && tally(rt.blocked ?? 0, "blocked or unconfirmed", { tab: "pipeline", filter: "repair" }),
+        (rt.failed ?? 0) > 0 && tally(rt.failed ?? 0, "not submitted", { tab: "pipeline", filter: "repair" }),
+      ].filter(Boolean)),
     ]);
   rows.push([
     "Discovered",

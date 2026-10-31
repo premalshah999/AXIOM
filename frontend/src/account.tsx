@@ -183,7 +183,7 @@ function KeepSignedIn({ value, onChange }: { value: boolean; onChange: (value: b
 }
 
 /** Recovery codes, shown once: copy, download, and confirm they are saved before moving on. */
-export function RecoveryCodes({
+function RecoveryCodes({
   codes,
   doneLabel,
   onDone,

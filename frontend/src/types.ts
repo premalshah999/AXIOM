@@ -547,13 +547,6 @@ export type ControlResult = {
   run_id?: string;
 };
 // POST /api/jobs
-export type ImportResult = {
-  job: Job;
-  created: boolean;
-  run?: Run;
-  notice?: string;
-};
-
 // GET /api/mail
 export type Mailbox = {
   id: string;

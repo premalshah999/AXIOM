@@ -24,27 +24,21 @@ export type NavItem = {
   badge?: "needs";
   /** What its station reads under the name, when nothing live does. */
   barLabel?: string;
-  /** Lives under the quiet "Coming soon" label and opens a page of one sentence. */
+  /** A coming-soon station: it opens a page of one sentence. */
   soon?: boolean;
   /** The one sentence for the coming-soon page. */
   about?: string;
 };
-export type NavSection = { label?: string; items: NavItem[] };
 
-export const NAV: NavSection[] = [
-  {
-    items: [
+// In the order of the tuning scale. Tuner.tsx places the "coming soon" band over the last three.
+export const ALL_ITEMS: NavItem[] = [
+
       { id: "overview", label: "Overview", icon: House, route: { view: "batch" } },
       { id: "jobs", label: "Jobs", icon: Briefcase, route: { view: "jobs" } },
       { id: "needs", label: "Needs you", icon: Inbox, route: { view: "needs" }, badge: "needs" },
       { id: "applications", label: "Applications", icon: Send, route: { view: "ledger" } },
       { id: "profile", label: "Profile", icon: UserRound, route: { view: "profile" } },
       { id: "settings", label: "Settings", icon: Settings, route: { view: "settings" } },
-    ],
-  },
-  {
-    label: "Coming soon",
-    items: [
       {
         id: "axe",
         label: "Axe",
@@ -70,11 +64,7 @@ export const NAV: NavSection[] = [
         soon: true,
         about: "Outreach and follow-up emails that send themselves on your schedule.",
       },
-    ],
-  },
 ];
-
-export const ALL_ITEMS = NAV.flatMap((s) => s.items);
 
 // Each page's tabs. The palette offers them as places to jump to; Profile and Settings render from these.
 export const PAGE_TABS: Partial<Record<View, TabItem[]>> = {

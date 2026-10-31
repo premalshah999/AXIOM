@@ -19,7 +19,6 @@ import "./styles/onboarding.css";
 // The sign-in screens and Settings › System › Your sign-in live in account.tsx.
 
 // "Finish later" (guide.ts, so the shell reads it without loading this module).
-export { guideLater } from "./guide";
 
 // ---------------------------------------------------------------------------
 // Setup guide: the facts employers actually ask for, in the order a person thinks about them (DESIGN.md §7).
@@ -545,7 +544,7 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
           {current.id === "profile" && <ContactStep draft={draft} setTop={setTop} setAddress={setAddress} />}
           {current.id === "authorization" && <AuthorizationStep draft={draft} setFact={setFact} />}
           {current.id === "preferences" && <PreferencesStep draft={draft} setTop={setTop} setFact={setFact} />}
-          {current.id === "screening" && <ScreeningStep draft={draft} setTop={setTop} setFact={setFact} />}
+          {current.id === "screening" && <ScreeningStep draft={draft} setFact={setFact} />}
           {current.id === "identity" && <IdentityStep draft={draft} setTop={setTop} setFact={setFact} />}
           {current.id === "permissions" && (
             <PermissionsStep
@@ -931,7 +930,7 @@ function PreferencesStep({ draft, setTop, setFact }: StepProps & { setTop: SetTo
   );
 }
 
-function ScreeningStep({ draft, setTop, setFact }: StepProps & { setTop: SetTop; setFact: SetFact }) {
+function ScreeningStep({ draft, setFact }: StepProps & { setFact: SetFact }) {
   const f = foldFacts(draft.facts);
   const yn = (key: string, label: string) => (
     <YesNo label={label} value={asBool(f[key])} onChange={(v) => setFact(key, v)} />

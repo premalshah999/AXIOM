@@ -311,7 +311,7 @@ function modelState(model: NonNullable<RuntimeHealth["models"]>["answers"]) {
         : `Requests paused${model.retry_at ? " until " + new Date(model.retry_at).toLocaleTimeString() : ""}`;
 }
 
-/** The worker and host status the sidebar used to carry: what is running, how many workers, and whether it needs a restart. */
+/** Worker and host status: what is running, how many workers, and whether it needs a restart. */
 function SystemStatus() {
   const { snapshot } = useWorkspace();
   const health = usePoll<RuntimeHealth>((signal) => api("/runtime-health", "GET", undefined, signal), 30000);

@@ -131,19 +131,6 @@ type Inventory = {
   units: { id: string; kind: string; source_row: string; text: string }[];
   skills: string[];
 };
-type Readiness = {
-  fresh_jobs: number;
-  posting_basis: Record<string, number>;
-  classification: {
-    eligible: number;
-    failed: number;
-    unclassified: number;
-  };
-  tailoring: Record<string, number>;
-  ready_to_apply: number;
-  bottleneck: string;
-};
-
 const unmounted = (e: Error | null) =>
   e instanceof ApiError && (e.status === 404 || e.status === 405);
 

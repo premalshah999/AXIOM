@@ -52,9 +52,9 @@ export function SearchBox({
   );
 }
 
-export type ChipItem = { id: string; label: string; count?: number };
+type ChipItem = { id: string; label: string; count?: number };
 
-/** One quiet row of text filters with counts, acting as one choice (aria-pressed on each). */
+/** A row of filter keys with counts, acting as one choice (aria-pressed on each). */
 export function Chips({
   items,
   value,

@@ -3,13 +3,13 @@
 // failing a render. The page renders correctly without any of it.
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
-export type ThemeId = "dark" | "light";
+type ThemeId = "dark" | "light";
 
-export const THEME_KEY = "axiom.theme";
+const THEME_KEY = "axiom.theme";
 
 // Old stored values from the five-theme menu: maroon and ivory were light; navy, slate and system (which followed the
 // device, and now takes the default) become dark. index.html does the same before first paint.
-export function readTheme(): ThemeId {
+function readTheme(): ThemeId {
   try {
     const v = localStorage.getItem(THEME_KEY);
     return v === "light" || v === "maroon" || v === "ivory" ? "light" : "dark";

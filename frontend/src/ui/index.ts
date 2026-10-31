@@ -1,5 +1,5 @@
 // Import primitives from "./ui/index" (not "./ui": that resolves to the legacy ui.tsx file beside this folder).
-export { Button, type ButtonVariant } from "./Button";
+export { Button } from "./Button";
 export { ConfirmButton } from "./Confirm";
 export { Drawer } from "./Drawer";
 export { Empty } from "./Empty";
@@ -9,6 +9,6 @@ export { External } from "./Link";
 export { Panel } from "./Panel";
 export { Segmented } from "./Segmented";
 export { Pill, type PillTone } from "./Pill";
-export { RouteTabs, Tabs, type TabItem } from "./Tabs";
+export { RouteTabs, Tabs } from "./Tabs";
 export { Table, type Column } from "./Table";
 export { ToastStack } from "./Toast";

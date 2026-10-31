@@ -19,14 +19,14 @@ import { Button, Panel, Pill, Table } from "./ui/index";
 `{ title?, actions?, children, flush?, className?, id? }` A plain titled section on a hairline. `actions` sits right of the title. `flush` is for a table inside, which brings its own rules.
 
 ## Pill
-`{ tone?: "neutral" | "brand" | "ok" | "warn" | "bad" | "info" | "fix", children, title?, dot? }` A short status. Every tone and the dot are always in the markup; `components.css` decides the look (today only `warn` and `bad` show the dot).
+`{ tone?: "neutral" | "brand" | "ok" | "warn" | "bad" | "info" | "fix", children, title?, dot? }` A lamp and a word. Each tone is a lamp behaviour in `components.css`; only `warn` and `bad` colour the text.
 
 ## Tabs
-- `RouteTabs { view, tabs: {id, label, count?}[], label, current? }` Quiet text tabs that are real links and set the route `tab` for `view` (`go({ view, tab })`). Unknown `route.tab` falls back to the first tab. Profile's and Settings' lists are `PAGE_TABS` in `src/shell/nav.ts`.
+- `RouteTabs { view, tabs: {id, label, count?}[], label, current? }` A slide switch whose positions are real links and set the route `tab` for `view` (`go({ view, tab })`). Unknown `route.tab` falls back to the first tab. Profile's and Settings' lists are `PAGE_TABS` in `src/shell/nav.ts`.
 - `Tabs { tabs, value, onChange(id), label }` The same look for local state.
 
 ## Button
-`{ variant?: "primary" | "secondary" | "ghost" | "danger", size?: "sm" | "md", loading?, block?, icon?, ...button props }`
+`{ variant?: "primary" | "secondary" | "ghost" | "danger", size?: "sm" | "md", loading?, block?, round?, icon?, ...button props }`
 `loading` disables the button and shows a spinner. Defaults to `type="button"`. At most one primary on a screen; a disabled primary goes neutral.
 
 ## Field
@@ -47,8 +47,8 @@ Their small bits of CSS are in `styles/setup.css` until the identity moves them 
 
 ## Table
 `Table<T> { columns, rows, rowKey(row), label, onRowClick?, selected?, onSelectedChange?, bulk?, loading?, error?, empty?, fill?, minWidth?, canSelect?, busy?, rowLabel? }`
-- `columns: { key, header, cell(row), num?, width?, truncate?, min?, hideBelow?, pin?, wrap? }[]`. No outer card; rows are one line of 40px with hairline rules. `truncate` ends a cell in an ellipsis and gives it the room left over; `hideBelow` drops a column under 860px or 600px; `pin` keeps the row's actions in view; `wrap` lets a cell grow.
-- Pass `onSelectedChange` (and `selected`, a `Set` of row keys) for the checkbox column and the bulk line; `bulk` is the buttons beside "N selected". A row's checkbox shows on hover; select-all always shows.
+- `columns: { key, header, cell(row), num?, width?, truncate?, min?, hideBelow?, pin?, wrap? }[]`. No outer card; rows are one line of 40px with hairline rules; row checkboxes always show. `truncate` ends a cell in an ellipsis and gives it the room left over; `hideBelow` drops a column under 860px or 600px; `pin` keeps the row's actions in view; `wrap` lets a cell grow.
+- Pass `onSelectedChange` (and `selected`, a `Set` of row keys) for the checkbox column and the bulk line; `bulk` is the buttons beside "N selected".
 - `canSelect(row)` disables a row's checkbox and leaves it out of select-all; `busy` dims the rows while the next page or filter loads (the table keeps its size, so nothing jumps); `rowLabel(row)` names each row's checkbox.
 - States: `loading` with no rows shows skeleton lines, no rows shows `empty` (use `<Empty/>`), `error` shows its node.
 - Scrolls sideways inside itself. A sticky head against the page needs `fill`.
@@ -57,7 +57,7 @@ Their small bits of CSS are in `styles/setup.css` until the identity moves them 
 `{ open, onClose, title, children, footer?, width? }` A right-side drawer with its own scroll, Esc and scrim to close, focus moved in and returned on close, Tab kept inside. Mark a field `data-autofocus` to focus it on open.
 
 ## Empty
-`{ title, hint?, action?, icon? }` One line of what is missing and the one action that fixes it, which reads as a link. `icon` is rendered and hidden by `components.css`.
+`{ title, hint?, action?, icon? }` One line of what is missing and the one action that fixes it, which reads as a link.
 
 ## Toast
 `ToastStack { toasts, onDismiss }` is rendered once by `main.tsx`. Pages raise toasts with `useNotify()` from `src/hooks.ts`: `notify("ok" | "info" | "error", "text")`. Errors announce as alerts and stay until dismissed.

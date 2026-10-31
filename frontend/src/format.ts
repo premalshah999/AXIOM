@@ -43,10 +43,6 @@ export function clock(value?: string | null) {
     minute: "2-digit",
   });
 }
-export function elapsed(from?: string | null, now = Date.now()) {
-  if (!from) return "";
-  return seconds((now - new Date(from).getTime()) / 1000);
-}
 export function seconds(total: number) {
   const s = Math.max(0, Math.round(total));
   if (s < 60) return `${s}s`;
@@ -54,13 +50,6 @@ export function seconds(total: number) {
   if (m < 60) return `${m}m ${String(s % 60).padStart(2, "0")}s`;
   return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
 }
-export const host = (url: string) => {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return url;
-  }
-};
 
 /** "examplecorp · boards.greenhouse.io" for a pasted link whose title isn't known until ranking. */
 // A readable role for a job saved as a bare link: the last wordy path segment ("Exton-Associate%2C-Data-Science" ->

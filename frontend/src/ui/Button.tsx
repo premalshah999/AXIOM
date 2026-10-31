@@ -1,6 +1,6 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 
-export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 
 /** primary (at most one on a screen), secondary (hairline), ghost, danger; sm 28px or md 32px. `loading` disables and shows a spinner. */
 export function Button({

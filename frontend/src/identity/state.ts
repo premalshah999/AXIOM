@@ -2,7 +2,7 @@
 // and whether the plate is live. One priority order, the worst true thing first.
 import type { Snapshot } from "../types";
 
-export type PanelState = "lost" | "restart" | "paused" | "complete" | "running" | "held" | "none";
+type PanelState = "lost" | "restart" | "paused" | "complete" | "running" | "held" | "none";
 
 export const STATE_WORD: Record<PanelState, string> = {
   lost: "no connection",

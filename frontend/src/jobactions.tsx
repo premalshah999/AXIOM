@@ -10,7 +10,7 @@ import type { ControlResult } from "./types";
 import { Button } from "./ui/index";
 import { RowMenu, type MenuAction } from "./worktools";
 
-export type Act = {
+type Act = {
   id: string;
   label: string;
   run: () => unknown;
@@ -33,7 +33,7 @@ export function reconcileRun(runId: string, submitted: boolean) {
   });
 }
 
-export function useJobActions(row: JobRow, detailed = false) {
+function useJobActions(row: JobRow, detailed = false) {
   const { refresh, openJob, markJobs } = useWorkspace();
   const { pending, run } = useAction();
   const run_ = row.run;

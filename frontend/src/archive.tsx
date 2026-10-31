@@ -8,7 +8,7 @@ import { Pagination, usePagination } from "./pagination";
 import type { Archived } from "./types";
 import { day, plural } from "./format";
 import { stateInfo } from "./model";
-import { Button, Empty, Table, type Column } from "./ui/index";
+import { Empty, Table, type Column } from "./ui/index";
 import { ConfirmButton, JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
 
 export function ArchiveList() {

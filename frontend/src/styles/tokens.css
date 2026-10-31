@@ -47,7 +47,7 @@
   /* Text */
   --ink: #ece9df;
   --ink-2: #b3b0a5;
-  --ink-3: #98958a;
+  --ink-3: #a8a599;
   /* Keys. A key is lit from above and stands on an edge; --brand is the one dark or light master key. */
   --key: #32322f;
   --key-ink: #ece9df;
@@ -69,9 +69,8 @@
   /* One lamp colour. It only ever means the machine is live or something needs you. */
   --led: #ff4310;
   --signal: #ff4a17;
-  --signal-ink: #ff7b50;
+  --signal-ink: #ff845c;
   --signal-on-window: #ff6a3c;
-  --warn: var(--signal-ink);
   --bad: var(--signal-ink);
   --shade: rgba(0, 0, 0, 0.45);
   --shade-deep: rgba(0, 0, 0, 0.9);
@@ -118,7 +117,6 @@
   --signal: #f03a06;
   --signal-ink: #a32a00;
   --signal-on-window: #ff6a3c;
-  --warn: var(--signal-ink);
   --bad: var(--signal-ink);
   --shade: rgba(0, 0, 0, 0.33);
   --shade-deep: rgba(0, 0, 0, 0.9);

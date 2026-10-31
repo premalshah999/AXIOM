@@ -45,7 +45,7 @@ export type Module = {
   status: "not_started" | "partial" | "complete";
   questions: Question[];
 };
-export type Questionnaires = { modules: Module[]; completion: { answered: number; total: number; percent: number } };
+type Questionnaires = { modules: Module[]; completion: { answered: number; total: number; percent: number } };
 
 /** Later answers win; a supervisor card sent twice keeps the fields of both. */
 function mergeAnswers(before: Record<string, unknown> | undefined, next: Record<string, unknown>) {
@@ -135,7 +135,7 @@ export function YesNo({
 }
 
 type Status = { state: "idle" | "saving" | "saved" | "error"; message?: string };
-export function SaveState({ status, retry }: { status: Status; retry?: () => void }) {
+function SaveState({ status, retry }: { status: Status; retry?: () => void }) {
   return (
     <span className={"ax-save is-" + status.state} role="status" aria-live="polite">
       {status.state === "saving" && "Saving…"}
@@ -607,7 +607,7 @@ function References({
     list.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v.trim()]))).filter((r) => Object.values(r).some(Boolean));
   const save = (list: Record<string, string>[]) => {
     const bad = list.findIndex((r) => r.email.trim() && !EMAIL.test(r.email.trim()));
-    list.forEach((r, i) => setProblem(`ref:${i}:email`, i === bad ? "Enter a valid email address" : ""));
+    list.forEach((_, i) => setProblem(`ref:${i}:email`, i === bad ? "Enter a valid email address" : ""));
     if (bad < 0) onSave(clean(list));
   };
   return (

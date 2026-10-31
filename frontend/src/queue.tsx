@@ -18,7 +18,7 @@ type LinkResult = {
 // Every http(s) link in what the owner pasted: one per line, comma- or space-separated, or inside other text.
 const LINKS = /https?:\/\/[^\s,<>"']+/gi;
 
-export function linksIn(text: string) {
+function linksIn(text: string) {
   return [...new Set((text.match(LINKS) || []).map((u) => u.replace(/[.,;)]+$/, "")))];
 }
 

@@ -36,7 +36,7 @@
 }
 
 /* ---------- page scaffolding ---------- */
-/* The width and gutters come from .main (shell.css). Pages put no title of their own: the top bar owns it. */
+/* The width and gutters come from .main (shell.css). Pages put no title of their own: the shell owns it. */
 .ax-page {
   display: flex;
   flex-direction: column;
@@ -119,11 +119,9 @@
   height: 10px;
   border-radius: 50%;
 }
-.ax-lamp.is-run,
 .ax-pill.is-brand .ax-pill-dot {
   background: var(--live);
 }
-:root[data-run="on"] .ax-lamp.is-run,
 :root[data-run="on"] .ax-pill.is-brand .ax-pill-dot {
   animation: ax-pulse 1.6s ease-in-out infinite;
 }
@@ -133,21 +131,17 @@
   background: var(--signal);
   box-shadow: 0 0 0 2.5px var(--tint);
 }
-.ax-lamp.is-fix,
 .ax-pill.is-fix .ax-pill-dot {
   background: linear-gradient(90deg, var(--signal) 50%, transparent 50%);
   box-shadow: inset 0 0 0 1.5px var(--signal);
 }
-.ax-lamp.is-unc,
 .ax-pill.is-info .ax-pill-dot {
   background: repeating-conic-gradient(var(--ink) 0 45deg, transparent 0 90deg);
   mask: radial-gradient(circle, transparent 2.4px, currentColor 2.9px);
 }
-.ax-lamp.is-done,
 .ax-pill.is-ok .ax-pill-dot {
   background: var(--ink);
 }
-.ax-lamp.is-stop,
 .ax-pill.is-neutral .ax-pill-dot {
   box-shadow: inset 0 0 0 1.5px var(--ink-3);
 }
@@ -232,8 +226,7 @@
 }
 
 /* ---------- Button: a key, lit from above, standing on its edge. It presses down. ---------- */
-.ax-btn,
-.btn {
+.ax-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -261,30 +254,25 @@
   cursor: pointer;
   transition: transform 60ms;
 }
-.ax-btn:hover:not(:disabled):not([aria-disabled="true"]),
-.btn:hover:not(:disabled) {
+.ax-btn:hover:not(:disabled):not([aria-disabled="true"]) {
   background: var(--ground-2);
 }
-.ax-btn:active:not(:disabled):not([aria-disabled="true"]),
-.btn:active:not(:disabled) {
+.ax-btn:active:not(:disabled):not([aria-disabled="true"]) {
   background: var(--key-down);
   box-shadow: inset 0 2px 3px var(--shade);
   transform: translateY(1px);
 }
 .ax-btn:disabled,
-.ax-btn[aria-disabled="true"],
-.btn:disabled {
+.ax-btn[aria-disabled="true"] {
   opacity: 0.55;
   cursor: not-allowed;
 }
-.ax-btn.is-sm,
-.btn.sm {
+.ax-btn.is-sm {
   height: 28px;
   padding: 0 10px;
 }
 /* The master key: at most one on a screen. */
-.ax-btn.is-primary,
-.btn.primary {
+.ax-btn.is-primary {
   padding: 0 var(--space-4);
   background: var(--brand);
   box-shadow:
@@ -294,50 +282,38 @@
   font-stretch: var(--wide);
   font-weight: 600;
 }
-.ax-btn.is-primary:hover:not(:disabled),
-.btn.primary:hover:not(:disabled) {
+.ax-btn.is-primary:hover:not(:disabled) {
   background: var(--brand);
   filter: brightness(1.15);
 }
-.ax-btn.is-primary:active:not(:disabled),
-.btn.primary:active:not(:disabled) {
+.ax-btn.is-primary:active:not(:disabled) {
   background: var(--brand);
   box-shadow: none;
 }
 /* A primary that cannot be pressed yet stands down. */
-.ax-btn.is-primary:disabled,
-.btn.primary:disabled {
+.ax-btn.is-primary:disabled {
   background: none;
   box-shadow: 0 0 0 1px var(--line-strong);
   color: var(--ink-2);
   opacity: 1;
 }
-.ax-btn.is-ghost,
-.btn.quiet {
+.ax-btn.is-ghost {
   margin-bottom: 0;
   background: transparent;
   box-shadow: none;
   color: var(--ink-2);
 }
-.ax-btn.is-ghost:hover:not(:disabled),
-.btn.quiet:hover:not(:disabled) {
+.ax-btn.is-ghost:hover:not(:disabled) {
   background: var(--tint);
   color: var(--ink);
 }
-.ax-btn.is-ghost:active:not(:disabled),
-.btn.quiet:active:not(:disabled) {
+.ax-btn.is-ghost:active:not(:disabled) {
   background: var(--tint);
   box-shadow: none;
   transform: none;
 }
-.ax-btn.is-danger,
-.btn.danger,
-.btn.danger-solid,
-.btn.ask {
+.ax-btn.is-danger {
   color: var(--bad);
-}
-.btn.ask {
-  color: var(--key-ink);
 }
 .ax-btn.is-round {
   width: 64px;
@@ -367,8 +343,7 @@
     0 0 0 3px var(--ground),
     0 0 0 4px var(--line-strong);
 }
-.ax-btn.is-block,
-.btn.block {
+.ax-btn.is-block {
   width: 100%;
 }
 .ax-spinner {
@@ -416,8 +391,7 @@
 }
 
 /* ---------- Links ---------- */
-.ax-link,
-.link {
+.ax-link {
   padding: 0;
   border: 0;
   background: none;
@@ -428,13 +402,8 @@
   text-underline-offset: 3px;
   cursor: pointer;
 }
-.ax-link:hover,
-.link:hover {
+.ax-link:hover {
   text-decoration-thickness: 2px;
-}
-.link.sm {
-  color: var(--accent-text);
-  font-size: var(--text-ui);
 }
 /* ---------- Field ---------- */
 .ax-field {
@@ -467,49 +436,39 @@
   flex-direction: column;
   gap: var(--space-4);
 }
-.ax-page .ax-grid,
-.ax-page .form-grid {
+.ax-page .ax-grid {
   display: block;
 }
-.ax-page .ax-grid > *,
-.ax-page .form-grid > * {
+.ax-page .ax-grid > * {
   padding: var(--space-3) 0;
   border-bottom: 1px solid var(--line);
 }
-.ax-page .ax-grid > :first-child,
-.ax-page .form-grid > :first-child {
+.ax-page .ax-grid > :first-child {
   padding-top: var(--space-1);
 }
-.ax-page .ax-grid > :last-child,
-.ax-page .form-grid > :last-child {
+.ax-page .ax-grid > :last-child {
   border-bottom: 0;
 }
-.ax-page .ax-grid > .ax-field,
-.ax-page .form-grid > .field {
+.ax-page .ax-grid > .ax-field {
   display: grid;
   grid-template-columns: 200px minmax(0, 536px);
   gap: 4px var(--space-6);
   align-items: start;
 }
-.ax-page .ax-grid > .ax-field > *,
-.ax-page .form-grid > .field > * {
+.ax-page .ax-grid > .ax-field > * {
   grid-column: 2;
 }
-.ax-page .ax-grid > .ax-field > .ax-label,
-.ax-page .form-grid > .field > .field-label {
+.ax-page .ax-grid > .ax-field > .ax-label {
   grid-column: 1;
   grid-row: 1 / span 3;
   padding-top: 6px;
 }
 @media (max-width: 760px) {
-  .ax-page .ax-grid > .ax-field,
-  .ax-page .form-grid > .field {
+  .ax-page .ax-grid > .ax-field {
     grid-template-columns: minmax(0, 1fr);
   }
   .ax-page .ax-grid > .ax-field > *,
-  .ax-page .form-grid > .field > *,
-  .ax-page .ax-grid > .ax-field > .ax-label,
-  .ax-page .form-grid > .field > .field-label {
+.ax-page .ax-grid > .ax-field > .ax-label {
     grid-column: 1;
     grid-row: auto;
     padding-top: 0;
@@ -835,12 +794,6 @@
 .ax-table thead .is-pin {
   z-index: 3;
 }
-.ax-table td.is-act,
-.ax-table th.is-act {
-  width: 1%;
-  padding-left: var(--space-2);
-  padding-right: var(--space-2);
-}
 .ax-table-state {
   padding: var(--space-3) 0;
 }
@@ -884,19 +837,11 @@
   cursor: default;
 }
 /* Inside an overlay the ground is the overlay: sticky heads and pinned cells stay opaque against it. */
-.ax-drawer,
-.dialog {
+.ax-drawer {
   --ground: var(--raised);
   --plate: var(--raised);
   --surface: var(--raised);
   --card: var(--raised);
-}
-.dialog {
-  border-color: var(--line);
-  box-shadow: var(--overlay-shadow);
-}
-.dialog.center {
-  border-radius: var(--radius);
 }
 .ax-drawer {
   position: relative;
@@ -917,7 +862,9 @@
   min-height: 60px;
   padding: 0 var(--space-3) 0 var(--space-5);
 }
+/* A drawer's title is a real company and role, so it keeps its capitals. */
 .ax-drawer-head h2 {
+  text-transform: none;
   flex: 1;
   min-width: 0;
   overflow: hidden;

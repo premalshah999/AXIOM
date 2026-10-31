@@ -2,7 +2,7 @@ import { createContext, useContext } from "react";
 import type { JobRow, Marks } from "./model";
 import type { Counts, Snapshot } from "./types";
 
-// The six sidebar pages (batch is Overview, ledger is Applications), the resume editor and the coming-soon pages.
+// The six pages (batch is Overview, ledger is Applications), the resume editor and the coming-soon pages.
 export type View =
   | "batch"
   | "jobs"

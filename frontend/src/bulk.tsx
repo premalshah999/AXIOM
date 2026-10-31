@@ -13,7 +13,7 @@ import { Button, Panel } from "./ui/index";
 import { StatusPill } from "./worktools";
 
 // The server applies to at most this many jobs per request (owner_apply.MANY).
-export const MAX_SELECTED = 50;
+const MAX_SELECTED = 50;
 
 export type Selection = ReturnType<typeof useSelection>;
 
@@ -68,7 +68,7 @@ const OUTCOME_LABEL: Record<ApplyOutcome, string> = {
   refused: "not applied",
 };
 
-export function summarize(summary: ApplyManyResult["summary"]) {
+function summarize(summary: ApplyManyResult["summary"]) {
   return (Object.keys(OUTCOME_LABEL) as ApplyOutcome[])
     .filter((key) => summary[key])
     .map((key) => `${summary[key]} ${OUTCOME_LABEL[key]}`)
