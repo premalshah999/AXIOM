@@ -1162,7 +1162,7 @@ class Adapter:
 
     # ----- step handlers ------------------------------------------------------------------------
     async def on_job_details(self, obs):
-        if any(f.get("side_login") for f in obs["fields"]):
+        if any(f.get("side_login") for f in obs.get("fields") or ()):
             # The employer's own customer-login drawer covers the Apply control (scan.js chromeLogin): close it first.
             await self.dismiss_chrome_login()
             obs = await self.form.scan()
