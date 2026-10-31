@@ -89,6 +89,7 @@ exercised through the HTTP test client; every router now has an HTTP test module
 | PUT | `/api/limits` | Set them | `{job_token_cap: 50k–2M, company_limit: 1–25}` | same | ✔ |
 | GET | `/api/agents` | Which model providers and helper switches are available (never keys) | – | summary | ✔ |
 | PUT | `/api/agents` | Choose providers per role, switch helpers | `AgentSettings` | summary; 422 on a bad choice | ✔ |
+| GET | `/api/funnel` | All time, for Overview: jobs discovered, eligible and applied to, and applied per platform (confirmed is the ledger below) | – | `{discovered, eligible, applied, platforms:{ats: n}}` | ✔ |
 | GET | `/api/successful-applications` | The ledger: one confirmed run per job | – | `{applications:[{job_id, run_id, title, company, url, applied_at, ats, website_confirmed, email_confirmed, existing_application}]}` | ✔ |
 | GET | `/api/archive` | Archived failed applications | – | `{applications, log_bytes}` | ✔ |
 | POST | `/api/archive/failed` | Archive all failed applications | – | summary | ✔ |
@@ -369,7 +370,7 @@ tests found 94 of the 105 remaining routes called over HTTP (measured 2026-10-20
 | `resumes.py` | `/api/resumes` (GET, POST), `/api/resumes/{id}/download`, `DELETE /api/resumes/{id}` |
 | `knowledge.py` | `/api/knowledge` (legacy store) |
 | `settings.py` | `/api/control`, `/api/limits`, `/api/agents` |
-| `jobs.py` | `/api/jobs`, `/api/jobs/{id}` (GET, DELETE) and `/rank`, `/apply`, `/queue`, `/pause`, `/resume` |
+| `jobs.py` | `/api/funnel`, `/api/jobs`, `/api/jobs/{id}` (GET, DELETE) and `/rank`, `/apply`, `/queue`, `/pause`, `/resume` |
 | `runs.py` | `/api/runs/{id}` and `/screenshot`, `/reconcile`, `/check-email`; `/api/reviews/{id}` |
 | `sources.py` | `/api/sources`, `/api/sources/{id}`, `/api/sources/{id}/discover` |
 | `job_board.py` | `/api/job-board` and `/settings`, `/sources`, `/scrape`, `/autopilot/start` |
