@@ -71,7 +71,10 @@ ALREADY = re.compile(
     # iCIMS's job page for an applicant already in its pipeline (MCI 2026-10-24).
     r"you(?:'re| are) (?:currently )?submitted (?:to|for) this (?:job|position|role)|"
     # Shield AI (2026-10-29): "Your application was already submitted. We received your previous application on ...".
-    r"your application (?:was|has been) already (?:been )?(?:submitted|received)\b",
+    r"your application (?:was|has been) already (?:been )?(?:submitted|received)\b|"
+    # A posting whose Apply button turned into the status "Already Applied" (a Bullhorn career site after its form went
+    # through, 2026-10-31). Only a line of its own: "Already applied? Sign in" is a footer.
+    r"(?<![^\n])already applied(?![^\n])",
     re.I,
 )
 EMBED_FRAME = re.compile(
