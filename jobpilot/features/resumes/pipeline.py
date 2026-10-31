@@ -405,20 +405,6 @@ async def prepare_resume(
         _RUNNING.pop(row_id, None)
 
 
-def cancel(db, artifact_id: str) -> bool:
-    task = _RUNNING.get(artifact_id)
-    if task and not task.done():
-        task.cancel()
-        return True
-    with db.exclusive() as s:
-        row = s.get(RsArtifact, artifact_id)
-        if row and row.status == "building":
-            row.status, row.lease_until = "cancelled", None
-            row.error = TailoringError(code="cancelled", retryable=True).model_dump()
-            return True
-    return False
-
-
 def file_intact(data_dir, row) -> bool:
     """The artifact's PDF exists inside data_dir/tailored and still has its recorded hash."""
     import hashlib

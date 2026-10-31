@@ -3,7 +3,6 @@
 Public interface:
 
 - prepare_resume(db, config, job_id, source_resume_id=None, *, policy, drafter, compile_fn) -> TailoringResult
-- cancel(db, artifact_id) -> bool
 - current_artifact(db, job_id, data_dir) -> TailoredResume | None   (the only queueable variant: ready,
   matching current source/profile/posting, PDF intact; tailored or editor-saved)
 - preparation_state(db, job_id, data_dir) -> ready | building | failed | stale | none
@@ -19,7 +18,6 @@ from .pipeline import (
     TailoringError,
     TailoringResult,
     TailorPolicy,
-    cancel,
     current_artifact,
     current_identity,
     file_intact,
@@ -37,7 +35,6 @@ __all__ = [
     "TailoredResume",
     "TailoringError",
     "TailoringResult",
-    "cancel",
     "current_artifact",
     "current_identity",
     "file_intact",

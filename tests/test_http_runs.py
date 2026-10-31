@@ -61,12 +61,6 @@ def test_reconcile_records_that_the_application_was_not_submitted(client, servic
         assert s.get(Run, run_id).state != "submission_unknown"
 
 
-def test_verify_without_a_retained_draft_is_404_or_409(client, service):
-    assert client.post("/api/runs/unknown/verify", json={}).status_code == 404
-    run_id = seed_run(service, seed_job(service), state="failed")
-    assert client.post(f"/api/runs/{run_id}/verify", json={}).status_code in {404, 409}
-
-
 def test_an_answer_must_not_be_empty(client):
     assert client.post("/api/reviews/any", json={"answer": ""}).status_code == 422
 

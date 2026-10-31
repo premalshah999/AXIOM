@@ -6,19 +6,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from . import attestations, migration, store
-from .models import Budget, SaveAnswer, VersionConflict
-from .retrieval import retrieve_answer_context
+from .models import SaveAnswer, VersionConflict
 from .tables import KnAlias, KnEmployer, KnFact
-
-
-class RetrieveInput(BaseModel):
-    question: str = Field(min_length=1, max_length=2000)
-    options: list[str] = Field(default_factory=list, max_length=250)
-    employer: str = ""
-    employer_url: str = ""
-    history_row: str | None = None
-    resume_artifact_id: str | None = None
-    budget: Budget = Field(default_factory=Budget)
 
 
 class RetireInput(BaseModel):
@@ -133,23 +122,5 @@ def router(service) -> APIRouter:
                 "page": page,
                 "size": size,
             }
-
-    @r.post("/retrieve")
-    async def retrieve(data: RetrieveInput):
-        packet = retrieve_answer_context(
-            db,
-            data.question,
-            data.options,
-            data.employer,
-            data.employer_url,
-            data.history_row,
-            data.resume_artifact_id,
-            data.budget,
-        )
-        return packet.model_dump()
-
-    @r.post("/migrate")
-    async def migrate(dry_run: bool = True):
-        return migration.migrate_profile(db, dry_run=dry_run)
 
     return r

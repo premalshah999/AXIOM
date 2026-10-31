@@ -23,7 +23,6 @@ class Service(QueueingMixin, ExecutionMixin, CompletionMixin, ReviewsMixin, Migr
 
         self.mail = MailService(db, config)
         self.inbox = Inbox(self)
-        self.migrate_reviewed_answers()
         from ..operations.superseded import close_superseded_waits
 
         close_superseded_waits(self)  # 108 email waits a newer run had replaced were never closed (2026-10-29)

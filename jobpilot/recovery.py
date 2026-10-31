@@ -158,7 +158,7 @@ def _safe_strategy_summary(checkpoint):
     if not isinstance(strategies, dict):
         return output
     for key, strategy in list(strategies.items())[:64]:
-        if key in {"__navigation_outcomes__", "__continuous_outcomes__"} and isinstance(strategy, list):
+        if key == "__navigation_outcomes__" and isinstance(strategy, list):
             for attempt in strategy[-12:]:
                 if (
                     not isinstance(attempt, dict)

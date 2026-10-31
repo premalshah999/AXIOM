@@ -2,8 +2,7 @@
 
 from sqlalchemy import or_, select
 
-from ..db import Job, Review, Run, Setting, now
-from ..knowledge import learned_answer
+from ..db import Job
 
 
 class MigrationsMixin:
@@ -34,35 +33,3 @@ class MigrationsMixin:
             for source in s.scalars(select(Source).where(titled(Source.name))):
                 if PORTAL_TITLE.match(source.name):
                     source.name = employer_from_title(source.name)
-
-    def migrate_reviewed_answers(self):
-        """Give existing applicant reviews provenance without changing their answers.
-
-        Runs once per database: afterwards the reviewed answers are the store, and answers you
-        corrected or forgot must not come back from old review rows."""
-        with self.db.exclusive() as s:
-            item = s.get(Setting, "profile")
-            if not item or s.get(Setting, "migrated:reviewed_answers"):
-                return
-            value = dict(item.value)
-            learned = {a["id"]: a for a in value.get("reviewed_answers", [])}
-            forgotten = set(value.get("forgotten_answers", []))
-            for review, job in s.execute(
-                select(Review, Job)
-                .join(Run, Review.run_id == Run.id)
-                .join(Job, Run.job_id == Job.id)
-                .where(Review.answer.is_not(None))
-            ):
-                # Only migrate actual answers which are still in the approved answer store.
-                if (
-                    review.id not in learned
-                    and review.id not in forgotten
-                    and review.key not in {"manual", "session"}
-                    and value.get("approved_answers", {}).get(review.key) == review.answer
-                ):
-                    learned[review.id] = learned_answer(
-                        review.id, review.question, review.answer, review.options, job.company or job.url
-                    )
-            value["reviewed_answers"] = list(learned.values())
-            item.value = value
-            s.add(Setting(key="migrated:reviewed_answers", value={"at": now()}))

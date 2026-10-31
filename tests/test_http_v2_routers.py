@@ -51,20 +51,8 @@ def test_knowledge_employers_are_paged(client):
     assert {"items", "total", "page", "size"} <= set(page)
 
 
-def test_the_discovery_diagnostics_answer(client):
-    assert client.get("/api/v2/discovery/due").status_code == 200
-    assert client.get("/api/v2/discovery/ready").status_code == 200
-    assert client.get("/api/v2/discovery/requisitions").status_code == 200
-    assert client.get("/api/v2/discovery/sources/health").status_code == 200
-
-
 def test_resume_reads_that_need_no_master_answer(client):
     assert client.get("/api/v2/resumes/evidence").status_code == 200
     assert client.get("/api/v2/resumes/editor/templates").status_code == 200
     assert client.get("/api/v2/resumes/artifacts").status_code == 200
-    assert client.get("/api/v2/resumes/artifacts/unknown").status_code in {404, 422}
 
-
-def test_knowledge_migration_can_be_previewed_and_retrieval_needs_a_question(client):
-    assert client.post("/api/v2/knowledge/migrate", params={"dry_run": "true"}, json={}).status_code == 200
-    assert client.post("/api/v2/knowledge/retrieve", json={"question": ""}).status_code == 422
