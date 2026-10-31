@@ -2032,6 +2032,20 @@ class Adapter:
                 if rejection.get("category") == "employer_limit":
                     self.e.armed = self.committed = False
                     return await self.e.employer_limit_result(rejection)
+                if rejection.get("category") == "throttled":
+                    self.e.armed = self.committed = False
+                    await self.e.release_reservation()
+                    from ..browser import THROTTLED_PAUSE_SECONDS
+
+                    return {
+                        "state": "waiting_browser",
+                        "reason": "The employer is pacing this applicant's applications and did not accept this one; "
+                        "nothing was submitted, and it will be tried again later",
+                        "receipt": rejection,
+                        "blocker_type": "site_transient",
+                        "recovery_cause": "site_temporary",
+                        "site_cooldown_seconds": THROTTLED_PAUSE_SECONDS,
+                    }
                 if rejection.get("category") == "security":
                     # Lever: "There was an error verifying your application. Please try again."
                     # Nothing was accepted; a fresh form (restart_rejected_form) may try again.

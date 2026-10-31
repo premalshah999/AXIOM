@@ -136,6 +136,8 @@ NET_RETRY = re.compile(r"net::ERR_(?:CONNECTION_(?:CLOSED|RESET|TIMED_OUT)|NETWO
 NET_ERROR = re.compile(r"net::ERR_([A-Z_]+)")
 # Statuses a bot check or an access rule answers with while the platform may still have processed the write.
 AUTH_REFUSALS = {401, 403}
+# How long an employer that paces applications (Ashby: "apply to one role at a time") is left alone.
+THROTTLED_PAUSE_SECONDS = 6 * 3600
 WORKDAY_FAILURE = re.compile(
     r"something went wrong|unexpected (?:system )?error|session (?:has )?expired|"
     r"system (?:is )?(?:temporarily )?unavailable|server error",
@@ -4203,6 +4205,20 @@ class BrowserEngine:
                 if rejection.get("category") == "employer_limit":
                     self.armed = False
                     return await self.employer_limit_result(rejection)
+                if rejection.get("category") == "throttled":
+                    # An employer pacing applications ("apply to one role at a time"): nothing was accepted, so it
+                    # is retried after a pause, not failed (Ashby, Applied Intuition 2026-10-31).
+                    self.armed = False
+                    await self.release_reservation()
+                    return {
+                        "state": "waiting_browser",
+                        "reason": "The employer is pacing this applicant's applications and did not accept this one; "
+                        "nothing was submitted, and it will be tried again later",
+                        "receipt": rejection,
+                        "blocker_type": "site_transient",
+                        "recovery_cause": "site_temporary",
+                        "site_cooldown_seconds": THROTTLED_PAUSE_SECONDS,
+                    }
                 if rejection.get("category") == "temporary":
                     # SmartRecruiters: "Cannot submit your application. Please try again in a while."
                     self.armed = False
