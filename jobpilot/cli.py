@@ -159,6 +159,18 @@ def prune_workflows(config, days, apply, say=print) -> int:
     return 0
 
 
+def housekeeping(config, apply, say=print) -> int:
+    import json
+
+    from .db import Database
+    from .housekeeping import run
+
+    say(json.dumps(run(config, Database(config.database_url), apply=apply), indent=1))
+    if not apply:
+        say("Nothing changed. Run again with --apply to delete this.")
+    return 0
+
+
 def reset_password(config, ask=None, say=print) -> int:
     """Set the owner's dashboard password from the host, without echoing it, and sign every browser out.
 
@@ -225,6 +237,10 @@ def main():
     prune = sub.add_parser("prune-workflows", help="Delete finished DBOS workflows past the retention age")
     prune.add_argument("--days", type=int, help="Keep this many days (default DBOS_RETENTION_DAYS)")
     prune.add_argument("--apply", action="store_true", help="Delete them; without it this only counts")
+    keeping = sub.add_parser(
+        "housekeeping", help="Delete old jobs never applied to and old run logs (JOB_RETENTION_DAYS, LOG_RETENTION_DAYS)"
+    )
+    keeping.add_argument("--apply", action="store_true", help="Delete them; without it this only counts")
     verify = sub.add_parser(
         "verify", help="Exercise the running installation with two synthetic browser runs"
     )
@@ -254,12 +270,14 @@ def main():
         print(config.app_token)
     elif args.command == "reset-password":
         raise SystemExit(reset_password(config))
-    elif args.command in {"compact-runs", "prune-workflows", "backfill-identities"}:
+    elif args.command in {"compact-runs", "prune-workflows", "backfill-identities", "housekeeping"}:
         import os
 
         os.nice(10)  # Beside live browsers: all are background work.
         if args.command == "backfill-identities":
             raise SystemExit(backfill_identities(config.prepare(), args.apply))
+        if args.command == "housekeeping":
+            raise SystemExit(housekeeping(config.prepare(), args.apply))
         if args.command == "compact-runs":
             raise SystemExit(compact_runs(config.prepare(), args.apply))
         raise SystemExit(prune_workflows(config.prepare(), args.days, args.apply))
