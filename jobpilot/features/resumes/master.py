@@ -29,7 +29,6 @@ from .._store import new_id, now
 from .editor import ResumeDoc, Style
 from .tables import RsMaster
 
-IMPORT_VERSION = "master-import-v1"
 # Hyphens split words: PDF extraction breaks "exactly-once" across lines as "exactly-" / "once".
 TOKEN = re.compile(r"[a-z0-9][a-z0-9+#.%/&']*", re.I)
 

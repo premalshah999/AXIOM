@@ -257,10 +257,6 @@ def owned_fact_keys():
     return {question.key for module in MODULES for question in module.questions}
 
 
-def question_for(module, key):
-    return next((x for x in module.questions if x.key == key), None)
-
-
 # ---------------------------------------------------------------------------------------------------------------
 # Matching a form question to a WOTC question
 # ---------------------------------------------------------------------------------------------------------------

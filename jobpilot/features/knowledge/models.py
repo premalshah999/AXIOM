@@ -6,19 +6,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 Layer = Literal["confirmed", "narrative", "draft"]
 Scope = Literal["global", "employer"]
-CATEGORIES = (
-    "personal",
-    "education",
-    "experience",
-    "projects",
-    "skills",
-    "demographics",
-    "work_authorization",
-    "agreements",
-    "clearance",
-    "employer_relationship",
-    "additional",
-)
 
 
 class EmployerIdentity(BaseModel):
@@ -43,13 +30,6 @@ class QuestionIdentity(BaseModel):
     modality: Literal["willingness", "ability", "experience", "status", "none"] = "none"
     employer_specific: bool = False
     history_row: str | None = None
-
-
-class Provenance(BaseModel):
-    source: str  # app | telegram | review | profile_migration | resume | import
-    actor: str = "applicant"
-    reference: str = ""  # review id, evidence id, migration id …
-    at: str = ""
 
 
 class FactView(BaseModel):

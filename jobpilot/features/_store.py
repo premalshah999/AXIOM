@@ -28,12 +28,6 @@ def create_tables(engine):
     FeatureBase.metadata.create_all(engine)
 
 
-def drop_tables(engine, prefixes=("kn_", "rs_", "dc_")):
-    """Rollback helper for tests/maintainers: drops feature tables only."""
-    tables = [t for t in FeatureBase.metadata.sorted_tables if t.name.startswith(tuple(prefixes))]
-    FeatureBase.metadata.drop_all(engine, tables=tables)
-
-
 def now():
     return datetime.now(UTC).isoformat()
 

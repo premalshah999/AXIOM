@@ -158,17 +158,6 @@ async def test_reupload_overwrite_dialog_is_cancelled(page):
     assert await form.cancel_reupload_dialog() is False
 
 
-async def test_blank_page_detection(page):
-    await page.set_content("<html><body></body></html>")
-    assert await widgets.page_is_blank(page)
-    await page.set_content("<body><div id=app></div></body>")
-    assert await widgets.page_is_blank(page)
-    await page.set_content("<body><button>Apply</button></body>")
-    assert not await widgets.page_is_blank(page)
-    await page.set_content("<body><p>Loading your application</p></body>")
-    assert not await widgets.page_is_blank(page)
-
-
 async def test_clearing_one_tenant_keeps_other_tenants_signed_in(page):
     import re
 

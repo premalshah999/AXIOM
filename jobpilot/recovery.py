@@ -30,7 +30,6 @@ CAUSES = {
     "host_overloaded",
 }
 SENDER_BUSY = "Another application kept the same email sender busy"
-BROWSER_UNAVAILABLE = "Open the ApplyPilot Chrome window"
 # Lease waits more than an hour apart are separate attempts: Ford's two waits on 10-17 exhausted its 10-18 retry.
 SENDER_CHAIN_SECONDS = 3600
 # Waits that sent nothing: (first delay, longest delay, waits before giving up; None = never). Each wait doubles the
@@ -80,7 +79,6 @@ def repeats_unchanged(rows, repeats=2):
         and len(set(tail)) == 1
     )
 REPAIR_STRATEGY_VERSION = "owned-review-repair-observation-v4"
-SPECIALIST_LIMIT = 2  # default of the SPECIALIST_ATTEMPTS setting; the code reads config.specialist_attempts
 # Browser/control repairs have only eight minutes including all waits. Provider
 # and site outages retain their own admission/circuit gates.
 LOCAL_RETRY_DELAY_SECONDS = 30
