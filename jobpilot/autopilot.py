@@ -15,7 +15,7 @@ from .db import Budget, Job, Run, Source, Setting, latest_runs, now
 from .discovery import rank_batch
 from .jobboard import FITS, FOREIGN, LOCKED, board_snapshot, fit_of, settings
 from .service import ACTIVE
-from .admission import active_runs, capacity, employer_partition, outcome_for
+from .admission import active_runs, attempted_job_ids, capacity, employer_partition, outcome_for
 
 
 PRODUCTION_TARGET = "production:100_new_confirmed_20261012"
@@ -493,7 +493,9 @@ SAME_STALL_RUNS = 3
 
 def stall_key(reason):
     """A run's blocker without the numbers (counts, field indexes, durations) that differ between identical stalls."""
-    return re.sub(r"\d+", "#", (reason or "").strip().lower())[:80]
+    from .application_budget import stop_key
+
+    return stop_key(reason)
 
 
 def persist_wait(runs_today, reason):
@@ -506,9 +508,10 @@ def persist_wait(runs_today, reason):
 UNKNOWN_PER_TICK = 1
 
 
-def unknown_candidates(db):
-    """(job id, uncertain run id) for uncertain submissions the resubmit policy allows, oldest attempt first."""
-    from .admission import unknown_resubmit_allowed
+def unknown_candidates(db, checked=True):
+    """(job id, uncertain run id) for uncertain submissions the resubmit policy allows, oldest attempt first. With
+    `checked=False`, also those whose mailbox search (receipt_first) is still to be made."""
+    from .admission import newest_unknown, unknown_resubmit_allowed
     from .reserved import held
 
     with db.session() as s:
@@ -520,18 +523,39 @@ def unknown_candidates(db):
             runs = list(
                 s.scalars(select(Run).options(defer(Run.packet)).where(Run.job_id == job.id).order_by(Run.created_at.desc()))
             )
-            if runs and runs[0].state == "submission_unknown" and unknown_resubmit_allowed(s, runs):
-                found.append((runs[0].created_at, job.id, runs[0].id))
+            if runs and runs[0].state == "submission_unknown" and unknown_resubmit_allowed(s, runs, checked=checked):
+                found.append((runs[0].created_at, job.id, newest_unknown(runs).id))
     return [(job_id, run_id) for _, job_id, run_id in sorted(found)]
+
+
+async def receipt_first(service, job_id, run_id):
+    """Owner 2026-10-12: resubmit unknowns, "receipt-check first". True when the mailbox was searched to its end for
+    an acknowledgement of this application and holds none; that is recorded (`unknown_receipt_check:<job>`), which the
+    queue's admission requires of every caller. An acknowledgement found marks the job submitted (`unknown_triage`),
+    left to the one-click reconcile; a mailbox that cannot be searched clears nothing and is asked again next tick.
+    Asana, Assured Guaranty and Perseus were resubmitted on the matcher's silence (2026-10-12)."""
+    from .receipts import employer_acknowledged
+
+    found = await employer_acknowledged(service.mail, run_id)
+    if found is None:
+        return False
+    if found:
+        service.db.set_setting("unknown_triage:" + job_id, {"verdict": "submitted", "run_id": run_id, "at": now(),
+                                                            "source": "an acknowledgement in the mailbox"})
+        service.db.event(run_id, "unknown_triage", "The mailbox holds the employer's acknowledgement; not resubmitted", {})
+        return False
+    service.db.set_setting("unknown_receipt_check:" + job_id, {"run_id": run_id, "at": now()})
+    return True
 
 
 async def resubmit_unknown(service, slots):
     """Owner 2026-10-12: "Don't protect unknown submissions, resubmit them till you get a confirmation."
 
-    Only under `unknown_resubmit_allowed` (no receipt, the receipt wait passed, at most two resubmits), and only when
-    the uncertain run's saved final page shows no confirmation. A page that thanks the applicant is triaged as
-    submitted (`unknown_triage:<job>`) and left to the owner's one-click reconcile, never resubmitted; a run without a
-    saved final page is never resubmitted blind. Returns how many were queued."""
+    Only under `unknown_resubmit_allowed` (no receipt, the receipt wait passed, at most two resubmits), only when
+    the uncertain run's saved final page shows no confirmation, and only after the mailbox was searched for the
+    employer's acknowledgement (receipt_first; one search per free slot and tick). A page that thanks the applicant is
+    triaged as submitted (`unknown_triage:<job>`) and left to the owner's one-click reconcile, never resubmitted; a run
+    without a saved final page is never resubmitted blind. Returns how many were queued."""
     from pathlib import Path
 
     from .admission import QueueBlocked
@@ -540,9 +564,9 @@ async def resubmit_unknown(service, slots):
 
     if slots <= 0:
         return 0
-    db, queued = service.db, 0
-    for job_id, run_id in await asyncio.to_thread(unknown_candidates, db):
-        if queued >= slots:
+    db, queued, searched = service.db, 0, 0
+    for job_id, run_id in await asyncio.to_thread(unknown_candidates, db, False):
+        if queued >= slots or searched >= slots:
             break
         try:
             page = await asyncio.to_thread((Path(service.config.data_dir) / "runs" / run_id / "final_outline.txt").read_text)
@@ -553,6 +577,9 @@ async def resubmit_unknown(service, slots):
             db.set_setting("unknown_triage:" + job_id, {"verdict": "submitted", "run_id": run_id, "at": now(),
                                                          "source": "the uncertain run's final page"})
             db.event(run_id, "unknown_triage", "The final page shows a confirmation; not resubmitted", {})
+            continue
+        searched += 1
+        if not await receipt_first(service, job_id, run_id):
             continue
         try:
             await service.queue(job_id, "submit")
@@ -800,9 +827,10 @@ def unlisted_ready(db, cfg, listed):
                 Job.status == "ready",
                 Job.demo.is_(False),
                 Job.created_at >= cutoff,
-                Job.id.not_in(select(Run.job_id)),
             )
         ).all()
+        # Not those with an attempt: a cancellation by the app before anything was sent is none (admission).
+        attempted = attempted_job_ids(s, [row.id for row in rows])
     return [
         {
             "id": row.id,
@@ -819,7 +847,7 @@ def unlisted_ready(db, cfg, listed):
             "career_level": row.career_level or "Imported",
         }
         for row in rows
-        if row.id not in listed and row.active is not False
+        if row.id not in listed and row.id not in attempted and row.active is not False
     ]
 
 
@@ -998,7 +1026,9 @@ async def tick(service):
         from .reserved import held_ids
 
         with db.session() as s:
-            attempted = set(s.scalars(select(Run.job_id)))
+            # A cancellation by the app before anything was sent is no attempt (admission.attempted_job_ids): 43 Ready
+            # jobs whose queued run was cancelled sat idle for a week while every worker was free (2026-10-31).
+            attempted = attempted_job_ids(s)
         # FAANG, MANGO and the Big Four wait for the owner's approval (2026-10-27): never a candidate, so they never take
         # a slot. Queue admission refuses them too, whoever asks.
         reserved = await asyncio.to_thread(held_ids, db)
@@ -1025,7 +1055,7 @@ async def tick(service):
             a rejection raises ValueError."""
             jid = job["id"]
             with db.session() as s:
-                if s.scalar(select(Run.id).where(Run.job_id == jid)):
+                if attempted_job_ids(s, [jid]):
                     return "previous", None, None
                 current = s.get(Job, jid)
                 # Owner focus: platforms set aside for now are not dispatched.

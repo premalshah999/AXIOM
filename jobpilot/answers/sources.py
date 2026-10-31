@@ -21,6 +21,17 @@ NOT_A_SOURCE = re.compile(
 )
 
 
+def internal_channels_only(options):
+    """True when every offered source is an internal channel (employee, referral, agency, displaced...) and none is an
+    "Other" choice: the posting is then closed to external applicants. Thrivent's list (2026-10-14) was "Employee/Advisor
+    Referral" and "Other/Non-Referral": the second names a plain external applicant, but "refer" made it look internal
+    and the job was closed."""
+    offered = [str(o) for o in options or [] if str(o).strip()]
+    return bool(offered) and all(NOT_A_SOURCE.search(o) for o in offered) and not any(
+        re.match(r"\s*other\b", o, re.I) for o in offered
+    )
+
+
 # A parent source menu's follow-up asks which one: "Social Media Source", "Job Board Source". It names the channel the
 # parent chose.
 FOLLOW_UP = re.compile(

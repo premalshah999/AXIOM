@@ -34,7 +34,11 @@ async def test_uncertain_applications_are_resubmitted_only_without_a_confirmatio
         queued.append(job_id)
         return {"id": "again"}
 
+    async def searched(mail, run_id):
+        return False  # The mailbox was searched to its end and holds no acknowledgement (tests/test_unknown_receipt_first.py).
+
     monkeypatch.setattr(service, "queue", queue)
+    monkeypatch.setattr("jobpilot.receipts.employer_acknowledged", searched)
     assert await resubmit_unknown(service, 5) == 1
     assert queued == ["u1"]
     with service.db.session() as s:

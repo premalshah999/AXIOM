@@ -43,7 +43,10 @@ def pool_for(run):
 
 def custom_site(job):
     """A job on a career site with no known ATS: it runs on the custom-site worker (Topology.custom)."""
-    return normalize_ats(_get(job, "ats") or "") == "custom"
+    from .ats import custom_like
+
+    # A named platform only the generic driver runs (Pinpoint, Gem...) is still a site it learns as it goes.
+    return custom_like(normalize_ats(_get(job, "ats") or ""))
 
 
 def assign_pool(session, job, source=None):

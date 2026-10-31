@@ -141,15 +141,18 @@ def twins(session, final):
     """URLs of short links whose saved target is the posting `final`: the other side of the same duplicate."""
     from sqlalchemy import select
 
-    from .ats import identity_variants
+    from .ats import identity_variants, requisition_keys
     from .db import Setting
 
     wanted = set(identity_variants(final))
+    keys = {key for key, _ in requisition_keys(final)}  # The same requisition on the employer's page or its board.
     found = set()
     for row in session.scalars(select(Setting).where(Setting.key.like(CACHE_PREFIX + "%"))):
         value = row.value or {}
         try:
-            if value.get("final") and wanted & set(identity_variants(value["final"])):
+            if value.get("final") and (
+                wanted & set(identity_variants(value["final"])) or keys & {key for key, _ in requisition_keys(value["final"])}
+            ):
                 found.add(value["url"])
         except (KeyError, ValueError):
             continue

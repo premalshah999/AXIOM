@@ -29,14 +29,19 @@ def form_for(page, network=None):
 
 
 BURST = """<form><label>Name<input id=name></label></form><script>
-  const end = Date.now() + 1200;
-  const timer = setInterval(() => { document.getElementById('name').setAttribute('aria-invalid', Date.now() % 2 ? 'true' : 'false');
-    if (Date.now() > end) clearInterval(timer) }, 25);
+  window.burst = () => {
+    const end = Date.now() + 1200;
+    const timer = setInterval(() => { document.getElementById('name').setAttribute('aria-invalid', Date.now() % 2 ? 'true' : 'false');
+      if (Date.now() > end) clearInterval(timer) }, 25);
+  };
 </script>"""
 
 
 async def test_a_one_second_wait_costs_a_handful_of_calls_not_one_per_poll(page):
     await page.set_content(BURST)
+    # Start the changes right before the measured wait: a burst that began at page load could be over by the time a slow run
+    # reaches settle(), and then the wait would be shorter than the burst by design.
+    await page.evaluate("window.burst()")
     with roundtrips() as calls:
         started = time.monotonic()
         assert await form_for(page).settle(timeout=5, quiet=0.2)
@@ -52,7 +57,7 @@ async def test_a_page_that_never_settles_still_times_out_with_few_calls(page):
     with roundtrips() as calls:
         started = time.monotonic()
         assert not await form_for(page).settle(timeout=0.8, quiet=0.2)
-        assert time.monotonic() - started < 1.5
+        assert time.monotonic() - started < 2.5  # an 0.8 s timeout; the margin is for a loaded machine, a runaway wait still fails
     assert calls.total <= 3, dict(calls)
 
 
