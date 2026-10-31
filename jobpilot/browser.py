@@ -665,6 +665,10 @@ def user_agent(executable):
     return f"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
 
 
+def source_rules(engine):
+    return getattr(getattr(getattr(engine, "form", None), "resolver", None), "answer_rules", None)
+
+
 def unoffered_source_result(question, rules=None):
     """Stop at the first refusal for a saved source that the page's catalog does not offer.
 
@@ -1007,9 +1011,6 @@ class BrowserEngine:
         self.focus_sessions = []
         self.dir = self.config.data_dir / "runs" / run_id
         self.dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-
-    def source_rules(self):
-        return getattr(getattr(getattr(self, "form", None), "resolver", None), "answer_rules", None)
 
     def emit(self, kind, message, data=None):
         self.db.event(self.run_id, kind, message, data)
@@ -5007,7 +5008,7 @@ class BrowserEngine:
                         "reason": "Internal-only posting: its application source offers only internal channels",
                     }
                 # No offered option can be the applicant's saved source; re-choosing repeats the refusal.
-                return unoffered_source_result(target.get("label", ""), self.source_rules())
+                return unoffered_source_result(target.get("label", ""), source_rules(self))
             if rejected[key] >= 2:
                 if (
                     target.get("label")
@@ -5481,7 +5482,7 @@ class BrowserEngine:
                                 + ")",
                             }
                         else:
-                            self.result = unoffered_source_result(unoffered[0].get("question", ""), self.source_rules())
+                            self.result = unoffered_source_result(unoffered[0].get("question", ""), source_rules(self))
                     elif terminal_answer_errors:
                         # Browsing a picker cannot repair a rejected supporting fact.
                         # Persist the typed cause and release this owner instead of
