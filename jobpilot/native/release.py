@@ -7,6 +7,7 @@ editing or merging in the checkout changes nothing until then.
 """
 
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -26,15 +27,31 @@ def source_id(root):
     return sha + ("-dirty" if git("status", "--porcelain", "--", "jobpilot") else "")
 
 
+def packages_stale(frontend):
+    """npm records what it installed. A lock file newer than that record means the packages changed since: the first native
+    deploy of the new fonts built against the old node_modules, and every font was a 404 (2026-10-31)."""
+    installed = frontend / "node_modules" / ".package-lock.json"
+    lock = frontend / "package-lock.json"
+    return lock.exists() and (not installed.exists() or lock.stat().st_mtime > installed.stat().st_mtime)
+
+
 def dashboard_stale(root):
     index = root / "jobpilot" / "static" / "index.html"
-    if not index.exists():
+    frontend = root / "frontend"
+    if not index.exists() or packages_stale(frontend):
         return True
     built = index.stat().st_mtime
-    frontend = root / "frontend"
     sources = [p for name in ("package-lock.json", "index.html", "vite.config.ts") if (p := frontend / name).exists()]
     sources += [p for p in (frontend / "src").rglob("*") if p.is_file()] if (frontend / "src").is_dir() else []
     return any(p.stat().st_mtime > built for p in sources)
+
+
+def unresolved_assets(static):
+    """Package paths left in the built CSS. Vite only warns about a `url()` it cannot find and the build still succeeds."""
+    found = set()
+    for sheet in (static / "assets").glob("*.css"):
+        found.update(re.findall(r"""url\(["']?(@[^)"']+)""", sheet.read_text(errors="replace")))
+    return sorted(found)
 
 
 def build_dashboard(root, say=print):
@@ -46,10 +63,12 @@ def build_dashboard(root, say=print):
         raise NativeError("The dashboard needs building and npm was not found. Install Node 22: brew install node@22")
     frontend = root / "frontend"
     say("Building the dashboard ...")
-    if not (frontend / "node_modules").exists():
+    if packages_stale(frontend):
         subprocess.run([npm, "ci"], cwd=frontend, check=True, stdout=subprocess.DEVNULL)
     if subprocess.run([npm, "run", "build"], cwd=frontend, stdout=subprocess.DEVNULL).returncode:
         raise NativeError("The dashboard did not build. Run: cd frontend && npm run build")
+    if missing := unresolved_assets(root / "jobpilot" / "static"):
+        raise NativeError("The dashboard built without these files: " + ", ".join(missing))
     return True
 
 
