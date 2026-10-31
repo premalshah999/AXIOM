@@ -2,7 +2,7 @@
 
 Kept like a resume: a file under the data directory (`profile/`), described by the `profile_photo` setting. A form's photo
 upload gets it when one is saved; without one an optional field is left empty and a required one becomes one clear question
-("Upload a profile photo in Setup › Profile"). An ID document is not a profile photo and never takes it.
+("Upload a profile photo in Profile › Identity"). An ID document is not a profile photo and never takes it.
 """
 
 import hashlib
@@ -13,7 +13,7 @@ from .db import now
 
 SETTING = "profile_photo"
 MAX_BYTES = 5 * 1024 * 1024
-QUESTION = "Upload a profile photo in Setup › Profile"
+QUESTION = "Upload a profile photo in Profile › Identity"
 KEY = "profile:photo"
 
 # Magic numbers of the image types employers accept in a photo field.

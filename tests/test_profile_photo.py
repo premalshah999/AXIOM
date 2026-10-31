@@ -96,7 +96,7 @@ async def test_no_photo_leaves_an_optional_field_alone_and_asks_once_for_a_requi
     await session.scan()
     report = await session.verify()
     asked = [q for q in report["pending"] if q.get("key") == profile_photo.KEY]
-    assert len(asked) == 1 and asked[0]["owner_question"] == "Upload a profile photo in Setup › Profile"
+    assert len(asked) == 1 and asked[0]["owner_question"] == "Upload a profile photo in Profile › Identity"
     assert asked[0]["type"] == "file"
 
 

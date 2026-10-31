@@ -77,7 +77,7 @@ class TransportMixin:
                 )
                 if not password:
                     raise ValueError("Restore GMAIL_ADDRESS and GMAIL_APP_PASSWORD in .env")
-                where = "in Setup → Email" if token.get("app_password") else "in .env"
+                where = "in Settings → Email" if token.get("app_password") else "in .env"
                 try:
                     result = await asyncio.to_thread(
                         request,

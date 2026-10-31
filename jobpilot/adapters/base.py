@@ -300,11 +300,11 @@ RESET_CODE_INLINE_WAIT = 150
 RESET_WINDOW_SECONDS = 24 * 3600
 PASSWORD_UNKNOWN = (
     "This employer has an account for your email but refuses the saved password, and its password reset email never "
-    "arrives. Reset the password in your own browser, then save it under Setup > Accounts"
+    "arrives. Reset the password in your own browser, then save it under Settings > Accounts"
 )
 ALIAS_REFUSED = (
     "This employer's sign-up form refuses the plus-address that was to replace its unusable account for your email. "
-    "Reset the password in your own browser, then save it under Setup > Accounts"
+    "Reset the password in your own browser, then save it under Settings > Accounts"
 )
 # The page after a reset request that the employer took. SuccessFactors' Password Help: "If an account matches the
 # information you entered, then you will receive an email with instructions on how to reset your password." (REA of
@@ -329,7 +329,7 @@ RESET_SUBMIT = re.compile(r"reset(?: (?:my|your))? password", re.I)
 UNCONFIRMED_RESETS = 3
 RESET_UNCONFIRMED = (
     "This employer refuses the saved password, and its password reset form never confirmed a reset request. Reset "
-    "the password in your own browser, then save it under Setup > Accounts"
+    "the password in your own browser, then save it under Settings > Accounts"
 )
 
 
@@ -2784,7 +2784,7 @@ class Adapter:
             # The employer holds an account for this email, refuses the saved password, and mails nothing for a reset
             # (SuccessFactors: "If you do not receive an email then no matching account was found"). L3Harris, Entergy,
             # Farmers and Westinghouse (2026-10-21/22) repeated sign-in and reset on every run. Only the owner can
-            # recover it; a password saved under Setup > Accounts (state password_reset) is used from then on.
+            # recover it; a password saved under Settings > Accounts (state password_reset) is used from then on.
             if unanswered:
                 self.accounts.mark(url, "password_unknown", self.accounts.saved(url), password_unknown_at=now())
             if fresh := self.fresh_identity(record):
