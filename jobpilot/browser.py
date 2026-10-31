@@ -4732,7 +4732,7 @@ class BrowserEngine:
             key = field_identity(target)
             rejected[key] = rejected.get(key, 0) + 1
             if UNOFFERED_SOURCE in detail:
-                from .answers import NOT_A_SOURCE
+                from .answers.sources import internal_channels_only
 
                 options = [str(o) for o in target.get("options") or [] if str(o).strip()] or [
                     # The navigator's target may omit the catalog; the form observed it (Bank of America's
@@ -4756,11 +4756,7 @@ class BrowserEngine:
                         ),
                         [],
                     )
-                if (
-                    options
-                    and all(NOT_A_SOURCE.search(o) for o in options)
-                    and not any(re.fullmatch(r"\s*other\s*", o, re.I) for o in options)
-                ):
+                if internal_channels_only(options):
                     # Only internal channels (Displaced, LOA, Employee, Contractor, ...): the posting
                     # is not open to external applicants (BofA, Pfizer, Snap on 2026-10-13). Close it.
                     return {
@@ -5229,14 +5225,10 @@ class BrowserEngine:
                     elif unoffered := [
                         q for q in report["pending"] if str(q.get("reason", "")).startswith(UNOFFERED_SOURCE)
                     ]:
-                        from .answers import NOT_A_SOURCE
+                        from .answers.sources import internal_channels_only
 
                         offered = [str(o) for o in unoffered[0].get("options") or [] if str(o).strip()]
-                        if (
-                            offered
-                            and all(NOT_A_SOURCE.search(o) for o in offered)
-                            and not any(re.fullmatch(r"\s*other\s*", o, re.I) for o in offered)
-                        ):
+                        if internal_channels_only(offered):
                             # Only internal channels (BofA "Displaced (US)", "LOA - Job Search (US)"):
                             # the posting is internal-only, as in the answer-validation path.
                             self.result = {
