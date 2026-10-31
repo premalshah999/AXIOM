@@ -106,6 +106,7 @@ def router(service) -> APIRouter:
                     break
             await asyncio.sleep(2)
         db.set_setting(hold, {"at": now(), "stage": "complete", "reason": "restart from Setup", "updated_at": now()})
+        db.flush_events()  # os._exit skips the exit hook that would write a remote database's batched events.
         asyncio.get_running_loop().call_later(1.0, os._exit, 0)
         return {"restarting": True}
 

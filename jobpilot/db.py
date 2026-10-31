@@ -1,4 +1,6 @@
-from contextlib import contextmanager
+import threading
+import time
+from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -15,6 +17,7 @@ from sqlalchemy import (
     func,
     select,
 )
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.sql.functions import FunctionElement
@@ -292,17 +295,50 @@ def latest_runs(*where):
 # Connections for one app process: eight application workers, the discovery, matching, classification and tailoring
 # queues, the scheduler, the mail poller and API requests. SQLAlchemy's default (5 + 10 overflow) ran out under load.
 POOL_SIZE, POOL_OVERFLOW = 10, 20
+# Set by Settings.prepare from DB_AUDIT, so a local installation can measure its own hot paths before moving.
+AUDIT = {"enabled": False}
+# Connections to these hosts must come through DATABASE_MODE=supabase. A bare DATABASE_URL would create every table in `public`,
+# which Supabase publishes to anyone holding the anon key.
+HOSTED_DATABASES = (".supabase.co", ".supabase.com")
+# Events the application reads back to decide whether it already submitted or must wait (recovery, receipts, the iCIMS
+# repost guard). Over a network they are on the server before the caller carries on; every other kind is batched
+# (storage/remote_db.EventWriter), so a crash can lose at most the last half second of telemetry and never one of these.
+DURABLE_EVENTS = frozenset({"submitting", "verification", "form_post", "model_timeout_retry"})
 
 
-def engine_options(url):
+def remote_options(url):
+    """`url` without this application's own parameters (a schema and a pool, from storage.choice), and those."""
+    if url.startswith("sqlite"):
+        return url, {}
+    parsed = make_url(url)
+    found = {k: parsed.query[k] for k in ("axiom_schema", "axiom_pool", "axiom_overflow") if k in parsed.query}
+    if (parsed.host or "").endswith(HOSTED_DATABASES) and not found:
+        raise RuntimeError("Use DATABASE_MODE=supabase and SUPABASE_DB_URL for a Supabase database, not DATABASE_URL.")
+    if not found:
+        return url, {}
+    return parsed.difference_update_query(found).render_as_string(hide_password=False), found
+
+
+def engine_options(url, remote=None):
     if url.startswith("sqlite"):
         return {"connect_args": {"check_same_thread": False, "timeout": 30}, "pool_pre_ping": True}
+    if remote:
+        from .storage.remote_db import RECYCLE_SECONDS
+
+        # Pings are the pool's checkout hook (storage.remote_db): one round trip each is too dear here.
+        return {"pool_size": int(remote.get("axiom_pool", POOL_SIZE)), "max_overflow": int(remote.get("axiom_overflow", POOL_OVERFLOW)),
+                "pool_timeout": 30, "pool_recycle": RECYCLE_SECONDS, "isolation_level": "AUTOCOMMIT"}
     return {"pool_pre_ping": True, "pool_size": POOL_SIZE, "max_overflow": POOL_OVERFLOW, "pool_timeout": 30}
 
 
 class Database:
     def __init__(self, url):
-        self.engine = create_engine(url, **engine_options(url))
+        url, options = remote_options(url)
+        self.remote = bool(options)
+        self.schema = options.get("axiom_schema")
+        self.engine = create_engine(url, **engine_options(url, options))
+        self.audit = self.settings_cache = self.events = None
+        self._exclusive_lock = nullcontext()
         if url.startswith("sqlite"):
 
             @event.listens_for(self.engine, "connect")
@@ -311,9 +347,22 @@ class Database:
                 connection.execute("PRAGMA busy_timeout=30000")
 
         self.Session = sessionmaker(self.engine, expire_on_commit=False)
+        if self.remote or AUDIT["enabled"]:
+            from .storage.remote_db import StatementAudit
+
+            self.audit = StatementAudit(self.engine)
+        if self.remote:
+            from .storage.remote_db import EventWriter, SettingCache, install, install_session_hooks
+
+            install(self.engine, self.schema)
+            self.settings_cache, self.events = SettingCache(), EventWriter(self.engine, Event)
+            install_session_hooks(self, self.Session, Setting, Event)
+            self._exclusive_lock = threading.Lock()
         Base.metadata.create_all(self.engine)
         self.add_missing_columns()
         self.add_settings_prefix_index()
+        if self.remote:
+            self.require_private()
         with self.session() as s:
             if not s.get(Setting, "control"):
                 s.add(Setting(key="control", value={"paused": False, "auto_submit": False}))
@@ -355,36 +404,77 @@ class Database:
         with self.Session.begin() as session:
             yield session
 
+    def require_private(self):
+        """Refuse to run with anything of ours reachable through the database host's public API (Supabase's)."""
+        from .storage.remote_db import exposure_problems
+
+        if found := exposure_problems(self.engine, self.schema, list(Base.metadata.tables)):
+            raise RuntimeError("Refusing to start: " + " ".join(found))
+
     @contextmanager
     def exclusive(self):
         """Short business transactions; never hold this while doing network work."""
-        with self.Session() as s:
-            if self.engine.dialect.name == "sqlite":
-                s.connection().exec_driver_sql("BEGIN IMMEDIATE")
-            else:
-                # One per-app lock for budget/cap reservations and job transitions. These commits are the ones that must
-                # survive a crash ("submitting" before the click), so they wait for the disk even where plain commits do
-                # not (jobpilot/native/pg.py). Under Compose every commit waits already, and this changes nothing.
-                s.connection().exec_driver_sql(
-                    "SELECT pg_advisory_xact_lock(72319001), set_config('synchronous_commit', 'on', true)"
-                )
-            try:
-                yield s
-                s.commit()
-            except BaseException:
-                s.rollback()
-                raise
+        # Remote: one process owns the database, so waiters queue here without taking a pooled connection each. The advisory
+        # lock below still serialises other processes (a command run beside the app) and is what guarantees the exclusion.
+        with self._exclusive_lock:
+            started = time.perf_counter()
+            with self.Session() as s:
+                if self.engine.dialect.name == "sqlite":
+                    s.connection().exec_driver_sql("BEGIN IMMEDIATE")
+                else:
+                    # One per-app lock for budget/cap reservations and job transitions. These commits are the ones that must
+                    # survive a crash ("submitting" before the click), so they wait for the disk even where plain commits do
+                    # not (jobpilot/native/pg.py), and on a server whose own setting is off. Under Compose every commit waits
+                    # already, and this changes nothing.
+                    s.connection().exec_driver_sql(
+                        "SELECT pg_advisory_xact_lock(72319001), set_config('synchronous_commit', 'on', true)"
+                    )
+                try:
+                    yield s
+                    s.commit()
+                except BaseException:
+                    s.rollback()
+                    raise
+            if self.audit:
+                self.audit.hold(time.perf_counter() - started)
 
     def event(self, run_id, kind, message, data=None):
+        if self.events:
+            self.events.add(run_id, kind, message, data, now())  # Stamped now: the row is written a moment later.
+            if kind in DURABLE_EVENTS:
+                self.events.flush()  # In order behind everything already waiting, and on the server when this returns.
+            return
         with self.session() as s:
             s.add(Event(run_id=run_id, kind=kind, message=message, data=data or {}))
 
+    def flush_events(self):
+        if self.events:
+            self.events.flush()
+
     def get_setting(self, key, default=None):
+        if self.settings_cache:
+            from .storage.remote_db import read_setting
+
+            cached = self.settings_cache.get(key)
+            if cached is not self.settings_cache.MISSING:
+                return default if cached is None else cached
+            generation = self.settings_cache.begin_read()
+            value = read_setting(self.engine, Setting, key)
+            self.settings_cache.store(key, value, generation)
+            return default if value is None else value
         with self.session() as s:
             row = s.get(Setting, key)
             return row.value if row else default
 
     def set_setting(self, key, value):
+        if self.settings_cache:
+            from .storage.remote_db import single_statement_upsert
+
+            # One round trip without the global lock, held for four otherwise and taken for every setting written.
+            # Last write wins on the row, as it does for every get_setting then set_setting in the application.
+            single_statement_upsert(self.engine, Setting, key, value)
+            self.settings_cache.invalidate([key])
+            return
         with self.exclusive() as s:
             row = s.get(Setting, key)
             if row:
