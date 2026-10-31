@@ -93,6 +93,31 @@ class ValidateMixin:
         affirmative = re.fullmatch(r"(?:yes|y|true|checked)\.?", str(answer.value or "").strip(), re.I)
         return bool(affirmative) or topic(field["label"]) != "prior_employment"
 
+    def prior_yes_unsupported(self, field, answer):
+        """True for a Yes to "have you worked or contracted here before?" that cites no saved work row naming that
+        employer. Fifteen confirmed applications said the applicant had been a contractor at T-Mobile, PwC, PNC, the
+        Federal Reserve, Cigna and Target (2026-10-16..23) on the strength of the complete-history attestation, which
+        can only support a No. A page's own pre-selection and a stored earlier Yes are no evidence either; an answer
+        the applicant reviewed is theirs."""
+        if topic(field["label"]) != "prior_employment" or not re.fullmatch(
+            r"(?:yes|y|true|checked)\.?", str(answer.value or "").strip(), re.I
+        ):
+            return False
+        if any(x.startswith(("reviewed:", "knowledge:m:review:")) for x in answer.evidence_ids):
+            return False
+        text = " " + normalize(f"{field['label']} {getattr(self, 'employer', '') or ''}") + " "
+        for x in answer.evidence_ids:
+            match = re.fullmatch(r"profile:work\.(\d+)(?:\..+)?", x)
+            if match and int(match[1]) < len(self.profile.work):
+                name = re.sub(
+                    r"\b(?:inc|llc|ltd|corp|corporation|co|company|the)\b",
+                    " ",
+                    normalize(self.profile.work[int(match[1])].company or ""),
+                )
+                if len(name := re.sub(r"\s+", " ", name).strip()) >= 3 and f" {name} " in text:
+                    return False
+        return True
+
     def experience_cause(self, field, answer, yes):
         """Why a Yes/No to a years-of-experience question is refused, or "". A settled verdict from the work history
         decides the answer (Apptronik 2026-10-30: Yes six times, No twice for one profile). An undecided clause stays with
@@ -247,6 +272,8 @@ class ValidateMixin:
             # The applicant's "my employment history is complete" attestation answered "Yes" to "Do you use
             # Duolingo?" and to "have you ever been a contractor for the Federal Reserve?" (2026-10-26). A fact about
             # past employers supports only a question about the applicant's own past employment, and never a Yes.
+            valid_evidence = False
+        if self.prior_yes_unsupported(field, a):
             valid_evidence = False
         if any("date_of_birth" in x or x.endswith(":dob") for x in a.evidence_ids) and not re.search(
             r"birth|\bdob\b|\bborn\b|\bages?\b|years? old|years of age|citizenship|nationality|permanent residency|"

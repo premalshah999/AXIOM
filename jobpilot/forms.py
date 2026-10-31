@@ -20,7 +20,7 @@ from . import icims_protocol, phone_fields, taleo_protocol, widgets
 from . import profile_photo
 from .answers import CONTACT, HISTORY_UNKNOWN, WOTC, answer_key, job_catalog_search_box, normalize
 from .answers.experience import COMPUTED as EXPERIENCE_COMPUTED
-from .answers.text import strip_catalog_code
+from .answers.text import FROM_RECORD, strip_catalog_code
 from .knowledge import topic
 from .browser_contracts import ActionResult, action_result, field_identity, fingerprint
 from .models import AnswerModelUnavailable
@@ -3889,8 +3889,13 @@ class FormSession:
                 known = self.resolver.local(field)
                 if (
                     # A years-of-experience answer computed from the work history outranks every stored one, in
-                    # menus too (Apptronik's combobox kept an earlier No for a Yes the history supports, 2026-10-30).
-                    (field["type"] not in {"prompt", "combobox", "dropdown"} or EXPERIENCE_COMPUTED in (known.reason if known else ""))
+                    # menus too (Apptronik's combobox kept an earlier No for a Yes the history supports, 2026-10-30). So
+                    # does a prior-employment, enrolment or residence answer decided from the record (Federal Reserve's
+                    # menu kept a contractor Yes the work history contradicts, 2026-10-27).
+                    (
+                        field["type"] not in {"prompt", "combobox", "dropdown"}
+                        or any(m in (known.reason if known else "") for m in (EXPERIENCE_COMPUTED, FROM_RECORD))
+                    )
                     and known
                     and known.disposition == "answer"
                     and not widgets.same_value(field, field["value"], known.value)
