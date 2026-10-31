@@ -20,7 +20,8 @@ from openai import APIError
 from .models import AnswerModelUnavailable, BudgetExceeded
 
 from .answers import UNOFFERED_SOURCE, Resolver
-from .ats import EMBED_JS, REGISTRY, detect, detect_embedded
+from .ats import EMBED_JS, LABEL_ONLY, REGISTRY, VENDORS, classify_embedded, detect, unsettled
+from .posting_identity import IDENTITY_JS, identity, placeholder_title, save as save_identity
 from .email_browser import EmailBrowser, redacted_url
 from .failure_reports import clean
 from .forms import AUTH, ENTRY, FINAL, STALE_CHOICE, FormSession, NetworkMonitor, ResumeAttachmentError
@@ -1148,6 +1149,7 @@ class BrowserEngine:
         # This run's copy only: the stored URL keeps its identity for duplicate checks.
         job = {**job, "url": english_posting_url(job.get("url", ""))}
         self.job, self.run_record = job, run
+        job["ats"] = self.starting_label(job)
         started = time.monotonic()
         process, browser, pw = None, None, None
         temp = tempfile.mkdtemp(prefix="applypilot-browser-")
@@ -1465,8 +1467,15 @@ class BrowserEngine:
                     if embedded:
                         await page.goto(embedded, wait_until="domcontentloaded", timeout=30000)
                         self.emit("browser", "Opened the employer's embedded Greenhouse form directly")
-                except PlaywrightError:
-                    pass  # No embedded form: continue on the employer page.
+                except PlaywrightError as exc:
+                    # Continue on the employer page, and say why: this passed silently, so Roblox's, Abnormal's and Lyft's
+                    # runs (2026-10-25) could not show whether the board lookup, the 10 s wait for a frame that only
+                    # appears after Apply, or the navigation itself had failed.
+                    self.emit(
+                        "handoff_skipped",
+                        "No embedded Greenhouse form opened from the employer page",
+                        {"error": type(exc).__name__, "detail": str(exc).splitlines()[0][:160] if str(exc) else ""},
+                    )
             if job["ats"] == "greenhouse" and not resumed:
                 # Classic Greenhouse forms do not expose Remix's hydration global.
                 try:
@@ -1563,7 +1572,7 @@ class BrowserEngine:
             ):
                 # The resumed tab is already on the portal this job's career site handed off to.
                 self.adopt_handoff("icims", platform)
-            if not job["demo"] and job["ats"] == "custom" and ats != "custom":
+            if not job["demo"] and unsettled(job["ats"]) and not unsettled(ats):
                 if ats in {"icims", "successfactors", "taleo"}:
                     # The platform's own rules apply to its forms (this record is the resolver's and the engine's):
                     # iCIMS refuses a current role without an end date as "Invalid Data Error", and Medpace's and
@@ -1599,6 +1608,7 @@ class BrowserEngine:
                     "runner_tier": run["packet"].get("runner_tier", 1),
                 },
             )
+            await self.remember_posting_identity(page)
             async with asyncio.timeout(max(1, budget - (time.monotonic() - started))) as cm:
                 self.timeout_cm = cm
                 if job["demo"]:
@@ -2599,37 +2609,120 @@ class BrowserEngine:
         """A resumed draft of a short-linked job is already on its platform's page: adopt the handoff as a fresh run
         does. EA's go.vansh.nyc job resumed on its Avature site kept the custom adapter and armed its reset email
         with the short-link host's mail rule, whose senders were another employer's (2026-10-29)."""
-        if ats == "custom" and detect(page.url).id != "custom":
+        if unsettled(ats) and not unsettled(detect(page.url).id):
             return await self.detect_ats(page, ats)
         return ats
 
     async def detect_ats(self, page, ats):
-        """Redirects and embedded frames reveal the real ATS behind a company career site."""
+        """Redirects, embedded frames and the page's own fingerprints reveal the real ATS behind a company career site."""
         current = detect(page.url).id
-        if current != "custom":
-            if ats == "custom" and detect(self.job.get("url", "")).id == "custom":
+        if not unsettled(current):
+            if unsettled(ats) and unsettled(detect(self.job.get("url", "")).id):
                 # A custom link that redirects to the platform (Applied Materials' and Booz Allen's short links ->
                 # their Workday tenants, 2026-10-26) is the employer's handoff: without it Workday refused the tenant
                 # as "account origin does not match this employer".
                 self.adopt_handoff(current)
             return current
-        if ats != "custom":
+        if not unsettled(ats):
             return ats
         try:
             await page.wait_for_load_state("load", timeout=8000)
-            found, url = detect_embedded(await page.evaluate(EMBED_JS))
+            found, url, how = classify_embedded(await page.evaluate(EMBED_JS))
+            if found == "greenhouse" and not url:
+                url = await self.late_greenhouse_frame(page)
         except Exception:
             return ats
-        if found and url and found not in {"phenom"}:
+        if not found:
+            return ats
+        if url:
             from .adapters import adapter_class
 
-            self.emit("handoff", f"Career site uses {found}; opening its application directly")
-            await page.goto(
-                adapter_class(found).prepare_url(url), wait_until="domcontentloaded", timeout=30000
-            )
+            self.emit("handoff", f"Career site uses {found}; opening its application directly", {"found": found, "via": how})
+            await page.goto(adapter_class(found).prepare_url(url), wait_until="domcontentloaded", timeout=30000)
             self.adopt_handoff(found, url)
-            return found
-        return found or ats
+        elif how in {"meta", "link"}:
+            # The whole site is this platform's portal (Two Sigma's Avature, AARP's Eightfold): its pages, not the short
+            # link that led here, are the employer's identity for accounts and mail.
+            self.emit("handoff", f"The career site is a {found} portal", {"found": found, "via": how})
+            self.adopt_handoff(found)
+        else:
+            self.persist_observed_ats(found)
+        return found
+
+    embed_poll = 0.5  # seconds between looks for a frame that loads late
+
+    async def remember_posting_identity(self, page):
+        """Save the employer and title the open posting states about itself when the job has none (or has the career
+        site's hostname as its employer): jobs from pasted links and short links showed as "ats.rippling.com" or "Untitled
+        role", and an empty company kept receipts from matching (posting_identity). Best effort, and free for a job that
+        has both."""
+        job = self.job
+        company = str(job.get("company") or "").strip()
+        hostname_like = "." in company and " " not in company
+        if job.get("demo") or not (not company or hostname_like or placeholder_title(job.get("title"))):
+            return
+        try:
+            found = identity(await page.evaluate(IDENTITY_JS))
+            changes = await asyncio.to_thread(save_identity, self.db, job["id"], found) if found else {}
+        except Exception:
+            return
+        if changes:
+            job.update(changes)
+            self.emit("job_identity", "Saved the employer and title the posting states", changes)
+
+    async def late_greenhouse_frame(self, page, seconds=6):
+        """The application frame of a Greenhouse board embed that has not rendered yet: its holder (#grnhse_app) or loader
+        script is on the page at the load event and the iframe is added after it (Abnormal, Databricks, Lyft's CareerPuck,
+        2026-10-25..29), so one look at the load event saw no form."""
+        for _ in range(int(seconds / self.embed_poll) if self.embed_poll else 12):
+            await asyncio.sleep(self.embed_poll)
+            try:
+                found, url, _ = classify_embedded(await page.evaluate(EMBED_JS))
+            except PlaywrightError:
+                return None
+            if found == "greenhouse" and url:
+                return url
+        return None
+
+    async def follow_embedded(self, current):
+        """Look again at the live page (after an Apply click, a redirect, a new tab or a late iframe) while the run still
+        has only a career site's label: the platform it moved to, after moving the run there, else None.
+
+        Detection used to run once, before the first click: Roblox's Greenhouse frame appears only on its form step, so
+        the run kept a career site's label and mail rule (2026-10-31). A frame or Apply link to a platform opens its own
+        application as the top-level page, as the first look does, but only while nothing has been typed or uploaded:
+        what is already filled in the employer's frame stays where it is and the run only takes the platform's label."""
+        if self.armed or not unsettled(current) or getattr(self, "embedded_misses", 0) >= 3:
+            return None
+        page = self.page
+        try:
+            landed = detect(page.url).id
+            if unsettled(landed):
+                found, url, how = classify_embedded(await page.evaluate(EMBED_JS))
+            else:
+                found, url, how = landed, None, "url"  # a redirect or new tab already on the platform's page
+        except Exception:
+            return None
+        if not found or found == current or (current != "custom" and found in LABEL_ONLY):
+            return None
+        form = getattr(self, "form", None)
+        untouched = not (getattr(form, "ledger", None) or getattr(form, "uploaded", False))
+        if url and untouched:
+            from .adapters import adapter_class
+
+            try:
+                self.emit("handoff", f"The page now shows {found}; opening its application directly", {"found": found, "via": how})
+                await page.goto(adapter_class(found).prepare_url(url), wait_until="domcontentloaded", timeout=30000)
+            except PlaywrightError as exc:
+                self.embedded_misses = getattr(self, "embedded_misses", 0) + 1
+                self.emit("handoff_skipped", f"Could not open the {found} application the page shows", {"error": type(exc).__name__})
+                return None
+            self.adopt_handoff(found, url)
+        else:
+            if url:
+                self.emit("handoff_skipped", f"The page shows {found}, but the form is already in progress; staying on it", {"found": found})
+            self.adopt_handoff(found)
+        return found
 
     def adopt_handoff(self, target, url=None):
         """The employer's site led to this platform: its own posting becomes the run's job URL in memory (Workday's
@@ -2649,6 +2742,48 @@ class BrowserEngine:
             # The observed ATS owns the account and verification mail. Keeping
             # a short-link host here selects that host's unrelated sender rule.
             self.job.update(url=url or self.page.url, ats=target)
+        self.persist_observed_ats(target)
+
+    def starting_label(self, job):
+        """The label a run starts with. A row whose platform was learned from an earlier run's hand-off (not from its
+        address) starts as the career site it is and finds the platform again: trusting "workday" on a short link would skip
+        the adoption that Workday's account check needs ("account origin does not match this employer"), and a platform
+        reached only after Apply would never be looked for."""
+        if job.get("demo"):
+            return job.get("ats")
+        seen = self.db.get_setting("observed_ats:" + str(job.get("id")), {})
+        return (seen.get("was") or "custom") if seen.get("ats") == job.get("ats") else job.get("ats")
+
+    def persist_observed_ats(self, target):
+        """Write the platform this run observed behind the career site to the job row, once it is known.
+
+        adopt_handoff changed only this run's copy, so 144 of 269 jobs that were routed to Greenhouse, Workday, iCIMS and
+        the rest still read "custom" (2026-10-31): the wrong worker lane, the custom site's sender rule and a list that
+        called them career sites. Only a label that had not found its platform is replaced, and only by a better one
+        (custom < named platform < one with a driver); the address stays the career site's, so nothing keyed on it moves.
+        The observation is remembered (observed_ats:<job>) because that label then comes from this page, not from the
+        address: the next run starts as a career site again and finds the platform itself, where trusting the label
+        would skip the adoption that Workday's account check needs."""
+        db, job_id = getattr(self, "db", None), self.job.get("id")
+        if not db or not job_id or self.job.get("demo") or unsettled(target) and target not in LABEL_ONLY:
+            return
+
+        def rank(name):
+            return 0 if name == "custom" or name in VENDORS else 1 if name in LABEL_ONLY else 2
+
+        marker = "observed_ats:" + job_id
+        seen = db.get_setting(marker, {})
+        with db.session() as s:
+            row = s.get(Job, job_id)
+            if row is None or row.ats == target:
+                return
+            observed = seen.get("ats") == row.ats
+            was = seen.get("was") if observed else row.ats
+            if rank(target) < rank(row.ats) or (rank(target) == rank(row.ats) and not observed):
+                return
+            row.ats = target
+        db.set_setting(marker, {"ats": target, "was": was, "at": time.time()})
+        self.emit("ats_observed", f"This job's platform is {target}", {"was": was, "ats": target})
 
     def adopt_icims_portal(self, url):
         """A career site that hands off to its iCIMS portal (Planview's careers.planview.com/jobs/5080 opened
@@ -2736,7 +2871,16 @@ class BrowserEngine:
         target = detect(self.page.url).id
         current = getattr(getattr(self, "fallback_mail_adapter", None), "id", "") or self.job.get("ats", "")
         if target not in ADAPTERS or target in {current, self.job.get("ats", "")}:
-            return None
+            if not unsettled(current):
+                return None
+            # Still a career site: look again for a platform it shows now (an Apply that opened a frame, a new tab).
+            target = await self.follow_embedded(current)
+            if target not in ADAPTERS:
+                return None  # A label (or a platform without an adapter) is adopted; the navigator continues.
+            self.navigator_handed_off = True
+            self.emit("handoff", f"The application moved to {target}; its own adapter continues")
+            result = await self.run_adapters(target)
+            return None if result and result.get("fallback") and not self.armed else result
         self.navigator_handed_off = True
         self.adopt_handoff(target)
         self.emit("handoff", f"The application moved to {target}; its own adapter continues")

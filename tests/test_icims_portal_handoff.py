@@ -47,7 +47,7 @@ def engine(service, **extra):
 async def test_the_embedded_handoff_adopts_the_portal(service, monkeypatch):
     page = SimpleNamespace(url=SITE, wait_for_load_state=AsyncMock(), evaluate=AsyncMock(return_value=[]),
                            goto=AsyncMock())
-    monkeypatch.setattr("jobpilot.browser.detect_embedded", lambda entries: ("icims", PORTAL))
+    monkeypatch.setattr("jobpilot.browser.classify_embedded", lambda entries: ("icims", PORTAL, "frame"))
     value = engine(service, page=page)
     assert await value.detect_ats(page, "custom") == "icims"
     assert value.job["url"] == POSTING and value.job["ats"] == "icims"
