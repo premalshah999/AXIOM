@@ -361,9 +361,16 @@ def require_company_limit(session, job, run_id=None):
     ).all()
     employers = {candidate.id: identity(candidate.company, candidate.url) for candidate in jobs}
     by_id = {candidate.id: candidate for candidate in jobs}
+    # A short link recorded as the posting already applied to (queueing._record_duplicate) takes no slot of its own.
+    duplicates = set(
+        session.scalars(
+            select(Run.job_id).where(Run.state == "already_applied", Run.receipt["type"].as_string() == "duplicate_posting")
+        )
+    )
     for candidate in jobs:
         if employers[candidate.id] == target and candidate.status in {"confirmed", "already_applied"}:
-            confirmed.add(candidate.identity)
+            if candidate.id not in duplicates:
+                confirmed.add(candidate.identity)
     target_ids = [jid for jid, employer in employers.items() if employer == target]
     runs = session.execute(
         select(Run.id, Run.job_id, Run.state, Run.mode, Run.packet["verification_only"].as_boolean())
@@ -384,7 +391,8 @@ def require_company_limit(session, job, run_id=None):
         if not candidate or employers[candidate.id] != target or _exempt(candidate, run):
             continue
         if run.state in {"confirmed", "already_applied"}:
-            confirmed.add(candidate.identity)
+            if candidate.id not in duplicates:
+                confirmed.add(candidate.identity)
         elif run.mode == "submit" and run.state in {"queued", "running", "submitting"}:
             if run.id != run_id:
                 reserved.add(candidate.identity)
