@@ -41,3 +41,17 @@ def test_the_maintenance_page_url_alone_defers_workday():
                                       "Workday is down for scheduled maintenance. We'll be back soon.", at=at)
     assert until == (at + timedelta(hours=1)).isoformat()
     assert planned_maintenance_until("https://community.workday.com/forums", "anything", at=at) is None
+
+
+def test_the_static_maintenance_page_defers_workday_instead_of_an_origin_error():
+    # 2026-10-31: three jobs landed on static.community.workday.com/maintenance-page.html and were refused as
+    # "account origin does not match this employer" (eight such jobs in a week) instead of waiting for Workday.
+    at = datetime(2026, 10, 31, 6, 0, tzinfo=UTC)
+    text = "Workday is currently unavailable. We are experiencing a service interruption."
+    until = planned_maintenance_until("https://static.community.workday.com/maintenance-page.html", text, at=at)
+    assert until == (at + timedelta(hours=1)).isoformat()
+    assert planned_maintenance_until("https://community.workday.com/maintenance-page.html", text, at=at) == until
+    # A tenant's career site, a look-alike host and an all-clear page never defer the platform.
+    assert planned_maintenance_until("https://acme.wd1.myworkdayjobs.com/maintenance-page", text, at=at) is None
+    assert planned_maintenance_until("https://notworkday.com/maintenance-page", text, at=at) is None
+    assert planned_maintenance_until("https://static.community.workday.com/maintenance-page.html", "Welcome", at=at) is None
