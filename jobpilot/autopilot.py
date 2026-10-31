@@ -752,36 +752,6 @@ def admission_revision(db, cfg):
     return hashlib.sha256(json.dumps(policy, sort_keys=True).encode()).hexdigest()[:16]
 
 
-def open_repairs(db):
-    """Jobs in the dashboard's Repairing group: their latest run waits for the browser, timed out or failed.
-
-    Not a reserved employer's job awaiting the owner's approval: it shows in Jobs › Reserved and nothing retries it, so
-    it would hold every new application until the owner approved it (2026-10-27)."""
-    from .api.pipeline import RUN_GROUPS
-    from .reserved import held
-
-    with db.session() as s:
-        waiting = list(held(s))
-        latest = select(Run.job_id, func.max(Run.created_at).label("at")).group_by(Run.job_id).subquery()
-        return s.scalar(
-            select(func.count())
-            .select_from(Run)
-            .join(latest, (Run.job_id == latest.c.job_id) & (Run.created_at == latest.c.at))
-            .join(Job, Job.id == Run.job_id)
-            .where(
-                Run.state.in_(RUN_GROUPS["repair"]),
-                Job.status != "archived",
-                *([Job.id.not_in(waiting)] if waiting else []),
-            )
-        ) or 0
-
-
-def new_applications_held(db):
-    """Nothing holds new applications (owner 2026-10-28: "remove all the stupid allowances ... no blockages till I tell
-    you"). The repairs-first hold and the new-application allowance are gone; repairs and new jobs run side by side."""
-    return 0
-
-
 async def owner_requests_only(service):
     """Start the owner's deferred Apply clicks as admission allows, when no autopilot batch is running."""
     from .owner_apply import due
@@ -1033,12 +1003,6 @@ async def tick(service):
         # a slot. Queue admission refuses them too, whoever asks.
         reserved = await asyncio.to_thread(held_ids, db)
         candidates = [j for j in jobs if j["id"] not in attempted and j["id"] not in reserved]
-        # Repairs first: fresh postings wait while any application is repairing (owner 2026-10-27); retries, uncertain
-        # submissions and the owner's own Apply clicks continue below.
-        holding = new_applications_held(db)
-        batch["holding_new_for_repairs"] = holding
-        if holding:
-            candidates = []
         replenish_discovery(service, len(candidates))
         if integrated:
             from .execution_services import prepare_due
@@ -1191,7 +1155,7 @@ async def tick(service):
         unranked = [j["id"] for j in candidates[:24] if j.get("score") is None and j["status"] != "ready"]
         if integrated:
             unranked = classification_ids(due_work, attempted)
-        if queued_now < room and unranked and not holding:
+        if queued_now < room and unranked:
             try:
                 if integrated:
                     from .workers import enqueue_classification

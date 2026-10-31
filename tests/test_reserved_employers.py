@@ -287,8 +287,6 @@ async def test_stalled_retries_and_the_repairs_hold_leave_reserved_jobs_alone(se
                       status="waiting_browser"))
             s.add(Run(id="run-" + jid, job_id=jid, state="waiting_browser", mode="submit", packet={},
                       reason="did not advance", created_at=iso(10), finished_at=iso(9)))
-    # A held repair would otherwise keep every new application waiting (owner rule: repairs first).
-    assert autopilot.open_repairs(service.db) == 1
     assert await autopilot.persist_stalled(service, 5, [], {}) == 1 and resumed == ["acme"]
 
 

@@ -608,7 +608,6 @@ MULTIPAGE = {
     "adp",
     "custom",
 }
-FAST_PATH = {"greenhouse", "lever", "ashby", "smartrecruiters", "workable", "bamboohr"}
 CAPTCHA_HOSTS = ("google.com", "gstatic.com", "recaptcha.net", "cloudflare.com", "hcaptcha.com")
 TRACKERS = (
     "google-analytics.com",
@@ -3004,47 +3003,6 @@ class BrowserEngine:
                 ],
             }
             return False
-
-    async def fast_path(self, ats=None):
-        """Avoid navigation-model calls on an already visible one-page application."""
-        if (ats or self.job["ats"]) not in FAST_PATH:
-            return None
-        await self.form.scan()
-        fields, buttons = list(self.form.fields.values()), list(self.form.buttons.values())
-        resume_visible = any(
-            f["type"] == "file" and re.search(r"resume|cv\b", f["label"], re.I) for f in fields
-        )
-        final = [b for b in buttons if FINAL.search(b["label"])]
-        next_page = any(
-            re.fullmatch(r"next|continue|save and continue|review", b["label"], re.I) for b in buttons
-        )
-        captcha = await self.page.locator(
-            '.g-recaptcha:visible,.cf-turnstile:visible,iframe[src*="bframe"]:visible,iframe[src*="hcaptcha"]:visible'
-        ).count()
-        if (
-            not resume_visible
-            or len(final) != 1
-            or next_page
-            or (captcha and not self.config.twocaptcha_api_key)
-        ):
-            return None
-        self.emit("fast_path", "Single-page application detected; filling directly")
-        # One repair pass for fields revealed by a previous selection or resume parser.
-        for _ in range(2):
-            report = await self.form.fill_current()
-            if not report["ok"]:
-                report = await self.form.recover_controls(report)
-            if report["pending"] and await self.ask(report["pending"]):
-                report = await self.form.fill_current()
-            if report["pending"]:
-                return {
-                    "state": "needs_review",
-                    "reason": "Required answers need your review",
-                    "reviews": report["pending"],
-                }
-            if report["ok"]:
-                return await self.finish()
-        return None
 
     async def recover_workday_error(self):
         """Restart this job's draft after a Workday session/server error, before submit."""

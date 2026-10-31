@@ -7,16 +7,14 @@ named for a retired engine (the Oct 4 build, the reasoning-first and agent-led p
 from sqlalchemy import select
 from sqlalchemy.orm import defer
 
-from .config import MAX_WORKERS, Topology, legacy_topology
+from .config import Topology, legacy_topology
 from .db import Run
 
 CURRENT = "current"
-KEY = "pipeline_comparison"
 NORMAL = "normal"
 SPECIALIST = "specialist"
 CUSTOM = "custom"
 POOLS = (NORMAL, SPECIALIST, CUSTOM)
-MAX_SLOTS = MAX_WORKERS
 
 
 def _get(row, key, default=None):
@@ -135,7 +133,6 @@ def pool_capacity(session, pool=NORMAL, limit=8, rows=None):
         running=len(running),
         queued_partitions=frozenset(employer_partition(job) for run, job in rows if run.state == "queued"),
         running_partitions=frozenset(employer_partition(job) for _, job in running),
-        reservations=len({run.job_id for run, _ in rows}),
         limit=len(pool_slot_ids(pool, limit)),
     )
 

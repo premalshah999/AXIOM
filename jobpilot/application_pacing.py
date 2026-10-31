@@ -17,7 +17,6 @@ from .db import Job, Run, Setting
 from .features.knowledge.employers import name_aliases, tenant_alias
 from .features.knowledge.tables import KnAlias
 
-ASHBY_KEY = "application_pacing:ashby"
 ASHBY_GAP = 150
 # Platforms that take one application at a time with a gap between starts (seconds). Workable answers HTTP 412
 # "Something went wrong. We are working on this, please try again later." once a candidate has applied a few times:
@@ -56,7 +55,7 @@ def throttled_until(session, ats):
 
 
 def gap_key(ats):
-    return "application_pacing:" + ats  # "application_pacing:ashby" is ASHBY_KEY
+    return "application_pacing:" + ats
 HISTORICAL_PREFIX = "historical_company_submissions:"
 COMPANY_LIMIT = 3
 LIMIT_KEY = "application_pacing:company_limit"
