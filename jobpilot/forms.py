@@ -6596,7 +6596,11 @@ class FormSession:
                 "textarea:visible,select:visible,[contenteditable=true]:visible"
             )
             try:
-                if await editable.count():
+                # The site's own header search ("What? / Where? / Search") stays on the page after a submit; Adzuna's
+                # "Application submitted: <role>" (2026-10-31) was read as an open form because of its two text boxes.
+                if await editable.evaluate_all(
+                    "els => els.filter(e => !e.closest('header,nav,[role=search],form[action*=\"/search\"]')).length"
+                ):
                     continue
                 if await frame.get_by_role("button", name=FINAL).count():
                     continue
