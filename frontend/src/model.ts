@@ -382,5 +382,7 @@ export function evidenceLabel(r: {
   if (r.existing_application) return "Existing application";
   if (r.website_confirmed && r.email_confirmed) return "Confirmation page and email";
   if (r.email_confirmed) return "Employer email";
-  return "Confirmation page";
+  if (r.website_confirmed) return "Confirmation page";
+  // Confirmed with an empty receipt: the applicant recorded it, or the platform answered "created". Not a page, not an email.
+  return "No receipt on file";
 }
