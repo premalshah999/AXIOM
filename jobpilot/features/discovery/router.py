@@ -4,11 +4,9 @@ import threading
 import time
 
 from fastapi import APIRouter
-from sqlalchemy import func, select
 
 from .policy import DiscoveryPolicy
-from .readiness import discover_due, ready_applications, status
-from .tables import DcRequisition, DcSourceHealth
+from .readiness import status
 
 
 _TASKS: set = set()
@@ -42,58 +40,6 @@ def router(service) -> APIRouter:
             p = policy_for(db).model_copy(update={"owners": owners})
             answered.update(body=status(db, p), at=time.monotonic())
             return answered["body"]
-
-    @r.get("/due")
-    def due():
-        p = policy_for(db).model_copy(update={"owners": owners})
-        return discover_due(db, p).model_dump()
-
-    @r.get("/ready")
-    def ready(limit: int = 25):
-        p = policy_for(db).model_copy(update={"owners": owners})
-        return {"items": [x.model_dump() for x in ready_applications(db, p, limit=max(1, min(200, limit)))]}
-
-    @r.get("/requisitions")
-    def requisitions(page: int = 1, size: int = 25):
-        size, page = max(1, min(100, size)), max(1, page)
-        with db.session() as s:
-            total = s.scalar(select(func.count()).select_from(DcRequisition))
-            rows = s.scalars(
-                select(DcRequisition)
-                .order_by(DcRequisition.last_seen.desc())
-                .offset((page - 1) * size)
-                .limit(size)
-            )
-            items = [
-                {
-                    "id": x.id,
-                    "job_id": x.job_id,
-                    "title": x.title,
-                    "location": x.location,
-                    "posted_at": x.posted_at,
-                    "posted_basis": x.posted_basis,
-                    "first_seen": x.first_seen,
-                    "sources": len(x.sources or []),
-                }
-                for x in rows
-            ]
-        return {"items": items, "total": total, "page": page, "size": size}
-
-    @r.get("/sources/health")
-    def health():
-        with db.session() as s:
-            rows = s.scalars(select(DcSourceHealth).where(DcSourceHealth.failures > 0).limit(200))
-            return {
-                "items": [
-                    {
-                        "source_id": x.source_id,
-                        "failures": x.failures,
-                        "next_attempt_at": x.next_attempt_at,
-                        "last_error": x.last_error,
-                    }
-                    for x in rows
-                ]
-            }
 
     @r.get("/feeds")
     def feed_status():

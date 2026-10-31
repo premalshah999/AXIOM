@@ -1050,17 +1050,6 @@ async def reset_origin_data(page, url):
         return False
 
 
-async def page_is_blank(page):
-    """A single-page app that never rendered: no text and nothing to interact with."""
-    try:
-        return await page.evaluate(
-            """() => !(document.body && document.body.innerText.trim()) &&
-                     !document.querySelector('input,button,a[href],select,textarea,[role=button]')"""
-        )
-    except Exception:
-        return False
-
-
 async def keystroke_phone(el):
     """A phone input whose widget only trusts key events (Greenhouse fieldset.phone-input)."""
     try:
@@ -2794,7 +2783,6 @@ ICIMS_CODE_DROPDOWN = """e => {
     return null;
   return [anchor.id, ctnr.id];
 }"""
-DIAL_PREFIX = re.compile(r"^\s*\(\+?\d+\)\s*")
 DIAL_CODE = re.compile(r"\(?\+\d{1,4}\)?")
 
 

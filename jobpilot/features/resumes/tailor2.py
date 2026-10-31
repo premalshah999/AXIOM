@@ -31,7 +31,6 @@ from .._store import norm
 from . import claims
 from .editor import Bullet, Entry, ResumeDoc, Section, Style, render
 
-TAILOR_VERSION = "tailor-master-v2"
 GRADES = {"A": 4, "B": 3, "C": 2, "D": 1, "F": 0}
 
 TAILOR_SYSTEM = """You tailor ONLY the Projects and Skills sections of the applicant's own master resume for one job.

@@ -227,7 +227,7 @@ def build_snapshot(service, include_sources: bool):
             "mimo": bool(config.llm_api_key),
             "telegram": bool(config.telegram_bot_token and config.telegram_user_id),
             "capsolver": False,  # Retained response key for older dashboards; runtime uses 2Captcha.
-            "engine": config.engine,
+            "engine": "adapters",  # A label the Setup page prints; the guided-only mode (ENGINE=guided) is gone.
             "multipage_timeout": config.multipage_timeout,
             "account": bool(config.application_password),
             "account_email": config.account_email or profile.email,

@@ -498,22 +498,3 @@ async def _wait_committed(el, family, expected, field, *, refresh=None):
     except (TimeoutError, PlaywrightError):
         raise ValueError("ATS selection did not commit to its owning field") from None
 
-
-async def read_combo(frame, el):
-    family = await combo_family(frame, el)
-    try:
-        if family == "dayforce":
-            return await el.evaluate(
-                """e=>{
-              const values=e.closest('.ant-select')?.querySelectorAll('.ant-select-selection-item');
-              return values?.length===1?(values[0].getAttribute('title')||values[0].innerText).trim():'';
-            }""",
-                timeout=3000,
-            )
-        if family == "oracle":
-            return await el.input_value(timeout=3000)
-    except PlaywrightError:
-        # A re-rendered CX control (JPMorgan Oracle, 2026-10-14) is re-read by the generic path
-        # instead of failing the run after Playwright's 30 s default wait.
-        return None
-    return None

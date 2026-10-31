@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from jobpilot import telegram, tiers
+from jobpilot import telegram
 from jobpilot.browser import BrowserEngine
 from jobpilot.db import Job, Run
 from jobpilot.job_control import manage
@@ -69,12 +69,6 @@ def test_not_found_on_a_saved_step_never_counts_toward_closure(service):
     assert service.db.get_setting("posting_gone:j1", {}) == {}
 
 
-def test_posting_missing_text_is_external_to_escalation():
-    # The escalator skips runs whose reason matches EXTERNAL; it must match both reason texts.
-    assert tiers.EXTERNAL.search(POSTING_MISSING_REASON)
-    assert tiers.EXTERNAL.search(CLOSED_REASON)
-
-
 def seed_job(service, job_id, status, reason, packet):
     old = (datetime.now(UTC) - timedelta(minutes=10)).isoformat()
     with service.db.session() as s:
@@ -117,20 +111,6 @@ async def test_closed_posting_is_not_resumed_without_override(service, monkeypat
     result = await manage(service, "dead", "resume", reopen_closed=True)
     assert result["run_id"] == "new-run"
     queue.assert_awaited_once()
-
-
-async def test_escalation_skips_a_job_whose_posting_is_missing(service, monkeypatch):
-    seed_job(
-        service,
-        "missing",
-        "waiting_browser",
-        POSTING_MISSING_REASON,
-        {"recovery_cause": "posting_unavailable", "runner_tier": 1},
-    )
-    manage_mock = AsyncMock(return_value={"state": "queued"})
-    monkeypatch.setattr("jobpilot.job_control.manage", manage_mock)
-    assert await tiers.escalate_due(service) == 0
-    manage_mock.assert_not_awaited()
 
 
 async def test_posting_not_found_is_one_telegram_message_per_job(service, monkeypatch):

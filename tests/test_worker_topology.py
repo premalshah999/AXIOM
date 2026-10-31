@@ -1,5 +1,4 @@
-"""Four ATS workers, one specialist and one custom-site worker by default (owner 2026-10-28), configurable, with the
-legacy WORKERS number still meaning the whole fleet."""
+"""Four ATS workers, one specialist and one custom-site worker by default (owner 2026-10-28), configurable."""
 
 import pytest
 
@@ -42,21 +41,6 @@ def test_specialists_can_be_switched_off():
     config = settings(specialist_workers=0, normal_workers=6, custom_ats_worker=False)
     assert pool_slot_ids(SPECIALIST, config.topology) == []
     assert config.workers == 6
-
-
-@pytest.mark.parametrize(
-    ("legacy", "layout"), [(4, (4, 0)), (6, (6, 0)), (7, (6, 1)), (8, (6, 2)), (12, (10, 2)), (32, (30, 2))]
-)
-def test_the_legacy_workers_number_keeps_its_old_layout_and_warns(legacy, layout):
-    with pytest.warns(UserWarning, match="WORKERS=.* is deprecated"):
-        config = settings(workers=legacy)
-    assert (config.normal_workers, config.specialist_workers) == layout
-    assert config.workers == legacy
-
-
-def test_old_and_new_settings_cannot_be_mixed():
-    with pytest.raises(ValueError, match="not both"):
-        settings(workers=8, normal_workers=5)
 
 
 def test_the_fleet_has_a_hard_cap():

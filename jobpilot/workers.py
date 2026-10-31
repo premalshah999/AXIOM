@@ -289,13 +289,6 @@ async def scheduled_tick(scheduled_time: datetime, context: dict):
         await retry_due(SERVICE)
     except DBOSQueueDeduplicatedError:
         pass  # The prior matching tick is already queued/running.
-    try:
-        # Failed applications move to the next, stronger runner tier.
-        from .tiers import escalate_due
-
-        await escalate_due(SERVICE)
-    except Exception:
-        pass  # Escalation is retried on the next tick; it never blocks scheduling.
     for source_id in due:
         try:
             await enqueue_source(source_id)
@@ -338,7 +331,6 @@ async def start(service):
     from .recovery import schedule_version_repairs
 
     schedule_version_repairs(service)
-    service.audit_legacy_confirmation_evidence()
     from . import dbos_sqlite  # noqa: F401 - old SQLite needs the pinned DBOS clock default
 
     DBOS(

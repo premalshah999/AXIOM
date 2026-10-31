@@ -1,6 +1,10 @@
-"""Small, measured controller alternatives sharing one owner and submit guard."""
+"""Small, measured controller alternatives sharing one owner and submit guard.
 
-POLICIES = ("hybrid", "reasoning_first", "vision_assisted", "continuous_agent")
+The model-led alternatives (reasoning_first, continuous_agent) were retired on 2026-10-14; a retained draft that still
+names one reads as hybrid, which is what policy_for returns for any name it does not know.
+"""
+
+POLICIES = ("hybrid", "vision_assisted")
 
 
 def policy_for(run):

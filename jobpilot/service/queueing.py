@@ -665,18 +665,6 @@ class QueueingMixin:
                     ),
                 },
             )
-            from ..pipeline_comparison import AGENTIC, REASONING
-
-            pipeline = run.packet["application_pipeline"]
-            if pipeline in {AGENTIC, REASONING}:
-                run.packet = {
-                    **run.packet,
-                    "controller_policy": "continuous_agent" if pipeline == AGENTIC else "reasoning_first",
-                }
-            elif run.packet.get("controller_policy") in {"continuous_agent", "reasoning_first"}:
-                # The cheap engine never runs the model-led agent, whether inherited from the run it
-                # continues or requested by a recovery: that agent was 90% of model spend.
-                run.packet = {**run.packet, "controller_policy": "hybrid"}
             s.add(run)
             s.flush()
             if recovery_row:

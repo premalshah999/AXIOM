@@ -49,16 +49,6 @@ def router(service) -> APIRouter:
             ]
         return {"items": items, "total": total, "page": page, "size": size}
 
-    @r.get("/artifacts/{artifact_id}")
-    def artifact(artifact_id: str):
-        with db.session() as s:
-            row = s.get(RsArtifact, artifact_id)
-            if not row:
-                raise HTTPException(404)
-            out = pipeline.record(row).model_dump()
-        out.pop("pdf_path", None)
-        return out
-
     @r.get("/artifacts/{artifact_id}/pdf")
     def pdf(artifact_id: str):
         with db.session() as s:
@@ -79,10 +69,6 @@ def router(service) -> APIRouter:
         if task.done():
             return task.result().model_dump()
         return {"status": "building"}
-
-    @r.post("/artifacts/{artifact_id}/cancel")
-    async def cancel(artifact_id: str):
-        return {"cancelled": pipeline.cancel(db, artifact_id)}
 
     @r.get("/evidence")
     def inventory():

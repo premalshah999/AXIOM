@@ -289,10 +289,6 @@ def check(workers, *, db=None, session=None, load=None, at=None):
     return min(gates, key=lambda g: g.limit) if gates else Gate(workers)
 
 
-def concurrency_limit(workers, **kwargs):
-    return check(workers, **kwargs).limit
-
-
 def is_browser_outage(state, reason):
     return state in NOTHING_SENT_STATES and (reason or "").startswith(BROWSER_OUTAGE)
 

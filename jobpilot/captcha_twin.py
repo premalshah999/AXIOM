@@ -2,7 +2,7 @@
 
 iCIMS answers its email step with the returning-candidate Central login (`loginOnly=1`) whenever its invisible hCaptcha
 does not trust the browser, and Central cannot create accounts, so a new candidate never reaches the application (REA
-2026-10-19, codex-handoff/rea/maps/icims.md). hCaptcha distrusts the worker Chrome because Playwright instruments every
+2026-10-19, docs/rea/maps/icims.md). hCaptcha distrusts the worker Chrome because Playwright instruments every
 frame of every tab in a Chrome it is connected to.
 
 The twin is a second local Chrome that no Playwright session ever connects to (`python -m jobpilot.cli twin-browser`,

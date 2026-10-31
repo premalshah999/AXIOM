@@ -678,7 +678,6 @@ USEFUL_OPTIONAL = re.compile(
 )
 # Single-page ATSs whose react-select comboboxes keep their proven live behavior.
 WORKDAY_HOST = re.compile(r"myworkdayjobs\.com|myworkdaysite\.com", re.I)
-SINGLE_PAGE_HOSTS = re.compile(r"greenhouse\.io|lever\.co|ashbyhq\.com", re.I)
 # Frames that never hold applicant fields: CAPTCHA/bot-check providers, analytics, media, chat.
 PROVIDER_FRAME = re.compile(
     r"hcaptcha\.com|newassets\.hcaptcha|google\.com/recaptcha|recaptcha\.net|gstatic\.com/recaptcha|"
@@ -1912,7 +1911,6 @@ class FormSession:
             # A crashed or closed tab never recovers in place; fail fast so the run is retried.
             raise BrowserTabClosed("The application tab was closed")
         if successful_frames:
-            self.last_good_observation = deepcopy(obs)
             self._scan_failure_reported = False
         elif not getattr(self, "_scan_failure_reported", False):
             self._scan_failure_reported = True
@@ -3379,44 +3377,6 @@ class FormSession:
             return None
         address = self.resolver.profile.address
         return lambda texts: address_location_option(texts, address)
-
-    async def _combobox_single_page(self, field, el, value):
-        """Greenhouse/Lever/Ashby react-select comboboxes (the behavior proven on live runs)."""
-        await el.click(timeout=4000)
-        if await el.evaluate("e=>['INPUT','TEXTAREA'].includes(e.tagName)"):
-            await el.fill(value, timeout=4000)
-        options = self.frames[field["id"]].locator('[role="option"]')
-        exact = options.filter(has_text=re.compile("^" + re.escape(value) + "$"))
-        if re.search(r"location|city|currently based", field["label"], re.I):
-            await options.first.wait_for(timeout=5000)
-            labels = await options.all_text_contents()
-            location = self.resolver.profile.location
-            region = location.split(",")[1].strip() if "," in location else ""
-            from .answers import US_STATES
-
-            region = US_STATES.get(region.upper(), region).casefold()
-            candidates = [
-                label
-                for label in labels
-                if value.casefold() in label.casefold() and region and region in label.casefold()
-            ]
-            if candidates:
-                value = candidates[0]
-                exact = self.frames[field["id"]].get_by_role("option", name=value, exact=True)
-        try:
-            # Options often load after typing (Greenhouse school search): wait for the match.
-            await exact.first.wait_for(state="visible", timeout=5000)
-            await exact.first.click(timeout=5000)
-        except Exception:
-            await widgets.wait_options(
-                self.frames[field["id"]], None, timeout=3.0, selector='[role="option"]'
-            )
-            match = widgets.best_option([t.strip() for t in await options.all_text_contents()], value)
-            if not match:
-                raise ValueError("Option is not offered") from None
-            await options.filter(has_text=re.compile("^" + re.escape(match) + "$")).first.click(timeout=5000)
-            value = match
-        return value
 
     async def discover_options(self, field):
         """Open custom selects once to read their real choices before the resolver decides."""

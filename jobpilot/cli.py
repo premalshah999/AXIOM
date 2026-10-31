@@ -371,7 +371,7 @@ def main():
 
         if config.application_password and (problems := password_problems(config.application_password)):
             print("WARN    APPLICATION_PASSWORD: " + "; ".join(problems))
-        print(f"        Account email: {config.account_email or '(profile email)'} · engine: {config.engine}")
+        print(f"        Account email: {config.account_email or '(profile email)'}")
         if args.check_mail and config.gmail_address and config.gmail_app_password:
             from .gmail_imap import request
 

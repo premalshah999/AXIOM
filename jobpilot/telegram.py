@@ -250,13 +250,6 @@ def fresh_run(service, created_at):
     return not since or created_at >= since
 
 
-class ReplyInterpretation(BaseModel):
-    kind: Literal["answer", "question", "unrelated"] = "answer"
-    answer: str | None = None
-    quote: str = ""
-    reply: str = ""
-
-
 class FieldReply(BaseModel):
     """The owner's reply mapped onto one form field (owner 2026-10-23: "from my answer, there should be an AI to infer
     that answer, to look up in dropdowns")."""

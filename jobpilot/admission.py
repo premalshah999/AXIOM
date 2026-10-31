@@ -76,7 +76,6 @@ class Capacity:
     running: int
     queued_partitions: frozenset[str]
     running_partitions: frozenset[str]
-    reservations: int
     limit: int
 
     @property
@@ -165,7 +164,6 @@ def capacity(session, workers=8, rows=None):
         running=len(running),
         running_partitions=frozenset(employer_partition(j) for _, j in running),
         queued_partitions=frozenset(employer_partition(j) for r, j in rows if r.state == "queued"),
-        reservations=len({r.job_id for r, _ in rows}),
         limit=min(32, workers),
     )
 

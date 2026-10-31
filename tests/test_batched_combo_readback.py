@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from jobpilot.widgets_ats import read_combos, read_combo
+from jobpilot.widgets_ats import read_combos
 
 
 async def test_many_oracle_values_read_in_one_call_with_same_results(page):
@@ -13,8 +13,7 @@ async def test_many_oracle_values_read_in_one_call_with_same_results(page):
     values=await read_combos(frame,[f'p{i}' for i in range(30)]+['foreign'])
     assert len(calls)==1 and len(values)==30
     for i in (0,15,29):
-        old=await read_combo(frame,page.locator(f'[data-jp-id=p{i}]'))
-        assert values[f'p{i}']=={'family':'oracle','value':old}
+        assert values[f'p{i}']=={'family':'oracle','value':f'Choice {i}'}
     assert 'foreign' not in values
 
 

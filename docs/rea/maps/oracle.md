@@ -214,7 +214,7 @@ you can enter a different email address." The same message exists for a phone nu
   - "You can't submit your application because this job is no longer available.";
   - "Your attachments couldn't be uploaded. Review your job application and try again.";
   - "Your attachment couldn't be uploaded. Verify the file extension and try again.".
-- 400 bodies are turned into "<Section title>: <server message>" (see REA_FINDINGS 10-17).
+- 400 bodies are turned into "<Section title>: <server message>".
 
 **Verification code**
 - "The code isn't valid. Enter a valid code."

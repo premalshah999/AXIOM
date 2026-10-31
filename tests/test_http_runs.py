@@ -1,6 +1,6 @@
 """HTTP contract of the run routes: detail, screenshot, reconcile, cancel, verify and answering a review."""
 
-from jobpilot.db import Event, Job, Run
+from jobpilot.db import Event, Run
 from support_http import seed_job, seed_run
 
 
@@ -42,17 +42,6 @@ def test_screenshot_is_the_saved_png_or_404(client, service, config):
     assert answer.status_code == 200 and answer.headers["content-type"] == "image/png"
 
 
-def test_only_a_queued_run_can_be_cancelled(client, service):
-    job_id = seed_job(service)
-    queued = seed_run(service, job_id, state="queued")
-    running = seed_run(service, seed_job(service, 2), state="running")
-    assert client.post(f"/api/runs/{running}/cancel", json={}).status_code == 400
-    assert client.post(f"/api/runs/{queued}/cancel", json={}).json() == {"cancelled": True}
-    with service.db.session() as s:
-        assert s.get(Run, queued).state == "cancelled"
-        assert s.get(Job, job_id).status == "cancelled"
-
-
 def test_reconcile_needs_evidence_of_at_least_five_characters(client, service):
     run_id = seed_run(service, seed_job(service), state="submission_unknown")
     assert (
@@ -70,12 +59,6 @@ def test_reconcile_records_that_the_application_was_not_submitted(client, servic
     assert answer.status_code == 200 and answer.json() == {"reconciled": True}
     with service.db.session() as s:
         assert s.get(Run, run_id).state != "submission_unknown"
-
-
-def test_verify_without_a_retained_draft_is_404_or_409(client, service):
-    assert client.post("/api/runs/unknown/verify", json={}).status_code == 404
-    run_id = seed_run(service, seed_job(service), state="failed")
-    assert client.post(f"/api/runs/{run_id}/verify", json={}).status_code in {404, 409}
 
 
 def test_an_answer_must_not_be_empty(client):

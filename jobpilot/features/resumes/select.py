@@ -19,7 +19,6 @@ REQ_HEAD = re.compile(
 NEXT_HEAD = re.compile(
     r"^\s*(?:preferred|nice to have|bonus|benefits|about us|compensation|perks|what we offer)\b", re.I | re.M
 )
-TERM = re.compile(r"[A-Za-z][A-Za-z0-9+#./-]*(?:\s[A-Z][A-Za-z0-9+#.]*)?")
 
 
 def requirements_block(description: str) -> str:

@@ -1,4 +1,4 @@
-"""One requisition is one job, with or without the feed's platform hint (docs/forensics/FAILURE_ANALYSIS.md, flow F4).
+"""One requisition is one job, with or without the feed's platform hint (2026-10-20 failure analysis, flow F4).
 
 Job feeds append the platform they read a posting from ("?ats=successfactors"). ASSA ABLOY's AI Scientist existed with
 and without it, so it was two jobs: 81 runs in all (about $4.50), no shared budget, history or duplicate protection.

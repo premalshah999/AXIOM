@@ -8,13 +8,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from ...db import Job, Run, Source, now
+from ...db import Source, now
 from ...features.discovery.tables import DcSourceHealth
-from ...discovery import rank_batch
 from ...jobboard import LOCKED, BoardSettings, board_snapshot, fit_of, managed_ids, setup_sources, settings
 from ...network import public_url
 from ...schemas import SourceInput
-from ...service import ACTIVE
 from ..snapshot import BATCH_BOOKKEEPING
 
 
@@ -89,10 +87,6 @@ def listing_page(jobs, minimum, q, ats, level, fit, page, size):
         "selectable_ids": [job["id"] for job in matching][:SELECTABLE],
         "selectable_total": len(matching),
     }
-
-
-class ApplySelection(BaseModel):
-    job_ids: list[str] = Field(min_length=1, max_length=50)
 
 
 class BatchStart(BaseModel):
@@ -238,50 +232,5 @@ def router(service) -> APIRouter:
                 )
         await asyncio.to_thread(db.set_setting, "job_board_requested", {"at": started})
         return {"queued_sources": queued, "total_sources": len(ids)}
-
-    @r.post("/api/job-board/apply")
-    async def apply_selection(data: ApplySelection):
-        if not service.dispatch:
-            raise HTTPException(409, "Application workers are disabled")
-        control = await asyncio.to_thread(db.get_setting, "control", {})
-        if not control.get("auto_submit") or control.get("paused"):
-            raise HTTPException(409, "Enable automatic submission and resume workers in Settings first")
-        queued, skipped = [], []
-        blocking = ACTIVE | {"confirmed", "submission_unknown", "already_applied"}
-
-        def read_selection():
-            # One thread for every read: board_snapshot scans the whole board (~0.5 s) and it ran on the event loop
-            # once per selected job, up to 51 times a click, while the browser owners waited (2026-10-29).
-            fresh = {j["id"] for j in board_snapshot(db, jobs_only=True)["jobs"]}
-            with db.session() as s:
-                busy = set(s.scalars(select(Run.job_id).where(Run.state.in_(blocking))))
-                unranked = [
-                    jid
-                    for jid in dict.fromkeys(data.job_ids)
-                    if jid in fresh and jid not in busy and s.get(Job, jid).status != "ready"
-                ]
-            return fresh, busy, unranked
-
-        fresh_ids, busy, unranked = await asyncio.to_thread(read_selection)
-        for offset in range(0, len(unranked), 24):
-            await rank_batch(db, config, unranked[offset : offset + 24])
-        if unranked:
-            # Recheck expiry and activity after classification, which may take several seconds.
-            fresh_ids, busy, _ = await asyncio.to_thread(read_selection)
-        for jid in dict.fromkeys(data.job_ids):
-            if jid not in fresh_ids:
-                skipped.append({"job_id": jid, "reason": "No longer a fresh US listing"})
-                continue
-            if jid in busy:
-                skipped.append(
-                    {"job_id": jid, "reason": "Already active, submitted or awaiting confirmation"}
-                )
-                continue
-            try:
-                run = await service.queue(jid, "submit", owner_pick=True)  # The owner's own selection.
-                queued.append({"job_id": jid, "run_id": run["id"]})
-            except (ValueError, RuntimeError) as exc:
-                skipped.append({"job_id": jid, "reason": str(exc)[:250]})
-        return {"queued": queued, "skipped": skipped}
 
     return r

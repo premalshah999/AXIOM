@@ -44,7 +44,7 @@ my reading, not verified end to end.
 | Receipt | `…/{uuid}/thanks` | Static route, observed by GET: `div.page.thanks`, `div.confirmation-message` "Application submitted!", "Return to the main page". It loads for any posting without applying (200 for Shield AI), so a bare visit is **not** a receipt |
 
 - There is **no account and no email code**. The only gate is hCaptcha.
-- *From the 10-18 research and FINDINGS:* Lever's Postings and Data APIs accept applications only with the employer's own
+- *From the 10-18 research:* Lever's Postings and Data APIs accept applications only with the employer's own
   key or partner OAuth; there is no applicant-side API, so the hosted form is the only route.
 
 ---

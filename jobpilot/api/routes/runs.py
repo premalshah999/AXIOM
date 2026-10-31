@@ -28,18 +28,6 @@ def router(service) -> APIRouter:
     db, config = service.db, service.config
     r = APIRouter()
 
-    @r.post("/api/runs/{run_id}/cancel")
-    def cancel(run_id: str):
-        with db.exclusive() as s:
-            row = s.get(Run, run_id)
-            if not row or row.state != "queued":
-                raise ValueError(
-                    "Only queued runs can be cancelled. Pause workers to stop active runs before commit."
-                )
-            row.state = "cancelled"
-            s.get(Job, row.job_id).status = "cancelled"
-        return {"cancelled": True}
-
     @r.get("/api/runs")
     def job_runs(job_id: str):
         """Every attempt of one job, newest first (the job panel's Attempts list), without packets."""
@@ -110,22 +98,6 @@ def router(service) -> APIRouter:
         from ...receipts import check_receipts
 
         return await check_receipts(service.mail, run_id)
-
-    @r.post("/api/runs/{run_id}/verify")
-    async def continue_verification(run_id: str):
-        with db.session() as s:
-            run = s.get(Run, run_id)
-            if not run:
-                raise HTTPException(404)
-            challenge_id = run.packet.get("wait_handle", {}).get("challenge_id", "")
-            if not challenge_id:
-                original = s.get(Run, run.packet.get("reservation_run_id", ""))
-                if original and original.job_id == run.job_id:
-                    challenge_id = original.packet.get("wait_handle", {}).get("challenge_id", "")
-        result = await service.resume_mail_wait(run_id, challenge_id, restart_verification=True)
-        if not result:
-            raise HTTPException(409, "No retained verification draft can be resumed")
-        return result
 
     @r.post("/api/reviews/{review_id}")
     async def review(review_id: str, data: AnswerInput):

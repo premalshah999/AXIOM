@@ -87,11 +87,6 @@ def sensitive_matches(fields):
     return out
 
 
-def scan_sensitive(observation_fields):
-    """Distinct identifier kinds requested by a page's observed fields, in page order."""
-    return list(dict.fromkeys(kind for kind, _ in sensitive_matches(observation_fields)))
-
-
 async def stop_if_sensitive(engine, observation):
     """Stop the run and remove the job when this owned page asks for an identifier.
 
