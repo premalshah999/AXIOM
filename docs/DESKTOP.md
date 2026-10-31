@@ -5,8 +5,8 @@ shows the same dashboard a browser shows; a loopback-only server stays inside it
 
 It runs the supervisor in `jobpilot/native` ([NATIVE.md](NATIVE.md)), unforked. `scripts/axiom` and a checkout keep working exactly as before.
 
-The disk image is 126 MB and the installed app 374 MB. On this 16 GB Mac, measured beside production with synthetic data: a first start takes 7.6 s from the window opening to the dashboard (the
-database created, 3.4 s to the supervisor's "up"), a later start 5.5 s, and a Quit with nothing active 3 s.
+The disk image is 126 MB and the installed app 374 MB. On this 16 GB Mac, measured beside production with synthetic data: a first start takes about 8 s from the window opening to the dashboard (the
+database created), a later start about 6 s, and a Quit with nothing active 3 to 4 s. `jobpilot verify` passes on the installed app.
 
 | At idle, resident | MB |
 |---|---|
