@@ -24,7 +24,7 @@ export function RouteTabs({ view, tabs, label, current }: { view: View; tabs: Ta
           }}
         >
           {t.label}
-          {t.count !== undefined && <span className="ax-tab-count">{t.count}</span>}
+          {t.count !== undefined && <span className="ax-tab-count">{t.count.toLocaleString()}</span>}
         </a>
       ))}
     </nav>
@@ -55,7 +55,7 @@ export function Tabs({
           onClick={() => onChange(t.id)}
         >
           {t.label}
-          {t.count !== undefined && <span className="ax-tab-count">{t.count}</span>}
+          {t.count !== undefined && <span className="ax-tab-count">{t.count.toLocaleString()}</span>}
         </button>
       ))}
     </div>

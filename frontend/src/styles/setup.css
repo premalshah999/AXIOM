@@ -1,5 +1,4 @@
-/* Pieces of Profile, Settings and sign-in that components.css does not draw. Tokens only, no colours, sizes and weights
-   from outside the scale. When the identity lands, move what belongs to a primitive into components.css. */
+/* Pieces of Profile, Settings and sign-in that components.css does not draw. Tokens only. */
 
 /* Sections of a page that is built from several: Profile's tabs, Knowledge. */
 .ax-sections {
@@ -7,53 +6,6 @@
   flex-direction: column;
   gap: var(--space-8);
   min-width: 0;
-}
-
-/* Check (src/ui/Field.tsx): a checkbox with its name and, only where needed, one line of what it does. */
-.ax-check {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-  font-size: var(--text-ui);
-  cursor: pointer;
-}
-.ax-check input {
-  margin-top: 2px;
-}
-.ax-check-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.ax-row > .ax-check {
-  flex: 1 1 260px;
-}
-.ax-row-main > .ax-link {
-  align-self: flex-start;
-  text-align: left;
-}
-
-/* A fold's summary: a quiet chevron that turns when it is open. */
-.ax-fold > summary {
-  list-style: none;
-}
-.ax-fold > summary::-webkit-details-marker {
-  display: none;
-}
-.ax-fold > summary::before {
-  content: "";
-  flex: none;
-  width: 6px;
-  height: 6px;
-  margin: 0 var(--space-1) 0 2px;
-  border-right: 1.5px solid var(--ink-2);
-  border-bottom: 1.5px solid var(--ink-2);
-  transform: rotate(-45deg);
-  transition: transform var(--dur) var(--ease);
-}
-.ax-fold[open] > summary::before {
-  transform: rotate(45deg);
 }
 
 /* A role or a degree: a fold on a hairline, its dates at the right. */
@@ -92,7 +44,7 @@
   overflow: hidden;
   border: 1px solid var(--line-strong);
   border-radius: 50%;
-  background: var(--tint);
+  background: var(--inset);
   color: var(--ink-2);
   font-size: var(--text-title);
 }
@@ -106,48 +58,6 @@
   flex: 1 1 260px;
   flex-direction: column;
   gap: var(--space-2);
-}
-
-/* Segmented (src/ui/Segmented.tsx): a slide switch cut into the plate, the same object as Tabs. */
-.ax-seg {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  max-width: 100%;
-  padding: 3px;
-  border-radius: var(--radius);
-  background: var(--ground-3);
-  box-shadow: inset 0 1px 3px var(--shade);
-}
-.ax-seg.is-block {
-  display: flex;
-}
-.ax-seg.is-block button {
-  flex: 1;
-}
-.ax-seg button {
-  min-height: 30px;
-  padding: 0 var(--space-3);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--ink-2);
-  font: inherit;
-  font-size: var(--text-meta);
-  font-stretch: 108%;
-  font-weight: 500;
-  cursor: pointer;
-}
-.ax-seg button:hover {
-  color: var(--ink);
-}
-.ax-seg button[aria-checked="true"] {
-  background: var(--key);
-  box-shadow:
-    inset 0 1px 0 var(--key-top),
-    0 1px 0 var(--key-bot);
-  color: var(--key-ink);
-  font-weight: 700;
 }
 
 /* Sign-in, outside the shell. */
@@ -165,7 +75,7 @@
 }
 .ax-auth-help {
   color: var(--ink-3);
-  font-size: var(--text-ui);
+  font-size: var(--text-body);
   text-align: center;
 }
 .ax-rules-list {
@@ -199,7 +109,7 @@
   padding: 0;
   list-style: none;
   font-family: var(--font-data);
-  font-size: var(--text-ui);
+  font-size: var(--text-body);
 }
 .ax-codes li {
   padding: var(--space-2) var(--space-3);

@@ -1,15 +1,19 @@
 import { X } from "lucide-react";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
+import { IconButton } from "./Button";
+import { useOverlay } from "./overlay";
 
 /**
- * A right-side drawer over the page with its own scroll. Esc, the scrim and the close button close it; focus moves in
- * on open and returns to the opener on close, and Tab stays inside. The page behind does not scroll (it never does:
- * the document is fixed), and the body of the drawer is the one scroll region while it is open.
+ * A right-side drawer over the page with its own scroll: a record you opened from a list. Esc, the scrim and the close button close
+ * it; focus moves in on open and returns on close, and Tab stays inside. The page behind does not scroll (it never does: the
+ * document is fixed). `lead` sits before the title (a monogram), `sub` under it.
  */
 export function Drawer({
   open,
   onClose,
   title,
+  sub,
+  lead,
   children,
   footer,
   width = 600,
@@ -17,44 +21,14 @@ export function Drawer({
   open: boolean;
   onClose: () => void;
   title: ReactNode;
+  sub?: ReactNode;
+  lead?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
   width?: number;
 }) {
   const panel = useRef<HTMLDivElement>(null);
-  // Callers pass an inline onClose, new on every render: opening is the only thing that should move focus.
-  const close = useRef(onClose);
-  close.current = onClose;
-  useEffect(() => {
-    if (!open) return;
-    const opener = document.activeElement as HTMLElement | null;
-    const node = panel.current;
-    // A field marked data-autofocus takes focus when the drawer opens (after whatever closed to open it has let go of it).
-    (node?.querySelector<HTMLElement>("[data-autofocus]") ?? node)?.focus();
-    const key = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        close.current();
-      } else if (e.key === "Tab" && node) {
-        const items = [...node.querySelectorAll<HTMLElement>('a[href],button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])')].filter((el) => el.offsetParent !== null);
-        if (items.length === 0) return;
-        const first = items[0]!;
-        const last = items[items.length - 1]!;
-        if (e.shiftKey && (document.activeElement === first || document.activeElement === node)) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    };
-    document.addEventListener("keydown", key);
-    return () => {
-      document.removeEventListener("keydown", key);
-      opener?.focus?.();
-    };
-  }, [open]);
+  useOverlay(open, panel, onClose);
   if (!open) return null;
   return (
     <div className="ax-drawer-root">
@@ -69,10 +43,12 @@ export function Drawer({
         style={{ "--drawer-w": width + "px" } as React.CSSProperties}
       >
         <header className="ax-drawer-head">
-          <h2>{title}</h2>
-          <button type="button" className="ax-icon-btn" aria-label="Close" onClick={onClose}>
-            <X size={16} />
-          </button>
+          {lead}
+          <h2>
+            {title}
+            {sub && <span className="ax-drawer-sub">{sub}</span>}
+          </h2>
+          <IconButton label="Close" icon={<X size={16} aria-hidden="true" />} onClick={onClose} />
         </header>
         <div className="ax-drawer-body">{children}</div>
         {footer && <footer className="ax-drawer-foot">{footer}</footer>}

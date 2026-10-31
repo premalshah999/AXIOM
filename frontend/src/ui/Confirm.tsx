@@ -53,7 +53,7 @@ export function ConfirmButton({
         <>
           {note && <span className="ax-ask-text">{note}</span>}
           <Button
-            variant="danger"
+            variant="danger-solid"
             size={size}
             loading={pending}
             onClick={async () => {

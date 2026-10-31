@@ -59,33 +59,41 @@ def measure(theme, fg, *layers):
 
 TEXT = 4.5
 LARGE = 3.0
-PLATE = [("ground",), ("ground-2",), ("ground-3",), ("raised",), ("tint", "ground"), ("tint", "raised")]
-PAIRS = [(fg, surface, TEXT) for fg in ("ink", "ink-2", "ink-3", "accent-text", "signal-ink") for surface in PLATE]
+SURFACES = [("ground",), ("sheet",), ("raised",), ("overlay",), ("inset",), ("hover", "sheet"), ("hover", "raised"), ("active", "raised"), ("active", "ground")]
+PAIRS = [(fg, surface, TEXT) for fg in ("ink", "ink-2", "ink-3", "signal-ink") for surface in SURFACES]
+PAIRS += [(f"mono-{i}", ("mono-ink",), TEXT) for i in range(8)]  # an employer's initial on its monogram
 PAIRS += [
-    # Keys
-    ("key-ink", ("key",), TEXT),
-    ("key-ink", ("key-down",), TEXT),
-    ("key-ink", ("ground-2",), TEXT),
-    ("ink-2", ("key",), TEXT),  # a count on a filter key
-    ("ink-2", ("key-down",), TEXT),
+    # Buttons
+    ("btn-ink", ("btn",), TEXT),
+    ("btn-ink", ("btn-hover",), TEXT),
+    ("btn-ink", ("btn-active",), TEXT),
     ("brand-ink", ("brand",), TEXT),
+    ("brand-ink", ("brand-hover",), TEXT),
+    ("brand-ink", ("brand-active",), TEXT),
+    ("signal-fill-ink", ("signal-fill",), TEXT),
+    ("signal-ink", ("signal-soft", "ground"), TEXT),  # the count in the sidebar
+    ("signal-ink", ("btn",), TEXT),  # a destructive button's words
+    ("ink-2", ("btn",), TEXT),
     # Controls
     ("ink", ("field",), TEXT),
-    ("ink-2", ("field",), TEXT),  # placeholders
-    ("line-strong", ("ground",), LARGE),  # a control's edge
+    ("ink-3", ("field",), TEXT),  # placeholders
+    ("line-strong", ("sheet",), LARGE),  # a control's edge
     ("line-strong", ("raised",), LARGE),
-    ("focus", ("ground",), LARGE),
+    ("line-strong", ("overlay",), LARGE),
+    ("focus", ("sheet",), LARGE),
     ("focus", ("raised",), LARGE),
+    ("focus", ("overlay",), LARGE),
     ("focus", ("field",), LARGE),
     # The window, which stays dark in both themes
     ("window-ink", ("window",), TEXT),
     ("window-ink-2", ("window",), TEXT),
-    ("signal-on-window", ("window",), TEXT),
-    ("led", ("window",), LARGE),  # the lit readout and rungs
-    # Lamps on the plate
+    ("led", ("window",), LARGE),  # the lit readout and tracks
+    # Lamps and marks on a surface
+    ("signal", ("sheet",), LARGE),
+    ("signal", ("raised",), LARGE),
     ("signal", ("ground",), LARGE),
-    ("signal", ("ground-2",), LARGE),
-    ("ink", ("ground",), LARGE),
+    ("dot-lit", ("raised",), LARGE),
+    ("ink", ("sheet",), LARGE),
 ]
 
 
@@ -94,6 +102,14 @@ PAIRS += [
 def test_pair_meets_aa(theme, fg, layers, need):
     got = measure(theme, fg, *layers)
     assert got >= need, f"{theme}: {fg} on {'+'.join(layers)} is {got:.2f}:1, needs {need}:1"
+
+
+def test_a_lit_dot_stands_off_an_unlit_one():
+    """The window's dark dots and the page's dim dots still read as dots: visible, but well below the lit ones."""
+    for theme, tokens in THEMES.items():
+        assert ratio(rgba(tokens["dot-off"]), rgba(tokens["window"])) >= 1.2, theme
+        assert ratio(rgba(tokens["dot-plate"]), rgba(tokens["raised"])) >= 1.2, theme
+        assert ratio(rgba(tokens["line"]), rgba(tokens["sheet"])) >= 1.1, theme
 
 
 def test_literal_colours_live_only_in_tokens():

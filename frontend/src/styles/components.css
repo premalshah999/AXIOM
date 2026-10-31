@@ -1,17 +1,11 @@
-/* Shared primitives: src/ui, worktools.tsx, pagination.tsx and setup-kit.tsx. A page built from these belongs to the panel
-   without writing CSS: keys that press, recesses cut into the plate, hairlines, lamps. Colours come only from tokens.css. */
+/* The component family: src/ui, worktools.tsx, pagination.tsx and setup-kit.tsx. A page built from these looks right without
+   writing CSS. Colours come only from tokens.css. DESIGN.md says when to use each. */
 
-@keyframes ax-breathe {
-  50% {
-    opacity: 0.45;
-  }
-}
 @keyframes ax-pulse {
   50% {
-    opacity: 0.42;
+    opacity: 0.4;
   }
 }
-
 @keyframes ax-rise {
   from {
     transform: translateY(4px);
@@ -25,7 +19,13 @@
 }
 @keyframes ax-sheet {
   from {
-    transform: translateX(16px);
+    transform: translateX(24px);
+    opacity: 0.4;
+  }
+}
+@keyframes ax-pop {
+  from {
+    transform: translateY(6px) scale(0.985);
     opacity: 0;
   }
 }
@@ -34,29 +34,34 @@
     transform: rotate(360deg);
   }
 }
+@keyframes ax-shimmer {
+  50% {
+    opacity: 0.5;
+  }
+}
 
 /* ---------- page scaffolding ---------- */
-/* The width and gutters come from .main (shell.css). Pages put no title of their own: the shell owns it. */
 .ax-page {
   display: flex;
   flex-direction: column;
-  gap: var(--space-8);
+  gap: var(--space-6);
   min-width: 0;
-  padding-bottom: 72px;
+  padding-bottom: var(--space-12);
 }
-/* A page that is one table or one list filling the region: the table scrolls and the region does not. */
+/* A page that is one table filling the region: the table scrolls and the region does not. */
 .ax-page-fill {
   gap: var(--space-4);
   height: 100%;
   min-height: 0;
-  padding-bottom: var(--space-4);
+  padding-bottom: var(--space-5);
 }
 .ax-toolbar {
   display: flex;
   align-items: center;
   flex: none;
   flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
+  gap: var(--space-2) var(--space-3);
+  min-width: 0;
 }
 .ax-toolbar-end {
   margin-left: auto;
@@ -71,20 +76,25 @@
   min-width: 140px;
 }
 
-/* ---------- Panel: a plain titled section ---------- */
+/* ---------- Panel: a raised surface that groups something. Inside a drawer or another panel it is a plain section. ---------- */
 .ax-panel {
+  --surface: var(--raised);
   display: flex;
   flex-direction: column;
   min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  box-shadow: var(--shadow-panel);
 }
 .ax-panel-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  min-height: 28px;
-  padding-bottom: var(--space-2);
-  border-bottom: 1px solid var(--line);
+  min-height: 48px;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--line-soft);
 }
 .ax-panel-head h2 {
   min-width: 0;
@@ -93,291 +103,326 @@
 .ax-panel-actions {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
   flex: none;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
 }
 .ax-panel-body {
   min-width: 0;
-  padding-top: var(--space-3);
+  padding: var(--space-4);
 }
-/* A table inside brings its own rules. */
 .ax-panel-body.is-flush {
-  padding-top: 0;
+  padding: 0;
 }
-.ax-panel-head:has(+ .is-flush) {
-  border-bottom: 0;
-  padding-bottom: 0;
+.ax-panel .ax-panel,
+.ax-drawer .ax-panel,
+.ax-dialog .ax-panel {
+  --surface: inherit;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.ax-panel .ax-panel > .ax-panel-head,
+.ax-drawer .ax-panel > .ax-panel-head,
+.ax-dialog .ax-panel > .ax-panel-head {
+  min-height: 0;
+  padding: 0 0 var(--space-2);
+}
+.ax-panel .ax-panel > .ax-panel-body,
+.ax-drawer .ax-panel > .ax-panel-body,
+.ax-dialog .ax-panel > .ax-panel-body {
+  padding: var(--space-2) 0 0;
 }
 
-/* ---------- Lamps. One colour; state is behaviour: pulsing, ringed, half, dashed, solid ink, hollow. ---------- */
+/* ---------- Status: a lamp and a word. State is lamp behaviour, never a new colour. ---------- */
 .ax-lamp,
 .ax-pill-dot {
   position: relative;
   display: inline-block;
   flex: none;
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
 }
-.ax-pill.is-brand .ax-pill-dot {
+.ax-pill.is-brand .ax-pill-dot,
+.ax-lamp.is-live {
   background: var(--live);
 }
-:root[data-run="on"] .ax-pill.is-brand .ax-pill-dot {
+:root[data-run="on"] .ax-pill.is-brand .ax-pill-dot,
+:root[data-run="on"] .ax-lamp.is-live {
   animation: ax-pulse 1.6s ease-in-out infinite;
 }
 .ax-lamp.is-ask,
 .ax-pill.is-warn .ax-pill-dot,
 .ax-pill.is-bad .ax-pill-dot {
   background: var(--signal);
-  box-shadow: 0 0 0 2.5px var(--tint);
+  box-shadow: 0 0 0 3px var(--signal-soft);
 }
 .ax-pill.is-fix .ax-pill-dot {
   background: linear-gradient(90deg, var(--signal) 50%, transparent 50%);
   box-shadow: inset 0 0 0 1.5px var(--signal);
 }
+.ax-lamp.is-hold,
 .ax-pill.is-info .ax-pill-dot {
-  background: repeating-conic-gradient(var(--ink) 0 45deg, transparent 0 90deg);
-  mask: radial-gradient(circle, transparent 2.4px, currentColor 2.9px);
+  background: repeating-conic-gradient(var(--ink-2) 0 45deg, transparent 0 90deg);
+  mask: radial-gradient(circle, transparent 2px, currentColor 2.4px);
 }
-.ax-pill.is-ok .ax-pill-dot {
+.ax-pill.is-ok .ax-pill-dot,
+.ax-lamp.is-ok {
   background: var(--ink);
 }
-.ax-pill.is-neutral .ax-pill-dot {
+.ax-pill.is-neutral .ax-pill-dot,
+.ax-lamp.is-off {
   box-shadow: inset 0 0 0 1.5px var(--ink-3);
 }
-
-/* ---------- Pill: a lamp and its word. Text is ink unless it needs you. ---------- */
 .ax-pill {
   display: inline-flex;
   align-items: center;
   flex: none;
   gap: var(--space-2);
   color: var(--ink);
-  font-size: var(--text-ui);
+  font-size: var(--text-body);
   line-height: 1.3;
   white-space: nowrap;
-}
-.ax-pill.is-warn,
-.ax-pill.is-bad {
-  color: var(--signal-ink);
-  font-weight: 600;
 }
 .ax-pill.is-neutral {
   color: var(--ink-2);
 }
 
-/* ---------- Tabs: a slide switch cut into the plate ---------- */
+/* ---------- Tabs: quiet words on a hairline; the current one is underlined. ---------- */
 .ax-tabs {
   display: flex;
   align-items: stretch;
   flex: none;
-  width: max-content;
+  gap: var(--space-5);
   max-width: 100%;
-  padding: 3px;
   overflow-x: auto;
-  border-radius: var(--radius);
-  background: var(--ground-3);
-  box-shadow: inset 0 1px 3px var(--shade);
+  border-bottom: 1px solid var(--line);
   scrollbar-width: none;
 }
 .ax-tabs::-webkit-scrollbar {
   display: none;
 }
 .ax-tab {
+  position: relative;
   display: inline-flex;
   align-items: center;
   flex: none;
-  gap: var(--space-2);
-  min-height: 34px;
-  padding: 0 var(--space-5);
+  gap: 6px;
+  height: 36px;
+  padding: 0 1px;
   border: 0;
-  border-radius: var(--radius-sm);
   background: none;
   color: var(--ink-2);
-  font-size: var(--text-meta);
-  font-stretch: var(--wide);
+  font-size: var(--text-body);
   font-weight: 500;
   text-decoration: none;
-  text-transform: lowercase;
   white-space: nowrap;
   cursor: pointer;
+  transition: color var(--dur) var(--ease);
 }
 .ax-tab:hover {
   color: var(--ink);
 }
 .ax-tab[aria-current="page"],
 .ax-tab[aria-selected="true"] {
-  background: var(--key);
-  box-shadow:
-    inset 0 1px 0 var(--key-top),
-    0 1px 0 var(--key-bot);
-  color: var(--key-ink);
-  font-weight: 700;
+  color: var(--ink);
+}
+.ax-tab[aria-current="page"]::after,
+.ax-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 2px;
+  border-radius: 1px 1px 0 0;
+  background: var(--ink);
 }
 .ax-tab:focus-visible {
+  border-radius: 4px;
   outline-offset: -2px;
 }
 .ax-tab-count {
-  color: var(--ink-2);
+  color: var(--ink-3);
   font-family: var(--font-data);
-  font-size: 12px;
-  font-stretch: normal;
+  font-size: var(--text-data);
   font-weight: 400;
 }
 
-/* ---------- Button: a key, lit from above, standing on its edge. It presses down. ---------- */
+/* ---------- Segmented: a choice of two to four in one well ---------- */
+.ax-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 100%;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--inset);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.ax-seg.is-block {
+  display: flex;
+}
+.ax-seg.is-block button {
+  flex: 1;
+}
+.ax-seg button {
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: var(--text-meta);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+.ax-seg button:hover {
+  color: var(--ink);
+}
+.ax-seg button[aria-checked="true"] {
+  background: var(--btn);
+  box-shadow:
+    0 0 0 1px var(--btn-edge),
+    var(--btn-sheen);
+  color: var(--btn-ink);
+}
+
+/* ---------- Button ---------- */
 .ax-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: none;
   gap: 6px;
-  height: 34px;
-  margin-bottom: 2px;
+  height: var(--control);
   padding: 0 var(--space-3);
-  border: 0;
+  border: 1px solid var(--btn-edge);
   border-radius: var(--radius-sm);
-  background: var(--key);
-  box-shadow:
-    inset 0 1px 0 var(--key-top),
-    0 1px 0 var(--key-bot),
-    0 2px 0 var(--key-bot);
-  color: var(--key-ink);
+  background: var(--btn);
+  box-shadow: var(--btn-sheen);
+  color: var(--btn-ink);
   font: inherit;
-  font-size: var(--text-meta);
-  font-stretch: 108%;
+  font-size: var(--text-body);
   font-weight: 500;
   line-height: 1;
   text-decoration: none;
-  text-transform: lowercase;
   white-space: nowrap;
   cursor: pointer;
-  transition: transform 60ms;
+  transition:
+    background var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    color var(--dur) var(--ease);
 }
-.ax-btn:hover:not(:disabled):not([aria-disabled="true"]) {
-  background: var(--ground-2);
+.ax-btn > svg {
+  flex: none;
 }
-.ax-btn:active:not(:disabled):not([aria-disabled="true"]) {
-  background: var(--key-down);
-  box-shadow: inset 0 2px 3px var(--shade);
-  transform: translateY(1px);
+.ax-btn:hover:not(:disabled) {
+  background: var(--btn-hover);
 }
-.ax-btn:disabled,
-.ax-btn[aria-disabled="true"] {
-  opacity: 0.55;
+.ax-btn:active:not(:disabled) {
+  background: var(--btn-active);
+  box-shadow: none;
+}
+.ax-btn:disabled {
+  border-color: var(--line);
+  background: none;
+  box-shadow: none;
+  color: var(--ink-3);
   cursor: not-allowed;
 }
-.ax-btn.is-sm {
-  height: 28px;
-  padding: 0 10px;
+.ax-btn[aria-busy="true"] {
+  cursor: progress;
 }
-/* The master key: at most one on a screen. */
+.ax-btn.is-sm {
+  height: var(--control-sm);
+  padding: 0 10px;
+  font-size: var(--text-meta);
+}
+/* At most one on a view. */
 .ax-btn.is-primary {
-  padding: 0 var(--space-4);
+  border-color: var(--brand);
   background: var(--brand);
-  box-shadow:
-    0 1px 0 var(--key-bot),
-    0 2px 0 var(--key-bot);
+  box-shadow: none;
   color: var(--brand-ink);
-  font-stretch: var(--wide);
   font-weight: 600;
 }
 .ax-btn.is-primary:hover:not(:disabled) {
-  background: var(--brand);
-  filter: brightness(1.15);
+  border-color: var(--brand-hover);
+  background: var(--brand-hover);
 }
 .ax-btn.is-primary:active:not(:disabled) {
-  background: var(--brand);
-  box-shadow: none;
+  border-color: var(--brand-active);
+  background: var(--brand-active);
 }
-/* A primary that cannot be pressed yet stands down. */
 .ax-btn.is-primary:disabled {
-  background: none;
-  box-shadow: 0 0 0 1px var(--line-strong);
+  border-color: var(--line);
+  background: var(--hover);
+  color: var(--ink-3);
+}
+.ax-btn.is-primary[aria-busy="true"]:disabled {
   color: var(--ink-2);
-  opacity: 1;
 }
 .ax-btn.is-ghost {
-  margin-bottom: 0;
+  border-color: transparent;
   background: transparent;
   box-shadow: none;
   color: var(--ink-2);
 }
 .ax-btn.is-ghost:hover:not(:disabled) {
-  background: var(--tint);
+  background: var(--hover);
   color: var(--ink);
 }
 .ax-btn.is-ghost:active:not(:disabled) {
-  background: var(--tint);
-  box-shadow: none;
-  transform: none;
+  background: var(--active);
+}
+.ax-btn.is-ghost:disabled {
+  background: none;
 }
 .ax-btn.is-danger {
   color: var(--bad);
 }
-.ax-btn.is-round {
-  width: 64px;
-  height: 64px;
-  margin: 4px;
-  padding: 0;
-  border-radius: 50%;
-  box-shadow:
-    0 0 0 3px var(--ground),
-    0 0 0 4px var(--ink),
-    0 2px 0 0 var(--key-bot);
+.ax-btn.is-danger:hover:not(:disabled) {
+  background: var(--signal-soft);
 }
-.ax-btn.is-round:hover:not(:disabled) {
-  box-shadow:
-    0 0 0 3px var(--ground),
-    0 0 0 4px var(--ink),
-    0 2px 0 0 var(--key-bot);
+/* The button that actually does the destructive thing, once asked. */
+.ax-btn.is-danger-solid {
+  border-color: var(--signal-fill);
+  background: var(--signal-fill);
+  box-shadow: none;
+  color: var(--signal-fill-ink);
+  font-weight: 600;
 }
-.ax-btn.is-round:active:not(:disabled) {
-  box-shadow:
-    0 0 0 3px var(--ground),
-    0 0 0 4px var(--ink);
-}
-.ax-btn.is-round:disabled {
-  background: transparent;
-  box-shadow:
-    0 0 0 3px var(--ground),
-    0 0 0 4px var(--line-strong);
+.ax-btn.is-danger-solid:hover:not(:disabled) {
+  background: var(--signal-fill);
+  filter: brightness(1.08);
 }
 .ax-btn.is-block {
   width: 100%;
 }
 .ax-spinner {
   flex: none;
-  width: 12px;
-  height: 12px;
+  width: 13px;
+  height: 13px;
   border-radius: 50%;
   border: 1.5px solid var(--line-strong);
   border-top-color: currentColor;
   animation: ax-spin 0.7s linear infinite;
 }
-/* A finger needs more room than a pointer. */
-@media (pointer: coarse) {
-  .ax-btn,
-  .btn {
-    height: 42px;
-  }
-  .ax-btn.is-sm,
-  .btn.sm {
-    height: 38px;
-  }
-  .ax-icon-btn {
-    width: 36px;
-    height: 36px;
-  }
-}
 .ax-icon-btn {
   display: inline-grid;
   place-items: center;
   flex: none;
-  width: 28px;
-  height: 28px;
+  width: var(--control-sm);
+  height: var(--control-sm);
+  padding: 0;
   border: 0;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--ink-2);
   cursor: pointer;
@@ -385,9 +430,34 @@
     background var(--dur) var(--ease),
     color var(--dur) var(--ease);
 }
-.ax-icon-btn:hover {
-  background: var(--tint);
+.ax-icon-btn.is-md {
+  width: var(--control);
+  height: var(--control);
+}
+.ax-icon-btn.is-framed {
+  border: 1px solid var(--btn-edge);
+  background: var(--btn);
+  box-shadow: var(--btn-sheen);
+  color: var(--btn-ink);
+}
+.ax-icon-btn:hover:not(:disabled) {
+  background: var(--hover);
   color: var(--ink);
+}
+.ax-icon-btn:active:not(:disabled) {
+  background: var(--active);
+}
+.ax-icon-btn:disabled {
+  color: var(--ink-3);
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+/* A finger needs more room than a pointer. */
+@media (pointer: coarse) {
+  :root {
+    --control: 40px;
+    --control-sm: 36px;
+  }
 }
 
 /* ---------- Links ---------- */
@@ -395,16 +465,55 @@
   padding: 0;
   border: 0;
   background: none;
-  color: var(--accent-text);
+  color: var(--ink);
   font: inherit;
   text-decoration: underline;
+  text-decoration-color: var(--line-strong);
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
   cursor: pointer;
+  transition: text-decoration-color var(--dur) var(--ease);
 }
 .ax-link:hover {
-  text-decoration-thickness: 2px;
+  text-decoration-color: currentColor;
 }
+.ax-link:focus-visible {
+  border-radius: 3px;
+}
+/* A number or a line that opens the list behind it: quiet until pointed at. */
+.ax-quiet-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.ax-quiet-link:hover {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.ax-more-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: var(--text-meta);
+  text-decoration: none;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease);
+}
+.ax-more-link:hover {
+  color: var(--ink);
+}
+
 /* ---------- Field ---------- */
 .ax-field {
   display: flex;
@@ -413,7 +522,7 @@
   min-width: 0;
 }
 .ax-label {
-  color: var(--ink-2);
+  color: var(--ink);
   font-size: var(--text-meta);
   font-weight: 500;
 }
@@ -429,8 +538,24 @@
   width: 100%;
   min-width: 0;
 }
+.ax-check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: var(--text-body);
+  cursor: pointer;
+}
+.ax-check input {
+  margin-top: 2px;
+}
+.ax-check-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
 
-/* FormGrid on a page: one column of plain labelled rows divided by hairlines. In a drawer: stacked fields. */
+/* FormGrid. On a page: labelled rows divided by hairlines. In a drawer or dialog: stacked fields. */
 .ax-grid {
   display: flex;
   flex-direction: column;
@@ -441,12 +566,13 @@
 }
 .ax-page .ax-grid > * {
   padding: var(--space-3) 0;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-soft);
 }
 .ax-page .ax-grid > :first-child {
-  padding-top: var(--space-1);
+  padding-top: 0;
 }
 .ax-page .ax-grid > :last-child {
+  padding-bottom: 0;
   border-bottom: 0;
 }
 .ax-page .ax-grid > .ax-field {
@@ -461,14 +587,14 @@
 .ax-page .ax-grid > .ax-field > .ax-label {
   grid-column: 1;
   grid-row: 1 / span 3;
-  padding-top: 6px;
+  padding-top: 7px;
 }
 @media (max-width: 760px) {
   .ax-page .ax-grid > .ax-field {
     grid-template-columns: minmax(0, 1fr);
   }
   .ax-page .ax-grid > .ax-field > *,
-.ax-page .ax-grid > .ax-field > .ax-label {
+  .ax-page .ax-grid > .ax-field > .ax-label {
     grid-column: 1;
     grid-row: auto;
     padding-top: 0;
@@ -477,7 +603,7 @@
 .ax-stack {
   display: flex;
   flex-direction: column;
-  gap: var(--space-6);
+  gap: var(--space-5);
   min-width: 0;
 }
 .ax-actions {
@@ -498,7 +624,7 @@
   color: var(--ink-3);
   font-size: var(--text-meta);
 }
-/* Save appears only when something changed, at the foot of the region so it is never a screen away. */
+/* Appears only with unsaved changes, at the foot of the scroll region so it is never a screen away. */
 .ax-savebar {
   position: sticky;
   bottom: 0;
@@ -510,14 +636,15 @@
   gap: var(--space-2) var(--space-3);
   padding: var(--space-3) 0;
   border-top: 1px solid var(--line);
-  background: var(--plate);
+  background: var(--surface);
 }
 .ax-savebar-note {
   margin-right: auto;
   color: var(--ink-3);
-  font-size: var(--text-ui);
+  font-size: var(--text-body);
 }
-/* Hairline lists: a resume, a service, a mailbox. */
+
+/* Lists of things that are not a table: a resume, a mailbox, an attempt. */
 .ax-rows {
   list-style: none;
   margin: 0;
@@ -531,7 +658,7 @@
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-4);
   padding: var(--space-3) 0;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-soft);
 }
 .ax-switch-row {
   flex-wrap: nowrap;
@@ -542,6 +669,7 @@
 }
 .ax-row:last-child,
 .ax-switch-row:last-child {
+  padding-bottom: var(--space-1);
   border-bottom: 0;
 }
 .ax-row-main {
@@ -550,7 +678,7 @@
   flex: 1 1 260px;
   gap: 2px;
   min-width: 0;
-  font-size: var(--text-ui);
+  font-size: var(--text-body);
 }
 .ax-row-main > strong {
   font-weight: 500;
@@ -567,57 +695,70 @@
   flex-wrap: wrap;
   gap: var(--space-2);
 }
-/* A slide switch: the thumb is a small key, and the slot goes dark when it is on. */
+.ax-row > .ax-check {
+  flex: 1 1 260px;
+}
+.ax-row-main > .ax-link {
+  align-self: flex-start;
+  text-align: left;
+}
+
+/* ---------- Switch ---------- */
 .ax-switch {
   position: relative;
   flex: none;
-  width: 36px;
-  height: 18px;
+  width: 34px;
+  height: 20px;
   padding: 0;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: var(--ground-3);
-  box-shadow:
-    inset 0 1px 2px var(--shade),
-    0 0 0 1px var(--line-strong);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--inset);
   cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
 }
 .ax-switch i {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 16px;
+  width: 14px;
   height: 14px;
-  border-radius: 1px;
-  background: var(--key);
-  box-shadow:
-    inset 0 1px 0 var(--key-top),
-    0 1px 0 var(--key-bot);
-  transition: transform 180ms cubic-bezier(0.3, 1.4, 0.6, 1);
+  border-radius: 50%;
+  background: var(--ink-2);
+  transition:
+    transform var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+.ax-switch:hover:not(:disabled) {
+  border-color: var(--ink-2);
 }
 .ax-switch[aria-checked="true"] {
+  border-color: var(--brand);
   background: var(--brand);
 }
 .ax-switch[aria-checked="true"] i {
-  transform: translateX(16px);
+  background: var(--brand-ink);
+  transform: translateX(14px);
 }
 .ax-switch:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
-/* Read-only label and value rows (Facts in setup-kit, the job drawer). */
+
+/* ---------- Read-only label and value rows ---------- */
 .ax-kv {
   display: grid;
-  grid-template-columns: minmax(120px, 200px) minmax(0, 1fr);
+  grid-template-columns: minmax(110px, 180px) minmax(0, 1fr);
   margin: 0;
   column-gap: var(--space-6);
-  font-size: var(--text-ui);
+  font-size: var(--text-body);
 }
 .ax-kv > div {
   display: grid;
   grid-column: 1 / -1;
   grid-template-columns: subgrid;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-soft);
 }
 .ax-kv > div:last-child {
   border-bottom: 0;
@@ -642,14 +783,35 @@
     padding-top: 2px;
   }
 }
+
+/* ---------- Fold: raw and rarely needed detail, tucked away ---------- */
 .ax-fold > summary {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: 28px;
+  min-height: 32px;
   color: var(--ink-2);
-  font-size: var(--text-ui);
+  font-size: var(--text-body);
+  list-style: none;
   cursor: pointer;
+  transition: color var(--dur) var(--ease);
+}
+.ax-fold > summary::-webkit-details-marker {
+  display: none;
+}
+.ax-fold > summary::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 0 var(--space-1) 0 2px;
+  border-right: 1.5px solid var(--ink-3);
+  border-bottom: 1.5px solid var(--ink-3);
+  transform: rotate(-45deg);
+  transition: transform var(--dur) var(--ease);
+}
+.ax-fold[open] > summary::before {
+  transform: rotate(45deg);
 }
 .ax-fold > summary strong {
   font-weight: 500;
@@ -663,23 +825,28 @@
 .ax-fold > .ax-panel-body {
   padding: var(--space-2) 0 0;
 }
-.ax-lede {
-  flex: none;
-  max-width: 76ch;
-  margin: 0 0 var(--space-3);
-  color: var(--ink-3);
-  font-size: var(--text-ui);
-}
-.ax-lede:last-child {
-  margin-bottom: 0;
-}
 
-/* ---------- Table: no outer card, only hairline row rules ---------- */
+/* ---------- Table: a raised panel, a quiet head, rows that scan ---------- */
 .ax-table-wrap {
+  --surface: var(--raised);
   container: ax-table / inline-size;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  box-shadow: var(--shadow-panel);
+}
+.ax-panel .ax-table-wrap,
+.ax-drawer .ax-table-wrap,
+.ax-dialog .ax-table-wrap {
+  --surface: inherit;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
 }
 .ax-table-scroll {
   /* A positioned ancestor, so a visually hidden (absolute) span in a cell is clipped here instead of stretching the page. */
@@ -701,38 +868,39 @@
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: var(--text-ui);
+  font-size: var(--text-body);
 }
 .ax-table thead th {
   position: sticky;
   top: 0;
   z-index: 2;
-  height: 32px;
+  height: 36px;
   padding: 0 var(--space-3);
-  background: var(--plate);
+  background: var(--surface);
   border-bottom: 1px solid var(--line);
-  color: var(--ink-2);
+  color: var(--ink-3);
   font-size: var(--text-meta);
-  font-stretch: var(--wide);
   font-weight: 500;
   text-align: left;
-  text-shadow: var(--engrave);
-  text-transform: lowercase;
   white-space: nowrap;
 }
 .ax-table td {
-  height: 40px;
+  height: 44px;
   padding: 0 var(--space-3);
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-soft);
   white-space: nowrap;
+  transition: background var(--dur) var(--ease);
 }
 .ax-table th:first-child,
 .ax-table td:first-child {
-  padding-left: 0;
+  padding-left: var(--space-4);
 }
 .ax-table th:last-child,
 .ax-table td:last-child {
-  padding-right: 0;
+  padding-right: var(--space-4);
+}
+.ax-table time {
+  color: var(--ink-2);
 }
 /* A column with truncate keeps one line and ends in an ellipsis. max-width 0 takes it out of the table's size
    calculation, so it gets what is left after the other columns (shared by each one's width), never more. */
@@ -750,9 +918,11 @@
 .ax-table tbody tr:last-child td {
   border-bottom: 0;
 }
-.ax-table tbody tr:hover td,
+.ax-table tbody tr:hover td {
+  background: var(--hover);
+}
 .ax-table tbody tr[aria-selected="true"] td {
-  background: var(--tint);
+  background: var(--active);
 }
 .ax-table tbody tr.is-click {
   cursor: pointer;
@@ -764,8 +934,12 @@
 .ax-table .is-num {
   text-align: right;
 }
+.ax-table td.is-num {
+  font-family: var(--font-data);
+  font-size: var(--text-data);
+}
 .ax-table .is-check {
-  width: 28px;
+  width: 44px;
   padding-right: 0;
 }
 .ax-table .is-check input {
@@ -785,102 +959,161 @@
 .ax-table .is-pin {
   position: sticky;
   right: 0;
-  background: var(--plate);
+  background: var(--surface);
 }
-.ax-table tbody tr:hover td.is-pin,
+.ax-table tbody tr:hover td.is-pin {
+  background: linear-gradient(var(--hover), var(--hover)), var(--surface);
+}
 .ax-table tbody tr[aria-selected="true"] td.is-pin {
-  background: linear-gradient(var(--tint), var(--tint)), var(--plate);
+  background: linear-gradient(var(--active), var(--active)), var(--surface);
 }
 .ax-table thead .is-pin {
   z-index: 3;
 }
 .ax-table-state {
-  padding: var(--space-3) 0;
+  padding: var(--space-2) var(--space-4);
 }
-.ax-skeleton {
-  display: block;
-  height: 10px;
-  border-radius: var(--radius);
-  background: var(--tint);
+.ax-table-foot {
+  flex: none;
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--line);
 }
+/* The bulk line replaces nothing: it slides in above the head. */
 .ax-bulk {
   display: flex;
   align-items: center;
   flex: none;
-  gap: var(--space-3);
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
   min-height: 44px;
+  padding: var(--space-1) var(--space-4);
   border-bottom: 1px solid var(--line);
-  font-size: var(--text-ui);
+  background: var(--inset);
+  font-size: var(--text-body);
+  font-weight: 500;
 }
 .ax-bulk-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-2);
   margin-left: auto;
 }
 
-/* ---------- Drawer ---------- */
-.ax-drawer-root {
+/* ---------- Skeleton ---------- */
+.ax-skeleton {
+  display: block;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--active);
+  animation: ax-shimmer 1.4s ease-in-out infinite;
+}
+.ax-skeleton.is-mono {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+}
+.ax-skel-rows {
+  display: flex;
+  flex-direction: column;
+}
+.ax-skel-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: 44px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.ax-skel-row:last-child {
+  border-bottom: 0;
+}
+
+/* ---------- Overlays: drawer, dialog, menu, toast, tooltip ---------- */
+.ax-drawer-root,
+.ax-dialog-root {
   position: fixed;
   inset: 0;
   z-index: 70;
   display: flex;
   justify-content: flex-end;
 }
+.ax-dialog-root {
+  z-index: 75;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12vh var(--space-4) var(--space-4);
+  overflow-y: auto;
+}
 .ax-scrim {
-  position: absolute;
+  position: fixed;
   inset: 0;
   border: 0;
   padding: 0;
   background: var(--scrim);
-  animation: ax-fade var(--dur) ease;
+  animation: ax-fade 160ms ease;
   cursor: default;
 }
-/* Inside an overlay the ground is the overlay: sticky heads and pinned cells stay opaque against it. */
-.ax-drawer {
-  --ground: var(--raised);
-  --plate: var(--raised);
-  --surface: var(--raised);
-  --card: var(--raised);
-}
-.ax-drawer {
+.ax-drawer,
+.ax-dialog {
+  --surface: var(--overlay);
+  --raised: var(--overlay);
   position: relative;
   display: flex;
   flex-direction: column;
+  background: var(--overlay);
+  box-shadow: var(--shadow-overlay);
+}
+.ax-drawer {
   width: min(var(--drawer-w, 600px), 100vw);
   height: 100%;
-  background: var(--raised);
   border-left: 1px solid var(--line);
-  box-shadow: var(--overlay-shadow);
-  animation: ax-sheet var(--dur) var(--ease);
+  animation: ax-sheet 180ms var(--ease);
+}
+.ax-dialog {
+  width: min(var(--dialog-w, 480px), 100%);
+  max-height: calc(100vh - 16vh);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  animation: ax-pop 160ms var(--ease);
 }
 .ax-drawer-head {
+  align-items: center !important;
+}
+.ax-drawer-head,
+.ax-dialog-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   flex: none;
   gap: var(--space-3);
-  min-height: 60px;
-  padding: 0 var(--space-3) 0 var(--space-5);
+  padding: var(--space-4) var(--space-3) var(--space-3) var(--space-5);
 }
-/* A drawer's title is a real company and role, so it keeps its capitals. */
-.ax-drawer-head h2 {
-  text-transform: none;
+.ax-dialog-head h2 {
+  padding-top: 3px;
+}
+.ax-drawer-head h2,
+.ax-dialog-head h2 {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  padding-bottom: 1px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+}
+.ax-dialog-head p {
+  margin-top: 2px;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  font-weight: 400;
 }
 /* The drawer owns its scroll: the page behind never moves. */
-.ax-drawer-body {
+.ax-drawer-body,
+.ax-dialog-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: var(--space-1) var(--space-5) var(--space-5);
 }
-.ax-drawer-foot {
+.ax-drawer-foot,
+.ax-dialog-foot {
   display: flex;
   align-items: center;
   flex: none;
@@ -890,168 +1123,78 @@
   border-top: 1px solid var(--line);
 }
 
-/* ---------- Empty: one line ---------- */
-.ax-empty {
-  display: flex;
-  align-items: baseline;
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 2px var(--space-2);
-  padding: var(--space-3) 0;
-  border: 0;
-  border-radius: 0;
-  color: var(--ink-3);
-  font-size: var(--text-ui);
-}
-.ax-empty > svg {
-  display: none;
-}
-.ax-empty-title {
-  color: var(--ink-2);
-}
-.ax-empty-hint {
-  max-width: 76ch;
-}
-/* The one action reads as a link: an empty state is not a place for a button. */
-.ax-empty-action .ax-btn {
-  height: auto;
-  margin: 0;
-  padding: 0;
-  background: none;
-  box-shadow: none;
-  color: var(--accent-text);
-  font-weight: 400;
-  line-height: inherit;
-  text-transform: none;
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
-}
-.ax-empty-action .ax-btn:hover:not(:disabled),
-.ax-empty-action .ax-btn:active:not(:disabled) {
-  background: none;
-  box-shadow: none;
-  text-decoration-thickness: 2px;
-  transform: none;
-}
-
-/* ---------- Toast ---------- */
-.ax-toasts {
-  position: fixed;
-  right: var(--space-5);
-  bottom: var(--space-5);
-  z-index: 90;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  width: min(400px, calc(100vw - 32px));
-  pointer-events: none;
-}
-.ax-toast-group {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-.ax-toast {
-  pointer-events: auto;
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius);
-  background: var(--window);
-  box-shadow:
-    0 0 0 1px var(--window-edge),
-    var(--overlay-shadow);
-  color: var(--window-ink);
-  font-size: var(--text-ui);
-  animation: ax-rise var(--dur) var(--ease);
-}
-.ax-toast > span {
-  flex: 1;
-  min-width: 0;
-}
-.ax-toast.is-error::before {
-  content: "";
-  flex: none;
-  width: 10px;
-  height: 10px;
-  margin-top: 4px;
-  border-radius: 50%;
-  background: var(--led);
-}
-.ax-toast .ax-icon-btn {
-  color: var(--window-ink-2);
-}
-.ax-toast .ax-icon-btn:hover {
-  background: none;
-  color: var(--window-ink);
-}
-.ax-toast .ax-icon-btn {
-  width: 20px;
-  height: 20px;
-}
-/* A toast must never cover the Save button it is reporting on. */
-body:has(.ax-savebar) .ax-toasts {
-  bottom: 72px;
-}
-
-/* ---------- Overlay menus (row menu, account menu) ---------- */
-.ax-menu,
-.ax-pop {
+.ax-menu {
   min-width: 180px;
   max-width: min(320px, calc(100vw - 16px));
   padding: var(--space-1);
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--raised);
-  box-shadow: var(--overlay-shadow);
-  animation: ax-rise var(--dur) var(--ease);
+  background: var(--overlay);
+  box-shadow: var(--shadow-overlay);
+  animation: ax-rise 120ms var(--ease);
 }
 .ax-menu {
   position: fixed;
   z-index: 80;
+  max-height: min(420px, calc(100vh - 16px));
+  overflow-y: auto;
 }
 .ax-menu-item {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  height: 34px;
+  min-height: 32px;
   padding: 0 var(--space-2);
   border: 0;
-  border-radius: var(--radius);
+  border-radius: 5px;
   background: none;
   color: var(--ink);
   font: inherit;
-  font-size: var(--text-ui);
+  font-size: var(--text-body);
   text-align: left;
   text-decoration: none;
   white-space: nowrap;
   cursor: pointer;
 }
-.ax-menu-item svg {
+.ax-menu-item > svg {
   flex: none;
   color: var(--ink-2);
 }
 .ax-menu-item:hover:not(:disabled),
 .ax-menu-item:focus-visible {
   outline: none;
-  background: var(--tint);
+  background: var(--hover);
 }
 .ax-menu-item:disabled {
-  opacity: 0.5;
+  color: var(--ink-3);
   cursor: not-allowed;
 }
 .ax-menu-item.is-danger {
   color: var(--bad);
+}
+.ax-menu-item-end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+  padding-left: var(--space-4);
+  color: var(--ink-3);
+  font-family: var(--font-data);
+  font-size: var(--text-data);
+}
+.ax-menu-rule {
+  height: 1px;
+  margin: var(--space-1) calc(-1 * var(--space-1));
+  background: var(--line-soft);
 }
 .ax-menu-ask {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-2);
-  font-size: var(--text-ui);
+  font-size: var(--text-body);
+  white-space: normal;
 }
 .ax-menu-ask div {
   display: flex;
@@ -1066,39 +1209,281 @@ body:has(.ax-savebar) .ax-toasts {
 }
 .ax-ask-text {
   color: var(--ink-2);
-  font-size: var(--text-ui);
+  font-size: var(--text-body);
 }
 .ax-more[aria-expanded="true"] {
-  background: var(--tint);
+  background: var(--active);
   color: var(--ink);
 }
-/* A row's one action is a quiet link: twenty keys down a list would be the loudest thing on the page. */
-.ax-table .ax-btn.ax-lead {
-  height: auto;
-  margin: 0;
-  padding: 2px 4px;
-  background: none;
-  box-shadow: none;
+
+/* Listbox: a filter or small choice that is a designed menu rather than the system's. */
+.ax-listbox {
+  gap: var(--space-2);
+  padding-right: var(--space-2);
+  font-weight: 400;
+}
+.ax-listbox > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ax-listbox > svg:last-child {
+  color: var(--ink-3);
+}
+.ax-listbox-prefix {
+  color: var(--ink-3);
+}
+
+.ax-toasts {
+  position: fixed;
+  right: var(--space-5);
+  bottom: var(--space-5);
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(380px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.ax-toast-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.ax-toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--overlay);
+  box-shadow: var(--shadow-overlay);
+  color: var(--ink);
+  font-size: var(--text-body);
+  animation: ax-rise 160ms var(--ease);
+}
+.ax-toast > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ax-toast > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--ink-2);
+}
+.ax-toast.is-error > svg {
+  color: var(--signal);
+}
+.ax-toast .ax-icon-btn {
+  width: 22px;
+  height: 22px;
+  margin: -1px -2px 0 0;
+}
+/* A toast must never cover the Save button it is reporting on. */
+body:has(.ax-savebar) .ax-toasts {
+  bottom: 72px;
+}
+
+.ax-tip {
+  position: fixed;
+  z-index: 95;
+  max-width: 280px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--overlay);
+  box-shadow: var(--shadow-overlay);
   color: var(--ink);
   font-size: var(--text-meta);
-  font-stretch: 100%;
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-transform: none;
-  text-underline-offset: 3px;
+  line-height: 1.4;
+  pointer-events: none;
+  animation: ax-fade 100ms ease;
 }
-.ax-table .ax-btn.ax-lead:hover:not(:disabled),
-.ax-table .ax-btn.ax-lead:active:not(:disabled) {
-  background: none;
-  box-shadow: none;
-  text-decoration-thickness: 2px;
-  transform: none;
-}
-.ax-act {
+
+/* ---------- Empty: says what will appear and offers the next action ---------- */
+.ax-empty {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  flex-direction: column;
   gap: var(--space-1);
+  padding: var(--space-8) var(--space-4);
+  color: var(--ink-2);
+  font-size: var(--text-body);
+  text-align: center;
+}
+.ax-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--inset);
+  color: var(--ink-3);
+}
+.ax-empty-title {
+  color: var(--ink);
+  font-weight: 600;
+}
+.ax-empty-hint {
+  max-width: 52ch;
+}
+.ax-empty-action {
+  margin-top: var(--space-3);
+}
+.ax-empty.is-compact {
+  padding: var(--space-5) var(--space-3);
+}
+.ax-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4) 0;
+  color: var(--ink-2);
+  font-size: var(--text-body);
+}
+
+/* ---------- Dropzone: the only way a file comes in ---------- */
+.ax-drop {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 72px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--inset);
+  color: var(--ink-2);
+  font-size: var(--text-body);
+  cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+.ax-drop:hover {
+  border-color: var(--ink-2);
+  background: var(--hover);
+}
+.ax-drop.is-over {
+  border-style: solid;
+  border-color: var(--ink);
+  background: var(--active);
+}
+.ax-drop:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.ax-drop.is-disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.ax-drop.is-filled {
+  border-style: solid;
+  border-color: var(--line);
+  background: var(--surface);
+  cursor: default;
+}
+.ax-drop-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink-2);
+}
+.ax-drop-text {
+  flex: 1;
+  min-width: 0;
+}
+.ax-drop-text strong {
+  display: block;
+  color: var(--ink);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ax-drop-text u {
+  text-underline-offset: 3px;
+}
+.ax-drop-text small {
+  color: var(--ink-3);
+}
+
+/* ---------- Monogram: a small square with the employer's initial ---------- */
+.ax-mono {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  background: var(--mono-6);
+  color: var(--mono-ink);
+  font-size: 12px;
+  font-stretch: 105%;
+  font-weight: 600;
+  line-height: 1;
+  user-select: none;
+}
+.ax-mono[data-tone="0"] {
+  background: var(--mono-0);
+}
+.ax-mono[data-tone="1"] {
+  background: var(--mono-1);
+}
+.ax-mono[data-tone="2"] {
+  background: var(--mono-2);
+}
+.ax-mono[data-tone="3"] {
+  background: var(--mono-3);
+}
+.ax-mono[data-tone="4"] {
+  background: var(--mono-4);
+}
+.ax-mono[data-tone="5"] {
+  background: var(--mono-5);
+}
+.ax-mono[data-tone="6"] {
+  background: var(--mono-6);
+}
+.ax-mono[data-tone="7"] {
+  background: var(--mono-7);
+}
+.ax-mono.is-lg {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius);
+  font-size: 18px;
+}
+.ax-mono.is-md {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  font-size: 14px;
+}
+.ax-mono-stack {
+  display: inline-flex;
+  flex: none;
+}
+.ax-mono-stack > .ax-mono {
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.ax-mono-stack > .ax-mono + .ax-mono {
+  margin-left: -5px;
+}
+.ax-mono-more {
+  background: var(--inset);
+  color: var(--ink-2);
+  font-family: var(--font-data);
+  font-size: 10.5px;
+  font-weight: 400;
 }
 
 /* ---------- worktools: search, filters, job cell, note, notice ---------- */
@@ -1106,80 +1491,69 @@ body:has(.ax-savebar) .ax-toasts {
   position: relative;
   display: flex;
   align-items: center;
-  flex: 0 1 260px;
+  flex: 0 1 280px;
   min-width: 160px;
 }
 .ax-search svg {
   position: absolute;
   z-index: 1;
   left: 10px;
-  color: var(--ink-2);
+  color: var(--ink-3);
   pointer-events: none;
 }
 .ax-search input {
-  height: 36px;
+  height: var(--control);
   padding: 0 10px 0 32px;
 }
-/* Filters: a row of keys in one recess; the one that is down carries a thin line of the live colour. */
+/* Filters: words that switch a list, with counts. The current one is filled. */
 .ax-chips {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   flex-wrap: wrap;
   gap: 2px;
   min-width: 0;
-  padding: 3px;
-  border-radius: var(--radius);
-  background: var(--ground-3);
-  box-shadow: inset 0 1px 3px var(--shade);
 }
 .ax-chip {
-  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  height: 30px;
+  gap: 6px;
+  height: var(--control-sm);
   padding: 0 10px;
   border: 0;
   border-radius: var(--radius-sm);
-  background: var(--key);
-  box-shadow:
-    inset 0 1px 0 var(--key-top),
-    0 1px 0 var(--key-bot);
-  color: var(--key-ink);
+  background: none;
+  color: var(--ink-2);
   font-size: var(--text-meta);
-  font-stretch: 104%;
   font-weight: 500;
-  text-transform: lowercase;
   white-space: nowrap;
   cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
 }
 .ax-chip:hover {
-  background: var(--ground-2);
+  background: var(--hover);
+  color: var(--ink);
 }
 .ax-chip[aria-pressed="true"] {
-  background: var(--key-down);
-  box-shadow: inset 0 2px 3px var(--shade);
-  font-weight: 600;
-  transform: translateY(1px);
-}
-.ax-chip[aria-pressed="true"]::before {
-  content: "";
-  position: absolute;
-  inset: 3px 8px auto;
-  height: 2px;
-  background: var(--live);
+  background: var(--active);
+  color: var(--ink);
 }
 .ax-chip-n {
-  color: var(--ink-2);
+  color: var(--ink-3);
   font-family: var(--font-data);
-  font-size: 12px;
-  font-stretch: normal;
+  font-size: var(--text-data);
   font-weight: 400;
 }
+.ax-chip[aria-pressed="true"] .ax-chip-n {
+  color: var(--ink-2);
+}
+
+/* A job in a table: monogram, then employer and role side by side, stacking when the table is narrow. */
 .ax-job {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-  align-items: baseline;
+  grid-template-columns: auto minmax(0, 2fr) minmax(0, 3fr);
+  align-items: center;
   gap: var(--space-3);
   width: 100%;
   min-width: 0;
@@ -1192,38 +1566,71 @@ body:has(.ax-savebar) .ax-toasts {
   cursor: pointer;
 }
 .ax-job strong,
-.ax-job span {
+.ax-job-role {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .ax-job strong {
-  font-weight: 600;
+  font-weight: 500;
 }
-.ax-job span {
-  color: var(--ink);
+.ax-job-role {
+  color: var(--ink-2);
+}
+.ax-job-meta {
+  display: none;
 }
 .ax-job:hover strong {
   text-decoration: underline;
+  text-decoration-thickness: 1px;
   text-underline-offset: 3px;
 }
-.ax-job:focus-visible,
-.ax-link:focus-visible {
-  border-radius: var(--radius);
+.ax-job:focus-visible {
+  border-radius: 4px;
 }
-/* Too narrow for company and role side by side: they stack, so both can be read. */
 @container ax-table (max-width: 599px) {
   .ax-job {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0 var(--space-3);
+    padding: var(--space-3) 0;
     line-height: 1.35;
   }
-  .ax-job span {
+  .ax-job > .ax-mono {
+    grid-row: 1 / span 3;
+    align-self: start;
+    margin-top: 2px;
+  }
+  .ax-job-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: 4px;
     color: var(--ink-2);
+    font-size: var(--text-meta);
+  }
+  .ax-job-meta .ax-pill {
+    font-size: var(--text-meta);
   }
   .ax-table td {
-    height: 56px;
+    height: auto;
+    padding-inline: var(--space-2);
+  }
+  .ax-table td.is-check {
+    width: 36px;
+    vertical-align: top;
+    padding-top: var(--space-3);
+    padding-right: 0;
+    padding-left: var(--space-3);
+  }
+  .ax-table td:last-child {
+    vertical-align: top;
+    padding-top: 10px;
+    padding-right: var(--space-2);
+  }
+  /* The row's one action is in its drawer: the row stays readable. */
+  .ax-table .ax-lead {
+    display: none;
   }
 }
 .ax-note {
@@ -1234,7 +1641,29 @@ body:has(.ax-savebar) .ax-toasts {
   min-width: 0;
   font-size: var(--text-meta);
 }
-/* A plain line. Only something that needs attention gets a dot. */
+/* A row's one action: plain words that become a button when the row is pointed at, so twenty down a list stay calm. */
+.ax-btn.ax-lead {
+  border-color: transparent;
+  background: none;
+  box-shadow: none;
+  font-weight: 500;
+}
+tr:hover .ax-btn.ax-lead:not(:disabled),
+.ax-btn.ax-lead:focus-visible {
+  border-color: var(--btn-edge);
+  background: var(--btn);
+}
+tr:hover .ax-btn.ax-lead:hover:not(:disabled) {
+  background: var(--btn-hover);
+}
+.ax-act {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+
+/* A plain line. Only something that needs attention gets a lamp. */
 .ax-notice {
   display: flex;
   align-items: center;
@@ -1243,7 +1672,7 @@ body:has(.ax-savebar) .ax-toasts {
   gap: var(--space-2) var(--space-3);
   min-height: 28px;
   color: var(--ink-2);
-  font-size: var(--text-ui);
+  font-size: var(--text-body);
 }
 .ax-notice > span {
   flex: 1 1 auto;
@@ -1252,16 +1681,21 @@ body:has(.ax-savebar) .ax-toasts {
 }
 .ax-notice.is-warn,
 .ax-notice.is-bad {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
   color: var(--ink);
 }
 .ax-notice.is-warn::before,
 .ax-notice.is-bad::before {
   content: "";
   flex: none;
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--signal);
+  box-shadow: 0 0 0 3px var(--signal-soft);
 }
 
 /* ---------- Pager ---------- */
@@ -1271,10 +1705,13 @@ body:has(.ax-savebar) .ax-toasts {
   justify-content: space-between;
   flex: none;
   flex-wrap: wrap;
-  gap: var(--space-3);
+  gap: var(--space-2) var(--space-3);
   color: var(--ink-2);
-  font-family: var(--font-data);
   font-size: var(--text-meta);
+}
+.ax-pager-range {
+  font-family: var(--font-data);
+  font-size: var(--text-data);
 }
 .ax-pager-pages {
   display: flex;
@@ -1286,47 +1723,41 @@ body:has(.ax-savebar) .ax-toasts {
   align-items: center;
 }
 .ax-pager-btn {
-  min-width: 30px;
-  height: 30px;
-  padding: 0 var(--space-2);
+  display: inline-grid;
+  place-items: center;
+  min-width: var(--control-sm);
+  height: var(--control-sm);
+  padding: 0 var(--space-1);
   border: 0;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--ink-2);
-  font: inherit;
-  font-size: var(--text-meta);
+  font-family: var(--font-data);
+  font-size: var(--text-data);
   cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
 }
 .ax-pager-btn:hover:not(:disabled) {
+  background: var(--hover);
   color: var(--ink);
 }
 .ax-pager-btn[aria-current="page"] {
-  background: var(--key-down);
-  box-shadow: inset 0 1px 2px var(--shade);
+  background: var(--active);
   color: var(--ink);
 }
 .ax-pager-btn:disabled {
-  opacity: 0.4;
+  color: var(--ink-3);
+  opacity: 0.5;
   cursor: not-allowed;
 }
 .ax-pager-gap {
   padding: 0 2px;
 }
-.ax-pager-size {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-.ax-pager-size select {
-  width: auto;
-  min-height: 30px;
-  height: 30px;
-  padding: 0 24px 0 var(--space-2);
-  font-size: var(--text-meta);
-}
 
 /* On a phone the page itself scrolls, so a "fill" table cannot be held to what is left under the toolbar. */
-@media (max-width: 700px) {
+@media (max-width: 899px) {
   .ax-scroll:has(> .main > .ax-page-fill) {
     overflow-y: auto;
   }
@@ -1335,7 +1766,7 @@ body:has(.ax-savebar) .ax-toasts {
   }
   .ax-page-fill {
     height: auto;
-    padding-bottom: 56px;
+    padding-bottom: var(--space-6);
   }
   .ax-table-wrap.is-fill {
     flex: none;
@@ -1356,15 +1787,22 @@ body:has(.ax-savebar) .ax-toasts {
   .ax-chips::-webkit-scrollbar {
     display: none;
   }
-  /* A phone shows the job, its status and the menu without sliding the table far sideways. */
   .ax-table td.is-trunc {
     min-width: 120px !important;
   }
-  .ax-table th,
-  .ax-table td {
-    padding-inline: 6px;
-  }
   .ax-table .is-pin {
-    padding-inline: 0;
+    padding-inline: var(--space-1);
   }
+}
+.ax-drawer-sub {
+  display: block;
+  margin-top: 1px;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  font-weight: 400;
+}
+.ax-tipped {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
 }
