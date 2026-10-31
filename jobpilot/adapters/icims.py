@@ -707,6 +707,10 @@ class ICIMS(Adapter):
     def classify_page(self, obs):
         location = urlsplit(obs["url"])
         path = location.path
+        if any(f.get("side_login") for f in obs["fields"]):
+            # The employer's own customer login in its site chrome (scan.js chromeLogin) is not this application's
+            # sign-in: City National Bank's "Online Banking" drawer (2026-10-31) was typed into as one.
+            obs = {**obs, "fields": [f for f in obs["fields"] if not f.get("side_login")]}
         if self.central_enrollment(obs) or self.central_mfa_required(obs):
             return Step.CONSENT
         if path.rstrip("/").endswith("/jobs/dashboard"):

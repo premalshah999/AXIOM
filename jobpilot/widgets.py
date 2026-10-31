@@ -1155,7 +1155,13 @@ async def nearby_text(el, levels=3):
 
 
 
-DETACHED = re.compile(r"not attached to the DOM|detached from (?:the )?document|node is detached", re.I)
+# "Cannot find context with specified id" is the same fact as a detached node: the page navigated or re-rendered before
+# the click reached the node, and Playwright refuses it before dispatching anything (Oracle Apply, 2026-10-31).
+DETACHED = re.compile(
+    r"not attached to the DOM|detached from (?:the )?document|node is detached|"
+    r"Protocol error \(DOM\.scrollIntoViewIfNeeded\): Cannot find context with specified id",
+    re.I,
+)
 
 
 async def dispatch_owned_click(handle, *, pointer_sequence=False):

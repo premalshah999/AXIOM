@@ -101,3 +101,11 @@ async def test_setup_accounts_shows_the_record_and_a_saved_password_ends_the_sto
 
 def test_the_result_names_the_company_when_the_job_has_one():
     assert "ExampleSoft" in result({"company": "ExampleSoft", "url": JOB_URL})["reviews"][0]["question"]
+
+
+async def test_a_page_that_is_not_an_http_site_holds_no_account_and_never_raises(service):
+    # Great American's Workday run (2026-10-31): "Browser control failed at origin()" on a non-http page.
+    for url in ("about:blank", "chrome-error://chromewebdata/", "https://user:pw@careers.examplesoft.test/x"):
+        e = engine(service)
+        assert await stop_if_identity_conflict(e, {**JOB_PAGE, "url": url}) is False
+        assert e.result is None

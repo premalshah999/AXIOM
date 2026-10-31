@@ -77,7 +77,12 @@ async def stop_if_identity_conflict(engine, observation) -> bool:
     if store is None:
         return False
     url = observation.get("url") or getattr(getattr(engine, "page", None), "url", "") or job.get("url", "")
-    record = store.record(url) or {}
+    try:
+        record = store.record(url) or {}
+    except ValueError:
+        # A page that is not an http(s) site (about:blank, a browser error page, a URL with credentials) holds no
+        # employer account. Great American's Workday run (2026-10-31) ended "Browser control failed at origin()" here.
+        return False
     marked = record.get("state") == STATE
     if not marked:
         if not conflict_on_page(observation) or record.get("confirmed_at"):

@@ -1159,6 +1159,10 @@ class Adapter:
 
     # ----- step handlers ------------------------------------------------------------------------
     async def on_job_details(self, obs):
+        if any(f.get("side_login") for f in obs["fields"]):
+            # The employer's own customer-login drawer covers the Apply control (scan.js chromeLogin): close it first.
+            await self.dismiss_chrome_login()
+            obs = await self.form.scan()
         button = self.find_apply(obs)
         if not button:
             return {"fallback": True, "reason": "No apply control found"}
@@ -1177,6 +1181,19 @@ class Adapter:
                 return {"fallback": True, "reason": "No apply control found"}
             await self.click(button)
         self.apply_url = self.page.url
+
+    async def dismiss_chrome_login(self):
+        """Close a site-chrome customer login drawer by its own close control, else Escape. City National Bank's
+        iCIMS job page opened its "Online Banking" login over the page (2026-10-31)."""
+        try:
+            closer = self.page.locator("[data-jp-chrome-close]").first
+            if await closer.count():
+                await closer.click(timeout=2000)
+            else:
+                await self.page.keyboard.press("Escape")
+            await self.page.wait_for_timeout(400)
+        except Exception:
+            pass  # A drawer that will not close leaves Apply covered; the click then reports it as before.
 
     async def on_apply_method(self, obs):
         return {"fallback": True, "reason": "Unknown application method chooser"}
