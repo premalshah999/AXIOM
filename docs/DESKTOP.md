@@ -5,15 +5,27 @@ shows the same dashboard a browser shows; a loopback-only server stays inside it
 
 It runs the supervisor in `jobpilot/native` ([NATIVE.md](NATIVE.md)), unforked. `scripts/axiom` and a checkout keep working exactly as before.
 
+The disk image is 126 MB and the installed app 374 MB. On this 16 GB Mac, measured beside production with synthetic data: a first start takes 7.6 s from the window opening to the dashboard (the
+database created, 3.4 s to the supervisor's "up"), a later start 5.5 s, and a Quit with nothing active 3 s.
+
+| At idle, resident | MB |
+|---|---|
+| Window, plus WebKit's three helpers | 87 + 140 |
+| Supervisor | 16 |
+| App | 77 |
+| PostgreSQL (10 processes, shared pages counted in each) | 85 |
+| Worker Chrome, about:blank (4 to 8 processes) | 420 to 640 |
+| Twin Chrome (4 to 6 processes) | 320 to 400 |
+
 ## What is inside
 
 | Inside `AXIOM.app/Contents` | What | Size |
 |---|---|---|
-| `MacOS/AXIOM` | The window (`desktop/AXIOM.m`) | @SHELL@ |
-| `Resources/python` | CPython 3.12 from uv's relocatable builds, with every package from `uv.lock` in its `site-packages` | @PYTHON@ |
-| ... of which `playwright` | The driver and its Node, which is most of it | @PLAYWRIGHT@ |
-| `Resources/postgres` | PostgreSQL 17 with its libraries, relocated by `desktop/relocate_pg.py` | @POSTGRES@ |
-| `Resources/app` | `jobpilot/`, the built dashboard, the Chrome scripts, licences | @APP@ |
+| `MacOS/AXIOM` | The window (`desktop/AXIOM.m`) | 150 KB |
+| `Resources/python` | CPython 3.12 from uv's relocatable builds, with every package from `uv.lock` in its `site-packages` | 289 MB |
+| ... of which `playwright` | The driver and its Node, which is most of it | 133 MB |
+| `Resources/postgres` | PostgreSQL 17 with its libraries, relocated by `desktop/relocate_pg.py` | 69 MB |
+| `Resources/app` | `jobpilot/`, the built dashboard, the Chrome scripts, licences | 12 MB |
 | `Resources/bin/axiom` | `scripts/axiom` for a bundle: `status`, `logs`, `psql`, `hold`, `jobpilot verify`, `move-in` | |
 
 There is no virtualenv. uv's Python needs no fixing up to be moved, and packages installed straight into it have no absolute paths to go stale,
@@ -24,8 +36,8 @@ signed bundle must not be written to.
 
 | | This (Objective-C + the system's WKWebView) | Electron |
 |---|---|---|
-| In the bundle | @SHELL@ | Chromium and Node: over 200 MB (Electron's published size, not measured here) |
-| Memory | The window and WebKit's helpers: @SHELLRAM@ | A second Chromium beside the worker Chrome's nine tabs, on a 16 GB Mac already short of memory |
+| In the bundle | 150 KB | Chromium and Node: over 200 MB (Electron's published size, not measured here) |
+| Memory | The window and WebKit's three helpers: about 225 MB resident at idle, showing the dashboard | A second Chromium beside the worker Chrome's nine tabs, on a 16 GB Mac already short of memory |
 | Toolchain | `clang`, from Command Line Tools | Node and a packager |
 
 Objective-C rather than Swift only because Swift cannot import Cocoa on Command Line Tools 16.2: both `usr/include/swift/module.modulemap` and `bridging.modulemap`

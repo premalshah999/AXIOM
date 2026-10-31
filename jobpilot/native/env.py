@@ -91,7 +91,8 @@ class Native:
     @property
     def scripts(self):
         """Inside the Mac app `root` is the config folder, and the Chrome scripts travel with the code."""
-        return (ROOT if self.get("AXIOM_BUNDLE") else self.root) / "scripts"
+        bundle = self.get("AXIOM_BUNDLE")
+        return Path(bundle) / "app" / "scripts" if bundle else self.root / "scripts"
 
     @property
     def state_file(self):

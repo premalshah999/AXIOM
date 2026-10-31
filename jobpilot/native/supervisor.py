@@ -133,7 +133,8 @@ def chrome_argv(cfg, script, port_var, profile_var, url, profile, extra=""):
 class Child:
     def __init__(self, name, argv, *, env=None, cwd=None, log=None, required=True, after=(), ready=None,
                  stop_signal=signal.SIGTERM, grace=10.0, final_signal=signal.SIGKILL, url=None, service=False,
-                 restart="always", restart_with=(), health_url="", port=None):
+                 restart="always", restart_with=(), health_url="", port=None, profile=None):
+        self.profile = profile
         self.name, self.argv, self.env, self.cwd, self.log = name, argv, env, cwd, log
         self.required, self.after, self.ready = required, after, ready
         self.stop_signal, self.grace, self.final_signal, self.url = stop_signal, grace, final_signal, url
@@ -284,6 +285,7 @@ class Supervisor:
                     ready=lambda: http_ok(cfg.worker_cdp + "/json/version"),
                     url=cfg.worker_cdp,
                     grace=CHROME_GRACE,
+                    profile=cfg.get("CHROME_WORKER_PROFILE") or cfg.data_dir / "desktop-browser",
                 )
             )
         if cfg.twin_cdp:
@@ -302,6 +304,7 @@ class Supervisor:
                     ready=lambda: http_ok(cfg.twin_cdp + "/json/version"),
                     url=cfg.twin_cdp,
                     grace=CHROME_GRACE,
+                    profile=cfg.get("CHROME_TWIN_PROFILE") or cfg.data_dir / "twin-browser",
                 )
             )
         infrastructure = [database, *browsers]
@@ -655,12 +658,23 @@ class Supervisor:
                 if child.service and child.grace > 30:
                     self.say(f"Stopping {child.name}: it drains for up to {child.grace:.0f} s while commits finish.")
                 self.stop_and_wait(child)
+        self.stop_relaunched_chromes()
         if self.caffeinate and self.caffeinate.poll() is None:
             self.caffeinate.terminate()
             self.caffeinate.wait()
         self.phase = "stopped"
         self.write_state(force=True)
         self.say(self.reason or "Stopped.")
+
+    def stop_relaunched_chromes(self):
+        """Chrome can relaunch itself (a fresh worker profile did 143 s in, 2026-10-31). The new process is not our child, so
+        it reads as `external`, which a checkout leaves alone because someone may have started it by hand. In the Mac app
+        the port and the profile are private, so whatever holds the profile is ours, and Quit must leave nothing running."""
+        if not self.cfg.get("AXIOM_BUNDLE"):
+            return
+        for child in self.children or []:
+            if child.state == "external" and child.profile:
+                stop_chrome_holding(child.profile, say=self.say)
 
     def stop_and_wait(self, child):
         pid = child.pid
@@ -775,6 +789,25 @@ def stop_stray_postgres(cfg, say):
     say(f"Stopping a database left running on this data directory (pid {pid}).")
     stop_process(pid, signal.SIGINT, POSTGRES_GRACE, started)
     return True
+
+
+def chrome_holding(profile):
+    """The pid of the Chrome that holds this profile, from Chrome's own lock (a symlink to host-pid), or None. Checked against
+    the process's command line, because the lock outlives its process and a pid gets reused."""
+    try:
+        pid = int(os.readlink(os.path.join(profile, "SingletonLock")).rsplit("-", 1)[1])
+    except (OSError, ValueError, IndexError):
+        return None
+    command = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=5).stdout
+    return pid if f"--user-data-dir={profile}" in command else None
+
+
+def stop_chrome_holding(profile, say=print):
+    pid = chrome_holding(profile)
+    if pid:
+        say(f"Stopping the Chrome holding {os.path.basename(str(profile))} (pid {pid}).")
+        stop_process(pid, signal.SIGTERM, CHROME_GRACE, process_start(pid))
+    return bool(pid)
 
 
 def stop_process(pid, sig, grace, started):

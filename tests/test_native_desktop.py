@@ -5,6 +5,7 @@ import http.server
 import json
 import os
 import plistlib
+import shutil
 import signal
 import socket
 import stat
@@ -17,10 +18,10 @@ from pathlib import Path
 
 import pytest
 
-from jobpilot.native import desktop, migrate, movein, pg
+from jobpilot.native import desktop, movein, pg
 from jobpilot.native.desktop import Layout
 from jobpilot.native.env import NativeError, load, prepare
-from jobpilot.native.supervisor import Supervisor, chrome_argv, process_start, read_state
+from jobpilot.native.supervisor import Child, Supervisor, chrome_argv, process_start, read_state
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -131,6 +132,7 @@ def test_a_bug_while_starting_reaches_the_window_as_words(layout, monkeypatch, c
 
 def test_the_chrome_scripts_travel_with_the_code_not_the_config_folder(layout):
     desktop.ensure_config(layout)
+    shutil.copytree(ROOT / "scripts", layout.app / "scripts")
     env = {**desktop.environment(layout, {"app": 50001, "postgres": 50002, "worker": 50003, "twin": 50004}), "CHROME_BIN": "/fake/chrome"}
     cfg = load(environ=env)
     os.environ.update(env)
@@ -328,6 +330,62 @@ def test_a_checkout_install_has_no_owner_and_outlives_its_terminal(tmp_path):
     sup = Supervisor(prepare(load(tmp_path, environ={})), [], say=lambda _: None)
     sup.tick_owner()
     assert not sup.stop_reason
+
+
+def holding(profile):
+    """A stand-in for Chrome: a process with the profile on its command line and Chrome's lock pointing at it."""
+    profile.mkdir(parents=True, exist_ok=True)
+    process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", f"--user-data-dir={profile}"])
+    os.symlink(f"somehost-{process.pid}", profile / "SingletonLock")
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and f"--user-data-dir={profile}" not in subprocess.run(
+        ["ps", "-o", "command=", "-p", str(process.pid)], capture_output=True, text=True
+    ).stdout:
+        time.sleep(0.05)
+    return process
+
+
+@pytest.mark.regression
+def test_a_chrome_that_relaunched_itself_does_not_outlive_quit(tmp_path):
+    """A fresh worker profile's Chrome relaunched itself 143 s in (2026-10-31). The new process was nobody's child, read as
+    `external`, and stayed running after Quit."""
+    (tmp_path / ".env").write_text(f"POSTGRES_PASSWORD=x\nDATA_DIR={tmp_path}/data\n")
+    cfg = prepare(load(tmp_path, environ={"AXIOM_BUNDLE": str(tmp_path)}))
+    profile = cfg.data_dir / "desktop-browser"
+    chrome = holding(profile)
+    child = Child("worker", ["true"], url="http://127.0.0.1:1", profile=profile)
+    child.state = "external"
+    sup = Supervisor(cfg, [child], say=lambda _: None)
+    sup.stop_reason = "test"
+    sup.shutdown()
+    assert chrome.wait(timeout=10) is not None
+
+
+def test_a_checkout_still_leaves_a_chrome_it_did_not_start_alone(tmp_path):
+    (tmp_path / ".env").write_text(f"POSTGRES_PASSWORD=x\nDATA_DIR={tmp_path}/data\n")
+    cfg = prepare(load(tmp_path, environ={}))
+    profile = cfg.data_dir / "desktop-browser"
+    chrome = holding(profile)
+    child = Child("worker", ["true"], url="http://127.0.0.1:1", profile=profile)
+    child.state = "external"
+    sup = Supervisor(cfg, [child], say=lambda _: None)
+    sup.stop_reason = "test"
+    sup.shutdown()
+    try:
+        assert chrome.poll() is None, "docs/NATIVE.md: external is left alone"
+    finally:
+        chrome.kill()
+        chrome.wait()
+
+
+def test_a_lock_whose_pid_was_reused_is_not_chrome(tmp_path):
+    from jobpilot.native.supervisor import chrome_holding
+
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    os.symlink(f"somehost-{os.getpid()}", profile / "SingletonLock")
+    assert chrome_holding(profile) is None, "that pid is this test, which must never be signalled"
+    assert chrome_holding(tmp_path / "none") is None
 
 
 # ---- moving in, on a real scratch cluster --------------------------------------------------------------------------------

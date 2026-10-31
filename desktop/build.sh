@@ -75,6 +75,10 @@ build_dashboard(Path(sys.argv[1]))" "$root"
 say "The app"
 mkdir -p "$resources/app/scripts/lib" "$resources/app/docs"
 ditto "$root/jobpilot" "$resources/app/jobpilot"
+# Laid out flat, as a release does, once docs/ARCHITECTURE.md's move has made these packages.
+for package in "$root"/libs/*/src/axiom_* "$root"/services/*/src/axiom_* "$root"/desktop/axiom_*; do
+  [ -d "$package" ] && ditto "$package" "$resources/app/$(basename "$package")"
+done
 find "$resources/app" -type d -name __pycache__ -prune -exec rm -rf {} +
 cp "$root/scripts/chrome-worker.sh" "$root/scripts/chrome-twin.sh" "$resources/app/scripts/"
 cp "$root/scripts/lib/chrome.sh" "$resources/app/scripts/lib/"
@@ -102,7 +106,7 @@ chmod +x "$resources/bin/axiom"
 say "Compiling Python ahead of time"
 # A signed bundle must not be written to, so nothing is compiled at run time. Hash-based and unchecked: dragging the app
 # changes file times, and a time-based .pyc would then be ignored and compiled again on every start.
-PYTHONDONTWRITEBYTECODE=1 "$py" -m compileall -q -j 0 --invalidation-mode unchecked-hash "$stdlib" "$resources/app/jobpilot" >"$build/compile.log" 2>&1 \
+PYTHONDONTWRITEBYTECODE=1 "$py" -m compileall -q -j 0 --invalidation-mode unchecked-hash "$stdlib" "$resources/app" >"$build/compile.log" 2>&1 \
   || { grep -v '^$' "$build/compile.log" | tail -5 >&2; printf 'build: note: some files did not compile; see %s\n' "$build/compile.log" >&2; }
 
 say "The window"

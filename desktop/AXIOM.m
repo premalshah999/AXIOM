@@ -6,7 +6,7 @@
 // tick_owner).
 //
 // Objective-C rather than Swift only because Swift cannot import Cocoa on Command Line Tools 16.2 ("redefinition of module
-// SwiftBridging", a packaging bug in the toolchain). The binary is about 100 KB either way.
+// SwiftBridging", a packaging bug in the toolchain). The binary is about 150 KB either way.
 
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
@@ -87,6 +87,7 @@ static NSString *const SignedOutScript =
 @property(strong) NSWindow *window;
 @property(strong) WKWebView *web;
 @property(strong) NSStatusItem *statusItem;
+@property(strong) NSAlert *batteryAlert;
 @property(strong) NSMenuItem *loginItem;
 @property(strong) NSTask *boot;
 @property(strong) NSTimer *timer;
@@ -132,6 +133,7 @@ static NSString *const SignedOutScript =
   term = dispatch_source_create(DISPATCH_SOURCE_TYPE_SIGNAL, SIGTERM, 0, dispatch_get_main_queue());
   dispatch_source_set_event_handler(term, ^{
     self.quietQuit = YES;
+    [self dismissPanels];
     [NSApp terminate:nil];
   });
   dispatch_resume(term);
@@ -140,6 +142,7 @@ static NSString *const SignedOutScript =
                                                                queue:nil
                                                           usingBlock:^(NSNotification *n) {
                                                             self.quietQuit = YES;
+                                                            [self dismissPanels];
                                                           }];
   [self tick];
   // The common modes: while an NSTerminateLater quit waits, the run loop is in a modal mode, and a default-mode timer never
@@ -147,6 +150,12 @@ static NSString *const SignedOutScript =
   self.timer = [NSTimer timerWithTimeInterval:1.0 target:self selector:@selector(tick) userInfo:nil repeats:YES];
   self.timer.tolerance = 0.4;
   [NSRunLoop.mainRunLoop addTimer:self.timer forMode:NSRunLoopCommonModes];
+}
+
+// AppKit ignores Quit while a sheet or modal panel is up. Nobody is there to answer one when the Mac is shutting down.
+- (void)dismissPanels {
+  if (self.window.attachedSheet) [self.window endSheet:self.window.attachedSheet];
+  if (NSApp.modalWindow) [NSApp abortModal];
 }
 
 // Run from the disk image or a quarantined Downloads folder, macOS gives the app a read-only random path that disappears
@@ -658,6 +667,7 @@ static NSString *const SignedOutScript =
   }
   self.quitDeadline = [NSDate dateWithTimeIntervalSinceNow:budget];
   self.mode = ModeQuitting;
+  [self dismissBatteryWarning:nil];
   Log([NSString stringWithFormat:@"Quit: %ld active; waiting up to %ld s.", (long)active, (long)budget]);
   kill((pid_t)IntOr(state[@"pid"], 0), SIGTERM);
   self.base = nil;
@@ -681,13 +691,25 @@ static NSString *const SignedOutScript =
   if (IntOr(state[@"active"], 0) <= 0 || self.batteryWarned || self.mode == ModeQuitting) return;
   self.batteryWarned = YES;
   Log(@"Warned: applying on battery.");
+  // Not a sheet: AppKit ignores Quit while one is attached, and a warning must never be what stops a safe stop.
   NSAlert *alert = [NSAlert new];
   alert.alertStyle = NSAlertStyleWarning;
   alert.messageText = @"AXIOM is applying on battery power";
   alert.informativeText = [NSString stringWithFormat:@"The battery is at %ld%%. Your Mac sleeps when the lid closes or the battery runs "
                                                      @"out, and that freezes applications in progress. Plug in to keep them going.",
                                                      (long)IntOr(power[@"percent"], 0)];
-  [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r){}];
+  NSButton *ok = [alert addButtonWithTitle:@"OK"];
+  ok.target = self;
+  ok.action = @selector(dismissBatteryWarning:);
+  [alert layout];
+  [alert.window center];
+  [alert.window orderFront:nil];
+  self.batteryAlert = alert;
+}
+
+- (IBAction)dismissBatteryWarning:(id)sender {
+  [self.batteryAlert.window orderOut:nil];
+  self.batteryAlert = nil;
 }
 
 // ---- menus -------------------------------------------------------------------------------------------------------------

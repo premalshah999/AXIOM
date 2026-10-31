@@ -29,7 +29,7 @@ from pathlib import Path
 
 from . import release
 from .env import ROOT, NativeError, load, prepare
-from .supervisor import port_in_use, process_start, read_state, stop_leftovers, supervisor_alive
+from .supervisor import port_in_use, process_start, read_state, stop_chrome_holding, stop_leftovers, supervisor_alive
 
 BUNDLE_ID = "app.axiom.desktop"
 # What a checkout install uses by default, and what production holds on this Mac. An app beside a checkout never takes them.
@@ -440,6 +440,9 @@ def _boot(layout, owner, report):
         )
     # Before choosing ports: what a dead supervisor left running holds the ports this installation already owns.
     stop_leftovers(cfg, state, say=lambda line: print(line, flush=True))
+    # A relaunched Chrome no state file knows of. A new one on this profile would only hand over to it and exit.
+    for profile in ("desktop-browser", "twin-browser"):
+        stop_chrome_holding(cfg.data_dir / profile, say=lambda line: print(line, flush=True))
     ports = pick_ports(layout)
     chrome, source = find_chrome(layout)
     if not chrome:
