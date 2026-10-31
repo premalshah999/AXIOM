@@ -164,6 +164,15 @@ UNFINISHED = re.compile(
 )
 
 
+# A decline is not an acknowledgement of this submission, even when it opens with "thank you for applying".
+REJECTION = re.compile(
+    r"\bunfortunately\b|regret to (?:inform|tell)|not (?:be )?(?:moving|proceeding|going) forward|"
+    r"will not (?:be )?(?:moving|proceeding|considered)|not (?:been )?selected|"
+    r"no longer (?:under consideration|being considered)|(?:position|role) (?:has been|is now) filled|"
+    r"decided to (?:pursue|move forward with|proceed with) (?:other|another)"
+)
+
+
 def unfinished_receipt(receipt):
     """A stored email receipt whose subject is a started-or-incomplete notice (it never confirmed anything)."""
     return bool(UNFINISHED.search(str((receipt or {}).get("subject", ""))))
@@ -178,6 +187,8 @@ RECEIPT_WORDING = re.compile(
     r"(?:received|reviewing) your application|application.{0,60}(?:received|submitted|landed successfully|is in good hands)|"
     r"(?:confirms?|acknowledges?)\s+(?:our\s+)?receipt of your (?:application|resume)|"
     r"\breceipt of your (?:application|resume)\b|we(?:'ve| have)? received your (?:application|resume)|"
+    # Workday tenants that mail "<Employer> your resume/CV has been received" (American Cancer Society, 2026-10-30).
+    r"\byour (?:resume|cv)(?:\s*/\s*cv)?\s+(?:has|have) been (?:received|submitted)|"
     # German, French and Spanish career sites (Sopra Steria's SmartRecruiters mails "Bewerbung", 2026-10-27).
     r"vielen dank f(?:ü|ue)r ihre bewerbung|ihre bewerbung.{0,80}(?:eingegangen|eingereicht|erhalten)|"
     r"eingangsbest(?:ä|ae)tigung|merci pour votre candidature|votre candidature.{0,60}(?:reçue|bien été)|"
@@ -189,6 +200,15 @@ RECEIPT_WORDING = re.compile(
 RECEIPT_SEARCH = "(application OR applying OR resume OR Bewerbung OR candidature OR solicitud OR postulación)"
 # How firmly an acknowledgement names its job: by its link, by its title, or only by arriving after the submit.
 BASIS_STRENGTH = {"job_url": 3, "title": 2, "submit_window": 1}
+# The "submitting" event is logged after the click that sends the application, and some employers' systems answer within
+# seconds: Snap-on's iCIMS "Thank you for applying" was delivered 5 s before its run's event (2026-10-29), and the check
+# "received after the event" refused it. A receipt may precede the event by this much, never the run's own start.
+SUBMIT_GRACE = timedelta(minutes=2)
+# How long after a commit a title-less acknowledgement still counts for the count-in-window rule (the median delay of
+# 593 matched receipts was 13 s, the 95th percentile 2 min 9 s).
+COUNT_AFTER = timedelta(minutes=3)
+# An employer's confirmed run without a "submitting" event committed at an unknown time between its start and its end.
+UNPLACED_LOOKBACK = timedelta(hours=2)
 # Words of employer names too common to narrow a mailbox search.
 GENERIC_NAME_WORDS = {"the", "and", "inc", "llc", "ltd", "corp", "corporation", "company", "group", "holdings",
                       "university", "college", "health", "bank", "services", "solutions", "technologies", "systems"}
@@ -257,13 +277,14 @@ def _read_message(message):
         "recipients": {a.lower() for _, a in getaddresses(headers.get("to", []) + headers.get("delivered-to", []))},
         "received": int(message.get("internalDate", "0")) / 1000,
         "subject": subject,
+        "rejection": bool(REJECTION.search(body)),
         "compact_body": re.sub(r"[^a-z0-9]", "", body),
         "observed": observed_words(body),
         "links": {link.rstrip("/") for link in links},
     }
 
 
-def acknowledgement(message, job, run, allow_missing_title=False):
+def acknowledgement(message, job, run, allow_missing_title=False, any_time=False):
     facts = message_facts(message)
     if facts is None:
         return None
@@ -272,7 +293,9 @@ def acknowledgement(message, job, run, allow_missing_title=False):
     recipient = run["packet"]["profile"]["email"].lower()
     if recipient not in facts["recipients"]:
         return None
-    if facts["received"] < datetime.fromisoformat(run["created_at"]).timestamp():
+    # A committed run's floor is its commit event less SUBMIT_GRACE, never before the run itself began.
+    floor = run.get("receipt_floor") or run["created_at"]
+    if not any_time and facts["received"] < datetime.fromisoformat(floor).timestamp():
         return None
     company = re.sub(r"[^a-z0-9]", "", job["company"].casefold())
     first = job["company"].split()[0].casefold() if job["company"].split() else ""
@@ -490,6 +513,131 @@ def receipt_claimed(session, message, receipt):
     return False
 
 
+def count_in_window(runs, mails):
+    """{run id: mail id} for runs whose employer's title-less acknowledgements demonstrably cover every commit near them.
+
+    runs: (id, committed_at, earliest_acceptable, unproven) and mails: (id, received_at), all epoch seconds. A mail can
+    be credited to a run only inside [earliest_acceptable, committed_at + COUNT_AFTER]. A run that is not yet proven
+    (unconfirmed) could still be awaiting any later mail for UNKNOWN_RECEIPT_DAYS, so for deciding who else might own a
+    mail it reaches that far. Runs and mails linked through such a reach form one cluster. A cluster credits its runs only
+    when it holds at most one unproven run, at least as many mails as runs, and every run can take a distinct mail of its
+    own window; otherwise nothing in it is credited. Employers answer each submission once, so a cluster with enough
+    mails has no run left without one; but two unproven runs cannot be told apart by a later generic mail, which may be
+    either's (the strictness of check_receipts). Exelixis committed two Workday applications 2 min 41 s apart and was
+    thanked twice, 2026-10-30; a confirmed run beside one unproven run is such a cluster.
+    """
+    after = COUNT_AFTER.total_seconds()
+    late = timedelta(days=UNKNOWN_RECEIPT_DAYS).total_seconds()
+    runs = sorted(runs, key=lambda r: (r[1], r[0]))
+    mails = sorted(mails, key=lambda m: (m[1], m[0]))
+    inside = [
+        [i for i, (_, at, floor, unproven) in enumerate(runs) if floor <= t <= at + (late if unproven else after)]
+        for _, t in mails
+    ]
+    parent = list(range(len(runs)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for owners in inside:
+        for i in owners[1:]:
+            parent[find(i)] = find(owners[0])
+    cluster_runs, cluster_mails = {}, {}
+    for i in range(len(runs)):
+        cluster_runs.setdefault(find(i), []).append(i)
+    for j, owners in enumerate(inside):
+        if owners:
+            cluster_mails.setdefault(find(owners[0]), []).append(j)
+    credited = {}
+    for root, members in cluster_runs.items():
+        free = list(cluster_mails.get(root, []))
+        if len(free) < len(members) or sum(runs[i][3] for i in members) > 1:
+            continue
+        taken = {}
+        for i in members:  # By commit time: the earliest mail of each window leaves the most for the later runs.
+            _, at, floor, _ = runs[i]
+            pick = next((j for j in free if floor <= mails[j][1] <= at + after), None)
+            if pick is None:
+                break
+            free.remove(pick)
+            taken[runs[i][0]] = mails[pick][0]
+        else:
+            credited.update(taken)
+    return credited
+
+
+def count_window_credits(group, msgs, target_ids, taken_runs, taken_messages, foreign):
+    """[(run, receipt, message)]: unconfirmed submitted runs credited by the count-in-window rule, for one employer.
+
+    The title-and-link rules need a mail to name its job, and the submit-window rule needs the employer to have one
+    job: an employer thanking two applications minutes apart in mails with no title ("Thank You For Applying!"), or one
+    with past applications, therefore never matched. Here only mails that name no job of the employer count, only
+    runs that have a "submitting" event can be credited, and nothing is credited when another run that may have
+    committed at an unknown time sits near it. `foreign(message id)` says the mail also fits another employer's job.
+    """
+    after = COUNT_AFTER.total_seconds()
+    stamp = lambda iso: datetime.fromisoformat(iso).timestamp()  # noqa: E731
+    holders = {r["id"] for r, _ in group if r.get("email_claim")} | taken_runs
+    claimed = {r["email_claim"] for r, _ in group if r.get("email_claim")} | taken_messages
+    targets = [
+        (r, j)
+        for r, j in group
+        if r["state"] == "submission_unknown" and r.get("submitted_at") and r["id"] in target_ids and r["id"] not in holders
+    ]
+    if not targets:
+        return []
+    committed = [(r, j) for r, j in group if r.get("submitted_at") and r["id"] not in holders]
+    windows = [(stamp(r["receipt_floor"]), stamp(r["submitted_at"]) + after) for r, _ in committed]
+    # Every job of the employer, the mail's own time aside: does the mail name one of them, or only the employer?
+    jobs = {}
+    for run, job in group:
+        jobs.setdefault(job["id"], (run, job))
+    pool = {}
+    for msg in msgs:
+        facts = message_facts(msg)
+        if (
+            facts is None
+            or facts["rejection"]
+            or msg["id"] in claimed
+            or not any(low <= facts["received"] <= high for low, high in windows)
+            or foreign(msg["id"])
+        ):
+            continue
+        fits = named = False
+        try:
+            for run, job in jobs.values():
+                receipt = acknowledgement(msg, job, run, allow_missing_title=True, any_time=True)
+                if receipt and receipt["sender_trusted"]:
+                    fits = True
+                    named = named or receipt["attribution_basis"] != "submit_window"
+        except (ValueError, TypeError, KeyError, RecursionError):
+            continue  # The matching loop already quarantined it.
+        if fits and not named:
+            pool[msg["id"]] = (msg, facts["received"])
+    credited = count_in_window(
+        [(r["id"], stamp(r["submitted_at"]), stamp(r["receipt_floor"]), r["state"] != "confirmed") for r, _ in committed],
+        [(mid, at) for mid, (_, at) in pool.items()],
+    )
+    unplaced = [
+        stamp(r["created_at"])
+        for r, _ in group
+        if r["state"] in {"confirmed", "submission_unknown"} and not r.get("submitted_at") and r["id"] not in holders
+    ]
+    out = []
+    for run, job in targets:
+        at = stamp(run["submitted_at"])
+        if run["id"] not in credited or any(at - UNPLACED_LOOKBACK.total_seconds() <= u <= at + after for u in unplaced):
+            continue
+        msg = pool[credited[run["id"]]][0]
+        receipt = acknowledgement(msg, job, run, allow_missing_title=True, any_time=True)
+        if receipt:
+            out.append((run, {**receipt, "attribution_basis": "count_in_window"}, msg))
+    return out
+
+
 # {run_id: (recipient, match_approved)}. Both are written once, when the run is queued, and never change, yet
 # reading them with Run.packet[...] made Postgres parse every ~320 KB packet: 25 s per call, once a minute, 34% of
 # the database's active samples; the recipient query of the poll added another 17% (py-spy/pg_stat, 2026-10-29).
@@ -623,13 +771,21 @@ async def check_receipts(mail, run_id=None):
             # Job columns without the description: nothing here reads it, and it is most of the row.
             job_columns = [c for c in Job.__table__.columns if c.name != "description"]
             rows = s.execute(
-                select(Run.id, Run.job_id, Run.state, Run.created_at, *job_columns)
+                select(
+                    Run.id,
+                    Run.job_id,
+                    Run.state,
+                    Run.created_at,
+                    Run.receipt["email"]["message_id"].as_string(),
+                    Run.receipt["email"]["sender_trusted"].as_boolean(),
+                    *job_columns,
+                )
                 .join(Job, Run.job_id == Job.id)
                 .where(Job.demo.is_(False))
             ).all()
             facts = packet_facts(s, [row[0] for row in rows])
             competitors = []
-            for rid, job_id, state, created_at, *values in rows:
+            for rid, job_id, state, created_at, claim, claim_trusted, *values in rows:
                 recipient, approved = facts.get(rid, ("", False))
                 if state not in {"confirmed", "submission_unknown"} and not approved:
                     continue
@@ -642,6 +798,8 @@ async def check_receipts(mail, run_id=None):
                             "job_id": job_id,
                             "state": state,
                             "created_at": created_at,
+                            # The message that already proves this run (legacy email receipts were trusted).
+                            "email_claim": claim if claim and claim_trusted is not False else "",
                             "packet": {"profile": {"email": recipient}},
                         },
                         job,
@@ -660,6 +818,10 @@ async def check_receipts(mail, run_id=None):
     competitors, submit_times = await asyncio.to_thread(load_competitors)
     for run, _ in competitors:
         if run["id"] in submit_times:
+            # The commit event stands for the run's time; a receipt may precede it by SUBMIT_GRACE, but not the run.
+            run["receipt_floor"] = max(
+                datetime.fromisoformat(run["created_at"]), datetime.fromisoformat(submit_times[run["id"]]) - SUBMIT_GRACE
+            ).isoformat()
             run["created_at"] = submit_times[run["id"]]
             run["submitted_at"] = submit_times[run["id"]]
     # Messages fetched for this batch are matched against every unconfirmed
@@ -759,12 +921,30 @@ async def check_receipts(mail, run_id=None):
             return [jid for jid, level in strength.items() if level == top] == [job_id]
 
         assignments = [a for a in assignments if sole(a[2]["id"], a[0]["job_id"])]
+        # What the other rules could not decide: an employer's title-less acknowledgements counted against its commits.
+        taken_runs = {a[0]["id"] for a in assignments}
+        taken_messages = {a[2]["id"] for a in assignments}
+        for (recipient, company), group in groups.items():
+            if recipient not in boxes or not any(r["id"] in target_ids for r, _ in group):
+                continue
+            own_jobs = {j["id"] for _, j in group}
+            for source, receipt, msg in count_window_credits(
+                group,
+                messages.get(boxes[recipient], []),
+                target_ids,
+                taken_runs,
+                taken_messages,
+                lambda mid, own=own_jobs: bool(set(possible_jobs.get(mid, {})) - own),
+            ):
+                assignments.append((source, receipt, msg, (recipient, company)))
+                taken_runs.add(source["id"])
+                taken_messages.add(msg["id"])
         cohort_counts = {}
         for source, receipt, _, key in assignments:
             if source["state"] == "submission_unknown" and receipt["attribution_basis"] != "submit_window":
                 cohort_counts.setdefault(key, set()).add(source["job_id"])
         for source, receipt, msg, key in assignments:
-            counted = (
+            counted = receipt["attribution_basis"] == "count_in_window" or (
                 receipt["attribution_basis"] != "submit_window" and len(cohort_counts.get(key, set())) > 1
             )
             with mail.db.exclusive() as s:
@@ -906,6 +1086,11 @@ async def reconcile_approved_drafts(mail, job_ids, max_pages=8):
                     )
                     if not window_start:
                         continue
+                    # Same grace as the minute poll, and never before the run itself.
+                    window_start = max(
+                        runs[0].created_at,
+                        (datetime.fromisoformat(window_start) - SUBMIT_GRACE).isoformat(),
+                    )
                 candidates.append((record(job), latest, window_start))
         return candidates, boxes
 
