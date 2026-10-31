@@ -239,6 +239,8 @@ def _directive_conditions(label):
     """(answer, condition) for every instruction in the label that ties an answer to a condition."""
     hits = list(DIRECTIVE.finditer(label))
     for i, hit in enumerate(hits):
+        if re.search(r"\b(?:do not|don['’]t|never)\s*$", label[: hit.start()], re.I):
+            continue  # "Do not select Yes if you are only on OPT" gives no answer to that status.
         answer = hit["answer"].casefold() == "yes"
         after = label[hit.end() :]
         if m := re.match(r"\s+if\b", after):

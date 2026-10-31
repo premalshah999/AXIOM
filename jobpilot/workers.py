@@ -324,6 +324,22 @@ def recover_interrupted(service):
                 schedule_recovery(s, service.config, row, {"recovery_cause": "worker_interrupted"})
 
 
+def dbos_limits(config, db):
+    """Connections and polling for DBOS. Local keeps DBOS's defaults unless DBOS_POOL_SIZE asks otherwise."""
+    limits = {"sys_db_pool_size": config.dbos_pool_size} if config.dbos_pool_size else {}
+    if getattr(db, "remote", False):
+        from .storage.choice import pools_in_force
+
+        # Each listener holds a connection the database counts, and nothing here uses DBOS notifications.
+        limits = {"sys_db_pool_size": pools_in_force(config, config.database_mode)["dbos"], "use_listen_notify": False}
+    return limits
+
+
+# Each queue polls with several statements a second. Remote, that is most of DBOS's connection time for nothing: a job
+# waits up to this long to start, which an application of several minutes does not notice.
+REMOTE_QUEUE_POLL_SECONDS = 3.0
+
+
 async def start(service):
     global SERVICE
     SERVICE = service
@@ -333,20 +349,25 @@ async def start(service):
     schedule_version_repairs(service)
     from . import dbos_sqlite  # noqa: F401 - old SQLite needs the pinned DBOS clock default
 
-    DBOS(
-        config={
-            "name": "applypilot-studio",
-            "system_database_url": service.config.dbos_database_url,
-            "application_version": engine_version(),
-            # DBOS's executor is unbounded by default: after a night of source sweeps the process held 2,942 idle
-            # executor threads (2026-10-22), and a sampling profiler could not keep up with them.
-            "max_executor_threads": 128,
-        }
-    )
+    dbos_config = {
+        "name": "applypilot-studio",
+        "system_database_url": service.config.dbos_database_url,
+        "application_version": engine_version(),
+        # DBOS's executor is unbounded by default: after a night of source sweeps the process held 2,942 idle
+        # executor threads (2026-10-22), and a sampling profiler could not keep up with them.
+        "max_executor_threads": 128,
+    }
+    dbos_config.update(dbos_limits(service.config, service.db))
+    DBOS(config=dbos_config)
     DBOS.launch()
+    if getattr(service.db, "remote", False):
+        from .storage.remote_db import seal_schema
+
+        seal_schema(service.db.engine, "dbos")  # DBOS created its schema; keep it closed to Supabase's API roles.
     await retire_obsolete_deliveries(service)
     from .pipeline_comparison import POOLS, pool_slot_ids
 
+    polling = {"polling_interval_sec": REMOTE_QUEUE_POLL_SECONDS} if getattr(service.db, "remote", False) else {}
     for pool in POOLS:
         count = len(pool_slot_ids(pool, service.config.topology))
         if not count:
@@ -356,15 +377,17 @@ async def start(service):
             worker_concurrency=count,
             global_concurrency=count,
             partition_concurrency=1,
+            **polling,
         )
     await DBOS.register_queue_async(
         "discovery",
         worker_concurrency=service.config.discovery_workers,
         global_concurrency=service.config.discovery_workers,
+        **polling,
     )
-    await DBOS.register_queue_async("matching", worker_concurrency=1, global_concurrency=1)
-    await DBOS.register_queue_async("classification", worker_concurrency=1, global_concurrency=1)
-    await DBOS.register_queue_async("tailoring", worker_concurrency=2, global_concurrency=2)
+    await DBOS.register_queue_async("matching", worker_concurrency=1, global_concurrency=1, **polling)
+    await DBOS.register_queue_async("classification", worker_concurrency=1, global_concurrency=1, **polling)
+    await DBOS.register_queue_async("tailoring", worker_concurrency=2, global_concurrency=2, **polling)
 
     async def dispatch(run_id):
         with service.db.session() as s:

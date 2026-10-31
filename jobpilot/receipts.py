@@ -372,11 +372,15 @@ def employer_hint(company):
 
 
 async def receipt_messages(
-    mail, mailbox_id, recipient, since, *, max_pages=2, max_messages=100, durable=True, narrow="", seconds=15
+    mail, mailbox_id, recipient, since, *, max_pages=2, max_messages=100, durable=True, narrow="", seconds=15,
+    report=None,
 ):
     """One bounded mailbox search per cycle, with durable progress through older pages. A one-run check
     (durable=False) reads its own window from the newest message and leaves the shared cursor alone; `narrow` adds
-    search terms (the employer's name)."""
+    search terms (the employer's name). `report`, when given, says whether the search reached the end of the mail:
+    {"done": every page was listed, "failed": a transport error or an unreadable message cut it short}."""
+    report = {} if report is None else report
+    report.update(done=False, failed=False)
     # Bucket only the search boundary. acknowledgement() independently enforces
     # each run's exact timestamp, so this cannot accept earlier mail for a run.
     since = int(since) // 3600 * 3600
@@ -409,6 +413,7 @@ async def receipt_messages(
                 state, upgraded = {"query_id": query_id}, True
                 continue
             except (TimeoutError, MailTransportError, MailOperationError):
+                report["failed"] = True
                 break  # Keep the cursor; a mailbox transport outage changes no receipt.
             fetched_pages += 1
             ids = [item["id"] for item in listed.get("messages", []) if item.get("id")]
@@ -416,6 +421,7 @@ async def receipt_messages(
             state["next_page_token"] = listed.get("nextPageToken")
             if not ids:
                 state = {"query_id": query_id}
+                report["done"] = True
                 break
         mid = ids[0]
         try:
@@ -427,9 +433,11 @@ async def receipt_messages(
             state, upgraded = {"query_id": query_id}, True
             continue
         except (TimeoutError, MailTransportError, MailOperationError):
+            report["failed"] = True
             break
         except MailMessageError:
             message = None
+            report["failed"] = True  # An unreadable message may be the acknowledgement.
         if mid not in seen:
             seen.add(mid)
             if message is not None:
@@ -441,10 +449,65 @@ async def receipt_messages(
                 state["page_token"] = token
             else:
                 state = {"query_id": query_id}
+                report["done"] = True
                 break  # Start a new sweep next cycle, including newly arrived mail.
     if durable:
         mail.db.set_setting(key, {**state, "updated_at": time.time()})
     return messages
+
+
+async def employer_acknowledged(mail, run_id):
+    """Receipt first (owner, 2026-10-12): is there ANY acknowledgement of this job's application in the mailbox since
+    its first commit? True: yes. False: the mailbox was searched to its end and holds none. None: it could not be
+    searched to the end (no mailbox, an outage, a cut-short or unreadable page), which clears nothing.
+
+    The matcher (check_receipts) is the proof of a confirmation and may refuse a mail as ambiguous or not have reached the
+    run yet; this answers the other question, whether the employer already has the application. Asana, Assured
+    Guaranty and Perseus were resubmitted 1 to 18 hours after a receipt-less commit while each employer's
+    acknowledgement, delivered within two minutes of it, sat unattributed (2026-10-12). Any trusted acknowledgement of
+    the job counts, a title-less one included."""
+    from .email_alias import base_address
+
+    def load():
+        with mail.db.session() as s:
+            run = s.get(Run, run_id)
+            job = s.get(Job, run.job_id) if run else None
+            if not run or not job or job.demo:
+                return None
+            first = s.scalar(
+                select(func.min(Event.created_at))
+                .select_from(Event)
+                .join(Run, Run.id == Event.run_id)
+                .where(Run.job_id == job.id, Event.kind == "submitting")
+            )
+            boxes = {b.email.lower(): b.id for b in s.scalars(select(Mailbox).where(Mailbox.state == "connected"))}
+            return record(run), record(job), first, boxes
+
+    loaded = await asyncio.to_thread(load)
+    if loaded is None:
+        return None
+    run, job, first, boxes = loaded
+    address = str((run.get("packet") or {}).get("profile", {}).get("email", "")).lower()
+    mailbox_id = boxes.get(base_address(address)) if address else None
+    if not mailbox_id:
+        return None
+    # The earliest commit of the job, not this run's: an earlier attempt's acknowledgement counts.
+    floor = datetime.fromisoformat(first) - SUBMIT_GRACE if first else datetime.fromisoformat(run["created_at"])
+    run["receipt_floor"] = floor.isoformat()
+    to = sorted({base_address(address), address})
+    reports, messages = [], []
+    # By the employer's name first, then everything that reads like an acknowledgement (an alias in the mail).
+    for narrow in dict.fromkeys([employer_hint(job["company"]), ""]):
+        reports.append({})
+        messages += await receipt_messages(
+            mail, mailbox_id, to if len(to) > 1 else to[0], floor.timestamp(), durable=False, narrow=narrow, seconds=20,
+            report=reports[-1],
+        )
+    for message in messages:
+        found = acknowledgement(message, job, run, allow_missing_title=True)
+        if found and found["sender_trusted"]:
+            return True
+    return False if all(r["done"] and not r["failed"] for r in reports) else None
 
 
 def receipt_claimed(session, message, receipt):

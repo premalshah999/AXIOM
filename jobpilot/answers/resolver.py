@@ -616,11 +616,36 @@ class Resolver(
         evidence = [f"profile:work.{i}" for i in verdict.work] + [f"profile:education.{i}" for i in verdict.education]
         return self._ans(f, (yes if verdict.result else no)[0], evidence, f"{COMPUTED}: {verdict.reason}")
 
+    def work_status_verdict(self, f):
+        """How a work-authorization question reads against the applicant's facts (work_status.py)."""
+        from .work_status import decide
+
+        if f.get("type") in {"file", "password"}:
+            return None
+        return decide({**f, "label": screening_text(f)}, self.profile.facts)
+
+    def work_status_answer(self, f):
+        verdict = self.work_status_verdict(f)
+        if verdict is None or verdict.value is None:
+            return None
+        return Answer(
+            field_id=f["id"],
+            value=verdict.value,
+            disposition="answer",
+            evidence_ids=list(verdict.refs),
+            supporting_facts=list(verdict.refs),
+            reason=verdict.why,
+        )
+
     def local(self, f):
         from .third_party import guard
 
         if answer := guard(self, f):
             return answer  # An employer's, supervisor's or reference's contact detail is never the applicant's own.
+        if answer := self.work_status_answer(f):
+            # Before every saved answer and the repair agent's: the question's own definition against the recorded
+            # status. A stored "Yes" made an applicant on OPT a U.S. citizen at Credence (2026-10).
+            return answer
         if answer := self.experience_years_answer(f):
             return answer  # Before any saved answer: a stored Yes the work history contradicts must not stand.
         if answer := self.repair_override(f):

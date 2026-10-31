@@ -521,6 +521,12 @@ def same_value(field, actual, expected):
         if actual_code and norm(e) in _alias_group("United States"):
             actual_country = norm(re.sub(r"\+\s*\d{1,4}\b", "", a))
             return actual_code[0] == "+1" and actual_country in _alias_group("United States")
+        if same_dial_country(a, e):
+            return True  # "United States (1)" is "+1 (United States of America)": the code's place and the name's spelling.
+        shown, wanted = dial_digits(a), dial_digits(e)
+        if shown and shown == wanted and not dial_name(e):
+            # A bare "+1" names the row "United States (1)": the code alone means the United States (as above).
+            return shown != "1" or norm(dial_name(a)) in _alias_group("United States")
     if field.get("widget") == "date-text" and field.get("date_format") == "dmy":
         try:
             d, m, y = str(actual).split("/")
@@ -2524,9 +2530,28 @@ async def icims_select_texts(el):
     return [t for t in texts if not placeholder_option(t)]
 
 
+DIAL_AFFIX = r"(?:\(\+?\d{1,4}\)|\+\d{1,4})"
+
+
 def dial_name(text):
-    """A phone country row's name without its dial code: "United States (1)" and "(+1) United States" -> "United States"."""
-    return re.sub(r"^\s*\(\+?\d{1,4}\)\s*|\s*\(\+?\d{1,4}\)\s*$", "", str(text or "")).strip()
+    """A phone country row's name without its dial code, in any spelling a site or the profile uses: "United States (1)",
+    "(+1) United States", "+1 (United States)" and "United States of America +1" -> the name. A bare number is no code
+    ("2 Year Degree" stays); a dial code is parenthesized or carries its plus."""
+    name = re.sub(rf"^\s*{DIAL_AFFIX}\s*|\s*{DIAL_AFFIX}\s*$", "", str(text or "")).strip()
+    return name[1:-1].strip() if name.startswith("(") and name.endswith(")") and name.count("(") == 1 else name
+
+
+def dial_digits(text):
+    """The dial code's digits in a phone country value ("United States (1)", "+1 (United States)" -> "1"), else ""."""
+    found = re.search(r"\(\+?(\d{1,4})\)|\+\s*(\d{1,4})\b", str(text or ""))
+    return (found[1] or found[2]) if found else ""
+
+
+def same_dial_country(a, b):
+    """Two phone country values naming one country, whatever the spelling of the name or the code placement:
+    "United States (1)" and "+1 (United States of America)"."""
+    x, y = norm(dial_name(a)), norm(dial_name(b))
+    return bool(x and y) and (x == y or y in _alias_group(x))
 
 
 def icims_text(label):
@@ -2630,7 +2655,7 @@ async def icims_dropdown_commit(
         "e=>(s=>s&&s.selectedIndex>=0&&s.options[s.selectedIndex].value!==''"
         "?s.options[s.selectedIndex].text:'')(document.getElementById(e.id.slice(0,-14)))"
     )
-    if held and not placeholder_option(icims_text(held)) and norm(dial_name(icims_text(held))) == norm(dial_name(value)):
+    if held and not placeholder_option(icims_text(held)) and same_dial_country(icims_text(held), value):
         # The profile page is prefilled from the account: PepsiCo's phone code already held "United States (1)", and
         # searching the server-searched list for it again outlasted the field's deadline on every run (2026-10-27). A
         # repair that names the country alone ("United States") means the same row.
@@ -2900,6 +2925,25 @@ MULTI_SELECTED_JS = """e=>{
 }"""
 
 
+# Removes every chip of a single-answer multi picker except `keep`. A chip's own remove control fires the widget's handler.
+DROP_OTHER_CHIPS_JS = r"""(e, keep) => {
+    const same = t => t.replace(/\s+/g, ' ').trim().toLowerCase() === keep.replace(/\s+/g, ' ').trim().toLowerCase();
+    const react = e.closest('[class*=__control]');
+    if (react) {
+        for (const chip of react.querySelectorAll('[class*=__multi-value__label]')) {
+            if (same(chip.textContent)) continue;
+            chip.parentElement?.querySelector('[class*=__multi-value__remove]')?.click();
+        }
+        return;
+    }
+    for (const chip of e.querySelectorAll('.select2-selection__choice')) {
+        const copy = chip.cloneNode(true);
+        copy.querySelectorAll('.select2-selection__choice__remove').forEach(x => x.remove());
+        if (!same(copy.textContent)) chip.querySelector('.select2-selection__choice__remove')?.click();
+    }
+}"""
+
+
 async def multi_combobox(frame, el, value, **options):
     """Every value of a multiselect answer ("A\\nB\\nC"), each picked once. An Oracle CX multiselect was given the
     whole answer as one search and refused it ("No matching option is offered", 2026-10-27); values already shown as
@@ -2961,6 +3005,7 @@ async def combobox(
         return picked
     # Greenhouse "mark all that apply" questions are react-select multi
     # comboboxes: the commit is a chip, never a single-value or input value.
+    one_answer = not multi and not re.search(r"[\n;]", str(value))
     multi = multi or await el.evaluate(
         "e => e.matches('.select2-selection--multiple') || !!e.closest('[class*=__control]')?.querySelector('[class*=__value-container--is-multi]')"
     )
@@ -2989,6 +3034,7 @@ async def combobox(
     )
     scope = await _popup_scope(el)
     opts = []
+    listed = []
     choice = None
 
     def eligible(options):
@@ -3118,7 +3164,13 @@ async def combobox(
         choice = best_option(opts, value)
     if not choice:
         await el.press("Escape")
-        raise ValueError("No matching option is offered")
+        error = ValueError("No matching option is offered")
+        # The rows the control did offer, so the failure record says what format to match (a month list that offers
+        # "05 - May" refuses "May") and the repeat breaker sees a changed list as new; option labels only.
+        error.offered = {
+            "rows": list(dict.fromkeys(o["text"] for o in [*listed, *opts] if o.get("text")))[:20]
+        }
+        raise error
     await click_option(frame, choice, owner=el)
     await asyncio.sleep(0.1)
     if multi:
@@ -3126,6 +3178,15 @@ async def combobox(
         selected = await el.evaluate(MULTI_SELECTED_JS)
         if norm(choice["text"]) not in {norm(v) for v in selected.splitlines()}:
             raise ValueError("Multiselect did not retain the selected option")
+        if one_answer and len([v for v in selected.splitlines() if v.strip()]) > 1:
+            # The answer is this one option, and every other chip is a claim nobody made: Twitch's citizenship menu kept
+            # "Laos" and "Latvia" from earlier passes, and veteran menus kept "I elect not to self-identify" beside "No"
+            # (2026-10). Repairing the value would only have added a third.
+            await el.evaluate(DROP_OTHER_CHIPS_JS, choice["text"])
+            await asyncio.sleep(0.1)
+            selected = await el.evaluate(MULTI_SELECTED_JS)
+            if {norm(v) for v in selected.splitlines() if v.strip()} != {norm(choice["text"])}:
+                raise ValueError("Multiselect kept options nobody chose")
         return selected
     deadline = time.monotonic() + 2
     while time.monotonic() < deadline:
@@ -3349,33 +3410,67 @@ async def remove_prompt_pill(container, text):
         pass
 
 
-async def commit_prompt_name(frame, container, target):
+async def release_prompt(frame, container=None, inp=None):
+    """Close a prompt's results popup with real input once its search is over. A popup still loading holds no listbox,
+    so dismiss_pickers counts nothing open and leaves it standing over the fields below (Humana, 2026-10-30: an optional
+    Field of Study search left one over Education 1's Degree); Workday closes its popups on trusted pointer events."""
+    try:
+        if inp is not None:
+            await inp.fill("", timeout=1000)  # Text left in the box is searched again on blur.
+    except PlaywrightError:
+        pass
+    try:
+        await frame.page.keyboard.press("Escape")
+        await click_blank_point(frame)
+    except Exception:
+        pass
+
+
+def seconds_left(deadline, ceiling):
+    """A wait of at most `ceiling` seconds that stays inside the field's one deadline (a monotonic time, or None)."""
+    return ceiling if deadline is None else max(0.3, min(ceiling, deadline - time.monotonic()))
+
+
+def out_of_time(deadline, needed=1.0):
+    return deadline is not None and deadline - time.monotonic() < needed
+
+
+async def commit_prompt_name(frame, container, target, deadline=None):
     """Commit an exact catalog name: one search for it, then its pill. Workday selects a search's sole result by
-    itself, so any other pill this search added is removed again (REA, 2026-10-25)."""
+    itself, so any other pill this search added is removed again (REA, 2026-10-25).
+
+    A search that shows no row of that name is typed once more, inside the same deadline: on Workday the first Field of
+    Study of a form answered nothing in 4 s for a name its second row committed in under a second (Invesco, Unisys
+    2026-10-31); the cold search is the one that fails."""
     before = await prompt_pills(container)
     if any(norm(text) == norm(target) for text in before):
         return next(text for text in before if norm(text) == norm(target))
     await dismiss_pickers(frame)
     inp = await open_prompt(container)
-    await inp.fill("", timeout=4000)
-    await inp.press_sequentially(target, delay=10)
-    await inp.press("Enter")
-    deadline = time.monotonic() + 4
-    while time.monotonic() < deadline:
-        now = await prompt_pills(container)
-        if any(norm(text) == norm(target) for text in now if text not in before):
-            break  # The sole result committed itself.
-        opts = await visible_options(
-            frame, await _popup_scope(container), "[data-automation-id=promptOption],[role=option]"
-        )
-        exact = [o for o in opts if o["leaf"] and not o["disabled"] and norm(o["text"]) == norm(target)]
-        if len(exact) == 1:
-            await click_option(frame, exact[0], owner=container)
+    for attempt in range(2):
+        if attempt and out_of_time(deadline, 2.5):
             break
-        if not opts and await menu_notice(frame) == "none":
+        await inp.fill("", timeout=4000)
+        await inp.press_sequentially(target, delay=10)
+        await inp.press("Enter")
+        ends = time.monotonic() + seconds_left(deadline, 3.0 if not attempt else 4.0)
+        while time.monotonic() < ends:
+            now = await prompt_pills(container)
+            if any(norm(text) == norm(target) for text in now if text not in before):
+                break  # The sole result committed itself.
+            opts = await visible_options(
+                frame, await _popup_scope(container), "[data-automation-id=promptOption],[role=option]"
+            )
+            exact = [o for o in opts if o["leaf"] and not o["disabled"] and norm(o["text"]) == norm(target)]
+            if len(exact) == 1:
+                await click_option(frame, exact[0], owner=container)
+                break
+            if not opts and await menu_notice(frame) == "none":
+                break
+            await asyncio.sleep(0.08)
+        await asyncio.sleep(0.2)
+        if any(norm(text) == norm(target) for text in await prompt_pills(container) if text not in before):
             break
-        await asyncio.sleep(0.08)
-    await asyncio.sleep(0.2)
     now = await prompt_pills(container)
     for stray in [text for text in now if text not in before and norm(text) != norm(target)]:
         await remove_prompt_pill(container, stray)
@@ -3386,12 +3481,19 @@ async def commit_prompt_name(frame, container, target):
     await dismiss_pickers(frame)
     committed = next((text for text in await prompt_pills(container) if norm(text) == norm(target)), None)
     if not committed:
+        await release_prompt(frame, container)
         raise ValueError("No matching option is offered")
     return committed
 
 
-async def prompt(frame, container, value, choose=None, school_scope=False, catalog=None):
+async def prompt(frame, container, value, choose=None, school_scope=False, catalog=None, deadline=None, missed=None):
     """Workday multiselect prompt: search, then commit a leaf; categories are opened once.
+
+    `deadline` is the field's one monotonic deadline for every search this write makes: each wait is cut to what is
+    left, no further query starts without time to finish it, and the popup is closed when time runs out. The write used
+    to be cancelled mid-wait by the form's 12 s limit with its popup open (Field of Study: 91 deadline errors in 218
+    runs, 2026-10-24..31). `missed` (a set kept for the run) holds the (value, query) searches that already returned
+    nothing usable, so a later row or retry of the same field does not type them again.
 
     `value` may list candidates in preference order (the recorded major, then the profile's fallback). With the page's
     own full value list (`catalog`), the answer is chosen from it first and only its exact name is searched: probe
@@ -3414,7 +3516,7 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
             error = ValueError("No matching option is offered")
             error.offered = {"catalog": names[:8], "candidates": candidates}
             raise error
-        return await commit_prompt_name(frame, container, target)
+        return await commit_prompt_name(frame, container, target, deadline)
     value = candidates[0]
     interpretations = 0
     # What each search returned (the employer's own option labels), for the failure record.
@@ -3503,7 +3605,7 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
     opts = await wait_options(
         frame,
         None,
-        timeout=4,
+        timeout=seconds_left(deadline, 4),
         selector="[data-automation-id=promptOption],[role=option]",
         query=first,
         owner=container,
@@ -3518,7 +3620,14 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
     real = [o for o in opts if not re.search(r"^no items|no results|no matches", o["text"], re.I)]
     choice = await supported_leaf(real) if real else None
     fallbacks = [query for query in prompt_fallback_queries(value, school_scope) if query != first]
+    tried = missed if missed is not None else set()
+    if not choice:
+        tried.add((norm(value), norm(first)))
     for query in [] if choice else fallbacks:
+        if (norm(value), norm(query)) in tried:
+            continue  # Already searched for this value and nothing supported came of it.
+        if out_of_time(deadline, 2.0):
+            break  # Another search cannot finish inside the field's deadline.
         # Employer taxonomies may say "Management Information Systems" where
         # the resume says "Information Systems", or "University of Michigan -
         # Ann Arbor" where it says "..., Ann Arbor". Search a shorter term,
@@ -3530,7 +3639,7 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
         opts = await wait_options(
             frame,
             None,
-            timeout=4,
+            timeout=seconds_left(deadline, 4),
             selector="[data-automation-id=promptOption],[role=option]",
             query=query,
             owner=container,
@@ -3545,17 +3654,20 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
         real = [o for o in opts if not re.search(r"^no items|no results|no matches", o["text"], re.I)]
         if choice := await supported_leaf(real):
             break
+        tried.add((norm(value), norm(query)))
     if not choice and school_scope:
         # School prompts use the same applicant preference as comboboxes:
         # search the real institution first, then an offered Other fallback.
         for query in SCHOOL_NOT_LISTED_QUERIES:
+            if out_of_time(deadline, 2.0):
+                break
             await inp.fill("")
             await inp.press_sequentially(query, delay=10)
             await inp.press("Enter")
             opts = await wait_options(
                 frame,
                 None,
-                timeout=3,
+                timeout=seconds_left(deadline, 3),
                 selector="[data-automation-id=promptOption],[role=option]",
                 query=query,
                 owner=container,
@@ -3564,14 +3676,14 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
             if len(others) == 1:
                 choice = others[0]
                 break
-    if not choice:
+    if not choice and not out_of_time(deadline, 2.0):
         # Browse from the top: the value can be a leaf under a category ("Job Board" > "LinkedIn").
         await inp.fill("")
         await inp.press("Enter")
         opts = await wait_options(
             frame,
             None,
-            timeout=2,
+            timeout=seconds_left(deadline, 2),
             selector="[data-automation-id=promptOption],[role=option]",
             owner=container,
         )
@@ -3584,7 +3696,7 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
         likely = re.compile(r"social|job ?board|online|internet|web|network|media", re.I)
         categories.sort(key=lambda text: not likely.search(text))
         for index, name in enumerate(categories):
-            if choice:
+            if choice or out_of_time(deadline, 2.5):
                 break
             if index:
                 # Reopen from the top instead of depending on a Back control: tenants
@@ -3596,7 +3708,7 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
                 opts = await wait_options(
                     frame,
                     None,
-                    timeout=2,
+                    timeout=seconds_left(deadline, 2),
                     selector="[data-automation-id=promptOption],[role=option]",
                     owner=container,
                 )
@@ -3607,7 +3719,7 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
             inner = await wait_options(
                 frame,
                 None,
-                timeout=2,
+                timeout=seconds_left(deadline, 2),
                 selector="[data-automation-id=promptOption],[role=option]",
                 owner=container,
             )
@@ -3615,7 +3727,7 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
             if choice:
                 break
     if not choice:
-        await inp.press("Escape")
+        await release_prompt(frame, container, inp)
         error = ValueError("No matching option is offered")
         error.offered = seen
         raise error

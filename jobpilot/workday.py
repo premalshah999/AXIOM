@@ -14,8 +14,11 @@ from .mail import origin
 from .mail_errors import MailPending
 from .accounts import AccountStore
 
-# A not-found page closes a posting only after this many distinct runs saw it at the posting URL.
-POSTING_GONE_CONFIRMATIONS = 2
+# A not-found page that the employer's own search can neither confirm nor deny (it errored, timed out, or answered with
+# something unreadable) never closes a posting: the job is tried again later, and after this many distinct runs it stops
+# on a reason that says what is unknown. 88 Workday postings were closed "no longer available" since 2026-10-17, 23 of them
+# still listed by their employers; the unreadable-search branch closed after two runs.
+POSTING_SEARCH_ATTEMPTS = 3
 POSTING_MISSING_REASON = "The employer reports that this posting page does not exist; availability or the posting URL must be checked"
 ROUTE_MISSING_REASON = "The application step is not found; the next attempt opens the posting from its start"
 CLOSED_REASON = "The posting is closed or no longer available"
@@ -88,8 +91,12 @@ def same_posting_page(page_url, job_url):
     return bool(page.path) and path(page) == path(job)
 
 
+# The requisition may itself hold hyphens ("R-797359", "REQ-058936"); the repost counter after it is one or two digits
+# ("-1"). Read as one word, State Street, Humana, AT&T, Lilly and others (hyphenated ids, 2026-10) never reached the search.
+POSTING_COUNTER = re.compile(r"-\d{1,2}$")
 WORKDAY_POSTING = re.compile(
-    r"https://([a-z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com/(?:[a-z]{2}-[A-Z]{2}/)?([^/?#]+)/job/[^?#]*_([A-Za-z0-9]+)(?:-\d+)?/?$"
+    r"https://([a-z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com/(?:[a-z]{2}-[A-Z]{2}/)?([^/?#]+)/job/[^?#]*_"
+    r"([A-Za-z0-9]+(?:-[A-Za-z0-9]+)*?)(?:-\d{1,2})?/?$"
 )
 
 
@@ -121,15 +128,19 @@ async def tenant_search_lists(job_url):
         data = r.json()
     except Exception:
         return None
-    paths = [str(p.get("externalPath", "")) for p in data.get("jobPostings") or []]
-    if any(path.rstrip("/").split("_")[-1].split("-")[0] == requisition for path in paths):
+    if not isinstance(data, dict) or not isinstance(data.get("jobPostings"), list):
+        return None  # Not a posting list (an error body, a maintenance page): the search said nothing about the posting.
+    paths = [str(p.get("externalPath", "")) for p in data["jobPostings"] if isinstance(p, dict)]
+    if any(POSTING_COUNTER.sub("", path.rstrip("/").split("_")[-1]) == requisition for path in paths):
         return True
-    return False if data.get("total") == 0 else None
+    return False if data.get("total") == 0 and not paths else None
 
 
 def missing_posting_result(db, job, run_id, page_url, listed=None):
-    """Classify a not-found page. One run never closes a posting; two distinct runs at the posting URL do, and so does
-    one run when the employer's own search no longer lists the requisition (`listed` False)."""
+    """Classify a not-found page. Only the employer's own search closes a posting: `listed` False (it answered with no
+    hits for the requisition). `listed` True (still listed) or None (the search errored, timed out, or was unreadable)
+    never closes it; None is tried again later and, after POSTING_SEARCH_ATTEMPTS runs, ends on a reason that says the
+    posting's availability could not be confirmed."""
     if not same_posting_page(page_url, job["url"]):
         return {
             "state": "waiting_browser",
@@ -148,12 +159,22 @@ def missing_posting_result(db, job, run_id, page_url, listed=None):
     if run_id not in seen:
         seen.append(run_id)
         db.set_setting(key, {"run_ids": seen[-10:], "at": now()})
-    if len(set(seen)) >= POSTING_GONE_CONFIRMATIONS:
-        return {"state": "closed", "reason": CLOSED_REASON}
+    tries = len(set(seen))
+    if tries >= POSTING_SEARCH_ATTEMPTS:
+        # Nothing here proves the posting gone (HTTP errors, timeouts and unreadable answers say nothing), so it is not
+        # closed and not retried by itself: the owner can resume it from the job page.
+        return {
+            "state": "waiting_browser",
+            "reason": f"The employer's page says this posting does not exist, but its own search could not confirm that in "
+            f"{tries} runs; the posting is not closed, and its availability must be checked",
+            "recovery_cause": "posting_unavailable",
+        }
     return {
         "state": "waiting_browser",
-        "reason": POSTING_MISSING_REASON,
-        "recovery_cause": "posting_unavailable",
+        "blocker_type": "site_transient",
+        "recovery_cause": "site_temporary",
+        "reason": f"The employer's page says this posting does not exist, but its own search could not confirm that "
+        f"(run {tries} of {POSTING_SEARCH_ATTEMPTS}); it will be tried again later",
     }
 
 

@@ -1,0 +1,14 @@
+/* Settings › Database (src/database.tsx). Tokens only. */
+.ax-dbchecks {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-2);
+  font-size: var(--text-ui);
+}
+.ax-dbchecks strong {
+  color: var(--ink);
+  font-weight: 500;
+}

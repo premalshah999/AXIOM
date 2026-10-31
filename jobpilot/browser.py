@@ -679,8 +679,10 @@ def unoffered_source_result(question):
 
 
 REQUIRES_CITIZENSHIP = re.compile(
-    r"requires? (?:u\.?s\.?|united states) citizenship|must be (?:a )?(?:u\.?s\.?|united states) citizen|"
-    r"(?:u\.?s\.?|united states) citizenship (?:is )?(?:required|mandatory)",
+    r"requires? (?:current )?(?:u\.?\s?s\.?|united states) citizenship|must be (?:a )?(?:u\.?\s?s\.?|united states) citizen|"
+    r"(?:u\.?\s?s\.?|united states) citizenship (?:is )?(?:required|mandatory)|"
+    r"requires? you to be (?:a )?(?:u\.?\s?s\.?|united states) citizen|"
+    r"(?:limit|restrict)(?:s|ed)? (?:this \w+ )?to (?:individuals who are )?(?:u\.?\s?s\.?|united states) citizens",
     re.I,
 )
 
@@ -3845,7 +3847,7 @@ class BrowserEngine:
         """The final-submit path. Every refusal before the commit leaves a `finish_refused`
         event (state, reason, candidate submit controls, open dialogs), so a run that reached
         the review page but never submitted can be explained from the database."""
-        if not self.armed and (ineligible := self.citizenship_required_result()):
+        if not self.armed and (ineligible := self.citizenship_required_result() or self.status_gate_result()):
             return ineligible
         result = await self._finish(reserved=reserved, validation_attempt=validation_attempt)
         if result and not self.armed:
@@ -3868,6 +3870,47 @@ class BrowserEngine:
                 }
         return None
 
+    def status_gate_result(self):
+        """The form's own wording closes the role to the applicant's recorded status, whatever was answered: Atlassian's
+        "not open to candidates whose work authorization is based on F-1 student status" was answered truthfully and
+        submitted anyway (2026-10). Every page's questions count, not only the one on show."""
+        form = getattr(self, "form", None)
+        profile = getattr(getattr(form, "resolver", None), "profile", None)
+        if not getattr(profile, "facts", None):
+            return None
+        from .eligibility import closed_by_statement
+
+        records = [*getattr(form, "fields", {}).values(), *getattr(form, "ledger", {}).values()]
+        for text in dict.fromkeys(" ".join(str(r.get(k) or "") for k in ("label", "hint")).strip() for r in records):
+            if finding := closed_by_statement(text, profile):
+                return {
+                    "state": "closed",
+                    "reason": f'The employer closes this role to the applicant\'s status: "{finding.quote[:240]}"',
+                    "blocker_type": "ineligible",
+                }
+        return None
+
+    def work_status_stop(self):
+        """The last check before anything can be sent, whatever the answer review did or is configured to do: a
+        contradiction it could not repair stops the submit, with its reason (answer_quality.work_status_problems)."""
+        from .answer_quality import work_status_problems
+
+        problems = work_status_problems(self.form) if getattr(self.form, "resolver", None) else []
+        if not problems:
+            return None
+        self.emit(
+            "work_status_stop",
+            "Not submitted: the work-authorization answers contradict the recorded facts or each other",
+            {"fields": [str(p["question"])[:80] for p in problems][:5], "kinds": sorted({p["kind"] for p in problems})},
+        )
+        return {
+            "state": "waiting_browser",
+            "reason": ("Not submitted: " + "; ".join(p["reason"] for p in problems))[:400],
+            "blocker_type": "control_failure",
+            "recoverable": False,
+            "report": {"work_status": problems},
+        }
+
     async def confirm_post_commit(self):
         """One bounded look at the page after an exit that follows a commit (mail wait, deadline,
         control failure). Only the explicit proof finish() accepts counts, and only if it is not
@@ -3885,6 +3928,18 @@ class BrowserEngine:
             "state": "confirmed",
             "reason": "Website confirmation captured after the commit",
             "receipt": receipt,
+        }
+
+    async def no_control_after_commit(self):
+        """No submit control is left on a page after the commit was sent: the click took effect, so this is no control
+        failure and nothing is clicked again. A new acknowledgement confirms it under the usual evidence rules; anything
+        else is an uncertain submission for the receipt check, never a retry."""
+        if confirmed := await self.confirm_post_commit():
+            return confirmed
+        return {
+            "state": "submission_unknown",
+            "reason": "Submission attempted; no submit control is left on the page and it shows no acknowledgement of "
+            "this application. Nothing is submitted again",
         }
 
     async def record_finish_refusal(self, result):
@@ -4044,6 +4099,8 @@ class BrowserEngine:
         if quality_blocker := await self.quality_gate():
             return quality_blocker
         report = await self.form.verify()
+        if not self.armed and (contradiction := self.work_status_stop()):
+            return contradiction
         if not report["ok"]:
             return {
                 "state": "waiting_browser",
@@ -4073,7 +4130,12 @@ class BrowserEngine:
                     "recovery_cause": "validation_controls",
                     "recoverable": True,
                 }
-            return {"state": "needs_review", "reason": "Final submit control was not unique"}
+            if not final and self.armed:
+                return await self.no_control_after_commit()
+            return {
+                "state": "needs_review",
+                "reason": "Final submit control was not unique" if final else "No final submit control is on this page",
+            }
         signup = getattr(self.form, "signup_form", None)
         if signup and await signup(final[0]["id"]) is True:
             # Roku: the "Join our Talent Community" sidebar was submitted as if it were the job.
@@ -4338,9 +4400,12 @@ class BrowserEngine:
                     self.armed = False  # The employer explicitly declined this incomplete form.
                     self.validation_refusal = rejection
                     await self.release_reservation()
+                    # Oracle's "You have 2 issues that need to be fixed" lists the items; the owned page opens them.
+                    issues = rejection.get("issues") or []
                     return {
                         "state": "waiting_browser",
-                        "reason": "Employer requested field corrections; automatic repair could not complete them",
+                        "reason": "Employer requested field corrections; automatic repair could not complete them"
+                        + (f" (still to fix: {'; '.join(issues[:4])})" if issues else ""),
                         "blocker_type": "validation",
                         "recovery_cause": "validation_controls",
                         "receipt": rejection,

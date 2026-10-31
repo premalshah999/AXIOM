@@ -17,6 +17,8 @@ from .extraction import extract_message
 from .helpers import origin
 from .models import RuleInput
 from .senders import KNOWN_SENDERS
+from .senders import employer_label
+from .senders import tenant_tokens
 
 
 def connected_mailbox(session, recipient):
@@ -28,6 +30,42 @@ def connected_mailbox(session, recipient):
 
 
 class RulesMixin:
+    def posting_url(self, url, session=None):
+        """Where a job really is: the posting a short link points to (the saved answer only, never the network), else the
+        url itself. A job entered through go.vansh.nyc/HD had its mail rule keyed on go.vansh.nyc, so the Workday reset it
+        asked for (a link on interdigital.wd5.myworkdayjobs.com) was refused on every poll as a foreign origin
+        (Interdigital 4c9405de, 2026-10-29), and its sender list was another employer's. The rule, its link origins and the
+        tenant tokens follow the posting."""
+        from .. import shortlinks
+
+        if not url or not shortlinks.is_shortlink(url):
+            return url
+        if session is None:
+            with self.db.session() as session:
+                return self.posting_url(url, session)
+        known, final = shortlinks.cached(session, url)
+        return final if known and final else url
+
+    def sibling_senders(self, rule):
+        """Employer-owned sender domains that other employers' rules learned and this employer's name carries.
+
+        TikTok's rule learned mail.bytedance.net; ByteDance's own rule, with the same name in its host and mail domain,
+        never saw it (15 of 15 ByteDance code windows expired, 2026-10-31). A domain is shared only when its registrable
+        label is one of this employer's own name tokens, and never when it belongs to a platform family or tenant suffix:
+        a shared sender is attributed by tenant identity (extract_message), not by being on a sibling's list."""
+        tokens = {t for t in tenant_tokens(rule["employer_origin"]) if len(t) >= 4}
+        platform = {d for domains in KNOWN_SENDERS.values() for d in domains}
+        have = set(rule["sender_domains"] or [])
+        found = []
+        with self.db.session() as s:
+            for other in s.scalars(select(MailRule).where(MailRule.employer_origin != rule["employer_origin"])):
+                for d in other.sender_domains or []:
+                    if d in have or d in found or any(d == p or d.endswith("." + p) for p in platform):
+                        continue
+                    if employer_label(d) in tokens:
+                        found.append(d)
+        return found
+
     def add_link_origin(self, rule_id, link_origin):
         """Record an employer-owned login origin (careers.qualcomm.com for qualcomm.eightfold.ai)."""
         with self.db.exclusive() as s:
@@ -81,6 +119,7 @@ class RulesMixin:
             with self.db.session() as session:
                 return self.rule_for(url, session=session)
         s = session
+        url = self.posting_url(url, s)
         rows = list(
             s.scalars(
                 select(MailRule).where(MailRule.employer_origin == origin(url), MailRule.enabled.is_(True))
@@ -98,6 +137,7 @@ class RulesMixin:
 
     async def ensure_rule(self, job, recipient):
         """Known ATS senders are scoped to this employer and the applicant's mailbox."""
+        job = {**job, "url": self.posting_url(job.get("url", ""))}  # a short link's rule belongs to the posting it opens
         existing = self.rule_for(job["url"])
         if existing:
             # A rule built from its platform's senders gains the senders learned since. L3Harris's rule (2026-10-21)
@@ -117,6 +157,11 @@ class RulesMixin:
                     row = s.get(MailRule, existing["id"])
                     row.sender_domains = [*current, *missing]
                 existing["sender_domains"] = [*current, *missing]
+            if siblings := self.sibling_senders(existing):
+                with self.db.exclusive() as s:
+                    row = s.get(MailRule, existing["id"])
+                    row.sender_domains = [*existing["sender_domains"], *siblings]
+                existing["sender_domains"] = [*existing["sender_domains"], *siblings]
             return existing
         known = KNOWN_SENDERS
         # A named platform that only the generic driver runs (ats.LABEL_ONLY) keeps the custom site's rule: ClearCompany's

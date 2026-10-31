@@ -17,7 +17,7 @@ from ..db import Event, Job, MailChallenge, MailRule, Run, Setting, now
 from ..accounts import account_tenant
 from ..schemas import Answer
 
-from .base import Adapter, Step, KNOWN_ACCOUNT
+from .base import ALIAS_UNREGISTERED, Adapter, Step, KNOWN_ACCOUNT
 
 # Schwab labels it "Apply for this job" (no "online"); unmatched, every Schwab run left the iCIMS flow at the job page
 # and the generic navigator clicked an email step it cannot pass (2026-10-21). The link target still has to be this job's.
@@ -956,6 +956,18 @@ class ICIMS(Adapter):
             )
         fresh = await self.form.scan()
         link = self.central_signup_link(fresh)
+        if not link and self.alias_unregistered(record):
+            # Central showed its password step for a replacement address nobody registered (National Louis, 10-30): that
+            # step proves nothing and a reset of it brings no mail. The sign-up page of the same transaction is the route.
+            state = self.central_transaction(self.page.url)
+            if state:
+                await self.page.goto(
+                    "https://login.icims.com/u/signup?" + urlencode({"state": state}), wait_until="domcontentloaded", timeout=20000
+                )
+                fresh = await self.form.scan()
+                if self.central_transaction(self.page.url, signup=True) == state:
+                    return await self.on_create_account(fresh)
+            return self.defer(ALIAS_UNREGISTERED, state="waiting_browser", blocker_type="account")
         if not link and self.config.account_password_reset:
             # Owner (2026-10-17): "set whatever password you want with iCIMS". Central accepted this email and
             # rejected the configured password, so the identity exists; reset it and set our own password.

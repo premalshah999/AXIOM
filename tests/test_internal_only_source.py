@@ -46,3 +46,30 @@ def test_an_other_non_referral_choice_is_a_way_in_for_an_external_applicant():
     result = verdict(engine(["Employee/Advisor Referral", "Other/Non-Referral"]))
     assert result["state"] != "closed"
     assert verdict(engine(["Select One", "Employee Referral", "Other"]))["state"] != "closed"
+
+
+def test_a_source_list_closes_the_posting_only_when_every_choice_is_internal():
+    # The rule used the "cannot be claimed truthfully" pattern, which also reads agencies, recruiters, referrals and
+    # campus events as internal. GE Vernova (2026-10-15..28, four jobs) offered "Agency / Search Firm", "Current Employee"
+    # and "GE Vernova Recruiter", GDIT (2026-10-24) only "Employee Referral": each is a way in for an outside applicant,
+    # so the application waits for the owner instead of being closed as internal-only.
+    from jobpilot.answers.sources import internal_channels_only
+
+    assert not internal_channels_only(["Agency / Search Firm", "Current Employee", "GE Vernova Recruiter"])
+    assert not internal_channels_only(["Employee Referral"])
+    assert not internal_channels_only(["Select One", "Campus Event", "Career Fair", "University Career Center"])
+    assert not internal_channels_only(["Employee Referral", "Staffing Agency", "Alumni Network"])
+    assert not internal_channels_only(["Select One", "Displaced (US)", "LOA - Job Search (US)", "Company Website"])
+    for result in (verdict(engine(["Agency / Search Firm", "Current Employee", "GE Vernova Recruiter"])),
+                   verdict(engine(["Employee Referral"]))):
+        assert result["state"] == "waiting_browser" and "owner review" in result["reason"]
+
+
+def test_internal_channels_alone_still_close_the_posting():
+    from jobpilot.answers.sources import internal_channels_only
+
+    assert internal_channels_only(["Select One", "Displaced (US)", "LOA - Job Search (US)"])
+    assert internal_channels_only(["Employee"])  # Snap (2026-10-15)
+    assert internal_channels_only(["-- Select --", "Current Employee", "Former Employee", "Internal Transfer"])
+    assert not internal_channels_only([])
+    assert not internal_channels_only(["Select One"])

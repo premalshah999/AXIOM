@@ -21,7 +21,7 @@ class Session:
 
 def test_uncertain_submission_is_retried_after_receipt_window():
     assert unknown_resubmit_allowed(
-        Session({"enabled": True}), [run("waiting_browser"), run("submission_unknown")], NOW
+        Session({"enabled": True}), [run("waiting_browser"), run("submission_unknown")], NOW, checked=False
     )
 
 
@@ -29,7 +29,7 @@ def test_retry_waits_for_receipt_window_and_is_bounded():
     assert not unknown_resubmit_allowed(Session({"enabled": True}), [run("submission_unknown", minutes_ago=5)], NOW)
     three = [run("submission_unknown")] * 3
     assert not unknown_resubmit_allowed(Session({"enabled": True}), three, NOW)
-    assert unknown_resubmit_allowed(Session({"enabled": True, "max_resubmits": 5}), three, NOW)
+    assert unknown_resubmit_allowed(Session({"enabled": True, "max_resubmits": 5}), three, NOW, checked=False)
 
 
 def test_screenshot_confirmed_jobs_are_never_resubmitted():
@@ -50,4 +50,4 @@ def test_resubmission_is_off_unless_the_installation_enables_it():
     unknown = [run("submission_unknown")]
     assert not unknown_resubmit_allowed(Session(), unknown, NOW)
     assert not unknown_resubmit_allowed(Session({"max_resubmits": 2}), unknown, NOW)
-    assert unknown_resubmit_allowed(Session({"enabled": True}), unknown, NOW)
+    assert unknown_resubmit_allowed(Session({"enabled": True}), unknown, NOW, checked=False)

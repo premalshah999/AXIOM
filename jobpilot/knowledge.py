@@ -144,7 +144,17 @@ def _topic(text):
             r"\bever been,? an? (?:employee|contractor|consultant|contract worker|intern) (?:of|for|at|with)\b|"
             # Amazon (2026-10-27): "Are you currently working as an intern at Amazon?" had no subject and the model
             # proposed "Yes".
-            r"\b(?:currently|presently) (?:working|employed|interning) (?:as an? [\w-]+ )?(?:at|for|with)\b",
+            r"\b(?:currently|presently) (?:working|employed|interning) (?:as an? [\w-]+ )?(?:at|for|with)\b|"
+            # Contractor, contingent, temp and third-party wordings (an internship is an experience question, not this) of "worked here before?" (T-Mobile, Target,
+            # PwC, PNC, Howmet, IQVIA, Sanofi 2026-10-14..26): unrecognised, the model copied "Yes" from the
+            # complete-history fact and 15 confirmed applications said the applicant had been a contractor there.
+            r"(?:\b(?:are|were|was|have|had|did) you|\byou (?:are|were|have|had))\b[^?]{0,80}?"
+            r"\b(?:contractors?|contract workers?|contingent workers?|temp(?:orary)? (?:workers?|employees?)|"
+            r"third.party labou?r)\b(?:\s*\([^)]{0,40}\))?"
+            r"(?:\s+or\s+[\w -]{1,30})?\s+(?:for|at|with|to|of)\b|"
+            r"\bwork(?:ed)? (?:previously|before) (?:for|at|with)\b|\bwork(?:ed)? (?:for|at|with)\b[^?]{0,60}\bbefore\b|"
+            r"\bcontract(?:ing|ed) (?:with|for)\b|\bex[- ]\w+ (?:employee|associate)\b|"
+            r"\bprovid(?:ed|ing) (?:any )?(?:contract |contingent )?(?:work|services?) (?:for|to)\b",
         ),
         (
             "sponsorship",
@@ -273,7 +283,9 @@ def learned_answer(review_id, question, answer, options, employer):
 
 
 def applicable(answer, employer):
-    return answer.scope == "personal" or answer.employer.casefold() == employer.casefold()
+    # An answer given to one employer stays with it; with no employer on either side there is nothing to say it is the
+    # same one.
+    return answer.scope == "personal" or (bool(employer) and answer.employer.casefold() == employer.casefold())
 
 
 def relevant_fact(label, key):
@@ -380,13 +392,44 @@ CHOICE_TYPES = {
 }
 
 
-def kb_norm(question, employer=""):
-    q = f" {question.casefold()} "
+# What a form wraps around a question without asking anything else: a "Required" marker, a number in front.
+LEADING_MARK = re.compile(r"^\s*[*✱]\s*")
+QUESTION_NUMBER = re.compile(
+    r"^\s*(?:question\s*#?\s*\d{1,3}\s*[.):\-–—]?\s+|q\.?\s*\d{1,3}\s*[.):\-–—]\s*|"  # "Question 3", "Q3:"
+    r"[(\[]?\d{1,3}[.):\]]\s+(?=[a-z])|"  # "1. ", "2) ", "(3) "; never "1.5 years" or "3 - 5 years"
+    r"\d{1,3}\s+[-–—]\s+(?=[a-z]))"  # "13 - What was your..."
+)
+TRAILING_MARK = re.compile(
+    r"(?:\s*(?:[*✱]|\(\s*required\s*\)|\[\s*required\s*\]|[-–—:]\s*required|(?<=[?:.!*✱])\s*required))+\s*$"
+)
+
+
+@functools.lru_cache(maxsize=16384)
+def kb_norm(question, employer="", loose=True):
+    """The question's identity across forms: the same words, whatever the form's case, spacing, punctuation, "Required"
+    marker, question number or naming of the employer. `loose=False` keeps the older, narrower rule (case, spacing,
+    trailing asterisk or "(Required)", employer name) for a bare field caption such as "End Date".
+
+    Every word stays, with its negation, comparator, number and decimal, so two questions that differ in a qualifier
+    ("U.S. citizen" against "authorized", "last 5 years" against "ever", "< 5 years" against "> 5 years") never share
+    an identity. Punctuation is dropped, never read: it is not similarity (2026-10-31 audit: 70 of 724 owner questions
+    were re-asked after the same question, differently dressed, was answered)."""
+    q = semantic_text(question)
     for name in sorted(employer_variants(employer), key=len, reverse=True):
-        q = q.replace(name.casefold(), " employer ")
+        # Whole words: "Meta" is not the start of "metadata".
+        q = re.sub(r"(?<!\w)" + re.escape(semantic_text(name)) + r"(?!\w)", " employer ", q)
     q = re.sub(r"(?:\s*\(required\)|\*|✱)\s*$", " ", q)
-    # Keep comparison symbols and negation words: "< 5 years" and "> 5 years" differ.
-    return semantic_text(q)
+    if not loose:
+        # Keep comparison symbols and negation words: "< 5 years" and "> 5 years" differ.
+        return semantic_text(q)
+    q = TRAILING_MARK.sub("", LEADING_MARK.sub("", q))
+    q = QUESTION_NUMBER.sub("", q)
+    q = re.sub(r"['`´]", "", q)  # "don't" and "applicant's" lose the mark; the word stays
+    q = re.sub(r"(?<=\d)\s*[-–—]\s*(?=\d)", "-", q)  # a range stays a range
+    q = re.sub(r"(?<=[^\W\d_])-(?=[^\W\d_])", " ", q)  # "full-time" is "full time"
+    q = re.sub(r"[^\w\s<>=+%$#&@.,-]", " ", q)  # quotes, brackets, slashes, colons, question marks
+    q = re.sub(r"(?<!\d)[.,]|[.,](?!\d)|(?<!\d)-|-(?!\d)", " ", q)  # 3.5, 1,000 and 2-4 keep theirs
+    return re.sub(r"\s+", " ", q).strip()
 
 
 def stem(word):
@@ -423,14 +466,18 @@ class KnowledgeBase:
 
     @staticmethod
     def _compatible(entry, options, kind):
-        from .widgets import best_option, foreign_fallback
+        from .widgets import foreign_fallback, norm, placeholder_option
 
         if foreign_fallback(entry.answer, getattr(entry, "options", None), options):
             return None
         if kind == "checkbox":
             return as_checkbox(entry.answer)
         if options:
-            return best_option(options, entry.answer)
+            # The saved answer must be one of the options this form offers, as it words them; a nearest or aliased
+            # option is a guess (Gender: a saved "Male" is no answer to a menu of "Female" and "Non-binary").
+            offered = [o for o in options if not placeholder_option(o)]
+            same = {o for o in offered if norm(o) and norm(o) == norm(entry.answer)}
+            return same.pop() if len(same) == 1 else None
         if kind in CHOICE_TYPES:
             return None
         return entry.answer
@@ -438,11 +485,17 @@ class KnowledgeBase:
     def lookup(self, question, options, employer="", kind=""):
         if topic(question) == "source":
             return None
-        key = kb_norm(question, employer)
+        from .owner_questions import generic, tidy
+
+        # A bare caption ("End Date", "Please specify", "Gender") names its question only through the section around
+        # it: it matches only the same caption, as before. A question is matched by its words, not its dress.
+        text = tidy(question)
+        loose = not (generic(question) or ("?" not in text and len(re.findall(r"\w+", text)) <= 3))
+        key = kb_norm(question, employer, loose)
         if not key:
             return None
         for entry in reversed(self.entries):
-            if applicable(entry, employer) and kb_norm(entry.question, entry.employer) == key:
+            if applicable(entry, employer) and kb_norm(entry.question, entry.employer, loose) == key:
                 value = self._compatible(entry, options, kind)
                 if value:
                     return entry, value
