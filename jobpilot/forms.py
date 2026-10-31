@@ -5782,11 +5782,21 @@ class FormSession:
             and scope_fields is not before.get("fields", [])
             and scope_fields
             and all(
-                f["type"] in {"checkbox", "radio", "radiogroup"}
-                and re.search(
-                    r"consent|agree|privacy|policy|terms|data|alerts?|preferences|communications",
-                    f["label"],
-                    re.I,
+                (
+                    f["type"] in {"checkbox", "radio", "radiogroup"}
+                    and re.search(
+                        r"consent|agree|privacy|policy|terms|data|alerts?|preferences|communications"
+                        # Microsoft (Eightfold) 2026-10-27: "AI-insights visibility to Microsoft Recruiting" and
+                        # "email notifications when new jobs open that match my profile".
+                        r"|visibility|insights?|notifications?|recommendations?|talent (?:network|community)",
+                        f["label"],
+                        re.I,
+                    )
+                )
+                # The same dialog opens with the country of residence, which decides which notices follow.
+                or (
+                    f["type"] in {"select", "combobox"}
+                    and re.search(r"country|region of residence", f["label"], re.I)
                 )
                 for f in scope_fields
             )
