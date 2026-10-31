@@ -2700,6 +2700,15 @@ class Adapter:
             # The latest request is among them (its window opens just before the click records it).
             if not resets or max(c.since for c in resets) < asked - 600:
                 return False
+            # Only the newest windows that actually waited speak (RESET_UNANSWERED_CAP of them): one reset mail that came
+            # days ago kept Farmers' 25 runs from ever reading its later silence (2026-10-26 answered, 10-30/31 not).
+            judged, waited = [], 0
+            for c in sorted(resets, key=lambda c: c.created_at, reverse=True):
+                judged.append(c)
+                waited += c.state == "expired"
+                if waited >= RESET_UNANSWERED_CAP:
+                    break
+            resets = judged
             if any(c.state not in {"expired", "cancelled"} for c in resets):
                 return False  # one matched, was claimed, failed on an ambiguous message, or is still open
             for run_id, since in {(c.run_id, c.created_at) for c in resets}:
