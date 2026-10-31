@@ -495,6 +495,16 @@ class ValidateMixin:
                 cause = "question_polarity"
         if not cause and value is not None and re.match(r"^(?:yes|no)\b", value, re.I):
             cause = self.experience_cause(field, a, bool(re.match(r"^yes\b", value, re.I)))
+        if (
+            not cause
+            and value is not None
+            and topic(field["label"]) == "background_check"
+            and any(re.search(r"convict|criminal", x) for x in a.evidence_ids)
+            and not re.match(r"^\s*(?:yes|true|i am able|able)\b", value, re.I)
+        ):
+            # The conviction fact backs only the applicant's ability to clear a records check: a "No" cited to it reads the
+            # fact backwards (it says there is no record).
+            cause = "question_polarity"
         if not cause and value is not None and self.graduation_choice_valid(field, value) is False:
             cause = "question_time_scope"
         if value is not None and field.get("maxlength", -1) > 0 and len(value) > field["maxlength"]:

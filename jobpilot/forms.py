@@ -746,6 +746,9 @@ DEPENDENT_TYPES = {"radio", "radiogroup", "select", "dropdown", "pills", "checkb
 
 def implausible_link(field):
     """A link/URL field holding something that is not shaped like a web address."""
+    if field.get("options") or field.get("type") in {"select", "dropdown", "combobox", "radio", "radiogroup", "pills"}:
+        # A pick list named for a site ("Company Website", Taleo's source detail, 2026-10-31) holds a choice, not a link.
+        return False
     if not (
         field.get("type") == "url"
         or re.search(r"\b(?:link|url|website|linkedin|github|portfolio)\b", field.get("label", ""), re.I)
