@@ -1,6 +1,6 @@
 # AXIOM dashboard design system (2026-10-31)
 
-Read this before touching a page. It holds two stages: the **family** every page is made from, and the **reference pages** (Overview, Jobs and its drawer) to copy. Needs you, Applications, Resumes, Profile, Settings and the sign-in screens are on the new shell and tokens but not yet redesigned; section 7 says what each must become.
+Read this before touching a page. It holds two stages: the **family** every page is made from, and the **reference pages** (Overview, Jobs and its drawer) to copy. Needs you, Applications, Resumes, Profile and the sign-in screens are on the new shell and tokens but not yet redesigned; section 7 says what each must become. Settings is redesigned (section 6b).
 
 ## 1. Rules
 
@@ -82,7 +82,7 @@ Doto (`.ax-read`) is for hero readouts of 56px and up, on Overview only. The Arc
 | Applications | `ledger` | `confirmed`, `unconfirmed`, `archive` |
 | Resumes | `resumes` (the editor, `editor`, belongs to it) | |
 | Profile | `profile` | `identity`, `experience`, `knowledge` |
-| Settings | `settings` | `connections`, `accounts`, `email`, `discovery`, `system` |
+| Settings | `settings` | `connections`, `email` (Mailbox), `discovery` (Job search), `applying`, `accounts` (Employer accounts), `account` (Your account), `database`, `system` (Advanced) |
 | Coming soon | `soon-axe`, `soon-network`, `soon-emails` | |
 
 Old names that must keep working: `?view=setup` (all its tabs), `/setup`, `?view=connections|accounts|email|discovery|system|sources`, `?gmail=`; `?view=setup&tab=profile&filter=identity|experience|preferences|facts|policies|rules`; `?view=setup&tab=answers`, `?view=knowledge|answers|knowledge base`; `?view=setup&tab=resumes`, `?view=resumes`, `?view=profile&tab=resumes` (opens Resumes); `?view=jobs&tab=archive`, `?view=archive`; `?view=successful|confirmed|applications|unconfirmed`; `?view=discovered|job board|pipeline|reserved`, `?page=job-board`, `?view=jobs&filter=new`; `?view=overview`; `?view=needs help|needs you|questions`. Anything unknown opens Overview.
@@ -152,6 +152,29 @@ Copy this structure for Applications and any list.
 - **Views are named:** Started, Discovered, Reserved, each with a count, each saying what it is in one line. "Add job" is a button opening a small dialog (`AddJobDialog` in `jobintake.tsx`, mounted once in `main.tsx`; dispatch `OPEN_JOB_LINK`), never a permanent input.
 - **The drawer** (`JobPanel`): head with a large monogram, employer, role; a meta line (location, platform, fit, Open posting). Then the **status block** (`StatusBlock`, an inset surface): lamp and word, what it means, why, and inside it the question to answer or the next action. Then what stopped it, Proof, History (a line of attempts; click to open one), Final page. Folds: Answers, Activity, This attempt in detail, Raw receipt, Technical details.
 
+## 6b. Settings: the reference for a settings page (`src/settings.tsx` and the files it mounts)
+
+One page, a list of sections beside the one that is open (`.st-nav`, real links; on a phone one row that scrolls sideways and keeps the open one in view). The section is the route's `tab`; the list is `PAGE_TABS.settings` in `shell/nav.ts`. Grouped by what a person recognises, the engine's own switches last:
+
+| Section (`tab`) | File | What it is |
+|---|---|---|
+| Connections (`connections`) | `connections.tsx` | **Cards**, not input rows: one per AI model (one is in use, "Use this one" picks it) and per service (Gmail, Telegram, 2Captcha, Serper, TypeSafe, employer sign-in). A card says what it does, whether it is set and in use, shows the key **masked by the server** (never read back; Replace opens a field that holds only what is typed), and has Test. One sticky save bar for all of it. Advanced fold: OpenRouter hosting, a screenshot model, and any field the server adds that no card claims |
+| Mailbox (`email`) | `mail.tsx` | The mailbox's true state, trusted senders (a table; Add a rule is a Dialog), recent verifications. Connect Gmail is a Dialog |
+| Job search (`discovery`) | `discovery.tsx` | What to look for (switches, `Segmented` choices), employer boards (table, Add a board Dialog, Failing chip), Custom sources in a fold |
+| Applying (`applying`) | `system.tsx`, `discovery.tsx` | Send applications and Pause (apply at once), automatic applications (fit, batch size), Limits (daily, per employer, per job: two endpoints, one form, one save bar) |
+| Employer accounts (`accounts`) | `accounts.tsx` | A table with **what needs you first** (`Chips` filter with counts, "Set password" or "Retry verification" per row, the rest in the row menu); how AXIOM signs in and Import a session are folds |
+| Your account (`account`) | `account.tsx` (`SignInSettings`) | Password, recovery codes, sign out, setup guide, as rows in one panel |
+| Database (`database`) | `settings.tsx` | **A slot.** `DatabaseSection` has the heading and `DatabasePending` for a body. `src/database.tsx` (agent8/db-config) mounts by being imported in `settings.tsx` and rendered in place of `<DatabasePending />`; nothing else changes |
+| Advanced (`system`) | `system.tsx` | Status in plain words, Workers (read at start, so a restart notice), what AXIOM may do on its own, application platforms |
+
+Rules this page set:
+
+- **A status is true or it is not shown.** `mailHealth` (`mail.tsx`) decides what a mailbox says: "Connected" only when no failure is newer than the last success. The server keeps `state` (login accepted) apart from `error` (the last request's failure), so connected with an error is "Trouble reaching Gmail" with the cause in words and "Last worked 5m ago". It reads `last_ok_at`, `last_error_at` and `retrying` when the server sends them (agent8/fix-mail) and falls back to `error` and `checked_at` when it does not. A refused login is "Needs reconnecting".
+- **One form over `/api/connections`, several places.** `useConnections` is the controller (draft, masked values, test, save); the cards, the Limits and the Workers each use their own copy and their own save bar. `FieldInput` edits one non-secret field by its type; `SecretField` replaces one secret.
+- **Plain words for engine terms.** "Model for answers", "Model for moving through pages", "Workers: 6 regular, 2 for difficult sites", "Version c11630cac88b" (never `execution-v2-…`).
+- **Folds for internals** are `.st-adv` (a surface of its own, closed by default, with a plain line saying what is inside).
+- Styles are in `styles/settings.css` (`st-` prefix): `.st-card` (a service), `.st-key` (a masked key), `.st-state` (a line that says what is true, with a lamp), `.st-rows` (name left, control right), `.st-fields`, `.st-sub` (a column's value shown under the first column when the table is narrow).
+
 ## 7. Pages still to redesign, on this standard
 
 Their brief is in UI3_BRIEF.md. What each must do with the family above:
@@ -160,7 +183,7 @@ Their brief is in UI3_BRIEF.md. What each must do with the family above:
 - **Applications** (`ledger.tsx`, `archive.tsx`): copy Jobs. A confident header using `TopLine` (total, today), evidence words from `evidenceLabel`, Listbox for evidence, Export as `TopActions`, `footer` for the pager; replace the remaining `Pagination` after the table.
 - **Resumes** (`ResumesView` in `setup.tsx`, `features.tsx`, `editor.tsx`, `pdfpages.tsx`): lead with what is being sent and whether tailoring is on, in one sentence and one control (`application_resume_policy` in the snapshot). Guided path for setting it up. Do not turn tailoring on yourself. Library cards or rows with preview and download; the Dropzone is already wired for upload. Tailored versions open in a preview panel. Editor: a full-height workspace with a slim bar; it currently still shows the shell's page header (`main.view-editor`, `.ax-scroll.is-fixed`). Test every path.
 - **Profile** (`profile.tsx`, `knowledge.tsx`, `qform.tsx`): section navigation within the page, a two-column grid for related fields, cards that open to edit, a sticky save bar only with changes (`ax-savebar`), progress cards.
-- **Settings** (`connections.tsx`, `autonomy.tsx`, `mail.tsx`, `discovery.tsx`, `setup.tsx`): group by what people recognise; provider cards with status, masked key and Test; internals behind an Advanced fold. Fix the mailbox showing "connected" beside "Mailbox operation failed".
+- **Settings**: done, see section 6b.
 - **Sign-in, sign-up, reset, setup guide** (`account.tsx`, `onboarding.tsx`, `styles/onboarding.css`, `styles/setup.css`), **coming-soon** (`ComingSoon.tsx`), **error boundary** (`ErrorBoundary.tsx`), **404**: the same family; the first thing anyone sees.
 
 When a page moves off `.ax-grid`, `.nq-*` and the like, delete what it leaves behind. Keep this file true.
