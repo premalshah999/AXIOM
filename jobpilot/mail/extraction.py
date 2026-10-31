@@ -128,6 +128,12 @@ def _origin_or_none(href):
 # A verification continuation in a link's own URL (iCIMS: ".../login?step=email&hashed=...&token=...").
 VERIFY_URL = re.compile(r"verif|confirm|token|activate|[?&](?:step|hashed|key|code)=|/login\b", re.I)
 RESET_URL = re.compile(r"reset|password|passwd|pwd|token|activat", re.I)
+# A button's own text: the whole anchor is the step ("Reset password", "Set a new password", "Verify your email").
+BUTTON_TEXT = re.compile(
+    r"(?:reset|set|change|create|choose)\s+(?:(?:my|your|a|the|new)\s+)*password|"
+    r"(?:verify|confirm|activate)\s+(?:(?:my|your|the)\s+)*(?:e-?mail(?:\s+address)?|account|candidate account)",
+    re.I,
+)
 
 
 def extract_message(message, rule, challenge, *, identity_only=False, diagnostics=None):
@@ -485,6 +491,16 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
         step = {link for link in valid_links if (RESET_URL if reset else VERIFY_URL).search(link)}
         if len(step) == 1:
             valid_links = step
+    if len(valid_links) > 1 and all(_origin_or_none(link) in CLICK_TRACKERS for link in valid_links):
+        # Behind a click tracker the URL names nothing (Stifel's iCIMS Central "Reset your password", 2026-10-31: two
+        # cued tracker links, ambiguous_token on every poll while the mail sat in the inbox). The one whose own anchor
+        # text is exactly the step's button ("Reset password", "Verify email") is the link; a sentence that merely
+        # mentions it is not. Still ambiguous when none or several are.
+        buttons = {link for link in valid_links if BUTTON_TEXT.fullmatch(anchor_text.get(link, "").strip(" .:>»"))}
+        if len(buttons) == 1:
+            valid_links = buttons
+        elif diagnostics is not None:
+            diagnostics["ambiguous_anchors"] = sorted({anchor_text.get(link, "")[:40] for link in valid_links})[:6]
     kind = challenge["kind"]
     if identity_only:
         return (
