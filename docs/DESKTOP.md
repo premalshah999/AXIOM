@@ -5,7 +5,7 @@ shows the same dashboard a browser shows; a loopback-only server stays inside it
 
 It runs the supervisor in `jobpilot/native` ([NATIVE.md](NATIVE.md)), unforked. `scripts/axiom` and a checkout keep working exactly as before.
 
-The disk image is 163 MB and the installed app 435 MB. On this 16 GB Mac, measured beside production with synthetic data: a first start takes about 8 s from the window opening to the dashboard (the
+The disk image is 161 MB and the installed app 436 MB. On this 16 GB Mac, measured beside production with synthetic data: a first start takes about 7 s from the window opening to the dashboard (the
 database created), a later start about 6 s, and a Quit with nothing active 3 to 4 s. `jobpilot verify` passes on the installed app.
 
 | At idle, resident | MB |
@@ -89,7 +89,7 @@ Tailoring works on a Mac with no LaTeX: `pdflatex` is in the bundle, first on th
 
 **Licences.** `docs/licenses/TeXLive-LICENSE.TL.txt` allows redistribution "with or without modification, for profit or not", asks that a changed distribution says so (`Resources/tex/README.AXIOM`), and forbids claiming copyright on the whole. Each file keeps its own licence (GPL for the binaries, LPPL for LaTeX, GUST and others for fonts). The GPL means the source of those binaries must be available: the README points to TeX Live and offers it on request, so whoever distributes the DMG has to be able to honour that.
 
-**A hand-written `\\usepackage` of something not installed** fails with LaTeX's own "not found", exactly as it does on a checkout's TinyTeX: every package that TeX has is bundled, and none is ever downloaded at run time.
+**A hand-written `\usepackage` of something not installed** fails with LaTeX's own "not found", exactly as it does on a checkout's TinyTeX: every package that TeX has is bundled, and none is ever downloaded at run time.
 
 ## Upgrades
 
@@ -148,6 +148,40 @@ Run the installed binary with `env -i` under `sandbox-exec`, with this at its co
 - A Mac where these paths are truly absent rather than refused. A program that behaves differently on `ENOENT` than on `EPERM` would not show up. System libraries differ too: this is macOS 15.2 only.
 - A real Chrome-for-Testing run. The download is exercised for real and unpacked (367 MB), but running a downloaded binary is not permitted on this machine, and the sandbox has to let the installed Chrome run outside itself.
 - Privacy prompts, which are per-user and already answered here for some things; the firewall's prompt, if it is on; WebKit's helpers, which launchd starts outside the profile.
+
+## Parity with the checkout app
+
+Each row was driven in the installed app's own window, through `AXIOM_SHELL_DRIVE`, with `env -i`, a scratch HOME and the refusing profile above, so Python and PostgreSQL could reach only loopback. "Not exercised" means nobody ran it here.
+
+| Feature | Exercised | Not exercised, and why |
+|---|---|---|
+| Sign-in | The window signs itself in. The API answers 401 without a session and throttles wrong tokens (401, then 429). Signing out signs back in. | |
+| Setup guide | Opens on first launch. | Its eleven steps were not walked. |
+| Overview, live work | A real run seen while running. | |
+| Jobs | Started, Discovered and Reserved render. A pasted link is saved through the dialog's route. | The dialog's own form. |
+| Needs you | Renders, empty. | A real question, which needs an employer's form. |
+| Applications | All three tabs. CSV saved to disk through a save panel that was really shown, using the page's URL and `download` name. | The page's own link, which appears only with a confirmed non-demo row. A person clicking Save: the driver answers it. |
+| Resumes | Upload through a real open panel. PDF.js draws inside the window. Editor page. | Choosing the file by hand: NSOpenPanel cannot be scripted, so the driver hands over the file after the panel is shown. |
+| Tailoring | The bundled pdfTeX compiles from the running app with every template and all five fonts, plus hand-written LaTeX. The switch refuses "on" without an approved master, and "off" answers. | The model step, end to end: it needs a key, network and an approved master. |
+| Profile | Every tab renders. Photo upload through the panel. | |
+| Drag and drop | A file on a pasteboard through WebKit's real drop path reached the page's drop zone. | A physical drag from Finder. |
+| Settings | Every tab renders. Telegram, 2Captcha, Serper and DeepSeek save and Test, each answering plainly that it cannot reach the service. TypeSafe's Test only says "Saved", by design. Secrets stay masked. | A Test that succeeds: that needs real keys and network. |
+| Gmail | The app-password error, and the sign-in link's plain error without Google client settings. | A real mailbox, by rule. |
+| Employer accounts | Route and tab. | A real employer sign-in. |
+| Database | Test against a real server and a dead one. Switch to Server, copying data with counts verified, local PostgreSQL stopped, and back to Local. | Supabase: the owner runs that. |
+| Themes, Cmd-K | Both themes, through the account menu. The palette, through a real key event. | |
+| WebKit gaps | `alert`, `confirm`, `prompt`, clipboard, new-window links, blob downloads. External links reach `NSWorkspace`. | The browser actually opening: the driver records the address instead, so as not to open tabs on this Mac. |
+| Chromes | The worker and twin start and are supervised. A synthetic application is submitted through the worker, twice. | A real employer, by rule. |
+| Discovery | The route queues 680 sources. | Any board actually fetched: the network is closed on purpose, because a test instance once ran discovery against real boards. |
+| Mail polling, receipts | The loop runs with no mailbox. The demo form's receipt is matched. Python has the system's 128 root certificates. | A receipt from a real mailbox. |
+| Recovery | The app killed mid-run: the supervisor restarts it, and the run reaches "draft recovery scheduled", with nothing submitted. | |
+| Repair | | Code read only: it needs a model key and network. |
+| Update path | The app replaced over itself: data, token and ports kept. Restart from Settings. `axiom deploy` is refused by design. | A real newer version with a schema change. |
+| Quit, force-quit | Drains in 3 to 5 s, leaving nothing running. A force-quit stops the engine in about 6 s. | Quit from the menu: the driver uses the same path through SIGTERM. |
+| Logs, Status menu, Start at Login | All through the real menus' actions, in the scratch HOME. The battery warning fired on real battery. | Login itself: launchd loading the agent. |
+| Moving in | A real-schema install: verified, opened held, released, and refused while the old one runs. The real `--plan` read the production folder and rightly reported it blocked. | The real move: the owner runs it. |
+
+**Known flake.** `Page.goto` stalled for 60 s in about one synthetic run in five, in this test setup. Chrome relaunched itself in about one launch in four here (flags intact), which may be why, though the cause was not proved; a scratch HOME also makes it install its updater, which a real HOME would not. Such a run ends `waiting_browser` and retries; nothing is sent. The supervisor stops a relaunched Chrome at Quit, and at the next start.
 
 ## macOS 15 minimum
 
