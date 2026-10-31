@@ -45,10 +45,18 @@ async def lifespan(app):
         from ..retention import watch as watch_retention
 
         retention_task = asyncio.create_task(watch_retention(service))
+    housekeeping_task = None
+    if config.enable_workers and (config.job_retention_days or config.log_retention_days):
+        from ..housekeeping import watch as watch_housekeeping
+
+        housekeeping_task = asyncio.create_task(watch_housekeeping(service))
     yield
     if retention_task:
         retention_task.cancel()
         await asyncio.gather(retention_task, return_exceptions=True)
+    if housekeeping_task:
+        housekeeping_task.cancel()
+        await asyncio.gather(housekeeping_task, return_exceptions=True)
     if config.enable_workers and config.shutdown_drain_seconds:
         # First of all, while the workers, outbox and mail poller still run: a stop must not cut a commit.
         await service.drain(config.shutdown_drain_seconds)

@@ -77,6 +77,11 @@ class Settings(BaseSettings):
     db_audit: bool = False
     # DBOS never forgets a finished workflow (845 MB by 2026-10-30, most of it source sweeps). Days to keep them; 0 keeps all.
     dbos_retention_days: int = Field(default=14, ge=0, le=3650)
+    # Days to keep what has outlived its use (jobpilot/housekeeping.py). 0 keeps it. A job never applied to, one still waiting
+    # its turn, and a run's logs; a submitted application's record and duplicate protection are never touched.
+    job_retention_days: int = Field(default=7, ge=0, le=3650)
+    ready_retention_days: int = Field(default=14, ge=0, le=3650)
+    log_retention_days: int = Field(default=7, ge=0, le=3650)
     app_token: str = ""
     secure_cookies: bool = False
     base_url: str = "http://127.0.0.1:8080"
