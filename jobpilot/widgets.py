@@ -521,6 +521,12 @@ def same_value(field, actual, expected):
         if actual_code and norm(e) in _alias_group("United States"):
             actual_country = norm(re.sub(r"\+\s*\d{1,4}\b", "", a))
             return actual_code[0] == "+1" and actual_country in _alias_group("United States")
+        if same_dial_country(a, e):
+            return True  # "United States (1)" is "+1 (United States of America)": the code's place and the name's spelling.
+        shown, wanted = dial_digits(a), dial_digits(e)
+        if shown and shown == wanted and not dial_name(e):
+            # A bare "+1" names the row "United States (1)": the code alone means the United States (as above).
+            return shown != "1" or norm(dial_name(a)) in _alias_group("United States")
     if field.get("widget") == "date-text" and field.get("date_format") == "dmy":
         try:
             d, m, y = str(actual).split("/")
@@ -2499,9 +2505,28 @@ async def icims_select_texts(el):
     return [t for t in texts if not placeholder_option(t)]
 
 
+DIAL_AFFIX = r"(?:\(\+?\d{1,4}\)|\+\d{1,4})"
+
+
 def dial_name(text):
-    """A phone country row's name without its dial code: "United States (1)" and "(+1) United States" -> "United States"."""
-    return re.sub(r"^\s*\(\+?\d{1,4}\)\s*|\s*\(\+?\d{1,4}\)\s*$", "", str(text or "")).strip()
+    """A phone country row's name without its dial code, in any spelling a site or the profile uses: "United States (1)",
+    "(+1) United States", "+1 (United States)" and "United States of America +1" -> the name. A bare number is no code
+    ("2 Year Degree" stays); a dial code is parenthesized or carries its plus."""
+    name = re.sub(rf"^\s*{DIAL_AFFIX}\s*|\s*{DIAL_AFFIX}\s*$", "", str(text or "")).strip()
+    return name[1:-1].strip() if name.startswith("(") and name.endswith(")") and name.count("(") == 1 else name
+
+
+def dial_digits(text):
+    """The dial code's digits in a phone country value ("United States (1)", "+1 (United States)" -> "1"), else ""."""
+    found = re.search(r"\(\+?(\d{1,4})\)|\+\s*(\d{1,4})\b", str(text or ""))
+    return (found[1] or found[2]) if found else ""
+
+
+def same_dial_country(a, b):
+    """Two phone country values naming one country, whatever the spelling of the name or the code placement:
+    "United States (1)" and "+1 (United States of America)"."""
+    x, y = norm(dial_name(a)), norm(dial_name(b))
+    return bool(x and y) and (x == y or y in _alias_group(x))
 
 
 def icims_text(label):
@@ -2605,7 +2630,7 @@ async def icims_dropdown_commit(
         "e=>(s=>s&&s.selectedIndex>=0&&s.options[s.selectedIndex].value!==''"
         "?s.options[s.selectedIndex].text:'')(document.getElementById(e.id.slice(0,-14)))"
     )
-    if held and not placeholder_option(icims_text(held)) and norm(dial_name(icims_text(held))) == norm(dial_name(value)):
+    if held and not placeholder_option(icims_text(held)) and same_dial_country(icims_text(held), value):
         # The profile page is prefilled from the account: PepsiCo's phone code already held "United States (1)", and
         # searching the server-searched list for it again outlasted the field's deadline on every run (2026-10-27). A
         # repair that names the country alone ("United States") means the same row.

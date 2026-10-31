@@ -84,3 +84,29 @@ async def test_a_cold_search_that_shows_no_row_of_the_name_is_typed_once_more(pa
     assert committed == "Computer Science"
     assert await pills(page) == ["Computer Science"]
     assert await page.evaluate("window.SEARCHES") == ["Computer Science", "Computer Science"]
+
+
+def test_a_dial_code_is_stripped_in_every_spelling_a_site_uses():
+    for text in ("United States (1)", "(+1) United States", "+1 (United States)", "United States +1"):
+        assert widgets.dial_name(text) == "United States"
+    assert widgets.dial_name("United States of America (+1)") == "United States of America"
+    # A bare number is part of a name, not a code.
+    assert widgets.dial_name("2 Year Degree") == "2 Year Degree"
+
+
+def test_the_saved_code_and_the_row_the_page_holds_name_one_country():
+    assert widgets.same_dial_country("United States (1)", "+1 (United States of America)")
+    assert widgets.same_dial_country("United States (1)", "United States of America (+1)")
+    assert not widgets.same_dial_country("United States (1)", "+44 (United Kingdom)")
+    assert not widgets.same_dial_country("Canada (1)", "+1 (United States)")
+
+
+def test_the_rescan_reads_a_phone_code_row_as_the_saved_code_in_any_spelling():
+    # iCIMS shows the committed row "United States (1)"; the re-scan compared it as text to "+1" and to
+    # "+1 (United States of America)" and called the field unset (54 stalled runs, 2026-10-24..31).
+    field = {"type": "combobox", "label": "Phone Country Code"}
+    for saved in ("+1", "+1 (United States of America)", "United States of America (+1)", "United States"):
+        assert widgets.same_value(field, "United States (1)", saved), saved
+    for saved in ("+44", "+44 (United Kingdom)"):
+        assert not widgets.same_value(field, "United States (1)", saved)
+    assert not widgets.same_value(field, "Canada (1)", "+1")  # A shared code is not a shared country.
