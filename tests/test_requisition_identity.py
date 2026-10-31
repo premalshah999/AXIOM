@@ -87,6 +87,7 @@ def test_a_workday_requisition_is_one_posting_across_portals_suffixes_and_the_ap
     # The same number at another employer is another posting.
     assert not same(jobs, "https://other.wd5.myworkdayjobs.com/en-US/external/job/Austin-TX/Analyst-I_R31111")
     assert not same(jobs, "https://wd5.myworkdaysite.com/recruiting/other/External/job/Dallas-TX/Analyst-I_R31111")
+    assert keys("https://wd5.myworkdayjobs.com/en-US/external/job/Austin-TX/Analyst-I_R31111") == set()  # No tenant.
 
 
 def test_an_icims_requisition_is_one_posting_on_careers_talent_and_jibe_portals():

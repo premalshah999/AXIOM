@@ -463,7 +463,8 @@ def requisition_keys(url: str):
         job = re.search(r"/job/.+_([^/]+)$", re.sub(r"/apply(?:/[^/?#]*)?$", "", path))
         site = re.search(r"/recruiting/([^/]+)/", path)
         tenant = site[1] if site else host.split(".")[0] if host.endswith(".myworkdayjobs.com") else ""
-        if job and tenant:  # _1214365-1 and _1214365-3 are one requisition posted for several locations.
+        if job and tenant and not re.fullmatch(r"wd\d+", tenant.lower()):  # No tenant, no scope for the number.
+            # _1214365-1 and _1214365-3 are one requisition posted for several locations.
             req = re.sub(r"(?<=[0-9])-[0-9]{1,2}$", "", job[1])
             found[f"workday:{tenant.lower()}:{req.lower()}"] = req
     portal = host[: -len(".icims.com")] if host.endswith(".icims.com") else ""
