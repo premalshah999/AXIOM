@@ -7,7 +7,7 @@ extends it to every adapter, with the silence read from the mailbox instead of a
 
 import time
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -104,6 +104,10 @@ def seed_resets(service, challenge_state="expired", poll=None, since=ASKED - 30,
                         created_at=datetime.now(UTC).isoformat()))
 
 
+def when_iso(seconds):
+    return (datetime.now(UTC) + timedelta(seconds=seconds)).isoformat()
+
+
 def silent(service):
     return Adapter.reset_mail_silent(adapter(None, service=service, silent=None), dict(PROVEN))
 
@@ -132,6 +136,27 @@ def test_any_mail_in_the_window_means_the_employer_does_answer(service, poll):
 @pytest.mark.parametrize("state", ["matched", "consumed", "verified", "failed", "pending"])
 def test_a_reset_that_was_claimed_or_is_still_open_is_not_silence(service, state):
     seed_resets(service, challenge_state=state, poll=QUIET)
+    assert not silent(service)
+
+
+def test_an_old_answered_reset_does_not_outvote_the_recent_silence(service):
+    # Farmers (2026-10-31): a reset mail came on 10-26, then two resets in a row were never answered.
+    old = (datetime.now(UTC) - timedelta(days=5)).isoformat()
+    with service.db.exclusive() as s:
+        s.add(Run(id="run0", job_id="job1", mode="submit", state="waiting_browser", packet={}))
+        s.add(Event(run_id="run0", kind="mail_poll", message="Checked the verification mailbox",
+                    data={**QUIET, "candidate_count": 1, "matching_count": 1}, created_at=old))
+    extra = MailChallenge(id="c2", run_id="run1", rule_id="r", mailbox_id="m", recipient="alex@example.test",
+                          kind="password_reset", state="expired", since=ASKED - 3600, expires=ASKED - 2400, created_at=when_iso(-3600))
+    seed_resets(service, poll=QUIET, extra_challenge=extra)
+    with service.db.exclusive() as s:
+        s.add(MailChallenge(id="c0", run_id="run0", rule_id="r", mailbox_id="m", recipient="alex@example.test",
+                            kind="password_reset", state="expired", since=ASKED - 400000, expires=ASKED - 398800, created_at=old))
+    assert silent(service)
+    # ... but a recent window that did see a mail still counts.
+    with service.db.exclusive() as s:
+        s.add(Event(run_id="run1", kind="mail_poll", message="Checked", data={**QUIET, "candidate_count": 1},
+                    created_at=datetime.now(UTC).isoformat()))
     assert not silent(service)
 
 
