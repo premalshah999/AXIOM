@@ -3325,6 +3325,15 @@ class FormSession:
                     if str(exc) != widgets.NO_OPTIONS_READABLE:
                         raise
                     # A plain UI5 Input without suggestions keeps the typed value; the readback below checks it.
+            elif kind == "text" and await widgets.is_place_search(el):
+                from .answers import address_location_option
+
+                address = self.resolver.profile.address
+                choose = lambda texts: address_location_option(texts, address)  # noqa: E731
+                if picked := await widgets.pick_place(frame, el, value, choose):
+                    committed = picked
+                else:
+                    el = await widgets.human_type(el, value, timeout=4000)
             elif kind == "tel" or (
                 re.search(r"phone|mobile|telephone|\bcell(?:ular)?\b", field["label"], re.I) and "@" not in str(value)
             ):

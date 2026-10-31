@@ -2473,6 +2473,50 @@ async def ui5wc_radio(host):
     return False
 
 
+async def is_place_search(el):
+    """A Google Places search box: Places Autocomplete marks its input `pac-target-input`, and <gmpx-place-picker> holds one."""
+    try:
+        return bool(
+            await el.evaluate(
+                "e => e.classList.contains('pac-target-input') || e.getRootNode().host?.tagName === 'GMPX-PLACE-PICKER'",
+                timeout=1000,
+            )
+        )
+    except Exception:
+        return False
+
+
+async def pick_place(frame, el, value, choose=None, timeout=4.0):
+    """Type into a Google Places box and click the matching suggestion, which is all such a page keeps: typed text left its
+    hidden location input empty, and IXL's form answered "This field is required" (2026-10-31). Returns what the box then
+    shows, or None when no suggestion matches, so that the caller's plain write and the page's own check still decide.
+    `choose` is the address rule (forms.location_resolver); else the first suggestion naming the typed city."""
+    await el.fill("", timeout=4000)
+    await el.click(timeout=4000)
+    await el.fill(str(value), timeout=4000)
+    items = frame.locator(".pac-container .pac-item")
+    deadline = time.monotonic() + timeout
+    texts = []
+    while time.monotonic() < deadline:
+        # The query and the region are separate spans with no separator between them.
+        texts = await items.evaluate_all(
+            "es => es.filter(e => e.offsetParent !== null).map(e => [...e.children].map(s => s.innerText.trim())"
+            ".filter(Boolean).join(', '))"
+        )
+        if texts:
+            break
+        await asyncio.sleep(0.15)
+    city = norm(str(value).split(",")[0])
+    wanted = choose(texts) if choose and texts else None
+    if wanted is None:
+        wanted = next((text for text in texts if city and norm(text.split(",")[0]) == city), None)
+    if wanted is None:
+        return None
+    await items.nth(texts.index(wanted)).click(timeout=4000)
+    await asyncio.sleep(0.3)
+    return await el.input_value(timeout=2000)
+
+
 async def ui5_uncommitted(el, expected):
     """After blur, a UI5 text control that did not keep `expected` was cleared or flagged invalid."""
     if not norm(expected) or not await is_ui5_input(el):
