@@ -4249,7 +4249,8 @@ class FormSession:
 
             try:
                 letter = await cover_letter(self.resolver)
-            except (RuntimeError, ValueError, TimeoutError):
+            except (RuntimeError, ValueError, TimeoutError) as exc:
+                self.emit("cover_letter_refused", "The cover letter was not written", {"why": str(exc)[:400]})
                 self._pending(
                     field,
                     "Cover letter generation was unavailable",
