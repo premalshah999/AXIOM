@@ -29,6 +29,9 @@ class FakeMail:
         self.release_at = release_at
         self.begin_calls = 0
 
+    def sibling_senders(self, rule):
+        return []
+
     def rule_for(self, url):
         return {"id": "rule-1", "mailbox_id": 1, "sender_domains": ["oraclecloud.com", "oracle.com"]}
 

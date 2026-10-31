@@ -377,6 +377,40 @@ RESET_UNCONFIRMED = (
 )
 
 
+# Confirmed resets that nothing answered, per employer identity, before the engine stops asking. Since 10-17 17 of 221
+# password-reset challenges verified (8%); on accounts the employer itself said existed, 4 of 115. A reset is the move for an
+# account the employer confirmed, once or twice, not the default for an account nothing shows: the next steps are the
+# sign-up route (an account the employer never had), a replacement identity, then a clear stop.
+RESET_UNANSWERED_CAP = 2
+RESET_UNANSWERED_MEMORY = 7 * 24 * 3600  # an old silence (a sleeping Mac, a dead mailbox) is not held against the employer
+EXISTS_EVIDENCE_STATES = {"authenticated", "password_reset", "exists", "verification_pending", "locked"}
+ALIAS_UNREGISTERED = (
+    "The replacement address for this employer (the same inbox) has no account yet and its sign-up route was not found; "
+    "no password reset is requested for an address that was never registered. Reset the password for your own address in "
+    "your own browser, then save it under Settings > Accounts"
+)
+
+
+def account_evidenced(record):
+    """The employer itself showed an account exists for this address: a sign-in that worked, an 'already exists', an
+    accepted Create or activation. A saved credential, a refused sign-in or a requested reset show none."""
+    record = record or {}
+    return bool(
+        record.get("confirmed_at") or record.get("identity_exists_at") or record.get("authenticated_at")
+        or record.get("state") in EXISTS_EVIDENCE_STATES
+    )
+
+
+def resets_unanswered(record):
+    """Confirmed resets of this employer identity that nothing answered within the last RESET_UNANSWERED_MEMORY."""
+    record = record or {}
+    try:
+        at = datetime.fromisoformat(record.get("resets_unanswered_at") or "").timestamp()
+    except (TypeError, ValueError):
+        return 0
+    return int(record.get("resets_unanswered") or 0) if time.time() - at < RESET_UNANSWERED_MEMORY else 0
+
+
 def reset_proven(record):
     """The employer's page confirmed a reset request for this account (request_reset saw it). Only then does a reset
     email that never came say anything about the account. L3Harris, Farmers, Westinghouse, Hershey's and Belden
@@ -1077,11 +1111,17 @@ class Adapter:
         if (handle.get("kind") != "password_reset" or not handle.get("source_run_id")
                 or not handle.get("challenge_id") or not self.accounts.store):
             return False
-        from ..db import Run
+        from ..db import MailChallenge, Run
 
         with self.service.db.session() as session:
             source = session.get(Run, handle["source_run_id"])
-            return bool(source and source.job_id == self.job["id"])
+            if not (source and source.job_id == self.job["id"]):
+                return False
+            # The handle is read from the packet this run started with. Workday's own driver consumes a matched reset
+            # before the adapter drives (Accenture, Allegion 2026-10-30/31: the reset arrived, the password was saved
+            # and the sign-in succeeded), and this still armed a second password_reset wait that no mail could answer.
+            row = session.get(MailChallenge, handle["challenge_id"])
+            return bool(row and row.state in {"pending", "matched"})
 
     def matched_link_waiting(self):
         """This run was released by an emailed sign-in link that has arrived and not been opened yet.
@@ -2671,6 +2711,19 @@ class Adapter:
                         return False
         return True
 
+    def alias_unregistered(self, record):
+        """This run applies with the employer's replacement address (fresh_identity) and nothing shows an account for it
+        yet. National Louis (iCIMS, 2026-10-30): Central took the new address to its password step and the run asked for a
+        reset of an account nobody had created; no mail could come."""
+        from ..email_alias import employer_alias_key
+
+        db = getattr(self.service, "db", None)
+        key = employer_alias_key(self.job.get("url", ""))
+        setting = (db.get_setting(key) if db and key else None) or {}
+        local = str(getattr(self.accounts, "email", "") or "").partition("@")[0]
+        tag = str(setting.get("tag") or "")
+        return bool(tag and not setting.get("refused_at") and f"+{tag}" in local and not account_evidenced(record))
+
     def fresh_identity(self, record):
         """An identity the employer holds for the applicant's address that refuses the login and mails no reset is
         abandoned for this employer: its next run applies with a plus-address, which the employer reads as a new
@@ -2699,7 +2752,7 @@ class Adapter:
             or not reset_proven(record)
             or (record.get("confirmed_at") and not said_exists)
             or not (icims or said_exists)
-            or not self.reset_mail_silent(record)
+            or not (resets_unanswered(record) >= RESET_UNANSWERED_CAP or self.reset_mail_silent(record))
         ):
             return None
         db.set_setting(key, {"tag": EMPLOYER_ALIAS_TAG, "at": now(), "reason": "identity never signed in; no reset mail"})
@@ -2831,13 +2884,15 @@ class Adapter:
             and time.time() - float(record["reset_requested_at"]) > UNANSWERED_RESET_SECONDS
         )
         recent = time.time() - float(record.get("reset_requested_at") or 0) < RESET_WINDOW_SECONDS
+        if (late := await self.earlier_reset_mail(url, record)) is not None:
+            return late
         if record.get("state") == "password_unknown" and not unanswered:
             since = str(record.get("password_unknown_at") or "")
             try:
                 waited = (datetime.now(UTC) - datetime.fromisoformat(since)).total_seconds() if since else 0
             except ValueError:
                 waited = 0
-            if waited > RESET_RETRY_SECONDS:
+            if waited > RESET_RETRY_SECONDS and resets_unanswered(record) < RESET_UNANSWERED_CAP:
                 if fresh := self.fresh_identity(record):
                     return fresh  # a reset the mailbox never answered is not asked for a third time; a new identity is
                 self.emit("auth", "Requesting this employer's password reset again (resets are always allowed)")
@@ -2862,7 +2917,9 @@ class Adapter:
             # Farmers and Westinghouse (2026-10-21/22) repeated sign-in and reset on every run. Only the owner can
             # recover it; a password saved under Settings > Accounts (state password_reset) is used from then on.
             if unanswered:
-                self.accounts.mark(url, "password_unknown", self.accounts.saved(url), password_unknown_at=now())
+                self.accounts.mark(url, "password_unknown", self.accounts.saved(url), password_unknown_at=now(),
+                                   resets_unanswered=resets_unanswered(record) + 1, resets_unanswered_at=now())
+                record = {**record, "resets_unanswered": resets_unanswered(record) + 1, "resets_unanswered_at": now()}
             if fresh := self.fresh_identity(record):
                 return fresh
             return self.defer(
@@ -2904,7 +2961,7 @@ class Adapter:
                 manual,
                 state="waiting_browser",
                 blocker_type="email_wait",
-            )
+            ) | {"recovery_cause": "reset_cooldown"}
         if record.get("resets", 0) >= 3 and recent:
             return self.defer(
                 "Password resets for this employer are exhausted; sign in manually once",
@@ -2912,6 +2969,21 @@ class Adapter:
                 state="waiting_browser",
                 blocker_type="account",
             )
+        if resets_unanswered(record) >= RESET_UNANSWERED_CAP:
+            # Two confirmed resets, no mail: a third would only repeat the silence (Textron 9 waits, Lenovo 8, Bain and
+            # Intuit 7 each). The job stops here, with the reason, until a password is saved under Settings > Accounts.
+            return self.defer(PASSWORD_UNKNOWN, manual, state="waiting_browser", blocker_type="account")
+        if (self.alias_unregistered(record) or not account_evidenced(record)) and not self.attempts["create_first"]:
+            # An address the employer has no account for gets no mail from a reset. A replacement address was never
+            # registered; any other account that nothing shows exists is tried at the sign-up route once first (it answers
+            # "already exists" if it does, and then a reset is justified).
+            self.attempts["create_first"] += 1
+            if self.accounts.may_create and not create_spent(record) and create_allowed(record, self.e.run_id) and await self.switch(obs, CREATE_LINK):
+                self.accounts.mark(url, "no_account", self.accounts.saved(url) or self.accounts.credentials(url))
+                self.emit("account", "Nothing shows this employer has an account for this address; trying its sign-up route before asking for a reset")
+                return None
+            if self.alias_unregistered(record):
+                return self.defer(ALIAS_UNREGISTERED, manual, state="waiting_browser", blocker_type="account")
         self.attempts["reset"] += 1
         obs = await self.form.scan()
         forgot = [b for b in obs["controls"] if FORGOT.search(b["label"])]
@@ -3094,6 +3166,46 @@ class Adapter:
             return None
         return {**blocker, "reason": reason + ". The employer page remains open in Chrome."}
 
+    async def earlier_reset_mail(self, url, record):
+        """Use the reset mail an earlier request of this employer got after its window closed, instead of asking again.
+
+        Accenture's reset arrived 39 s after its 20-minute window, Fresenius' 2 min 14 s (2026-10-31); the next run saw
+        "requested recently" and waited, or asked again, which voids the first link. A window opened now starts at that
+        request (challenges.late_since), so one search finds the mail. None when nothing arrived (or none was asked)."""
+        from ..mail.challenges import LATE_MAIL_VALIDITY
+
+        asked = float((record or {}).get("reset_requested_at") or 0)
+        if (
+            not asked
+            or not (record or {}).get("reset_submitted_at")
+            or time.time() - asked > LATE_MAIL_VALIDITY
+            or self.attempts["late_reset"]
+            or not (inbox := getattr(self, "inbox", None))
+            or not inbox.configured
+            or inbox.live(getattr(self, "challenge", None))  # this run's own request is still open: it is the one waited for
+        ):
+            return None
+        self.attempts["late_reset"] += 1
+        if not await self.arm_mail("password_reset") or not (self.challenge or {}).get("late_window"):
+            self.release_mail()
+            return None
+        arrived = False
+        try:
+            await self.service.mail.poll_once()
+            from ..db import MailChallenge
+
+            with self.service.db.session() as session:
+                row = session.get(MailChallenge, self.challenge["id"])
+                arrived = bool(row and row.state == "matched")
+        except Exception:
+            pass  # A failed look never blocks the run; it asks the usual way.
+        if not arrived:
+            self.release_mail()
+            return None
+        self.emit("auth", "The earlier password reset's email arrived after its window closed; using it instead of asking again")
+        self.reset_in_progress = True
+        return await self.complete_password_reset(url)
+
     async def request_reset(self, obs, detail):
         """Explicit reset-email step: fill the email, open the request window, click, confirm the page took the
         request, then wait for the email."""
@@ -3109,11 +3221,13 @@ class Adapter:
             return self.defer(
                 "A password reset was requested recently; no additional reset will be requested during the cooldown",
                 state="waiting_browser", blocker_type="email_wait",
-            )
+            ) | {"recovery_cause": "reset_cooldown"}
 
         # Resumed mail is reclaimed by _drive before this request path. This guard covers both a fresh recovery and a
         # run reopened directly on the reset page, including requests whose page did not confirm submission.
         if cooling_down():
+            if (late := await self.earlier_reset_mail(url, self.accounts.record(url))) is not None:
+                return late
             return cooldown_result()
         view = self.dialog_view(obs) or obs
         one_page = self.one_page_reset(obs)
@@ -3311,7 +3425,7 @@ class Adapter:
             return self.defer("The employer did not accept the password reset confirmation: " + (detail or outcome))
         self.finish_mail("verified", "Employer accepted the password reset")
         record = self.accounts.record(url)
-        self.accounts.mark(url, "password_reset", credentials, resets=record.get("resets", 0) + 1)
+        self.accounts.mark(url, "password_reset", credentials, resets=record.get("resets", 0) + 1, resets_unanswered=0)
         self.attempts["sign_in"] = self.attempts["create"] = 0
         self.emit("auth", "Employer accepted the new account password")
         await self.form.settle(timeout=6)
@@ -3445,7 +3559,7 @@ class Adapter:
         self.finish_mail("verified", "Employer accepted the password reset")
         record = self.accounts.record(url)
         # The temporary password the employer mailed is spent by this change.
-        self.accounts.mark(url, "password_reset", credentials, resets=record.get("resets", 0) + 1,
+        self.accounts.mark(url, "password_reset", credentials, resets=record.get("resets", 0) + 1, resets_unanswered=0,
                            temporary_password=None, temporary_password_at=None)
         self.attempts["sign_in"] = self.attempts["create"] = 0
         self.emit("auth", "Employer accepted the new account password")

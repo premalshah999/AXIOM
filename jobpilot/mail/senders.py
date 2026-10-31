@@ -168,6 +168,30 @@ def tenant_tokens(url, company="", tenant=""):
     return out[:8]
 
 
+# One word an employer puts before or after its own name in a mail domain: Textron's Taleo mail comes from hrtextron.<tld>
+# ("Set up a user name and password at Textron", 2026-10-29/30: three mails, none matched, every reset 'did not arrive').
+LABEL_PREFIX = ("hr", "careers", "career", "jobs", "job", "recruiting", "recruit", "talent", "apply", "my", "team")
+LABEL_SUFFIX = ("hr", "careers", "jobs", "talent", "mail")
+
+
+def decorated_label(label, tokens):
+    """Whether a mail domain's label is an employer name with at most one such word around it. A hyphen separates words,
+    so look-alikes ("healthedge-careers", "stripe-careers-notify") never pass."""
+    return "-" not in label and any(
+        len(t) >= 5 and re.fullmatch(rf"(?:{'|'.join(LABEL_PREFIX)})?{re.escape(t)}(?:{'|'.join(LABEL_SUFFIX)})?", label)
+        for t in tokens
+    )
+
+
+def decorated_senders(tokens):
+    """Sender search terms for decorated_label domains: Gmail matches whole words, so `from:textron` never listed mail
+    from hrtextron.<tld>. At most three tokens, so the query stays short."""
+    names = [t for t in tokens if len(t) >= 5][:3]
+    return [p + t for t in names for p in ("hr", "careers", "jobs", "recruiting", "talent", "my")] + [
+        t + x for t in names for x in ("hr", "careers", "jobs")
+    ]
+
+
 def sender_allowed(domain, domains, tokens=(), employer_senders=False):
     """Exact rule domain or its subdomain; with employer senders, a domain the employer owns."""
     if any(domain == d or domain.endswith("." + d) for d in domains):
@@ -175,8 +199,10 @@ def sender_allowed(domain, domains, tokens=(), employer_senders=False):
     if not employer_senders:
         return False
     # The employer's own domain: its registrable label equals the tenant or company name exactly
-    # ("healthedge.com" for HealthEdge). Prefix look-alikes ("healthedge-careers.com") never pass.
-    return employer_label(domain) in {t for t in tokens if len(t) >= 4}
+    # ("healthedge.com" for HealthEdge), or with one word around it ("hrtextron.com"). Hyphenated look-alikes
+    # ("healthedge-careers.com") never pass.
+    label = employer_label(domain)
+    return label in {t for t in tokens if len(t) >= 4} or decorated_label(label, tokens)
 
 
 def sender_domains_overlap(first, second):
