@@ -31,5 +31,9 @@ def test_an_existing_profile_is_refused_before_any_demo_job_is_queued(against_th
 def test_a_new_installation_gets_past_the_profile_check(against_the_app):
     with pytest.raises(verify.VerificationFailed) as caught:
         verify.verify_deployment(against_the_app, timeout=5)
-    # The test app has no built dashboard, so the next check is the one that stops it; the profile check passed.
-    assert "GET / returned HTTP 503" in str(caught.value)
+    # The profile check passed: the next check stops it. Without a built dashboard that is the dashboard itself (503);
+    # in a checkout where `npm run build` has run, GET / is served and the next check is the disabled workers (the full
+    # suite after a landing build failed on this, 2026-10-31).
+    message = str(caught.value)
+    assert "new installation" not in message
+    assert message == "GET / returned HTTP 503" or message == "Workers are disabled"
