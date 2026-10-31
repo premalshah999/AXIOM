@@ -178,6 +178,7 @@ class ReviewsMixin:
     def answer_review(self, review_id, answer, *, document=False):
         """Save the owner's answer. `document` is True only when an uploaded file answers an upload question."""
         from .. import owner_questions as oq
+        from ..answers.validate import BARE_HISTORY_DATE
 
         if not answer.strip() or len(answer) > 8000:
             raise ValueError("Provide an answer of 1–8000 characters")
@@ -271,6 +272,13 @@ class ReviewsMixin:
                             or (other.context or {}).get("history_identity") != context.get("history_identity")
                         ):
                             continue  # Another row's "End Date" is a different question.
+                        if not row_scoped and (
+                            (other.context or {}).get("history_kind") or BARE_HISTORY_DATE.fullmatch(oq.tidy(review.question))
+                        ):
+                            # A rowless "End Date Month" answered one form's field; copied onto a history row it became
+                            # that row's date (4fe4eac6, run 6d2635b1, 2026-10). An answer with no row names no row, and
+                            # a bare date caption is never carried to another form's field.
+                            continue
                         fits = answer in other.options or oq.free_text_allowed(other.options, other.context)
                         if fits and (
                             scope == "personal" or employer.company.casefold() == job.company.casefold()
