@@ -173,8 +173,16 @@ def add_font_packages(destination, cache):
     for name, digest in FONT_PACKAGES.items():
         archive = cache / f"{name}.tar.xz"
         if not archive.exists():
-            with urllib.request.urlopen(ARCHIVE.format(name), timeout=120) as response:
-                archive.write_bytes(response.read())
+            # The address sends each request to some mirror, and one with a broken certificate chain failed a whole build
+            # (2026-10-31). Another try reaches another mirror, and the hash below decides what is kept.
+            for attempt in range(5):
+                try:
+                    with urllib.request.urlopen(ARCHIVE.format(name), timeout=120) as response:
+                        archive.write_bytes(response.read())
+                    break
+                except OSError:
+                    if attempt == 4:
+                        raise
         if hashlib.sha256(archive.read_bytes()).hexdigest() != digest:
             archive.unlink()
             raise SystemExit(f"{name}.tar.xz is not the one reviewed. Check it, then update FONT_PACKAGES in {__file__}")
