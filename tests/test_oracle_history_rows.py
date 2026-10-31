@@ -1,5 +1,5 @@
 """Oracle's Work and Education History (2026-10-23): "Employer Country"/"Employer City" took the employer's name, an
-education row captioned "Education at University of Maryland" was not a history row, and an uncaptioned education
+education row captioned "Education at Example State University" was not a history row, and an uncaptioned education
 block's "Start Date Month" took the availability answer "Immediately". Each section was refused."""
 
 from jobpilot.answers import Resolver
@@ -8,7 +8,7 @@ from jobpilot.schemas import EducationEntry, Profile, WorkEntry
 
 PROFILE = Profile(
     work=[WorkEntry(company="Acme Labs", title="AI Engineer", location="College Park, MD", start="2024-08", end="")],
-    education=[EducationEntry(school="University of Maryland", degree="Master of Science", field_of_study="Data Science",
+    education=[EducationEntry(school="Example State University", degree="Master of Science", field_of_study="Data Science",
                               start="2023-08", end="2025-05")],
     availability="Immediately",
     facts={"availability": "Immediately"},
@@ -31,7 +31,7 @@ def test_employer_city_and_country_are_the_rows_location(service):
 
 
 def test_a_row_named_by_its_school_is_that_education_entry(service):
-    month = ask(service, "Start Date Month", "Education at University of Maryland", type="select", options=MONTHS,
+    month = ask(service, "Start Date Month", "Education at Example State University", type="select", options=MONTHS,
                 date_parts=["Month", "Year"])
     assert month is not None and month.value == "08"
 
@@ -77,7 +77,7 @@ def test_a_gpa_box_takes_the_number(service):
     """INTEGRIS (Oracle, 2026-10-23, REA): "3.9/4.0" was refused with "Enter a valid number"."""
     from jobpilot.schemas import EducationEntry, Profile
 
-    saved = Profile(education=[EducationEntry(school="University of Maryland", degree="Master of Science", gpa="3.9/4.0")])
+    saved = Profile(education=[EducationEntry(school="Example State University", degree="Master of Science", gpa="3.9/4.0")])
     resolver = Resolver(saved, service.db, service.config)
     gpa = resolver.local({"id": "g", "label": "GPA", "type": "text", "group": "Education 1", "options": []})
     assert gpa.value == "3.9"
