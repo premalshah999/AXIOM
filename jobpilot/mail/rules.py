@@ -16,6 +16,8 @@ from .extraction import extract_message
 from .helpers import origin
 from .models import RuleInput
 from .senders import KNOWN_SENDERS
+from .senders import employer_label
+from .senders import tenant_tokens
 
 
 def connected_mailbox(session, recipient):
@@ -42,6 +44,26 @@ class RulesMixin:
                 return self.posting_url(url, session)
         known, final = shortlinks.cached(session, url)
         return final if known and final else url
+
+    def sibling_senders(self, rule):
+        """Employer-owned sender domains that other employers' rules learned and this employer's name carries.
+
+        TikTok's rule learned mail.bytedance.net; ByteDance's own rule, with the same name in its host and mail domain,
+        never saw it (15 of 15 ByteDance code windows expired, 2026-10-31). A domain is shared only when its registrable
+        label is one of this employer's own name tokens, and never when it belongs to a platform family or tenant suffix:
+        a shared sender is attributed by tenant identity (extract_message), not by being on a sibling's list."""
+        tokens = {t for t in tenant_tokens(rule["employer_origin"]) if len(t) >= 4}
+        platform = {d for domains in KNOWN_SENDERS.values() for d in domains}
+        have = set(rule["sender_domains"] or [])
+        found = []
+        with self.db.session() as s:
+            for other in s.scalars(select(MailRule).where(MailRule.employer_origin != rule["employer_origin"])):
+                for d in other.sender_domains or []:
+                    if d in have or d in found or any(d == p or d.endswith("." + p) for p in platform):
+                        continue
+                    if employer_label(d) in tokens:
+                        found.append(d)
+        return found
 
     def add_link_origin(self, rule_id, link_origin):
         """Record an employer-owned login origin (careers.qualcomm.com for qualcomm.eightfold.ai)."""
@@ -134,6 +156,11 @@ class RulesMixin:
                     row = s.get(MailRule, existing["id"])
                     row.sender_domains = [*current, *missing]
                 existing["sender_domains"] = [*current, *missing]
+            if siblings := self.sibling_senders(existing):
+                with self.db.exclusive() as s:
+                    row = s.get(MailRule, existing["id"])
+                    row.sender_domains = [*existing["sender_domains"], *siblings]
+                existing["sender_domains"] = [*existing["sender_domains"], *siblings]
             return existing
         known = KNOWN_SENDERS
         own_site = job.get("ats") == "custom" and (urlsplit(job.get("url", "")).hostname or "")

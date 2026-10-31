@@ -22,6 +22,7 @@ from .extraction import UNBRANDED_MAX_CANDIDATES
 from .extraction import UNBRANDED_SEARCH_TERMS
 from .extraction import extract_message
 from .extraction import latest_employer_code
+from .extraction import names_employer
 from .extraction import newest_reset_link
 from .helpers import origin
 from .senders import EMPLOYER_SENDER_FAMILIES
@@ -33,6 +34,9 @@ from .senders import sender_domains_overlap
 from .senders import tenant_tokens
 
 
+# Platforms whose mail has no attribution rules of its own, so a message that names the employer is enough to learn them
+# (family_learning). Workday learns from an exact tenant link; Oracle, iCIMS and Greenhouse attribute by their own rules.
+LEARNABLE_FAMILIES = {"eightfold", "avature", "smartrecruiters", "jobvite", "taleo", "successfactors", "adp"}
 # A gap this long between two looks at the clocks is the machine asleep, not a slow poll.
 SLEEP_GAP_SECONDS = 4
 # Searches a window past its end still gets before it is called empty (a poll that fails does not use them up).
@@ -136,11 +140,10 @@ class PollingMixin:
                             or self.final_attempts.get(c.id, 0) >= LAST_SEARCHES
                         )
                     ):
-                        c.state, c.payload, c.reason = (
-                            "expired",
-                            "",
-                            "Application or verification deadline ended",
-                        )
+                        # A claimed mail (consumed) keeps the reason it was handed over with: Fortinet's code was typed at
+                        # 14:27 and the row then read "deadline ended" as if the mail had gone unused (2026-10-31).
+                        c.reason = c.reason if c.state == "consumed" else "Application or verification deadline ended"
+                        c.state, c.payload = "expired", ""
                     elif c.expires < current:
                         last_chance.append(c.id)
                 ended = self.end_dead_email_waits(s)
@@ -337,6 +340,11 @@ class PollingMixin:
                                         token = extract_message(msg, proof_rule, c)
                                         if token:
                                             learned_domain = domain
+                            elif not token and diagnostics.get("rejection") == "sender" and c["employer_senders"]:
+                                learned_domain = self.family_learning(msg, rule, c)
+                                if learned_domain:
+                                    token = extract_message(msg, {**rule, "sender_domains": [*rule["sender_domains"], *learned_domain]}, c)
+                                    learned_domain = learned_domain if token else None
                         except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
                             self.quarantine(c["mailbox_id"], m["id"], "invalid_message")
                             token, diagnostics = None, {"rejection": "invalid_message"}
@@ -413,11 +421,12 @@ class PollingMixin:
                         if learned_domain:
                             # Learning must not create an overlapping active
                             # sender lease while another employer owns it.
+                            learned = [learned_domain] if isinstance(learned_domain, str) else list(learned_domain)
                             conflict = any(
                                 other.run_id != c["run_id"]
                                 and other.expires > time.time()
                                 and (other_rule := s.get(MailRule, other.rule_id))
-                                and sender_domains_overlap([learned_domain], other_rule.sender_domains)
+                                and sender_domains_overlap(learned, other_rule.sender_domains)
                                 for other in s.scalars(
                                     select(MailChallenge).where(MailChallenge.state.in_(LIVE))
                                 )
@@ -451,15 +460,16 @@ class PollingMixin:
                                 owner, max(row.expires, time.time() + MATCH_HOLD_SECONDS.get(row.kind, 600))
                             )
                             if learned_domain:
-                                current_rule.sender_domains = list(
-                                    dict.fromkeys(current_rule.sender_domains + [learned_domain])
-                                )
+                                learned = [learned_domain] if isinstance(learned_domain, str) else list(learned_domain)
+                                current_rule.sender_domains = list(dict.fromkeys(current_rule.sender_domains + learned))
                                 s.add(
                                     Event(
                                         run_id=row.run_id,
                                         kind="mail_sender_learned",
-                                        message="Learned an authenticated sender from the exact Workday tenant link",
-                                        data={"sender_domain": learned_domain, "challenge_id": row.id},
+                                        message="Learned an authenticated sender from the exact Workday tenant link"
+                                        if isinstance(learned_domain, str)
+                                        else "Learned the employer's platform sender: its mail names the employer and no other open window's",
+                                        data={"sender_domain": learned[0], "sender_domains": learned, "challenge_id": row.id},
                                     )
                                 )
                             s.add(MailConsumption(key=key, challenge_id=row.id))
@@ -527,6 +537,28 @@ class PollingMixin:
                             )
                 while len(self.final_attempts) > 200:
                     self.final_attempts.pop(next(iter(self.final_attempts)))
+
+    @staticmethod
+    def family_learning(msg, rule, c):
+        """The sender domains of the platform a rejected message comes from, when that mail is this employer's.
+
+        AARP's career site (apply.aarp.org) is Eightfold under a label of "custom", so its rule listed only aarp.org; the
+        mail ("AARP Careers" <confirm@eightfold.ai>, "Verify your email", 2026-10-31) was refused as `sender` on every poll.
+        A platform family's senders belong on the rule of an employer that uses it. The proof is the mail's own: the
+        sender is in a family without attribution rules of its own (Workday, Oracle, iCIMS and Greenhouse have theirs), the
+        message names this employer in its subject, sender name or snippet, and names none of the other open windows'
+        employers. Every other gate (DMARC, recipient, window, tenant label) still applies to the re-read."""
+        senders = getaddresses([h["value"] for h in msg["payload"]["headers"] if h["name"].lower() == "from"])
+        if len(senders) != 1 or not c.get("tenant_tokens"):
+            return None
+        domain = senders[0][1].rpartition("@")[2].lower()
+        for name, family in KNOWN_SENDERS.items():
+            if name in LEARNABLE_FAMILIES and any(domain == d or domain.endswith("." + d) for d in family):
+                if names_employer(msg, c["tenant_tokens"]) and not any(
+                    names_employer(msg, peer) for peer in c.get("peer_tokens") or []
+                ):
+                    return [d for d in family if d not in rule["sender_domains"]] or None
+        return None
 
     async def outside_senders(self, c):
         """Diagnosis only, for a link or reset wait whose sender search listed nothing: the sender domains of reset or

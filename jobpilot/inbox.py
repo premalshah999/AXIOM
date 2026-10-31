@@ -66,7 +66,11 @@ class Inbox:
 
         existing = self.mail.rule_for(job["url"])
         family = set(KNOWN_SENDERS.get(job.get("ats"), []))
-        if existing is None or (family and not family <= set(existing.get("sender_domains") or [])):
+        if (
+            existing is None
+            or (family and not family <= set(existing.get("sender_domains") or []))
+            or self.mail.sibling_senders(existing)  # a sender a sibling brand's rule learned (ByteDance / TikTok)
+        ):
             return await self.mail.ensure_rule(job, recipient) or existing
         return existing
 
