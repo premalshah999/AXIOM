@@ -159,7 +159,7 @@ class PollingMixin:
                     job = s.get(Job, run.job_id) if run else None
                     # Tenant identity: the employer this run applies to, never message text.
                     c["tenant_tokens"] = tenant_tokens(
-                        (job.url if job else "") or (rule or {}).get("employer_origin", ""),
+                        self.posting_url(job.url if job else "", s) or (rule or {}).get("employer_origin", ""),
                         job.company if job else "",
                         sf_tenant(s, job),
                     )
@@ -198,7 +198,7 @@ class PollingMixin:
                         peer_job = s.get(Job, peer_run.job_id) if peer_run else None
                         if peer_job and peer_job.id != (job.id if job else None):
                             c["peer_tokens"].append(
-                                tenant_tokens(peer_job.url or "", peer_job.company or "", sf_tenant(s, peer_job))
+                                tenant_tokens(self.posting_url(peer_job.url or "", s), peer_job.company or "", sf_tenant(s, peer_job))
                             )
                     c["oracle_pod"] = oracle_pod(job.url) if job and job.ats == "oracle" else ""
                     c["oracle_peers"] = []

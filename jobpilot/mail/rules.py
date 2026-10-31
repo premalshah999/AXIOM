@@ -27,6 +27,22 @@ def connected_mailbox(session, recipient):
 
 
 class RulesMixin:
+    def posting_url(self, url, session=None):
+        """Where a job really is: the posting a short link points to (the saved answer only, never the network), else the
+        url itself. A job entered through go.vansh.nyc/HD had its mail rule keyed on go.vansh.nyc, so the Workday reset it
+        asked for (a link on interdigital.wd5.myworkdayjobs.com) was refused on every poll as a foreign origin
+        (Interdigital 4c9405de, 2026-10-29), and its sender list was another employer's. The rule, its link origins and the
+        tenant tokens follow the posting."""
+        from .. import shortlinks
+
+        if not url or not shortlinks.is_shortlink(url):
+            return url
+        if session is None:
+            with self.db.session() as session:
+                return self.posting_url(url, session)
+        known, final = shortlinks.cached(session, url)
+        return final if known and final else url
+
     def add_link_origin(self, rule_id, link_origin):
         """Record an employer-owned login origin (careers.qualcomm.com for qualcomm.eightfold.ai)."""
         with self.db.exclusive() as s:
@@ -80,6 +96,7 @@ class RulesMixin:
             with self.db.session() as session:
                 return self.rule_for(url, session=session)
         s = session
+        url = self.posting_url(url, s)
         rows = list(
             s.scalars(
                 select(MailRule).where(MailRule.employer_origin == origin(url), MailRule.enabled.is_(True))
@@ -97,6 +114,7 @@ class RulesMixin:
 
     async def ensure_rule(self, job, recipient):
         """Known ATS senders are scoped to this employer and the applicant's mailbox."""
+        job = {**job, "url": self.posting_url(job.get("url", ""))}  # a short link's rule belongs to the posting it opens
         existing = self.rule_for(job["url"])
         if existing:
             # A rule built from its platform's senders gains the senders learned since. L3Harris's rule (2026-10-21)
