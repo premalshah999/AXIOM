@@ -512,6 +512,7 @@ export type Board = {
   fits?: Record<"all" | "eligible" | "unranked" | "below" | "uncertain", number>;
 };
 
+export type Proof = "page" | "both" | "email" | "existing" | "platform" | "final_page" | "dashboard" | "applicant" | "none";
 export type Success = {
   job_id: string;
   run_id: string;
@@ -523,6 +524,8 @@ export type Success = {
   website_confirmed: boolean;
   email_confirmed: boolean;
   existing_application: boolean;
+  /** What proved it (the server decides from the receipt): see PROOF in model.ts. */
+  proof: Proof;
 };
 export type Archived = {
   job_id: string;

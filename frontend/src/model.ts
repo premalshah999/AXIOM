@@ -1,6 +1,6 @@
 // Product semantics for run/job states. One place decides how a state reads,
 // which group it belongs to and which controls are honest for it.
-import type { Job, JobRequest, PipelineRow, Reserved, Review, Run, Snapshot } from "./types";
+import type { Job, JobRequest, PipelineRow, Proof, Reserved, Review, Run, Snapshot } from "./types";
 
 export type Tone = "ok" | "run" | "ask" | "hold" | "fix" | "bad" | "idle";
 export type Group =
@@ -374,15 +374,20 @@ export function deriveRows(s: Snapshot): JobRow[] {
   return rows;
 }
 
-export function evidenceLabel(r: {
-  website_confirmed?: boolean;
-  email_confirmed?: boolean;
-  existing_application?: boolean;
-}) {
-  if (r.existing_application) return "Existing application";
-  if (r.website_confirmed && r.email_confirmed) return "Confirmation page and email";
-  if (r.email_confirmed) return "Employer email";
-  if (r.website_confirmed) return "Confirmation page";
-  // Confirmed with an empty receipt: the applicant recorded it, or the platform answered "created". Not a page, not an email.
-  return "No receipt on file";
+// What proved a confirmed application, in plain words. The server picks the id from the receipt (jobpilot/api/routes/state.py, whose
+// spreadsheet says the same words, and a test keeps the two equal).
+export const PROOF: Record<Proof, string> = {
+  page: "Confirmation page",
+  both: "Confirmation page and email",
+  email: "Employer email",
+  existing: "Existing application",
+  platform: "Platform response",
+  final_page: "Final page",
+  dashboard: "Employer dashboard",
+  applicant: "Recorded by you",
+  none: "No receipt on file",
+};
+
+export function evidenceLabel(r: { proof: Proof }) {
+  return PROOF[r.proof];
 }

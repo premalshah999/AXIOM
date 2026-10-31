@@ -397,9 +397,10 @@ function DetailBody({ detail, state, runs, runId, open }: { detail: Detail; stat
       {detail.screenshot && (
         <Panel title="Final page">
           {shot ? (
-            <a className="ax-shot" href={`/api/runs/${run.id}/screenshot`} target="_blank" rel="noreferrer">
+            // Shown in place: a link to the same picture would open the system browser from the native window, with no session.
+            <div className="ax-shot">
               <img src={`/api/runs/${run.id}/screenshot`} alt="The last application page AXIOM saw" />
-            </a>
+            </div>
           ) : (
             <div>
               <Button size="sm" onClick={() => setShot(true)}>

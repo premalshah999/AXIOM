@@ -1,14 +1,14 @@
-import { CheckCheck, CopyCheck, Download, ExternalLink, FileCheck2, FileMinus, FilterX, MailCheck, SearchX, ShieldCheck } from "lucide-react";
+import { CheckCheck, CopyCheck, Download, ExternalLink, FileCheck2, FileMinus, FileText, FilterX, Globe, LayoutDashboard, MailCheck, SearchX, ShieldCheck, UserCheck, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useDraft, useNow, usePoll } from "./hooks";
 import { confirmedToday } from "./identity/state";
-import { evidenceLabel } from "./model";
+import { evidenceLabel, PROOF } from "./model";
 import type { JobRow } from "./model";
 import { usePipelinePage } from "./pipeline";
 import { Pagination, usePagination } from "./pagination";
-import type { Archived, Success } from "./types";
+import type { Archived, Proof, Success } from "./types";
 import { ArchiveList } from "./archive";
 import { useSelection } from "./bulk";
 import { RowActions } from "./jobactions";
@@ -23,7 +23,7 @@ import "./styles/applications.css";
 // drawer opens on its status and its Proof), and the posting opens in the system browser (a real link with a target, which the
 // native window hands to the Mac).
 
-type Evidence = "all" | "page" | "email" | "existing" | "none";
+type Evidence = "all" | Exclude<Proof, "both">;
 type Period = "all" | "today" | "week" | "month";
 type Filters = { q: string; evidence: Evidence; period: Period; platform: string };
 
@@ -34,36 +34,38 @@ const PERIODS: { value: Period; label: string; days: number }[] = [
   { value: "month", label: "Last 30 days", days: 30 },
 ];
 
-const EVIDENCE: { value: Evidence; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "page", label: "Confirmation page" },
-  { value: "email", label: "Employer email" },
-  { value: "existing", label: "Existing application" },
-  { value: "none", label: "No receipt on file" },
-];
+// The proof menu: a confirmation page or an employer email (each also counts a job proved by both), then every other proof the
+// ledger holds, in this order. One with no application is left out unless it is chosen.
+const EVIDENCE: Evidence[] = ["all", "page", "email", "existing", "platform", "final_page", "dashboard", "applicant", "none"];
 
-// What each kind of proof means, in the words a person would use.
-const PROOF_HELP = {
+// What each proof means, in the words a person would use, and its small icon (both shows two).
+const PROOF_HELP: Record<Proof, string> = {
   page: "The employer's own page said the application was received.",
   email: "An email from the employer acknowledged the application.",
   both: "The employer's page and an email from the employer both acknowledged it.",
   existing: "The employer says an application from you was already on file.",
-  none: "No page or email was captured. You recorded it as sent, or the platform answered that it was created. Open it to see which.",
-} as const;
-
-function proofKind(r: Success): keyof typeof PROOF_HELP {
-  if (r.existing_application) return "existing";
-  if (r.website_confirmed && r.email_confirmed) return "both";
-  if (r.website_confirmed) return "page";
-  return r.email_confirmed ? "email" : "none";
-}
+  platform: "The platform answered the application as created.",
+  final_page: "The last page of the application said it was received.",
+  dashboard: "The employer's candidate dashboard lists the application.",
+  applicant: "You checked the employer's page or email and recorded it as sent.",
+  none: "No confirmation page or employer email is on file. Open it to see why it counts.",
+};
+const PROOF_ICON: Record<Proof, LucideIcon[]> = {
+  page: [FileCheck2],
+  email: [MailCheck],
+  both: [FileCheck2, MailCheck],
+  existing: [CopyCheck],
+  platform: [Globe],
+  final_page: [FileText],
+  dashboard: [LayoutDashboard],
+  applicant: [UserCheck],
+  none: [FileMinus],
+};
 
 function hasProof(r: Success, kind: Evidence) {
   if (kind === "page") return r.website_confirmed;
   if (kind === "email") return r.email_confirmed;
-  if (kind === "existing") return r.existing_application;
-  if (kind === "none") return !(r.website_confirmed || r.email_confirmed || r.existing_application);
-  return true;
+  return kind === "all" || r.proof === kind;
 }
 
 // Local midnight of the first day the period covers, as epoch ms (0 for any time).
@@ -117,14 +119,12 @@ function Sent({ r, now }: { r: Success; now: number }) {
 }
 
 function Proof({ r }: { r: Success }) {
-  const kind = proofKind(r);
   return (
-    <Tooltip label={PROOF_HELP[kind]}>
-      <span className={"ap-proof" + (kind === "none" ? " is-none" : "")}>
-        {(kind === "page" || kind === "both") && <FileCheck2 size={15} aria-hidden="true" />}
-        {(kind === "email" || kind === "both") && <MailCheck size={15} aria-hidden="true" />}
-        {kind === "existing" && <CopyCheck size={15} aria-hidden="true" />}
-        {kind === "none" && <FileMinus size={15} aria-hidden="true" />}
+    <Tooltip label={PROOF_HELP[r.proof]}>
+      <span className={"ap-proof" + (r.proof === "none" ? " is-none" : "")}>
+        {PROOF_ICON[r.proof].map((Icon, i) => (
+          <Icon key={i} size={15} aria-hidden="true" />
+        ))}
         {evidenceLabel(r)}
       </span>
     </Tooltip>
@@ -184,7 +184,11 @@ function Confirmed({ ledger }: { ledger: ReturnType<typeof usePoll<{ application
     for (const r of byPlatform) names.set(r.ats, (names.get(r.ats) || 0) + 1);
     if (platform !== "all" && !names.has(platform)) names.set(platform, 0);
     return {
-      evidence: EVIDENCE.map((o) => ({ ...o, count: byProof.filter((r) => hasProof(r, o.value)).length })),
+      evidence: EVIDENCE.map((value) => ({
+        value,
+        label: value === "all" ? "All" : PROOF[value],
+        count: byProof.filter((r) => hasProof(r, value)).length,
+      })).filter((o) => o.count > 0 || o.value === "all" || o.value === evidence),
       period: PERIODS.map((o) => ({ ...o, count: all.filter((r) => passes(r, f, periodStart(o.value, now))).length })),
       platform: [
         { value: "all", label: "All", count: byPlatform.length },
@@ -236,7 +240,7 @@ function Confirmed({ ledger }: { ledger: ReturnType<typeof usePoll<{ application
         return (
           <span className="ap-act">
             <Button size="sm" className="ax-lead ap-receipt" onClick={() => openJob(r.job_id, r.run_id)}>
-              {proofKind(r) === "none" ? "Details" : "Receipt"}
+              {r.proof === "none" ? "Details" : "Receipt"}
             </Button>
             {link && (
               <a
