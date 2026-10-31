@@ -1974,6 +1974,21 @@ class BrowserEngine:
                         "evidence": "My Applications: applied-application view with Withdraw Application"},
         }
 
+    async def posting_closure(self, reason="The posting is closed or no longer available"):
+        """The result for a page that says its posting is gone. A Workday "The page you are looking for doesn't exist"
+        is also what a stale route or a busy tenant renders, so a Workday posting closes only on the employer's own
+        search (workday.missing_posting_result: not listed, or two runs at the posting itself); page_closed, the
+        controller and the adapter's closed step each closed such a page on its first sight (HNTB, Moffitt, Nordstrom,
+        Varian, WVU Medicine and Evolent, 2026-10-29: all six are still listed by their own career sites)."""
+        job = getattr(self, "job", None) or {}
+        if job.get("ats") == "workday":
+            from .workday import missing_posting_result, tenant_search_lists
+
+            return missing_posting_result(
+                self.db, job, self.run_id, self.page.url, listed=await tenant_search_lists(job.get("url", ""))
+            )
+        return {"state": "closed", "reason": reason}
+
     async def page_closed(self):
         """A stalled flow that ends on the posting's own "position has been filled" (four runs at one career site,
         2026-10-27, each parked as a repair): no application form is left, so the posting is closed."""
@@ -1992,7 +2007,8 @@ class BrowserEngine:
                     "nothing was submitted: " + limit[0][:120]}
         if fields or not (match := CLOSED.search(text)):
             return None
-        return {"state": "closed", "reason": "The posting is closed: " + match[0][:120]}
+        verdict = await self.posting_closure("The posting is closed: " + match[0][:120])
+        return verdict if verdict["state"] == "closed" else None
 
     async def page_acknowledged(self):
         """A stalled flow that ends on the employer's acknowledgement. Sopra Steria (SmartRecruiters 2026-10-26): its
@@ -5333,11 +5349,10 @@ class BrowserEngine:
 
                     if not self.armed and CLOSED.search(obs.get("text", "") or ""):
                         # The controller recognized a closed posting; retrying cannot help.
-                        self.result = {
-                            "state": "closed",
-                            "reason": "The posting is closed or no longer available",
-                        }
-                        return
+                        verdict = await self.posting_closure()
+                        if verdict["state"] == "closed":  # Workday's own search may still list it: carry on then.
+                            self.result = verdict
+                            return
                     if self.run_record["mode"] == "submit" and (receipt := await self.form.proof()):
                         # EY (SuccessFactors) 2026-10-16: the form's own Apply submitted and the page said so;
                         # the controller then stopped for help, and the run stayed "waiting".

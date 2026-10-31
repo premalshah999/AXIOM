@@ -1719,7 +1719,7 @@ class Adapter:
                 "reason": "The employer's application limit for this applicant is reached, so nothing was submitted: "
                 + notice,
             }
-        return {"state": "closed", "reason": "The posting is closed or no longer available"}
+        return await self.e.posting_closure()
 
     async def on_blocked(self, obs):
         return self.defer(

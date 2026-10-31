@@ -129,6 +129,11 @@ def missing_posting_result(db, job, run_id, page_url, listed=None):
         }
     if listed is False:
         return {"state": "closed", "reason": CLOSED_REASON}
+    if listed is True:
+        # The employer's own search still lists the requisition, so the "does not exist" page is this route or a
+        # busy tenant, not the posting: 23 live postings (Disney, Cisco, Toyota, Motorola, Applied Materials...) were
+        # closed on it by 2026-10-29 and still answer their own posting API today. Never closed on that evidence.
+        return {"state": "waiting_browser", "reason": POSTING_MISSING_REASON, "recovery_cause": "posting_unavailable"}
     key = "posting_gone:" + job["id"]
     seen = list((db.get_setting(key, {}) or {}).get("run_ids", []))
     if run_id not in seen:
