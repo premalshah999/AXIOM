@@ -1992,20 +1992,18 @@ class BrowserEngine:
     async def page_closed(self):
         """A stalled flow that ends on the posting's own "position has been filled" (four runs at one career site,
         2026-10-27, each parked as a repair): no application form is left, so the posting is closed."""
-        from .adapters.base import APPLICATION_LIMIT, CLOSED
+        from .adapters.base import closed_notice, form_open, limit_notice
 
         try:
             obs = await self.form.scan()
         except Exception:
             return None
-        fields = [f for f in obs.get("fields", []) if f["type"] not in {"search", "hidden"}
-                  and not re.search(r"search|keyword|location", f.get("label", ""), re.I)]
-        text = " ".join([*obs.get("headings", []), *obs.get("errors", []), str(obs.get("text", ""))])
-        if not getattr(self, "armed", False) and (limit := APPLICATION_LIMIT.search(text)):
-            # TikTok's cap notice sits over a full form (see APPLICATION_LIMIT): the form does not make it open.
+        if not getattr(self, "armed", False) and (limit := limit_notice(obs)):
+            # TikTok's cap notice sits over a full form (see APPLICATION_LIMIT): the form does not make it open. Its
+            # own limit_check answered it, and the mailbox holds four ByteDance applications of 2026-10-14.
             return {"state": "closed", "reason": "The employer's application limit for this applicant is reached, so "
-                    "nothing was submitted: " + limit[0][:120]}
-        if fields or not (match := CLOSED.search(text)):
+                    "nothing was submitted: " + limit[:300]}
+        if form_open(obs) or not (match := closed_notice(obs)):
             return None
         verdict = await self.posting_closure("The posting is closed: " + match[0][:120])
         return verdict if verdict["state"] == "closed" else None
@@ -5345,9 +5343,9 @@ class BrowserEngine:
                 elif decision.action == "wait":
                     await asyncio.sleep(1)
                 else:
-                    from .adapters.base import CLOSED
+                    from .adapters.base import closed_notice, form_open
 
-                    if not self.armed and CLOSED.search(obs.get("text", "") or ""):
+                    if not self.armed and not form_open(obs) and closed_notice(obs):
                         # The controller recognized a closed posting; retrying cannot help.
                         verdict = await self.posting_closure()
                         if verdict["state"] == "closed":  # Workday's own search may still list it: carry on then.

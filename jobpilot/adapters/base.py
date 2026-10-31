@@ -135,6 +135,48 @@ APPLICATION_LIMIT = re.compile(
     r"\b(?:job )?application limit (?:has been |was |is )?(?:reached|exceeded)\b",
     re.I,
 )
+# A notice the page itself announces stands in a heading, an error banner or an open dialog, or alone on a short line of
+# its text; prose inside a job description or a help paragraph does not. Lines longer than this are prose.
+NOTICE_LINE = 400
+
+
+def notice(obs, pattern):
+    """The first match of `pattern` in what the page announces about itself, else None. One guarded check for every
+    "the posting is closed" and "the application limit is reached" decision: each used to search the whole body text,
+    where a job description or a "what happens when a position has been filled" paragraph could close an open posting
+    (a latent false closure; browser_contracts.missing_posting_notice guarded only the adapter path)."""
+    for region in [*obs.get("headings", []), *obs.get("errors", []),
+                   *(f"{d.get('title', '')} {d.get('text', '')}" for d in obs.get("dialogs", []))]:
+        if found := pattern.search(str(region)):
+            return found
+    for line in str(obs.get("text") or "").splitlines():
+        if len(line) <= NOTICE_LINE and (found := pattern.search(line)):
+            return found
+    return None
+
+
+def closed_notice(obs):
+    return notice(obs, CLOSED)
+
+
+def limit_notice(obs):
+    """The employer's own cap notice, as one sentence or two, or ''."""
+    found = notice(obs, APPLICATION_LIMIT)
+    if not found:
+        return ""
+    where = found.string
+    window = " ".join(where[max(0, found.start() - 250) : found.end()].split())
+    return " ".join(re.split(r"(?<=[.!?])\s+", window)[-2:])
+
+
+def form_open(obs):
+    """True when the page still holds application fields (a career site's own search box is not one)."""
+    return any(
+        f["type"] not in {"search", "hidden"} and not re.search(r"search|keyword|location", f.get("label", ""), re.I)
+        for f in obs.get("fields", [])
+    )
+
+
 CHECK_EMAIL = re.compile(
     r"check your (?:email|inbox)|(?:verification|confirmation|activation) (?:email|link) (?:has been |was )?sent|"
     r"we(?:'ve| have)? (?:just )?sent (?:you )?(?:an? )?(?:email|link|verification email)|verify your (?:email|account)|"
@@ -865,7 +907,7 @@ class Adapter:
             return Step.CONFIRMATION
         if ALREADY.search(text) and not passwords and len(meaningful) <= 1 and not self.find_apply(obs):
             return Step.ALREADY_APPLIED
-        if not self.committed and APPLICATION_LIMIT.search(text):
+        if not self.committed and limit_notice(obs):
             return Step.CLOSED  # The form may still show; the employer refuses any further application (on_closed).
         codes = self.code_fields(obs)
         if codes and (self.committed or dedicated_code_step(obs["fields"], codes)):
@@ -905,7 +947,7 @@ class Adapter:
             )
         if CHECK_EMAIL.search(text) and len(meaningful) <= 1 and not self.find_apply(obs):
             return Step.VERIFY_LINK
-        if not meaningful and CLOSED.search(text) and not self.find_apply(obs):
+        if not meaningful and closed_notice(obs) and not self.find_apply(obs):
             return Step.CLOSED
         emails = [f for f in meaningful if f["type"] == "email" or re.search(r"e-?mail", f["label"], re.I)]
         if (
@@ -1711,15 +1753,14 @@ class Adapter:
         }
 
     async def on_closed(self, obs):
-        if limit := APPLICATION_LIMIT.search(obs.get("text", "")):
-            window = " ".join(obs["text"][max(0, limit.start() - 250) : limit.end()].split())
-            notice = " ".join(re.split(r"(?<=[.!?])\s+", window)[-2:])
+        if limit := limit_notice(obs):
             return {
                 "state": "closed",
                 "reason": "The employer's application limit for this applicant is reached, so nothing was submitted: "
-                + notice,
+                + limit,
             }
-        return await self.e.posting_closure()
+        closure = getattr(self.e, "posting_closure", None)  # Workday closes only on its own search (browser.py).
+        return await closure() if closure else {"state": "closed", "reason": "The posting is closed or no longer available"}
 
     async def on_blocked(self, obs):
         return self.defer(
