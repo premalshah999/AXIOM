@@ -20,7 +20,7 @@ from . import icims_protocol, phone_fields, taleo_protocol, widgets
 from . import profile_photo
 from .answers import CONTACT, HISTORY_UNKNOWN, WOTC, answer_key, job_catalog_search_box, normalize
 from .answers.experience import COMPUTED as EXPERIENCE_COMPUTED
-from .answers.work_status import holds as work_status_holds
+from .answers.work_status import CITIZENSHIP_ASK, holds as work_status_holds
 from .answers.text import strip_catalog_code
 from .knowledge import topic
 from .browser_contracts import ActionResult, action_result, field_identity, fingerprint
@@ -3061,6 +3061,13 @@ class FormSession:
                     return None
 
                 choose = no_guess
+            if CITIZENSHIP_ASK.search(field["label"]):
+                # A country of citizenship is a fact, never the nearest row a model can see. Twitch's search window lacked
+                # the recorded country, and the guesses left "Laos" and "Latvia" on the form (2026-10-21).
+                async def no_citizenship_guess(texts):
+                    return None
+
+                choose = no_citizenship_guess
             broad_queries, degree_pick = [], None
             if EDUCATION["degree"].search(field["label"]):
                 from .answers.history import DEGREE_FALLBACK, degree_level
