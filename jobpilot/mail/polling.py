@@ -26,6 +26,7 @@ from .extraction import newest_reset_link
 from .helpers import origin
 from .senders import EMPLOYER_SENDER_FAMILIES
 from .senders import KNOWN_SENDERS
+from .senders import decorated_senders
 from .senders import icims_names
 from .senders import oracle_pod
 from .senders import sender_domains_overlap
@@ -239,7 +240,7 @@ class PollingMixin:
                     scan_started = time.monotonic()
                     senders = list(rule["sender_domains"])
                     if c["employer_senders"]:
-                        senders += c["tenant_tokens"]
+                        senders += c["tenant_tokens"] + decorated_senders(c["tenant_tokens"])
                     terms = ["from:" + d for d in senders]
                     if c["ats"] == "oracle" and c["kind"] in {"code", "auto"}:
                         terms.append('subject:"confirm your identity"')

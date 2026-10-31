@@ -171,18 +171,19 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
             unbranded_sender = True
         else:
             return reject("sender")
+    # Links are opened only on this employer's own origins (link_origins below), so another tenant's link can never be
+    # used. The sender-name heuristic rejected 133 Workday verification mails; none of the verified Workday runs had a
+    # tenant rejection. That holds for a link only: a code or password in the same mail has no origin to check, so it
+    # still needs the tenant gate (the reset-code branch below). A ServiceTitan window saw Accenture's reset (2026-10-31).
+    link_only_tenant = bool(
+        challenge.get("kind") in {"link", "password_reset"}
+        and rule.get("link_origins")
+        and all(not o.endswith((".myworkday.com", "//myworkday.com")) for o in rule["link_origins"])
+    )
     if (
         not (outside_rule or unbranded_sender)
         and tenant_conflict(address, domain, tokens)
-        and not (
-            # Links are opened only on this employer's own origins (link_origins
-            # below), so another tenant's link can never be used. The sender-name
-            # heuristic rejected 133 Workday verification mails; none of the
-            # verified Workday runs had a tenant rejection.
-            challenge.get("kind") in {"link", "password_reset"}
-            and rule.get("link_origins")
-            and all(not o.endswith((".myworkday.com", "//myworkday.com")) for o in rule["link_origins"])
-        )
+        and not link_only_tenant
     ):
         return reject("tenant")
     recipients = getaddresses(values.get("to", []) + values.get("delivered-to", []))
@@ -513,6 +514,8 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
     if kind in {"link", "auto", "password_reset"} and len(valid_links) == 1 and (reset or not codes):
         return {"kind": "link", "value": next(iter(valid_links))}
     if reset and not valid_links and len(codes) == 1 and not fallback_code:
+        if not (outside_rule or unbranded_sender) and tenant_conflict(address, domain, tokens):
+            return reject("tenant")  # a shared sender's code for another tenant has no origin to be refused on
         # A reset confirmed by an emailed code ("TikTok verification code: 523632", 2026-10-28) was refused as
         # token_format on every poll: reset windows took only links. One labelled code and no link is the reset's code.
         return {"kind": "code", "value": next(iter(codes))}
