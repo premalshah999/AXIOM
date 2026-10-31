@@ -69,6 +69,15 @@ def same_date(a, b):
         return False
     return all(first) and first == second
 
+# A question about where the applicant is now (not where they would move), and the way out some of them offer.
+PRESENT_LOCATION = re.compile(
+    r"commuting distance|within \d+ miles|(?:currently|presently) (?:meet|reside|live|located|based)\b|"
+    r"based on where you (?:currently )?(?:reside|live)|worksite location requirements|\blocal to\b",
+    re.I,
+)
+RELOCATION_ALTERNATIVE = re.compile(r"\b(?:or|and)\b[^.?]{0,40}\b(?:relocat\w*|move|willing)\b|\bwilling to relocate\b|\bif (?:no|not)\b", re.I)
+
+
 class ValidateMixin:
     def relationship_evidence_misused(self, field, answer, scoped_items):
         """True when an employer-relationship fact (the complete-history attestation, "never worked for X") backs an
@@ -117,6 +126,24 @@ class ValidateMixin:
                 if len(name := re.sub(r"\s+", " ", name).strip()) >= 3 and f" {name} " in text:
                     return False
         return True
+
+    def willingness_misused(self, field, answer):
+        """True when a Yes to a question about where the applicant lives now cites only relocation willingness. Lightcast
+        asked "within commuting distance of Moscow, ID ... based on where you currently reside, not your willingness to
+        relocate" and got Yes from fact:willing_to_relocate; Credence's "currently meet the worksite location
+        requirements" did too (2026-10-23, 10-27). Willingness answers a question that offers relocation as the way out."""
+        label = re.sub(r"\bnot (?:your )?willing(?:ness)?[^.?]*", " ", str(field["label"]))
+        if (
+            not PRESENT_LOCATION.search(label)
+            or RELOCATION_ALTERNATIVE.search(label)
+            or not re.fullmatch(r"(?:yes|y|true|checked)\.?", str(answer.value or "").strip(), re.I)
+        ):
+            return False
+        refs = answer.evidence_ids
+        return any("relocat" in x for x in refs) and not any(
+            re.search(r"(?:^|:)(?:city|state|county|metro_region|address|state_of_residence|country_of_residence)\b", x)
+            for x in refs
+        )
 
     def experience_cause(self, field, answer, yes):
         """Why a Yes/No to a years-of-experience question is refused, or "". A settled verdict from the work history
@@ -273,7 +300,7 @@ class ValidateMixin:
             # Duolingo?" and to "have you ever been a contractor for the Federal Reserve?" (2026-10-26). A fact about
             # past employers supports only a question about the applicant's own past employment, and never a Yes.
             valid_evidence = False
-        if self.prior_yes_unsupported(field, a):
+        if self.prior_yes_unsupported(field, a) or self.willingness_misused(field, a):
             valid_evidence = False
         if any("date_of_birth" in x or x.endswith(":dob") for x in a.evidence_ids) and not re.search(
             r"birth|\bdob\b|\bborn\b|\bages?\b|years? old|years of age|citizenship|nationality|permanent residency|"
