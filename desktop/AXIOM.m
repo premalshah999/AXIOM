@@ -366,6 +366,7 @@ static NSString *const SignedOutScript =
   // checkout's `jobpilot` instead of its own (2026-10-31, on the first launch beside production).
   env[@"PYTHONSAFEPATH"] = @"1";
   env[@"AXIOM_BUNDLE"] = resources;
+  env[@"OPENSSL_CONF"] = [resources stringByAppendingPathComponent:@"openssl.cnf"];
   NSTask *task = [NSTask new];
   task.executableURL = [NSURL fileURLWithPath:[resources stringByAppendingPathComponent:@"python/bin/python3"]];
   task.arguments = @[ @"-u", @"-m", @"jobpilot.native.desktop", @"boot", [NSString stringWithFormat:@"%d", getpid()] ];

@@ -106,10 +106,12 @@ cat >"$resources/bin/axiom" <<'WRAPPER'
 #!/bin/sh
 here=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$here" || exit 1
-HOME=${HOME:?} AXIOM_BUNDLE="$here" PYTHONPATH="$here/app" PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONSAFEPATH=1 \
+HOME=${HOME:?} AXIOM_BUNDLE="$here" PYTHONPATH="$here/app" PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONSAFEPATH=1 OPENSSL_CONF="$here/openssl.cnf" \
   exec "$here/python/bin/python3" -m jobpilot.native.desktop "$@"
 WRAPPER
 chmod +x "$resources/bin/axiom"
+
+: >"$resources/openssl.cnf"  # Empty, on purpose: desktop.py points OPENSSL_CONF here (see there).
 
 say "Compiling Python ahead of time"
 # A signed bundle must not be written to, so nothing is compiled at run time. Hash-based and unchecked: dragging the app

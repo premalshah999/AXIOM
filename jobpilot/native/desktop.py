@@ -317,6 +317,9 @@ def environment(layout, ports=None, chrome=""):
         # Otherwise the working directory comes first on sys.path. Started from a checkout's folder, this imported that
         # checkout's `jobpilot` instead of its own (2026-10-31, on the first launch beside production).
         "PYTHONSAFEPATH": "1",
+        # The bundled OpenSSLs were built to read /opt/homebrew/etc/openssl@3/openssl.cnf. On a Mac with Homebrew that would be
+        # someone else's config inside the app's TLS; on one without, a failed read at every start (the clean-run trace, 2026-10-31).
+        "OPENSSL_CONF": str(layout.resources / "openssl.cnf"),
     }
     if ports:
         env.update(

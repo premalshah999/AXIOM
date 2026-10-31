@@ -96,6 +96,7 @@ def test_the_environment_has_no_homebrew_and_the_app_keeps_it_that_way(layout, t
     desktop.ensure_config(layout)
     env = desktop.environment(layout, {"app": 50001, "postgres": 50002, "worker": 50003, "twin": 50004}, "/fake/chrome")
     assert "homebrew" not in env["PATH"] and "/usr/local" not in env["PATH"] and "/Library/TeX" not in env["PATH"]
+    assert env["OPENSSL_CONF"].startswith(str(layout.resources)), "the bundled OpenSSL must not read Homebrew's config"
     assert env["PATH"].split(os.pathsep)[0] == str(layout.tex_bin), "pdflatex is the bundle's, whatever else is on the Mac"
     cfg = load(environ=env)
     assert cfg.root == layout.support and cfg.data_dir == layout.data and cfg.logs == layout.logs
