@@ -6446,6 +6446,9 @@ class FormSession:
             r"(?:thank you|thanks) for (?:applying|your (?:job )?(?:application|submission))|"
             r"(?:thank you|thanks) for (?:submitting|sending) your (?:job )?application|"
             r"application (?:has |was )?(?:successfully )?(?:been )?(?:successfully )?(?:submitted|received|sent)|"
+            # The role named in between (Gem, Imagen Technologies 2026-10-28: "Your application for Software Engineer has
+            # been received!" parked a run on a custom site while the page showed it).
+            r"your application for [^.!?\n]{1,140}? (?:has been|was) (?:successfully )?(?:submitted|received|sent)\b|"
             r"we(?:'ve| have)? received your application|successfully (?:applied|submitted)|"
             r"thank you for sending us your online job submission|"
             r"your application (?:is |has been |was )?(?:complete|submitted|received|sent|on its way)|"
@@ -6561,6 +6564,10 @@ class FormSession:
         duplicate = re.search(
             r"(?im)^\s*you(?: have|['’]ve)? already applied (?:for|to) this (?:job|position|role)[.!]?\s*$",
             text,
+        )
+        # Shield AI (2026-10-29): "Your application was already submitted. We received your previous application on ..."
+        duplicate = duplicate or re.search(
+            r"(?im)^\s*your application (?:was|has been) already (?:been )?(?:submitted|received)\b[^\n]{0,200}$", text
         )
         if duplicate:
             return {"type": "explicit_rejection_page", "url": self.page.url,

@@ -69,7 +69,9 @@ ALREADY = re.compile(
     # Workday posting page after an application (HPE 2026-10-15): "You applied for this job on October 15, 2026."
     r"you applied for this (?:job|position|role) on\b|"
     # iCIMS's job page for an applicant already in its pipeline (MCI 2026-10-24).
-    r"you(?:'re| are) (?:currently )?submitted (?:to|for) this (?:job|position|role)",
+    r"you(?:'re| are) (?:currently )?submitted (?:to|for) this (?:job|position|role)|"
+    # Shield AI (2026-10-29): "Your application was already submitted. We received your previous application on ...".
+    r"your application (?:was|has been) already (?:been )?(?:submitted|received)\b",
     re.I,
 )
 EMBED_FRAME = re.compile(
