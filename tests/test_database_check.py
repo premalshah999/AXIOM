@@ -116,10 +116,9 @@ def test_an_old_server_is_refused(fresh, monkeypatch):
 
 
 def test_a_slow_link_gets_an_honest_verdict_for_the_workers():
-    assert check.rate_workers(2)["workers"] == 9
-    assert check.rate_workers(30)["workers"] == 6
-    assert check.rate_workers(100)["workers"] == 3
-    assert check.rate_workers(400)["workers"] == 1
+    """Measured 2026-10-31: at 30 ms an application took 3 times as long and the event loop waited on the database for a fifth of every minute."""
+    assert [check.rate_workers(ms)["workers"] for ms in (2, 10, 15, 30, 100, 400)] == [9, 9, 6, 3, 1, 1]
+    assert "Nine would leave the browsers waiting" in check.rate_workers(30)["text"]
 
 
 @pytest.mark.parametrize(

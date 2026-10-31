@@ -25,11 +25,13 @@ import resource
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from urllib.parse import urlsplit
 
 from . import pg, release, services
 from .env import NativeError, load, prepare, system_chrome
+from ..storage import mode as database_mode
 
 STABLE_SECONDS = 60.0
 MAX_STRIKES = 5
@@ -246,26 +248,39 @@ class Supervisor:
         self.next_tick = {}
         self.written = 0.0
         self.lstart = process_start(os.getpid())
+        self.database = None  # (choice, revision) this installation was planned for: storage/mode.py
+        self.reexec = False
 
     # ---- what runs ---------------------------------------------------------------------------------------------------
 
     def plan(self):
         cfg = self.cfg
-        self.pg_bin = pg.find_bin(cfg)
-        pg.init_cluster(self.pg_bin, cfg)
+        # Local starts PostgreSQL; Supabase and a server of the owner's own do not (storage/choice.py). psql is still wanted
+        # for the hold and the active-run count, but its absence there only costs those.
+        self.database = (database_mode.current(cfg.values, cfg.data_dir), database_mode.revision(cfg.data_dir))
+        local = self.database[0] == "local"
+        try:
+            self.pg_bin = pg.find_bin(cfg)
+        except NativeError:
+            if local:
+                raise
+            self.pg_bin = None
         listed = services.read(cfg, release.current(cfg))
-        database = Child(
-            "postgres",
-            pg.server_argv(self.pg_bin, cfg, max_connections=pg.max_connections(listed)),
-            env=pg.server_env(),
-            log=cfg.logs / "postgres.log",
-            ready=lambda: pg.is_ready(self.pg_bin, cfg),
-            # SIGINT is "fast": it disconnects clients and checkpoints. SIGQUIT is the last resort. Never SIGKILL: that
-            # would leave shared memory behind and force crash recovery.
-            stop_signal=signal.SIGINT,
-            grace=POSTGRES_GRACE,
-            final_signal=signal.SIGQUIT,
-        )
+        infrastructure = []
+        if local:
+            pg.init_cluster(self.pg_bin, cfg)
+            infrastructure.append(Child(
+                "postgres",
+                pg.server_argv(self.pg_bin, cfg, max_connections=pg.max_connections(listed)),
+                env=pg.server_env(),
+                log=cfg.logs / "postgres.log",
+                ready=lambda: pg.is_ready(self.pg_bin, cfg),
+                # SIGINT is "fast": it disconnects clients and checkpoints. SIGQUIT is the last resort. Never SIGKILL: that
+                # would leave shared memory behind and force crash recovery.
+                stop_signal=signal.SIGINT,
+                grace=POSTGRES_GRACE,
+                final_signal=signal.SIGQUIT,
+            ))
         browsers = []
         if cfg.worker_cdp:
             browsers.append(
@@ -303,7 +318,7 @@ class Supervisor:
                     grace=CHROME_GRACE,
                 )
             )
-        infrastructure = [database, *browsers]
+        infrastructure = [*infrastructure, *browsers]
         by_name = {c.name: c for c in infrastructure}
         running = [self.service_child(s, by_name) for s in listed]
         for child in running:
@@ -356,7 +371,8 @@ class Supervisor:
             )
         listed = services.read(cfg, release.current(cfg))
         ports = [(s.port, f"the {s.name} service") for s in listed if s.port]
-        for port, what in (*ports, (cfg.pg_port, "the database")):
+        local = database_mode.current(cfg.values, cfg.data_dir) == "local"
+        for port, what in (*ports, *([(cfg.pg_port, "the database")] if local else [])):
             if port_in_use(port):
                 raise NativeError(
                     f"Port {port}, which {what} needs, is already in use. Stop whatever holds it "
@@ -397,6 +413,8 @@ class Supervisor:
             self.say(f"Not starting: {exc}")
         finally:
             self.shutdown()
+        if self.reexec and not self.failure:
+            os.execv(sys.executable, [sys.executable, "-m", "jobpilot.native", "_supervise"])
         return 1 if self.failure else 0
 
     def raise_file_limit(self):
@@ -446,6 +464,8 @@ class Supervisor:
         for child in self.children:
             self.tick_child(child, now)
         self.tick_phase(now)
+        if self.due("database", now, 5.0):
+            self.tick_database()
         if self.due("sleep", now, ACTIVE_SECONDS):
             self.tick_sleep(now)
         if self.due("power", now, POWER_SECONDS):
@@ -454,6 +474,25 @@ class Supervisor:
         if self.due("rotate", now, ROTATE_SECONDS):
             self.rotate_logs()
         self.write_state()
+
+    def tick_database(self):
+        """The Database screen saved another choice (storage/choice.py). A different database for the same kind of choice is a
+        restart of the services; Local to or from a remote one changes which children exist (PostgreSQL), so everything stops, and
+        this process starts again in place and plans afresh. A switch has already waited for nothing to be running."""
+        if not self.database or self.stop_reason:
+            return
+        try:
+            found = (database_mode.current(self.cfg.values, self.cfg.data_dir), database_mode.revision(self.cfg.data_dir))
+        except ValueError:
+            return  # Unreadable: the app reports it, and nothing is changed here.
+        if found == self.database:
+            return
+        if found[0] != self.database[0]:
+            self.say(f"The database choice changed from {self.database[0]} to {found[0]}: restarting on it.")
+            self.reexec, self.stop_reason = True, "The database choice changed: restarting on it."
+        else:
+            self.say(f"The {found[0]} database settings changed: restarting the services.")
+            self.database, self.restart_requested = found, True
 
     def due(self, name, now, every):
         if now < self.next_tick.get(name, 0.0):
@@ -568,7 +607,8 @@ class Supervisor:
         ties caffeinate to this process, so it cannot outlive a crash; -i also holds on battery, -s would not."""
         database = self.child("postgres")
         count = None
-        if database and database.state == "up":
+        # Local: when the cluster we run is up. Remote: when psql is here, the hold's and the count's way into it.
+        if (database and database.state == "up") or (database is None and self.pg_bin):
             try:
                 raw = pg.psql(self.pg_bin, self.cfg, ACTIVE_RUNS, timeout=5, check=False)
                 count = int(raw) if raw not in (None, "") else None
@@ -684,6 +724,7 @@ class Supervisor:
             "pid": os.getpid(),
             "lstart": self.lstart,
             "phase": self.phase,
+            "database": (self.database or ("local",))[0],
             "reason": self.reason or self.failure,
             "base_url": self.cfg.base_url,
             "began_at": self.began_at,

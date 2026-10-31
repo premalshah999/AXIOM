@@ -145,6 +145,72 @@ never carried this load, every write in the app would queue behind one writer wi
 bring 2.9 GB of existing data and 2.2 million DBOS rows across, and the saving is only PostgreSQL's 200 to 350 MB. It stays what it is: the
 fallback for demos and tests.
 
+## Choosing the database: this computer, Supabase or a server
+
+Settings › Database offers three, and a person who never opens it gets the first.
+
+| Choice | What it is | The supervisor |
+|---|---|---|
+| **This computer** (`local`, the default) | The PostgreSQL above. Nothing to configure. | Starts it, as always. |
+| **Supabase** | A Supabase project's database: its Session pooler or Direct string. | Starts no PostgreSQL. |
+| **Server** | Any PostgreSQL 14 or newer you run: `postgresql://user:password@host:5432/database`. | Starts no PostgreSQL. |
+
+**Where the choice lives.** Outside the database, because it is needed before connecting: `DATA_DIR/database.json` says which one and holds no secret
+(the supervisor reads it), and the connection strings are sealed in `DATA_DIR/database.enc` with the key that seals mailbox and employer passwords.
+`DATABASE_MODE`, `SUPABASE_DB_URL` and `SERVER_DB_URL` in `.env` or the environment win over what the app saved, so `DATABASE_MODE=local` is always the
+way back, and `jobpilot database use-local` writes the same choice when a broken remote one stops AXIOM from starting. A chosen remote database that
+cannot be used makes AXIOM refuse to start rather than fall back to Local, which would write new applications where the owner believes nothing is.
+Strings are never logged, never returned by the API (the screen gets host, port, user and database), never on a command line, and reach `psql` through
+libpq's environment.
+
+**Test connection** (`POST /api/database/test`, `jobpilot database test`) changes nothing and checks, in order: the string (Supabase's transaction pooler,
+port 6543, is refused: it breaks prepared statements, advisory locks and session settings, which the never-apply-twice guards use, and the message sends
+you to the Session pooler or Direct); that the host resolves; that it connects, with a plain message for each usual failure (wrong password, Supabase's
+"Tenant or user not found", no `pg_hba.conf` rule, nothing listening, an IPv6-only direct host, no free connections); TLS (unencrypted is a failure on a
+host that is on the internet); PostgreSQL 14 or newer; that consecutive statements stay on one backend, which finds a transaction-mode pooler on any
+port; that the user can create a schema, tables and indexes and take the advisory lock (in a transaction that is rolled back); that the `anon` and
+`authenticated` roles cannot use our schemas and none of our tables is in `public`; `fsync`; how many connections it will really give us, found by
+opening them (the Session pooler's limit is not visible in SQL); and the round trip, with the verdict for workers below. The pools are sized from the
+connections found, with two kept for commands.
+
+**Supabase serves `public` through its REST API to anyone with the anon key**, so the tables are created in a private schema, `axiom`, that those roles
+cannot use; `dbos` is closed the same way at start and again after DBOS has made its tables; and the start is refused if a table of ours is in `public`.
+
+**Switching** (`POST /api/database/switch`, `jobpilot database switch <choice> [--no-copy] [--replace] [--verify full]`) runs as its own process, so it
+outlives a restart of the app, and: tests the new database; refuses one that already holds AXIOM data unless you say Replace; holds new applications and
+waits (up to 15 minutes) for running ones to finish; creates the tables; copies every table in one REPEATABLE READ snapshot of the old database into one
+transaction on the new one, sets the sequences, and compares exact row counts per table (`--verify full` also compares a hash of every row) before
+committing; saves the choice; and leaves the hold on in both databases until AXIOM next starts on the new one, which lifts only the hold the switch left.
+The old database is only read, apart from that hold, and is never deleted. Any failure rolls the new one back and puts the old hold back. DBOS's
+workflow history is not copied: queued runs are enqueued again at every start and a finished run is not run again. Writes the old app makes between the
+snapshot and its restart (discovery, a mail poll) are not carried over; none of them can be an application, which the hold prevents. Switching back is
+another switch, and the old database still holds its old data, so it needs Replace to be overwritten. Moving to Local while a remote one is in use
+starts the local cluster for the length of the copy and stops it again. When the choice changes, the supervisor re-plans (starts or stops PostgreSQL by
+re-executing itself) or restarts the services; under Compose, press Restart.
+
+**A remote database costs speed, and the app says how much.** Measured on 2026-10-31 on this Mac: a delaying TCP proxy (30 ms and 100 ms round trips) in front of a
+scratch PostgreSQL 17, the real app (`jobpilot serve`, one custom-site worker, discovery off, synthetic data, loopback only) and the built-in demo
+(`jobpilot verify`'s two runs, one at a time):
+
+| Round trip | Demo application, dry run / submit | Statements on the event loop, idle / one application | `/healthz` median, p95 | The app's own host gate |
+|---|---|---|---|---|
+| This computer | 11.7 s / 10.4 s | 0.39 / 0.75 s a minute | 4.5 ms, 14 ms | ok |
+| 0 ms (remote layer, direct) | 12.4 s / 8.8 s | 0.27 / 0.36 s | 5 ms, 10 ms | ok |
+| 30 ms, before the outbox fix | 42 s / 45 s | 20.8 / 26.9 s | 120 ms, 497 ms | overloaded (loop late 2.3 s) |
+| **30 ms** | **34.5 s / 26.6 s** | **4.6 / 12.6 s** | **39 ms, 198 ms** | loaded (late 2.8 s) |
+| **100 ms** | **60.7 s / 65.8 s** | **8.9 / 22.5 s** | **112 ms, 1,062 ms** | loaded, 4 overloaded periods (late up to 12 s) |
+
+The unmodified database layer takes 4.5 round trips for any call (136 ms at 30 ms, 419 ms at 100 ms; `exclusive()` 205 and 627 ms); the remote layer
+takes one for a read, three for a write and about six for a `with db.exclusive()` that reads and writes one row, and a batched event costs the caller
+nothing. What remains is that much of the application still calls the database from the one event loop that drives every browser, so every round trip
+stops all of them. Four outbox pollers asking once a second were three quarters of it, and now ask with one unlocked read from a thread; the rest
+(`mail/polling`, `features/knowledge`, `execution_services`) is a long tail of call sites that the audit lists (`GET /api/database`, `on_loop_sites`). **Nine workers on a remote database are not
+viable today**: at 30 ms one application already costs a third of the loop's time, and more workers add to it. The Test and the Database screen say so,
+from the measured round trip: nine workers at 10 ms or less, six at 20, three at 40, one at 120 and one with a warning beyond. The next step is moving
+those call sites to threads (`Database.off_loop` is there for it) or the services split of ARCHITECTURE.md, where the applier owns its own loop.
+The demo flow completes on all three with the same evidence (dry run passed, one submission confirmed once), and `exclusive()` stays a durable commit: it
+turns `synchronous_commit` on for its own transaction even on a server that has it off, and the `submitting` event is on the server before the click.
+
 ## Moving a Docker installation here
 
 Docker is only ever read. Every command against it is `pg_dump`, a `psql` select, or `find`/`tar`/`sha256sum` in a throwaway container that

@@ -341,21 +341,27 @@ def latency(report, conn, cur):
     report.facts["latency"] = {"median_ms": round(median, 1), "p95_ms": round(samples[int(len(samples) * 0.95) - 1], 1), "max_ms": round(worst, 1),
                                "commit_ms": None if commit is None else round(commit, 1), "samples": len(samples)}
     text = f"A query takes {median:.0f} ms (slowest {worst:.0f} ms)" + (f"; a durable commit {commit:.0f} ms." if commit is not None else ".")
-    state = "ok" if median <= 40 else "warn" if median <= 120 else "fail"
+    state = "ok" if median <= 10 else "warn" if median <= 120 else "fail"
     if state != "ok":
         text += " " + rate_workers(median)["text"]
     report.add("latency", "Speed", "warn" if state == "fail" else state, text)  # Slow is advice, not a reason to refuse.
 
 
 def rate_workers(round_trip_ms: float) -> dict:
-    """How many browser workers a round trip this long can drive, from the measurements in docs/NATIVE.md (section Remote database)."""
-    if round_trip_ms <= 15:
+    """How many browser workers a round trip this long can drive. Measured on 2026-10-31 with a delaying proxy in front of a scratch
+    PostgreSQL and one demo application at a time (docs/NATIVE.md, "A remote database"): much of the application still calls the
+    database from the one event loop that drives every browser, so each round trip stops them all. At 30 ms the loop waited on the
+    database 12.6 s of every minute with a single application running and an application took 3 times as long (27-35 s against
+    9-12 s); at 100 ms, 22.5 s a minute and 6 times as long, with the loop late by up to 12 s. Each further worker adds that load."""
+    if round_trip_ms <= 10:
         return {"workers": 9, "text": "Fast enough for all nine workers."}
+    if round_trip_ms <= 20:
+        return {"workers": 6, "text": "Use up to six workers: the application waits on the database from the same loop that runs every browser."}
     if round_trip_ms <= 40:
-        return {"workers": 6, "text": "Fine for up to six workers; nine will work but each application is somewhat slower."}
+        return {"workers": 3, "text": "Use up to three workers. Nine would leave the browsers waiting on the database, and each application takes about three times as long as on this computer."}
     if round_trip_ms <= 120:
-        return {"workers": 3, "text": "Slow for this app: use three workers or fewer, and expect each application to take longer."}
-    return {"workers": 1, "text": "Too slow for more than one worker. Choose a database closer to this computer."}
+        return {"workers": 1, "text": "Slow for this app: one worker at a time, and each application takes five or six times as long as on this computer."}
+    return {"workers": 1, "text": "Too slow to be useful. Choose a database closer to this computer, or keep the data on it."}
 
 
 def existing_counts(cur, schema=choice.SCHEMA) -> dict:
