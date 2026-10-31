@@ -370,6 +370,36 @@ class ReviewsMixin:
             settled += 1
         return settled
 
+    _reconsidering = False
+    _reconsider_again = False
+
+    async def reconsider_open_questions(self):
+        """Check every open question again after the owner saved something (a questionnaire, the profile, an answer).
+
+        Owner 2026-10-31: "a lot of needs answer applications are just stuck", "never ask me what you can answer".
+        Settling and revalidating ran only when the app started, so a saved questionnaire freed nothing until the next
+        restart. A save during a pass asks for one more pass; passes never overlap."""
+        if self._reconsidering:
+            self._reconsider_again = True
+            return None
+        self._reconsidering = True
+        outcome = {"settled": 0}
+        try:
+            while True:
+                self._reconsider_again = False
+                try:
+                    outcome["settled"] += await self.settle_open_questions()
+                except Exception:
+                    pass  # They stay asked, as before.
+                try:
+                    outcome.update(await self.revalidate_open_questions())
+                except Exception:
+                    pass
+                if not self._reconsider_again:
+                    return outcome
+        finally:
+            self._reconsidering = False
+
     async def revalidate_open_questions(self):
         """Ask the current engine every open question again.
 
@@ -405,6 +435,7 @@ class ReviewsMixin:
 
         outcome = {"closed": 0, "recovered": 0, "answered": 0, "merged": 0}
         moved, seen, duplicates = set(), set(), []
+        saved_profile = self.db.get_setting("profile", {}) or {}
         for rid, run_id, question, options, context, reason, key, packet, job in await asyncio.to_thread(candidates):
             if run_id in moved or key in {"manual", "session"}:
                 continue
@@ -418,6 +449,12 @@ class ReviewsMixin:
             from ..run_profile import full as full_profile
 
             options, context, profile = options or [], context or {}, full_profile(packet, self.db)
+            if saved_profile:
+                # What the owner has saved since this run started (a questionnaire answer, a salary, a corrected
+                # status) outranks the run's own copy: answering resumes the job as a new run on the current profile,
+                # so the old copy kept open a question the next attempt answers. The run's email, an alias some
+                # platforms bind, stays.
+                profile = {**profile, **saved_profile, **({"email": profile["email"]} if profile.get("email") else {})}
             outside = residence_outside(question, options, profile.get("facts"), profile.get("location", ""))
             from ..sensitive_ids import sensitive_field
 
