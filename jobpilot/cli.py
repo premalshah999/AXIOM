@@ -161,7 +161,7 @@ def reset_password(config, ask=None, say=print) -> int:
     if not stored.get("password_hash"):
         say("No email and password are set on this installation yet.")
         say(
-            "Sign in to the dashboard with the access token (`jobpilot token`), then add them in Setup → System."
+            "Sign in to the dashboard with the access token (`jobpilot token`), then add them in Settings → System."
         )
         return 1
     say(f"Setting a new dashboard password for {stored.get('email') or 'the owner account'}.")

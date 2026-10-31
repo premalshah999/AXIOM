@@ -585,7 +585,7 @@ class QueueingMixin:
             assigned_pool = worker_pool = assign_pool(s, job, pipeline_source)
             if worker_pool == "custom" and not self.config.topology.custom:
                 raise QueueBlocked(
-                    "Applications on custom career sites are turned off (Setup › Connections › Workers); this one "
+                    "Applications on custom career sites are turned off (Settings › Connections › Workers); this one "
                     "waits until the custom-site worker is on",
                     outcome="deferred",
                     code="custom_off",

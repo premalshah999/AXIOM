@@ -337,7 +337,7 @@ def test_reset_needs_an_account_and_a_known_method(app, config):
     none = web.post(
         "/api/account/reset", json={"method": "access_token", "secret": config.app_token, "password": NEW}
     )
-    assert none.status_code == 409 and "Setup → System" in none.json()["detail"]
+    assert none.status_code == 409 and "Settings → System" in none.json()["detail"]
     assert (
         web.post("/api/account/reset", json={"method": "email", "secret": "x", "password": NEW}).status_code
         == 422

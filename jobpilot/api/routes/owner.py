@@ -40,7 +40,7 @@ from ..sessions import KEEP_SECONDS, SESSION_SECONDS, same_secret
 
 NO_PASSWORD = (
     "This installation has no email sign-in yet. Sign in with the access token, then add an email and "
-    "password in Setup → System."
+    "password in Settings → System."
 )
 
 
@@ -99,7 +99,7 @@ def router(service, sessions, throttle) -> APIRouter:
             raise HTTPException(
                 403,
                 "This installation already holds a profile or jobs, so it can't be claimed by signing up. "
-                "Sign in with its access token, then add an email and password in Setup → System.",
+                "Sign in with its access token, then add an email and password in Settings → System.",
             )
         if problem := signup_problem(data.name, data.email, data.password):
             raise ValueError(problem)

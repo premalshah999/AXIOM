@@ -46,7 +46,7 @@ FIELDS = {
                       "Used to sign up and sign in on career sites. Empty: the email in your profile."),
     "application_password": ("Accounts", "Shared employer password", True,
                              "One password for every employer account the app creates. A site that refuses it gets a "
-                             "stronger variant, kept in Setup › Accounts."),
+                             "stronger variant, kept in Settings › Accounts."),
     "telegram_enabled": ("Telegram", "Telegram messages", False, "Send questions and alerts to Telegram."),
     "captcha_image_rounds": ("Captcha", "Paid image rounds per puzzle", False, "More rounds solve more puzzles and cost more."),
     "captcha_timeout": ("Captcha", "Seconds to wait for a solve", False, "How long one captcha may take."),
