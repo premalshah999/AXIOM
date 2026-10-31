@@ -96,3 +96,19 @@ def test_a_pick_list_named_for_a_site_is_not_a_link_box():
     menu = {"type": "select", "label": "Company Website .", "value": "Company Website", "options": ["Career Section", "Company Website"]}
     assert not implausible_prefill(menu)
     assert implausible_prefill({"type": "text", "label": "Company Website", "value": "Company Website", "options": []})
+
+
+RECENT = "Have you been employed at any time in the last 6 months?"
+
+
+def test_recent_employment_is_answered_from_the_current_role_not_as_a_prior_employer_question(service):
+    r = resolver(service, {"previously_employed_here": False})
+    a = r.local(field(RECENT, ["Yes", "No"], "radiogroup"))
+    assert a and a.value == "Yes" and a.evidence_ids == ["profile:work.0"]
+    # No current role in the profile: not this rule's to answer, and never the prior-employer No.
+    ended = [{"company": "Example University", "title": "Analyst", "start": "2020-01", "end": "2021-06"}]
+    b = resolver(service, {"previously_employed_here": False}, work=ended).local(field(RECENT, ["Yes", "No"], "radiogroup"))
+    assert b is None or b.value != "No"
+    # The employer question keeps its answer.
+    c = r.local(field("Have you ever been employed at or by Acme?", ["Yes", "No"], "radiogroup"))
+    assert c is None or c.value == "No"

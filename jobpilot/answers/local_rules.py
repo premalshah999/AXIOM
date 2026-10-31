@@ -73,6 +73,11 @@ CURRENT_INDUSTRY = re.compile(
     re.I,
 )
 NOT_WORKING_OPTION = re.compile(r"\s*(?:no,? )?i (?:do not|don['’]t|am not|currently do not)\b[^.]{0,40}\b(?:work|employ)", re.I)
+# "Have you been employed at any time in the last 6 months?": a question about now, not about one employer.
+RECENT_EMPLOYMENT = re.compile(
+    r"^(?:have you been|were you|are you)(?: currently)? (?:employed|working)\b(?: at any (?:time|point))?[^?.]{0,25}"
+    r"\b(?:in |during |within )?the (?:last|past|previous) (?:\d+|six|three|twelve|few) (?:months?|weeks?)\b[^?.]{0,20}\??$"
+)
 PAGE_LANGUAGE = re.compile(r"(?:select|choose|change) (?:a |your |the )?language|\b(?:rb|ddl|cbo|lst)language\b|"
                            r"(?:display|site|page) language")
 ENDONYMS = {"español", "espanol", "français", "francais", "deutsch", "português", "portugues", "italiano", "中文",
@@ -209,6 +214,20 @@ class LocalRulesMixin:
             if len(computers) == 1:
                 return Answer(field_id=f["id"], value=computers[0], disposition="answer", evidence_ids=["policy:device"],
                               reason="The application is completed in a desktop browser")
+        if (
+            options
+            and f.get("type") in {"select", "dropdown", "combobox", "radio", "radiogroup", "pills", "buttonchoice"}
+            and RECENT_EMPLOYMENT.search(label)
+            and (current := [i for i, w in enumerate(p.work) if w.current or not (w.end or "").strip()])
+        ):
+            # "Have you been employed at any time in the last 6 months?" (Caesars' tax-credit questionnaire, 2026-10-29) read as
+            # "have you worked for this employer" and was answered No; the conditional "As you indicated above, you are
+            # currently unemployed ..." then had no answer for 32 runs. A role the profile holds as current answers it.
+            yes = [o for o in options if yes_no(str(o)) == "Yes"]
+            if len(yes) == 1:
+                refs = [f"profile:work.{i}" for i in current]
+                return Answer(field_id=f["id"], value=yes[0], disposition="answer", evidence_ids=refs, supporting_facts=refs,
+                              reason="The profile holds a current role")
         if (industry := CURRENT_INDUSTRY.search(str(f.get("label", "")))) and options and self.history_attested():
             # "If you currently work in the gaming industry, would you be able to end that employment ...?" (Hancock Whitney's
             # Workday, 2026-10-31) offers "I do not work for ..." and was refused as a restriction/NDA disclosure. It asks
