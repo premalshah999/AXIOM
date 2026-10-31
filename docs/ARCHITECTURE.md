@@ -1,6 +1,6 @@
 # AXIOM architecture
 
-This is the target design and the plan to reach it. Only phase (a), dead code removal, has started. Until phase (b) lands the
+This is the target design and the plan to reach it. Only phase (a), dead code removal, has landed. Until phase (b) lands the
 code lives in `jobpilot/`; [RUNTIME.md](RUNTIME.md) describes how it runs today. Numbers are from production on 2026-10-30
 and from `main` at `930eb79` unless a line says otherwise.
 
@@ -609,18 +609,18 @@ each of the 236 modules, so the map is a set of decisions, not a heuristic. Modu
 <!-- BEGIN GENERATED MODULE-SUMMARY -->
 | Owner | Kind | Modules | Lines |
 |---|---|--:|--:|
-| `control` | service | 66 | 16,274 |
-| `applier` | service | 61 | 39,158 |
-| `discovery` | service | 12 | 5,254 |
-| `mail` | service | 11 | 3,892 |
-| `core` | library | 13 | 1,734 |
-| `domain` | library | 27 | 5,376 |
+| `control` | service | 62 | 15,555 |
+| `applier` | service | 61 | 38,087 |
+| `discovery` | service | 12 | 5,200 |
+| `mail` | service | 11 | 3,887 |
+| `core` | library | 13 | 1,703 |
+| `domain` | library | 27 | 5,349 |
 | `contracts` | library | 2 | 78 |
-| `ledger` | library | 16 | 3,344 |
-| `llm` | library | 6 | 1,404 |
-| `knowledge` | library | 13 | 3,662 |
-| `desktop` | launcher | 9 | 2,517 |
-| **Total** | | **236** | **82,693** |
+| `ledger` | library | 16 | 3,134 |
+| `llm` | library | 6 | 1,401 |
+| `knowledge` | library | 13 | 3,658 |
+| `desktop` | launcher | 9 | 2,515 |
+| **Total** | | **232** | **80,567** |
 <!-- END GENERATED MODULE-SUMMARY -->
 
 ### 6.1 What actually crosses
@@ -632,15 +632,15 @@ its module splits (`IMPORTER_MOVES`), leaves the fourth column. **That is the re
 <!-- BEGIN GENERATED CROSSINGS -->
 | From | To | Imports today | After the symbol moves | What is left, by name |
 |---|---|--:|--:|---|
-| `control` | `discovery` | 26 | 14 | `DcSourceHealth`, `add_job`, `board_snapshot`, `discover_due`, `managed_ids`, `owner_switched`, `posting_api_text`, `rank`, `rank_batch`, and 6 more |
+| `control` | `discovery` | 25 | 13 | `DcSourceHealth`, `add_job`, `board_snapshot`, `discover_due`, `managed_ids`, `owner_switched`, `posting_api_text`, `rank`, `rank_batch`, and 6 more |
 | `applier` | `control` | 12 | 0 |  |
-| `control` | `applier` | 11 | 3 | `draft_for`, `one`, `overview`, `save_owner_password`, `summary` |
-| `ledger` | `control` | 11 | 0 |  |
+| `control` | `applier` | 10 | 3 | `draft_for`, `one`, `overview`, `save_owner_password`, `summary` |
 | `applier` | `mail` | 9 | 0 |  |
+| `ledger` | `control` | 9 | 0 |  |
 | `core` | `control` | 7 | 0 |  |
 | `domain` | `applier` | 6 | 0 |  |
-| `control` | `mail` | 5 | 3 | `check_receipts`, `request` |
 | `knowledge` | `control` | 5 | 1 | `send_live_questions` |
+| `control` | `mail` | 4 | 3 | `check_receipts`, `request` |
 | `domain` | `knowledge` | 4 | 0 |  |
 | `applier` | `discovery` | 3 | 1 | `enrich` |
 | `core` | `knowledge` | 3 | 0 |  |
@@ -656,7 +656,7 @@ its module splits (`IMPORTER_MOVES`), leaves the fourth column. **That is the re
 | `knowledge` | `ledger` | 1 | 0 |  |
 | `ledger` | `mail` | 1 | 0 |  |
 | `mail` | `ledger` | 1 | 0 |  |
-| **Total** | | **124** | **22** | |
+| **Total** | | **119** | **21** | |
 <!-- END GENERATED CROSSINGS -->
 
 Each remaining name has a replacement in section 2: `add_job`, `rank`, `rank_in_thread`, `rank_batch`, `posting_api_text`, `enrich` become discovery's
@@ -767,73 +767,70 @@ and `telegram.api`. A split must move those seams and their tests together, whic
 ### 6.3 Every module
 
 <!-- BEGIN GENERATED MODULE-MAP -->
-<details><summary><code>control</code> (service): 66 modules</summary>
+<details><summary><code>control</code> (service): 62 modules</summary>
 
 | Today (`jobpilot/`) | Lines | Used by | Target | Note |
 |---|--:|--:|---|---|
-| `cli.py` | 396 | 0 | `cli.py` | split: serve/token/doctor stay; probe, login, browser, twin-browser go to applier:cli.py |
+| `cli.py` | 391 | 0 | `cli.py` | split: serve/token/doctor stay; probe, login, browser, twin-browser go to applier:cli.py |
 | `demo.py` | 73 | 1 | `demo/seed.py` | Synthetic application for `verify` and the first-run tour |
 | `api/__init__.py` | 5 | 1 | `gateway/__init__.py` |  |
 | `api/app.py` | 83 | 1 | `gateway/app.py` |  |
 | `api/lifespan.py` | 100 | 1 | `gateway/lifespan.py` | One per process afterwards; each service starts only its own loops |
 | `api/middleware.py` | 68 | 1 | `gateway/middleware.py` |  |
-| `api/pipeline.py` | 407 | 5 | `gateway/pipeline.py` |  |
+| `api/pipeline.py` | 407 | 4 | `gateway/pipeline.py` |  |
 | `api/routes/__init__.py` | 0 | 0 | `gateway/routes/__init__.py` |  |
 | `api/routes/accounts.py` | 118 | 1 | `gateway/routes/accounts.py` | Proxies to applier /v1/accounts |
 | `api/routes/archive.py` | 35 | 1 | `gateway/routes/archive.py` |  |
 | `api/routes/demo.py` | 76 | 1 | `gateway/routes/demo.py` |  |
 | `api/routes/frontend.py` | 32 | 1 | `gateway/routes/frontend.py` |  |
 | `api/routes/health.py` | 45 | 1 | `gateway/routes/health.py` |  |
-| `api/routes/job_board.py` | 287 | 1 | `gateway/routes/job_board.py` | Proxies to discovery /v1 |
+| `api/routes/job_board.py` | 236 | 1 | `gateway/routes/job_board.py` | Proxies to discovery /v1 |
 | `api/routes/jobs.py` | 180 | 1 | `gateway/routes/jobs.py` |  |
 | `api/routes/knowledge.py` | 57 | 1 | `gateway/routes/knowledge.py` |  |
-| `features/knowledge/router.py` | 155 | 1 | `gateway/routes/knowledge_v2.py` |  |
+| `features/knowledge/router.py` | 126 | 1 | `gateway/routes/knowledge_v2.py` |  |
 | `api/routes/mail.py` | 121 | 1 | `gateway/routes/mail.py` | Proxies to mail /v1 |
 | `api/routes/owner.py` | 282 | 1 | `gateway/routes/owner.py` |  |
 | `api/routes/profile.py` | 99 | 1 | `gateway/routes/profile.py` |  |
 | `api/routes/queue.py` | 121 | 1 | `gateway/routes/queue.py` |  |
 | `api/routes/reserved.py` | 99 | 1 | `gateway/routes/reserved.py` |  |
 | `api/routes/resumes.py` | 120 | 1 | `gateway/routes/resumes.py` |  |
-| `features/resumes/router.py` | 340 | 1 | `gateway/routes/resumes_v2.py` |  |
-| `api/routes/runs.py` | 161 | 1 | `gateway/routes/runs.py` |  |
+| `features/resumes/router.py` | 326 | 1 | `gateway/routes/resumes_v2.py` |  |
+| `api/routes/runs.py` | 133 | 1 | `gateway/routes/runs.py` |  |
 | `api/routes/session.py` | 35 | 1 | `gateway/routes/session.py` |  |
 | `api/routes/settings.py` | 202 | 1 | `gateway/routes/settings.py` |  |
 | `api/routes/sources.py` | 73 | 1 | `gateway/routes/sources.py` | Proxies to discovery /v1 |
 | `api/routes/state.py` | 64 | 1 | `gateway/routes/state.py` |  |
 | `api/sessions.py` | 128 | 4 | `gateway/sessions.py` |  |
 | `api/snapshot.py` | 238 | 3 | `gateway/snapshot.py` | Assembled from each owner's status API |
-| `telegram.py` | 2,138 | 5 | `notify/telegram/__init__.py` | split: 6.2 |
+| `telegram.py` | 2,131 | 5 | `notify/telegram/__init__.py` | split: 6.2 |
 | `telegram_workers.py` | 406 | 4 | `notify/telegram/worker_bots.py` |  |
 | `operations/__init__.py` | 1 | 0 | `ops/__init__.py` |  |
-| `operations/cancel.py` | 85 | 0 | `ops/cancel.py` |  |
 | `operations/closed_postings.py` | 31 | 1 | `ops/closed_postings.py` |  |
-| `operations/reset.py` | 106 | 3 | `ops/reset.py` |  |
+| `operations/reset.py` | 5 | 2 | `ops/reset.py` |  |
 | `operations/superseded.py` | 49 | 2 | `ops/superseded.py` | close_superseded_waits runs inside completion and moves to the ledger |
-| `service/queueing.py` | 732 | 4 | `orchestrator/admission.py` | _queue becomes an ordered list of guards |
+| `service/queueing.py` | 720 | 4 | `orchestrator/admission.py` | _queue becomes an ordered list of guards |
 | `archive.py` | 153 | 1 | `orchestrator/archive.py` |  |
-| `autopilot.py` | 1,238 | 4 | `orchestrator/autopilot.py` | Reads admission_candidates instead of scanning the board |
+| `autopilot.py` | 1,202 | 4 | `orchestrator/autopilot.py` | Reads admission_candidates instead of scanning the board |
 | `failure_reports.py` | 146 | 4 | `orchestrator/failure_reports.py` |  |
-| `corrections.py` | 38 | 1 | `orchestrator/migrations/corrections.py` | One-time; deleted once Alembic carries a baseline |
-| `grandfather.py` | 77 | 1 | `orchestrator/migrations/grandfather.py` | One-time; same |
-| `service/migrations.py` | 173 | 1 | `orchestrator/migrations/legacy.py` | Runs at start today; becomes Alembic revisions |
+| `service/migrations.py` | 35 | 1 | `orchestrator/migrations/legacy.py` | Runs at start today; becomes Alembic revisions |
 | `execution_services.py` | 454 | 8 | `orchestrator/preparation.py` | split: authoritative_packet moves to knowledge:packet.py |
-| `recovery.py` | 799 | 4 | `orchestrator/recovery.py` | split: schedule_recovery runs inside ledger.complete and moves to ledger:recovery.py |
+| `recovery.py` | 797 | 4 | `orchestrator/recovery.py` | split: schedule_recovery runs inside ledger.complete and moves to ledger:recovery.py |
 | `repair_agent.py` | 568 | 3 | `orchestrator/repair.py` | Constants the resolver borrows move to domain:answers/masks.py |
 | `retention.py` | 105 | 2 | `orchestrator/retention.py` | DBOS retention is a singleton job |
 | `service/reviews.py` | 592 | 1 | `orchestrator/reviews.py` |  |
-| `workers.py` | 569 | 9 | `orchestrator/schedule.py` | split: each DBOS workflow moves to the service that executes it (section 2) |
+| `workers.py` | 561 | 9 | `orchestrator/schedule.py` | split: each DBOS workflow moves to the service that executes it (section 2) |
 | `owner_account.py` | 309 | 4 | `owner/account.py` |  |
 | `owner_apply.py` | 202 | 7 | `owner/apply.py` | `picked` moves to ledger:admission.py |
 | `owner_questions.py` | 561 | 8 | `owner/questions.py` | split: document_for, generic, row_for are read at fill time and move to domain:answers/owner_view.py |
-| `features/resumes/__init__.py` | 50 | 6 | `resumes/__init__.py` |  |
+| `features/resumes/__init__.py` | 47 | 6 | `resumes/__init__.py` |  |
 | `features/resumes/claims.py` | 78 | 2 | `resumes/claims.py` |  |
 | `features/resumes/compiler.py` | 150 | 2 | `resumes/compiler.py` |  |
 | `features/resumes/editor.py` | 327 | 3 | `resumes/editor.py` |  |
 | `features/resumes/latex.py` | 128 | 2 | `resumes/latex.py` |  |
-| `features/resumes/master.py` | 324 | 2 | `resumes/master.py` |  |
-| `features/resumes/pipeline.py` | 525 | 4 | `resumes/pipeline.py` |  |
-| `features/resumes/select.py` | 107 | 1 | `resumes/select.py` |  |
-| `features/resumes/tailor2.py` | 558 | 1 | `resumes/tailor.py` |  |
+| `features/resumes/master.py` | 323 | 2 | `resumes/master.py` |  |
+| `features/resumes/pipeline.py` | 511 | 4 | `resumes/pipeline.py` |  |
+| `features/resumes/select.py` | 106 | 1 | `resumes/select.py` |  |
+| `features/resumes/tailor2.py` | 557 | 1 | `resumes/tailor.py` |  |
 | `features/resumes/validate.py` | 64 | 1 | `resumes/validate.py` |  |
 | `verify.py` | 163 | 1 | `verify.py` | `axiom verify`, the deployment acceptance check |
 
@@ -843,7 +840,7 @@ and `telegram.api`. A split must move those seams and their tests together, whic
 
 | Today (`jobpilot/`) | Lines | Used by | Target | Note |
 |---|--:|--:|---|---|
-| `accounts/__init__.py` | 90 | 8 | `accounts/__init__.py` |  |
+| `accounts/__init__.py` | 90 | 7 | `accounts/__init__.py` |  |
 | `accounts/credentials.py` | 140 | 1 | `accounts/credentials.py` |  |
 | `accounts/dayforce.py` | 103 | 3 | `accounts/dayforce.py` |  |
 | `accounts/errors.py` | 7 | 6 | `accounts/errors.py` |  |
@@ -856,7 +853,7 @@ and `telegram.api`. A split must move those seams and their tests together, whic
 | `accounts/pages.py` | 107 | 5 | `accounts/pages.py` |  |
 | `accounts/store.py` | 333 | 5 | `accounts/store.py` |  |
 | `adapters/__init__.py` | 30 | 3 | `adapters/__init__.py` |  |
-| `adapters/base.py` | 3,380 | 12 | `adapters/base/__init__.py` | split: 6.2 |
+| `adapters/base.py` | 3,380 | 11 | `adapters/base/__init__.py` | split: 6.2 |
 | `adapters/icims.py` | 1,858 | 3 | `adapters/icims/adapter.py` |  |
 | `icims_protocol.py` | 243 | 1 | `adapters/icims/protocol.py` |  |
 | `adapters/oracle.py` | 179 | 1 | `adapters/oracle.py` |  |
@@ -885,11 +882,11 @@ and `telegram.api`. A split must move those seams and their tests together, whic
 | `captcha.py` | 669 | 2 | `captcha/solver.py` |  |
 | `captcha_twin.py` | 190 | 2 | `captcha/twin.py` |  |
 | `captcha_visual.py` | 621 | 2 | `captcha/visual.py` |  |
-| `browser.py` | 5,751 | 8 | `engine/__init__.py` | split: 6.2 |
+| `browser.py` | 5,428 | 7 | `engine/__init__.py` | split: 6.2 |
 | `bot_wall.py` | 58 | 1 | `engine/bot_wall.py` |  |
 | `browser_contracts.py` | 187 | 3 | `engine/contracts.py` |  |
 | `diagnostics.py` | 452 | 3 | `engine/diagnostics.py` |  |
-| `continuous_agent.py` | 767 | 1 | `engine/flows/agent_evidence.py` | The cleanup branch removes drive() and leaves about 80 lines of shared evidence helpers |
+| `continuous_agent.py` | 90 | 1 | `engine/flows/agent_evidence.py` | The cleanup branch removes drive() and leaves about 80 lines of shared evidence helpers |
 | `control_agent.py` | 243 | 1 | `engine/flows/control_agent.py` |  |
 | `playwright_fast.py` | 74 | 3 | `engine/playwright_fast.py` |  |
 | `posting_read.py` | 101 | 1 | `engine/posting_read.py` |  |
@@ -897,11 +894,11 @@ and `telegram.api`. A split must move those seams and their tests together, whic
 | `desktop_cdp.py` | 152 | 2 | `engine/tab.py` |  |
 | `history_editor_guard.py` | 81 | 3 | `forms/history_editor.py` |  |
 | `phone_fields.py` | 150 | 3 | `forms/phone_fields.py` |  |
-| `forms.py` | 6,762 | 8 | `forms/session.py` | split: 6.2 |
+| `forms.py` | 6,722 | 7 | `forms/session.py` | split: 6.2 |
 | `email_browser.py` | 872 | 3 | `mailflow/email_browser.py` |  |
 | `inbox.py` | 171 | 4 | `mailflow/inbox.py` | Becomes the in-process, then HTTP, client of the mail service |
-| `widgets.py` | 3,766 | 26 | `widgets/__init__.py` | split: 6.2 |
-| `widgets_ats.py` | 519 | 2 | `widgets/ats_combo.py` |  |
+| `widgets.py` | 3,754 | 25 | `widgets/__init__.py` | split: 6.2 |
+| `widgets_ats.py` | 500 | 2 | `widgets/ats_combo.py` |  |
 | `operations/close_tabs.py` | 206 | 1 | `worker/close_tabs.py` |  |
 | `service/execution.py` | 341 | 1 | `worker/execution.py` | split: reserve_submission and release_submission move to ledger:reservation.py |
 
@@ -912,17 +909,17 @@ and `telegram.api`. A split must move those seams and their tests together, whic
 | Today (`jobpilot/`) | Lines | Used by | Target | Note |
 |---|--:|--:|---|---|
 | `features/discovery/__init__.py` | 54 | 5 | `__init__.py` |  |
-| `features/discovery/router.py` | 119 | 1 | `api/v1.py` |  |
+| `features/discovery/router.py` | 65 | 1 | `api/v1.py` |  |
 | `jobboard.py` | 1,195 | 9 | `board/__init__.py` | split: settings and sources to board/; scrape_source to sources/; board_snapshot to board/snapshot.py |
 | `features/discovery/policy.py` | 251 | 10 | `policy.py` | SENIOR and friends move to domain:posting/seniority.py; gate() is read at admission |
-| `discovery.py` | 1,038 | 13 | `ranking/__init__.py` | split: add_job to ingest/jobs.py; rank and rank_batch to ranking/; per-ATS scrapers to sources/; application_entry to domain:ats.py |
+| `discovery.py` | 1,038 | 12 | `ranking/__init__.py` | split: add_job to ingest/jobs.py; rank and rank_batch to ranking/; per-ATS scrapers to sources/; application_entry to domain:ats.py |
 | `features/discovery/classify.py` | 193 | 4 | `ranking/classify.py` |  |
 | `features/discovery/readiness.py` | 531 | 3 | `readiness.py` | Publishes admission candidates instead of being called by the tick |
 | `features/discovery/companies.py` | 427 | 1 | `sources/companies.py` |  |
 | `features/discovery/feeds.py` | 879 | 6 | `sources/feeds.py` |  |
 | `features/discovery/postings.py` | 227 | 2 | `sources/postings.py` |  |
 | `jobsearch.py` | 284 | 2 | `sources/web_search.py` |  |
-| `features/discovery/tables.py` | 56 | 6 | `tables.py` |  |
+| `features/discovery/tables.py` | 56 | 5 | `tables.py` |  |
 
 </details>
 
@@ -934,10 +931,10 @@ and `telegram.api`. A split must move those seams and their tests together, whic
 | `mail/challenges.py` | 428 | 1 | `challenges.py` |  |
 | `mail/constants.py` | 17 | 6 | `constants.py` |  |
 | `mail/extraction.py` | 562 | 3 | `extraction.py` |  |
-| `gmail_imap.py` | 377 | 5 | `imap.py` |  |
+| `gmail_imap.py` | 381 | 5 | `imap.py` |  |
 | `mail/mailboxes.py` | 214 | 1 | `mailboxes.py` |  |
 | `mail/polling.py` | 555 | 1 | `polling.py` | Writes runs today; emits challenge.matched and receipt.matched instead |
-| `receipts.py` | 1,192 | 3 | `receipts.py` | Writes runs today; emits receipt.matched instead |
+| `receipts.py` | 1,183 | 2 | `receipts.py` | Writes runs today; emits receipt.matched instead |
 | `mail/rules.py` | 207 | 1 | `rules.py` |  |
 | `mail/service.py` | 32 | 1 | `service.py` |  |
 | `mail/transport.py` | 198 | 1 | `transport.py` |  |
@@ -950,12 +947,12 @@ and `telegram.api`. A split must move those seams and their tests together, whic
 |---|--:|--:|---|---|
 | `__init__.py` | 3 | 0 | `__init__.py` | Version only |
 | `features/__init__.py` | 19 | 1 | `_retired.py` | Removed: `features` is not a domain |
-| `agent_settings.py` | 103 | 19 | `agent_settings.py` | Helper switches every process reads; mail needs them without the LLM clients |
-| `config.py` | 360 | 8 | `config.py` | split: one Settings per service over one shared base |
-| `connections.py` | 276 | 2 | `connections.py` | Provider keys entered in the dashboard overlay config at start |
-| `db.py` | 397 | 100 | `db.py` | split: Database stays; each ORM class moves to its owner's tables.py (section 3) |
+| `agent_settings.py` | 103 | 18 | `agent_settings.py` | Helper switches every process reads; mail needs them without the LLM clients |
+| `config.py` | 342 | 8 | `config.py` | split: one Settings per service over one shared base |
+| `connections.py` | 269 | 2 | `connections.py` | Provider keys entered in the dashboard overlay config at start |
+| `db.py` | 397 | 96 | `db.py` | split: Database stays; each ORM class moves to its owner's tables.py (section 3) |
 | `dbos_sqlite.py` | 24 | 1 | `dbos_sqlite.py` |  |
-| `features/_store.py` | 64 | 24 | `feature_store.py` | FeatureBase, digest, norm |
+| `features/_store.py` | 58 | 24 | `feature_store.py` | FeatureBase, digest, norm |
 | `memory.py` | 131 | 1 | `memory.py` | Heap trim; every process runs it |
 | `network.py` | 64 | 13 | `network.py` | SSRF-safe fetch |
 | `outbox.py` | 245 | 8 | `outbox.py` | split: enqueue, claim, retry are the shared bus; deliver() moves to control:orchestrator/delivery.py |
@@ -982,9 +979,9 @@ and `telegram.api`. A split must move those seams and their tests together, whic
 | `answers/sources.py` | 67 | 3 | `answers/sources.py` |  |
 | `answers/text.py` | 121 | 15 | `answers/text.py` |  |
 | `answers/third_party.py` | 110 | 5 | `answers/third_party.py` |  |
-| `ats.py` | 426 | 18 | `ats.py` | Pure URL to platform; imported by 17 modules |
+| `ats.py` | 426 | 17 | `ats.py` | Pure URL to platform; imported by 17 modules |
 | `email_alias.py` | 108 | 10 | `email_alias.py` | Pure address arithmetic |
-| `features/knowledge/models.py` | 142 | 8 | `knowledge_types.py` |  |
+| `features/knowledge/models.py` | 122 | 8 | `knowledge_types.py` |  |
 | `mail/helpers.py` | 32 | 7 | `mail_identity.py` | Pure helpers both sides of the boundary need |
 | `mail/senders.py` | 396 | 6 | `mail_senders.py` | Pure sender families; the applier reads them when it arms a challenge |
 | `features/discovery/degree.py` | 142 | 2 | `posting/degree.py` |  |
@@ -992,8 +989,8 @@ and `telegram.api`. A split must move those seams and their tests together, whic
 | `features/discovery/roles.py` | 174 | 7 | `posting/roles.py` | Pure target-role matching; admission and ranking both ask |
 | `features/knowledge/questions.py` | 149 | 5 | `question_identity.py` |  |
 | `features/resumes/evidence.py` | 166 | 7 | `resume_evidence.py` | profile_digest is read by admission and ranking |
-| `schemas.py` | 301 | 41 | `schemas.py` | split: Profile and history types stay; request models go to contracts:<service>.py |
-| `sensitive_ids.py` | 132 | 4 | `sensitive_ids.py` | split: stop_if_sensitive (it touches the page) moves to applier:engine/sensitive.py |
+| `schemas.py` | 299 | 40 | `schemas.py` | split: Profile and history types stay; request models go to contracts:<service>.py |
+| `sensitive_ids.py` | 127 | 3 | `sensitive_ids.py` | split: stop_if_sensitive (it touches the page) moves to applier:engine/sensitive.py |
 | `shortlinks.py` | 156 | 2 | `shortlinks.py` | Resolved once, at admission and at feed import |
 
 </details>
@@ -1011,22 +1008,22 @@ and `telegram.api`. A split must move those seams and their tests together, whic
 
 | Today (`jobpilot/`) | Lines | Used by | Target | Note |
 |---|--:|--:|---|---|
-| `service/__init__.py` | 47 | 7 | `_retired_service.py` | split: `Service` ends. control:orchestrator/app.py and applier:worker/app.py assemble what each process needs |
-| `admission.py` | 230 | 22 | `admission.py` | QueueBlocked, capacity, employer_partition |
-| `application_budget.py` | 126 | 13 | `budget.py` | Allowance, nothing_sent |
+| `service/__init__.py` | 39 | 6 | `_retired_service.py` | split: `Service` ends. control:orchestrator/app.py and applier:worker/app.py assemble what each process needs |
+| `admission.py` | 228 | 22 | `admission.py` | QueueBlocked, capacity, employer_partition |
+| `application_budget.py` | 126 | 12 | `budget.py` | Allowance, nothing_sent |
 | `service/completion.py` | 494 | 2 | `completion.py` | split: policy functions become hooks (section 7, phase b) |
-| `controller_policy.py` | 19 | 3 | `controller_policy.py` | Validated at admission, read by the engine |
-| `host_health.py` | 397 | 8 | `host_gate.py` | split: HostLoad sampling moves to applier:worker/host_load.py; the published state and Gate stay |
-| `job_control.py` | 225 | 10 | `job_control.py` | split: manage() moves to control:owner/job_control.py; watch() to applier:worker/watch.py |
-| `application_pacing.py` | 418 | 6 | `pacing.py` |  |
-| `pipeline_comparison.py` | 319 | 12 | `pools.py` | split: engine_for moves to applier:worker/engine_choice.py (it imports BrowserEngine) |
+| `controller_policy.py` | 23 | 3 | `controller_policy.py` | Validated at admission, read by the engine |
+| `host_health.py` | 393 | 8 | `host_gate.py` | split: HostLoad sampling moves to applier:worker/host_load.py; the published state and Gate stay |
+| `job_control.py` | 225 | 9 | `job_control.py` | split: manage() moves to control:owner/job_control.py; watch() to applier:worker/watch.py |
+| `application_pacing.py` | 417 | 6 | `pacing.py` |  |
+| `pipeline_comparison.py` | 283 | 11 | `pools.py` | split: engine_for moves to applier:worker/engine_choice.py (it imports BrowserEngine) |
 | `reserved.py` | 426 | 9 | `reserved.py` | require_approval runs inside the reservation |
 | `run_profile.py` | 184 | 6 | `run_profile.py` |  |
 | `run_trace.py` | 66 | 1 | `run_trace.py` |  |
 | `application_slots.py` | 42 | 2 | `slots.py` |  |
 | `specialist.py` | 65 | 5 | `specialist.py` |  |
 | `service/states.py` | 21 | 3 | `states.py` |  |
-| `tiers.py` | 265 | 8 | `tiers.py` | split: escalate_due moves to control:orchestrator/escalation.py |
+| `tiers.py` | 102 | 6 | `tiers.py` | split: escalate_due moves to control:orchestrator/escalation.py |
 
 </details>
 
@@ -1035,7 +1032,7 @@ and `telegram.api`. A split must move those seams and their tests together, whic
 | Today (`jobpilot/`) | Lines | Used by | Target | Note |
 |---|--:|--:|---|---|
 | `model_admission.py` | 109 | 1 | `admission.py` |  |
-| `models.py` | 740 | 18 | `client.py` | Writes runs.cost today; the meter goes through a ledger callback |
+| `models.py` | 737 | 17 | `client.py` | Writes runs.cost today; the meter goes through a ledger callback |
 | `jev.py` | 161 | 1 | `jev.py` |  |
 | `prompt_layout.py` | 78 | 3 | `prompt_layout.py` |  |
 | `provider_health.py` | 200 | 5 | `provider_health.py` | dispatch_gate moves to ledger:host_gate.py |
@@ -1051,12 +1048,12 @@ and `telegram.api`. A split must move those seams and their tests together, whic
 | `features/knowledge/attestations.py` | 84 | 2 | `attestations.py` |  |
 | `eligibility.py` | 344 | 3 | `eligibility.py` | Facts versus hiring restrictions; ranking and admission both ask |
 | `features/knowledge/employers.py` | 233 | 12 | `employers.py` | resolve() has write side effects; see section 3 |
-| `knowledge.py` | 606 | 20 | `legacy_answers.py` | Retired once kn_facts is the one store (API.md D4) |
+| `knowledge.py` | 606 | 19 | `legacy_answers.py` | Retired once kn_facts is the one store (API.md D4) |
 | `features/knowledge/migration.py` | 331 | 7 | `migration.py` | Moves from read paths to profile save (API.md I4) |
 | `profile_photo.py` | 113 | 3 | `profile_photo.py` |  |
-| `features/knowledge/questionnaires.py` | 575 | 6 | `questionnaires.py` |  |
+| `features/knowledge/questionnaires.py` | 571 | 6 | `questionnaires.py` |  |
 | `features/resumes/tables.py` | 61 | 7 | `resume_tables.py` | rs_artifacts is pinned by admission and read by ranking and the engine |
-| `features/knowledge/retrieval.py` | 385 | 5 | `retrieval.py` | Served from a per-run snapshot in the applier |
+| `features/knowledge/retrieval.py` | 385 | 4 | `retrieval.py` | Served from a per-run snapshot in the applier |
 | `features/knowledge/store.py` | 285 | 6 | `store.py` |  |
 | `features/knowledge/tables.py` | 89 | 11 | `tables.py` |  |
 | `features/knowledge/writing.py` | 468 | 7 | `writing.py` | Role briefs and cover letter text |
@@ -1070,7 +1067,7 @@ and `telegram.api`. A split must move those seams and their tests together, whic
 | `native/__init__.py` | 6 | 0 | `__init__.py` |  |
 | `native/__main__.py` | 3 | 0 | `__main__.py` |  |
 | `native/cli.py` | 490 | 1 | `cli.py` |  |
-| `native/env.py` | 198 | 6 | `env.py` |  |
+| `native/env.py` | 196 | 6 | `env.py` |  |
 | `native/migrate.py` | 549 | 1 | `migrate.py` | Docker to native; deleted after the cut-over |
 | `native/pg.py` | 180 | 3 | `pg.py` |  |
 | `native/release.py` | 100 | 2 | `release.py` | Snapshots services/, libs/ and web/ instead of jobpilot/ |
@@ -1088,15 +1085,15 @@ this machine, and assume at most two or three agents at once under the shared us
 
 | Phase | Agent-hours | Presentable to YC at the end? |
 |---|--:|---|
-| (a) Dead code | 3 remaining | The code is honest, but the flat layout is unchanged. Only this document shows the structure |
+| (a) Dead code | done | The code is honest, but the flat layout is unchanged. Only this document shows the structure |
 | (b) Modular monolith | 52 | **Yes.** The tree a reader sees is the target, boundaries fail CI, and it runs as one process |
 | (c) Internal contracts | 36 | **Yes, and strong.** `/v1`, OpenAPI per service, a generated client, one writer per table. Still one process |
 | (d) Extraction | 36 | **The full story.** Four processes, measured |
-| **Total** | **about 127, or 5 to 8 days elapsed** | |
+| **Total** | **about 124 still to do, or 5 to 8 days elapsed** | |
 
 ### (a) Dead code removal
 
-In progress on the cleanup branch: 4,171 lines removed so far, including the model-led agent, runner-tier escalation and one-off operations tools.
+Landed on 2026-10-31. Against `main` before it, `jobpilot/` is 2,186 lines smaller (60 added, for the callers that changed) and `tests/` 853 lines smaller (1,217 removed, 364 added); `uv.lock` lost 3,639 lines with the browser-use, LangChain and MCP dependencies. Removed: the model-led agent and its browser-use branch, runner-tier escalation, `ENGINE=guided` and the old `WORKERS` number, the MCP server, the debug routes, and the one-off tools (`corrections.py`, `grandfather.py`, `operations/cancel.py`). `scripts/dev/module_map.py --check` reports 232 modules, none unmapped and none stale.
 
 - **Accept:** fast gate green; `jobpilot verify` on a clean installation; `module_map.py --check` passes.
 - **Rollback:** previous release.
@@ -1219,7 +1216,7 @@ gated on the latest version per name, and without that a discovery deploy would 
 
 ### If the deadline arrives early
 
-Do (a), b0 to b5, the `widgets` and `forms` splits, b7, c5, the mail parts of c1, c3, c4 and d0, and d1: about 65 agent-hours. That gives the target tree, CI-enforced boundaries, `/v1` with OpenAPI and a generated client, one
+Do b0 to b5 (with (a) already done), the `widgets` and `forms` splits, b7, c5, the mail parts of c1, c3, c4 and d0, and d1: about 62 agent-hours. That gives the target tree, CI-enforced boundaries, `/v1` with OpenAPI and a generated client, one
 service really extracted, and this document describing the rest as a plan already in motion. Never present a phase as done because its directory exists.
 
 ### The biggest risk

@@ -3,7 +3,8 @@
 Every route the application serves, what it does, who may call it, and what is wrong with the design. The last part
 proposes a cleaner route map. **Renames are still not done:** the dashboard calls these paths from about seventy places,
 so they ship together with the frontend change (section 5). Phase B (2026-10-20) moved every handler into
-`jobpilot/api/routes/` (section 7) and deleted the four routes nothing called (section 6).
+`jobpilot/api/routes/` (section 7) and deleted the four routes nothing called (section 6). The 2026-10-31 cleanup deleted eleven more
+(section 6); the reference tables below no longer list them.
 
 How this was produced: the route table was read from the running application object (109 routes: 54 declared in
 `jobpilot/api.py`, 8 in `owner_account.py`, 9 in `mail_api.py`, 7 in `jobboard_api.py`, 31 in the three `/api/v2`
@@ -22,7 +23,7 @@ and the dashboard (`GET /{path}` returns `index.html`, `/assets/*` the build).
 **Authentication** (`api/middleware.py`, the `security` middleware). A request to `/api/*` needs one of:
 
 - `Authorization: Bearer <access token>` (`APP_TOKEN`, or the generated `DATA_DIR/access-token`; print it with
-  `jobpilot token`). Constant-time comparison. Used by scripts and the MCP server.
+  `jobpilot token`). Constant-time comparison. Used by scripts.
 - the `jp_session` cookie (`api/sessions.py`): HttpOnly, `SameSite=Strict`, `Secure` when `SECURE_COOKIES`, issued by
   `POST /api/login` (token), `POST /api/account/login` (e-mail and password), sign-up and a password reset. The signed
   payload is `{s: "applicant", v: <session version>, k: <keep>}`; the signing key is the access token. A session ends
@@ -115,8 +116,6 @@ exercised through the HTTP test client; every router now has an HTTP test module
 | GET | `/api/v2/knowledge/employers` | Employer identities with aliases and memory counts | `q, page, size` | page | ✔ |
 | GET | `/api/v2/knowledge/attestations` | Broad statements the applicant can confirm once | – | `{items}` | ✔ |
 | POST | `/api/v2/knowledge/attestations/{id}` | Confirm one | `{statement}` | `{confirmed}`; 422 | ✔ |
-| POST | `/api/v2/knowledge/retrieve` | Debug: the evidence packet for a question | `RetrieveInput` | `EvidencePacket` | – |
-| POST | `/api/v2/knowledge/migrate` | Mirror the profile into `kn_facts` | `?dry_run=true` | report | – |
 | GET | `/api/v2/resumes/master` | The master resume and its approval state | – | status | ✔ |
 | PUT | `/api/v2/resumes/master` | Save the master document | `{doc, style}` | status | ✔ |
 | POST | `/api/v2/resumes/master/import` | Build the master from an uploaded resume | – | status | ✔ |
@@ -124,8 +123,6 @@ exercised through the HTTP test client; every router now has an HTTP test module
 | GET | `/api/v2/resumes/evidence` | The material tailoring may use (no contact values) | – | inventory | ✔ |
 | POST | `/api/v2/resumes/prepare` | Tailor a resume for a job | `{job_id, source_resume_id?}` | artifact | ✔ |
 | GET | `/api/v2/resumes/artifacts` | Tailored variants | `status, job_id, page, size` | page | ✔ |
-| GET | `/api/v2/resumes/artifacts/{id}` | One variant | – | artifact | – |
-| POST | `/api/v2/resumes/artifacts/{id}/cancel` | Cancel a preparation | – | artifact | – |
 | GET | `/api/v2/resumes/artifacts/{id}/pdf` | The PDF | – | `application/pdf` | ✔ (link) |
 | GET | `/api/v2/resumes/editor/document` | Editor document of an artifact or the master | `artifact_id, master` | doc and style | ✔ |
 | GET | `/api/v2/resumes/editor/templates` | Style presets | – | list | ✔ |
@@ -157,8 +154,6 @@ exercised through the HTTP test client; every router now has an HTTP test module
 | GET | `/api/runs/{id}/screenshot` | The final page | – | `image/png` | ✔ |
 | POST | `/api/runs/{id}/reconcile` | The applicant states whether an uncertain submission went through | `{submitted, evidence ≥ 5 chars}` | `{reconciled:true}` | ✔ |
 | POST | `/api/runs/{id}/check-email` | Look for the employer's acknowledgement now | – | receipt-check result | ✔ |
-| POST | `/api/runs/{id}/verify` | Resume a retained verification draft | – | result; 409 none retained | – (documented operator route) |
-| POST | `/api/runs/{id}/cancel` | Cancel a *queued* run | – | `{cancelled:true}`; 400 otherwise | – |
 | POST | `/api/reviews/{id}` | Answer a question a run is waiting on; saves the answer and resumes the run | `{answer}` | resume result | ✔ |
 
 ### 2.5 Sources, job board, autopilot
@@ -173,15 +168,10 @@ exercised through the HTTP test client; every router now has an HTTP test module
 | PUT | `/api/job-board/settings` | Board settings; turning on auto-apply starts a batch | `BoardSettings {enabled, interval_hours, early_career_only, web_search, auto_apply, batch_target, minimum_auto_fit, max_age_hours}` | `{saved, sources}` | ✔ |
 | POST | `/api/job-board/sources` | Add a **managed** source | `SourceInput` | `{added, id}`; 409 if already a plain source | ✔ |
 | POST | `/api/job-board/scrape` | Scan all managed sources now | – | `{queued_sources, total_sources}` | ✔ |
-| POST | `/api/job-board/apply` | Rank and queue up to 50 listed jobs (the dashboard uses `POST /api/jobs/apply-many`) | `{job_ids}` | `{queued, skipped}` | – |
 | POST | `/api/job-board/autopilot/start` | Start an unattended batch | `{target 1–500}` | start result and runtime | ✔ |
 | GET | `/api/v2/discovery/status` | Pipeline readiness and the bottleneck (one answer per 20 s) | – | status | – |
 | GET | `/api/v2/discovery/feeds` | Last public-feed sweep | – | state | ✔ |
 | POST | `/api/v2/discovery/feeds/refresh` | Start a sweep (an in-process task) | – | `{state}` | ✔ |
-| GET | `/api/v2/discovery/due` | Sources due now | – | list | – |
-| GET | `/api/v2/discovery/ready` | Ready applications | `limit ≤ 200` | `{items}` | – |
-| GET | `/api/v2/discovery/requisitions` | Canonical requisitions | `page, size` | page | – |
-| GET | `/api/v2/discovery/sources/health` | Failing sources | – | `{items}` | – |
 
 ### 2.6 Mail, employer accounts, sessions, demo
 
@@ -222,7 +212,7 @@ exercised through the HTTP test client; every router now has an HTTP test module
 
 | # | Duplicate | Routes | Recommendation |
 |---|---|---|---|
-| D1 | Five ways to start an application (two were deleted in Phase B: `/approve`, `/batch-queue`) | `POST /api/jobs/{id}/apply`, `/queue`, `/api/job-board/apply` | One service function behind two routes: `POST /api/jobs/{id}/apply` (optional body takes the `/queue` options) and `POST /api/jobs/apply` (`job_ids`). Delete `/approve` and `/batch-queue` |
+| D1 | Five ways to start an application (two were deleted in Phase B: `/approve`, `/batch-queue`) | `POST /api/jobs/{id}/apply`, `/queue` | One service function behind two routes: `POST /api/jobs/{id}/apply` (optional body takes the `/queue` options) and `POST /api/jobs/apply` (`job_ids`). Delete `/approve` and `/batch-queue` |
 | D2 | Two ways to add a source | `POST /api/sources`, `POST /api/job-board/sources` | One route with `managed: bool` |
 | D3 | Board information in four places | `GET /api/job-board`, (`/api/job-board/search`, deleted), the snapshot's `discovery_settings`/`sources`, `GET /api/v2/discovery/status` and `/feeds` | One `GET /api/discovery` |
 | D4 | Two knowledge stores and APIs | `/api/knowledge` (profile `reviewed_answers`) versus `/api/v2/knowledge/facts` (`kn_facts`). The dashboard uses both | `kn_facts` only; move the "saved answers" screen to v2, then delete v1 |
@@ -237,11 +227,7 @@ exercised through the HTTP test client; every router now has an HTTP test module
 
 | Route | Also unused by tests? | Recommendation |
 |---|---|---|
-| `POST /api/runs/{id}/cancel` | yes | Keep and use: a queued run cannot be cancelled from the UI; or delete |
-| `POST /api/runs/{id}/verify` | n/a (service-level tests) | Keep: documented operator route in DEVELOPER.md |
-| `GET /api/v2/discovery/due`, `/ready`, `/requisitions`, `/sources/health` | yes | Keep as operator diagnostics under `/api/admin/discovery/…`, or build the screen they were made for |
-| `POST /api/v2/knowledge/facts`, `/retrieve`, `/migrate` | yes | Keep as operator routes; `facts` is the write path the v1 screen should move to |
-| `GET /api/v2/resumes/artifacts/{id}`, `POST …/{id}/cancel` | yes | Keep: needed once the UI cancels a preparation |
+| `POST /api/v2/knowledge/facts` | yes | Keep as an operator route; it is the write path the v1 screen should move to |
 | `GET /api/onboarding`, `GET /api/profile`, `GET /api/resumes`, `GET /api/control` | partly | Read through the snapshot; delete or keep for scripts |
 
 `GET /api/preflight`, `POST /api/jobs/{id}/approve`, `POST /api/jobs/batch-queue` and `GET /api/job-board/search` were also in this table and were deleted in Phase B (section 6). The ones above stay.
@@ -293,8 +279,8 @@ Phase B added a contract test module for each router, one file per area (`tests/
 `tests/support_http.py`): health, session, request security (sign-in, Origin, content type, headers, error mapping), jobs, runs,
 the ledger and archive, profile and resumes, settings, sources, legacy knowledge and employer accounts and sessions, the demo
 and dashboard fallback, mail rules and OAuth, the job board and the three `/api/v2` routers. A literal-path scan of the
-tests finds 94 of the 105 remaining routes called over HTTP. Not yet called over HTTP:
-`POST /api/v2/discovery/feeds/refresh` and the `/api/v2/resumes` write routes (`PUT master`, `master/import`, `master/{id}/approve`, `prepare`, `artifacts/{id}/cancel`, `artifacts/{id}/pdf`, `editor/document`, `editor/render`, `editor/compile`, `editor/save`), which need the LaTeX toolchain or a model. Add them before renaming anything: the tests are what makes the rename in section 5 safe.
+tests found 94 of the 105 remaining routes called over HTTP (measured 2026-10-20, before the eleven deletions below). Not yet called over HTTP:
+`POST /api/v2/discovery/feeds/refresh` and the `/api/v2/resumes` write routes (`PUT master`, `master/import`, `master/{id}/approve`, `prepare`, `artifacts/{id}/pdf`, `editor/document`, `editor/render`, `editor/compile`, `editor/save`), which need the LaTeX toolchain or a model. Add them before renaming anything: the tests are what makes the rename in section 5 safe.
 
 ## 5. Proposed route design
 
@@ -330,12 +316,11 @@ tests finds 94 of the 105 remaining routes called over HTTP. Not yet called over
 | `POST /api/job-board/scrape`, `POST /api/sources/{id}/discover` | `POST /api/scans`, `POST /api/sources/{id}/scan` | P2 |
 | `POST /api/job-board/autopilot/start` | `POST /api/autopilot/batches` | P2 |
 | `/api/v2/discovery/status`, `/feeds`, `/feeds/refresh` | `/api/discovery/status`, `/api/discovery/feed`, `POST /api/discovery/feed/sweeps` (durable queue, I9) | P1 |
-| `/api/v2/discovery/due`, `/ready`, `/requisitions`, `/sources/health` | `/api/admin/discovery/…` | P2 |
-| `POST /api/jobs/{id}/apply`, `/queue`, `/approve`, `POST /api/jobs/batch-queue`, `POST /api/job-board/apply` | `POST /api/jobs/{id}/apply` (optional options) and `POST /api/jobs/apply` (`job_ids`) | P1 (D1) |
+| `POST /api/jobs/{id}/apply`, `/queue`, `/approve`, `POST /api/jobs/batch-queue` | `POST /api/jobs/{id}/apply` (optional options) and `POST /api/jobs/apply` (`job_ids`) | P1 (D1) |
 | `POST /api/jobs/{id}/rank` | unchanged (or `/ranking`) | – |
 | `POST /api/runs/{id}/check-email` | `POST /api/runs/{id}/receipt-check` | P2 |
 | `POST /api/reviews/{id}` | `POST /api/reviews/{id}/answer` | P2 |
-| `/api/knowledge` (v1) | removed; `/api/v2/knowledge/*` becomes `/api/knowledge/*` (`POST /facts/{id}/retire` stays, it carries `expected_version`; `migrate` and `retrieve` move to `/api/admin/knowledge/`) | P1 (D4) |
+| `/api/knowledge` (v1) | removed; `/api/v2/knowledge/*` becomes `/api/knowledge/*` (`POST /facts/{id}/retire` stays, it carries `expected_version`; `migrate` and `retrieve` were deleted on 2026-10-31) | P1 (D4) |
 | `/api/v2/resumes/*` | `/api/resumes/masters`, `/artifacts`, `/editor`, `/evidence`, `/prepare` (drop `v2`); uploaded resumes stay at `/api/resumes` | P2 |
 | `GET /api/resumes/{id}/download` | `GET /api/resumes/{id}/file` | P2 |
 | `POST /api/mail/connect`, `POST /api/mail/imap`, `POST /api/inbox/check`, `/api/mail/{id}…` | `POST /api/mail/mailboxes` (`kind`), `POST /api/mail/mailboxes/{id}/check`, `DELETE /api/mail/mailboxes/{id}` (the `.env` mailbox listed too) | P1 (D6, D9) |
@@ -360,11 +345,12 @@ tests finds 94 of the 105 remaining routes called over HTTP. Not yet called over
   helpers found no caller: `GET /api/preflight`, `POST /api/jobs/{id}/approve`, `POST /api/jobs/batch-queue`,
   `GET /api/job-board/search`. `Service.preflight_questions`, `Service.queue_batch` and the `Approval` and `BatchQueue`
   models went with them. 105 routes remain.
-- **Kept although the dashboard does not call them** (uncertain or documented): `POST /api/runs/{id}/cancel`,
-  `POST /api/runs/{id}/verify` (operator route), `GET /api/onboarding`, `GET /api/profile`, `GET /api/resumes`,
-  `GET /api/control` (read through the snapshot, but scripts may use them), the `/api/v2/discovery` diagnostics
-  (`due`, `ready`, `requisitions`, `sources/health`), `POST /api/v2/knowledge/{facts,retrieve,migrate}` and
-  `GET /api/v2/resumes/artifacts/{id}` with `POST …/cancel`.
+- **Eleven more routes deleted on 2026-10-31**, with the cleanup, because nothing called them: `POST /api/job-board/apply`,
+  `POST /api/runs/{id}/cancel`, `POST /api/runs/{id}/verify`, the `/api/v2/discovery` diagnostics (`due`, `ready`, `requisitions`,
+  `sources/health`), `POST /api/v2/knowledge/retrieve` and `/migrate`, and `GET /api/v2/resumes/artifacts/{id}` with `POST …/cancel`.
+  The MCP server (`jobpilot/mcp_server.py`) was deleted in the same cleanup.
+- **Kept although the dashboard does not call them** (uncertain or documented): `GET /api/onboarding`, `GET /api/profile`,
+  `GET /api/resumes`, `GET /api/control` (read through the snapshot, but scripts may use them) and `POST /api/v2/knowledge/facts`.
 - **Handlers moved** into one router per resource, with no change to a path, method, auth rule, request or response
   (the OpenAPI paths, parameters and request bodies of the running application were compared before and after).
 - **A latent import fix** came with the move: `GET /api/runtime-health` imports `host_health`, and the new HTTP test caught
@@ -384,9 +370,9 @@ tests finds 94 of the 105 remaining routes called over HTTP. Not yet called over
 | `knowledge.py` | `/api/knowledge` (legacy store) |
 | `settings.py` | `/api/control`, `/api/limits`, `/api/agents` |
 | `jobs.py` | `/api/jobs`, `/api/jobs/{id}` (GET, DELETE) and `/rank`, `/apply`, `/queue`, `/pause`, `/resume` |
-| `runs.py` | `/api/runs/{id}` and `/screenshot`, `/reconcile`, `/check-email`, `/verify`, `/cancel`; `/api/reviews/{id}` |
+| `runs.py` | `/api/runs/{id}` and `/screenshot`, `/reconcile`, `/check-email`; `/api/reviews/{id}` |
 | `sources.py` | `/api/sources`, `/api/sources/{id}`, `/api/sources/{id}/discover` |
-| `job_board.py` | `/api/job-board` and `/settings`, `/sources`, `/scrape`, `/apply`, `/autopilot/start` |
+| `job_board.py` | `/api/job-board` and `/settings`, `/sources`, `/scrape`, `/autopilot/start` |
 | `mail.py` | `/api/mail…`, `/oauth/gmail/callback`, `/api/mail-rules…`, `/api/mail-challenges/{id}/cancel`, `/api/inbox/check` |
 | `accounts.py` | `/api/accounts`, `/api/accounts/{id}`, `/api/accounts/{id}/{password,verify}`, `/api/sessions` (employer browser sessions) |
 | `demo.py` | `/api/demo`, `/demo/form/{nonce}` |

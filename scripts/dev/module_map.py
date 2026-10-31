@@ -107,7 +107,6 @@ IMPORTER_MOVES = {
     "features/_store.py": {"discovery", "knowledge", "ledger"},
     "features/knowledge/__init__.py": {"control"},
     "service/migrations.py": {"applier", "domain"},
-    "corrections.py": {"mail"},
 }
 
 # fmt: off
@@ -155,8 +154,6 @@ MAP = {
     "archive.py":                        ("control:orchestrator/archive.py", ""),
     "controller_policy.py":              ("ledger:controller_policy.py", "Validated at admission, read by the engine"),
     "host_health.py":                    ("ledger:host_gate.py", "split: HostLoad sampling moves to applier:worker/host_load.py; the published state and Gate stay"),
-    "corrections.py":                    ("control:orchestrator/migrations/corrections.py", "One-time; deleted once Alembic carries a baseline"),
-    "grandfather.py":                    ("control:orchestrator/migrations/grandfather.py", "One-time; same"),
     "service/migrations.py":             ("control:orchestrator/migrations/legacy.py", "Runs at start today; becomes Alembic revisions"),
 
     # ---- control: orchestrator (admission, autopilot, recovery, repair) -----------------------------------------------
@@ -170,7 +167,6 @@ MAP = {
     "retention.py":                      ("control:orchestrator/retention.py", "DBOS retention is a singleton job"),
     "workers.py":                        ("control:orchestrator/schedule.py", "split: each DBOS workflow moves to the service that executes it (section 2)"),
     "operations/__init__.py":            ("control:ops/__init__.py", ""),
-    "operations/cancel.py":              ("control:ops/cancel.py", ""),
     "operations/closed_postings.py":     ("control:ops/closed_postings.py", ""),
     "operations/reset.py":               ("control:ops/reset.py", ""),
     "operations/superseded.py":          ("control:ops/superseded.py", "close_superseded_waits runs inside completion and moves to the ledger"),

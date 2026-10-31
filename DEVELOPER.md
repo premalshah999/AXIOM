@@ -114,8 +114,6 @@ Shared browser fixtures live in `tests/conftest.py`; synthetic mail and iCIMS ob
 
 PostgreSQL and applicant data use named Docker volumes. Never run `docker compose down -v` on this installation. Keep database and CDP ports private. Dedicated CDP Chrome uses the persisted `application_browser.visible` preference. The owner requested visible worker tabs on October 10: each owner foregrounds its own exact tab at startup. A false or absent preference keeps new tabs in the background. Never adopt another worker's page.
 
-`operations/cancel.py` cancels only unreserved saved drafts after pause and drain. It preserves packets, reviews, events and receipts, disables their recovery, cancels unsent deliveries and clears cancelled verification payloads. Reserved histories remain protected and paused.
-
 Legacy duplicate guards (including the apply-v2 ledger) were imported on 2026-10-10 as historical protection, not confirmations; the one-time import tools were then removed. Legacy accounts, answer memory, fit verdicts and browser profiles are preserved privately under `.data/migrations/2026-10-10/`.
 
 `application_pacing.py` limits unique confirmed/reserved applications to three per employer and admits one Ashby owner with at least 150 seconds between new starts. Pacing defers admission before consuming an executor slot. Other ATS owners continue. The migrated public catalog supplies Greenhouse/Ashby board slugs and SAP/iCIMS career-page hints; every hint still goes through current fetch, freshness, suitability and duplicate checks.

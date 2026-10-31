@@ -53,7 +53,7 @@ valid only for string settings. The example keeps every default commented out fo
 | `LLM_PROVIDER` | The old example said `mimo`; the code default is `deepseek`. | Example follows the code (`deepseek`). |
 | `DEEPSEEK_THINKING` | The old example said `disabled`, the developer guide says production answers run with thinking off, but the code default is `enabled` (slower and dearer). | The example keeps `disabled` active. **Recommend flipping the code default**; not changed here to avoid a behaviour change in the architecture branch's area. |
 | `TELEGRAM_WAIT_SECONDS` | Old example 120, code 0. | Example follows the code. |
-| `WORKERS` | Old example and code 8, production 6 (which meant no specialists). | Replaced, see Workers. |
+| `WORKERS` | Old example and code 8, production 6 (which meant no specialists). | Removed on 2026-10-31: a `WORKERS` in `.env` is ignored. See Workers. |
 | `TIMEZONE` | Defaults to `UTC`. It decides the daily limit, the daily budget, schedules and the date written on forms. | `scripts/setup.sh` writes the computer's zone. An installation that relied on the old `America/New_York` default must set `TIMEZONE` in its `.env` (the original owner's production file does). |
 | `CAPTCHA_SAME_IP`, `CAPTCHA_TWIN_HOSTS` | `true` / `icims.com` encode decisions taken for one owner's setup. | Documented; harmless without a 2Captcha key. |
 | `ENABLE_DEMO` | `true` in the production image: the demo employer form and `/api/demo` are reachable. | Needed by `jobpilot verify` and the first-run tour, so left on; flagged. |
@@ -106,9 +106,9 @@ The multiplier is applied in three places: the run's wall-clock budget (`tiers.t
 `Service._execute_owned` and the engine's own budget), the model-call cap (`tiers.call_limit`, read from the run's pool),
 and the 24-hour per-job input-token cap (`tiers.job_over_budget`, at queue time).
 
-**Legacy `WORKERS`.** It still works, keeps its old layout, and logs a warning: slots 1 to 6 are ATS workers, slots 7 and 8
-specialists, a larger fleet keeps two specialists as its last slots. So `WORKERS=6` is six ATS workers and **no**
-specialists. It cannot be combined with `NORMAL_WORKERS` or `SPECIALIST_WORKERS`.
+**`WORKERS` is gone.** The single number was deleted from the settings on 2026-10-31. A `WORKERS` line left in `.env` is ignored, so an
+installation that still has one gets `NORMAL_WORKERS` and `SPECIALIST_WORKERS` (or their defaults, the numbers saved in Settings ›
+Connections › Workers) and nothing warns about the stale line: delete it. `WORKERS=6` used to mean six ATS workers and **no** specialists.
 
 **Why these hard-platform defaults.** In the production run history, failures with an agent-fixable cause were dominated
 by Workday (already tuned separately), then SuccessFactors, Eightfold and SmartRecruiters, whose failures are mostly stuck
@@ -207,8 +207,8 @@ file run from another directory would otherwise create empty volumes under the n
 1. In the production `.env` set `COMPOSE_PROJECT_NAME=applypilot` (keeps the volumes and the `applypilot-app-1` / `applypilot-db-1` names)
    and `POSTGRES_PASSWORD` set to the value the existing volume was created with: the production `.env`'s `POSTGRES_PASSWORD` if it has one, otherwise the
    default written in the old `compose.yaml` (`${POSTGRES_PASSWORD:-...}`). A volume keeps its first password, and Compose refuses to start without the variable.
-2. Replace `WORKERS=6` with `NORMAL_WORKERS=6` and `SPECIALIST_WORKERS=2`, or leave `WORKERS=6` to keep six workers and no
-   specialists for now. Keep `BROWSER_CDP_URL` and `BROWSER_TWIN_CDP_URL`.
+2. Replace `WORKERS=6` with `NORMAL_WORKERS=6` and `SPECIALIST_WORKERS=2` (a leftover `WORKERS` is ignored; to keep six workers and no
+   specialists set `SPECIALIST_WORKERS=0`). Keep `BROWSER_CDP_URL` and `BROWSER_TWIN_CDP_URL`.
 3. Hold and drain as usual (`hold.sh`; the container being replaced is the old build, which cannot drain itself, so wait for
    `select count(*) from runs where state = 'submitting'` to reach 0), then `docker compose up -d --build --remove-orphans`. The database container is recreated as well,
    because its image reference changes from `postgres:17-bookworm` to the pinned `postgres:17.11-bookworm` (same PostgreSQL 17.11, a separate build): a few
