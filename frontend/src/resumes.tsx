@@ -676,7 +676,10 @@ function sentWords(a: Artifact, tailoringOff: boolean): { word: string; tone: "o
   if (a.sent?.state === "confirmed") return { word: `Sent ${day(a.sent.at)}`, tone: "ok", tip: "An application went out with this version." };
   if (a.sent?.state === "unknown") return { word: "Maybe sent", tone: "info", tip: "An application used it, but its outcome wasn't confirmed." };
   if (a.status !== "ready") return { word: ARTIFACT_WORD[a.status] || a.status, tone: (ARTIFACT_PILL[a.status] as "neutral") || "neutral" };
-  return tailoringOff ? { word: "Never sent", tone: "neutral", tip: "No application used this version." } : { word: "Ready", tone: "ok" };
+  if (!tailoringOff) return { word: "Ready", tone: "ok" };
+  // An older server doesn't say what happened to a version. "Never sent" is a claim, so it needs the answer.
+  if (a.sent === undefined) return { word: "Not in use", tone: "neutral" };
+  return { word: "Never sent", tone: "neutral", tip: "No application used this version." };
 }
 
 const companyOf = (a: Artifact) => a.job?.company || (a.employer_id ? employerLabel(a.employer_id) : "Tailored version");
@@ -939,7 +942,9 @@ function VersionPreview({ id, items, tailoringOff }: { id: string; items: Artifa
                         : a.status === "kept_master"
                           ? "The tailored draft didn't read better than your master, so the master was kept."
                           : tailoringOff
-                            ? "No application used this draft, and nothing new will while tailoring is off."
+                            ? a.sent === undefined
+                              ? "Nothing new uses this draft while tailoring is off."
+                              : "No application used this draft, and nothing new will while tailoring is off."
                             : "Used for this job's application while it still matches the posting and your profile."}
                 </p>
                 {(a.selection || []).length > 0 && (
