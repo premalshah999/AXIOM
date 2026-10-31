@@ -1,98 +1,205 @@
-/* The setup guide (src/onboarding.tsx): one question group per step and a thin progress line. It lives outside the shell,
-   inside .ax-screen. Tokens only. */
+/* The setup guide (src/onboarding.tsx) and the sign-in screens (src/account.tsx): the first thing anyone sees. Both live outside
+   the shell, inside .ax-screen. A raised card on the page, one named step at a time, the way on sits in a sticky bar. Tokens only. */
 .ax-ob {
+  --ob-w: 640px;
   display: flex;
   flex-direction: column;
-  gap: var(--space-6);
-  max-width: 600px;
   min-height: 100%;
-  margin: 0 auto;
-  padding: var(--space-4) var(--gutter) var(--space-12);
+}
+.ax-ob.is-boot {
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
 }
 .ax-ob-top {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  min-height: 40px;
+  justify-content: space-between;
+  min-height: 64px;
+  padding: var(--space-3) var(--gutter);
 }
 .ax-ob-top .ax-brand {
   flex: none;
 }
-.ax-ob-count {
-  margin-left: auto;
+.ax-ob-form {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.ax-ob-col {
+  flex: 1;
+  width: 100%;
+  max-width: calc(var(--ob-w) + 2 * var(--gutter));
+  margin: 0 auto;
+  padding: var(--space-2) var(--gutter) var(--space-12);
 }
 
-/* The progress line: one thin segment per step. A reached step is a button back to it. */
-.ax-ob-steps {
+/* ---------- progress: seven named steps, each a segment; a reached one is a way back ---------- */
+.ax-ob-progress {
   display: flex;
-  gap: 3px;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+.ax-ob-caption {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+}
+.ax-ob-steps {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
-.ax-ob-steps li {
-  flex: 1;
-}
 .ax-ob-steps button {
-  position: relative;
-  display: block;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   width: 100%;
-  height: 16px;
-  padding: 0;
+  padding: 6px 0 0;
   border: 0;
   background: none;
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+  text-align: left;
   cursor: pointer;
+  transition: color var(--dur) var(--ease);
 }
-.ax-ob-steps button::after {
-  content: "";
-  position: absolute;
-  inset: 7px 0;
-  border-radius: 1px;
-  background: var(--line-strong);
+.ax-ob-steps i {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+  transition: background var(--dur) var(--ease);
 }
-.ax-ob-steps .is-done button::after {
-  background: var(--ink-3);
+.ax-ob-steps span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.ax-ob-steps .is-now button::after {
+.ax-ob-steps .is-done i {
+  background: var(--ink-2);
+}
+.ax-ob-steps .is-done button {
+  color: var(--ink-2);
+}
+.ax-ob-steps .is-now i {
   background: var(--ink);
+}
+.ax-ob-steps .is-now button {
+  color: var(--ink);
+  font-weight: 500;
+}
+.ax-ob-steps button:hover:not(:disabled) {
+  color: var(--ink);
 }
 .ax-ob-steps button:disabled {
   cursor: default;
 }
+.ax-ob-steps button:focus-visible {
+  border-radius: 3px;
+  outline-offset: 3px;
+}
 
-.ax-ob-card,
-.ax-ob-body {
+/* ---------- the card ---------- */
+.ax-ob-card {
+  --surface: var(--raised);
   display: flex;
   flex-direction: column;
-}
-.ax-ob-card {
-  gap: var(--space-6);
+  gap: var(--space-8);
+  padding: var(--space-8);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+  box-shadow: var(--shadow-panel);
 }
 .ax-ob-card > header {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--space-2);
+}
+.ax-ob-card > header p {
+  max-width: 54ch;
+  color: var(--ink-2);
+}
+.ax-ob-card.is-hero > header p {
+  color: var(--ink);
+  font-size: var(--text-title);
+  line-height: 1.5;
 }
 .ax-ob-card h1:focus {
   outline: none;
 }
 .ax-ob-body {
-  gap: var(--space-6);
-}
-.ax-ob-foot {
   display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--line);
+  flex-direction: column;
+  gap: var(--space-8);
+  animation: ax-ob-in 180ms var(--ease);
 }
-.ax-ob-foot-end {
-  display: flex;
-  gap: var(--space-2);
-  margin-left: auto;
+@keyframes ax-ob-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
 }
 
-/* Questions: the prompt at the left and its answer at the right, on hairlines. */
+/* The way on: always in reach, however long the step. */
+.ax-ob-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  border-top: 1px solid var(--line);
+  background: var(--sheet);
+}
+.ax-ob-bar-in {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  max-width: calc(var(--ob-w) + 2 * var(--gutter));
+  margin: 0 auto;
+  padding: var(--space-3) var(--gutter) calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+}
+.ax-ob-bar-end {
+  display: flex;
+  flex: 1;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* ---------- parts of a step ---------- */
+.ax-ob-sect {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.ax-ob-sect > header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ax-ob-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+.ax-ob-grid > .is-wide {
+  grid-column: 1 / -1;
+}
+.ax-ob-phone {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: var(--space-4);
+}
+
+/* A question: its words at the left, its answer at the right, on hairlines. */
 .ax-ob-list {
   display: flex;
   flex-direction: column;
@@ -103,13 +210,21 @@
   justify-content: space-between;
   gap: var(--space-4);
   padding: var(--space-3) 0;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-soft);
   font-size: var(--text-body);
+}
+.ax-ob-list > .ax-ob-q:first-child {
+  padding-top: 0;
+}
+.ax-ob-list > .ax-ob-q:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
 }
 .ax-ob-q.is-stack {
   flex-direction: column;
   align-items: stretch;
   gap: var(--space-2);
+  padding: 0;
   border-bottom: 0;
 }
 .ax-ob-q-text {
@@ -123,10 +238,6 @@
   flex: none;
   max-width: 100%;
 }
-.ax-ob-list > .ax-check {
-  padding: var(--space-3) 0;
-  border-bottom: 1px solid var(--line);
-}
 .ax-ob input[type="range"] {
   min-height: 0;
   padding: 0;
@@ -134,67 +245,414 @@
   background: none;
   accent-color: var(--ink);
 }
-.ax-ob-grid {
+
+/* A choice of one, shown as cards: a title, one line, and a tick on the one chosen. */
+.ax-ob-choices {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-3) var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-3);
 }
-.ax-ob-grid > .is-wide {
-  grid-column: 1 / -1;
+.ax-ob-choice {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--field);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  transition:
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
 }
-@media (max-width: 560px) {
+button.ax-ob-choice {
+  cursor: pointer;
+}
+button.ax-ob-choice:hover {
+  border-color: var(--ink-3);
+}
+.ax-ob-choice.is-on {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+.ax-ob-choice-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.ax-ob-choice-main strong {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-weight: 600;
+}
+.ax-ob-choice-main small {
+  color: var(--ink-2);
+}
+.ax-ob-tick {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  color: transparent;
+}
+.ax-ob-choice.is-on .ax-ob-tick {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: var(--brand-ink);
+}
+.ax-ob-tag {
+  margin-left: auto;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* Switches grouped on one hairline frame. */
+.ax-ob-switches {
+  padding: 0 var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.ax-ob-switches .ax-switch-row {
+  padding: var(--space-3) 0;
+}
+.ax-ob-switches .ax-switch-row:first-child,
+.ax-ob-switches .ax-switch-row:last-child {
+  padding: var(--space-3) 0;
+}
+
+/* Roles and places as words that can be removed or added. */
+.ax-ob-tags {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.ax-ob-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.ax-ob-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: var(--text-meta);
+  cursor: pointer;
+  transition:
+    color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+.ax-ob-chip:hover {
+  border-color: var(--ink-3);
+  color: var(--ink);
+}
+.ax-ob-chip.is-on {
+  border-color: var(--btn-edge);
+  background: var(--btn);
+  box-shadow: var(--btn-sheen);
+  color: var(--btn-ink);
+}
+.ax-ob-chip svg {
+  opacity: 0.7;
+}
+
+/* Parts most people leave closed. */
+.ax-ob-folds {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.ax-ob-fold + .ax-ob-fold {
+  border-top: 1px solid var(--line);
+}
+.ax-ob-fold > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 48px;
+  padding: 0 var(--space-4);
+  list-style: none;
+  cursor: pointer;
+}
+.ax-ob-fold > summary::-webkit-details-marker {
+  display: none;
+}
+.ax-ob-fold > summary::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--ink-3);
+  border-bottom: 1.5px solid var(--ink-3);
+  transform: rotate(-45deg);
+  transition: transform var(--dur) var(--ease);
+}
+.ax-ob-fold[open] > summary::before {
+  transform: rotate(45deg);
+}
+.ax-ob-fold > summary strong {
+  font-weight: 500;
+}
+.ax-ob-fold > summary .ax-hint {
+  margin-left: auto;
+  text-align: right;
+}
+.ax-ob-fold > summary:hover strong {
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
+.ax-ob-fold-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border-top: 1px solid var(--line-soft);
+}
+.ax-ob-fold-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+/* ---------- welcome ---------- */
+.ax-ob-plan {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.ax-ob-plan li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+.ax-ob-plan li + li {
+  border-top: 1px solid var(--line-soft);
+}
+.ax-ob-plan li > span:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ax-ob-plan strong {
+  font-weight: 500;
+}
+.ax-ob-plan small {
+  color: var(--ink-2);
+}
+.ax-ob-tile {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--inset);
+  color: var(--ink-2);
+}
+
+/* ---------- resume ---------- */
+.ax-ob-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.ax-ob-found {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.ax-ob-found li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+}
+.ax-ob-found li + li {
+  border-top: 1px solid var(--line-soft);
+}
+.ax-ob-found li > span:last-child {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ax-ob-found strong {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ax-ob-found small {
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- connections ---------- */
+.ax-ob-conn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.ax-ob-conn > header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+.ax-ob-conn-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ax-ob-conn-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line-soft);
+}
+
+/* ---------- ready ---------- */
+.ax-ob-seal {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: var(--space-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--inset);
+  color: var(--ink);
+}
+.ax-ob-seal.is-done path {
+  stroke-dasharray: 26;
+  stroke-dashoffset: 26;
+  animation: ax-ob-draw 420ms var(--ease) 140ms forwards;
+}
+@keyframes ax-ob-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.ax-ob-lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.ax-ob-lines li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+}
+.ax-ob-lines li + li {
+  border-top: 1px solid var(--line-soft);
+}
+.ax-ob-lines .ax-lamp {
+  margin-top: 6px;
+}
+.ax-ob-line-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ax-ob-line-main strong {
+  font-weight: 500;
+}
+.ax-ob-line-main small {
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+.ax-ob-lines .ax-link {
+  flex: none;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.ax-ob-more {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
+}
+.ax-ob-more > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ax-ob-more small {
+  color: var(--ink-2);
+}
+
+@media (max-width: 640px) {
+  .ax-ob-top {
+    min-height: 56px;
+  }
+  .ax-ob-steps span {
+    display: none;
+  }
+  .ax-ob-card {
+    gap: var(--space-6);
+    padding: var(--space-5);
+  }
+  .ax-ob-body {
+    gap: var(--space-6);
+  }
+  .ax-ob-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .ax-ob-q:not(.is-stack) {
     flex-direction: column;
     align-items: stretch;
     gap: var(--space-2);
   }
-  .ax-ob-grid {
-    grid-template-columns: minmax(0, 1fr);
+  .ax-ob-more {
+    flex-direction: column;
+    align-items: stretch;
   }
-}
-
-/* Roles and places as removable words. */
-.ax-ob-tags {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-.ax-ob-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-2);
-}
-.ax-ob-chip {
-  padding: 2px var(--space-2);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: none;
-  color: var(--ink-3);
-  font: inherit;
-  font-size: var(--text-body);
-  cursor: pointer;
-}
-.ax-ob-chip:hover {
-  color: var(--ink);
-}
-.ax-ob-chip.is-on {
-  border-color: var(--line-strong);
-  color: var(--ink);
-}
-
-.ax-ob-drop {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  padding: var(--space-4);
-  border: 1px dashed var(--line-strong);
-  border-radius: var(--radius);
-  font-size: var(--text-body);
-}
-.ax-ob-drop > p {
-  flex: 1 1 240px;
-}
-.ax-ob-drop.is-over {
-  border-color: var(--ink);
 }

@@ -222,6 +222,17 @@ Their brief is in UI3_BRIEF.md. What each must do with the family above:
 
 When a page moves off `.ax-grid`, `.nq-*` and the like, delete what it leaves behind. Keep this file true.
 
+## 7a. First run: the setup guide, sign-in, coming soon, a crashed page
+
+These are the first things anyone sees, so they are one family: a raised card on the page (`--raised`, hairline, `--radius-lg`), the wordmark above or beside it, a title and one line, then the task. Outside the shell, inside `.ax-screen`.
+
+- **The setup guide** (`onboarding.tsx`, `styles/onboarding.css`): a welcome, seven short steps, a finish. In order: **Data** (where the data lives), **Resume**, **Contact**, **Eligibility** (work authorization, with Background questions and Self-identification as folds most people leave closed), **Search** (roles, places), **Automation** (send for me or review first; switches), **Connections** (AI key and inbox, both skippable). The progress line has one named segment per step (a reached step is a way back), "Step 3 of 7" and "About 4 min left" (the sum of `minutes` in `STEPS`). The way on lives in a sticky bar (Back, an optional skip, one primary); Enter in a field continues. The usual answer is already chosen where one exists; nothing is defaulted for the person (`test_wizard_background_facts.py`): "Answer No to the rest" fills unanswered background questions only when pressed. The finish says "AXIOM is ready" only when nothing AXIOM needs is missing, otherwise "Almost ready" with a Fix link per line; questionnaires moved to Profile › Knowledge and are offered from the finish. Server step ids are unchanged (`server` in `STEPS`); `OPEN_AT` maps a stored step back to a guide step.
+- **The Data step is a slot.** `DatabaseStep` shows Local as chosen and nothing to fill in. The Local, Supabase and Server component from `agent8/db-config` (`frontend/src/database.tsx`) replaces its body; keep Continue enabled while Local is selected.
+- **Sign-in, sign-up, recovery codes, reset** (`account.tsx`, `styles/auth.css`): one `AuthCard` (wordmark above, quiet links to the other ways in under it); a password has its own Show and Hide inside the field; the rules a new password must meet tick off as they are met; recovery codes sit in a numbered well with Copy and Download. They appear only for someone who set a lock. Settings › System › Your sign-in is in the same file.
+- **Coming soon** (`shell/ComingSoon.tsx`, `styles/screens.css`): plainly not switched on (a dashed lamp and "Coming soon"), one sentence, three lines of what it will do, a picture of the idea drawn in tokens, and a way back. Add a page by adding to `nav.ts` and to `WILL` in the file.
+- **A crashed page** (`shell/ErrorBoundary.tsx`): what happened, that the rest still works, Try again (clears the error) and Reload, the message behind a fold.
+- **No 404 page.** Any unknown address opens Overview (§3), so there is nothing to show.
+
 ## 9. Checking your work
 
 - With a vite dev server from your worktree (`npx vite --host 127.0.0.1 --port <free>`, proxying `/api` to 8080) and `scratchpad/qa/live.py` (`QA_BASE`), which aborts non-GET requests. A new read-only endpoint isn't on production yet: fulfil it in the test browser from real SQL (`q.sh`).

@@ -1,18 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Upload } from "lucide-react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowLeft, ArrowRight, Check as Tick, FileText, HardDrive, Mail, SlidersHorizontal, Sparkles, UserRound, X } from "lucide-react";
 import { api, ApiError } from "./api";
+import { routeUrl } from "./context";
 import { Wordmark } from "./shell/Brand";
-import { Facts } from "./setup-kit";
-import { Button, Check, External, Field, Input, Loading, Panel, Pill, Segmented } from "./ui/index";
-import {
-  ModuleForm,
-  ModuleList,
-  moduleFacts,
-  Unavailable,
-  useQuestionnaires,
-  YesNo,
-  type Module,
-} from "./qform";
+import { SwitchRow } from "./setup-kit";
+import { YesNo } from "./qform";
+import { Button, Dropzone, ErrorLine, External, Input, Loading, Monogram, Pill, Segmented, Select } from "./ui/index";
 import type { EducationEntry, Profile, WorkEntry } from "./types";
 import "./styles/onboarding.css";
 
@@ -21,53 +14,109 @@ import "./styles/onboarding.css";
 // "Finish later" (guide.ts, so the shell reads it without loading this module).
 
 // ---------------------------------------------------------------------------
-// Setup guide: the facts employers actually ask for, in the order a person thinks about them (DESIGN.md §7).
-// One question group per step and a thin progress line; progress is saved on the server (/api/onboarding), so it resumes
-// where it stopped.
+// Setup guide (DESIGN.md §7): seven short steps between a welcome and a finish. Each one is a task a person can do in under
+// two minutes, with the usual answer already chosen where one exists. Progress is saved on the server (/api/onboarding), so it
+// resumes where it stopped. The first screen of a new installation: it has to read as finished.
 // ---------------------------------------------------------------------------
 
-type StepId =
-  | "account"
-  | "resume"
-  | "profile"
-  | "authorization"
-  | "preferences"
-  | "screening"
-  | "identity"
-  | "permissions"
-  | "connections"
-  | "questionnaires"
-  | "review";
-// `server` is the id the backend stores (ONBOARDING_STEPS); two steps share one where the server has no id of its own.
-// `lead` is one line, and only where a person would otherwise not know what the step is for.
-type Step = { id: StepId; title: string; lead?: string; server: string; optional?: boolean };
+type StepId = "welcome" | "data" | "resume" | "profile" | "authorization" | "preferences" | "automation" | "connections" | "ready";
+// `server` is the id the backend stores (ONBOARDING_STEPS); steps the server has no id of its own for share a neighbour's.
+// `name` labels the step in the progress line, `minutes` is what it usually takes (the "about N min left" is their sum),
+// `skip` is the words on the button that moves on without doing it.
+type Step = { id: StepId; name: string; title: string; lead?: string; server: string; minutes: number; skip?: string };
 const STEPS: Step[] = [
-  { id: "account", title: "Welcome", server: "resume" },
-  { id: "resume", title: "Resume", server: "resume", lead: "We read it once to prefill your profile. You confirm everything on the next steps." },
-  { id: "profile", title: "Contact details", server: "contact", lead: "Filled into every application exactly as written." },
-  { id: "authorization", title: "Work authorization", server: "authorization" },
-  { id: "preferences", title: "Preferences", server: "preferences" },
-  { id: "screening", title: "Screening", server: "background", lead: "Answer only what is true. A question you leave blank is asked of you when a form needs it." },
-  { id: "identity", title: "Self-identification", server: "identity", lead: "Voluntary equal-opportunity questions." },
-  { id: "permissions", title: "Permissions", server: "permissions", lead: "What AXIOM may do on your behalf." },
-  { id: "connections", title: "Connections", server: "permissions", lead: "The model key and the inbox that verification codes arrive in. Both can wait." },
-  { id: "questionnaires", title: "Questionnaires", server: "questionnaires", optional: true },
-  { id: "review", title: "Review", server: "review", lead: "You can change any of this later in Profile and Settings." },
+  {
+    id: "welcome",
+    name: "Welcome",
+    title: "Welcome to AXIOM",
+    lead: "AXIOM finds jobs that fit you, fills in each application and sends it. It asks you only when it isn't sure.",
+    server: "resume",
+    minutes: 0,
+  },
+  {
+    id: "data",
+    name: "Data",
+    title: "Where your data lives",
+    lead: "Your profile, jobs and answers are kept in a database. Most people never change this.",
+    server: "resume",
+    minutes: 0.25,
+  },
+  {
+    id: "resume",
+    name: "Resume",
+    title: "Start with your resume",
+    lead: "We read it once to fill in most of the next steps. You check everything before it is used.",
+    server: "resume",
+    minutes: 0.75,
+    skip: "I'll type it instead",
+  },
+  {
+    id: "profile",
+    name: "Contact",
+    title: "Contact details",
+    lead: "Filled into every application exactly as written.",
+    server: "contact",
+    minutes: 1,
+  },
+  {
+    id: "authorization",
+    name: "Eligibility",
+    title: "Work eligibility",
+    lead: "The questions nearly every application asks.",
+    server: "authorization",
+    minutes: 1,
+  },
+  {
+    id: "preferences",
+    name: "Search",
+    title: "What you're looking for",
+    lead: "Discovery searches for these. You can change them any time.",
+    server: "preferences",
+    minutes: 1,
+  },
+  {
+    id: "automation",
+    name: "Automation",
+    title: "How AXIOM works for you",
+    lead: "What it may do without asking. Each of these can be changed later in Settings.",
+    server: "permissions",
+    minutes: 0.5,
+  },
+  {
+    id: "connections",
+    name: "Connections",
+    title: "Connect your AI key and inbox",
+    lead: "AXIOM needs one AI key to read job pages and write answers, and an inbox to read verification codes. Both can wait.",
+    server: "permissions",
+    minutes: 0.5,
+    skip: "Set up later",
+  },
+  {
+    id: "ready",
+    name: "Ready",
+    title: "AXIOM is ready",
+    lead: "Your profile is saved. Open AXIOM to see your overview and start applying.",
+    server: "review",
+    minutes: 0,
+  },
 ];
+// The steps in the progress line: everything between the welcome and the finish.
+const WORK = STEPS.slice(1, -1);
+const FIRST_WORK = 1;
 
-const EDITS_PROFILE = new Set<StepId>(["resume", "profile", "authorization", "preferences", "screening", "identity", "permissions"]);
+const EDITS_PROFILE = new Set<StepId>(["resume", "profile", "authorization", "preferences", "automation"]);
 
-// Which step a stored server step reopens. "identity" belonged to its own step before Screening absorbed it.
+// Which step a stored server step reopens. Background and self-identification became part of Eligibility.
 const OPEN_AT: Record<string, StepId> = {
   resume: "resume",
   contact: "profile",
   authorization: "authorization",
   preferences: "preferences",
-  background: "screening",
-  identity: "identity",
-  permissions: "permissions",
-  questionnaires: "questionnaires",
-  review: "review",
+  background: "authorization",
+  identity: "authorization",
+  permissions: "automation",
+  questionnaires: "ready",
+  review: "ready",
 };
 
 type Draft = Profile;
@@ -194,6 +243,19 @@ function Question({
   );
 }
 
+/** A named part of a step: a section title, an optional line under it, then its fields. */
+function Section({ title, hint, children }: { title: string; hint?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <section className="ax-ob-sect">
+      <header>
+        <h2>{title}</h2>
+        {hint && <p className="ax-hint">{hint}</p>}
+      </header>
+      {children}
+    </section>
+  );
+}
+
 function Tags({
   values,
   onChange,
@@ -215,23 +277,6 @@ function Tags({
   };
   return (
     <div className="ax-ob-tags">
-      {(values.length > 0 || suggestions.length > 0) && (
-        <div className="ax-ob-chips">
-          {values.map((v) => (
-            <button key={v} type="button" className="ax-ob-chip is-on" aria-label={`Remove ${v}`} onClick={() => onChange(values.filter((x) => x !== v))}>
-              {v} <span aria-hidden="true">×</span>
-            </button>
-          ))}
-          {suggestions
-            .filter((s) => !values.includes(s))
-            .slice(0, 6)
-            .map((s) => (
-              <button key={s} type="button" className="ax-ob-chip" onClick={() => add(s)}>
-                + {s}
-              </button>
-            ))}
-        </div>
-      )}
       <input
         className="ax-control"
         aria-label={label}
@@ -246,6 +291,24 @@ function Tags({
         }}
         onBlur={() => text && add(text)}
       />
+      {(values.length > 0 || suggestions.length > 0) && (
+        <div className="ax-ob-chips">
+          {values.map((v) => (
+            <button key={v} type="button" className="ax-ob-chip is-on" aria-label={`Remove ${v}`} onClick={() => onChange(values.filter((x) => x !== v))}>
+              {v}
+              <X size={12} aria-hidden="true" />
+            </button>
+          ))}
+          {suggestions
+            .filter((s) => !values.includes(s))
+            .slice(0, 6)
+            .map((s) => (
+              <button key={s} type="button" className="ax-ob-chip" onClick={() => add(s)}>
+                + {s}
+              </button>
+            ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -273,6 +336,19 @@ function CsvInput({
         onChange(e.target.value.split(",").map((x) => x.trim()).filter(Boolean));
       }}
     />
+  );
+}
+
+/** A folded part of a step that most people leave alone: its name, what it holds, and the words on the right. */
+function Optional({ title, meta, children }: { title: string; meta?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <details className="ax-ob-fold">
+      <summary>
+        <strong>{title}</strong>
+        {meta && <span className="ax-hint">{meta}</span>}
+      </summary>
+      <div className="ax-ob-fold-body">{children}</div>
+    </details>
   );
 }
 
@@ -327,7 +403,7 @@ function mergeExtract(draft: Draft, x: Partial<Draft>): Draft {
   return next;
 }
 
-// ---------- connections state (the Connections step and the review read the same copy) ----------
+// ---------- connections state (the Connections step and the finish read the same copy) ----------
 type ConnectionField = { name: string; set: boolean; value: string };
 type Connections = { fields: ConnectionField[]; provider: string; model_ready: boolean };
 type Mailbox = { id: string; email: string; state?: string; provider?: string };
@@ -343,19 +419,27 @@ const PROVIDERS = [
 
 // ---------- the guide ----------
 type Account = { email?: string; name?: string };
+type Summary = { id: string; title: string; answered: number; total: number }[];
+
+/** "About 4 min left": the minutes of every step from this one to the last. */
+function timeLeft(at: number): string {
+  if (at <= 0) return "About " + Math.round(WORK.reduce((n, s) => n + s.minutes, 0)) + " minutes";
+  const left = STEPS.slice(at, -1).reduce((n, s) => n + s.minutes, 0);
+  return left <= 0.5 ? "Almost done" : `About ${Math.ceil(left)} min left`;
+}
 
 export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () => void }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [account, setAccount] = useState<Account>({});
   const [at, setAt] = useState(0);
-  // The furthest step reached: the rail lets you go back to any of these, and forward again.
+  // The furthest step reached: the progress line lets you go back to any of these, and forward again.
   const [reached, setReached] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   // Automatic submission lives in the installation's controls, not the profile.
   const [submit, setSubmit] = useState<{ saved: boolean; value: boolean } | null>(null);
   const [linked, setLinked] = useState<Linked>({ model: null, mailboxes: null });
-  const [summary, setSummary] = useState<{ id: string; title: string; answered: number; total: number }[] | null>(null);
+  const [summary, setSummary] = useState<Summary | null>(null);
   const dirty = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
 
@@ -371,7 +455,7 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
   useEffect(() => {
     Promise.all([
       api<Partial<Draft>>("/profile"),
-      api<{ step: string; updated_at?: string; questionnaires?: { modules: { id: string; title: string; answered: number; total: number }[] } }>("/onboarding"),
+      api<{ step: string; updated_at?: string; questionnaires?: { modules: Summary } }>("/onboarding"),
       api<{ auto_submit: boolean }>("/control").catch(() => null),
       api<Account>("/account").catch(() => ({}) as Account),
     ])
@@ -380,8 +464,8 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
         setAccount(who);
         if (control) setSubmit({ saved: control.auto_submit, value: control.auto_submit });
         setSummary(state.questionnaires?.modules ?? null);
-        // A brand-new account has never saved a step: it starts at the welcome card.
-        const id = state.updated_at ? OPEN_AT[state.step] || "resume" : "account";
+        // A brand-new installation has never saved a step: it starts at the welcome.
+        const id = state.updated_at ? OPEN_AT[state.step] || "resume" : "welcome";
         const index = Math.max(0, STEPS.findIndex((s) => s.id === id));
         setAt(index);
         setReached(index);
@@ -404,14 +488,15 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
 
   if (error && !draft)
     return (
-      <main className="ax-ob">
-        <div className="ax-notice is-bad" role="alert">
-          <span>Could not open the setup guide: {error}</span>
+      <main className="ax-ob is-boot">
+        <Wordmark width={108} />
+        <div className="ax-boot-error" role="alert">
+          <p>Could not open the setup guide: {error}</p>
           <span className="ax-ask">
-            <Button variant="primary" size="sm" onClick={() => window.location.reload()}>
+            <Button variant="primary" onClick={() => window.location.reload()}>
               Try again
             </Button>
-            <Button variant="ghost" size="sm" onClick={onExit}>
+            <Button variant="ghost" onClick={onExit}>
               Skip for now
             </Button>
           </span>
@@ -420,12 +505,14 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
     );
   if (!draft)
     return (
-      <main className="ax-ob">
-        <Loading label="Loading your profile…" />
+      <main className="ax-ob is-boot">
+        <Wordmark width={108} />
+        <Loading label="Opening setup…" />
       </main>
     );
 
   const current = STEPS[at];
+  const first = at === 0;
   const last = at === STEPS.length - 1;
   const edit = (fn: (d: Draft) => Draft) => {
     dirty.current = true;
@@ -445,21 +532,11 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
     dirty.current = true;
     setDraft((d) => (d ? updater(d) : d));
   };
-  // A questionnaire saved on its own: keep this copy of the profile current so a later profile save cannot undo it.
-  const learn = (module: Module) =>
-    setDraft((d) => {
-      if (!d) return d;
-      const facts = { ...d.facts };
-      for (const [k, v] of Object.entries(moduleFacts(module))) {
-        if (v === undefined) delete facts[k];
-        else facts[k] = v;
-      }
-      return { ...d, facts };
-    });
 
-  async function persist(toIndex: number, completed = false) {
+  async function persist(toIndex: number, completed = false, after?: () => void) {
     if (!draft) return;
-    const problem = stepProblem(current.id, draft);
+    // Going back never needs the step you are leaving to be complete.
+    const problem = toIndex > at ? stepProblem(current.id, draft) : "";
     if (problem) {
       setError(problem);
       return;
@@ -483,13 +560,13 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
         await api("/control", "PUT", { ...fresh, auto_submit: submit.value });
         setSubmit({ saved: submit.value, value: submit.value });
       }
-      const state = await api<{ questionnaires?: { modules: { id: string; title: string; answered: number; total: number }[] } }>(
-        "/onboarding",
-        "PUT",
-        { step: STEPS[Math.min(toIndex, STEPS.length - 1)].server, completed },
-      );
+      const state = await api<{ questionnaires?: { modules: Summary } }>("/onboarding", "PUT", {
+        step: STEPS[Math.min(toIndex, STEPS.length - 1)].server,
+        completed,
+      });
       if (state?.questionnaires?.modules) setSummary(state.questionnaires.modules);
-      if (completed) onDone();
+      if (after) after();
+      else if (completed) onDone();
       else go(toIndex);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : (e as Error).message);
@@ -498,111 +575,145 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
     }
   }
 
+  const next = () => (last ? persist(at, true) : persist(at + 1));
+  // The finish can open Profile › Knowledge instead of the Overview: the guide is complete either way.
+  const finishAt = () => persist(at, true, () => window.location.assign(routeUrl({ view: "profile", tab: "knowledge" })));
+  const hello = (account.name || "").trim().split(/\s+/)[0];
+  // The finish says "ready" only when nothing AXIOM needs is missing.
+  const lines = last ? readyLines(draft, submit?.value ?? null, linked) : [];
+  const unfinished = lines.filter((l) => !l.ok && !l.optional).length;
+  const title = current.id === "welcome" && hello ? `Welcome, ${hello}` : last && unfinished ? "Almost ready" : current.title;
+  const lead = last && unfinished ? "Your profile is saved. A few things are still open: finish them here, or any time later." : current.lead;
+  const stepNo = at - FIRST_WORK + 1;
+  // The resume step moves on once something was read from a resume; "I'll type it instead" is the way past it without one.
+  const waiting = current.id === "resume" && !draft.work.length && !draft.education.length && !draft.skills.length;
+
   return (
     <main className="ax-ob">
       <header className="ax-ob-top">
         <div className="ax-brand">
           <Wordmark />
         </div>
-        <span className="ax-hint ax-ob-count">
-          Step {at + 1} of {STEPS.length}
-        </span>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onExit}
-          title="Steps you saved are kept. Continue any time from the banner or Settings › System."
-        >
-          Finish later
-        </Button>
-      </header>
-      <nav aria-label="Setup steps">
-        <ol className="ax-ob-steps">
-          {STEPS.map((s, i) => (
-            <li key={s.id} aria-current={i === at ? "step" : undefined} className={i < at ? "is-done" : i === at ? "is-now" : ""}>
-              <button
-                type="button"
-                aria-label={`${s.title}, step ${i + 1} of ${STEPS.length}`}
-                disabled={i > reached || saving}
-                onClick={() => go(i)}
-              />
-            </li>
-          ))}
-        </ol>
-      </nav>
-      <section className="ax-ob-card" aria-labelledby="ob-title">
-        <header>
-          <h1 id="ob-title" ref={heading} tabIndex={-1}>
-            {current.title}
-            {current.optional && <span className="ax-hint"> Optional</span>}
-          </h1>
-          {current.lead && <p className="ax-hint">{current.lead}</p>}
-        </header>
-        <div className="ax-ob-body" key={current.id}>
-          {current.id === "account" && <AccountStep account={account} />}
-          {current.id === "resume" && <ResumeStep draft={draft} setDraft={(fn) => setPeople(fn)} />}
-          {current.id === "profile" && <ContactStep draft={draft} setTop={setTop} setAddress={setAddress} />}
-          {current.id === "authorization" && <AuthorizationStep draft={draft} setFact={setFact} />}
-          {current.id === "preferences" && <PreferencesStep draft={draft} setTop={setTop} setFact={setFact} />}
-          {current.id === "screening" && <ScreeningStep draft={draft} setFact={setFact} />}
-          {current.id === "identity" && <IdentityStep draft={draft} setTop={setTop} setFact={setFact} />}
-          {current.id === "permissions" && (
-            <PermissionsStep
-              draft={draft}
-              setTop={setTop}
-              submit={submit?.value ?? null}
-              setSubmit={(value) => setSubmit((v) => (v ? { ...v, value } : v))}
-            />
-          )}
-          {current.id === "connections" && <ConnectionsStep linked={linked} email={draft.email} refresh={refreshLinked} />}
-          {current.id === "questionnaires" && (
-            <QuestionnairesStep
-              onModule={(m) => {
-                learn(m);
-                setSummary((list) => list && list.map((x) => (x.id === m.id ? { ...x, answered: m.answered, total: m.total } : x)));
-              }}
-            />
-          )}
-          {current.id === "review" && (
-            <ReviewStep
-              draft={draft}
-              go={(id) => go(STEPS.findIndex((s) => s.id === id))}
-              submit={submit?.value ?? null}
-              linked={linked}
-              summary={summary}
-            />
-          )}
-        </div>
-        {error && (
-          <p className="ax-error" role="alert">
-            {error}
-          </p>
+        {!last && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onExit}
+            title="Steps you saved are kept. Continue any time from the banner or Settings › System."
+          >
+            Finish later
+          </Button>
         )}
-        <footer className="ax-ob-foot">
-          {at > 0 && (
-            <Button variant="ghost" icon={<ArrowLeft size={15} aria-hidden="true" />} onClick={() => go(at - 1)} disabled={saving}>
-              Back
-            </Button>
-          )}
-          <span className="ax-ob-foot-end">
-            {current.optional && (
-              <Button variant="ghost" onClick={() => persist(at + 1)} disabled={saving}>
-                Skip for now
+      </header>
+
+      <form
+        className="ax-ob-form"
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!saving) next();
+        }}
+      >
+        <div className="ax-ob-col">
+          <nav aria-label="Setup steps" className="ax-ob-progress">
+            <p className="ax-ob-caption" role="status">
+              <span>{first ? `${WORK.length} short steps` : last ? (unfinished ? "Nearly done" : "Setup complete") : `Step ${stepNo} of ${WORK.length}`}</span>
+              {!last && <span>{timeLeft(at)}</span>}
+            </p>
+            <ol className="ax-ob-steps">
+              {WORK.map((s, k) => {
+                const i = k + FIRST_WORK;
+                return (
+                  <li key={s.id} aria-current={i === at ? "step" : undefined} className={i < at ? "is-done" : i === at ? "is-now" : ""}>
+                    <button
+                      type="button"
+                      aria-label={`${s.name}, step ${k + 1} of ${WORK.length}`}
+                      title={s.name}
+                      disabled={i > reached || saving}
+                      onClick={() => go(i)}
+                    >
+                      <i aria-hidden="true" />
+                      <span aria-hidden="true">{s.name}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          </nav>
+
+          <section className={"ax-ob-card" + (first || last ? " is-hero" : "")} aria-labelledby="ob-title">
+            <header>
+              {(first || (last && unfinished > 0)) && (
+                <span className="ax-ob-seal" aria-hidden="true">
+                  <svg className="ax-mark" viewBox="0 0 16 16" width="26" height="26">
+                    <circle className="o" cx="8" cy="8" r="6.6" />
+                    <circle className="lamp" cx="8" cy="8" r="2.6" />
+                  </svg>
+                </span>
+              )}
+              {last && unfinished === 0 && (
+                <span className="ax-ob-seal is-done" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20 6 9 17l-5-5" />
+                  </svg>
+                </span>
+              )}
+              <h1 id="ob-title" ref={heading} tabIndex={-1}>
+                {title}
+              </h1>
+              {lead && <p>{lead}</p>}
+            </header>
+            <div className="ax-ob-body" key={current.id}>
+              {current.id === "welcome" && <WelcomeStep />}
+              {current.id === "data" && <DatabaseStep />}
+              {current.id === "resume" && <ResumeStep draft={draft} setDraft={(fn) => setPeople(fn)} />}
+              {current.id === "profile" && <ContactStep draft={draft} setTop={setTop} setAddress={setAddress} />}
+              {current.id === "authorization" && <AuthorizationStep draft={draft} setTop={setTop} setFact={setFact} />}
+              {current.id === "preferences" && <PreferencesStep draft={draft} setTop={setTop} setFact={setFact} />}
+              {current.id === "automation" && (
+                <AutomationStep
+                  draft={draft}
+                  setTop={setTop}
+                  submit={submit?.value ?? null}
+                  setSubmit={(value) => setSubmit((v) => (v ? { ...v, value } : v))}
+                />
+              )}
+              {current.id === "connections" && <ConnectionsStep linked={linked} email={draft.email} refresh={refreshLinked} />}
+              {current.id === "ready" && (
+                <ReadyStep
+                  lines={lines}
+                  go={(id) => go(STEPS.findIndex((s) => s.id === id))}
+                  summary={summary}
+                  more={finishAt}
+                  busy={saving}
+                />
+              )}
+            </div>
+            <ErrorLine error={error} />
+          </section>
+        </div>
+
+        <footer className="ax-ob-bar">
+          <div className="ax-ob-bar-in">
+            {at > 0 && (
+              <Button variant="ghost" icon={<ArrowLeft size={15} aria-hidden="true" />} onClick={() => go(at - 1)} disabled={saving}>
+                Back
               </Button>
             )}
-            {!last ? (
-              <Button variant="primary" loading={saving} onClick={() => persist(at + 1)}>
-                {current.id === "account" ? "Get started" : "Continue"}
-                <ArrowRight size={15} aria-hidden="true" />
+            <span className="ax-ob-bar-end">
+              {current.skip && (current.id !== "resume" || waiting) && (
+                <Button variant="ghost" onClick={() => persist(at + 1)} disabled={saving}>
+                  {current.skip}
+                </Button>
+              )}
+              <Button type="submit" variant="primary" loading={saving} disabled={waiting}>
+                {first ? "Get started" : last ? "Open AXIOM" : "Continue"}
+                {!last && <ArrowRight size={15} aria-hidden="true" />}
               </Button>
-            ) : (
-              <Button variant="primary" loading={saving} onClick={() => persist(at, true)}>
-                Finish setup
-              </Button>
-            )}
-          </span>
+            </span>
+          </div>
         </footer>
-      </section>
+      </form>
     </main>
   );
 }
@@ -611,26 +722,69 @@ type StepProps = { draft: Draft };
 type SetTop = <K extends keyof Draft>(key: K, value: Draft[K]) => void;
 type SetFact = (key: string, value: unknown) => void;
 
-function AccountStep({ account }: { account: Account }) {
+// ---------- Welcome ----------
+const PLAN = [
+  { icon: FileText, title: "Add your resume", line: "We read it once and fill in most of what follows." },
+  { icon: UserRound, title: "Confirm your details", line: "Contact, work eligibility and the roles you want." },
+  { icon: SlidersHorizontal, title: "Choose how much AXIOM does", line: "Send applications for you, or let you review each one first." },
+];
+
+function WelcomeStep() {
   return (
     <>
-      <p>
-        Signed in as <strong>{account.email || account.name || "your account"}</strong>.
-      </p>
-      <p className="ax-hint">
-        Setup takes about five minutes and saves as you go. Only your contact details and the roles you want are needed to
-        start; nothing is submitted until you allow it.
-      </p>
+      <ol className="ax-ob-plan" aria-label="What setup covers">
+        {PLAN.map((p) => (
+          <li key={p.title}>
+            <span className="ax-ob-tile">
+              <p.icon size={16} aria-hidden="true" />
+            </span>
+            <span>
+              <strong>{p.title}</strong>
+              <small>{p.line}</small>
+            </span>
+          </li>
+        ))}
+      </ol>
+      <p className="ax-hint">Setup saves as you go, so you can stop and pick it up later. Nothing is sent to an employer until you allow it.</p>
     </>
   );
 }
 
+// ---------- Data ----------
+/**
+ * The slot for the database choice. Local is the default and needs nothing from anyone, so this shows it as chosen. The
+ * Local / Supabase / Server component built on agent8/db-config (`frontend/src/database.tsx`) mounts here: replace the body
+ * of this function with it, and keep Continue enabled while Local is selected. Nothing else in the guide depends on it.
+ */
+function DatabaseStep() {
+  return (
+    <>
+      <div className="ax-ob-choices" role="radiogroup" aria-label="Where your data lives">
+        <div className="ax-ob-choice is-on" role="radio" aria-checked="true" tabIndex={0}>
+          <span className="ax-ob-tile">
+            <HardDrive size={16} aria-hidden="true" />
+          </span>
+          <span className="ax-ob-choice-main">
+            <strong>On this Mac</strong>
+            <small>Stored in AXIOM's own database on this computer. Nothing to set up, and nothing leaves your Mac.</small>
+          </span>
+          <span className="ax-ob-tag">Recommended</span>
+          <span className="ax-ob-tick" aria-hidden="true">
+            <Tick size={12} />
+          </span>
+        </div>
+      </div>
+      <p className="ax-hint">Want Supabase or your own server instead? That choice is in Settings once setup is done.</p>
+    </>
+  );
+}
+
+// ---------- Resume ----------
 function ResumeStep({ draft, setDraft }: StepProps & { setDraft: (fn: (d: Draft) => Draft) => void }) {
   const [resumes, setResumes] = useState<{ id: string; name: string }[] | null>(null);
+  const [file, setFile] = useState<File | null>(null);
   const [state, setState] = useState<"idle" | "uploading" | "reading" | "done" | "error">("idle");
   const [message, setMessage] = useState("");
-  const [over, setOver] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api<{ id: string; name: string }[]>("/resumes").then(setResumes).catch(() => setResumes([]));
@@ -644,23 +798,24 @@ function ResumeStep({ draft, setDraft }: StepProps & { setDraft: (fn: (d: Draft)
       setDraft((d) => mergeExtract(d, extracted));
       setState("done");
       const parts = [
-        extracted.work?.length ? `${extracted.work.length} roles` : "",
-        extracted.education?.length ? `${extracted.education.length} schools` : "",
+        extracted.work?.length ? `${extracted.work.length} role${extracted.work.length === 1 ? "" : "s"}` : "",
+        extracted.education?.length ? `${extracted.education.length} school${extracted.education.length === 1 ? "" : "s"}` : "",
         extracted.skills?.length ? `${extracted.skills.length} skills` : "",
       ].filter(Boolean);
-      setMessage(parts.length ? "Found " + parts.join(", ") + ". Review them on the next steps." : "Resume read.");
+      setMessage(parts.length ? "Found " + parts.join(", ") + ". You'll check them on the next steps." : "Resume read.");
     } catch (e) {
       setState("error");
       setMessage(`${(e as Error).message} Your resume is saved; you can fill in the next steps by hand.`);
     }
   }
 
-  async function upload(file: File) {
+  async function upload(chosen: File) {
+    setFile(chosen);
     setState("uploading");
     setMessage("Uploading…");
     const form = new FormData();
-    form.append("file", file);
-    form.append("name", file.name.replace(/\.pdf$/i, "").slice(0, 100) || "Resume");
+    form.append("file", chosen);
+    form.append("name", chosen.name.replace(/\.pdf$/i, "").slice(0, 100) || "Resume");
     form.append("roles", "");
     try {
       const row = await api<{ id: string; name: string }>("/resumes", "POST", form);
@@ -673,85 +828,80 @@ function ResumeStep({ draft, setDraft }: StepProps & { setDraft: (fn: (d: Draft)
   }
 
   const busy = state === "uploading" || state === "reading";
+  const found = draft.work.length > 0 || draft.education.length > 0;
   return (
     <>
-      <div
-        className={"ax-ob-drop" + (over ? " is-over" : "")}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setOver(true);
+      <Dropzone
+        file={file}
+        onFile={(f) => {
+          if (f) upload(f);
+          else {
+            setFile(null);
+            setState("idle");
+            setMessage("");
+          }
         }}
-        onDragLeave={() => setOver(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setOver(false);
-          const file = e.dataTransfer.files?.[0];
-          if (file) upload(file);
-        }}
-      >
-        <Upload size={18} aria-hidden="true" />
-        <p>
-          Drop your resume here as a PDF. <span className="ax-hint">Text-based, up to 5 MB. It is attached to applications exactly as uploaded.</span>
-        </p>
-        <input
-          ref={input}
-          type="file"
-          accept="application/pdf"
-          hidden
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) upload(file);
-            e.target.value = "";
-          }}
-        />
-        <Button loading={busy} onClick={() => input.current?.click()}>
-          {busy ? "Working…" : "Choose PDF"}
-        </Button>
-      </div>
-      {message && (
-        <p className={state === "error" ? "ax-error" : "ax-hint"} role={state === "error" ? "alert" : "status"}>
+        accept="application/pdf,.pdf"
+        title="Add your resume"
+        hint="Drop a text-based PDF here, or click to choose. Up to 5 MB. It is attached to applications exactly as uploaded."
+        label="Resume PDF"
+        disabled={busy}
+      />
+      {busy && <Loading label={message} />}
+      {!busy && message && (
+        <p className={state === "error" ? "ax-error" : "ax-ob-note"} role={state === "error" ? "alert" : "status"}>
+          {state === "done" && <Tick size={14} aria-hidden="true" />}
           {message}
         </p>
       )}
-      {resumes && resumes.length > 0 && (
-        <ul className="ax-rows" aria-label="Uploaded resumes">
-          {resumes.map((r) => (
-            <li key={r.id} className="ax-row">
-              <span className="ax-row-main">{r.name}</span>
-              <Button size="sm" disabled={busy} onClick={() => read(r.id)}>
-                Prefill from this resume
-              </Button>
-            </li>
-          ))}
-        </ul>
+      {!file && resumes && resumes.length > 0 && (
+        <Section title="Or use one you've already added">
+          <ul className="ax-rows" aria-label="Uploaded resumes">
+            {resumes.slice(0, 4).map((r) => (
+              <li key={r.id} className="ax-row">
+                <span className="ax-row-main">
+                  <strong>{r.name}</strong>
+                </span>
+                <Button size="sm" disabled={busy} onClick={() => read(r.id)}>
+                  Use this one
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </Section>
       )}
-      {(draft.work.length > 0 || draft.education.length > 0) && (
-        <ul className="ax-rows" aria-label="Found in your resume">
-          {draft.work.slice(0, 4).map((w, i) => (
-            <li key={"w" + i} className="ax-row">
-              <span className="ax-row-main">
-                <strong>{w.title}</strong>
-                <small>{w.company}</small>
-              </span>
-            </li>
-          ))}
-          {draft.education.slice(0, 3).map((e, i) => (
-            <li key={"e" + i} className="ax-row">
-              <span className="ax-row-main">
-                <strong>
-                  {e.degree}
-                  {e.field_of_study ? " · " + e.field_of_study : ""}
-                </strong>
-                <small>{e.school}</small>
-              </span>
-            </li>
-          ))}
-        </ul>
+      {found && (
+        <Section title="What we found" hint="Edit any of it on the next steps.">
+          <ul className="ax-ob-found" aria-label="Found in your resume">
+            {draft.work.slice(0, 4).map((w, i) => (
+              <li key={"w" + i}>
+                <Monogram name={w.company} size="md" />
+                <span>
+                  <strong>{w.title || "Role"}</strong>
+                  <small>{w.company}</small>
+                </span>
+              </li>
+            ))}
+            {draft.education.slice(0, 3).map((e, i) => (
+              <li key={"e" + i}>
+                <Monogram name={e.school} size="md" />
+                <span>
+                  <strong>
+                    {e.degree}
+                    {e.field_of_study ? " · " + e.field_of_study : ""}
+                  </strong>
+                  <small>{e.school}</small>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Section>
       )}
     </>
   );
 }
 
+// ---------- Contact ----------
 function ContactStep({
   draft,
   setTop,
@@ -767,34 +917,63 @@ function ContactStep({
   });
   return (
     <>
-      <div className="ax-ob-grid">
-        <Input label="Legal first name" {...t("first_name")} autoComplete="given-name" />
-        <Input label="Legal last name" {...t("last_name")} autoComplete="family-name" />
-        <Input label="Preferred first name" hint="Optional." {...t("preferred_name")} />
-        <Input label="Email" type="email" {...t("email")} autoComplete="email" />
-        <Input label="Phone" type="tel" {...t("phone")} autoComplete="tel-national" />
-        <Input label="Country code" placeholder="+1" {...t("phone_country_code")} />
-      </div>
-      <Question label="Phone type">
-        <Choice label="Phone type" value={draft.phone_type as "Mobile"} options={["Mobile", "Home", "Work"] as const} onChange={(v) => setTop("phone_type", v)} />
-      </Question>
-      <div className="ax-ob-grid">
-        <Input label="Street address" className="is-wide" {...a("line1")} autoComplete="address-line1" />
-        <Input label="City" {...a("city")} autoComplete="address-level2" />
-        <Input label="State" {...a("state")} autoComplete="address-level1" />
-        <Input label="Postal code" {...a("postal_code")} autoComplete="postal-code" />
-        <Input label="Country" {...a("country")} autoComplete="country-name" />
-      </div>
-      <div className="ax-ob-grid">
-        <Input label="LinkedIn URL" placeholder="https://www.linkedin.com/in/…" {...t("linkedin")} />
-        <Input label="GitHub URL" placeholder="https://github.com/…" {...t("github")} />
-        <Input label="Portfolio or website" {...t("website")} />
-      </div>
+      <Section title="Name">
+        <div className="ax-ob-grid">
+          <Input label="Legal first name" {...t("first_name")} autoComplete="given-name" />
+          <Input label="Legal last name" {...t("last_name")} autoComplete="family-name" />
+          <Input label="Preferred first name (optional)" {...t("preferred_name")} />
+        </div>
+      </Section>
+      <Section title="How to reach you">
+        <div className="ax-ob-grid">
+          <Input label="Email" type="email" className="is-wide" {...t("email")} autoComplete="email" />
+          <div className="ax-ob-phone is-wide">
+            <Input label="Code" placeholder="+1" {...t("phone_country_code")} />
+            <Input label="Phone" type="tel" {...t("phone")} autoComplete="tel-national" />
+          </div>
+        </div>
+        <Question label="Phone type">
+          <Choice label="Phone type" value={draft.phone_type as "Mobile"} options={["Mobile", "Home", "Work"] as const} onChange={(v) => setTop("phone_type", v)} />
+        </Question>
+      </Section>
+      <Section title="Address">
+        <div className="ax-ob-grid">
+          <Input label="Street address" className="is-wide" {...a("line1")} autoComplete="address-line1" />
+          <Input label="City" {...a("city")} autoComplete="address-level2" />
+          <Input label="State" {...a("state")} autoComplete="address-level1" />
+          <Input label="Postal code" {...a("postal_code")} autoComplete="postal-code" />
+          <Input label="Country" {...a("country")} autoComplete="country-name" />
+        </div>
+      </Section>
+      <Section title="Links" hint="Optional. Used when a form asks for them.">
+        <div className="ax-ob-grid">
+          <Input label="LinkedIn" placeholder="https://www.linkedin.com/in/…" {...t("linkedin")} />
+          <Input label="GitHub" placeholder="https://github.com/…" {...t("github")} />
+          <Input label="Portfolio or website" className="is-wide" {...t("website")} />
+        </div>
+      </Section>
     </>
   );
 }
 
-function AuthorizationStep({ draft, setFact }: StepProps & { setFact: SetFact }) {
+// ---------- Eligibility: what nearly every form asks, then two folds most people leave closed ----------
+// The yes/no questions the screening fold asks, so its summary can say how many are answered.
+const BACKGROUND_KEYS = [
+  "previously_employed_here",
+  "has_relatives_at_employer",
+  "government_employment_history",
+  "government_official",
+  "has_non_compete",
+  "has_non_solicitation",
+  "company_relationships",
+  "criminal_conviction",
+  "ever_fired",
+  "export_control_restricted_country_history",
+  "has_asylee_status",
+  "referred_by_employee",
+];
+
+function AuthorizationStep({ draft, setTop, setFact }: StepProps & { setTop: SetTop; setFact: SetFact }) {
   const f = foldFacts(draft.facts);
   const status = (f.current_immigration_status_us as string) || "";
   const statusChoice = matchStatus(status);
@@ -802,40 +981,64 @@ function AuthorizationStep({ draft, setFact }: StepProps & { setFact: SetFact })
   const yn = (key: string, label: string) => (
     <YesNo label={label} value={asBool(f[key])} onChange={(v) => setFact(key, v)} />
   );
+  const answered = BACKGROUND_KEYS.filter((k) => asBool(f[k]) !== undefined).length;
   return (
     <>
-      <div className="ax-ob-list">
-        <Question label="Are you legally authorized to work in the United States?">
-          {yn("work_authorization_us", "Authorized to work in the United States")}
-        </Question>
-        <Question
-          label="Will you now or in the future require visa sponsorship?"
-          hint="Include future needs such as an H-1B petition after OPT."
+      <Section title="Work authorization">
+        <div className="ax-ob-list">
+          <Question label="Are you legally authorized to work in the United States?">
+            {yn("work_authorization_us", "Authorized to work in the United States")}
+          </Question>
+          <Question
+            label="Will you now or in the future require visa sponsorship?"
+            hint="Include future needs such as an H-1B petition after OPT."
+          >
+            {yn("requires_future_sponsorship_us", "Requires visa sponsorship")}
+          </Question>
+          <Question label="Are you at least 18 years old?">
+            {yn("over_18", "At least 18 years old")}
+          </Question>
+          <Question label="Do you hold an active U.S. security clearance?">{yn("has_security_clearance", "Holds a security clearance")}</Question>
+          <Question label="Do you have a valid driver's license?">{yn("valid_drivers_license", "Valid driver's license")}</Question>
+        </div>
+        <div className="ax-ob-grid">
+          <Select
+            label="Current status"
+            value={statusChoice}
+            onChange={(e) => {
+              const v = e.target.value as Status;
+              setFact("current_immigration_status_US", v);
+              setFact("us_citizen", v === "U.S. citizen");
+            }}
+          >
+            <option value="" disabled>
+              Choose one
+            </option>
+            {STATUS_OPTIONS.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </Select>
+          {opt && <Input label="OPT end date" type="date" value={String(f.opt_end_date || "")} onChange={(e) => setFact("opt_end_date", e.target.value)} />}
+          <Input label="Country of citizenship" value={String(f.country_of_citizenship || "")} onChange={(e) => setFact("country_of_citizenship", e.target.value)} />
+          <Input label="Country of residence" value={String(f.country_of_residence || "")} onChange={(e) => setFact("country_of_residence", e.target.value)} />
+        </div>
+      </Section>
+      <div className="ax-ob-folds">
+        <Optional
+          title="Background questions"
+          meta={
+            <>
+              <span className="mono">{answered}</span> of <span className="mono">{BACKGROUND_KEYS.length}</span> answered
+            </>
+          }
         >
-          {yn("requires_future_sponsorship_us", "Requires visa sponsorship")}
-        </Question>
-        <Question label="Are you at least 18 years old?">
-          {yn("over_18", "At least 18 years old")}
-        </Question>
-        <Question label="Do you hold an active U.S. security clearance?">{yn("has_security_clearance", "Holds a security clearance")}</Question>
-      </div>
-      <Question label="Current status" stack>
-        <Choice
-          label="Current status"
-          value={statusChoice}
-          options={STATUS_OPTIONS}
-          onChange={(v) => {
-            setFact("current_immigration_status_US", v);
-            setFact("us_citizen", v === "U.S. citizen");
-          }}
-        />
-      </Question>
-      {opt && (
-        <Input label="OPT end date" type="date" value={String(f.opt_end_date || "")} onChange={(e) => setFact("opt_end_date", e.target.value)} />
-      )}
-      <div className="ax-ob-grid">
-        <Input label="Country of citizenship" value={String(f.country_of_citizenship || "")} onChange={(e) => setFact("country_of_citizenship", e.target.value)} />
-        <Input label="Country of residence" value={String(f.country_of_residence || "")} onChange={(e) => setFact("country_of_residence", e.target.value)} />
+          <ScreeningStep draft={draft} setFact={setFact} />
+        </Optional>
+        <Optional title="Self-identification" meta={draft.decline_demographics ? "Declined" : "Using your answers"}>
+          <IdentityStep draft={draft} setTop={setTop} setFact={setFact} />
+        </Optional>
       </div>
     </>
   );
@@ -857,16 +1060,16 @@ function PreferencesStep({ draft, setTop, setFact }: StepProps & { setTop: SetTo
   const roleSuggestions = Array.from(new Set([...fromResume, ...ROLE_SUGGESTIONS]));
   return (
     <>
-      <Question label="Roles to look for" stack>
+      <Section title="Roles" hint="Type a role and press Enter, or pick a suggestion.">
         <Tags
           label="Roles to look for"
           values={draft.target_roles}
           onChange={(v) => setTop("target_roles", v)}
-          placeholder="Type a role and press Enter"
+          placeholder="e.g. Software Engineer"
           suggestions={roleSuggestions}
         />
-      </Question>
-      <Question label="Where would you work?" stack>
+      </Section>
+      <Section title="Places">
         <Tags
           label="Where would you work?"
           values={draft.target_locations}
@@ -874,68 +1077,102 @@ function PreferencesStep({ draft, setTop, setFact }: StepProps & { setTop: SetTo
           placeholder="City, state, or Remote"
           suggestions={anywhere ? ["Remote"] : ["Anywhere in the USA", "Remote"]}
         />
-      </Question>
-      <div className="ax-ob-list">
-        <Question label="Are you willing to relocate?">
-          <YesNo label="Willing to relocate" value={asBool(f.willing_to_relocate)} onChange={(v) => setFact("willing_to_relocate", v)} />
-        </Question>
-        {asBool(f.willing_to_relocate) === true && (
-          <Question label="Can you relocate at your own expense?" hint="Answers “Do you require relocation assistance?”">
-            <YesNo label="Relocate at own expense" value={asBool(f.relocation_at_own_expense)} onChange={(v) => setFact("relocation_at_own_expense", v)} />
+        <div className="ax-ob-list">
+          <Question label="Are you willing to relocate?">
+            <YesNo label="Willing to relocate" value={asBool(f.willing_to_relocate)} onChange={(v) => setFact("willing_to_relocate", v)} />
           </Question>
-        )}
-        <Question label="Are you open to working on-site or hybrid?">
-          <YesNo label="Open to on-site or hybrid" value={asBool(f.willing_onsite)} onChange={(v) => setFact("willing_onsite", v)} />
+          {asBool(f.willing_to_relocate) === true && (
+            <Question label="Can you relocate at your own expense?" hint="Answers “Do you require relocation assistance?”">
+              <YesNo label="Relocate at own expense" value={asBool(f.relocation_at_own_expense)} onChange={(v) => setFact("relocation_at_own_expense", v)} />
+            </Question>
+          )}
+          <Question label="Are you open to working on-site or hybrid?">
+            <YesNo label="Open to on-site or hybrid" value={asBool(f.willing_onsite)} onChange={(v) => setFact("willing_onsite", v)} />
+          </Question>
+        </div>
+      </Section>
+      <Section title="Practical details">
+        <Question label="How much travel can you do?" stack>
+          <Choice
+            label="Travel"
+            value={travel as (typeof TRAVEL_OPTIONS)[number] | ""}
+            options={TRAVEL_OPTIONS}
+            onChange={(v) => {
+              setFact("travel_percentage_willingness", TRAVEL_PERCENT[v]);
+              setFact("willing_to_travel", TRAVEL_PERCENT[v] > 0);
+            }}
+          />
         </Question>
-      </div>
-      <Question label="How much travel can you do?" stack>
-        <Choice
-          label="Travel"
-          value={travel as (typeof TRAVEL_OPTIONS)[number] | ""}
-          options={TRAVEL_OPTIONS}
-          onChange={(v) => {
-            setFact("travel_percentage_willingness", TRAVEL_PERCENT[v]);
-            setFact("willing_to_travel", TRAVEL_PERCENT[v] > 0);
-          }}
-        />
-      </Question>
-      <Question label="Earliest start" stack>
-        <Choice
-          label="Earliest start"
-          value={(START_OPTIONS as readonly string[]).includes(draft.availability) ? (draft.availability as (typeof START_OPTIONS)[number]) : ""}
-          options={START_OPTIONS}
-          onChange={(v) => {
-            setTop("availability", v);
-            setFact("availability", v);
-          }}
-        />
-      </Question>
-      <div className="ax-ob-grid">
-        <Input
-          label="Desired annual base salary (USD)"
-          hint="Leave empty to answer “negotiable” or pick the posted range."
-          inputMode="numeric"
-          value={draft.salary_expectation}
-          onChange={(e) => setTop("salary_expectation", e.target.value.replace(/[^\d]/g, ""))}
-          placeholder="e.g. 95000"
-        />
-        <Input
-          label="Notice period (days)"
-          inputMode="numeric"
-          value={f.notice_period === undefined ? "" : String(f.notice_period)}
-          onChange={(e) => setFact("notice_period", e.target.value === "" ? undefined : Number(e.target.value.replace(/\D/g, "")))}
-        />
-      </div>
+        <Question label="Earliest start" stack>
+          <Choice
+            label="Earliest start"
+            value={(START_OPTIONS as readonly string[]).includes(draft.availability) ? (draft.availability as (typeof START_OPTIONS)[number]) : ""}
+            options={START_OPTIONS}
+            onChange={(v) => {
+              setTop("availability", v);
+              setFact("availability", v);
+            }}
+          />
+        </Question>
+        <div className="ax-ob-grid">
+          <Input
+            label="Desired annual base salary (USD)"
+            hint="Leave empty to answer “negotiable” or pick the posted range."
+            inputMode="numeric"
+            value={draft.salary_expectation}
+            onChange={(e) => setTop("salary_expectation", e.target.value.replace(/[^\d]/g, ""))}
+            placeholder="e.g. 95000"
+          />
+          <Input
+            label="Notice period (days)"
+            inputMode="numeric"
+            value={f.notice_period === undefined ? "" : String(f.notice_period)}
+            onChange={(e) => setFact("notice_period", e.target.value === "" ? undefined : Number(e.target.value.replace(/\D/g, "")))}
+          />
+        </div>
+      </Section>
     </>
   );
 }
+
+// Questions whose usual answer is No, with the other keys the server reads for the same fact. "Answer No to the rest" fills only
+// what the person left unanswered, and only when they press it: a question nobody answered is never stored as No on its own.
+const USUALLY_NO: [string, string[]][] = [
+  ["previously_employed_here", []],
+  ["has_relatives_at_employer", []],
+  ["government_employment_history", []],
+  ["government_official", []],
+  ["has_non_compete", ["has_employment_restrictions"]],
+  ["has_non_solicitation", []],
+  ["company_relationships", []],
+  ["criminal_conviction", []],
+  ["ever_fired", ["asked_to_resign", "involuntarily_discharged"]],
+  ["export_control_restricted_country_history", []],
+  ["has_asylee_status", ["has_refugee_status"]],
+  ["referred_by_employee", []],
+];
 
 function ScreeningStep({ draft, setFact }: StepProps & { setFact: SetFact }) {
   const f = foldFacts(draft.facts);
   const yn = (key: string, label: string) => (
     <YesNo label={label} value={asBool(f[key])} onChange={(v) => setFact(key, v)} />
   );
+  const open = USUALLY_NO.filter(([key]) => asBool(f[key]) === undefined);
   return (
+    <>
+      <div className="ax-ob-fold-head">
+        <p className="ax-hint">Answer only what is true. A question you leave blank is asked of you when a form needs it.</p>
+        {open.length > 0 && (
+          <Button
+            size="sm"
+            onClick={() => {
+              for (const [key, linked] of open) for (const k of [key, ...linked]) setFact(k, false);
+            }}
+          >
+            Answer No to the rest
+          </Button>
+        )}
+      </div>
       <div className="ax-ob-list">
         <Question
           label="Apart from the employers in your work history, have you ever worked for a company you apply to?"
@@ -1001,11 +1238,11 @@ function ScreeningStep({ draft, setFact }: StepProps & { setFact: SetFact }) {
             }}
           />
         </Question>
-        <Question label="Do you have a valid driver's license?">{yn("valid_drivers_license", "Valid driver's license")}</Question>
         <Question label="Were you referred by a current employee?" hint="Usually No; referral codes are entered per application.">
           {yn("referred_by_employee", "Referred by an employee")}
         </Question>
       </div>
+    </>
   );
 }
 
@@ -1017,7 +1254,7 @@ function IdentityStep({ draft, setTop, setFact }: StepProps & { setTop: SetTop; 
   const f = foldFacts(draft.facts);
   return (
     <>
-      <Question label="How should AXIOM answer self-identification questions?" stack>
+      <Question label="How should AXIOM answer self-identification questions?" hint="Voluntary equal-opportunity questions." stack>
         <Segmented
           label="Self-identification answers"
           value={draft.decline_demographics ? "decline" : "answer"}
@@ -1065,9 +1302,10 @@ function IdentityStep({ draft, setTop, setFact }: StepProps & { setTop: SetTop; 
   );
 }
 
+// ---------- Automation: what AXIOM may do without asking ----------
 const SOURCES = ["LinkedIn", "Company website", "Indeed", "Handshake", "Glassdoor"];
 
-function PermissionsStep({
+function AutomationStep({
   draft,
   setTop,
   submit,
@@ -1076,58 +1314,101 @@ function PermissionsStep({
   const source = draft.application_source;
   return (
     <>
-      <div className="ax-ob-list">
-        {submit !== null && (
-          <Check
-            checked={submit}
-            onChange={setSubmit}
-            label="Submit applications for me (recommended)"
-            note="Applications submit once every required answer is verified. When this is off, AXIOM fills each application and stops before the final submit so you can review it."
+      {submit !== null && (
+        <Section title="When an application is ready">
+          <div className="ax-ob-choices" role="radiogroup" aria-label="When an application is ready">
+            {[
+              {
+                on: true,
+                title: "Send it for me",
+                line: "Applications go out once every required answer is verified.",
+              },
+              {
+                on: false,
+                title: "Let me review first",
+                line: "AXIOM fills each application and stops before the final submit.",
+              },
+            ].map((c) => (
+              <button
+                key={String(c.on)}
+                type="button"
+                role="radio"
+                aria-checked={submit === c.on}
+                className={"ax-ob-choice" + (submit === c.on ? " is-on" : "")}
+                onClick={() => setSubmit(c.on)}
+              >
+                <span className="ax-ob-choice-main">
+                  <strong>{c.title}</strong>
+                  <small>{c.line}</small>
+                </span>
+                <span className="ax-ob-tick" aria-hidden="true">
+                  <Tick size={12} />
+                </span>
+              </button>
+            ))}
+          </div>
+        </Section>
+      )}
+      <Section title="On employer sites">
+        <div className="ax-ob-switches">
+          <SwitchRow
+            label="Create employer accounts for me"
+            note="Recommended. Workday, Oracle and similar portals need an account per employer. AXIOM makes a strong password for each and stores it encrypted. Off: those applications stop at sign-in."
+            checked={draft.allow_account_creation}
+            onChange={() => setTop("allow_account_creation", !draft.allow_account_creation)}
+          />
+          <SwitchRow
+            label="Accept application terms and privacy notices"
+            note="Recommended. Most forms require it before they submit, and sign required attestations with your legal name. Off: those applications stop for you."
+            checked={draft.accept_all_application_terms}
+            onChange={() => {
+              const v = !draft.accept_all_application_terms;
+              setTop("accept_all_application_terms", v);
+              setTop("allow_application_consents", v);
+            }}
+          />
+          <SwitchRow
+            label="Decline marketing and talent-community opt-ins"
+            note="Newsletters, job alerts and sharing your data for other roles are declined whenever the form allows it."
+            checked={!draft.accept_required_marketing}
+            onChange={() => setTop("accept_required_marketing", !draft.accept_required_marketing)}
+          />
+        </div>
+      </Section>
+      <Section title="Finding jobs">
+        <div className="ax-ob-switches">
+          <SwitchRow
+            label="Apply automatically to strong matches"
+            note="AXIOM discovers jobs, ranks them against your profile, and applies without asking each time."
+            checked={draft.autonomous}
+            onChange={() => setTop("autonomous", !draft.autonomous)}
+          />
+        </div>
+        {draft.autonomous && (
+          <Input
+            label={`Minimum match score: ${draft.minimum_fit}`}
+            hint="Jobs below this score are skipped."
+            type="range"
+            min={40}
+            max={90}
+            step={1}
+            value={draft.minimum_fit}
+            onChange={(e) => setTop("minimum_fit", Number(e.target.value))}
           />
         )}
-        <Check
-          checked={draft.allow_account_creation}
-          onChange={(v) => setTop("allow_account_creation", v)}
-          label="Create employer accounts for me (recommended)"
-          note="Workday, Oracle and similar portals need an account per employer. AXIOM generates a strong password for each and stores it encrypted. When this is off, those applications stop at the sign-in page."
-        />
-        <Check
-          checked={draft.accept_all_application_terms}
-          onChange={(v) => {
-            setTop("accept_all_application_terms", v);
-            setTop("allow_application_consents", v);
-          }}
-          label="Accept application terms and privacy notices (recommended)"
-          note="Most forms require it before they submit. Required attestations are signed with your legal name. When this is off, those applications stop for you."
-        />
-        <Check
-          checked={!draft.accept_required_marketing}
-          onChange={(v) => setTop("accept_required_marketing", !v)}
-          label="Decline marketing and talent-community opt-ins"
-          note="Newsletters, job alerts and sharing your data for other roles are declined whenever the form allows it."
-        />
-        <Check
-          checked={draft.autonomous}
-          onChange={(v) => setTop("autonomous", v)}
-          label="Apply automatically to strong matches"
-          note="AXIOM discovers jobs, ranks them against your profile, and applies without asking each time."
-        />
-      </div>
-      {draft.autonomous && (
-        <Input
-          label={`Minimum match score: ${draft.minimum_fit}`}
-          hint="Jobs below this score are skipped."
-          type="range"
-          min={40}
-          max={90}
-          step={1}
-          value={draft.minimum_fit}
-          onChange={(e) => setTop("minimum_fit", Number(e.target.value))}
-        />
-      )}
-      <Question label="“How did you hear about us?”" hint="Used when the form offers this option; otherwise the closest one." stack>
-        <Choice label="How did you hear about us" value={source} options={SOURCES.includes(source) || !source ? SOURCES : [...SOURCES, source]} onChange={(v) => setTop("application_source", v)} />
-      </Question>
+        <Select
+          label="“How did you hear about us?”"
+          hint="Used when the form offers this option; otherwise the closest one."
+          value={source}
+          onChange={(e) => setTop("application_source", e.target.value)}
+        >
+          {(SOURCES.includes(source) || !source ? SOURCES : [...SOURCES, source]).map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </Select>
+      </Section>
     </>
   );
 }
@@ -1155,301 +1436,247 @@ function ConnectionsStep({ linked, email, refresh }: { linked: Linked; email: st
       setBusy("");
     }
   };
+  const saveKey = () =>
+    run("model", () => api("/connections", "PUT", { values: { llm_provider: chosen, [keyName]: key.trim() } }).then(() => setKey("")), "Key saved.");
+  const connectMail = () =>
+    run("mail", () => api("/mail/imap", "POST", { email: box.email || email, app_password: box.app_password }).then(() => setBox({ email: "", app_password: "" })), "Gmail connected.");
+  const enter = (fn: () => void, ready: boolean) => (e: React.KeyboardEvent) => {
+    if (e.key !== "Enter") return;
+    // Enter in a key field saves that key; it must not move the whole guide on.
+    e.preventDefault();
+    if (ready) fn();
+  };
   const note = (where: "model" | "mail") =>
     msg?.where === where && (
-      <p className={msg.ok ? "ax-hint" : "ax-error"} role={msg.ok ? "status" : "alert"}>
+      <p className={msg.ok ? "ax-ob-note" : "ax-error"} role={msg.ok ? "status" : "alert"}>
+        {msg.ok && <Tick size={14} aria-hidden="true" />}
         {msg.text}
       </p>
     );
   return (
     <>
-      <Panel
-        title="AI model"
-        actions={
-          model ? (
-            <Pill tone={model.model_ready ? "neutral" : "warn"} dot>
-              {model.model_ready ? "Ready" : "Key needed"}
-            </Pill>
-          ) : undefined
-        }
-      >
-        <div className="ax-stack">
-          <p className="ax-hint">Reads job pages and writes your answers. One key is enough; it is stored encrypted and never shown again.</p>
-          {model && !model.model_ready && (
-            <form
-              className="ax-stack"
-              onSubmit={(e) => {
-                e.preventDefault();
-                run("model", () => api("/connections", "PUT", { values: { llm_provider: chosen, [keyName]: key.trim() } }).then(() => setKey("")), "Key saved.");
-              }}
-            >
-              <Field label="Provider">
-                <select value={chosen} onChange={(e) => setProvider(e.target.value)}>
-                  {PROVIDERS.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Input label="API key" type="password" autoComplete="off" spellCheck={false} placeholder="Paste here" value={key} onChange={(e) => setKey(e.target.value)} />
-              <div>
-                <Button type="submit" size="sm" loading={busy === "model"} disabled={!key.trim()}>
-                  Save key
-                </Button>
-              </div>
-            </form>
-          )}
-          {note("model")}
-        </div>
-      </Panel>
-
-      <Panel
-        title="Gmail"
-        actions={
-          mailboxes ? (
-            <Pill tone="neutral" dot={!mailboxes.length}>
-              {mailboxes.length ? "Connected" : "Not connected"}
-            </Pill>
-          ) : undefined
-        }
-      >
-        <div className="ax-stack">
-          <p className="ax-hint">Reads verification codes, sign-in links and receipts. Read-only; nothing is sent from it.</p>
-          {mailboxes && mailboxes.length > 0 && (
-            <ul className="ax-rows">
-              {mailboxes.map((b) => (
-                <li key={b.id} className="ax-row">
-                  <span className="ax-row-main">
-                    <strong>{b.email}</strong>
-                    <small>{b.provider === "gmail_oauth" ? "Google sign-in" : "App password"}</small>
-                  </span>
-                </li>
+      <section className="ax-ob-conn">
+        <header>
+          <span className="ax-ob-tile">
+            <Sparkles size={16} aria-hidden="true" />
+          </span>
+          <span className="ax-ob-conn-main">
+            <h2>AI key</h2>
+            <p className="ax-hint">Reads job pages and writes your answers. One key is enough; it is stored encrypted and never shown again.</p>
+          </span>
+          {model && <Pill tone={model.model_ready ? "ok" : "warn"} dot>{model.model_ready ? "Ready" : "Key needed"}</Pill>}
+        </header>
+        {model && !model.model_ready && (
+          <div className="ax-ob-conn-form">
+            <Select label="Provider" value={chosen} onChange={(e) => setProvider(e.target.value)}>
+              {PROVIDERS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
               ))}
-            </ul>
-          )}
-          <form
-            className="ax-stack"
-            onSubmit={(e) => {
-              e.preventDefault();
-              run("mail", () => api("/mail/imap", "POST", { email: box.email || email, app_password: box.app_password }).then(() => setBox({ email: "", app_password: "" })), "Gmail connected.");
-            }}
-          >
-            <Input label={mailboxes?.length ? "Connect another Gmail" : "Gmail address"} type="email" autoComplete="off" placeholder={email || "you@gmail.com"} hint="Empty: the email in your profile." value={box.email} onChange={(e) => setBox({ ...box, email: e.target.value })} />
+            </Select>
             <Input
-              label="Gmail app password"
+              label="API key"
               type="password"
               autoComplete="off"
               spellCheck={false}
-              placeholder="xxxx xxxx xxxx xxxx"
-              hint={
-                <>
-                  16 letters from <External href="https://myaccount.google.com/apppasswords">myaccount.google.com/apppasswords</External> (needs 2-Step Verification).
-                </>
-              }
-              value={box.app_password}
-              onChange={(e) => setBox({ ...box, app_password: e.target.value })}
+              placeholder="Paste here"
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              onKeyDown={enter(saveKey, !!key.trim())}
             />
             <div>
-              <Button type="submit" size="sm" loading={busy === "mail"} disabled={!box.app_password.trim()}>
-                Connect Gmail
+              <Button size="sm" loading={busy === "model"} disabled={!key.trim()} onClick={saveKey}>
+                Save key
               </Button>
             </div>
-          </form>
-          {note("mail")}
+          </div>
+        )}
+        {note("model")}
+      </section>
+
+      <section className="ax-ob-conn">
+        <header>
+          <span className="ax-ob-tile">
+            <Mail size={16} aria-hidden="true" />
+          </span>
+          <span className="ax-ob-conn-main">
+            <h2>Gmail</h2>
+            <p className="ax-hint">Reads verification codes, sign-in links and receipts. Read-only; nothing is sent from it.</p>
+          </span>
+          {mailboxes && <Pill tone={mailboxes.length ? "ok" : "neutral"} dot={!mailboxes.length}>{mailboxes.length ? "Connected" : "Not connected"}</Pill>}
+        </header>
+        {mailboxes && mailboxes.length > 0 && (
+          <ul className="ax-rows">
+            {mailboxes.map((b) => (
+              <li key={b.id} className="ax-row">
+                <span className="ax-row-main">
+                  <strong>{b.email}</strong>
+                  <small>{b.provider === "gmail_oauth" ? "Google sign-in" : "App password"}</small>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="ax-ob-conn-form">
+          <Input
+            label={mailboxes?.length ? "Connect another Gmail" : "Gmail address"}
+            type="email"
+            autoComplete="off"
+            placeholder={email || "you@gmail.com"}
+            hint="Empty: the email in your profile."
+            value={box.email}
+            onChange={(e) => setBox({ ...box, email: e.target.value })}
+          />
+          <Input
+            label="Gmail app password"
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="xxxx xxxx xxxx xxxx"
+            hint={
+              <>
+                16 letters from <External href="https://myaccount.google.com/apppasswords">myaccount.google.com/apppasswords</External> (needs 2-Step Verification).
+              </>
+            }
+            value={box.app_password}
+            onChange={(e) => setBox({ ...box, app_password: e.target.value })}
+            onKeyDown={enter(connectMail, !!box.app_password.trim())}
+          />
+          <div>
+            <Button size="sm" loading={busy === "mail"} disabled={!box.app_password.trim()} onClick={connectMail}>
+              Connect Gmail
+            </Button>
+          </div>
         </div>
-      </Panel>
+        {note("mail")}
+      </section>
       <p className="ax-hint">Telegram alerts, captcha solving and extra job sources are in Settings › Connections whenever you want them.</p>
     </>
   );
 }
 
-// ---------- Optional questionnaires: the same modules as Profile › Knowledge, embedded ----------
-function QuestionnairesStep({ onModule }: { onModule: (m: Module) => void }) {
-  const { data, error, reload, setModule } = useQuestionnaires();
-  const [open, setOpen] = useState("");
-  const module = data?.modules.find((m) => m.id === open);
-  const close = () => {
-    setOpen("");
-    document.querySelector(".ax-screen")?.scrollTo({ top: 0 });
-  };
-  if (error && !data) return <Unavailable error={error} retry={reload} />;
-  if (!data) return <Loading label="Loading the questionnaires…" />;
-  if (module)
-    return (
-      <ModuleForm
-        module={module}
-        onModule={(m) => {
-          setModule(m);
-          onModule(m);
-        }}
-        onClose={close}
-        closeLabel="Back to the list"
-      />
-    );
-  return (
-    <>
-      <p className="ax-hint">
-        Nothing here is required. Each is saved as you answer and used by every application; change or clear any answer later in
-        Profile › Knowledge.
-      </p>
-      <ModuleList data={data} onOpen={setOpen} />
-      <p className="ax-hint">
-        {data.completion.answered} of {data.completion.total} answered
-      </p>
-    </>
-  );
-}
-
+// ---------- Ready: the finish ----------
 function yesno(v: unknown) {
   const b = asBool(v);
-  return b === true ? "Yes" : b === false ? "No" : "Not answered";
+  return b === true ? "Yes" : b === false ? "No" : "";
 }
 
-const STOPS = "Off: those applications stop for you";
-const SUBMIT_OFF = "Off: applications stop before submitting";
-const NOT_CONNECTED = "Not connected";
-const WARN = new Set(["Missing", "Not answered", STOPS, SUBMIT_OFF, NOT_CONNECTED]);
+type Line = { id: string; step: StepId; label: string; detail: string; ok: boolean; optional?: boolean };
 
-function ReviewStep({
-  draft,
-  go,
-  submit,
-  linked,
-  summary,
-}: StepProps & {
-  go: (id: StepId) => void;
-  submit: boolean | null;
-  linked: Linked;
-  summary: { id: string; title: string; answered: number; total: number }[] | null;
-}) {
+/** What the finish lists: each thing AXIOM will use, whether it is complete, and the step that fixes it. */
+function readyLines(draft: Draft, submit: boolean | null, linked: Linked): Line[] {
   const f = foldFacts(draft.facts);
-  const groups = useMemo(
-    () => [
-      {
-        step: "profile" as StepId,
-        title: "Contact details",
-        rows: [
-          ["Name", [draft.first_name, draft.last_name].filter(Boolean).join(" ") || "Missing"],
-          ["Email", draft.email || "Missing"],
-          ["Phone", [draft.phone_country_code, draft.phone].filter(Boolean).join(" ") || "Missing"],
-          ["Address", [draft.address.line1, draft.address.city, draft.address.state, draft.address.postal_code].filter(Boolean).join(", ") || "Missing"],
-          ["LinkedIn", draft.linkedin || "—"],
-        ],
-      },
-      {
-        step: "authorization" as StepId,
-        title: "Work authorization",
-        rows: [
-          ["Authorized to work in the US", yesno(f.work_authorization_us)],
-          ["Requires sponsorship", yesno(f.requires_future_sponsorship_us)],
-          ["Status", String(f.current_immigration_status_us || "Not answered")],
-          ["18 or older", yesno(f.over_18)],
-        ],
-      },
-      {
-        step: "preferences" as StepId,
-        title: "Preferences",
-        rows: [
-          ["Roles", draft.target_roles.join(", ") || "Missing"],
-          ["Locations", draft.target_locations.join(", ") || "Anywhere in the USA"],
-          ["Relocate", yesno(f.willing_to_relocate)],
-          ["Start", draft.availability || "Not answered"],
-          ["Salary", draft.salary_expectation ? "$" + Number(draft.salary_expectation).toLocaleString() : "Negotiable"],
-        ],
-      },
-      {
-        step: "screening" as StepId,
-        title: "Screening",
-        rows: [
-          ["Relatives at employer", yesno(f.has_relatives_at_employer)],
-          ["Government employment (5 yrs)", yesno(f.government_employment_history)],
-          ["Worked for other employers you apply to", yesno(f.previously_employed_here)],
-          ["Non-compete", yesno(f.has_non_compete)],
-          ["Non-solicitation", yesno(f.has_non_solicitation)],
-          ["Company relationships", yesno(f.company_relationships)],
-          ["Criminal conviction", yesno(f.criminal_conviction)],
-          ["Export-control country", yesno(f.export_control_restricted_country_history)],
-          ["Asylee or refugee", yesno(f.has_asylee_status)],
-        ],
-      },
-      {
-        step: "identity" as StepId,
-        title: "Self-identification",
-        rows: [["Self-identification", draft.decline_demographics ? "Decline to self-identify" : "Use my information"]],
-      },
-      {
-        step: "permissions" as StepId,
-        title: "Permissions",
-        rows: [
-          ...(submit === null ? [] : [["Submit applications", submit ? "On" : SUBMIT_OFF]]),
-          ["Create employer accounts", draft.allow_account_creation ? "Allowed" : STOPS],
-          ["Accept application terms", draft.accept_all_application_terms ? "Allowed" : STOPS],
-          ["Apply automatically", draft.autonomous ? `On, minimum score ${draft.minimum_fit}` : "Off"],
-        ],
-      },
-      {
-        step: "connections" as StepId,
-        title: "Connections",
-        rows: [
-          ["AI model", linked.model ? (linked.model.model_ready ? "Ready" : NOT_CONNECTED) : "Unknown"],
-          ["Gmail", linked.mailboxes ? (linked.mailboxes.length ? linked.mailboxes.map((b) => b.email).join(", ") : NOT_CONNECTED) : "Unknown"],
-        ],
-      },
-    ],
-    [draft, f, submit, linked],
-  );
-  const open = groups.flatMap((g) => g.rows).filter(([, v]) => WARN.has(v)).length;
+  const name = [draft.first_name, draft.last_name].filter(Boolean).join(" ");
+  const authorized = yesno(f.work_authorization_us);
+  const sponsor = yesno(f.requires_future_sponsorship_us);
+  return [
+    {
+      id: "contact",
+      step: "profile",
+      label: "Contact details",
+      detail: [name, draft.email].filter(Boolean).join(" · ") || "Add your name, email and phone.",
+      ok: !!(draft.first_name && draft.last_name && draft.email && draft.phone),
+    },
+    {
+      id: "eligibility",
+      step: "authorization",
+      label: "Work eligibility",
+      detail: authorized && sponsor ? `Authorized to work: ${authorized}. Needs sponsorship: ${sponsor}.` : "Answer the work authorization questions.",
+      ok: !!(authorized && sponsor),
+    },
+    {
+      id: "roles",
+      step: "preferences",
+      label: "Roles and places",
+      detail: draft.target_roles.length
+        ? [draft.target_roles.join(", "), draft.target_locations.join(", ") || "Anywhere in the USA"].join(" · ")
+        : "Add at least one role to search for.",
+      ok: draft.target_roles.length > 0,
+    },
+    {
+      id: "sending",
+      step: "automation",
+      label: "Sending",
+      detail:
+        submit === null
+          ? "Choose in Settings."
+          : submit
+            ? "Applications are sent once every required answer is verified."
+            : "AXIOM stops before the final submit so you can review each application.",
+      ok: true,
+    },
+    {
+      id: "key",
+      step: "connections",
+      label: "AI key",
+      detail: linked.model ? (linked.model.model_ready ? "Ready." : "Needed before AXIOM can read job pages. Add it in Settings › Connections.") : "Could not check.",
+      ok: !!linked.model?.model_ready,
+    },
+    {
+      id: "inbox",
+      step: "connections",
+      label: "Inbox",
+      detail: linked.mailboxes?.length ? linked.mailboxes.map((b) => b.email).join(", ") : "Not connected. Verification codes can't be read yet.",
+      ok: !!linked.mailboxes?.length,
+      optional: true,
+    },
+  ];
+}
+
+function ReadyStep({
+  lines,
+  go,
+  summary,
+  more,
+  busy,
+}: {
+  lines: Line[];
+  go: (id: StepId) => void;
+  summary: Summary | null;
+  more: () => void;
+  busy: boolean;
+}) {
+  const open = lines.filter((l) => !l.ok && !l.optional).length;
+  const modules = summary || [];
+  const answered = modules.reduce((n, m) => n + m.answered, 0);
+  const total = modules.reduce((n, m) => n + m.total, 0);
   return (
     <>
+      <ul className="ax-ob-lines" aria-label="What AXIOM will use">
+        {lines.map((l) => (
+          <li key={l.id}>
+            <span className={"ax-lamp " + (l.ok ? "is-ok" : l.optional ? "is-off" : "is-ask")} aria-hidden="true" />
+            <span className="ax-ob-line-main">
+              <strong>{l.label}</strong>
+              <small>{l.detail}</small>
+            </span>
+            <button type="button" className="ax-link" onClick={() => go(l.step)}>
+              {l.ok ? "Edit" : "Fix"}
+              <span className="sr-only"> {l.label}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
       {open > 0 && (
-        <div className="ax-notice is-warn">
+        <p className="ax-hint">
+          {open === 1 ? "One thing is unfinished." : `${open} things are unfinished.`} You can open AXIOM now: when a form asks for something missing,
+          AXIOM uses your profile if the answer is certain, otherwise it pauses that application and asks you.
+        </p>
+      )}
+      {total > 0 && (
+        <div className="ax-ob-more">
           <span>
-            {open === 1 ? "1 item needs" : `${open} items need`} attention. You can finish now: when a form asks for something
-            missing, AXIOM uses your profile if the answer is certain, otherwise it pauses that application and asks you.
+            <strong>Answer more questions</strong>
+            <small>
+              Optional questionnaires employers sometimes ask. <span className="mono">{answered}</span> of <span className="mono">{total}</span> answered.
+            </small>
           </span>
+          <Button size="sm" onClick={more} disabled={busy}>
+            Open Profile
+          </Button>
         </div>
       )}
-      {groups.map((g) => (
-        <Panel
-          key={g.title}
-          title={g.title}
-          actions={
-            <button type="button" className="ax-link" onClick={() => go(g.step)}>
-              Edit
-            </button>
-          }
-        >
-          <Facts
-            items={g.rows.map(([k, v]): [string, React.ReactNode] => [
-              k,
-              WARN.has(v) ? (
-                <Pill tone="warn" dot>
-                  {v}
-                </Pill>
-              ) : (
-                v
-              ),
-            ])}
-          />
-        </Panel>
-      ))}
-      <Panel
-        title="Questionnaires"
-        actions={
-          <button type="button" className="ax-link" onClick={() => go("questionnaires")}>
-            {summary && summary.some((m) => m.answered) ? "Edit" : "Start"}
-          </button>
-        }
-      >
-        <Facts
-          items={
-            summary
-              ? summary.map((m): [string, string] => [m.title, m.answered ? `${m.answered} of ${m.total} answered` : "Skipped"])
-              : [["Questionnaires", "Skipped"]]
-          }
-        />
-      </Panel>
     </>
   );
 }

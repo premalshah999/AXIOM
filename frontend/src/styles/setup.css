@@ -30,62 +30,6 @@
   flex: 1;
 }
 
-/* Sign-in, outside the shell. */
-.ax-auth {
-  display: grid;
-  place-items: center;
-  min-height: 100%;
-  padding: var(--space-6) var(--space-4);
-}
-.ax-auth-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  width: min(100%, 400px);
-}
-.ax-auth-help {
-  color: var(--ink-3);
-  font-size: var(--text-body);
-  text-align: center;
-}
-.ax-rules-list {
-  display: grid;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-}
-.ax-rules-list li {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-.ax-rules-list svg {
-  opacity: 0.35;
-}
-.ax-rules-list .is-met {
-  color: var(--ink);
-}
-.ax-rules-list .is-met svg {
-  opacity: 1;
-}
-.ax-codes {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-family: var(--font-data);
-  font-size: var(--text-body);
-}
-.ax-codes li {
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
 /* A form opened in place under its row (change password, new recovery codes). */
 .ax-inline {
   padding: var(--space-3) 0;
