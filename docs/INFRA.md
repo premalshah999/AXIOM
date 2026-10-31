@@ -1,6 +1,8 @@
 # Infrastructure, configuration and workers
 
-For the person who runs or changes the installation. Friends and family start at [SETUP.md](SETUP.md).
+For the person who runs or changes the installation. Friends and family start at [SETUP.md](SETUP.md). This describes today's one
+application process. [ARCHITECTURE.md](ARCHITECTURE.md) section 7 is the plan that splits it into four, native first with Docker as a packaging
+option; a new service is an entry in `jobpilot/native/services.toml`.
 
 ## What was consolidated, and why
 
@@ -222,7 +224,7 @@ file run from another directory would otherwise create empty volumes under the n
 
 ## Open issues
 
-- **No migration framework.** The schema comes from `Base.metadata.create_all`, which creates missing tables but never alters
+- **No migration framework** (Alembic arrives in step c1 of [ARCHITECTURE.md](ARCHITECTURE.md) section 7). The schema comes from `Base.metadata.create_all`, which creates missing tables but never alters
   existing ones. The first release that changes a column needs a migration step (Alembic). `setup.sh` documents "migrates"
   as automatic only because nothing needs migrating yet.
 - **Specialist track record.** The production history shows several hundred specialist runs, nearly all ending in

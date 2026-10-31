@@ -223,7 +223,8 @@ To change a saved answer, open **Setup → Knowledge**.
 
 ## For developers
 
-[docs/SETUP.md](docs/SETUP.md) (installation details), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
+[docs/SETUP.md](docs/SETUP.md) (installation details), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (the target design),
+[docs/RUNTIME.md](docs/RUNTIME.md) (how a run works today),
 [docs/KNOWLEDGE.md](docs/KNOWLEDGE.md) (how questions are answered), [docs/API.md](docs/API.md),
 [docs/INFRA.md](docs/INFRA.md), [DEVELOPER.md](DEVELOPER.md). Every setting is listed in [.env.example](.env.example);
 service keys can be entered in **Setup → Connections** instead and take precedence over `.env`.
