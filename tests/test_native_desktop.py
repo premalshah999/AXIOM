@@ -101,6 +101,34 @@ def test_the_environment_has_no_homebrew_and_the_app_keeps_it_that_way(layout, t
     assert "homebrew" in load(tmp_path, environ={}).path_with_tools({"PATH": "/usr/bin"}), "a checkout still finds its tools"
 
 
+@pytest.mark.regression
+def test_a_folder_holding_its_own_jobpilot_cannot_replace_the_apps(layout, tmp_path):
+    """The first launch beside production ran from the checkout's folder, and Python imported that checkout's `jobpilot`, the
+    working directory being first on sys.path (2026-10-31). It failed only because that one had no desktop.py."""
+    assert desktop.environment(layout)["PYTHONSAFEPATH"] == "1"
+    decoy = tmp_path / "decoy" / "jobpilot"
+    decoy.mkdir(parents=True)
+    (decoy / "__init__.py").write_text("raise SystemExit('imported the wrong package')")
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(layout.home), "PYTHONPATH": str(ROOT), "PYTHONSAFEPATH": "1"}
+    done = subprocess.run(
+        [sys.executable, "-m", "jobpilot.native.desktop", "login-item"], cwd=decoy.parent, env=env, capture_output=True, text=True, timeout=30
+    )
+    assert done.returncode == 0 and done.stdout.strip() == "off", done.stderr
+    del env["PYTHONSAFEPATH"]
+    done = subprocess.run(
+        [sys.executable, "-m", "jobpilot.native.desktop", "login-item"], cwd=decoy.parent, env=env, capture_output=True, text=True, timeout=30
+    )
+    assert "wrong package" in done.stderr, "without it, the folder wins: this is what the setting is for"
+
+
+def test_a_bug_while_starting_reaches_the_window_as_words(layout, monkeypatch, capsys):
+    monkeypatch.setattr(desktop, "_boot", lambda *_: 1 / 0)
+    assert desktop.boot(layout) == 1
+    report = json.loads(layout.progress_file.read_text())
+    assert report["step"] == "failed" and "ZeroDivisionError" in report["message"]
+    assert "Traceback" in capsys.readouterr().err, "the log says what"
+
+
 def test_the_chrome_scripts_travel_with_the_code_not_the_config_folder(layout):
     desktop.ensure_config(layout)
     env = {**desktop.environment(layout, {"app": 50001, "postgres": 50002, "worker": 50003, "twin": 50004}), "CHROME_BIN": "/fake/chrome"}

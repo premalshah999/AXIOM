@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -319,6 +320,9 @@ def environment(layout, ports=None, chrome=""):
         # A write inside the bundle would break its signature; the build compiles everything ahead of time.
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONNOUSERSITE": "1",
+        # Otherwise the working directory comes first on sys.path. Started from a checkout's folder, this imported that
+        # checkout's `jobpilot` instead of its own (2026-10-31, on the first launch beside production).
+        "PYTHONSAFEPATH": "1",
     }
     if ports:
         env.update(
@@ -406,6 +410,10 @@ def boot(layout, owner=None):
         report("failed", str(exc))
         print(f"axiom: {exc}", file=sys.stderr)
         return 1
+    except Exception as exc:  # A bug here must reach the window as words, not leave it waiting.
+        report("failed", f"AXIOM hit a problem while starting ({type(exc).__name__}). Your data is safe, and the logs say what.")
+        traceback.print_exc()
+        return 1
 
 
 def _boot(layout, owner, report):
@@ -461,8 +469,9 @@ def _boot(layout, owner, report):
 
 
 def _detach(layout):
-    """Its own session, so that a signal to the window is not one to the database; and its output in the log, because the
-    window has nowhere to show it."""
+    """Its own session, so that a signal to the window is not one to the database; its output in the log, because the window
+    has nowhere to show it; and the config folder as its working directory, where the app reads `.env`."""
+    os.chdir(layout.support)
     try:
         os.setsid()
     except PermissionError:
