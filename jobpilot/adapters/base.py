@@ -135,6 +135,48 @@ APPLICATION_LIMIT = re.compile(
     r"\b(?:job )?application limit (?:has been |was |is )?(?:reached|exceeded)\b",
     re.I,
 )
+# A notice the page itself announces stands in a heading, an error banner or an open dialog, or alone on a short line of
+# its text; prose inside a job description or a help paragraph does not. Lines longer than this are prose.
+NOTICE_LINE = 400
+
+
+def notice(obs, pattern):
+    """The first match of `pattern` in what the page announces about itself, else None. One guarded check for every
+    "the posting is closed" and "the application limit is reached" decision: each used to search the whole body text,
+    where a job description or a "what happens when a position has been filled" paragraph could close an open posting
+    (a latent false closure; browser_contracts.missing_posting_notice guarded only the adapter path)."""
+    for region in [*obs.get("headings", []), *obs.get("errors", []),
+                   *(f"{d.get('title', '')} {d.get('text', '')}" for d in obs.get("dialogs", []))]:
+        if found := pattern.search(str(region)):
+            return found
+    for line in str(obs.get("text") or "").splitlines():
+        if len(line) <= NOTICE_LINE and (found := pattern.search(line)):
+            return found
+    return None
+
+
+def closed_notice(obs):
+    return notice(obs, CLOSED)
+
+
+def limit_notice(obs):
+    """The employer's own cap notice, as one sentence or two, or ''."""
+    found = notice(obs, APPLICATION_LIMIT)
+    if not found:
+        return ""
+    where = found.string
+    window = " ".join(where[max(0, found.start() - 250) : found.end()].split())
+    return " ".join(re.split(r"(?<=[.!?])\s+", window)[-2:])
+
+
+def form_open(obs):
+    """True when the page still holds application fields (a career site's own search box is not one)."""
+    return any(
+        f["type"] not in {"search", "hidden"} and not re.search(r"search|keyword|location", f.get("label", ""), re.I)
+        for f in obs.get("fields", [])
+    )
+
+
 CHECK_EMAIL = re.compile(
     r"check your (?:email|inbox)|(?:verification|confirmation|activation) (?:email|link) (?:has been |was )?sent|"
     r"we(?:'ve| have)? (?:just )?sent (?:you )?(?:an? )?(?:email|link|verification email)|verify your (?:email|account)|"
@@ -725,7 +767,7 @@ class Adapter:
     def in_assessment(self):
         """The tab left the application for the tax-credit questionnaire its launcher opened. Any page of this ATS is the
         application itself, even under another host of it (Workday's myworkdaysite.com)."""
-        from ..ats import detect
+        from ..ats import custom_like, detect
 
         form = getattr(getattr(self, "e", None), "form", None)
         host = getattr(self, "assessment_from", "") or getattr(form, "assessment_origin", "")
@@ -734,7 +776,7 @@ class Adapter:
         url = self.page.url
         if (urlsplit(url).hostname or "") == host:
             return False
-        return self.id == "custom" or detect(url).id != self.id
+        return custom_like(self.id) or detect(url).id != self.id
 
     def assessment_launcher(self, obs, again=False):
         """The control that opens the tax-credit questionnaire this application requires: once per run, and once more
@@ -865,7 +907,7 @@ class Adapter:
             return Step.CONFIRMATION
         if ALREADY.search(text) and not passwords and len(meaningful) <= 1 and not self.find_apply(obs):
             return Step.ALREADY_APPLIED
-        if not self.committed and APPLICATION_LIMIT.search(text):
+        if not self.committed and limit_notice(obs):
             return Step.CLOSED  # The form may still show; the employer refuses any further application (on_closed).
         codes = self.code_fields(obs)
         if codes and (self.committed or dedicated_code_step(obs["fields"], codes)):
@@ -905,7 +947,7 @@ class Adapter:
             )
         if CHECK_EMAIL.search(text) and len(meaningful) <= 1 and not self.find_apply(obs):
             return Step.VERIFY_LINK
-        if not meaningful and CLOSED.search(text) and not self.find_apply(obs):
+        if not meaningful and closed_notice(obs) and not self.find_apply(obs):
             return Step.CLOSED
         emails = [f for f in meaningful if f["type"] == "email" or re.search(r"e-?mail", f["label"], re.I)]
         if (
@@ -984,6 +1026,11 @@ class Adapter:
             if await self.e.refresh_expired_entry(obs):
                 continue
             moved = self.handoff(obs["url"])
+            follow = getattr(self.e, "follow_embedded", None)
+            if not moved and follow and not self.committed and not self.in_assessment():
+                # Every step, not once before the first click: a frame that loads late, an Apply that opens another
+                # platform's page or a new tab changes what this page is (Roblox's Greenhouse form step, 2026-10-31).
+                moved = await follow(self.id)
             if moved:
                 return {"handoff": moved}
             # Modal precedence: an open dialog is the current step; act only on its controls.
@@ -1711,15 +1758,14 @@ class Adapter:
         }
 
     async def on_closed(self, obs):
-        if limit := APPLICATION_LIMIT.search(obs.get("text", "")):
-            window = " ".join(obs["text"][max(0, limit.start() - 250) : limit.end()].split())
-            notice = " ".join(re.split(r"(?<=[.!?])\s+", window)[-2:])
+        if limit := limit_notice(obs):
             return {
                 "state": "closed",
                 "reason": "The employer's application limit for this applicant is reached, so nothing was submitted: "
-                + notice,
+                + limit,
             }
-        return {"state": "closed", "reason": "The posting is closed or no longer available"}
+        closure = getattr(self.e, "posting_closure", None)  # Workday closes only on its own search (browser.py).
+        return await closure() if closure else {"state": "closed", "reason": "The posting is closed or no longer available"}
 
     async def on_blocked(self, obs):
         return self.defer(
@@ -1991,6 +2037,20 @@ class Adapter:
                 if rejection.get("category") == "employer_limit":
                     self.e.armed = self.committed = False
                     return await self.e.employer_limit_result(rejection)
+                if rejection.get("category") == "throttled":
+                    self.e.armed = self.committed = False
+                    await self.e.release_reservation()
+                    from ..browser import THROTTLED_PAUSE_SECONDS
+
+                    return {
+                        "state": "waiting_browser",
+                        "reason": "The employer is pacing this applicant's applications and did not accept this one; "
+                        "nothing was submitted, and it will be tried again later",
+                        "receipt": rejection,
+                        "blocker_type": "site_transient",
+                        "recovery_cause": "site_temporary",
+                        "site_cooldown_seconds": THROTTLED_PAUSE_SECONDS,
+                    }
                 if rejection.get("category") == "security":
                     # Lever: "There was an error verifying your application. Please try again."
                     # Nothing was accepted; a fresh form (restart_rejected_form) may try again.

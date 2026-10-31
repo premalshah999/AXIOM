@@ -8,7 +8,7 @@ Repairing and were retried (2026-10-29).
 from sqlalchemy import select
 
 from ..db import Event, Job, Run, latest_runs, now
-from ..service.completion import CLOSED_POSTING
+from ..service.completion import CLOSED_POSTING, OWN_CLOSING_RULE
 
 STOPPED = ("waiting_browser", "timed_out", "failed")
 
@@ -20,7 +20,12 @@ def close_gone_postings(db):
         latest = latest_runs()
         for run_id, job_id in s.execute(select(latest.c.id, latest.c.job_id).where(latest.c.state.in_(STOPPED))).all():
             run = s.get(Run, run_id)
-            if not CLOSED_POSTING.search(run.reason or "") or run.receipt or run.packet.get("reservation_run_id"):
+            if (
+                not CLOSED_POSTING.search(run.reason or "")
+                or run.receipt
+                or run.packet.get("reservation_run_id")
+                or run.packet.get("recovery_cause") in OWN_CLOSING_RULE
+            ):
                 continue
             run.state, run.finished_at = "closed", run.finished_at or now()
             run.reason = ("The posting is closed: " + (run.reason or ""))[:4000]

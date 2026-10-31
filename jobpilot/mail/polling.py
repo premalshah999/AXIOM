@@ -17,6 +17,7 @@ from ..db import Mailbox
 from ..db import Run
 from ..db import Setting
 from ..db import record
+from ..ats import custom_like
 from .constants import LIVE
 from .extraction import UNBRANDED_MAX_CANDIDATES
 from .extraction import UNBRANDED_SEARCH_TERMS
@@ -115,7 +116,7 @@ class PollingMixin:
                         sf_tenant(s, job),
                     )
                     platform = job.ats if job else ""
-                    if platform == "custom" and rule:
+                    if custom_like(platform) and rule:
                         # A career site on the employer's domain that is a platform underneath is matched as that
                         # platform: Garmin's iCIMS link mail ("User account with Garmin International, Inc.", a
                         # tracking.icims.com link) was refused as "tenant" while the job read as custom (2026-10-27).
@@ -125,7 +126,7 @@ class PollingMixin:
                                 for name, domains in KNOWN_SENDERS.items()
                                 if name != "custom" and set(domains) & set(rule["sender_domains"])
                             ),
-                            platform,
+                            "custom",  # a named platform with no sender family of its own is matched as a custom site
                         )
                     c["employer_senders"] = bool(job and platform in EMPLOYER_SENDER_FAMILIES)
                     c["ats"] = platform

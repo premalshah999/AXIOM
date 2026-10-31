@@ -23,7 +23,7 @@ from .consent import MARKETING
 from .consent import NOT_IDENTITY
 from .consent import OTHER_ROLES_CONSENT
 from .consent import SIGNATURE
-from .consent import STANDARD_CONSENT
+from .consent import CERTIFY_ACCURACY, CERTIFY_EXTRAS, STANDARD_CONSENT
 from .consent import TODAY
 from .contact import ADDRESS
 from .contact import CONTACT
@@ -1251,6 +1251,21 @@ class LocalRulesMixin:
             return Answer(
                 field_id=f["id"], value=options[0], disposition="answer", evidence_ids=["policy:consent"]
             )
+        if (
+            f.get("type") == "checkboxgroup"
+            and p.allow_application_consents
+            and CERTIFY_ACCURACY.search(f["label"])
+            and not CERTIFY_EXTRAS.search(f["label"])
+        ):
+            # Adzuna (2026-10-28) offered "Yes, I certify" / "No, I don't certify" as two boxes under a required
+            # question: the one affirmative option only, never the refusal, and only under the owner's permission.
+            yes = [
+                o for o in options
+                if re.match(r"\s*(?:yes\b[\s,.:;-]*)?i\s+(?:certify|attest|affirm)\b", o, re.I)
+                and not re.search(r"\b(?:no|not|n['’]t)\b", o, re.I)
+            ]
+            if len(yes) == 1:
+                return Answer(field_id=f["id"], value=yes[0], disposition="answer", evidence_ids=["policy:consent"])
         if (
             p.accept_all_application_terms
             and not disclosure

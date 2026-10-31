@@ -96,7 +96,16 @@ async def cover_letter(resolver):
             or not letter.evidence_ids
             or any(ref not in allowed for ref in letter.evidence_ids)
         ):
-            raise ValueError("Cover letter needs internal writing repair")
+            # Say which check refused it: MetOx's required letter (2026-10-29) was drafted and repaired twice (HTTP 200)
+            # and refused, and nothing recorded whether a claim, the text or the evidence ids failed.
+            cited = [ref for ref in letter.evidence_ids if ref not in allowed]
+            why = (
+                "unsupported claim: " + "; ".join(str(p) for p in unsupported)[:300] if unsupported
+                else "empty text" if not letter.text
+                else "no evidence cited" if not letter.evidence_ids
+                else "cited evidence that was not offered: " + ", ".join(cited)[:200]
+            )
+            raise ValueError("Cover letter needs internal writing repair: " + why)
         stored = {"text": letter.text, "signed": True, "evidence_ids": letter.evidence_ids,
                   "style_findings": list(letter.problems or [])[:6]}
         resolver.db.set_setting("cover_letter:" + key, stored)

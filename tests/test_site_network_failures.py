@@ -11,12 +11,16 @@ class NavError(Exception):
     pass
 
 
-def test_an_invalid_certificate_closes_the_job_without_sending_anything():
-    result = net_failure(NavError("Page.goto: net::ERR_CERT_DATE_INVALID at <url>"))
-    assert result["state"] == "closed" and "ERR_CERT_DATE_INVALID" in result["reason"]
+@pytest.mark.parametrize("code", ["ERR_CERT_DATE_INVALID", "ERR_CERT_AUTHORITY_INVALID", "ERR_SSL_PROTOCOL_ERROR"])
+def test_an_invalid_certificate_waits_and_never_closes_the_job(code):
+    # West Monroe (2026-10-25): six jobs were closed on an expired certificate; three siblings had confirmed the day before.
+    result = net_failure(NavError(f"Page.goto: net::{code} at <url>"))
+    assert result["state"] == "waiting_browser" and result["recovery_cause"] == "site_temporary"
+    assert code in result["reason"] and "no application data was sent" in result["reason"]
 
 
-@pytest.mark.parametrize("code", ["ERR_FAILED", "ERR_NETWORK_CHANGED", "ERR_NAME_NOT_RESOLVED", "ERR_CONNECTION_REFUSED"])
+@pytest.mark.parametrize("code", ["ERR_FAILED", "ERR_NETWORK_CHANGED", "ERR_NAME_NOT_RESOLVED", "ERR_CONNECTION_REFUSED",
+                                  "ERR_TIMED_OUT", "ERR_INTERNET_DISCONNECTED", "ERR_TUNNEL_CONNECTION_FAILED"])
 def test_a_site_that_did_not_load_is_retried_later(code):
     result = net_failure(NavError(f"Page.goto: net::{code} at <url>"))
     assert result["state"] == "waiting_browser" and result["recovery_cause"] == "site_temporary"

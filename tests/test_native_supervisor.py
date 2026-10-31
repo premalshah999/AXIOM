@@ -139,7 +139,8 @@ def test_the_app_drains_with_its_browser_driver_alive(cfg, tmp_path):
 def test_a_stop_drains_the_app_first_and_stops_the_database_last(cfg, tmp_path):
     order = tmp_path / "order"
     def named(name, signal_name):
-        return f"trap 'echo {name} >> {order}; exit 0' {signal_name}; while :; do sleep 0.1; done"
+        # The shell touches its marker only after its trap is set: a stop sent earlier would kill it unhandled.
+        return f"trap 'echo {name} >> {order}; exit 0' {signal_name}; touch {tmp_path / name}; while :; do sleep 0.1; done"
 
     database = child("postgres", named("postgres", "INT"), stop_signal=signal.SIGINT, grace=5.0)
     worker = child("worker", named("worker", "TERM"), url="http://127.0.0.1:1", grace=5.0)
@@ -147,8 +148,7 @@ def test_a_stop_drains_the_app_first_and_stops_the_database_last(cfg, tmp_path):
     pg_ensure, pg.ensure_database = pg.ensure_database, lambda *_: None
     try:
         sup = supervised(cfg, database, worker, app)
-        assert advance(sup, lambda: app.state == "up")
-        time.sleep(0.3)  # Let each shell install its trap.
+        assert advance(sup, lambda: app.state == "up" and all((tmp_path / n).exists() for n in ("postgres", "worker", "app")))
         sup.stop_reason = "Stopped by request."
         sup.shutdown()
     finally:
@@ -156,11 +156,12 @@ def test_a_stop_drains_the_app_first_and_stops_the_database_last(cfg, tmp_path):
     assert order.read_text().split() == ["app", "worker", "postgres"]
 
 
-def test_an_app_that_ignores_a_stop_is_killed_only_after_the_whole_grace(cfg):
-    app = child("app", "trap '' TERM; while :; do sleep 0.1; done", grace=1.0)
+def test_an_app_that_ignores_a_stop_is_killed_only_after_the_whole_grace(cfg, tmp_path):
+    ready = tmp_path / "ready"
+    app = child("app", f"trap '' TERM; touch {ready}; while :; do sleep 0.1; done", grace=1.0)
     sup = supervised(cfg, app)
-    assert advance(sup, lambda: app.state == "up")
-    time.sleep(0.2)
+    # Stop only once the shell ignores TERM; a TERM that arrives first would end it at once and skip the grace.
+    assert advance(sup, lambda: app.state == "up" and ready.exists())
     began = time.monotonic()
     pid = app.pid
     app.final_signal = signal.SIGKILL
@@ -630,11 +631,11 @@ def test_several_services_stop_in_reverse_with_the_database_last(cfg, tmp_path, 
     monkeypatch.setattr(pg, "ensure_database", lambda *_: None)
     order = tmp_path / "order"
     database, applier, mail, gateway = several(cfg, tmp_path, order=order)
-    trap = f"trap 'echo postgres >> {order}; exit 0' INT; while :; do sleep 0.1; done"
+    trap = f"trap 'echo postgres >> {order}; exit 0' INT; touch {tmp_path / 'postgres'}; while :; do sleep 0.1; done"
     database.argv = ["sh", "-c", trap]
     sup = supervised(cfg, database, applier, mail, gateway)
-    assert advance(sup, lambda: gateway.state == "up")
-    time.sleep(0.4)
+    # Each shell touches its marker after its trap is set; a stop sent earlier would kill it unhandled.
+    assert advance(sup, lambda: gateway.state == "up" and all((tmp_path / n).exists() for n in ("postgres", "applier", "mail", "gateway")))
     sup.stop_reason = "Stopped by request."
     sup.shutdown()
     stopped = order.read_text().split()

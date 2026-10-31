@@ -20,7 +20,8 @@ from openai import APIError
 from .models import AnswerModelUnavailable, BudgetExceeded
 
 from .answers import UNOFFERED_SOURCE, Resolver
-from .ats import EMBED_JS, REGISTRY, detect, detect_embedded
+from .ats import EMBED_JS, LABEL_ONLY, REGISTRY, VENDORS, classify_embedded, detect, unsettled
+from .posting_identity import IDENTITY_JS, identity, placeholder_title, save as save_identity
 from .email_browser import EmailBrowser, redacted_url
 from .failure_reports import clean
 from .forms import AUTH, ENTRY, FINAL, STALE_CHOICE, FormSession, NetworkMonitor, ResumeAttachmentError
@@ -134,6 +135,10 @@ COMMIT_TRACKING = re.compile(
 # A page load the network refused once and may answer on a second try.
 NET_RETRY = re.compile(r"net::ERR_(?:CONNECTION_(?:CLOSED|RESET|TIMED_OUT)|NETWORK_CHANGED|TIMED_OUT|FAILED|EMPTY_RESPONSE)\b")
 NET_ERROR = re.compile(r"net::ERR_([A-Z_]+)")
+# Statuses a bot check or an access rule answers with while the platform may still have processed the write.
+AUTH_REFUSALS = {401, 403}
+# How long an employer that paces applications (Ashby: "apply to one role at a time") is left alone.
+THROTTLED_PAUSE_SECONDS = 6 * 3600
 WORKDAY_FAILURE = re.compile(
     r"something went wrong|unexpected (?:system )?error|session (?:has )?expired|"
     r"system (?:is )?(?:temporarily )?unavailable|server error",
@@ -157,18 +162,23 @@ def current_role_end_date(resolver, field):
 def net_failure(exc, diagnostics=None):
     """The outcome of a page the employer's site would not serve, or None. West Monroe's career site served an
     expired certificate and Amazon's dropped the connection (2026-10-25): each run read "Browser control failed at
-    browser.py:1408" and sat in repair as if the engine were broken."""
+    browser.py:1408" and sat in repair as if the engine were broken.
+
+    Never "closed": an infrastructure error (certificate, DNS, connection, timeout) says nothing about the posting.
+    West Monroe's six jobs were closed on a certificate error while three siblings of the same site had confirmed the day
+    before. A posting that is truly gone answers with its own page (a 404, a "no longer available" notice)."""
     match = NET_ERROR.search(str(exc))
     if not match or match[1] in {"ABORTED", "BLOCKED_BY_CLIENT", "BLOCKED_BY_RESPONSE"}:
         return None  # An aborted navigation is the page's own redirect; blocked ones are this browser's guard.
     code = "net::ERR_" + match[1]
     extra = {"diagnostics": diagnostics} if diagnostics else {}
-    if match[1].startswith(("CERT_", "SSL_")) or "CERTIFICATE" in match[1]:
-        # Nothing an applicant enters may go to a site whose identity the browser cannot verify.
-        return {"state": "closed", "reason": f"The employer's site failed the browser's security check ({code}); "
-                "no application data was sent to it", **extra}
-    return {"state": "waiting_browser", "reason": f"The employer's site did not load ({code}); it will be tried "
-            "again later", "blocker_type": "site_transient", "recovery_cause": "site_temporary", **extra}
+    # The browser stops at a certificate it cannot verify, so nothing an applicant enters can reach that site; trying
+    # again later reaches the same refusal until the site is fixed. The recovery attempts are bounded.
+    insecure = match[1].startswith(("CERT_", "SSL_")) or "CERTIFICATE" in match[1]
+    return {"state": "waiting_browser", "blocker_type": "site_transient", "recovery_cause": "site_temporary",
+            "reason": (f"The employer's site failed the browser's security check ({code}); no application data was "
+                       "sent to it, and it will be tried again later" if insecure else
+                       f"The employer's site did not load ({code}); it will be tried again later"), **extra}
 
 
 # Keys an API error body names its complaint with.
@@ -251,6 +261,17 @@ async def icims_site_posting_gone(url):
     )
 
 
+COMPANY_NOISE = re.compile(r"\b(?:inc|llc|ltd|limited|corp|corporation|co|company|the)\b")
+
+
+def same_employer(board_name, company):
+    """Whether a Greenhouse board names itself as this company (case, punctuation and 'Inc.' aside)."""
+    def key(name):
+        return re.sub(r"[^a-z0-9]", "", COMPANY_NOISE.sub("", re.sub(r"[.,]", "", str(name or "").lower())))
+
+    return bool(key(company)) and key(board_name) == key(company)
+
+
 async def greenhouse_board(url, company=""):
     """(board, job id, listed) for an employer career page that names its Greenhouse job (?gh_jid=), or None.
 
@@ -271,9 +292,13 @@ async def greenhouse_board(url, company=""):
                 job = await client.get(f"https://boards-api.greenhouse.io/v1/boards/{name}/jobs/{job_id}")
                 if job.status_code == 200:
                     return name, job_id, True
-                if job.status_code == 404 and (await client.get(f"https://boards-api.greenhouse.io/v1/boards/{name}")).status_code == 200:
-                    return name, job_id, False
-    except httpx.HTTPError:
+                if job.status_code == 404:
+                    # A board that merely exists under the guessed name says nothing about this posting: it may be
+                    # another company's, or an old one. Only the employer's own board (it names itself) can close it.
+                    board = await client.get(f"https://boards-api.greenhouse.io/v1/boards/{name}")
+                    if board.status_code == 200 and same_employer(board.json().get("name"), company):
+                        return name, job_id, False
+    except (httpx.HTTPError, ValueError):  # ValueError: a board page that is not JSON
         return None
     return None
 
@@ -1124,6 +1149,7 @@ class BrowserEngine:
         # This run's copy only: the stored URL keeps its identity for duplicate checks.
         job = {**job, "url": english_posting_url(job.get("url", ""))}
         self.job, self.run_record = job, run
+        job["ats"] = self.starting_label(job)
         started = time.monotonic()
         process, browser, pw = None, None, None
         temp = tempfile.mkdtemp(prefix="applypilot-browser-")
@@ -1441,8 +1467,15 @@ class BrowserEngine:
                     if embedded:
                         await page.goto(embedded, wait_until="domcontentloaded", timeout=30000)
                         self.emit("browser", "Opened the employer's embedded Greenhouse form directly")
-                except PlaywrightError:
-                    pass  # No embedded form: continue on the employer page.
+                except PlaywrightError as exc:
+                    # Continue on the employer page, and say why: this passed silently, so Roblox's, Abnormal's and Lyft's
+                    # runs (2026-10-25) could not show whether the board lookup, the 10 s wait for a frame that only
+                    # appears after Apply, or the navigation itself had failed.
+                    self.emit(
+                        "handoff_skipped",
+                        "No embedded Greenhouse form opened from the employer page",
+                        {"error": type(exc).__name__, "detail": str(exc).splitlines()[0][:160] if str(exc) else ""},
+                    )
             if job["ats"] == "greenhouse" and not resumed:
                 # Classic Greenhouse forms do not expose Remix's hydration global.
                 try:
@@ -1452,8 +1485,16 @@ class BrowserEngine:
                     )
                 except PlaywrightError:
                     pass  # The scanner/navigator can handle an employer-hosted entry page.
-                # File upload clients initialize after React hydration.
-                await page.wait_for_timeout(2000)
+                # File upload clients initialize after React hydration. The job-boards form is React: wait for
+                # it to hydrate, reloading once if it does not, rather than a fixed pause (Esri, 2026-10-31).
+                if (urlsplit(page.url).hostname or "").startswith("job-boards"):
+                    from .widgets import wait_react_hydrated
+
+                    if not await wait_react_hydrated(page):
+                        self.emit("browser", "The Greenhouse form did not hydrate; continuing on the page as it is")
+                    await page.wait_for_timeout(500)
+                else:
+                    await page.wait_for_timeout(2000)
             from .run_profile import full as full_profile
 
             self.profile = Profile.model_validate(full_profile(run["packet"], self.db))
@@ -1539,7 +1580,7 @@ class BrowserEngine:
             ):
                 # The resumed tab is already on the portal this job's career site handed off to.
                 self.adopt_handoff("icims", platform)
-            if not job["demo"] and job["ats"] == "custom" and ats != "custom":
+            if not job["demo"] and unsettled(job["ats"]) and not unsettled(ats):
                 if ats in {"icims", "successfactors", "taleo"}:
                     # The platform's own rules apply to its forms (this record is the resolver's and the engine's):
                     # iCIMS refuses a current role without an end date as "Invalid Data Error", and Medpace's and
@@ -1575,6 +1616,7 @@ class BrowserEngine:
                     "runner_tier": run["packet"].get("runner_tier", 1),
                 },
             )
+            await self.remember_posting_identity(page)
             async with asyncio.timeout(max(1, budget - (time.monotonic() - started))) as cm:
                 self.timeout_cm = cm
                 if job["demo"]:
@@ -1967,25 +2009,39 @@ class BrowserEngine:
                         "evidence": "My Applications: applied-application view with Withdraw Application"},
         }
 
+    async def posting_closure(self, reason="The posting is closed or no longer available"):
+        """The result for a page that says its posting is gone. A Workday "The page you are looking for doesn't exist"
+        is also what a stale route or a busy tenant renders, so a Workday posting closes only on the employer's own
+        search (workday.missing_posting_result: not listed, or two runs at the posting itself); page_closed, the
+        controller and the adapter's closed step each closed such a page on its first sight (HNTB, Moffitt, Nordstrom,
+        Varian, WVU Medicine and Evolent, 2026-10-29: all six are still listed by their own career sites)."""
+        job = getattr(self, "job", None) or {}
+        if job.get("ats") == "workday":
+            from .workday import missing_posting_result, tenant_search_lists
+
+            return missing_posting_result(
+                self.db, job, self.run_id, self.page.url, listed=await tenant_search_lists(job.get("url", ""))
+            )
+        return {"state": "closed", "reason": reason}
+
     async def page_closed(self):
         """A stalled flow that ends on the posting's own "position has been filled" (four runs at one career site,
         2026-10-27, each parked as a repair): no application form is left, so the posting is closed."""
-        from .adapters.base import APPLICATION_LIMIT, CLOSED
+        from .adapters.base import closed_notice, form_open, limit_notice
 
         try:
             obs = await self.form.scan()
         except Exception:
             return None
-        fields = [f for f in obs.get("fields", []) if f["type"] not in {"search", "hidden"}
-                  and not re.search(r"search|keyword|location", f.get("label", ""), re.I)]
-        text = " ".join([*obs.get("headings", []), *obs.get("errors", []), str(obs.get("text", ""))])
-        if not getattr(self, "armed", False) and (limit := APPLICATION_LIMIT.search(text)):
-            # TikTok's cap notice sits over a full form (see APPLICATION_LIMIT): the form does not make it open.
+        if not getattr(self, "armed", False) and (limit := limit_notice(obs)):
+            # TikTok's cap notice sits over a full form (see APPLICATION_LIMIT): the form does not make it open. Its
+            # own limit_check answered it, and the mailbox holds four ByteDance applications of 2026-10-14.
             return {"state": "closed", "reason": "The employer's application limit for this applicant is reached, so "
-                    "nothing was submitted: " + limit[0][:120]}
-        if fields or not (match := CLOSED.search(text)):
+                    "nothing was submitted: " + limit[:300]}
+        if form_open(obs) or not (match := closed_notice(obs)):
             return None
-        return {"state": "closed", "reason": "The posting is closed: " + match[0][:120]}
+        verdict = await self.posting_closure("The posting is closed: " + match[0][:120])
+        return verdict if verdict["state"] == "closed" else None
 
     async def page_acknowledged(self):
         """A stalled flow that ends on the employer's acknowledgement. Sopra Steria (SmartRecruiters 2026-10-26): its
@@ -2561,37 +2617,120 @@ class BrowserEngine:
         """A resumed draft of a short-linked job is already on its platform's page: adopt the handoff as a fresh run
         does. EA's go.vansh.nyc job resumed on its Avature site kept the custom adapter and armed its reset email
         with the short-link host's mail rule, whose senders were another employer's (2026-10-29)."""
-        if ats == "custom" and detect(page.url).id != "custom":
+        if unsettled(ats) and not unsettled(detect(page.url).id):
             return await self.detect_ats(page, ats)
         return ats
 
     async def detect_ats(self, page, ats):
-        """Redirects and embedded frames reveal the real ATS behind a company career site."""
+        """Redirects, embedded frames and the page's own fingerprints reveal the real ATS behind a company career site."""
         current = detect(page.url).id
-        if current != "custom":
-            if ats == "custom" and detect(self.job.get("url", "")).id == "custom":
+        if not unsettled(current):
+            if unsettled(ats) and unsettled(detect(self.job.get("url", "")).id):
                 # A custom link that redirects to the platform (Applied Materials' and Booz Allen's short links ->
                 # their Workday tenants, 2026-10-26) is the employer's handoff: without it Workday refused the tenant
                 # as "account origin does not match this employer".
                 self.adopt_handoff(current)
             return current
-        if ats != "custom":
+        if not unsettled(ats):
             return ats
         try:
             await page.wait_for_load_state("load", timeout=8000)
-            found, url = detect_embedded(await page.evaluate(EMBED_JS))
+            found, url, how = classify_embedded(await page.evaluate(EMBED_JS))
+            if found == "greenhouse" and not url:
+                url = await self.late_greenhouse_frame(page)
         except Exception:
             return ats
-        if found and url and found not in {"phenom"}:
+        if not found:
+            return ats
+        if url:
             from .adapters import adapter_class
 
-            self.emit("handoff", f"Career site uses {found}; opening its application directly")
-            await page.goto(
-                adapter_class(found).prepare_url(url), wait_until="domcontentloaded", timeout=30000
-            )
+            self.emit("handoff", f"Career site uses {found}; opening its application directly", {"found": found, "via": how})
+            await page.goto(adapter_class(found).prepare_url(url), wait_until="domcontentloaded", timeout=30000)
             self.adopt_handoff(found, url)
-            return found
-        return found or ats
+        elif how in {"meta", "link"}:
+            # The whole site is this platform's portal (Two Sigma's Avature, AARP's Eightfold): its pages, not the short
+            # link that led here, are the employer's identity for accounts and mail.
+            self.emit("handoff", f"The career site is a {found} portal", {"found": found, "via": how})
+            self.adopt_handoff(found)
+        else:
+            self.persist_observed_ats(found)
+        return found
+
+    embed_poll = 0.5  # seconds between looks for a frame that loads late
+
+    async def remember_posting_identity(self, page):
+        """Save the employer and title the open posting states about itself when the job has none (or has the career
+        site's hostname as its employer): jobs from pasted links and short links showed as "ats.rippling.com" or "Untitled
+        role", and an empty company kept receipts from matching (posting_identity). Best effort, and free for a job that
+        has both."""
+        job = self.job
+        company = str(job.get("company") or "").strip()
+        hostname_like = "." in company and " " not in company
+        if job.get("demo") or not (not company or hostname_like or placeholder_title(job.get("title"))):
+            return
+        try:
+            found = identity(await page.evaluate(IDENTITY_JS))
+            changes = await asyncio.to_thread(save_identity, self.db, job["id"], found) if found else {}
+        except Exception:
+            return
+        if changes:
+            job.update(changes)
+            self.emit("job_identity", "Saved the employer and title the posting states", changes)
+
+    async def late_greenhouse_frame(self, page, seconds=6):
+        """The application frame of a Greenhouse board embed that has not rendered yet: its holder (#grnhse_app) or loader
+        script is on the page at the load event and the iframe is added after it (Abnormal, Databricks, Lyft's CareerPuck,
+        2026-10-25..29), so one look at the load event saw no form."""
+        for _ in range(int(seconds / self.embed_poll) if self.embed_poll else 12):
+            await asyncio.sleep(self.embed_poll)
+            try:
+                found, url, _ = classify_embedded(await page.evaluate(EMBED_JS))
+            except PlaywrightError:
+                return None
+            if found == "greenhouse" and url:
+                return url
+        return None
+
+    async def follow_embedded(self, current):
+        """Look again at the live page (after an Apply click, a redirect, a new tab or a late iframe) while the run still
+        has only a career site's label: the platform it moved to, after moving the run there, else None.
+
+        Detection used to run once, before the first click: Roblox's Greenhouse frame appears only on its form step, so
+        the run kept a career site's label and mail rule (2026-10-31). A frame or Apply link to a platform opens its own
+        application as the top-level page, as the first look does, but only while nothing has been typed or uploaded:
+        what is already filled in the employer's frame stays where it is and the run only takes the platform's label."""
+        if self.armed or not unsettled(current) or getattr(self, "embedded_misses", 0) >= 3:
+            return None
+        page = self.page
+        try:
+            landed = detect(page.url).id
+            if unsettled(landed):
+                found, url, how = classify_embedded(await page.evaluate(EMBED_JS))
+            else:
+                found, url, how = landed, None, "url"  # a redirect or new tab already on the platform's page
+        except Exception:
+            return None
+        if not found or found == current or (current != "custom" and found in LABEL_ONLY):
+            return None
+        form = getattr(self, "form", None)
+        untouched = not (getattr(form, "ledger", None) or getattr(form, "uploaded", False))
+        if url and untouched:
+            from .adapters import adapter_class
+
+            try:
+                self.emit("handoff", f"The page now shows {found}; opening its application directly", {"found": found, "via": how})
+                await page.goto(adapter_class(found).prepare_url(url), wait_until="domcontentloaded", timeout=30000)
+            except PlaywrightError as exc:
+                self.embedded_misses = getattr(self, "embedded_misses", 0) + 1
+                self.emit("handoff_skipped", f"Could not open the {found} application the page shows", {"error": type(exc).__name__})
+                return None
+            self.adopt_handoff(found, url)
+        else:
+            if url:
+                self.emit("handoff_skipped", f"The page shows {found}, but the form is already in progress; staying on it", {"found": found})
+            self.adopt_handoff(found)
+        return found
 
     def adopt_handoff(self, target, url=None):
         """The employer's site led to this platform: its own posting becomes the run's job URL in memory (Workday's
@@ -2611,6 +2750,48 @@ class BrowserEngine:
             # The observed ATS owns the account and verification mail. Keeping
             # a short-link host here selects that host's unrelated sender rule.
             self.job.update(url=url or self.page.url, ats=target)
+        self.persist_observed_ats(target)
+
+    def starting_label(self, job):
+        """The label a run starts with. A row whose platform was learned from an earlier run's hand-off (not from its
+        address) starts as the career site it is and finds the platform again: trusting "workday" on a short link would skip
+        the adoption that Workday's account check needs ("account origin does not match this employer"), and a platform
+        reached only after Apply would never be looked for."""
+        if job.get("demo"):
+            return job.get("ats")
+        seen = self.db.get_setting("observed_ats:" + str(job.get("id")), {})
+        return (seen.get("was") or "custom") if seen.get("ats") == job.get("ats") else job.get("ats")
+
+    def persist_observed_ats(self, target):
+        """Write the platform this run observed behind the career site to the job row, once it is known.
+
+        adopt_handoff changed only this run's copy, so 144 of 269 jobs that were routed to Greenhouse, Workday, iCIMS and
+        the rest still read "custom" (2026-10-31): the wrong worker lane, the custom site's sender rule and a list that
+        called them career sites. Only a label that had not found its platform is replaced, and only by a better one
+        (custom < named platform < one with a driver); the address stays the career site's, so nothing keyed on it moves.
+        The observation is remembered (observed_ats:<job>) because that label then comes from this page, not from the
+        address: the next run starts as a career site again and finds the platform itself, where trusting the label
+        would skip the adoption that Workday's account check needs."""
+        db, job_id = getattr(self, "db", None), self.job.get("id")
+        if not db or not job_id or self.job.get("demo") or unsettled(target) and target not in LABEL_ONLY:
+            return
+
+        def rank(name):
+            return 0 if name == "custom" or name in VENDORS else 1 if name in LABEL_ONLY else 2
+
+        marker = "observed_ats:" + job_id
+        seen = db.get_setting(marker, {})
+        with db.session() as s:
+            row = s.get(Job, job_id)
+            if row is None or row.ats == target:
+                return
+            observed = seen.get("ats") == row.ats
+            was = seen.get("was") if observed else row.ats
+            if rank(target) < rank(row.ats) or (rank(target) == rank(row.ats) and not observed):
+                return
+            row.ats = target
+        db.set_setting(marker, {"ats": target, "was": was, "at": time.time()})
+        self.emit("ats_observed", f"This job's platform is {target}", {"was": was, "ats": target})
 
     def adopt_icims_portal(self, url):
         """A career site that hands off to its iCIMS portal (Planview's careers.planview.com/jobs/5080 opened
@@ -2698,7 +2879,16 @@ class BrowserEngine:
         target = detect(self.page.url).id
         current = getattr(getattr(self, "fallback_mail_adapter", None), "id", "") or self.job.get("ats", "")
         if target not in ADAPTERS or target in {current, self.job.get("ats", "")}:
-            return None
+            if not unsettled(current):
+                return None
+            # Still a career site: look again for a platform it shows now (an Apply that opened a frame, a new tab).
+            target = await self.follow_embedded(current)
+            if target not in ADAPTERS:
+                return None  # A label (or a platform without an adapter) is adopted; the navigator continues.
+            self.navigator_handed_off = True
+            self.emit("handoff", f"The application moved to {target}; its own adapter continues")
+            result = await self.run_adapters(target)
+            return None if result and result.get("fallback") and not self.armed else result
         self.navigator_handed_off = True
         self.adopt_handoff(target)
         self.emit("handoff", f"The application moved to {target}; its own adapter continues")
@@ -4167,6 +4357,20 @@ class BrowserEngine:
                 if rejection.get("category") == "employer_limit":
                     self.armed = False
                     return await self.employer_limit_result(rejection)
+                if rejection.get("category") == "throttled":
+                    # An employer pacing applications ("apply to one role at a time"): nothing was accepted, so it
+                    # is retried after a pause, not failed (Ashby, Applied Intuition 2026-10-31).
+                    self.armed = False
+                    await self.release_reservation()
+                    return {
+                        "state": "waiting_browser",
+                        "reason": "The employer is pacing this applicant's applications and did not accept this one; "
+                        "nothing was submitted, and it will be tried again later",
+                        "receipt": rejection,
+                        "blocker_type": "site_transient",
+                        "recovery_cause": "site_temporary",
+                        "site_cooldown_seconds": THROTTLED_PAUSE_SECONDS,
+                    }
                 if rejection.get("category") == "temporary":
                     # SmartRecruiters: "Cannot submit your application. Please try again in a while."
                     self.armed = False
@@ -4302,10 +4506,14 @@ class BrowserEngine:
         if not url or getattr(self.page, "url", "") != url or getattr(self, "commit_inflight", None):
             return False
         # A write the employer refused with a 4xx accepted nothing (Dallas County: its work-history item answered 400
-        # and the application was never posted). A 5xx may have been partly processed and stays uncertain.
+        # and the application was never posted). A 5xx may have been partly processed and stays uncertain, and so does
+        # a 401/403: Rippling answered its apply POST 401 "turnstile_verification_failure" and still created the
+        # application (Go Fish Digital 2026-10-28: both submits answered 401, both sent "Thank you for applying" mail,
+        # and the second was a duplicate; TheGuarantors the same). A bot-check refusal is no evidence of nothing sent.
         writes = [
             r for r in getattr(self, "commit_requests", None) or []
-            if not COMMIT_TRACKING.search(r.get("path", "")) and not 400 <= int(r.get("status") or 0) < 500
+            if not COMMIT_TRACKING.search(r.get("path", ""))
+            and (not 400 <= int(r.get("status") or 0) < 500 or int(r["status"]) in AUTH_REFUSALS)
         ]
         if writes or len(getattr(self, "commit_requests", None) or []) >= 40:  # a full log may have dropped writes
             return False
@@ -4692,7 +4900,7 @@ class BrowserEngine:
             key = field_identity(target)
             rejected[key] = rejected.get(key, 0) + 1
             if UNOFFERED_SOURCE in detail:
-                from .answers import NOT_A_SOURCE
+                from .answers.sources import internal_channels_only
 
                 options = [str(o) for o in target.get("options") or [] if str(o).strip()] or [
                     # The navigator's target may omit the catalog; the form observed it (Bank of America's
@@ -4716,11 +4924,7 @@ class BrowserEngine:
                         ),
                         [],
                     )
-                if (
-                    options
-                    and all(NOT_A_SOURCE.search(o) for o in options)
-                    and not any(re.fullmatch(r"\s*other\s*", o, re.I) for o in options)
-                ):
+                if internal_channels_only(options):
                     # Only internal channels (Displaced, LOA, Employee, Contractor, ...): the posting
                     # is not open to external applicants (BofA, Pfizer, Snap on 2026-10-13). Close it.
                     return {
@@ -5189,14 +5393,10 @@ class BrowserEngine:
                     elif unoffered := [
                         q for q in report["pending"] if str(q.get("reason", "")).startswith(UNOFFERED_SOURCE)
                     ]:
-                        from .answers import NOT_A_SOURCE
+                        from .answers.sources import internal_channels_only
 
                         offered = [str(o) for o in unoffered[0].get("options") or [] if str(o).strip()]
-                        if (
-                            offered
-                            and all(NOT_A_SOURCE.search(o) for o in offered)
-                            and not any(re.fullmatch(r"\s*other\s*", o, re.I) for o in offered)
-                        ):
+                        if internal_channels_only(offered):
                             # Only internal channels (BofA "Displaced (US)", "LOA - Job Search (US)"):
                             # the posting is internal-only, as in the answer-validation path.
                             self.result = {
@@ -5318,15 +5518,14 @@ class BrowserEngine:
                 elif decision.action == "wait":
                     await asyncio.sleep(1)
                 else:
-                    from .adapters.base import CLOSED
+                    from .adapters.base import closed_notice, form_open
 
-                    if not self.armed and CLOSED.search(obs.get("text", "") or ""):
+                    if not self.armed and not form_open(obs) and closed_notice(obs):
                         # The controller recognized a closed posting; retrying cannot help.
-                        self.result = {
-                            "state": "closed",
-                            "reason": "The posting is closed or no longer available",
-                        }
-                        return
+                        verdict = await self.posting_closure()
+                        if verdict["state"] == "closed":  # Workday's own search may still list it: carry on then.
+                            self.result = verdict
+                            return
                     if self.run_record["mode"] == "submit" and (receipt := await self.form.proof()):
                         # EY (SuccessFactors) 2026-10-16: the form's own Apply submitted and the page said so;
                         # the controller then stopped for help, and the run stayed "waiting".

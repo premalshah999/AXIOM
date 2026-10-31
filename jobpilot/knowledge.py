@@ -148,7 +148,9 @@ def _topic(text):
         ),
         (
             "sponsorship",
-            r"\bsponsor(?:ship|s|ing)?\b|\bsponsored\s+(?:visa|immigration|work)|(?:visa|employer|company)[- ]sponsored|"
+            # "company sponsored happy hour" (Interco's conduct quiz, 2026-10-30) is no immigration question.
+            r"\bsponsor(?:ship|s|ing)?\b|\bsponsored\s+(?:visa|immigration|work)|visa[- ]sponsored|"
+            r"(?:employer|company)[- ]sponsored\s+(?:visa|immigration|work|h-?1b|employment|status|permit|green card)|"
             + IMMIGRATION_VISA,
         ),
         (

@@ -40,7 +40,7 @@ async def test_embedded_workday_link_adopts_the_observed_employer_tenant(monkeyp
     page.goto = AsyncMock(side_effect=goto)
     engine.page = page
     engine.emit = lambda *a, **k: None
-    monkeypatch.setattr(browser, 'detect_embedded', lambda _: ('workday', POSTING))
+    monkeypatch.setattr(browser, 'classify_embedded', lambda _: ('workday', POSTING, 'apply'))
     assert await engine.detect_ats(page, 'custom') == 'workday'
     assert engine.job is original
     assert engine.job['url'] == POSTING
