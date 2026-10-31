@@ -24,7 +24,6 @@ WORDINGS = [
     "including but not limited to the following: Acme, Initech.",
     "Have you ever been a contractor of Acme's affiliated companies or subsidiaries? (Acme Service Company)",
     "Did you work previously at Acme?",
-    "Have you previously completed an internship at Acme?",
     "Are you currently contracting or previously contracted with Acme or any of its subsidiaries?",
     "Have you ever provided any contract work for Acme, Inc. or any of its subsidiaries or affiliates?",
     "Have you worked for Acme before?",
@@ -65,6 +64,13 @@ def test_the_history_decides_menu_answers_over_a_stored_one(service):
     assert FROM_RECORD in r.local(field(WORDINGS[0])).reason
 
 
+def test_generic_experience_questions_are_not_prior_employment():
+    from jobpilot.knowledge import topic
+
+    assert topic("Have you had an internship at a tech or SaaS company, or open source contributions?") != "prior_employment"
+    assert topic("Have you previously completed an internship at an organization?") != "prior_employment"
+
+
 def test_yes_needs_a_work_row_that_names_the_employer(service):
     r = resolver(service, attested=True, work=[{"company": "Acme Corp", "title": "Contractor"}, {"company": "Globex"}])
     f = field("Did you work previously at Acme?")
@@ -78,3 +84,7 @@ def test_yes_needs_a_work_row_that_names_the_employer(service):
     assert not r.prior_yes_unsupported(f, yes("profile:work.0"))
     assert not r.prior_yes_unsupported(f, Answer(field_id="q", disposition="answer", value="No", evidence_ids=[]))
     assert not r.prior_yes_unsupported(field("Do you use Duolingo?"), yes("profile:work.1"))
+    hyphen = Resolver(Profile(work=[{"company": "Globex"}]), service.db, service.config, employer="T-Mobile")
+    assert hyphen.prior_yes_unsupported(field("Are you or have you been a contractor for T-Mobile?"), yes("profile:work.0"))
+    # Contracting in general names no employer: the work rows back it.
+    assert not r.prior_yes_unsupported(field("Have you ever worked as a contractor with a client before?"), yes("profile:work.1"))

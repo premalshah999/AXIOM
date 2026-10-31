@@ -75,7 +75,7 @@ PRESENT_LOCATION = re.compile(
     r"based on where you (?:currently )?(?:reside|live)|worksite location requirements|\blocal to\b",
     re.I,
 )
-RELOCATION_ALTERNATIVE = re.compile(r"\b(?:or|and)\b[^.?]{0,40}\b(?:relocat\w*|move|willing)\b|\bwilling to relocate\b|\bif (?:no|not)\b", re.I)
+RELOCATION_ALTERNATIVE = re.compile(r"relocat|\bmove\b|\bwilling\b|\bif (?:no|not)\b", re.I)
 
 
 class ValidateMixin:
@@ -114,6 +114,18 @@ class ValidateMixin:
             return False
         if any(x.startswith(("reviewed:", "knowledge:m:review:")) for x in answer.evidence_ids):
             return False
+        from ..features.knowledge.employers import mention_aliases
+
+        question = " " + normalize(field["label"]) + " "
+        if not (
+            re.search(r"\b(?:this|our|the) (?:company|organi[sz]ation|employer)\b", question)
+            or any(
+                re.search(r"(?<!\w)" + re.escape(alias) + r"(?!\w)", field["label"], re.I) or f" {normalize(alias)} " in question
+                for alias in mention_aliases([getattr(self, "employer", "") or ""])
+                if alias
+            )
+        ):
+            return False  # A question about contracting in general ("... as a contractor before?") names no employer.
         text = " " + normalize(f"{field['label']} {getattr(self, 'employer', '') or ''}") + " "
         for x in answer.evidence_ids:
             match = re.fullmatch(r"profile:work\.(\d+)(?:\..+)?", x)

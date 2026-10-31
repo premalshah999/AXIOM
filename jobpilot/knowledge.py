@@ -145,12 +145,12 @@ def _topic(text):
             # Amazon (2026-10-27): "Are you currently working as an intern at Amazon?" had no subject and the model
             # proposed "Yes".
             r"\b(?:currently|presently) (?:working|employed|interning) (?:as an? [\w-]+ )?(?:at|for|with)\b|"
-            # Contractor, contingent, temp, third-party and intern wordings of "worked here before?" (T-Mobile, Target,
+            # Contractor, contingent, temp and third-party wordings (an internship is an experience question, not this) of "worked here before?" (T-Mobile, Target,
             # PwC, PNC, Howmet, IQVIA, Sanofi 2026-10-14..26): unrecognised, the model copied "Yes" from the
             # complete-history fact and 15 confirmed applications said the applicant had been a contractor there.
             r"(?:\b(?:are|were|was|have|had|did) you|\byou (?:are|were|have|had))\b[^?]{0,80}?"
             r"\b(?:contractors?|contract workers?|contingent workers?|temp(?:orary)? (?:workers?|employees?)|"
-            r"third.party labou?r|consultants?|interns?|internships?)\b(?:\s*\([^)]{0,40}\))?"
+            r"third.party labou?r)\b(?:\s*\([^)]{0,40}\))?"
             r"(?:\s+or\s+[\w -]{1,30})?\s+(?:for|at|with|to|of)\b|"
             r"\bwork(?:ed)? (?:previously|before) (?:for|at|with)\b|\bwork(?:ed)? (?:for|at|with)\b[^?]{0,60}\bbefore\b|"
             r"\bcontract(?:ing|ed) (?:with|for)\b|\bex[- ]\w+ (?:employee|associate)\b|"
