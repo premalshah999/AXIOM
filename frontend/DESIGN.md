@@ -1,136 +1,174 @@
-# AXIOM dashboard design system: The Instrument (2026-10-31)
+# AXIOM dashboard design system (2026-10-31)
 
-A front panel. Lines are the machine: ruled, fixed, engraved. Dots are what it is doing: live, lit, countable. The owner's rule for all of it: not generic, not cluttered, and it must stay true with real data.
+Read this before touching a page. It holds two stages: the **family** every page is made from, and the **reference pages** (Overview, Jobs and its drawer) to copy. Needs you, Applications, Resumes, Profile, Settings and the sign-in screens are on the new shell and tokens but not yet redesigned; section 7 says what each must become.
 
-## 1. The rules
+## 1. Rules
 
-- **One panel, one page.** The channel bank, the readouts, the lit window and the round key live on Overview only. Every other page carries the identity through type, the plate, hairlines and lamps, and stays calm and legible.
-- **Vermilion means the machine is live, or something needs you.** Never decoration. `--live` is vermilion only while real state says the machine runs (`data-run` on `<html>`, set in `main.tsx` from `identity/state.ts`, and off until the first answer).
-- **State is never a new colour.** It is lamp behaviour plus words: running pulses, a question is ringed, repairing is half lit, no receipt is dashed, confirmed is solid ink, stopped is hollow.
-- **Doto only at 56px and up.** It gets scratchy small. Under about 20px, data (time, count, platform) is Fragment Mono and sentences are Archivo.
-- **Copy says what it does.** "Pause applying", not poetry. Engraved labels are lowercase by CSS; the text in the DOM stays sentence case, and real names (company, role) keep their capitals.
-- No KPI tiles, no cards inside cards, no glassmorphism, no glow on surfaces, no pill on every row. A row's one action is a quiet link. At most one primary key on a screen, except Needs you's round send keys, one per question.
-- A screen has one obvious thing to look at. Keep real data and guidance; remove noise. Explanatory paragraphs mostly go.
-- Motion only where it means the machine is alive: CSS only, off under `prefers-reduced-motion`. No backdrop-filter, no blend modes over the page, no JS animation loops. The grain is one background tile.
+- **Design around the task.** Ask what the person came here to do, and put that first. A token swap is not a redesign. If a page is still "title, tabs, rows of inputs", it isn't done.
+- **Judge like the owner.** Do a real task on the page with real data, and look at the screenshot: funded company's product, or college project? Passing contrast or overflow checks says nothing about that.
+- **Remove words.** Translate engineer terms: never "pipeline", "worker slots", "rung", "ch 3", "execution-v2-...", "Answer model", "page acknowledgement". Say "Started", "busy/idle", "step", "Confirmation page", "Employer email". Real data only; nothing invented.
+- **Vermilion means the machine is live or something needs you.** Never decoration, never a brand colour, never a primary button. `--live` is vermilion only while `data-run="on"` on `<html>` (real state, `main.tsx`).
+- **State is lamp behaviour plus words, never a new colour.**
+- **Every number opens the list behind it.** Use `ax-quiet-link`, a row button, or `MoreLink` ("All 3,060 →"). If the list shows a subset, say so in a caption.
+- **Sentence case everywhere.** No `text-transform`. No decorative uppercase eyebrows, serif headings, side rails of cards, glassmorphism, card glow, decorative gradients, emoji or violet.
+- **Stat tiles only where a number is really the point of the page.** No row of four out of habit.
+- **At most one primary button per view.**
+- **Every state considered:** loading (Skeleton), empty (Empty, saying what will appear and offering the next action), error (LoadError or ErrorLine, with retry), disabled, and long names (ellipsis plus a title).
+- **No document scroll; no horizontal page scroll at 390px; no layout shift on poll.** Motion is CSS only, fast, off under `prefers-reduced-motion` (`base.css` handles it).
+- **Colours only in `tokens.css`** (`tests/test_identity_contrast.py` fails otherwise, and measures every pair AA in both themes). Fonts stay bundled. Never fetch logos or anything else from a third party: it would leak the job list.
 
-## 2. Themes
+## 2. Tokens (`src/styles/tokens.css`)
 
-Exactly two, on `<html data-theme>`: `dark` (graphite `#232321`, the default for a missing or unknown value) and `light` (bone aluminium `#E5E3DB`). They are named Dark and Light. The display window stays dark in both. The switch is on the rail, and "Switch to the … theme" is in the palette. The choice is in `localStorage` under `axiom.theme`, set before first paint by the inline script in `index.html`. Old stored values still work: `navy`, `slate` and `system` read as dark; `maroon` and `ivory` read as light. `readTheme` in `src/shell/prefs.ts` and that script must agree.
+Two themes on `<html data-theme>`: dark (graphite, the default for a missing or unknown value) and light (bone). The choice is `localStorage["axiom.theme"]`, applied before first paint by the script in `index.html`; `readTheme` in `shell/prefs.ts` must agree.
 
-### Tokens (`src/styles/tokens.css`, the only file with colours and fonts)
+**Surfaces, back to front.** Depth comes from these plus 1px hairlines, not from shadows.
 
-| Group | Tokens |
+| Token | Used for |
 |---|---|
-| Plate | `--ground`, `--ground-2` (hover), `--ground-3` (a recess), `--raised` (overlays), `--field` (controls), `--tint`, `--plate` (an opaque piece of plate, with its grain) |
-| Lines | `--line`, `--line-strong` (ticks, control edges: 3:1) |
-| Text | `--ink`, `--ink-2`, `--ink-3`, `--accent-text` (links are ink and underlined) |
-| Keys | `--key`, `--key-ink`, `--key-top`, `--key-bot`, `--key-down`; `--brand`, `--brand-ink` (the master key) |
-| Window | `--window`, `--window-edge`, `--window-rule`, `--window-ink`, `--window-ink-2`, `--dot-off` |
-| Lamp | `--led`, `--signal`, `--signal-ink`, `--signal-on-window`, `--bad`, `--live` |
-| Material | `--shade`, `--shade-deep`, `--engrave`, `--grain`, `--overlay-shadow`, `--scrim`, `--paper`, `--paper-shadow` |
-| Type | `--font-read` (Doto), `--font-text` (Archivo), `--font-data` (Fragment Mono), `--wide`, `--text-meta` 13, `--text-ui` and `--text-body` 14, `--text-sub` 16, `--text-title` 20, `--text-page` 30 |
-| Layout | `--radius` 3, `--radius-sm` 2, `--space-1` to `--space-12` (4px grid), `--page-w`, `--form-w`, `--gutter`, `--rail`, `--inset`, `--bar-height`, `--soon` |
+| `--ground` | Behind everything: the sidebar, the phone's bars |
+| `--sheet` | The page. Nothing else may be page-coloured |
+| `--raised` | Panels and tables on the page |
+| `--overlay` | Drawers, dialogs, menus, toasts, the palette |
+| `--inset` | A well cut into a surface: progress tracks, code, the drawer's status block, segmented controls, the bulk bar |
+| `--field` | An input |
+| `--window` | The display window: stays dark in both themes (`.ax-window`, Overview only). What sits inside takes dark values automatically |
+| `--hover`, `--active` | Translucent overlays that work on any surface |
+| `--surface` | **Not a colour of its own**: the current opaque surface, for sticky heads, pinned cells and save bars. Anything that sets a background must set this too |
 
-`tests/test_identity_contrast.py` measures every pair WCAG AA in both themes and fails on a literal colour outside `tokens.css`.
+**Lines:** `--line` (between things), `--line-soft` (between rows), `--line-strong` (a control's edge, 3:1).
 
-### Fonts
+**Text:** `--ink` (primary), `--ink-2` (secondary), `--ink-3` (quietest, still AA on every surface). Links and buttons never have their own colour.
 
-Bundled, Latin subsets only, 118 KB: Doto `full` (6 KB; has ROND and wght), Archivo `standard` (88 KB; has wdth and wght), Fragment Mono (25 KB). Those are the files with the axes the look depends on, measured in Chromium. Don't swap them for a package's default file, which lacks them.
+**Controls:** `--btn`, `--btn-hover`, `--btn-active`, `--btn-edge`, `--btn-ink`, `--btn-sheen`; `--brand`, `--brand-hover`, `--brand-active`, `--brand-ink` (primary: bone on graphite, ink on bone).
 
-## 3. Shell
+**Signal:** `--led` (a lit dot), `--signal` (a lamp), `--signal-ink` (signal text), `--signal-soft` (a tint behind a count or lamp), `--signal-fill` + `--signal-fill-ink` (the destructive button that finally does it), `--bad` (an error's words). Window: `--window-edge`, `--window-rule`, `--window-ink`, `--window-ink-2`, `--dot-off`. Dots on a surface: `--dot-plate` (off), `--dot-lit` (on).
 
-- `html`, `body` and `#root` are the viewport and `body` clips: **the document never scrolls.** Screens outside the shell (sign-in, setup guide) wrap themselves in `.ax-screen`.
-- `.ax-app` is a column of the top plate and main. Main is a column: page title, one-line banners, then **one scroll region** (`.ax-scroll`).
-- **The top plate** is the rail (wordmark, theme switch) and the **tuning scale**: nine stations and a needle that moves to the current page. Each station reads something live under its name: Overview's state word, the job and confirmed counts, Needs you's count with its lamp, the owner's name. Search (`⌘K`) and the account menu sit in the corner the scale leaves free.
-- Coming soon (Axe, Network, Emails) are the last three stations, under a "coming soon" band. Under 1340px they narrow to 0.9 of a page's station, and under 1280px to 0.72, where Axe drops its "ai interviewer" line.
-- **Phones (under 900px):** the scale becomes a strip along the bottom with real names at full size, sliding under a fixed needle; tapping a station goes there and centres it. This replaces the old slide-over drawer. Search, the theme switch and the account are in the top bar.
-- **The page title** is outside the scroll region, in engraved Archivo. Overview has none: its panel is its title. A page may add one or two things beside it with `<TopActions>`.
-- Lists use the page width; Profile and Settings keep a form's width.
+**Monograms:** `--mono-0` to `--mono-7`, `--mono-ink`. **Depth:** `--shadow-panel`, `--shadow-overlay`, `--scrim`. **Paper:** `--paper`, `--paper-shadow` (a resume page is white in both themes).
 
-## 4. Overview: the panel
+**Scale:** `--radius-sm` 6 (buttons, inputs, rows), `--radius` 8 (panels, tables, menus), `--radius-lg` 10 (the sheet, dialogs). `--control` 34, `--control-sm` 28 (40 and 36 on a touch screen, automatically). `--space-1` to `--space-12` on a 4px grid. `--gutter` 32 (16 on a phone). `--page-w`, `--form-w`, `--sidebar`. `--dur`, `--ease`.
 
-Rail plus nine columns, the same grid as the scale, so at nine workers each channel stands under a station. All of it is in `src/identity/` and `batch.tsx`.
+### Type
 
-- **Confirmed today:** a Doto readout, counted by `confirmedToday` from `GET /api/successful-applications` since local midnight. Applications' "today" reads the same function.
-- **The sentence.** One, the worst true thing first, from `panelState`: connection lost, needs a restart, paused, target reached, running, held, no batch. Actions: `start` (with "Apply until"), `resume`, or `pause`, and "Needs a restart" adds a primary Restart automation beside Pause. Only lost and restart take the lamp colour. "Connection lost" shows here and not again in the banner.
-- **The day:** `DayChart`, a matrix of half-hour columns, one lit dot per confirmation. A busy day goes to quarter hours, then says "each dot is N". Nothing is invented.
-- **The lit window:** the count of questions waiting, in the lamp colour; dark glass at zero.
-- **The round key:** `MasterKey`.
-- **The channel bank:** `ChannelBank`, one channel per worker slot (1 to 30), from runtime-health's workers. Under 120px a channel it becomes a row of ladders over a list of the busy ones, which is also what a phone gets. A lit channel carries company, role, what it is doing, platform, time on the job and Pause; the company opens the job. Long names clamp with the full text in a title attribute. A channel goes dark only when its run really stops, in order, so pausing puts them out one at a time.
+Five sizes. Use the element or the token; never invent a size.
 
-### Channels: the rung mapping (`identity/stages.ts`)
+| Role | Token | Spec |
+|---|---|---|
+| Page title | `--text-page`, `h1` (the shell renders it) | 24, 600, slightly wide (`--wide`) |
+| Section title | `--text-title`, `h2` | 15, 600, normal width |
+| Body | `--text-body`, `h3` is this at 600 | 14 |
+| Secondary | `--text-meta` | 13, with `--ink-2` or `--ink-3`. Labels, hints, table heads |
+| Data | `--text-data`, `.mono`, `<time>` | 12.5 Fragment Mono. **Numbers, IDs and times only**, never words |
 
-Six rungs, bottom to top. `running` alone only proves "open", so a channel reads the run's newest telling event from its worker's `phase` in the snapshot poll it already makes (`pipeline_comparison.TELLING_EVENTS`, the same kinds as `TELLING` in `identity/stages.ts`).
+Doto (`.ax-read`) is for hero readouts of 56px and up, on Overview only. The Archivo and Doto files are the ones with the axes the look depends on (`full`, `standard`): don't swap them.
 
-| Rung | Run events (`events.kind`) |
-|---|---|
-| open | `browser`, `new_tab` |
-| sign in | `auth`, `account`, `captcha`, `email_wait`, `email_verified` |
-| fill | `step`, `form_page`, `form_post`, `field_error`, `agent_step`, `agent_action_result`, `recovery`, `browser_recovery` |
-| questions | `answer_quality`, `answer_validation`, `knowledge_inference`, `knowledge_inference_declined` |
-| review | `verification` |
-| submit | `submitting`, `submission_requests`, or run state `submitting` |
+## 3. Shell (`src/shell/`, `src/styles/shell.css`)
 
-## 5. Navigation
+- `html`, `body` and `#root` are the viewport and clip. `.ax-app` is the 232px sidebar beside `.ax-main`, the page **sheet**: a rounded surface with a hairline, forward of the sidebar. The sheet is a column: page header, banners, then one scroll region (`.ax-scroll`). Screens outside the shell (sign-in, setup guide) wrap themselves in `.ax-screen`.
+- **Sidebar:** wordmark; Search (⌘K) as a quiet field; Overview, Jobs, Needs you (count), Applications, Resumes, Profile, Settings; a quiet "Coming soon" group; at the foot, one line of live status (`statusLine` in `identity/state.ts`) and the account row, whose menu holds who, the theme and sign out. Items come from `shell/nav.ts`.
+- **Page header:** the shell renders the title from `nav.ts`. From inside a page, `<TopActions>` puts the page's actions at its right and `<TopLine>` puts one short line under the title, only if it helps. They portal and unmount with the page. Don't put a title in a page.
+- **Phones (under 900px):** a slim top bar (wordmark, live status, search) and a five-item tab bar (Overview, Jobs, Needs you, Applications, More). More opens a bottom sheet with the other pages, the theme and sign out. Actions wrap under the title by themselves.
+- **Command palette:** `⌘K` or Ctrl-K: pages, tabs, jobs (with monograms), Add a job, switch theme.
+- **Scrolling:** a page that is one table uses `<div className="ax-page ax-page-fill">` and `<Table fill footer={<Pagination/>}>`: the table is the only scroller and its head stays put. Any other page is `<div className="ax-page">` and scrolls in `.ax-scroll`. Widths: `.ax-main` sets `--content-w`; Profile and Settings use `--form-w`.
 
-| Station | `view` | Tabs (`tab`) |
+### Routes
+
+`src/context.ts` holds the one table: `canonical()` turns any old `view`, `tab` and `filter` into its home, `parseRoute()` applies it to the address, `go()` and `routeUrl()` apply it to code, and `main.tsx` rewrites the address bar. Add a new old name there, nowhere else. `route.q` carries a list's search in the URL, so a number elsewhere can open the list already searched.
+
+| Page | `view` | Tabs (`tab`) |
 |---|---|---|
 | Overview | `batch` | |
-| Jobs | `jobs` | `pipeline`, `discovered`, `reserved` |
+| Jobs | `jobs` | `pipeline` (labelled Started), `discovered`, `reserved` |
 | Needs you | `needs` | |
 | Applications | `ledger` | `confirmed`, `unconfirmed`, `archive` |
-| Profile | `profile` | `identity`, `experience`, `knowledge`, `resumes` |
+| Resumes | `resumes` (the editor, `editor`, belongs to it) | |
+| Profile | `profile` | `identity`, `experience`, `knowledge` |
 | Settings | `settings` | `connections`, `accounts`, `email`, `discovery`, `system` |
-| *Coming soon:* Axe, Network, Emails | `soon-axe`, `soon-network`, `soon-emails` | |
+| Coming soon | `soon-axe`, `soon-network`, `soon-emails` | |
 
-`src/shell/nav.ts` lists the items and tabs. The resume editor (`editor`) belongs to Profile.
+Old names that must keep working: `?view=setup` (all its tabs), `/setup`, `?view=connections|accounts|email|discovery|system|sources`, `?gmail=`; `?view=setup&tab=profile&filter=identity|experience|preferences|facts|policies|rules`; `?view=setup&tab=answers`, `?view=knowledge|answers|knowledge base`; `?view=setup&tab=resumes`, `?view=resumes`, `?view=profile&tab=resumes` (opens Resumes); `?view=jobs&tab=archive`, `?view=archive`; `?view=successful|confirmed|applications|unconfirmed`; `?view=discovered|job board|pipeline|reserved`, `?page=job-board`, `?view=jobs&filter=new`; `?view=overview`; `?view=needs help|needs you|questions`. Anything unknown opens Overview.
 
-**Every URL the dashboard has ever had keeps working.** `src/context.ts` holds the one table: `canonical()` turns any old `view`, `tab` and `filter` into its new home, `parseRoute()` applies it to the address, `go()` and `routeUrl()` apply it to code, and `main.tsx` rewrites the address bar. Add a new old name there, nowhere else.
+## 4. The family (`src/ui/`, imported from `./ui/index`)
 
-| Old | New home |
+Build pages from these and they look right without new CSS. Write CSS only for what is really unique to the page, in a stylesheet of its own, prefixed for the page.
+
+| Component | When, and how |
 |---|---|
-| `?view=setup` (no or unknown tab), `/setup`, `?view=connections`, `?view=setup&tab=storage` | Settings › Connections |
-| `?view=setup&tab=accounts\|email\|discovery\|system\|connections`, `?view=accounts\|email\|discovery\|system`, `?view=sources`, `?gmail=` | that tab of Settings (`sources` is Discovery; `gmail` is Email) |
-| `?view=setup&tab=profile`, `&filter=identity` | Profile › Identity |
-| `&tab=profile&filter=experience` | Profile › Experience |
-| `&tab=profile&filter=preferences` | Profile › Experience, Preferences section |
-| `&tab=profile&filter=facts\|policies\|rules` | Profile › Knowledge, that section |
-| `?view=setup&tab=answers`, `?view=knowledge`, `?view=answers`, `?view=knowledge base` | Profile › Knowledge |
-| `?view=setup&tab=resumes`, `?view=resumes` | Profile › Resumes |
-| `?view=jobs&tab=archive`, `?view=archive` | Applications › Archive |
-| `?view=successful`, `?view=confirmed`, `?view=applications` | Applications › Confirmed |
-| `?view=unconfirmed` | Applications › Unconfirmed |
-| `?view=discovered`, `?view=job board`, `?page=job-board`, `?view=jobs&filter=new` | Jobs › Discovered |
-| `?view=pipeline`, `?view=reserved` | that tab of Jobs |
-| `?view=overview`, anything unknown | Overview |
-| `?view=needs help`, `?view=needs you`, `?view=questions` | Needs you |
+| **Button** | `variant`: `primary` (one per view), `secondary`, `ghost`, `danger` (asks first), `danger-solid` (does it). `size`: `md` 34, `sm` 28. `icon` leads, at 15px with `aria-hidden`. `loading` swaps the icon for a spinner and disables. `block` is full width |
+| **IconButton** | An icon alone. `label` is required. `framed` gives it an edge; `size="md"` matches a Button |
+| **Input, Textarea, Select, Field, Check** | A label over a control, with `hint` and `error`. `Select` is a form's plain select. `Field` wraps any other control. `Check` is a checkbox with its name and an optional note |
+| **Listbox** | A filter or standalone choice as a designed menu, for every toolbar and pager. `{ value, options: [{value, label, count?}], onChange, label, prefix?, size?, align? }` |
+| **Dropzone** | **The only way a file comes in. Never a visible native file input.** `{ file, onFile, accept, title, hint, label }` drags, clicks and keyboard; shows the chosen file with a remove button; refuses the wrong kind in words |
+| **Switch** (`SwitchRow` in `setup-kit.tsx`) | An on/off setting that takes effect at once, with its name and one line |
+| **Segmented** | Two to four choices in one well, when all should stay visible |
+| **RouteTabs, Tabs** | Quiet words on a hairline with an optional `count`, the current one underlined. `RouteTabs` are real links. Use them only for views of the same thing |
+| **Chips** (`worktools`) | Status filters: words with counts, the current one filled. A row of them is the filter; they scroll sideways on a phone |
+| **SearchBox** (`worktools`) | The list's search, first in the toolbar |
+| **Table** | A raised panel by itself; flat inside a Panel, Drawer or Dialog. 44px rows, sticky head. `columns: [{key, header, cell, num?, width?, truncate?, min?, hideBelow?: 860 \| 600, pin?, wrap?}]`, `fill`, `footer`, `selected` + `onSelectedChange` + `bulk` (checkboxes are always visible, the owner's decision), `canSelect`, `rowLabel`, `onRowClick`, `loading` (skeleton), `busy` (dims rows without jumping), `empty`, `error` |
+| **JobCell** (`worktools`) | Monogram, employer and role as a table's first column. In a narrow table they stack and `meta` (status, time) shows under them, so hide those columns with `hideBelow: 600` |
+| **Monogram, MonogramStack** | The employer's initial in a deterministic square, on every job, application and question row. `size`: `sm` 24 in a row, `md` 32, `lg` 40 in a drawer's head. Stack for several employers behind one thing |
+| **StatusPill** (`worktools`), **Pill** | A lamp and a word. `StatusPill state=` reads `model.ts`. Lamps: applying pulses (`--live`), needs you is ringed, repairing is half lit, waiting is dashed, done is solid ink, stopped is hollow. Text stays ink: a column of them must stay calm. Put the reason in a Tooltip |
+| **Panel** | A raised surface that groups something, `title`, `actions`, `flush` for a list or table. Inside a Drawer, Dialog or another Panel it's a plain section. Not everything needs one |
+| **Dialog** | One short task, centred: add a job, answer one question. `{ open, onClose, title, sub, footer, width }`; footer buttons with the primary last; `data-autofocus` on the field |
+| **Drawer** | A record opened from a list. `{ open, onClose, title, sub, lead, footer, width }`. Status and next step first, history below, raw detail in folds |
+| **Popover** | The floating part of any menu: placement, flip, outside click, Esc, arrow keys. Use **RowMenu** (`worktools`) for a row's or drawer's "More"; a destructive item with `confirm` asks inside the menu. **ConfirmButton** asks in place on a page |
+| **Tooltip** | What a number counts, why a status reads as it does. `<Tooltip label="...">`. Never the only place something essential is said: a phone has no hover |
+| **Toast** | Outcomes, via `useNotify()` from `hooks.ts` or `useAction().run`. Errors stay until dismissed |
+| **Skeleton** | Lists while loading, in the list's shape. `Loading` (a spinner line) only where no shape is known |
+| **Empty** | `{ icon, title, hint, action, compact }`: what will appear, and a real button for the next action. A search with no result offers clearing it |
+| **Notice, ErrorLine, LoadError** (`worktools`, `ui`) | A plain line; `warn` and `bad` get a lamp and a surface. LoadError retries |
+| **Pagination** | `footer` of a Table. Client lists use `usePagination`; server lists pass a `Paging` |
+| **Facts** (`worktools`) | Read-only label and value rows |
+| **Fold** (`<details className="ax-fold">`) | Raw and rarely needed detail, tucked away |
+| **`ax-rows` / `ax-row`** | A plain list of things that aren't a table. **`ax-quiet-link`** for a number that opens a list; **`ax-more-link`**, **`MoreLink`** for "All 44 →"; **`ax-link`** for an inline link, underlined |
 
-## 6. Primitives (`src/ui/`, `src/worktools.tsx`, `src/setup-kit.tsx`)
+**Focus:** every control has a visible ring in both themes (`:focus-visible` in `base.css`). **Keyboard paths must keep working:** ⌘K, Esc on every overlay, arrows in menus, Enter to submit.
 
-Build pages from these and they look right without new CSS. API details are in `src/ui/README.md`.
+## 5. Overview: the reference for a page with several parts (`src/batch.tsx`, `src/identity/`)
 
-- **Button:** a key, lit from above, on its edge; it presses down. Primary is the dark master key; a disabled one stands down. `round` is the round commit key for one short word. Ghost has no key; danger is lamp-coloured text.
-- **Tabs and Segmented:** a slide switch cut into the plate. **Filters (`Chips`):** a row of keys in one recess, with counts in mono; the one that is down carries a thin line of `--live`.
-- **Pill / StatusPill:** a lamp and a word. Text is ink unless it needs you.
-- **Panel:** a titled section on a hairline. Not a card.
-- **Field:** a label over a recess with a real edge. On a page, `FormGrid` turns fields into labelled rows divided by hairlines; in a drawer they stack.
-- **Table:** no outer card, hairline rules, 40px rows. Company and role read as two columns inside `JobCell`, each clamped with its full text in a title. **Row checkboxes are always visible** (the owner's decision). At most one lead action per row, shown as a quiet link.
-- **Drawer, menu, palette:** the only raised things. **Toast:** one line in the display window. **Empty:** one line; its action reads as a link. **Notice:** one plain line, with a lamp only for what needs you.
+Reads complete at any activity level. In order:
 
-Every control has a visible focus ring in both themes.
+1. **The top** (`Hero`, one Panel divided by hairlines): the Doto readout of confirmed today (from `confirmedToday`, opens Applications); the state sentence and any line under it (`panelState`, the worst true thing first: lost, restart, paused, complete, running, held, none); progress to target; the day chart; the lit window with the number of questions (opens Needs you; dark glass at zero); the round master key with one line under it. The key is Pause, Resume, Restart (with "Pause instead"), or Start with "Apply until N confirmed". Only lost and restart colour the sentence.
+2. **Live work** (`LiveWork`, the dark window): one row per application really running: monogram, employer, role, a six-step track of dots (`RUNGS` in `identity/stages.ts`, from the worker's phase: open, sign in, fill, questions, review, send), what it's doing in words, time on the job, platform, Pause. Waiting-for-email runs are rows too, with the track unlit. Idle capacity is one figure and a row of dots, never empty columns. With nothing running, one sentence says why. The foot links what else waits (queued, being fixed, blocked in this batch).
+3. **Get started** (only until the first job exists): a checklist with the next action per line.
+4. **Two columns.** Left: `Questions` (top four by applications freed, each opening a Dialog with the real `QuestionCard`) and `Recent` (newest five confirmations, with their proof). Right: `Results`: the funnel and success by platform.
 
-## 7. Pages
+Data is real: `GET /api/funnel` (`pipeline.funnel`, read-only, all time: discovered, eligible, applied, applied by platform), and Confirmed is the Applications list itself. Bars share one scale from one baseline; only Confirmed is at full strength; the tail of platforms folds into Other. Tracks and bars are CSS dot patterns, drawn with `--led`, `--dot-lit`, `--dot-plate`.
 
-- **Jobs and Applications:** tabs, filter keys and a table. No readouts.
-- **Needs you:** one sentence on what the questions hold back, then rows of who is asking and the question, with short choices as keys and a round send key.
-- **Job drawer:** title with real capitals, status sentence, the one action, then history. No nested panels.
-- **Settings and Profile:** one column of labelled rows on hairlines. Secrets stay masked.
-- **Setup guide:** one question group per step and a thin progress line.
-- **Coming soon pages:** the name and one sentence.
+## 6. Jobs: the reference for a list page (`src/jobs.tsx`, `jobboard.tsx`, `reserved.tsx`, `jobdetail.tsx`)
 
-## 8. Quality bar
+Copy this structure for Applications and any list.
 
-- Every page keeps its loading, empty and error states. Every keyboard path keeps working.
-- No layout shift on poll refresh; no document scroll; no horizontal page scroll at 390px.
-- Check every page in both themes at 1440×900 and 390×844, and the scale at 1024, 1280 and 1920.
-- `npx knip` lists only the three font packages, which are used through `url()` in `tokens.css`.
+```tsx
+<div className="ax-page ax-page-fill">
+  <TopActions><Button variant="primary" icon={<Plus size={15} aria-hidden="true" />}>Add job</Button></TopActions>
+  <TopLine>Every job AXIOM has started or queued.</TopLine>
+  <RouteTabs view="jobs" tabs={counted} label="Job lists" current={tab} />
+  <div className="ax-toolbar"><SearchBox ... /><Listbox ... /><Chips ... /></div>
+  <Table fill columns={columns} footer={<Pagination paging={paging} />} empty={<Empty icon={...} title="..." hint="..." action={...} />} ... />
+</div>
+```
+
+- **Rows:** checkbox, JobCell (monogram, employer, role), Location (`hideBelow: 860`), Status (with the reason in a Tooltip) and Updated (both `hideBelow: 600`, and in JobCell's `meta` on a phone), then at most one action, plain words that gain a button's chrome when the row is pointed at (`className="ax-lead"`), and the "…" RowMenu. The whole row opens the drawer.
+- **Views are named:** Started, Discovered, Reserved, each with a count, each saying what it is in one line. "Add job" is a button opening a small dialog (`AddJobDialog` in `jobintake.tsx`, mounted once in `main.tsx`; dispatch `OPEN_JOB_LINK`), never a permanent input.
+- **The drawer** (`JobPanel`): head with a large monogram, employer, role; a meta line (location, platform, fit, Open posting). Then the **status block** (`StatusBlock`, an inset surface): lamp and word, what it means, why, and inside it the question to answer or the next action. Then what stopped it, Proof, History (a line of attempts; click to open one), Final page. Folds: Answers, Activity, This attempt in detail, Raw receipt, Technical details.
+
+## 7. Pages still to redesign, on this standard
+
+Their brief is in UI3_BRIEF.md. What each must do with the family above:
+
+- **Needs you** (`needs.tsx`, `questions.tsx`, the `nq-` styles in `work.css`): an inbox. Group the same question across jobs ("Supervisor phone, 6 applications") with MonogramStack; list and answer pane, or better. `QuestionCard` already handles every kind of answer, including uploads through Dropzone; Enter to send and move on, "skip", "not applicable to me", progress, what answering unblocks. Questions that text can't answer look different and offer to drop the job.
+- **Applications** (`ledger.tsx`, `archive.tsx`): copy Jobs. A confident header using `TopLine` (total, today), evidence words from `evidenceLabel`, Listbox for evidence, Export as `TopActions`, `footer` for the pager; replace the remaining `Pagination` after the table.
+- **Resumes** (`ResumesView` in `setup.tsx`, `features.tsx`, `editor.tsx`, `pdfpages.tsx`): lead with what is being sent and whether tailoring is on, in one sentence and one control (`application_resume_policy` in the snapshot). Guided path for setting it up. Do not turn tailoring on yourself. Library cards or rows with preview and download; the Dropzone is already wired for upload. Tailored versions open in a preview panel. Editor: a full-height workspace with a slim bar; it currently still shows the shell's page header (`main.view-editor`, `.ax-scroll.is-fixed`). Test every path.
+- **Profile** (`profile.tsx`, `knowledge.tsx`, `qform.tsx`): section navigation within the page, a two-column grid for related fields, cards that open to edit, a sticky save bar only with changes (`ax-savebar`), progress cards.
+- **Settings** (`connections.tsx`, `autonomy.tsx`, `mail.tsx`, `discovery.tsx`, `setup.tsx`): group by what people recognise; provider cards with status, masked key and Test; internals behind an Advanced fold. Fix the mailbox showing "connected" beside "Mailbox operation failed".
+- **Sign-in, sign-up, reset, setup guide** (`account.tsx`, `onboarding.tsx`, `styles/onboarding.css`, `styles/setup.css`), **coming-soon** (`ComingSoon.tsx`), **error boundary** (`ErrorBoundary.tsx`), **404**: the same family; the first thing anyone sees.
+
+When a page moves off `.ax-grid`, `.nq-*` and the like, delete what it leaves behind. Keep this file true.
+
+## 8. Checking your work
+
+- With a vite dev server from your worktree (`npx vite --host 127.0.0.1 --port <free>`, proxying `/api` to 8080) and `scratchpad/qa/live.py` (`QA_BASE`), which aborts non-GET requests. A new read-only endpoint isn't on production yet: fulfil it in the test browser from real SQL (`q.sh`).
+- Check every page in both themes at 1440×900 and 390×844, and at 1024, 1280 and 1920.
+- Test states by rewriting the real snapshot in the test browser: `autopilot_runtime.application_workers.assignments` for busy, `control.paused`, `autopilot_runtime.scheduler.degraded`, `autopilot_runtime.state`, an aborted snapshot poll for connection lost, empty `jobs`, `runs` and `counts` for a new account.
+- `npx tsc -b`, `npm run build`, `grep -l frontend tests/*.py` through `pytest-locked.sh`, `npx knip`.
+- Screenshots hold the owner's real data: scratch folder only, never the repo.
