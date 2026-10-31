@@ -78,7 +78,6 @@ export function platformName(ats?: string) {
   return PLATFORMS[id] || id.charAt(0).toUpperCase() + id.slice(1).replaceAll("_", " ") || "Unknown";
 }
 
-/** "examplecorp · boards.greenhouse.io" for a pasted link whose title isn't known until ranking. */
 // A readable role for a job saved as a bare link: the last wordy path segment ("Exton-Associate%2C-Data-Science" ->
 // "Exton Associate, Data Science"), never a 300-character query string in the table (owner 2026-10-28: "cluttered").
 export function urlRole(url?: string) {
@@ -104,19 +103,40 @@ export function urlRole(url?: string) {
       .replace(/\b(?=\w*\d)[0-9a-z]{8,}\b/gi, "")
       .replace(/\s+/g, " ")
       .trim();
-    return title || "Untitled role";
+    return title;
   } catch {
-    return "Untitled role";
+    return "";
   }
+}
+
+export const ROLE_UNREAD = "Role not read yet";
+
+/**
+ * What a list shows for a job: the employer, the role, and, only when either was not read from the posting, the posting's own host as
+ * a muted hint. A link saved before ranking has neither a company nor a title; the address stands in for them and says so.
+ */
+export function jobWords(j: { company?: string; title?: string; url?: string }) {
+  const company = employerOf(j.company, j.url);
+  const read = j.title || urlRole(j.url);
+  return { company, role: read || ROLE_UNREAD, unread: !read, hint: !j.company || !read ? linkHost(j.url) : "" };
 }
 
 /** Who a job is with, for a list: its company, or for a job saved as a bare link, the employer its address names ("Blossom Health"). */
 export function employerOf(company?: string, url?: string) {
   if (company) return company;
   const name = linkHost(url).split(" · ")[0] ?? "";
-  // A plain host ("careers.example.com") says nothing better than itself.
-  if (!name || name.includes(".")) return name || "Employer";
-  return name.replace(/[-_]+/g, " ").replace(/\b[a-z]/g, (c) => c.toUpperCase());
+  if (!name) return "Employer";
+  // A plain host ("careers.example.com") names its employer by the label before the suffix ("Example"); the host itself stays
+  // available as the hint (jobWords).
+  const label = name.includes(".") ? hostLabel(name) : name;
+  return label.replace(/[-_]+/g, " ").replace(/\b[a-z]/g, (c) => c.toUpperCase());
+}
+
+// "careers.example.com" -> "example", "jobs.example.co.uk" -> "example": the label left of the registrable suffix.
+function hostLabel(host: string) {
+  const parts = host.split(".");
+  const second = /^(?:co|com|org|net|gov|edu|ac)$/.test(parts[parts.length - 2] ?? "") && (parts[parts.length - 1]?.length ?? 0) === 2;
+  return parts[Math.max(0, parts.length - (second ? 3 : 2))] || host;
 }
 
 export function linkHost(url?: string) {

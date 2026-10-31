@@ -9,7 +9,7 @@ import { useAction, useDraft, useNow, usePoll } from "./hooks";
 import { appliedState, rowFromServer, stateInfo, STATES, withMarks, type JobRow } from "./model";
 import { Pagination, type Paging } from "./pagination";
 import type { ReservedEmployer, ReservedPage, ReservedRules } from "./types";
-import { ago, linkHost, plural } from "./format";
+import { ago, jobWords, plural } from "./format";
 import { ShieldCheck, SearchX } from "lucide-react";
 import { Button, Check, Drawer, Empty, Table, Textarea, type Column } from "./ui/index";
 import { TopActions, TopLine } from "./shell/Shell";
@@ -85,8 +85,7 @@ export function ReservedJobs() {
       truncate: true,
       cell: (r) => (
         <JobCell
-          company={r.job.company || linkHost(r.job.url) || r.reserved?.employer || "Employer"}
-          role={r.job.title || r.job.url}
+          {...jobWords({ ...r.job, company: r.job.company || r.reserved?.employer })}
           onOpen={() => openJob(r.job.id, r.run?.id)}
           meta={r.state !== "reserved" ? <StatusPill state={r.state} /> : r.job.score != null ? <span className="mono">Fit {r.job.score}</span> : undefined}
         />

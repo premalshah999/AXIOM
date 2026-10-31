@@ -7,7 +7,7 @@ import { useAction, useDraft, type usePoll } from "./hooks";
 import { Pagination, usePagination } from "./pagination";
 import { TopLine } from "./shell/Shell";
 import type { Archived } from "./types";
-import { day, employerOf, plural, urlRole } from "./format";
+import { day, jobWords, plural } from "./format";
 import { stateInfo } from "./model";
 import { Button, Empty, Table, type Column } from "./ui/index";
 import { ConfirmButton, JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
@@ -39,8 +39,7 @@ export function ArchiveList({ archive }: { archive: ReturnType<typeof usePoll<{ 
       truncate: true,
       cell: (a) => (
         <JobCell
-          company={employerOf(a.company, a.url)}
-          role={a.title || urlRole(a.url) || "Untitled role"}
+          {...jobWords(a)}
           onOpen={() => openJob(a.job_id, a.run_id)}
           meta={
             <>

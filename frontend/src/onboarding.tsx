@@ -9,7 +9,7 @@ import { Button, Dropzone, ErrorLine, External, Input, Loading, Monogram, Pill, 
 import type { EducationEntry, Profile, WorkEntry } from "./types";
 import "./styles/onboarding.css";
 
-// The sign-in screens and Settings › System › Your sign-in live in account.tsx.
+// The sign-in screens and Settings › Your account live in account.tsx.
 
 // "Finish later" (guide.ts, so the shell reads it without loading this module).
 
@@ -599,7 +599,7 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
             variant="ghost"
             size="sm"
             onClick={onExit}
-            title="Steps you saved are kept. Continue any time from the banner or Settings › System."
+            title="Steps you saved are kept. Continue any time from the banner or Settings › Your account."
           >
             Finish later
           </Button>

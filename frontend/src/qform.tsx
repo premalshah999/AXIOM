@@ -20,7 +20,7 @@ export type WorkRow = {
   current: boolean;
   answer: Record<string, string>;
 };
-export type Question = {
+type Question = {
   key: string;
   prompt: string;
   type: "yes_no" | "choice" | "text" | "date" | "work_rows" | "references";
@@ -141,32 +141,6 @@ function SaveState({ status, retry }: { status: Status; retry?: () => void }) {
       )}
       {status.state === "idle" && "Saves as you go"}
     </span>
-  );
-}
-
-// ---------- module list ----------
-const verb = (m: Module) => (m.status === "not_started" ? "Start" : m.status === "complete" ? "Review" : "Continue");
-
-export function ModuleList({ data, onOpen }: { data: Questionnaires; onOpen: (id: string) => void }) {
-  return (
-    <ul className="ax-rows">
-      {data.modules.map((m) => (
-        <li className="ax-row" key={m.id}>
-          <span className="ax-row-main">
-            <strong>{m.title}</strong>
-            <small>{m.purpose}</small>
-          </span>
-          <span className="ax-row-end">
-            <span className="ax-hint">
-              {m.status === "complete" ? "Complete" : `${m.answered} of ${m.total} answered`}
-            </span>
-            <Button size="sm" onClick={() => onOpen(m.id)} aria-label={`${verb(m)} ${m.title}`}>
-              {verb(m)}
-            </Button>
-          </span>
-        </li>
-      ))}
-    </ul>
   );
 }
 

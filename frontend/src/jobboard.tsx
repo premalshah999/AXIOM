@@ -7,7 +7,7 @@ import { useAction, useDraft, useNow, usePoll } from "./hooks";
 import { Pagination, type Paging } from "./pagination";
 import { TopActions, TopLine } from "./shell/Shell";
 import type { Board, Listing } from "./types";
-import { ago, platformName, plural, stamp } from "./format";
+import { ago, jobWords, platformName, plural, stamp } from "./format";
 import { Button, Empty, Listbox, Table, Tooltip, type Column } from "./ui/index";
 import { Chips, JobCell, LoadError, Notice, Note, SearchBox, StatusPill } from "./worktools";
 
@@ -106,7 +106,7 @@ export function DiscoveredJobs() {
   };
   const blockers = [
     !snapshot.config.workers_enabled && "application workers are disabled",
-    !snapshot.control.auto_submit && "automatic submission is off (Settings › System)",
+    !snapshot.control.auto_submit && "automatic submission is off (Settings › Applying)",
     snapshot.control.paused && "new applications are paused (resume them on Overview)",
   ].filter(Boolean) as string[];
   const canApply = blockers.length === 0;
@@ -146,8 +146,7 @@ export function DiscoveredJobs() {
       truncate: true,
       cell: (j) => (
         <JobCell
-          company={j.company}
-          role={j.title}
+          {...jobWords(j)}
           title={j.rejection && j.status === "ready" ? whyNot(j.rejection) : undefined}
           onOpen={() => openJob(j.id)}
           meta={

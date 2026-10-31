@@ -86,12 +86,18 @@ export function JobCell({
   role,
   title,
   meta,
+  hint,
+  unread,
   onOpen,
 }: {
   company: string;
   role: string;
   title?: string;
   meta?: ReactNode;
+  /** The posting's host, shown muted after the role when the employer or role was not read from the posting. */
+  hint?: string;
+  /** The role is a stand-in ("Role not read yet"), so it reads quieter. */
+  unread?: boolean;
   onOpen: () => void;
 }) {
   return (
@@ -106,8 +112,9 @@ export function JobCell({
     >
       <Monogram name={company} />
       <strong title={company}>{company}</strong>
-      <span className="ax-job-role" title={role}>
+      <span className={"ax-job-role" + (unread ? " is-unread" : "")} title={hint ? `${role} · ${hint}` : role}>
         {role}
+        {hint && <span className="ax-job-hint">{hint}</span>}
       </span>
       {meta && <span className="ax-job-meta">{meta}</span>}
     </button>

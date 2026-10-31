@@ -8,17 +8,6 @@
   min-width: 0;
 }
 
-/* A role or a degree: a fold on a hairline, its dates at the right. */
-.ax-entry {
-  padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--line);
-}
-.ax-entry:last-child {
-  border-bottom: 0;
-}
-.ax-entry > summary > .ax-hint {
-  margin-left: auto;
-}
 
 /* Secrets. */
 .ax-secret {

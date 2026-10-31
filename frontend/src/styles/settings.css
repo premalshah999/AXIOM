@@ -312,15 +312,6 @@
   display: block;
   background: var(--inset);
 }
-.st-inline {
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--line-soft);
-  background: var(--inset);
-}
-.st-inline .ax-inline {
-  padding: 0;
-  border: 0;
-}
 
 /* A panel with a form in it: the fields, then the one thing to do. */
 .st-form {

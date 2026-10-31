@@ -13,25 +13,6 @@ import "./styles/needs.css";
 /** One waiting question and everything that answering it reaches: `reviews` are all of its rows, `others` the other jobs asking. */
 export type QuestionGroup = { review: Review; reviews: Review[]; job?: Job; others: Job[] };
 
-// What the server adds to a question beyond the Review type (owner_questions.present). A server without the "no answer completes
-// this" marker simply leaves those two fields out, and the question reads as an ordinary one.
-export type Asked = Omit<Review, "kind"> & {
-  kind?: string;
-  input_kind?: string;
-  /** A plain reason when no answer from the profile or the owner's words completes this field. */
-  cannot_automate?: string;
-  context?: {
-    type?: string;
-    section?: string;
-    group?: string;
-    caption?: string;
-    hint?: string;
-    history_kind?: string;
-    history_identity?: { company?: string; title?: string; school?: string };
-  } | null;
-};
-export const asked = (review: Review) => review as Asked;
-
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 export const BLIND_TITLE = "A required field AXIOM couldn't read";
 const SKIP_KEY = /mac/i.test(navigator.platform) ? "\u2325S" : "Alt S";
@@ -47,10 +28,9 @@ export const isBlind = (review: Review) => {
 
 /** Why no typed answer completes this question, or null. `hard`: nothing the owner could type or send fits. */
 export function blockOf(review: Review) {
-  const q = asked(review);
-  const hard = q.kind === "cannot_automate";
-  if (!hard && !q.cannot_automate) return null;
-  return { hard, reason: q.cannot_automate || "This application needs something the app can't provide." };
+  const hard = review.kind === "cannot_automate";
+  if (!hard && !review.cannot_automate) return null;
+  return { hard, reason: review.cannot_automate || "This application needs something the app can't provide." };
 }
 
 // Identical questions across jobs share one answer. A key is the form's field identity, and forms worded alike have different keys
@@ -211,7 +191,7 @@ export function QuestionCard({
   suggestion?: { label: string; value: string };
 }) {
   const { review, job, others, reviews } = group;
-  const q = asked(review);
+  const q = review;
   const { refresh, openJob } = useWorkspace();
   const { pending, run } = useAction();
   const [answer, setAnswer, clear] = useDraft("review:" + q.id, "");
@@ -454,7 +434,7 @@ export function QuestionCard({
     </div>
   );
   const pageContext = [q.context?.section, q.context?.group, q.context?.caption, q.context?.hint].filter(Boolean).join(" · ");
-  const BlockIcon = /video|record/i.test(whole) ? Video : FileText;
+  const BlockIcon = block?.hard ? Video : FileText;
   const blocked = block && (
     <div className={"nd-block" + (block.hard ? " is-hard" : "")}>
       <BlockIcon size={18} aria-hidden="true" />

@@ -19,7 +19,7 @@ import { Button, Check, Input, Panel, Segmented, Skeleton } from "./ui/index";
 import "./styles/profile.css";
 
 export type Setter = <K extends keyof Profile>(key: K, value: Profile[K]) => void;
-export type SectionId = "about" | "work" | "preferences" | "contacts" | "questionnaires" | "permissions" | "answers" | "memory";
+type SectionId = "about" | "work" | "preferences" | "contacts" | "questionnaires" | "permissions" | "answers" | "memory";
 
 // ---------- the profile, made safe to read ----------
 // A profile that arrives thin (a new account, an older server) is filled in so no section reads a missing list.
@@ -134,7 +134,7 @@ const useProfile = () => {
 
 const factsOf = (p: Profile) => JSON.stringify(p.facts || {}, null, 2);
 
-export function ProfileProvider({ children }: { children: ReactNode }) {
+function ProfileProvider({ children }: { children: ReactNode }) {
   const { snapshot, refresh } = useWorkspace();
   const server = useMemo(() => normalizeProfile(snapshot.profile), [snapshot.profile]);
   const [draft, setDraft] = useDraft<ProfileDraft | null>("profile", null);

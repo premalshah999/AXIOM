@@ -1,50 +1,5 @@
 /* What the work pages (Needs you, the job drawer) draw for themselves. Every look comes from src/ui, worktools.tsx and the tokens. */
 
-/* Needs you: who is asking on the left, the question and its answer on the right, on hairlines. */
-.nq-head {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding-bottom: var(--space-4);
-  border-bottom: 1px solid var(--ink);
-}
-.nq-say {
-  font-size: var(--text-title);
-  font-weight: 500;
-  line-height: 1.3;
-}
-.ax-page:has(> .nq-head) {
-  gap: 0;
-}
-.nq-row {
-  display: grid;
-  grid-template-columns: minmax(180px, 280px) minmax(0, 1fr);
-  gap: var(--space-3) var(--space-8);
-  padding-block: var(--space-5);
-  border-bottom: 1px solid var(--line);
-}
-.nq-who {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  min-width: 0;
-}
-.nq-who h2 {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  font-size: var(--text-title);
-  font-weight: 600;
-}
-.nq-who .mono {
-  margin-top: var(--space-1);
-  color: var(--ink-2);
-}
-.nq-who .ax-link {
-  margin-top: var(--space-1);
-  font-size: var(--text-meta);
-}
 .ax-page > .ax-pager {
   padding-top: var(--space-4);
 }
@@ -54,6 +9,7 @@
   gap: var(--space-3);
   min-width: 0;
 }
+/* Needs you's answer controls (the page itself is needs.css). */
 .nq-q {
   max-width: 62ch;
   font-size: var(--text-title);
@@ -128,9 +84,6 @@
   border: 0;
 }
 @media (max-width: 760px) {
-  .nq-row {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .nq-ctl {
     grid-template-columns: minmax(0, 1fr) auto;
   }

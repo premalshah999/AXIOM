@@ -5,11 +5,10 @@ import { ArrowLeft, Check, CircleSlash, FileText, MessageCircleQuestion, Users, 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKey } from "react";
 import { api, applyJob } from "./api";
 import { useWorkspace } from "./context";
-import { ago, employerOf, plural, urlRole } from "./format";
+import { ago, employerOf, jobWords, plural } from "./format";
 import { useAction, useDraft } from "./hooks";
 import { EMAIL, entryOf, useQuestionnaires, type Field, type Module, type WorkRow } from "./qform";
 import {
-  asked,
   BLIND_TITLE,
   blockOf,
   deliver,
@@ -74,7 +73,7 @@ type Claim = { person: string; part: Part };
 
 /** Which person a short supervisor or reference box belongs to, or null when it stays a question of its own. */
 function claimOf(review: Review, rows: WorkRow[]): Claim | null {
-  const q = asked(review);
+  const q = review;
   const label = (q.question || "").replace(/[*:\s]+$/, "");
   const fits = q.kind === "text" || (q.kind === "choice" && !q.multiple);
   // A sentence ("Provide two professional references...") isn't one box: the words "name" and "email" in it say nothing.
@@ -132,7 +131,7 @@ type Entry = {
   job?: Job;
 };
 const WAITING = new Set(["waiting_answer", "needs_review"]);
-const roleOf = (job: Job) => job.title || urlRole(job.url);
+const roleOf = (job: Job) => jobWords(job).role;
 
 function useInbox() {
   const { snapshot } = useWorkspace();
@@ -187,7 +186,7 @@ function useInbox() {
         type: blockOf(group.review) ? "blocked" : "question",
         names: namesOf(reach),
         // Three "Begin Date"s on one form differ by the past job each one sits in.
-        title: isBlind(group.review) ? BLIND_TITLE : [text, asked(group.review).context?.history_identity?.company].filter(Boolean).join(", "),
+        title: isBlind(group.review) ? BLIND_TITLE : [text, group.review.context?.history_identity?.company].filter(Boolean).join(", "),
         who: whoOf(jobsOf(reach)),
         since: group.reviews[0]?.created_at || "",
         reach,
@@ -560,7 +559,7 @@ export function NeedsView() {
 // ---------- a row of the list ----------
 function InboxRow({ entry: e, questions, current, onPick }: { entry: Entry; questions: number; current: boolean; onPick: () => void }) {
   const frees = e.reach.frees.length;
-  const asksVideo = e.type === "blocked" && /video|record/i.test(e.title);
+  const asksVideo = e.type === "blocked" && !!e.group && blockOf(e.group.review)?.hard;
   const sub =
     e.type === "people"
       ? `${plural(questions, "question")} on ${plural(frees + e.reach.helps.length, "application")}`
@@ -815,7 +814,7 @@ function PeoplePane({
       // Saving teaches the next form; the applications already waiting only move on their own question's answer.
       // A form's own rows go first. An answer with no row also lands on every open row of the same field (answer_review), which
       // would give the other jobs this supervisor's name, so it waits until those rows have their own; any save can then send it.
-      const rowOf = (r: Review) => !!asked(r).context?.history_kind;
+      const rowOf = (r: Review) => !!r.context?.history_kind;
       const rowed = p.asks.filter((a) => rowOf(a.review)).map((a) => ({ review: a.review, value: valueFor(a.part, entry, a.review) })).filter((a) => a.value);
       const sent = new Set(rowed.map((a) => a.review.id));
       const clear = (r: Review) => !snapshot.reviews.some((o) => o.key === r.key && o.id !== r.id && rowOf(o) && !sent.has(o.id));

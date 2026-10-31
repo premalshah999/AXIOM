@@ -13,7 +13,7 @@ import { usePipelinePage } from "./pipeline";
 import { ReservedJobs } from "./reserved";
 import { PAGE_TABS } from "./shell/nav";
 import { TopActions, TopLine } from "./shell/Shell";
-import { ago, employerOf, urlRole } from "./format";
+import { ago, jobWords } from "./format";
 import { Button, Empty, RouteTabs, Table, Tooltip, type Column } from "./ui/index";
 import { Chips, JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
 
@@ -85,8 +85,7 @@ function Started() {
         truncate: true,
         cell: (r) => (
           <JobCell
-            company={employerOf(r.job.company, r.job.url)}
-            role={r.job.title || urlRole(r.job.url)}
+            {...jobWords(r.job)}
             onOpen={() => openJob(r.job.id, r.run?.id)}
             meta={
               <>

@@ -14,7 +14,7 @@ import { useSelection } from "./bulk";
 import { RowActions } from "./jobactions";
 import { PipelineBulk } from "./pipelinebulk";
 import { TopActions, TopLine } from "./shell/Shell";
-import { ago, employerOf, platformName, stamp, urlRole } from "./format";
+import { ago, jobWords, platformName, stamp } from "./format";
 import { Button, Empty, Listbox, RouteTabs, Table, Tooltip, type Column } from "./ui/index";
 import { JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
 import "./styles/applications.css";
@@ -215,8 +215,7 @@ function Confirmed({ ledger }: { ledger: ReturnType<typeof usePoll<{ application
       truncate: true,
       cell: (r) => (
         <JobCell
-          company={employerOf(r.company, r.url)}
-          role={r.title || urlRole(r.url)}
+          {...jobWords(r)}
           onOpen={() => openJob(r.job_id, r.run_id)}
           meta={
             <>
@@ -382,8 +381,7 @@ function Unconfirmed() {
       truncate: true,
       cell: (r) => (
         <JobCell
-          company={employerOf(r.job.company, r.job.url)}
-          role={r.job.title || urlRole(r.job.url)}
+          {...jobWords(r.job)}
           onOpen={() => openJob(r.job.id, r.run?.id)}
           meta={
             <>

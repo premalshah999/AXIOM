@@ -13,7 +13,7 @@ import { appliedState, evidenceLabel, STATES, type JobRow } from "./model";
 import { OPEN_JOB_LINK } from "./jobintake";
 import { groupQuestions, QuestionCard, type QuestionGroup } from "./questions";
 import type { ApplicationWorkers, MailStatus, RuntimeHealth, Snapshot, Success } from "./types";
-import { ago, day, employerOf, plural, urlRole } from "./format";
+import { ago, day, employerOf, jobWords, plural, urlRole } from "./format";
 import { Button, Dialog, Empty, Monogram, MonogramStack, Panel, Skeleton } from "./ui/index";
 import { Notice } from "./worktools";
 import "./styles/work.css";
@@ -38,7 +38,7 @@ type Working = {
 };
 
 // The home page, in the order someone reads it: how today is going and the one control; what is running now; then what needs them
-// and how the whole thing is doing. Every number opens the list behind it. Worker and host detail is in Settings › System.
+// and how the whole thing is doing. Every number opens the list behind it. Worker and host detail is in Settings › Advanced.
 export function BatchView() {
   const health = usePoll<RuntimeHealth>((signal) => api("/runtime-health", "GET", undefined, signal), 30000);
   const mail = usePoll<MailStatus>((signal) => api("/mail", "GET", undefined, signal), 30000);
@@ -496,9 +496,7 @@ function Recent({ applications }: { applications: Success[] | null }) {
       ) : rows.length ? (
         <ul className="ov-list">
           {rows.map((a) => {
-            // A job saved as a bare link has no name yet: read one from the address, as every list does.
-            const company = employerOf(a.company, a.url);
-            const title = a.title || urlRole(a.url);
+                        const { company, role: title } = jobWords(a);
             return (
             <li key={a.run_id}>
               <button type="button" className="ov-ok" onClick={() => openJob(a.job_id, a.run_id)}>
