@@ -84,8 +84,24 @@ def sweep_answered_drafts(service, limit=200):
     return added
 
 
+def anything_due(db, kinds, current):
+    """One unlocked read: is there a row the claim below could take? Over a network the claim is five round trips and four
+    pollers ask every second, which was three quarters of what ran on the event loop (30 ms link, 2026-10-31). The claim still
+    re-selects under the lock, so a row taken in between is never claimed twice."""
+    with db.session() as s:
+        query = select(Outbox.id).where(
+            Outbox.available_at <= current,
+            or_(Outbox.state == "pending", (Outbox.state == "processing") & (Outbox.lease_until < current)),
+        )
+        if kinds:
+            query = query.where(Outbox.kind.in_(kinds))
+        return s.scalar(query.limit(1)) is not None
+
+
 def claim(db, kinds=None):
     current = time.time()
+    if getattr(db, "remote", False) and not anything_due(db, kinds, current):
+        return None
     with db.exclusive() as s:
         query = (
             select(Outbox)
@@ -169,7 +185,7 @@ def owns_delivery(row, item):
 
 
 async def process_one(service, kinds=None):
-    item = claim(service.db, kinds)
+    item = await service.db.off_loop(claim, service.db, kinds)
     if item is None:
         return False
     try:
@@ -225,7 +241,7 @@ async def poll(service):
                 if kinds and "fact_resume" in kinds:
                     from .execution_services import forward_fact_events
 
-                    forward_fact_events(service)
+                    await service.db.off_loop(forward_fact_events, service)
                     if time.monotonic() >= next_sweep:
                         await asyncio.to_thread(sweep_answered_drafts, service)
                         next_sweep = time.monotonic() + 30

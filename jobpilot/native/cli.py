@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 
+from ..storage.mode import current as database_choice
 from . import migrate, pg, release, services, supervisor
 from .env import ROOT, NativeError, load, prepare, system_chrome
 from .supervisor import read_state, same_process, stop_leftovers, supervisor_alive
@@ -130,7 +131,8 @@ def cmd_start(cfg, args):
         print(f"AXIOM is already running at {state.get('base_url')}.")
         _open(cfg, args)
         return 0
-    pg.find_bin(cfg)  # Fail here, in the terminal, rather than in a log.
+    if database_choice(cfg.values, cfg.data_dir) == "local":
+        pg.find_bin(cfg)  # Fail here, in the terminal, rather than in a log.
     services.read(cfg, release.ensure(cfg))
     began = time.monotonic()
     log = os.open(cfg.logs / "supervisor.log", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
@@ -254,10 +256,11 @@ def cmd_logs(cfg, args):
 
 def cmd_psql(cfg, args):
     bin_dir = pg.find_bin(cfg)
+    remote = pg.remote(cfg)  # Supabase or a server: the connection is in libpq's environment, so no password is on a command line.
     os.execve(
         bin_dir / "psql",
-        [str(bin_dir / "psql"), *pg.connection(cfg), *args.rest],  # A full argv[0]: psql finds its files from it.
-        {**os.environ, "PGPASSWORD": cfg.password, "PGTZ": "UTC"},
+        [str(bin_dir / "psql"), *([] if remote else pg.connection(cfg)), *args.rest],  # A full argv[0]: psql finds its files from it.
+        {**os.environ, "PGPASSWORD": cfg.password, "PGTZ": "UTC", **(remote or {})},
     )
 
 
@@ -337,12 +340,17 @@ def cmd_setup(cfg, args):
     try:
         bin_dir = pg.find_bin(cfg)
     except NativeError:
-        if not shutil.which("brew"):
+        if database_choice(cfg.values, cfg.data_dir) != "local":
+            print("Database    not on this computer: PostgreSQL is not needed here (only psql, for `axiom psql`)")
+            bin_dir = None
+        elif not shutil.which("brew"):
             raise
-        print("Installing PostgreSQL 17 with Homebrew (about 80 MB, plus its libraries) ...")
-        subprocess.run(["brew", "install", f"postgresql@{pg.MAJOR}"], check=True)
-        bin_dir = pg.find_bin(cfg)
-    print(f"PostgreSQL  {bin_dir}")
+        else:
+            print("Installing PostgreSQL 17 with Homebrew (about 80 MB, plus its libraries) ...")
+            subprocess.run(["brew", "install", f"postgresql@{pg.MAJOR}"], check=True)
+            bin_dir = pg.find_bin(cfg)
+    if bin_dir:
+        print(f"PostgreSQL  {bin_dir}")
     print(f"Chrome      {system_chrome() or 'not found: install Google Chrome for real job sites'}")
     latex = shutil.which("pdflatex", path=cfg.path_with_tools())
     print(f"pdflatex    {latex or 'not found: resume tailoring needs it (brew install --cask basictex)'}")
@@ -404,6 +412,8 @@ class MigrationServer:
 
 
 def cmd_migrate(cfg, args):
+    if database_choice(cfg.values, cfg.data_dir) != "local":
+        raise NativeError("A Docker installation is restored into the database on this computer. Set DATABASE_MODE=local first.")
     if not cfg.password:
         raise NativeError("POSTGRES_PASSWORD is not set in .env. Create one with: scripts/setup.sh --env-only")
     source = migrate.source_from(cfg, args)

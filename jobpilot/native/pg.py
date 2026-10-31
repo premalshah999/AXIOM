@@ -141,14 +141,28 @@ def init_cluster(bin_dir, cfg):
     return True
 
 
+def remote(cfg):
+    """libpq settings for the database in force when it is Supabase or a server (storage/choice.py), else None."""
+    from ..storage.mode import current
+
+    if current(cfg.values, cfg.data_dir) == "local":
+        return None
+    from ..storage.choice import DatabaseChoiceError, native_connection
+
+    try:
+        return native_connection(cfg.values, cfg.data_dir)
+    except DatabaseChoiceError as exc:
+        raise NativeError(str(exc)) from None
+
+
 def _client_env(cfg):
     # PGPASSWORD, never argv: `ps` shows every user's command lines.
-    return {**os.environ, "PGPASSWORD": cfg.password, "PGCONNECT_TIMEOUT": "5", "PGTZ": "UTC"}
+    return {**os.environ, "PGPASSWORD": cfg.password, "PGCONNECT_TIMEOUT": "5", "PGTZ": "UTC", **(remote(cfg) or {})}
 
 
 def psql(bin_dir, cfg, sql, *, database=DATABASE, timeout=30, check=True):
     done = subprocess.run(
-        [str(bin_dir / "psql"), *connection(cfg, database), "-XAt", "-v", "ON_ERROR_STOP=1", "-c", sql],
+        [str(bin_dir / "psql"), *([] if remote(cfg) else connection(cfg, database)), "-XAt", "-v", "ON_ERROR_STOP=1", "-c", sql],
         capture_output=True,
         text=True,
         env=_client_env(cfg),

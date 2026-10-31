@@ -5,7 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, Field, model_validator
+from pydantic import AliasChoices, Field, PrivateAttr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Application owners share one browser and event loop. At most this many run at once, ATS workers and specialists together.
@@ -59,8 +59,22 @@ def legacy_topology(total: int) -> Topology:
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
     data_dir: Path = Path(".data")
-    database_url: str = ""
-    dbos_database_url: str = ""
+    # repr=False: with a remote database these hold its password.
+    database_url: str = Field(default="", repr=False)
+    dbos_database_url: str = Field(default="", repr=False)
+    # Which database holds the data (storage/choice.py): the one on this computer, Supabase, or a PostgreSQL server of your own.
+    # The choice and the connection strings can also be saved in the app's Database settings (DATA_DIR/database.json and
+    # database.enc); anything set here wins over what was saved, so DATABASE_MODE=local always brings an installation back.
+    database_mode: Literal["local", "supabase", "server"] = "local"
+    supabase_db_url: str = Field(default="", repr=False)
+    server_db_url: str = Field(default="", repr=False)
+    # Connections this process may open for a remote database: the application's pool, its overflow and DBOS's. Unset: the
+    # numbers the last connection test sized from the database's own limit (storage/choice.py, size_pools).
+    db_pool_size: int | None = Field(default=None, ge=1, le=200)
+    db_pool_overflow: int | None = Field(default=None, ge=0, le=200)
+    dbos_pool_size: int | None = Field(default=None, ge=1, le=100)
+    # Record how long statements take and which run on the event loop (GET /api/database). Always on for a remote database.
+    db_audit: bool = False
     # DBOS never forgets a finished workflow (845 MB by 2026-10-30, most of it source sweeps). Days to keep them; 0 keeps all.
     dbos_retention_days: int = Field(default=14, ge=0, le=3650)
     app_token: str = ""
@@ -245,6 +259,10 @@ class Settings(BaseSettings):
     enable_workers: bool = True
     enable_demo: bool = True
     allow_private_urls: bool = False  # Tests only. Never enabled by the production image.
+    # The local URLs as they were before a remote choice replaced them (what a switch copies from or back to), and the choice
+    # this process started with (so the screen can say a restart is needed).
+    _local_database_urls: tuple[str, str] | None = PrivateAttr(default=None)
+    _database_applied: tuple[str, int] | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def resolve_topology(self):
@@ -310,6 +328,11 @@ class Settings(BaseSettings):
                 with os.fdopen(fd, "w") as f:
                     f.write(secrets.token_urlsafe(32))
             self.app_token = token_file.read_text().strip()
+        from . import db as database
+        from .storage.choice import apply as apply_database_choice
+
+        database.AUDIT["enabled"] = self.db_audit
+        apply_database_choice(self)  # Before the SQLite fallback: a remote choice replaces both database URLs.
         if not self.database_url:
             self.database_url = f"sqlite:///{self.data_dir / 'application.db'}"
         if not self.dbos_database_url:
