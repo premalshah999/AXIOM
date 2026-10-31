@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from .db import Job, Run, Setting
 
@@ -45,6 +45,24 @@ SHARED_LINK_HOSTS = {
     "go.vansh.nyc", "bit.ly", "lnkd.in", "tinyurl.com", "t.co", "ow.ly", "buff.ly", "rebrand.ly", "cutt.ly",
     "short.gy", "simplify.jobs", "jobright.ai",
 }
+
+
+def requisition_twins(session, job_id, urls):
+    """(id, url) of every other job that is the same requisition as one of `urls` under another link, on any platform:
+    the employer's page around a Greenhouse or Ashby form beside the board URL, an embed, an /apply tail, a Workday or
+    iCIMS portal variant (ats.requisition_keys). Roblox, Abnormal, Rubrik and IXL applied twice that way (2026-10)."""
+    from .ats import requisition_keys
+
+    wanted = {key: needle for url in urls for key, needle in requisition_keys(url)}
+    if not wanted:
+        return []
+    # The id is searched in the stored links first (one pass over the url column); keys decide.
+    rows = session.execute(
+        select(Job.id, Job.url).where(
+            Job.id != job_id, Job.demo.is_(False), or_(*[Job.url.icontains(n, autoescape=True) for n in set(wanted.values())])
+        )
+    )
+    return [(row.id, row.url) for row in rows if wanted.keys() & {key for key, _ in requisition_keys(row.url)}]
 
 
 def employer_partition(job):

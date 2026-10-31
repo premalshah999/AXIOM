@@ -422,5 +422,68 @@ def canonicalize(url: str, *, keep_platform_hint=False, requisition_ids=True):
     return clean, hashlib.sha256(identity.encode()).hexdigest()
 
 
+UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+ICIMS_TENANT_PREFIX = re.compile(r"^(?:careers?|talent|employees|internal|intranet)-")
+
+
+@functools.lru_cache(maxsize=32768)
+def requisition_keys(url: str):
+    """((key, needle), ...): what names this requisition on any page that shows it, or ().
+
+    `canonicalize` keeps a URL's own shape: the employer's page that wraps a Greenhouse or Ashby form
+    (careers.example.com/jobs?gh_jid=8262223), the board URL, the embed URL and an /apply tail were each their own
+    "job", so one requisition was admitted twice and applied to twice (Roblox, Abnormal, Pinterest, Rubrik, IXL, Block,
+    Quantifind, Databricks and others, 2026-10-07..30). A key is a stable id of the posting together with
+    whatever scopes it: Greenhouse and Ashby/Lever/Pinpoint ids are global; a Workday requisition is scoped by tenant
+    (chewy.wd5.myworkdayjobs.com and wd5.myworkdaysite.com/recruiting/chewy are one), an iCIMS one by portal (Jibe's
+    ?icims=1 front end included). Two URLs with a key in common are one posting; different ids never share one. `needle`
+    is the id as it appears in the URL, for a cheap search of stored links."""
+    try:
+        p = urlsplit(url.strip())
+    except ValueError:
+        return ()
+    host = (p.hostname or "").lower()
+    if p.scheme not in ("http", "https") or not host:
+        return ()
+    path = p.path.rstrip("/")
+    query = {k.lower(): v for k, v in parse_qsl(p.query)}
+    found = {}
+    gh = query.get("gh_jid", "")
+    if host == "greenhouse.io" or host.endswith(".greenhouse.io"):
+        board_job = re.match(r"/[^/]+/jobs/(\d+)", path)
+        # The embed form is job_app?for=<board>&token=<job id>.
+        gh = board_job[1] if board_job else query.get("token") or gh
+    if re.fullmatch(r"\d+", gh):
+        found[f"greenhouse:{gh}"] = gh
+    posting = re.search(rf"/({UUID})$", re.sub(r"/(?:apply|application)$", "", path), re.I)
+    uid = posting[1] if posting else query.get("ashby_jid", "")  # ashby_jid: Ashby's embed on the employer's own page
+    if re.fullmatch(UUID, uid, re.I):
+        found[f"posting:{uid.lower()}"] = uid
+    if host.endswith((".myworkdayjobs.com", ".myworkdaysite.com")):
+        job = re.search(r"/job/.+_([^/]+)$", re.sub(r"/apply(?:/[^/?#]*)?$", "", path))
+        site = re.search(r"/recruiting/([^/]+)/", path)
+        tenant = site[1] if site else host.split(".")[0] if host.endswith(".myworkdayjobs.com") else ""
+        if job and tenant:  # _1214365-1 and _1214365-3 are one requisition posted for several locations.
+            req = re.sub(r"(?<=[0-9])-[0-9]{1,2}$", "", job[1])
+            found[f"workday:{tenant.lower()}:{req.lower()}"] = req
+    portal = host[: -len(".icims.com")] if host.endswith(".icims.com") else ""
+    if host.endswith(".jibeapply.com") and query.get("icims"):
+        portal = host.split(".")[0]
+    if portal and (job := re.search(r"/jobs/(\d+)(?:/|$)", path)):
+        found[f"icims:{ICIMS_TENANT_PREFIX.sub('', portal)}:{job[1]}"] = job[1]
+    if host == "apply.workable.com" and (job := re.match(r"/([^/]+)/j/([0-9a-z]+)(?:/apply)?$", path, re.I)):
+        found[f"workable:{job[1].lower()}:{job[2].lower()}"] = job[2]  # .../j/01F1C3E218 and .../j/01F1C3E218/apply
+    if host.endswith(".applytojob.com") and (job := re.match(r"/apply/([0-9a-z]+)(?:/[^/]*)?$", path, re.I)):
+        found[f"jazzhr:{host}:{job[1]}"] = job[1]  # The title slug after the id changes; the id does not.
+    dayforce = re.match(r"(?:/[a-z]{2}-[a-z]{2})?(/[^/]+/[^/]+/jobs/(\d+))$", path, re.I)
+    if host == "jobs.dayforcehcm.com" and dayforce:  # candidateportal / CANDIDATEPORTAL; with or without the locale.
+        found[f"dayforce:{dayforce[1].lower()}"] = dayforce[2]
+    if not found and detect(url).id == "custom" and (job := re.search(r"/jobs?/(\d{5,})(?:/|$)", path)):
+        # The employer's own site with the requisition number in its path (amazon.jobs/jobs/10567489/apply and
+        # amazon.jobs/en/jobs/10567489/<title>): one site, one number.
+        found[f"site:{host.removeprefix('www.')}:{job[1]}"] = job[1]
+    return tuple(found.items())
+
+
 def catalog():
     return [asdict(x) for x in REGISTRY]
