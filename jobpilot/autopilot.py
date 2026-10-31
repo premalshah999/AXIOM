@@ -493,7 +493,9 @@ SAME_STALL_RUNS = 3
 
 def stall_key(reason):
     """A run's blocker without the numbers (counts, field indexes, durations) that differ between identical stalls."""
-    return re.sub(r"\d+", "#", (reason or "").strip().lower())[:80]
+    from .application_budget import stop_key
+
+    return stop_key(reason)
 
 
 def persist_wait(runs_today, reason):

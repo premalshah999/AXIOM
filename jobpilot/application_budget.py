@@ -14,6 +14,7 @@ A start that ended before anything reached the employer because of the app itsel
 sender, the browser or the model provider was unavailable, a deployment interrupted the worker) does not count toward
 the start limit. Ford's Oracle application spent all three starts waiting for the shared sender, 16 s each.
 """
+import re
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import or_, select
@@ -54,6 +55,58 @@ def nothing_sent(state, reason):
     return state in NOTHING_SENT_STATES and (reason or "").startswith(NOTHING_SENT)
 
 
+# The same stop again and again. Across 3,563 runs (2026-10-24..31) a named stop (a field, an answer, a sign-in or page
+# the engine could not get past) that the job had already ended on 5 times confirmed on the next try 4-7% of the time,
+# against 15-17% for a first stop; 99 runs a week went to those, mostly on a refused sign-in or a missing email code.
+# Every deploy gives a job a fresh three starts (allowance counts the current build only), so the same stop recurred
+# build after build. The count here is not per build and not only back to back: Allen Institute's and ADP's stops
+# alternated between two or three blockers. The engine's catch-all "did not advance" is exempt: it hides different
+# causes and repeats no worse than a first try (12-16% at every count). Runs that sent nothing are exempt too (a model
+# outage, Chrome unavailable, a worker interrupted), as are this gate's own refusals.
+REPEAT_STOP_LIMIT = 5
+REPEAT_STOP_SPACING = timedelta(hours=24)
+CATCH_ALL_STOP = "the browser did not advance"
+REPEAT_STOP_REFUSAL = "The same stop has now ended this application"
+STOP_STATES = {"waiting_browser", "timed_out", "needs_review"}
+
+
+def stop_key(reason):
+    """A run's stop without the numbers (counts, field indexes, durations) that differ between identical stops."""
+    return re.sub(r"\d+", "#", (reason or "").strip().lower())[:80]
+
+
+def repeated_stop(session, job_id, *, aliases=None, reset_at=None):
+    """(times, reason, last finished) when the job's newest named stop has ended it REPEAT_STOP_LIMIT times or more
+    since the owner's last answer or reset, else None. Walks back from the newest run: runs that sent nothing and
+    cancelled ones are skipped; a run that waited for the owner's answer, or ended any other way, ends the count."""
+    rows = session.execute(
+        select(Run.state, Run.reason, Run.created_at, Run.finished_at)
+        .where(Run.job_id.in_(aliases or [job_id]), Run.mode == "submit")
+        .order_by(Run.created_at.desc()).limit(60)
+    ).all()
+    stops, newest = [], None
+    for state, reason, created, finished in rows:
+        if state in {"cancelled", "queued", "running"} or nothing_sent(state, reason) or (reason or "").startswith(REPEAT_STOP_REFUSAL):
+            continue
+        instant = datetime.fromisoformat((created or "").replace("Z", "+00:00")) if created else None
+        if instant is not None and instant.tzinfo is None:
+            instant = instant.replace(tzinfo=UTC)
+        if state not in STOP_STATES or (reset_at and instant and instant < reset_at):
+            break
+        key = stop_key(reason)
+        if not key:
+            break
+        if newest is None:
+            if key.startswith(CATCH_ALL_STOP):
+                return None
+            newest = (key, reason, finished or created)
+        if key == newest[0]:
+            stops.append(key)
+    if len(stops) < REPEAT_STOP_LIMIT:
+        return None
+    return len(stops), newest[1], newest[2]
+
+
 def max_seconds(session):
     """The lifetime wall-clock cap in seconds, or None when the owner runs production uncapped."""
     row = session.get(Setting, SETTING)
@@ -63,28 +116,21 @@ def max_seconds(session):
     return None if value in (None, 0, "") else int(value)
 
 
-def allowance(session, job_id, *, exclude_run=None, at=None, aliases=None):
-    at = at or datetime.now(UTC)
+def job_aliases(session, job_id):
+    """The ids of every listing of the same posting on this platform (the job itself included)."""
+    from .ats import icims_requisition_alias, url_identity
+
     job = session.get(Job, job_id)
-    if aliases is None:
-        from .ats import icims_requisition_alias, url_identity
+    # url_identity is canonicalize(url)[1], cached: the uncached parse of every posting on the platform cost
+    # 23 ms of each Apply click with 7,600 jobs (2026-10-22).
+    identity = url_identity(job.url)
+    return [row.id for row in session.execute(
+        select(Job.id, Job.url, Job.ats, Job.company).where(Job.ats == job.ats)
+    ) if url_identity(row.url) == identity or icims_requisition_alias(job, row)]
 
-        # url_identity is canonicalize(url)[1], cached: the uncached parse of every posting on the platform cost
-        # 23 ms of each Apply click with 7,600 jobs (2026-10-22).
-        identity = url_identity(job.url)
-        aliases = [row.id for row in session.execute(
-            select(Job.id, Job.url, Job.ats, Job.company).where(Job.ats == job.ats)
-        ) if url_identity(row.url) == identity or icims_requisition_alias(job, row)]
-    from .runtime import engine_version
 
-    current = engine_version()
-    # Only starts on this engine build count: a failure on an older build says nothing about the current one, and the
-    # owner wants fresh tries once a fix ships (2026-10-26, "Application already used its initial attempt and two
-    # retries" held 40+ fixable jobs). The per-job daily model budget still bounds the cost.
-    rows = session.execute(select(Run.id, Run.started_at, Run.state, Run.reason).where(
-        Run.job_id.in_(aliases), Run.mode == "submit", Run.started_at.is_not(None),
-        or_(Run.packet["engine_version"].as_string() == current, Run.packet["engine_version"].as_string().is_(None)),
-    )).all()
+def budget_reset_at(session, aliases):
+    """When the owner last gave these listings a fresh budget (Apply click, maintenance), or None."""
     reset_at = None
     for value in session.scalars(
         select(Setting.value).where(Setting.key.in_(["application_budget_reset:" + a for a in aliases]))
@@ -95,6 +141,24 @@ def allowance(session, job_id, *, exclude_run=None, at=None, aliases=None):
             continue
         instant = instant.replace(tzinfo=UTC) if instant.tzinfo is None else instant
         reset_at = max(reset_at or instant, instant)
+    return reset_at
+
+
+def allowance(session, job_id, *, exclude_run=None, at=None, aliases=None):
+    at = at or datetime.now(UTC)
+    if aliases is None:
+        aliases = job_aliases(session, job_id)
+    from .runtime import engine_version
+
+    current = engine_version()
+    # Only starts on this engine build count: a failure on an older build says nothing about the current one, and the
+    # owner wants fresh tries once a fix ships (2026-10-26, "Application already used its initial attempt and two
+    # retries" held 40+ fixable jobs). The per-job daily model budget still bounds the cost.
+    rows = session.execute(select(Run.id, Run.started_at, Run.state, Run.reason).where(
+        Run.job_id.in_(aliases), Run.mode == "submit", Run.started_at.is_not(None),
+        or_(Run.packet["engine_version"].as_string() == current, Run.packet["engine_version"].as_string().is_(None)),
+    )).all()
+    reset_at = budget_reset_at(session, aliases)
     starts = []
     for rid, started, state, reason in rows:
         if not started:
@@ -115,7 +179,31 @@ def allowance(session, job_id, *, exclude_run=None, at=None, aliases=None):
     return deadline, None if deadline is None else max(0.0, (deadline - at).total_seconds()), count
 
 
+def repeat_stop_block(session, job_id, *, at=None, aliases=None):
+    """A QueueBlocked when the job's newest named stop already ended it REPEAT_STOP_LIMIT times and the last of them
+    is under a day old (one try a day after that), else None. The owner's Apply click resets the count."""
+    at = at or datetime.now(UTC)
+    aliases = aliases or job_aliases(session, job_id)
+    found = repeated_stop(session, job_id, aliases=aliases, reset_at=budget_reset_at(session, aliases))
+    if not found:
+        return None
+    times, reason, finished = found
+    try:
+        last = datetime.fromisoformat((finished or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    last = last.replace(tzinfo=UTC) if last.tzinfo is None else last
+    if last + REPEAT_STOP_SPACING <= at:
+        return None
+    return QueueBlocked(
+        f"{REPEAT_STOP_REFUSAL} {times} times ({(reason or '')[:140].rstrip('. ')}). It is retried once a day until "
+        "something changes; applying again yourself starts it afresh",
+        outcome="deferred", code="repeated_stop", not_before=(last + REPEAT_STOP_SPACING).isoformat(),
+    )
+
+
 def require_allowance(session, job_id, *, exclude_run=None, at=None, aliases=None, new_attempt=True):
+    aliases = aliases or job_aliases(session, job_id)
     deadline, remaining, starts = allowance(
         session, job_id, exclude_run=exclude_run, at=at, aliases=aliases,
     )
@@ -123,4 +211,6 @@ def require_allowance(session, job_id, *, exclude_run=None, at=None, aliases=Non
         raise QueueBlocked("Application reached its eight-minute total deadline", code="application_deadline")
     if new_attempt and starts >= MAX_STARTS:
         raise QueueBlocked("Application already used its initial attempt and two retries", code="application_retry_limit")
+    if new_attempt and (blocked := repeat_stop_block(session, job_id, at=at, aliases=aliases)):
+        raise blocked
     return deadline, remaining
