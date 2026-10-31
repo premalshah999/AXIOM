@@ -546,6 +546,20 @@ class FlowHandleMixin:
             },
         )
         passwords_left = sum(f["type"] == "password" for f in after["fields"])
+        if creating:
+            from ..adapters.base import ALIAS_REFUSED
+            from ..email_alias import alias_refusal
+
+            # The replacement identity (Adapter.fresh_identity) needs a sign-up form that takes a plus-address.
+            if alias_refusal(e.service.db, e.job["url"], self.store.email, after.get("errors", [])):
+                e.emit("account", "This employer's sign-up form refused the plus-address; its profile address is used again")
+                e.result = {
+                    "state": "waiting_browser",
+                    "reason": ALIAS_REFUSED,
+                    "blocker_type": "account",
+                    "recoverable": False,
+                }
+                return True
         if creating and any(ACCOUNT_EXISTS.search(str(x)) for x in [*after.get("errors", []), *headings]):
             # AMETEK (SuccessFactors) 2026-10-18 answered Create with "Account Already Exists" and no password field;
             # that read as a finished registration and its new password replaced the working one.

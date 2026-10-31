@@ -4886,6 +4886,26 @@ class BrowserEngine:
         detail = "; ".join(dict.fromkeys(clean(str(p)) for p in problems if p))[:600]
         return "Recovery stopped: " + (detail or "No observed action advanced the application") + "; draft saved."
 
+    def stuck_control_result(self, target, failures):
+        """Recovery's end when one control has failed its last `failures.limit` results: more decisions cannot read a
+        control that no action reaches, and each is a paid model call (Humana's Degree, 2026-10-30)."""
+        from .failure_reports import clean
+
+        label = str(target.get("label") or "a control")[:120]
+        problems = "; ".join(dict.fromkeys(clean(str(p)) for p in (getattr(self.form, "last_problems", None) or [])[:2]))
+        self.emit(
+            "navigation_stalled",
+            "Recovery stopped on a control whose last results all failed",
+            {"control": label, "failures": failures.limit},
+        )
+        return {
+            "state": "waiting_browser",
+            "reason": f"Recovery stopped: {label!r} failed {failures.limit} results in a row "
+            f"({problems or 'no action reached it'}); draft saved.",
+            "blocker_type": "control_failure",
+            "recovery_cause": "control_observation",
+        }
+
     def answer_verdict(self, decision, target, feedback, rejected):
         """End recovery when the answer, not the control, is what blocks the step."""
         from .browser_contracts import field_identity
@@ -5046,12 +5066,13 @@ class BrowserEngine:
             "validation",
             "model_output",
         }
-        from .browser_contracts import ProgressTracker
+        from .browser_contracts import ControlFailures, ProgressTracker
 
         progress = ProgressTracker(
             limit=max(2, self.config.browser_recovery_actions * self.config.browser_recovery_episodes)
         )
         refused, rejected, diagnosed = 0, {}, set()
+        control_failures = ControlFailures()
         for step in range(30):
             if self.result or self.db.get_setting("control", {}).get("paused"):
                 return
@@ -5249,7 +5270,7 @@ class BrowserEngine:
                 thinking=thinking,
                 timeout=20 if thinking == "disabled" else 60,
             )
-            from .browser_contracts import fingerprint, field_identity
+            from .browser_contracts import control_failed, control_key, field_identity, fingerprint
 
             decision = bind_navigation_choice(decision, obs)
             signature = fingerprint(obs)
@@ -5363,6 +5384,9 @@ class BrowserEngine:
                         ),
                     }
                 )
+                if target.get("id") and control_failures.record(control_key(target), True):
+                    self.result = self.stuck_control_result(target, control_failures)
+                    return
                 continue
             refused = 0
             outcome = ""
@@ -5648,6 +5672,15 @@ class BrowserEngine:
                 {**h, "outcome": h["outcome"][:1600]} for h in history[-12:]
             ]
             await self.checkpoint_draft()
+            if (
+                target.get("id")
+                and decision.action in {"fill", "click", "inspect_options", "choose", "search", "back_menu", "scroll", "date"}
+                and control_failures.record(
+                    control_key(target), control_failed(decision.action, decision.control_id, outcome)
+                )
+            ):
+                self.result = self.stuck_control_result(target, control_failures)
+                return
         if not self.result:
             self.result = self.controller_blocker(
                 self.recovery_exhausted_reason(history)

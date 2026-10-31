@@ -5,6 +5,9 @@ of what was sent. It runs entirely on your computer. Your resume, answers and em
 on your machine; nothing is uploaded anywhere except the requests to the model provider you choose and the employer
 sites you apply to.
 
+Would you rather have no Docker at all? `make start` runs the same app natively on a Mac, which frees several GB of
+memory on a 16 GB machine: see [NATIVE.md](NATIVE.md). The rest of this guide is the Docker path.
+
 ## What you need
 
 | Need | Notes |

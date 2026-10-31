@@ -1,0 +1,23 @@
+#!/bin/sh
+# The native app, without Docker: scripts/axiom start | stop | status | ... (docs/NATIVE.md)
+#
+# Only `start` and `setup` may create the virtualenv, with uv from uv.lock; anything else just says it is not set up.
+# AXIOM_VENV (or UV_PROJECT_ENVIRONMENT) points at another virtualenv, as in a git worktree.
+set -eu
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+venv=${AXIOM_VENV:-${UV_PROJECT_ENVIRONMENT:-$root/.venv}}
+if [ ! -x "$venv/bin/python" ]; then
+  case "${1:-}" in
+    start | setup)
+      command -v uv >/dev/null 2>&1 || { echo "axiom: uv is needed once, to install the app: brew install uv" >&2; exit 1; }
+      echo "Installing the app's Python packages from uv.lock (a few hundred MB, the first time only) ..."
+      (cd "$root" && UV_PROJECT_ENVIRONMENT="$venv" uv sync --frozen --no-dev)
+      ;;
+    *)
+      echo "axiom: not set up yet. Run: scripts/axiom setup" >&2
+      exit 1
+      ;;
+  esac
+fi
+cd "$root"
+exec "$venv/bin/python" -u -m jobpilot.native "$@"

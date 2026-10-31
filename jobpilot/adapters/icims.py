@@ -117,6 +117,7 @@ FLAGGED_JS = r"""() => {
 class ICIMS(Adapter):
     id = "icims"
     name = "iCIMS"
+    link_resume = False  # its own continuation of a parked mail wait
     apply_ids = ()
     # The email step posts css_loginName from <input type=submit id=enterEmailSubmitButton>; its label is "Next" on most
     # employers and "I Acknowledge the Privacy Notice" on Schwab (2026-10-21).
