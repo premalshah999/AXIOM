@@ -984,6 +984,11 @@ class Adapter:
             if await self.e.refresh_expired_entry(obs):
                 continue
             moved = self.handoff(obs["url"])
+            follow = getattr(self.e, "follow_embedded", None)
+            if not moved and follow and not self.committed and not self.in_assessment():
+                # Every step, not once before the first click: a frame that loads late, an Apply that opens another
+                # platform's page or a new tab changes what this page is (Roblox's Greenhouse form step, 2026-10-31).
+                moved = await follow(self.id)
             if moved:
                 return {"handoff": moved}
             # Modal precedence: an open dialog is the current step; act only on its controls.
