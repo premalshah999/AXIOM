@@ -42,6 +42,16 @@ FONT_PACKAGES = {
     "mathpazo": "b42822082e609bc2c707bb2657ff5bf6f491718ab391d2c884f7dfed0d51ec15",
     "fpl": "98ea140d101e0802ff266614d57f486495f1a6d063561d1474e68ac764fbc4aa",
 }
+# In place of the build machine's own texmf.cnf, which is personal by design: this Mac's said TEXMFAUXTREES=/Library/Frameworks/
+# R.framework/..., and every compile in the installed app read R's folder (the clean-run trace, 2026-10-31).
+ROOT_CNF = """% AXIOM: everything TeX reads is under this folder.
+TEXMFLOCAL = $SELFAUTOPARENT/texmf-local
+TEXMFHOME = $TEXMFLOCAL
+TEXMFVAR = $TEXMFSYSVAR
+TEXMFCONFIG = $TEXMFSYSCONFIG
+TEXMFAUXTREES =
+max_print_line = 10000
+"""
 LS_R_MAGIC = "% ls-R -- filename database for kpathsea; do not change this line.\n"
 
 
@@ -143,7 +153,7 @@ def wanted(root, opened):
         for path in (root / "texmf-dist" / top).rglob("*"):
             if path.is_file():
                 chosen.add(path.relative_to(root))
-    for name in ("texmf.cnf", "texmf-dist/web2c/texmf.cnf", "texmf-var/web2c/pdftex/pdflatex.fmt", "texmf-var/web2c/metafont/mf.base"):
+    for name in ("texmf-dist/web2c/texmf.cnf", "texmf-var/web2c/pdftex/pdflatex.fmt", "texmf-var/web2c/metafont/mf.base"):
         chosen.add(Path(name))
     kept = {p for p in chosen if not any(bad in "/" + str(p) for bad in NOT_WANTED)}
     # What mktexpk needs: the scripts' own folder, Metafont's macros and the sources of the fonts it may draw.
@@ -217,6 +227,7 @@ def bundle(root, destination, cache):
         # arm64 only: the app is, and the other half is half the size. A linker-signed thin binary keeps a valid signature.
         subprocess.run(["lipo", str(source_bin / name), "-thin", "arm64", "-output", str(bin_dir / name)], check=True)
         subprocess.run(["codesign", "--force", "--sign", "-", str(bin_dir / name)], check=True, capture_output=True)
+    (destination / "texmf.cnf").write_text(ROOT_CNF)
     os.symlink("pdftex", bin_dir / "pdflatex")
     os.symlink("mf-nowin", bin_dir / "mf")
     for name in SCRIPTS:
@@ -250,9 +261,16 @@ def prove(source_results, bin_dir, destination):
     outside = sorted(p for _, paths in ours.values() for p in paths if not Path(p).resolve().is_relative_to(destination))
     if outside:
         raise SystemExit(f"The bundled TeX opened files outside itself: {outside[:6]}")
-    root = subprocess.run([bin_dir / "kpsewhich", "-var-value=TEXMFROOT"], env={"PATH": "/usr/bin:/bin"}, capture_output=True, text=True)
-    if Path(root.stdout.strip()).resolve() != destination:
-        raise SystemExit(f"The bundled TeX believes its root is {root.stdout.strip()}")
+    def setting(name):
+        return subprocess.run([bin_dir / "kpsewhich", f"-var-value={name}"], env={"PATH": "/usr/bin:/bin"}, capture_output=True, text=True).stdout.strip()
+
+    if Path(setting("TEXMFROOT")).resolve() != destination:
+        raise SystemExit(f"The bundled TeX believes its root is {setting('TEXMFROOT')}")
+    # The trees it searches, not only the files it opened: a search of someone else's folder opens nothing, and still reads it.
+    trees = [t.lstrip("!") for t in setting("TEXMF").strip("{}").split(",") if t]
+    strays = [t for t in trees if not Path(t).resolve().is_relative_to(destination)]
+    if strays:
+        raise SystemExit(f"The bundled TeX searches outside itself: {strays}")
     print(f"Compiled all {len(ours)} combinations: every template, font, base size and header, and hand-written LaTeX.")
 
 

@@ -124,7 +124,30 @@ desktop/build.sh          # desktop/build/AXIOM.app and AXIOM.dmg. About 1.5 GB 
 
 It needs Command Line Tools, uv, npm, PostgreSQL 17 and TeX Live or TinyTeX on the build machine, and none of them on the Mac that installs the result. It fails if any binary inside links outside the bundle or the system (`otool-proof.txt`), and declares the macOS the strictest binary allows.
 
-**Where PostgreSQL comes from.** `relocate_pg.py` takes the build machine's own Homebrew PostgreSQL, copies it and every library it links, rewrites the links to be relative, and signs them. The result has no link to Homebrew. One thing follows from that: its version is whatever that Mac has (17.8 today, while the image has 17.11). EDB's or Zonky's prebuilt binaries are the alternatives: running a downloaded binary was not permitted on this machine, so neither was tried. Zonky's 62 MB archive also lacks `psql`, `pg_isready` and `pg_dump`, which the supervisor and `move-in` use, and carries ICU 68, against production's 78, so it would force an index rebuild on moving in.
+**Where PostgreSQL comes from.** `relocate_pg.py` takes the build machine's own Homebrew PostgreSQL, copies it and every library it links, rewrites the links to be relative, and signs them. `otool` cannot show the other half: PostgreSQL finds its `share` and `lib` folders from its compiled-in paths, and falls back to the absolute ones unless its own folder ends in the same tail as the compiled-in bindir. So the layout keeps `Cellar/postgresql@17/<version>/bin`, and the build fails unless `initdb` and `postgres` run under a sandbox that refuses Homebrew. Before that, the app worked here only because this Mac has Homebrew, and could never have started on a clean one. One thing follows from that: its version is whatever that Mac has (17.8 today, while the image has 17.11). EDB's or Zonky's prebuilt binaries are the alternatives: running a downloaded binary was not permitted on this machine, so neither was tried. Zonky's 62 MB archive also lacks `psql`, `pg_isready` and `pg_dump`, which the supervisor and `move-in` use, and carries ICU 68, against production's 78, so it would force an index rebuild on moving in.
+
+## Proving a clean run on a Mac that is not clean
+
+`otool` and a scrubbed PATH were not enough: they passed while `initdb` was reading `/opt/homebrew/share`. What found it is a profile that refuses what a clean Mac would not have, and reports everything else.
+
+Run the installed binary with `env -i` under `sandbox-exec`, with this at its core, and every process it starts inherits it:
+
+```
+(allow default)
+(allow file-read* (with report))
+(deny file-read* file-map-executable process-exec* (subpath "/opt/homebrew") (subpath "/usr/local") (subpath "/Library/Developer") (subpath "$HOME") ...)
+(deny process-exec* (literal "/usr/bin/git") (literal "/usr/bin/python3") ...)     ; On a clean Mac these only offer to install the developer tools.
+(deny network-outbound) (allow network-outbound (remote ip "localhost:*"))
+```
+
+`log stream --predicate 'sender == "Sandbox"'` then shows each read, without root: `fs_usage` and `dtruss` need it. The kernel coalesces repeated reports and may drop some under load, so the list of reads is strong evidence, and the refusal is the proof: a path that is refused cannot be used, whether or not it was reported.
+
+**What this cannot show, and only a second Mac or macOS user can:**
+
+- The real first open: quarantine, Gatekeeper and "Open Anyway". `spctl` here says `rejected`, as the signing section expects, but nobody has walked through it.
+- A Mac where these paths are truly absent rather than refused. A program that behaves differently on `ENOENT` than on `EPERM` would not show up. System libraries differ too: this is macOS 15.2 only.
+- A real Chrome-for-Testing run. The download is exercised for real and unpacked (367 MB), but running a downloaded binary is not permitted on this machine, and the sandbox has to let the installed Chrome run outside itself.
+- Privacy prompts, which are per-user and already answered here for some things; the firewall's prompt, if it is on; WebKit's helpers, which launchd starts outside the profile.
 
 ## macOS 15 minimum
 

@@ -408,6 +408,13 @@ def test_a_tex_tree_is_listed_as_kpathsea_expects(tmp_path):
     assert "\n./fonts/tfm:\na.tfm\n" in text
 
 
+@pytest.mark.regression
+def test_the_bundled_tex_has_no_trees_of_the_build_machines(tmp_path):
+    """This Mac's TinyTeX config names R's folder, and every compile in the installed app read it (the clean-run trace, 2026-10-31)."""
+    cnf = load_tex_bundler().ROOT_CNF
+    assert "TEXMFAUXTREES =\n" in cnf and "TEXMFHOME = $TEXMFLOCAL" in cnf and "/Library" not in cnf
+
+
 def test_every_template_and_font_is_bundled_for():
     """A template or font added to the editor must reach the build's recorder, or it fails on a Mac with no LaTeX."""
     names = [name for name, _ in load_tex_bundler().documents()]
