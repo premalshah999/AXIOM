@@ -69,7 +69,9 @@ ALREADY = re.compile(
     # Workday posting page after an application (HPE 2026-10-15): "You applied for this job on October 15, 2026."
     r"you applied for this (?:job|position|role) on\b|"
     # iCIMS's job page for an applicant already in its pipeline (MCI 2026-10-24).
-    r"you(?:'re| are) (?:currently )?submitted (?:to|for) this (?:job|position|role)",
+    r"you(?:'re| are) (?:currently )?submitted (?:to|for) this (?:job|position|role)|"
+    # Shield AI (2026-10-29): "Your application was already submitted. We received your previous application on ...".
+    r"your application (?:was|has been) already (?:been )?(?:submitted|received)\b",
     re.I,
 )
 EMBED_FRAME = re.compile(
@@ -1672,6 +1674,20 @@ class Adapter:
                 "state": "submission_unknown",
                 "reason": "Submission attempted; the page did not change and it was not submitted again",
             }
+        if self.committed:
+            seen = await self.form.scan()
+            if not [b for b in seen["controls"] if FINAL.search(b["label"])] and not await self.form.application_submit_controls():
+                # The commit went out and no submit control is left: a new acknowledgement confirms it, otherwise the
+                # submission is uncertain. It is never a control failure, and nothing is clicked again.
+                receipt = await self.form.proof()
+                if receipt and receipt != self.before_commit:
+                    receipt["resume_sha256"] = self.run_record["packet"]["resume_sha"]
+                    return {"state": "confirmed", "reason": "Website confirmation captured", "receipt": receipt}
+                return {
+                    "state": "submission_unknown",
+                    "reason": "Submission attempted; no submit control is left on the page and it shows no "
+                    "acknowledgement of this application. Nothing is submitted again",
+                }
         if report is None:
             report = await self.form.verify()
         if report.get("auth_required"):

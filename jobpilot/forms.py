@@ -6079,6 +6079,27 @@ class FormSession:
             "run_id": getattr(self.resolver, "run_id", ""),
         }
 
+    async def oracle_lists_job(self):
+        """True when a tile of Oracle's My Applications list is this job's: a link titled as the job, or its requisition."""
+        job = getattr(self.resolver, "job", {}) or {}
+
+        def norm(text):
+            return " ".join(re.sub(r"[^\w]+", " ", str(text or "")).casefold().split())
+
+        title = norm(job.get("title"))
+        req = (re.search(r"/job/(\d{4,})", str(job.get("url") or "")) or [None, ""])[1]
+        try:
+            tiles = await self.page.locator("li.cs-application-tile:visible").evaluate_all(
+                "els => els.map(el => ({text: el.innerText, links: [...el.querySelectorAll('a[href]')].map(a => a.textContent)}))"
+            )
+        except PlaywrightError:
+            return False
+        return any(
+            (title and any(norm(link) == title for link in tile["links"]))
+            or (req and re.search(rf"(?<!\d){req}(?!\d)", tile["text"]))
+            for tile in tiles
+        )
+
     async def proof(self):
         host = (urlsplit(self.page.url).hostname or "").lower()
         # Greenhouse can acknowledge a submitted requisition in its document
@@ -6488,6 +6509,11 @@ class FormSession:
                         "status_region": "job_application_status",
                         "observed_job_heading": card["heading"][:200],
                     }
+        if host.endswith(".oraclecloud.com") and "/my-profile" in current.path and not await self.oracle_lists_job():
+            # Oracle's My Applications list holds every application of the account, and its generic "Thank you for your
+            # job application" toast names no job: 28 receipts rested on the toast alone (2026-10-17..31). This job must
+            # have its own tile; the list is otherwise no evidence about it.
+            return None
         # Ashby lets employers customize the success copy (e.g. "Thanks,
         # got it!"). Its application-success component is stronger evidence
         # than a generic Success heading or a phrase in the job description.
@@ -6518,6 +6544,9 @@ class FormSession:
             r"(?:thank you|thanks) for (?:applying|your (?:job )?(?:application|submission))|"
             r"(?:thank you|thanks) for (?:submitting|sending) your (?:job )?application|"
             r"application (?:has |was )?(?:successfully )?(?:been )?(?:successfully )?(?:submitted|received|sent)|"
+            # The role named in between (Gem, Imagen Technologies 2026-10-28: "Your application for Software Engineer has
+            # been received!" parked a run on a custom site while the page showed it).
+            r"your application for [^.!?\n]{1,140}? (?:has been|was) (?:successfully )?(?:submitted|received|sent)\b|"
             r"we(?:'ve| have)? received your application|successfully (?:applied|submitted)|"
             r"thank you for sending us your online job submission|"
             r"your application (?:is |has been |was )?(?:complete|submitted|received|sent|on its way)|"
@@ -6608,6 +6637,18 @@ class FormSession:
         return None
 
     @staticmethod
+    def review_issues(text):
+        """The items a review page marks "Fields to fix: N" (Oracle's education, experience and language tiles), each named
+        by the two lines above its notice: ["Data Science / University of Maryland (Fields to fix: 2)"]."""
+        lines = [line.strip() for line in str(text).splitlines() if line.strip()]
+        found = []
+        for i, line in enumerate(lines):
+            if notice := re.search(r"(?:^|\s)(fields? to fix: ?\d+)$", line, re.I):
+                name = line[: notice.start()].strip() or " / ".join(lines[max(0, i - 2) : i])
+                found.append(f"{name} ({notice[1]})"[:200])
+        return list(dict.fromkeys(found))[:10]
+
+    @staticmethod
     def inline_field_errors(obs):
         # Many forms report errors beside the fields, without a rejection banner.
         # Greenhouse's phone widget prints "Phone number is too short" after
@@ -6634,6 +6675,10 @@ class FormSession:
             r"(?im)^\s*you(?: have|['’]ve)? already applied (?:for|to) this (?:job|position|role)[.!]?\s*$",
             text,
         )
+        # Shield AI (2026-10-29): "Your application was already submitted. We received your previous application on ..."
+        duplicate = duplicate or re.search(
+            r"(?im)^\s*your application (?:was|has been) already (?:been )?(?:submitted|received)\b[^\n]{0,200}$", text
+        )
         if duplicate:
             return {"type": "explicit_rejection_page", "url": self.page.url,
                     "category": "already_applied", "evidence": duplicate[0].strip(), "missing_fields": []}
@@ -6658,13 +6703,17 @@ class FormSession:
             r"please fix the highlighted errors and try again|answer all required questions to submit this application|"
             # Workable's banner with HTTP 412 from /api/v1/jobs/<code>/apply when it throttles a candidate
             # (2026-10-23): nothing was accepted, and the same application went through later.
-            r"something went wrong\. we are working on this,? please try again later",
+            r"something went wrong\. we are working on this,? please try again later|"
+            # Oracle's review step after a refused Submit (Lazard 2026-10-23, 61 runs on 37 jobs): "You have 2 issues that
+            # need to be fixed before you can submit your application", the tiles say "Fields to fix: 2". Nothing was
+            # accepted; only the adapter's own poll knew this wording, so the guided flow ended as an uncertain submission.
+            r"you have \d+ issues? that needs? to be fixed before you can submit",
             text,
             re.I,
         )
         if match:
             missing = re.findall(r"Missing entry for required field:\s*([^\n]+)", text, re.I)
-            corrections = "correct the error" in match.group().lower()
+            corrections = "correct the error" in match.group().lower() or "fixed before you can submit" in match.group().lower()
             phrase = match.group().lower()
             tail = text[match.end() : match.end() + 600]
             from .adapters.base import ALREADY
@@ -6726,10 +6775,13 @@ class FormSession:
                         if normalize(subject) in labels
                     )
                 )
+            issues = self.review_issues(text) if "fixed before you can submit" in phrase else []
             return {
                 "type": "explicit_rejection_page",
                 "url": self.page.url,
                 "evidence": text[max(0, match.start() - 20) : match.end() + 400],
+                # What the employer lists as still to fix, for the owned page and the owner when no field names it.
+                **({"issues": issues} if issues else {}),
                 "category": "validation"
                 if missing or corrections
                 else (
