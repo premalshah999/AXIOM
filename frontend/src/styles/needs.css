@@ -426,6 +426,10 @@ button.nd-asking:hover strong {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.nd-reach-hint {
+  margin-left: var(--space-2);
+  color: var(--ink-3);
+}
 .nd-reach small {
   color: var(--ink-2);
   font-size: var(--text-meta);

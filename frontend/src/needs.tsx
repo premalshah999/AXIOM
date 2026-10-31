@@ -260,7 +260,7 @@ function useInbox() {
           id: "run:" + run.id,
           type: "none",
           names: namesOf(reach),
-          title: job ? roleOf(job) : "Application",
+          title: job ? [jobWords(job).role, jobWords(job).hint].filter(Boolean).join(" · ") : "Application",
           who: employerOf(job?.company, job?.url),
           since: run.created_at || "",
           reach,
@@ -572,7 +572,7 @@ function InboxRow({ entry: e, questions, current, onPick }: { entry: Entry; ques
             <Users size={13} />
           </span>
         ) : (
-          <MonogramStack names={e.names} max={2} />
+          <MonogramStack names={e.names} max={e.names.length > 2 ? 1 : 2} />
         )}
       </span>
       <span className="nd-row-main">
@@ -619,7 +619,7 @@ function Unblocks({ entry: e }: { entry: Entry }) {
   const { frees, helps } = e.reach;
   const blocked = e.type === "blocked";
   const rows = [
-    ...frees.map((x) => ({ ...x, note: blocked ? "" : "Moves again" })),
+    ...frees.map((x) => ({ ...x, note: blocked ? "" : "Continues" })),
     ...helps.map((x) => ({ ...x, note: `${plural(x.left, "more question")} after this` })),
   ];
   if (!rows.length) return null;
@@ -645,14 +645,16 @@ function Unblocks({ entry: e }: { entry: Entry }) {
       <h3>{heading}</h3>
       <ul>
         {rows.slice(0, SHOW).map((x, i) => {
-          const name = employerOf(x.job?.company, x.job?.url);
+          const words = x.job ? jobWords(x.job) : null;
+          const name = words?.company || "Employer";
           return (
             <li key={x.job?.id || i}>
               <button type="button" disabled={!x.job} onClick={() => x.job && openJob(x.job.id)}>
                 <Monogram name={name} />
                 <strong title={name}>{name}</strong>
                 <span className="nd-reach-role" title={x.job?.title}>
-                  {x.job ? [roleOf(x.job), x.job.location].filter(Boolean).join(" · ") : ""}
+                  {words && [words.role, x.job?.location].filter(Boolean).join(" · ")}
+                  {words?.hint && <span className="nd-reach-hint">{words.hint}</span>}
                 </span>
                 {x.note && <small>{x.note}</small>}
               </button>
