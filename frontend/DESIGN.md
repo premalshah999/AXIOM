@@ -1,6 +1,6 @@
 # AXIOM dashboard design system (2026-10-31)
 
-Read this before touching a page. It holds two stages: the **family** every page is made from, and the **reference pages** (Overview, Jobs and its drawer, Resumes and its editor) to copy. Needs you, Applications, Profile, Settings and the sign-in screens are on the new shell and tokens but not yet redesigned; section 8 says what each must become.
+Read this before touching a page. It holds the **family** every page is made from (sections 1 to 4) and one section per page, each the reference for its kind of page: Overview (5, several parts), Jobs (6, a list), Applications (7, a ledger), Needs you (8, an inbox), Resumes and its editor (9, a state and a file viewer), Profile (10, a page of sections), Settings (11, a settings page) and the first-run screens (12). Every page is redesigned; copy the one that is closest to what you are building.
 
 ## 1. Rules
 
@@ -82,7 +82,7 @@ Doto (`.ax-read`) is for hero readouts of 56px and up, on Overview only. The Arc
 | Needs you | `needs` | |
 | Applications | `ledger` | `confirmed`, `unconfirmed`, `archive` |
 | Resumes | `resumes` (`&artifact=<id>` opens that tailored version's preview; the editor, `editor`, belongs to it: `&artifact=<id>`, `&artifact=master` for your copy, neither for a new one) | |
-| Profile | `profile` | `identity`, `experience`, `knowledge` |
+| Profile | `profile` | `identity`, `experience`, `knowledge`, narrowed by `filter` to a section (section 10) |
 | Settings | `settings` | `connections`, `email` (Mailbox), `discovery` (Job search), `applying`, `accounts` (Employer accounts), `account` (Your account), `database`, `system` (Advanced) |
 | Coming soon | `soon-axe`, `soon-network`, `soon-emails` | |
 
@@ -137,7 +137,7 @@ Data is real: `GET /api/funnel` (`pipeline.funnel`, read-only, all time: discove
 
 ## 6. Jobs: the reference for a list page (`src/jobs.tsx`, `jobboard.tsx`, `reserved.tsx`, `jobdetail.tsx`)
 
-Applications (6b) copies it; so should any list.
+Applications (section 7) copies it; so should any list.
 
 ```tsx
 <div className="ax-page ax-page-fill">
@@ -153,7 +153,53 @@ Applications (6b) copies it; so should any list.
 - **Views are named:** Started, Discovered, Reserved, each with a count, each saying what it is in one line. "Add job" is a button opening a small dialog (`AddJobDialog` in `jobintake.tsx`, mounted once in `main.tsx`; dispatch `OPEN_JOB_LINK`), never a permanent input.
 - **The drawer** (`JobPanel`): head with a large monogram, employer, role; a meta line (location, platform, fit, Open posting). Then the **status block** (`StatusBlock`, an inset surface): lamp and word, what it means, why, and inside it the question to answer or the next action. Then what stopped it, Proof, History (a line of attempts; click to open one), Final page. Folds: Answers, Activity, This attempt in detail, Raw receipt, Technical details.
 
-## 6b. Settings: the reference for a settings page (`src/settings.tsx` and the files it mounts)
+## 7. Applications: the reference for a ledger (`src/ledger.tsx`, `archive.tsx`, `styles/applications.css`)
+
+The proof that it works: every row says **when it was sent and what proved it**, and the receipt is one click away. It is Jobs' structure with these differences.
+
+- **Header:** `TopLine` reads "3,060 confirmed · 72 today" (mono figures, each a quiet link: the first clears the filters, the second sets Sent to Today; "today" is `confirmedToday`, as on Overview) and, only when some exist, "7 unconfirmed" with a lit dot, opening that tab. Each tab has its own one-line meaning in `TopLine`. `TopActions` holds **Export CSV** (secondary: no primary here).
+- **Tabs** are the three named views with counts: Confirmed, Unconfirmed, Archive. `LedgerView` polls the ledger and the archive once, so the counts show before a tab is opened, and hands each list its data.
+- **Rows** (Confirmed): JobCell, **Proof** (icon and words from `evidenceLabel`, with a Tooltip saying what it means: Confirmation page, Employer email, both, Existing application, **No receipt on file**: confirmed with an empty receipt, because the applicant recorded it or the platform answered "created"), **Sent** (the day in words, the clock in figures; full time and age in the title), Platform (wide only), then two words that become buttons when the row is pointed at: **Receipt** (opens the drawer, which leads with Confirmed and its Proof; "Details" when there is no receipt) and **Posting** (a real link to the employer's page, in the system browser). Under 860px the Receipt word goes (the row is the receipt), under 600px the stacked JobCell carries proof and time.
+- **Filters:** search, then Proof, Sent (any time, today, last 7, last 30 days) and Platform as Listboxes whose options carry counts under every other filter, so a choice shows exactly that many rows. "Sent" counts what AXIOM sent, so the employer's own "you already applied" notices fall away. Clear appears with any filter. Filters are `useDraft`, so they survive a tab switch; `route.q` opens the list searched. Search reads what the row shows: a job saved without a company or title is found by its link.
+- **Export** is a link to `GET /api/successful-applications.csv` with the same filters (`evidence`, `ats`, `since`, `q`), served with `Content-Disposition: attachment`: the app saves it, in a tab or in the native window. The button says how many rows ("Export 103 as CSV") once filtered. The server applies the same filters and words (`jobpilot/api/routes/state.py`); a test keeps them equal.
+- **Unconfirmed** is the server's `group=unconfirmed` list with the row action "Confirm as submitted" and bulk actions. **Archive** keeps the outcome, the reason, and a Log download link; "Archive earlier failures" asks first.
+
+## 8. Needs you: an inbox (`src/needs.tsx`, `questions.tsx`, `styles/needs.css`, answer controls in `work.css`)
+
+A list at the left, one answer pane at the right (one column on a phone: the list, then the pane with a back arrow). `useInbox` builds the entries; the list leads with what frees the most applications, then by how long it has waited.
+
+- **Entries are not rows of the database.** The same question on several jobs is one entry (`groupQuestions`: the field's wording and options decide, never the key), so one answer reaches every job asking (`deliver` posts it to each; the server answers twins itself, so a later POST that finds its row answered, HTTP 400 "already answered", counts as sent). Supervisor and reference questions across jobs are one entry, **Supervisors and references**, with a card per past job (`claimOf`: it reads the same labels the engine does, `answers/people_rules.py`). Saving a card writes the questionnaire and answers every waiting box it settles.
+- **What no answer completes looks different.** The server's marker is typed on `Review`: `cannot_automate` is a plain reason, and `kind: "cannot_automate"` (with `input_kind` keeping the answer's shape) means nothing the owner can type or send fits, such as a video of themselves. `blockOf` reads it; the list puts these under "Need something only you can make", the pane gives the reason, **Drop this job** (asks first) and, for a piece of the owner's own work, a Dropzone. Do not guess from the question's words in the browser.
+- **The pane** names who is asking (monograms, "and 3 others"), the question large, then the control that fits (buttons for a few short choices, a Dropzone for a file, a date, a text box), **Send to N applications**, Skip, **Not applicable to me**, the shortcut hint (Enter sends and moves to the next, ⌥S skips), and under it what answering frees or helps ("Frees 4 applications", each with "Continues"; "1 more question after this").
+- **A stack of employers** in the list shows one monogram and a "+N" chip when there are three or more, two when there are two: the first column is 44px.
+- **An application stopped on the owner with no question** is "Nothing to answer here": Try again, Skip, Open job. Not dressed as a question.
+- **A job saved as a link has no name yet.** `jobWords` (`format.ts`) is the one place that reads it: the employer from the address ("Helixbio"), the role as "Role not read yet", the address's host as a muted hint after it. Use it for any list of jobs; never print "Untitled role" or a bare host as the name.
+
+## 9. Resumes: a page that says a state and owns a file viewer (`src/resumes.tsx`, `editor.tsx`, `pdfpages.tsx`, `styles/resumes.css`, `editor.css`, `pdf.css`)
+
+**PDFs stay in the app.** It runs in a native window, where a link that opens a new tab goes nowhere, and the server answers "attachment". `PdfPages` (`fit`: `page` or `width`, with zoom), `PdfThumb` (a real first page, small), `usePdf(url)` (one read per session), `downloadPdf` and `savePdf` (a real file name; the server calls them all resume.pdf). Never `<a target="_blank">` to a PDF.
+
+1. **What employers get** (`Sending`): a picture of the file, one sentence, one control. Off: "Employers get X, exactly as you uploaded it", Set up tailoring. On: a Switch that turns it off at once. Read `policy.resume_id`: that's what the queue sends.
+2. **The guided path** (`SetupPath`): import, compare, approve, turn on, one current step with the one primary. Employers get the PDF until the last step. Turning on (`PUT /api/v2/resumes/policy`, refused without an approved master) always goes through a Dialog saying what changes, and is the owner's click: no agent, test or default turns it on.
+3. **Two columns.** Your resumes (rows with the file's first page, Download, a menu; the resume in use can't be removed, because the queue would have nothing to send; the Dropzone opens a Dialog for its name). Tailored versions: a Table of job, how many bullets were reworded, and what happened: **Sent Oct 7, Maybe sent, Never sent** come from the runs that pinned that version (`sent`), so never say a draft "was never used" from the policy alone.
+4. **The preview panel** (`VersionPreview`, a Drawer): what happened to this version first, then a fold of what it reworded, then the PDF filling the rest. ← → and the footer step through the list; the address follows.
+
+**The editor** hides the shell's header and takes the region: a slim bar (back, whose document this is, build status, Discard when changed, Download, the one primary), the form at the left, the page on an inset well at the right. Entries are rows that open; bullets grow with their text; reordering and hiding appear on pointing (always, on touch). Source shows what the controls produce now, in full. Your copy opens with the two documents side by side and the form closed. Under 960px the form and the page take turns. Each address is its own load (`EditorLoader` is keyed by it): never reuse the last answer for a new address.
+
+## 10. Profile: the reference for a page of sections (`profile.tsx`, `profile-work.tsx`, `profile-rules.tsx`, `profile-photo.tsx`, `profile-fields.tsx`, `knowledge.tsx`, `qform.tsx`, `styles/profile.css`)
+
+The page is a section list at the left and **one section at a time** at the right (a scrolling row of sections under the header below 1180px), over **one draft and one Save**.
+
+- **Sections and their addresses.** `SECTIONS` in `profile.tsx` holds them; each keeps an old address alive through `tab` (the old tab it grew out of) and `filter` (the old section name, or a new one): Personal details (`identity`), Work and education (`experience`), Job preferences (`experience` + `preferences`), Supervisors and references (`knowledge` + `references`), Questionnaires (`knowledge`), What AXIOM may do for you (`knowledge` + `policies`), When options don't match (`knowledge` + `rules`), Saved facts and memory (`knowledge` + `memory`; the old `facts` opens its JSON tab). Add a section there, not in `nav.ts`.
+- **What the list shows beside a name** is real or nothing: a vermilion count for applications actually waiting (Supervisors and references: open questions that ask for a supervisor or a reference, counted once per application from the live snapshot), a count of basic details still empty, a quiet tally (`26/37` answered, `7/9` permissions on), a dot where the draft has an unsaved change.
+- **One draft** (`ProfileProvider`, kept in memory across sections by `useDraft`). `dirty` means the draft really differs from what is saved (keys compared in sorted order, so an edit undone is not a change). The **save bar** (`pf-savebar`) exists only then, says which sections hold changes, and saves on Ctrl or ⌘ S. Questionnaires (supervisors, references, FAQ) save on their own as you go and say so.
+- **Fields** sit on a 6-column grid inside one Panel per section, in titled `Group`s: give a field `pf-s2` (a third), `pf-s3` (a half) or nothing (the row); everything is one column on a phone. First, middle and last name share a line. `Tags` (type and press Enter or a comma) replaces a comma-separated input, `Range` a number on a slider, `Pick` a choice in a form (a Listbox filled to the field's width).
+- **Experience, education and notes are cards** (`pf-card`: monogram, title, employer, dates, two lines of what you did). A card opens in a **Drawer** to edit, with Remove asking first. A card added and left empty is taken back on close.
+- **Supervisors and references** is where applications are waiting. The section leads with how many (the employers' monograms, "See them" opening Needs you), says AXIOM never invents these, and shows two meters. Below, one row per job in the work history that opens in place (`PersonCard` in `qform.tsx`; the first opens by itself while none is added), and up to three references. `ModuleForm` takes `bare` when the host supplies the title: only a floating save pill remains.
+- **Questionnaires are progress cards**: state, what it is for, which sections are still open, a meter, one button (Start, Continue, Review).
+- **Permissions** are plain sentences with a switch, grouped (Applying, Agreements and consents, Your privacy), with the count that are on.
+
+## 11. Settings: the reference for a settings page (`src/settings.tsx` and the files it mounts)
 
 One page, a list of sections beside the one that is open (`.st-nav`, real links; on a phone one row that scrolls sideways and keeps the open one in view). The section is the route's `tab`; the list is `PAGE_TABS.settings` in `shell/nav.ts`. Grouped by what a person recognises, the engine's own switches last:
 
@@ -176,67 +222,22 @@ Rules this page set:
 - **Folds for internals** are `.st-adv` (a surface of its own, closed by default, with a plain line saying what is inside).
 - Styles are in `styles/settings.css` (`st-` prefix): `.st-card` (a service), `.st-key` (a masked key), `.st-state` (a line that says what is true, with a lamp), `.st-rows` (name left, control right), `.st-fields`, `.st-sub` (a column's value shown under the first column when the table is narrow).
 
-## 7. Resumes: a page that says a state and owns a file viewer (`src/resumes.tsx`, `editor.tsx`, `pdfpages.tsx`, `styles/resumes.css`, `editor.css`, `pdf.css`)
-
-**PDFs stay in the app.** It runs in a native window, where a link that opens a new tab goes nowhere, and the server answers "attachment". `PdfPages` (`fit`: `page` or `width`, with zoom), `PdfThumb` (a real first page, small), `usePdf(url)` (one read per session), `downloadPdf` and `savePdf` (a real file name; the server calls them all resume.pdf). Never `<a target="_blank">` to a PDF.
-
-1. **What employers get** (`Sending`): a picture of the file, one sentence, one control. Off: "Employers get X, exactly as you uploaded it", Set up tailoring. On: a Switch that turns it off at once. Read `policy.resume_id`: that's what the queue sends.
-2. **The guided path** (`SetupPath`): import, compare, approve, turn on, one current step with the one primary. Employers get the PDF until the last step. Turning on (`PUT /api/v2/resumes/policy`, refused without an approved master) always goes through a Dialog saying what changes, and is the owner's click: no agent, test or default turns it on.
-3. **Two columns.** Your resumes (rows with the file's first page, Download, a menu; the resume in use can't be removed, because the queue would have nothing to send; the Dropzone opens a Dialog for its name). Tailored versions: a Table of job, how many bullets were reworded, and what happened: **Sent Oct 7, Maybe sent, Never sent** come from the runs that pinned that version (`sent`), so never say a draft "was never used" from the policy alone.
-4. **The preview panel** (`VersionPreview`, a Drawer): what happened to this version first, then a fold of what it reworded, then the PDF filling the rest. ← → and the footer step through the list; the address follows.
-
-**The editor** hides the shell's header and takes the region: a slim bar (back, whose document this is, build status, Discard when changed, Download, the one primary), the form at the left, the page on an inset well at the right. Entries are rows that open; bullets grow with their text; reordering and hiding appear on pointing (always, on touch). Source shows what the controls produce now, in full. Your copy opens with the two documents side by side and the form closed. Under 960px the form and the page take turns. Each address is its own load (`EditorLoader` is keyed by it): never reuse the last answer for a new address.
-
-## 6c. Profile: the reference for a page of sections (`profile.tsx`, `profile-work.tsx`, `profile-rules.tsx`, `profile-photo.tsx`, `profile-fields.tsx`, `knowledge.tsx`, `qform.tsx`, `styles/profile.css`)
-
-Copy this for Settings. The page is a section list at the left and **one section at a time** at the right (a scrolling row of sections under the header below 1180px), over **one draft and one Save**.
-
-- **Sections and their addresses.** `SECTIONS` in `profile.tsx` holds them; each keeps an old address alive through `tab` (the old tab it grew out of) and `filter` (the old section name, or a new one): Personal details (`identity`), Work and education (`experience`), Job preferences (`experience` + `preferences`), Supervisors and references (`knowledge` + `references`), Questionnaires (`knowledge`), What AXIOM may do for you (`knowledge` + `policies`), When options don't match (`knowledge` + `rules`), Saved facts and memory (`knowledge` + `memory`; the old `facts` opens its JSON tab). Add a section there, not in `nav.ts`.
-- **What the list shows beside a name** is real or nothing: a vermilion count for applications actually waiting (Supervisors and references: open questions that ask for a supervisor or a reference, counted once per application from the live snapshot), a count of basic details still empty, a quiet tally (`26/37` answered, `7/9` permissions on), a dot where the draft has an unsaved change.
-- **One draft** (`ProfileProvider`, kept in memory across sections by `useDraft`). `dirty` means the draft really differs from what is saved (keys compared in sorted order, so an edit undone is not a change). The **save bar** (`pf-savebar`) exists only then, says which sections hold changes, and saves on Ctrl or ⌘ S. Questionnaires (supervisors, references, FAQ) save on their own as you go and say so.
-- **Fields** sit on a 6-column grid inside one Panel per section, in titled `Group`s: give a field `pf-s2` (a third), `pf-s3` (a half) or nothing (the row); everything is one column on a phone. First, middle and last name share a line. `Tags` (type and press Enter or a comma) replaces a comma-separated input, `Range` a number on a slider, `Pick` a choice in a form (a Listbox filled to the field's width).
-- **Experience, education and notes are cards** (`pf-card`: monogram, title, employer, dates, two lines of what you did). A card opens in a **Drawer** to edit, with Remove asking first. A card added and left empty is taken back on close.
-- **Supervisors and references** is where applications are waiting. The section leads with how many (the employers' monograms, "See them" opening Needs you), says AXIOM never invents these, and shows two meters. Below, one row per job in the work history that opens in place (`PersonCard` in `qform.tsx`; the first opens by itself while none is added), and up to three references. `ModuleForm` takes `bare` when the host supplies the title: only a floating save pill remains.
-- **Questionnaires are progress cards**: state, what it is for, which sections are still open, a meter, one button (Start, Continue, Review).
-- **Permissions** are plain sentences with a switch, grouped (Applying, Agreements and consents, Your privacy), with the count that are on.
-
-## 6d. Applications: the reference for a ledger (`src/ledger.tsx`, `archive.tsx`, `styles/applications.css`)
-
-The proof that it works: every row says **when it was sent and what proved it**, and the receipt is one click away. It is Jobs' structure with these differences.
-
-- **Header:** `TopLine` reads "3,060 confirmed · 72 today" (mono figures, each a quiet link: the first clears the filters, the second sets Sent to Today; "today" is `confirmedToday`, as on Overview) and, only when some exist, "7 unconfirmed" with a lit dot, opening that tab. Each tab has its own one-line meaning in `TopLine`. `TopActions` holds **Export CSV** (secondary: no primary here).
-- **Tabs** are the three named views with counts: Confirmed, Unconfirmed, Archive. `LedgerView` polls the ledger and the archive once, so the counts show before a tab is opened, and hands each list its data.
-- **Rows** (Confirmed): JobCell, **Proof** (icon and words from `evidenceLabel`, with a Tooltip saying what it means: Confirmation page, Employer email, both, Existing application, **No receipt on file**: confirmed with an empty receipt, because the applicant recorded it or the platform answered "created"), **Sent** (the day in words, the clock in figures; full time and age in the title), Platform (wide only), then two words that become buttons when the row is pointed at: **Receipt** (opens the drawer, which leads with Confirmed and its Proof; "Details" when there is no receipt) and **Posting** (a real link to the employer's page, in the system browser). Under 860px the Receipt word goes (the row is the receipt), under 600px the stacked JobCell carries proof and time.
-- **Filters:** search, then Proof, Sent (any time, today, last 7, last 30 days) and Platform as Listboxes whose options carry counts under every other filter, so a choice shows exactly that many rows. "Sent" counts what AXIOM sent, so the employer's own "you already applied" notices fall away. Clear appears with any filter. Filters are `useDraft`, so they survive a tab switch; `route.q` opens the list searched. Search reads what the row shows: a job saved without a company or title is found by its link.
-- **Export** is a link to `GET /api/successful-applications.csv` with the same filters (`evidence`, `ats`, `since`, `q`), served with `Content-Disposition: attachment`: the app saves it, in a tab or in the native window. The button says how many rows ("Export 103 as CSV") once filtered. The server applies the same filters and words (`jobpilot/api/routes/state.py`); a test keeps them equal.
-- **Unconfirmed** is the server's `group=unconfirmed` list with the row action "Confirm as submitted" and bulk actions. **Archive** keeps the outcome, the reason, and a Log download link; "Archive earlier failures" asks first.
-
-## 8. Pages still to redesign, on this standard
-
-Their brief is in UI3_BRIEF.md. What each must do with the family above:
-
-- **Needs you** (`needs.tsx`, `questions.tsx`, the `nq-` styles in `work.css`): an inbox. Group the same question across jobs ("Supervisor phone, 6 applications") with MonogramStack; list and answer pane, or better. `QuestionCard` already handles every kind of answer, including uploads through Dropzone; Enter to send and move on, "skip", "not applicable to me", progress, what answering unblocks. Questions that text can't answer look different and offer to drop the job.
-- **Profile** (`profile.tsx`, `knowledge.tsx`, `qform.tsx`): section navigation within the page, a two-column grid for related fields, cards that open to edit, a sticky save bar only with changes (`ax-savebar`), progress cards.
-- **Settings**: done, see section 6b.
-- **Sign-in, sign-up, reset, setup guide** (`account.tsx`, `onboarding.tsx`, `styles/onboarding.css`, `styles/setup.css`), **coming-soon** (`ComingSoon.tsx`), **error boundary** (`ErrorBoundary.tsx`), **404**: the same family; the first thing anyone sees.
-
-When a page moves off `.ax-grid`, `.nq-*` and the like, delete what it leaves behind. Keep this file true.
-
-## 7a. First run: the setup guide, sign-in, coming soon, a crashed page
+## 12. First run: the setup guide, sign-in, coming soon, a crashed page
 
 These are the first things anyone sees, so they are one family: a raised card on the page (`--raised`, hairline, `--radius-lg`), the wordmark above or beside it, a title and one line, then the task. Outside the shell, inside `.ax-screen`.
 
 - **The setup guide** (`onboarding.tsx`, `styles/onboarding.css`): a welcome, seven short steps, a finish. In order: **Data** (where the data lives), **Resume**, **Contact**, **Eligibility** (work authorization, with Background questions and Self-identification as folds most people leave closed), **Search** (roles, places), **Automation** (send for me or review first; switches), **Connections** (AI key and inbox, both skippable). The progress line has one named segment per step (a reached step is a way back), "Step 3 of 7" and "About 4 min left" (the sum of `minutes` in `STEPS`). The way on lives in a sticky bar (Back, an optional skip, one primary); Enter in a field continues. The usual answer is already chosen where one exists; nothing is defaulted for the person (`test_wizard_background_facts.py`): "Answer No to the rest" fills unanswered background questions only when pressed. The finish says "AXIOM is ready" only when nothing AXIOM needs is missing, otherwise "Almost ready" with a Fix link per line; questionnaires moved to Profile › Knowledge and are offered from the finish. Server step ids are unchanged (`server` in `STEPS`); `OPEN_AT` maps a stored step back to a guide step.
 - **The Data step is a slot.** `DatabaseStep` shows Local as chosen and nothing to fill in. The Local, Supabase and Server component from `agent8/db-config` (`frontend/src/database.tsx`) replaces its body; keep Continue enabled while Local is selected.
-- **Sign-in, sign-up, recovery codes, reset** (`account.tsx`, `styles/auth.css`): one `AuthCard` (wordmark above, quiet links to the other ways in under it); a password has its own Show and Hide inside the field; the rules a new password must meet tick off as they are met; recovery codes sit in a numbered well with Copy and Download. They appear only for someone who set a lock. Settings › System › Your sign-in is in the same file.
+- **Sign-in, sign-up, recovery codes, reset** (`account.tsx`, `styles/auth.css`): one `AuthCard` (wordmark above, quiet links to the other ways in under it); a password has its own Show and Hide inside the field; the rules a new password must meet tick off as they are met; recovery codes sit in a numbered well with Copy and Download. They appear only for someone who set a lock. Settings › Your account is in the same file.
 - **Coming soon** (`shell/ComingSoon.tsx`, `styles/screens.css`): plainly not switched on (a dashed lamp and "Coming soon"), one sentence, three lines of what it will do, a picture of the idea drawn in tokens, and a way back. Add a page by adding to `nav.ts` and to `WILL` in the file.
 - **A crashed page** (`shell/ErrorBoundary.tsx`): what happened, that the rest still works, Try again (clears the error) and Reload, the message behind a fold.
 - **No 404 page.** Any unknown address opens Overview (§3), so there is nothing to show.
 
-## 9. Checking your work
+## 13. Checking your work
 
 - With a vite dev server from your worktree (`npx vite --host 127.0.0.1 --port <free>`, proxying `/api` to 8080) and `scratchpad/qa/live.py` (`QA_BASE`), which aborts non-GET requests. A new read-only endpoint isn't on production yet: fulfil it in the test browser from real SQL (`q.sh`).
 - Check every page in both themes at 1440×900 and 390×844, and at 1024, 1280 and 1920.
 - Test states by rewriting the real snapshot in the test browser: `autopilot_runtime.application_workers.assignments` for busy, `control.paused`, `autopilot_runtime.scheduler.degraded`, `autopilot_runtime.state`, an aborted snapshot poll for connection lost, empty `jobs`, `runs` and `counts` for a new account.
+- **Writes go to a scratch instance, never to production.** Run the app from your worktree under `env -i` with `PYTHONPATH=<worktree>` (the shared venv's editable install points at another worktree), `DATA_DIR` and a sqlite `DATABASE_URL` in your scratch folder, your own `APP_TOKEN`, `ENABLE_WORKERS=false`, a free port with a matching `BASE_URL`, blank mail and Telegram settings, and every provider `*_BASE_URL` pointed at a stand-in on your own port (`scripts/demo_instance.sh` is the short form). With workers off the Overview hides Start and Pause: rewrite `config.workers_enabled` in the snapshot in the test browser, and the click still reaches the real API.
 - `npx tsc -b`, `npm run build`, `grep -l frontend tests/*.py` through `pytest-locked.sh`, `npx knip`.
 - Screenshots hold the owner's real data: scratch folder only, never the repo.

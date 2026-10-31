@@ -14,7 +14,7 @@ import {
 } from "./model";
 import { groupQuestions, QuestionCard } from "./questions";
 import type { Detail, Job, JobRequest, Reserved, Run } from "./types";
-import { employerOf, platformName, plural, seconds, shortId, stamp, words } from "./format";
+import { jobWords, platformName, plural, seconds, shortId, stamp, words } from "./format";
 import { Button, Drawer, Monogram, Panel, Select, Skeleton, Textarea } from "./ui/index";
 import { Facts, Notice, StatusPill } from "./worktools";
 
@@ -86,10 +86,11 @@ export function JobPanel({
   const selectedRun = runId || row?.run?.id || runs[0]?.id;
   const job = row?.job;
   const latest = !runId || runId === row?.run?.id;
-  const company = job ? employerOf(job.company, job.url) : "Application record";
+  const words = job ? jobWords(job) : null;
+  const company = words?.company ?? "Application record";
   const actions = row && (!selectedRun || latest) ? <DrawerActions row={row} started={!!selectedRun} asking={!!row.reviews.length} /> : null;
   return (
-    <Drawer open onClose={close} title={company} sub={job?.title || undefined} lead={job ? <Monogram name={company} size="lg" /> : undefined} width={640}>
+    <Drawer open onClose={close} title={company} sub={words ? (words.unread ? [words.role, words.hint].filter(Boolean).join(" · ") : words.role) : undefined} lead={job ? <Monogram name={company} size="lg" /> : undefined} width={640}>
       <div className="ax-stack">
         {job ? (
           <JobSummary row={row!} />

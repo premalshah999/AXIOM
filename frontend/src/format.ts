@@ -118,7 +118,7 @@ export const ROLE_UNREAD = "Role not read yet";
 export function jobWords(j: { company?: string; title?: string; url?: string }) {
   const company = employerOf(j.company, j.url);
   const read = j.title || urlRole(j.url);
-  return { company, role: read || ROLE_UNREAD, unread: !read, hint: !j.company || !read ? linkHost(j.url) : "" };
+  return { company, role: read || ROLE_UNREAD, unread: !read, hint: !j.company || !read ? (linkHost(j.url).split(" · ").pop() ?? "") : "" };
 }
 
 /** Who a job is with, for a list: its company, or for a job saved as a bare link, the employer its address names ("Blossom Health"). */
