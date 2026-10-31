@@ -1667,6 +1667,20 @@ class Adapter:
                 "state": "submission_unknown",
                 "reason": "Submission attempted; the page did not change and it was not submitted again",
             }
+        if self.committed:
+            seen = await self.form.scan()
+            if not [b for b in seen["controls"] if FINAL.search(b["label"])] and not await self.form.application_submit_controls():
+                # The commit went out and no submit control is left: a new acknowledgement confirms it, otherwise the
+                # submission is uncertain. It is never a control failure, and nothing is clicked again.
+                receipt = await self.form.proof()
+                if receipt and receipt != self.before_commit:
+                    receipt["resume_sha256"] = self.run_record["packet"]["resume_sha"]
+                    return {"state": "confirmed", "reason": "Website confirmation captured", "receipt": receipt}
+                return {
+                    "state": "submission_unknown",
+                    "reason": "Submission attempted; no submit control is left on the page and it shows no "
+                    "acknowledgement of this application. Nothing is submitted again",
+                }
         if report is None:
             report = await self.form.verify()
         if report.get("auth_required"):

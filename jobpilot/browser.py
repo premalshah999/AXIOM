@@ -3735,6 +3735,18 @@ class BrowserEngine:
             "receipt": receipt,
         }
 
+    async def no_control_after_commit(self):
+        """No submit control is left on a page after the commit was sent: the click took effect, so this is no control
+        failure and nothing is clicked again. A new acknowledgement confirms it under the usual evidence rules; anything
+        else is an uncertain submission for the receipt check, never a retry."""
+        if confirmed := await self.confirm_post_commit():
+            return confirmed
+        return {
+            "state": "submission_unknown",
+            "reason": "Submission attempted; no submit control is left on the page and it shows no acknowledgement of "
+            "this application. Nothing is submitted again",
+        }
+
     async def record_finish_refusal(self, result):
         detail = {
             "state": result.get("state"),
@@ -3921,7 +3933,12 @@ class BrowserEngine:
                     "recovery_cause": "validation_controls",
                     "recoverable": True,
                 }
-            return {"state": "needs_review", "reason": "Final submit control was not unique"}
+            if not final and self.armed:
+                return await self.no_control_after_commit()
+            return {
+                "state": "needs_review",
+                "reason": "Final submit control was not unique" if final else "No final submit control is on this page",
+            }
         signup = getattr(self.form, "signup_form", None)
         if signup and await signup(final[0]["id"]) is True:
             # Roku: the "Join our Talent Community" sidebar was submitted as if it were the job.
