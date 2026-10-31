@@ -1,6 +1,6 @@
 # AXIOM dashboard design system (2026-10-31)
 
-Read this before touching a page. It holds two stages: the **family** every page is made from, and the **reference pages** (Overview, Jobs and its drawer) to copy. Needs you, Applications, Resumes, Profile, Settings and the sign-in screens are on the new shell and tokens but not yet redesigned; section 7 says what each must become.
+Read this before touching a page. It holds two stages: the **family** every page is made from, and the **reference pages** (Overview, Jobs and its drawer, Resumes and its editor) to copy. Needs you, Applications, Profile, Settings and the sign-in screens are on the new shell and tokens but not yet redesigned; section 8 says what each must become.
 
 ## 1. Rules
 
@@ -80,7 +80,7 @@ Doto (`.ax-read`) is for hero readouts of 56px and up, on Overview only. The Arc
 | Jobs | `jobs` | `pipeline` (labelled Started), `discovered`, `reserved` |
 | Needs you | `needs` | |
 | Applications | `ledger` | `confirmed`, `unconfirmed`, `archive` |
-| Resumes | `resumes` (the editor, `editor`, belongs to it) | |
+| Resumes | `resumes` (`&artifact=<id>` opens that tailored version's preview; the editor, `editor`, belongs to it: `&artifact=<id>`, `&artifact=master` for your copy, neither for a new one) | |
 | Profile | `profile` | `identity`, `experience`, `knowledge` |
 | Settings | `settings` | `connections`, `accounts`, `email`, `discovery`, `system` |
 | Coming soon | `soon-axe`, `soon-network`, `soon-emails` | |
@@ -152,20 +152,30 @@ Copy this structure for Applications and any list.
 - **Views are named:** Started, Discovered, Reserved, each with a count, each saying what it is in one line. "Add job" is a button opening a small dialog (`AddJobDialog` in `jobintake.tsx`, mounted once in `main.tsx`; dispatch `OPEN_JOB_LINK`), never a permanent input.
 - **The drawer** (`JobPanel`): head with a large monogram, employer, role; a meta line (location, platform, fit, Open posting). Then the **status block** (`StatusBlock`, an inset surface): lamp and word, what it means, why, and inside it the question to answer or the next action. Then what stopped it, Proof, History (a line of attempts; click to open one), Final page. Folds: Answers, Activity, This attempt in detail, Raw receipt, Technical details.
 
-## 7. Pages still to redesign, on this standard
+## 7. Resumes: a page that says a state and owns a file viewer (`src/resumes.tsx`, `editor.tsx`, `pdfpages.tsx`, `styles/resumes.css`, `editor.css`, `pdf.css`)
+
+**PDFs stay in the app.** It runs in a native window, where a link that opens a new tab goes nowhere, and the server answers "attachment". `PdfPages` (`fit`: `page` or `width`, with zoom), `PdfThumb` (a real first page, small), `usePdf(url)` (one read per session), `downloadPdf` and `savePdf` (a real file name; the server calls them all resume.pdf). Never `<a target="_blank">` to a PDF.
+
+1. **What employers get** (`Sending`): a picture of the file, one sentence, one control. Off: "Employers get X, exactly as you uploaded it", Set up tailoring. On: a Switch that turns it off at once. Read `policy.resume_id`: that's what the queue sends.
+2. **The guided path** (`SetupPath`): import, compare, approve, turn on, one current step with the one primary. Employers get the PDF until the last step. Turning on (`PUT /api/v2/resumes/policy`, refused without an approved master) always goes through a Dialog saying what changes, and is the owner's click: no agent, test or default turns it on.
+3. **Two columns.** Your resumes (rows with the file's first page, Download, a menu; the resume in use can't be removed, because the queue would have nothing to send; the Dropzone opens a Dialog for its name). Tailored versions: a Table of job, how many bullets were reworded, and what happened: **Sent Oct 7, Maybe sent, Never sent** come from the runs that pinned that version (`sent`), so never say a draft "was never used" from the policy alone.
+4. **The preview panel** (`VersionPreview`, a Drawer): what happened to this version first, then a fold of what it reworded, then the PDF filling the rest. ← → and the footer step through the list; the address follows.
+
+**The editor** hides the shell's header and takes the region: a slim bar (back, whose document this is, build status, Discard when changed, Download, the one primary), the form at the left, the page on an inset well at the right. Entries are rows that open; bullets grow with their text; reordering and hiding appear on pointing (always, on touch). Source shows what the controls produce now, in full. Your copy opens with the two documents side by side and the form closed. Under 960px the form and the page take turns. Each address is its own load (`EditorLoader` is keyed by it): never reuse the last answer for a new address.
+
+## 8. Pages still to redesign, on this standard
 
 Their brief is in UI3_BRIEF.md. What each must do with the family above:
 
 - **Needs you** (`needs.tsx`, `questions.tsx`, the `nq-` styles in `work.css`): an inbox. Group the same question across jobs ("Supervisor phone, 6 applications") with MonogramStack; list and answer pane, or better. `QuestionCard` already handles every kind of answer, including uploads through Dropzone; Enter to send and move on, "skip", "not applicable to me", progress, what answering unblocks. Questions that text can't answer look different and offer to drop the job.
 - **Applications** (`ledger.tsx`, `archive.tsx`): copy Jobs. A confident header using `TopLine` (total, today), evidence words from `evidenceLabel`, Listbox for evidence, Export as `TopActions`, `footer` for the pager; replace the remaining `Pagination` after the table.
-- **Resumes** (`ResumesView` in `setup.tsx`, `features.tsx`, `editor.tsx`, `pdfpages.tsx`): lead with what is being sent and whether tailoring is on, in one sentence and one control (`application_resume_policy` in the snapshot). Guided path for setting it up. Do not turn tailoring on yourself. Library cards or rows with preview and download; the Dropzone is already wired for upload. Tailored versions open in a preview panel. Editor: a full-height workspace with a slim bar; it currently still shows the shell's page header (`main.view-editor`, `.ax-scroll.is-fixed`). Test every path.
 - **Profile** (`profile.tsx`, `knowledge.tsx`, `qform.tsx`): section navigation within the page, a two-column grid for related fields, cards that open to edit, a sticky save bar only with changes (`ax-savebar`), progress cards.
 - **Settings** (`connections.tsx`, `autonomy.tsx`, `mail.tsx`, `discovery.tsx`, `setup.tsx`): group by what people recognise; provider cards with status, masked key and Test; internals behind an Advanced fold. Fix the mailbox showing "connected" beside "Mailbox operation failed".
 - **Sign-in, sign-up, reset, setup guide** (`account.tsx`, `onboarding.tsx`, `styles/onboarding.css`, `styles/setup.css`), **coming-soon** (`ComingSoon.tsx`), **error boundary** (`ErrorBoundary.tsx`), **404**: the same family; the first thing anyone sees.
 
 When a page moves off `.ax-grid`, `.nq-*` and the like, delete what it leaves behind. Keep this file true.
 
-## 8. Checking your work
+## 9. Checking your work
 
 - With a vite dev server from your worktree (`npx vite --host 127.0.0.1 --port <free>`, proxying `/api` to 8080) and `scratchpad/qa/live.py` (`QA_BASE`), which aborts non-GET requests. A new read-only endpoint isn't on production yet: fulfil it in the test browser from real SQL (`q.sh`).
 - Check every page in both themes at 1440×900 and 390×844, and at 1024, 1280 and 1920.
