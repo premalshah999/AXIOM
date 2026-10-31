@@ -744,3 +744,22 @@ def test_a_month_box_that_says_year_in_its_question_takes_the_month_only(service
     assert answer.value == expected and answer.evidence_ids == ["profile:education.0.end"]
     both = resolver.local({**field("Graduation month and year"), "type": "text", "options": []})
     assert both is None or "/" in both.value or "-" in both.value, "a field asking for both keeps the whole date"
+
+
+def test_a_quarter_menu_states_its_year_once(service):
+    # American Express on Oracle (2026-10-31): "April - June 2026" could not be read as a range, so every choice needed an
+    # approved answer and the run stopped on its expected graduation date.
+    resolver = Resolver(
+        Profile(education=[{"school": "Fixture", "degree": "MS", "end": "2026-05"}]), service.db, service.config
+    )
+    held = "April - June 2026"
+    f = {
+        **field("What is your expected graduation date:"),
+        "type": "combobox",
+        "options": ["January - March 2026", held, "April - June 2027", "I am currently not attending school"],
+    }
+    assert resolver.graduation_choice_valid(f, held) is True
+    assert resolver.graduation_choice_valid(f, "January - March 2026") is False
+    assert resolver.graduation_choice_valid(f, "April - June 2027") is False
+    assert resolver.graduation_choice_valid(f, "I am currently not attending school") is None
+    assert resolver.local(f).value == held

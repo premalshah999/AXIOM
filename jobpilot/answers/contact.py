@@ -26,6 +26,31 @@ def address_location_option(options, address):
     return unique[0] if len(unique) == 1 else None
 
 
+# "USA (other than New York)", "United States (excluding California)".
+REGION_EXCLUDING = re.compile(r"^(?P<region>.+?)\s*\((?:other than|outside(?: of)?|excluding|except)\s+(?P<excluded>.+)\)\s*$", re.I)
+
+
+def address_region_option(options, address):
+    """The address's own region in a closed menu of regions rather than cities ("New York", "USA (other than New York)",
+    "Europe", "Other": Atto Trading on Greenhouse, 2026-10-31). Its city or state named outright comes first."""
+    from ..widgets import _alias_group, norm
+
+    if not address.country:
+        return None
+    own = {norm(address.city), norm(address.state), *_alias_group(address.state)} - {""}
+    named = [option for option in options if norm(option) in own]
+    if named:
+        return named[0] if len(named) == 1 else None
+    country = _alias_group(address.country)
+    held = []
+    for option in options:
+        excluding = REGION_EXCLUDING.match(option)
+        region, excluded = (excluding["region"], excluding["excluded"]) if excluding else (option, "")
+        if norm(region) in country and norm(excluded) not in own:
+            held.append(option)
+    return held[0] if len(held) == 1 else None
+
+
 CONTACT = {
     "name": {
         "name",
