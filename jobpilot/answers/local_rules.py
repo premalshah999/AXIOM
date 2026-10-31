@@ -50,6 +50,7 @@ from .sources import BLANK_OPTION
 from .sources import DEAD_END
 from .sources import UNOFFERED_SOURCE
 from .sources import follow_up_channel
+from .text import FROM_RECORD
 from .text import first_matching
 from .text import answer_key
 from .text import normalize
@@ -184,6 +185,16 @@ class LocalRulesMixin:
         if re.fullmatch(
             r"(?:are you (?:a |still a |still )?)?(?:still student|current student|currently (?:a )?student|still (?:in school|studying)|currently enrolled)(?: at .+)?",
             label,
+        ) or (
+            # "Are you currently enrolled in a degree seeking program?" said Yes 28 times and No 13 for one applicant
+            # whose last degree ended in May (Cisco, Applied Materials 2026-10-17..24). A plain present-tense question
+            # is answered from the education rows; one that also asks about a past or planned degree is not.
+            re.match(r"are you (?:currently |presently |now )?(?:enrolled|pursuing|attending|studying|in school)\b", label)
+            and not re.search(
+                r"\b(?:or (?:have|had|received|completed|recently|a recent|will|plan)|will|plan\w*|intend\w*|expect\w*|"
+                r"anticipat\w*|if so|received|complet\w*|graduat\w*|recent\w*|previous\w*|former|spouse|member)\b",
+                label,
+            )
         ):
             row = (f.get("group") or "") + " " + (f.get("section") or "")
             m = re.search(r"education\s*(\d+)", row, re.I)
@@ -197,7 +208,7 @@ class LocalRulesMixin:
                     f,
                     value,
                     [f"profile:education.{i}.end" for i, _ in dated],
-                    "Confirmed degree end dates are before this application",
+                    f"Confirmed degree end dates are before this application ({FROM_RECORD})",
                 )
         # Combine the actual eligibility propositions before a sponsorship keyword
         # can answer the whole question with an opposite-polarity No.
