@@ -725,7 +725,7 @@ class Adapter:
     def in_assessment(self):
         """The tab left the application for the tax-credit questionnaire its launcher opened. Any page of this ATS is the
         application itself, even under another host of it (Workday's myworkdaysite.com)."""
-        from ..ats import detect
+        from ..ats import custom_like, detect
 
         form = getattr(getattr(self, "e", None), "form", None)
         host = getattr(self, "assessment_from", "") or getattr(form, "assessment_origin", "")
@@ -734,7 +734,7 @@ class Adapter:
         url = self.page.url
         if (urlsplit(url).hostname or "") == host:
             return False
-        return self.id == "custom" or detect(url).id != self.id
+        return custom_like(self.id) or detect(url).id != self.id
 
     def assessment_launcher(self, obs, again=False):
         """The control that opens the tax-credit questionnaire this application requires: once per run, and once more

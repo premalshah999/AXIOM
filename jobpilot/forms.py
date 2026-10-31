@@ -1236,7 +1236,7 @@ def icims_receipt(job_url, frame_url, body):
 def employer_greenhouse_page_owned(page_url, job):
     """A Greenhouse job's page is Greenhouse-hosted or on the job's own registrable domain."""
     from .accounts import registrable
-    from .ats import detect
+    from .ats import custom_like, detect
 
     job_url = str((job or {}).get("url") or "")
     job_parts = urlsplit(job_url)
@@ -1265,7 +1265,7 @@ def employer_greenhouse_page_owned(page_url, job):
                     return False
             return bool(board) and board == job_parts.path.strip("/").split("/")[0]
         return True
-    if detect(page_url).id != "custom":
+    if not custom_like(detect(page_url).id):
         return False
     return registrable(page_host) == registrable(job_host)
 
@@ -1601,7 +1601,7 @@ class FormSession:
     def on_questionnaire(self):
         """The page is the tax-credit questionnaire a launcher opened: another host than the application's, and not
         another host of the same ATS."""
-        from .ats import detect
+        from .ats import custom_like, detect
 
         origin = getattr(self, "assessment_origin", "")
         try:
@@ -1612,7 +1612,7 @@ class FormSession:
         if not origin or not host or host == origin:
             return False
         application = detect("https://" + origin + "/").id
-        return application == "custom" or detect(url).id != application
+        return custom_like(application) or detect(url).id != application
 
     async def return_from_questionnaire(self):
         """Back to the application once the questionnaire is finished: its tab, or the address it replaced."""
