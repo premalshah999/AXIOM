@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from ..storage.mode import current as database_choice
 from . import migrate, pg, release, services, supervisor
@@ -264,6 +265,37 @@ def cmd_psql(cfg, args):
     )
 
 
+def cmd_backup(cfg, args):
+    """A copy of the database outside the data folder: `axiom backup [file]`. pg_dump reads one consistent snapshot, so the
+    app keeps running. The file is written beside its name and renamed once pg_restore has read it back."""
+    bin_dir = pg.find_bin(cfg)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    target = Path(args.file).expanduser() if args.file else Path.home() / "axiom-backups" / f"axiom-{stamp}.dump"
+    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    partial = target.with_name(target.name + ".partial")
+    remote = pg.remote(cfg)
+    env = pg._client_env(cfg)
+    try:
+        with open(os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as out:
+            done = subprocess.run(
+                [str(bin_dir / "pg_dump"), *([] if remote else pg.connection(cfg)), "-Fc", "-Z", "6"],
+                stdout=out, stderr=subprocess.PIPE, env=env, check=False,
+            )
+        if done.returncode:
+            raise NativeError("pg_dump: " + done.stderr.decode(errors="replace").strip()[-400:])
+        listed = subprocess.run(
+            [str(bin_dir / "pg_restore"), "-l", str(partial)], capture_output=True, text=True, env=env, check=False
+        )
+        tables = sum(" TABLE DATA " in line for line in listed.stdout.splitlines())
+        if listed.returncode or not tables:
+            raise NativeError("The backup could not be read back: " + listed.stderr.strip()[-400:])
+        os.replace(partial, target)
+    finally:
+        partial.unlink(missing_ok=True)
+    print(f"{target}  {target.stat().st_size / 1e9:.2f} GB, {tables} tables")
+    return 0
+
+
 def cmd_jobpilot(cfg, args):
     """The app's own commands, with the environment the running app has: `axiom jobpilot token`, `... verify`."""
     found = release.ensure(prepare(cfg))
@@ -450,6 +482,8 @@ def parser():
     logs.add_argument("-n", "--lines", type=int, default=100)
     logs.add_argument("-f", "--follow", action="store_true")
     sub.add_parser("psql", help="Open psql on the native database")
+    backup = sub.add_parser("backup", help="Copy the database to a file; the app keeps running")
+    backup.add_argument("file", nargs="?", help="Default: ~/axiom-backups/axiom-<date>.dump")
     sub.add_parser("jobpilot", help="Run an app command here, for example: axiom jobpilot token")
     hold = sub.add_parser("hold", help="Stop or allow new applications (execution_v2_deployment_hold)")
     hold.add_argument("state", choices=["on", "off"])
@@ -475,6 +509,7 @@ COMMANDS = {
     "restart": cmd_restart,
     "logs": cmd_logs,
     "psql": cmd_psql,
+    "backup": cmd_backup,
     "jobpilot": cmd_jobpilot,
     "hold": cmd_hold,
     "deploy": cmd_deploy,
