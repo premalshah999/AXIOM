@@ -4203,9 +4203,12 @@ class BrowserEngine:
                     self.armed = False  # The employer explicitly declined this incomplete form.
                     self.validation_refusal = rejection
                     await self.release_reservation()
+                    # Oracle's "You have 2 issues that need to be fixed" lists the items; the owned page opens them.
+                    issues = rejection.get("issues") or []
                     return {
                         "state": "waiting_browser",
-                        "reason": "Employer requested field corrections; automatic repair could not complete them",
+                        "reason": "Employer requested field corrections; automatic repair could not complete them"
+                        + (f" (still to fix: {'; '.join(issues[:4])})" if issues else ""),
                         "blocker_type": "validation",
                         "recovery_cause": "validation_controls",
                         "receipt": rejection,
