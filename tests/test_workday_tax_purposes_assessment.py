@@ -60,3 +60,15 @@ async def test_a_server_error_still_restarts_the_draft():
     except RuntimeError:
         pass
     assert events == ["browser_recovery"] and eng.workday_error_restarts == 1
+
+
+async def test_a_busy_renderer_that_cannot_be_read_is_no_verdict():
+    # A 3 s body read timing out at the top of a Workday step ended a run as a control failure (2026-10-29).
+    class Busy(Body):
+        async def inner_text(self, timeout=0):
+            raise TimeoutError("Locator.inner_text: Timeout 3000ms exceeded.")
+
+    eng = engine("")
+    eng.page = Busy("")
+    assert await BrowserEngine.recover_workday_error(eng) is False
+    assert eng.result is None

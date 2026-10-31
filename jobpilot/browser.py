@@ -3209,7 +3209,13 @@ class BrowserEngine:
         """Restart this job's draft after a Workday session/server error, before submit."""
         if self.job.get("ats") != "workday" or self.armed:
             return False
-        text = await self.page.locator("body").inner_text(timeout=3000)
+        try:
+            text = await self.page.locator("body").inner_text(timeout=3000)
+        except (PlaywrightError, TimeoutError):
+            # A read-only look at a renderer that is busy (a tab re-rendering, throttled in the background) is no
+            # verdict: this check runs at the top of every Workday step, and a timeout here ended a run as a control
+            # failure (2026-10-29). The next step reads the page again.
+            return False
         if not WORKDAY_FAILURE.search(text):
             if not (page_error := WORKDAY_PAGE_ERROR.search(text)):
                 return False
