@@ -21,15 +21,28 @@ NOT_A_SOURCE = re.compile(
 )
 
 
+# An offered source that names the applicant's own employment relationship with the employer. NOT_A_SOURCE is broader (it
+# is "cannot be claimed truthfully"): agencies, recruiters, referrals, campus events, alumni and career fairs are ways in for
+# an outside applicant even when none is true for this one, so they do not make a posting internal-only.
+INTERNAL_CHANNEL = re.compile(
+    r"\binternal\b|\bintranet\b|displaced|\bloa\b|leave of absence|warn period|\brehire|"
+    r"\b(?:current|existing|former|prior|returning) (?:employee|associate|worker|colleague|team member|contractor)s?\b|"
+    r"^\W*(?:employee|associate|worker|colleague|team member|contractor|consultant)s?\W*(?:\(.*\))?\W*$",
+    re.I,
+)
+# A menu's own "Select One" row is not a source.
+PLACEHOLDER = re.compile(r"^\W*(?:please )?(?:select|choose)\b|^[\W_]*$", re.I)
+
+
 def internal_channels_only(options):
-    """True when every offered source is an internal channel (employee, referral, agency, displaced...) and none is an
-    "Other" choice: the posting is then closed to external applicants. Thrivent's list (2026-10-14) was "Employee/Advisor
-    Referral" and "Other/Non-Referral": the second names a plain external applicant, but "refer" made it look internal
-    and the job was closed."""
-    offered = [str(o) for o in options or [] if str(o).strip()]
-    return bool(offered) and all(NOT_A_SOURCE.search(o) for o in offered) and not any(
-        re.match(r"\s*other\b", o, re.I) for o in offered
-    )
+    """True when every offered source is an internal channel (displaced or on-leave employees, current or former
+    employees) and none is a way in for an outside applicant: the posting is then closed to external applicants. Bank of
+    America's employee site offers only "Displaced (US)" and "LOA - Job Search (US)". The test used to be NOT_A_SOURCE,
+    which also reads agency, recruiter, referral, campus and event choices as internal: Thrivent's "Employee/Advisor
+    Referral" and "Other/Non-Referral" (2026-10-14), GDIT's "Employee Referral" and GE Vernova's "Agency / Search
+    Firm", "Current Employee", "GE Vernova Recruiter" were closed although each offers an outside applicant a way in."""
+    offered = [o for o in (str(o).strip() for o in options or []) if o and not PLACEHOLDER.match(o)]
+    return bool(offered) and all(INTERNAL_CHANNEL.search(o) for o in offered)
 
 
 # A parent source menu's follow-up asks which one: "Social Media Source", "Job Board Source". It names the channel the
