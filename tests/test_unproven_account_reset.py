@@ -144,15 +144,19 @@ def test_an_unanswered_reset_is_not_proof_that_the_account_exists(service):
 
 @pytest.mark.parametrize("record,bounced", [
     # Simplify (2026-10-29): /auth/register opened for the one registration was turned back to sign-in at once.
-    ({"state": "reset_requested", "reset_requested_at": time.time() - 1200, "reset_submitted_at": CONFIRMED}, False),
+    ({"state": "reset_requested", "reset_age": 1200, "reset_submitted_at": CONFIRMED}, False),
     # The same page for an account that is proven stays a sign-in.
     ({"state": "authenticated", "confirmed_at": STAMP}, True),
     # The reset is still awaiting delivery: nothing says the account is absent.
-    ({"state": "reset_requested", "reset_requested_at": time.time() - 60, "reset_submitted_at": CONFIRMED}, True),
+    ({"state": "reset_requested", "reset_age": 60, "reset_submitted_at": CONFIRMED}, True),
 ])
 async def test_the_registration_after_an_unanswered_reset_is_not_turned_back_to_sign_in(service, record, bounced):
     obs = observation(URL)
     value = adapter(service, obs)
+    record = dict(record)
+    # The age is applied here, not at collection: the suite can take longer than the delivery window to reach this test.
+    if (age := record.pop("reset_age", None)) is not None:
+        record["reset_requested_at"] = time.time() - age
     value.accounts.mark(URL, record.pop("state"), LOGIN, **record)
     value.switch = AsyncMock(return_value=True)
     value.auth_button = lambda *a: None  # the form is not driven here; only the sign-in switch is under test
