@@ -558,10 +558,22 @@
 /* ---------- narrower plates: the coming-soon stations give up room, so the six pages keep their names ---------- */
 @media (max-width: 1339px) {
   :root {
+    --soon: 0.9;
+  }
+  .ax-stations {
+    grid-template-columns: repeat(6, minmax(0, 1fr)) repeat(3, minmax(0, 0.9fr));
+  }
+}
+@media (max-width: 1279px) {
+  :root {
     --soon: 0.72;
   }
   .ax-stations {
     grid-template-columns: repeat(6, minmax(0, 1fr)) repeat(3, minmax(0, 0.72fr));
+  }
+  /* "ai interviewer" no longer fits under "axe"; it stays in the station's tooltip and on its page. */
+  .ax-st.is-soon .ax-st-val {
+    visibility: hidden;
   }
 }
 @media (max-width: 1139px) {
@@ -576,10 +588,6 @@
   }
   .ax-st.is-soon .ax-st-name {
     font-stretch: 100%;
-  }
-  /* "ai interviewer" no longer fits under "axe"; it stays in the station's tooltip and on its page. */
-  .ax-st.is-soon .ax-st-val {
-    visibility: hidden;
   }
 }
 

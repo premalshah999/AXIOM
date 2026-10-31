@@ -42,7 +42,7 @@ Bundled, Latin subsets only, 118 KB: Doto `full` (6 KB; has ROND and wght), Arch
 - `html`, `body` and `#root` are the viewport and `body` clips: **the document never scrolls.** Screens outside the shell (sign-in, setup guide) wrap themselves in `.ax-screen`.
 - `.ax-app` is a column of the top plate and main. Main is a column: page title, one-line banners, then **one scroll region** (`.ax-scroll`).
 - **The top plate** is the rail (wordmark, theme switch) and the **tuning scale**: nine stations and a needle that moves to the current page. Each station reads something live under its name: Overview's state word, the job and confirmed counts, Needs you's count with its lamp, the owner's name. Search (`⌘K`) and the account menu sit in the corner the scale leaves free.
-- Coming soon (Axe, Network, Emails) are the last three stations, under a "coming soon" band. Under 1340px they narrow to 0.72 of a page's station; under 1140px Axe drops its "ai interviewer" line.
+- Coming soon (Axe, Network, Emails) are the last three stations, under a "coming soon" band. Under 1340px they narrow to 0.9 of a page's station, and under 1280px to 0.72, where Axe drops its "ai interviewer" line.
 - **Phones (under 900px):** the scale becomes a strip along the bottom with real names at full size, sliding under a fixed needle; tapping a station goes there and centres it. This replaces the old slide-over drawer. Search, the theme switch and the account are in the top bar.
 - **The page title** is outside the scroll region, in engraved Archivo. Overview has none: its panel is its title. A page may add one or two things beside it with `<TopActions>`.
 - Lists use the page width; Profile and Settings keep a form's width.
