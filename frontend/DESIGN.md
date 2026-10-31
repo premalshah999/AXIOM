@@ -14,6 +14,7 @@ Read this before touching a page. It holds two stages: the **family** every page
 - **Stat tiles only where a number is really the point of the page.** No row of four out of habit.
 - **At most one primary button per view.**
 - **Every state considered:** loading (Skeleton), empty (Empty, saying what will appear and offering the next action), error (LoadError or ErrorLine, with retry), disabled, and long names (ellipsis plus a title).
+- **Files and links must work in the native window.** A download is a plain link to a URL the app serves (`<a href="/api/..." download>` over a `Content-Disposition: attachment` response, as for a resume, a log or the Applications export), never a Blob made in the page: a webview may not save those. A link to another site is `<a target="_blank" rel="noreferrer noopener">` with an `http(s)` address (`External`, or the `ax-btn ax-lead` link in Applications): the window hands it to the system browser, and the label says so for a screen reader.
 - **No document scroll; no horizontal page scroll at 390px; no layout shift on poll.** Motion is CSS only, fast, off under `prefers-reduced-motion` (`base.css` handles it).
 - **Colours only in `tokens.css`** (`tests/test_identity_contrast.py` fails otherwise, and measures every pair AA in both themes). Fonts stay bundled. Never fetch logos or anything else from a third party: it would leak the job list.
 
@@ -136,7 +137,7 @@ Data is real: `GET /api/funnel` (`pipeline.funnel`, read-only, all time: discove
 
 ## 6. Jobs: the reference for a list page (`src/jobs.tsx`, `jobboard.tsx`, `reserved.tsx`, `jobdetail.tsx`)
 
-Copy this structure for Applications and any list.
+Applications (6b) copies it; so should any list.
 
 ```tsx
 <div className="ax-page ax-page-fill">
@@ -199,12 +200,22 @@ Copy this for Settings. The page is a section list at the left and **one section
 - **Questionnaires are progress cards**: state, what it is for, which sections are still open, a meter, one button (Start, Continue, Review).
 - **Permissions** are plain sentences with a switch, grouped (Applying, Agreements and consents, Your privacy), with the count that are on.
 
+## 6d. Applications: the reference for a ledger (`src/ledger.tsx`, `archive.tsx`, `styles/applications.css`)
+
+The proof that it works: every row says **when it was sent and what proved it**, and the receipt is one click away. It is Jobs' structure with these differences.
+
+- **Header:** `TopLine` reads "3,060 confirmed · 72 today" (mono figures, each a quiet link: the first clears the filters, the second sets Sent to Today; "today" is `confirmedToday`, as on Overview) and, only when some exist, "7 unconfirmed" with a lit dot, opening that tab. Each tab has its own one-line meaning in `TopLine`. `TopActions` holds **Export CSV** (secondary: no primary here).
+- **Tabs** are the three named views with counts: Confirmed, Unconfirmed, Archive. `LedgerView` polls the ledger and the archive once, so the counts show before a tab is opened, and hands each list its data.
+- **Rows** (Confirmed): JobCell, **Proof** (icon and words from `evidenceLabel`, with a Tooltip saying what it means: Confirmation page, Employer email, both, Existing application, **No receipt on file**: confirmed with an empty receipt, because the applicant recorded it or the platform answered "created"), **Sent** (the day in words, the clock in figures; full time and age in the title), Platform (wide only), then two words that become buttons when the row is pointed at: **Receipt** (opens the drawer, which leads with Confirmed and its Proof; "Details" when there is no receipt) and **Posting** (a real link to the employer's page, in the system browser). Under 860px the Receipt word goes (the row is the receipt), under 600px the stacked JobCell carries proof and time.
+- **Filters:** search, then Proof, Sent (any time, today, last 7, last 30 days) and Platform as Listboxes whose options carry counts under every other filter, so a choice shows exactly that many rows. "Sent" counts what AXIOM sent, so the employer's own "you already applied" notices fall away. Clear appears with any filter. Filters are `useDraft`, so they survive a tab switch; `route.q` opens the list searched. Search reads what the row shows: a job saved without a company or title is found by its link.
+- **Export** is a link to `GET /api/successful-applications.csv` with the same filters (`evidence`, `ats`, `since`, `q`), served with `Content-Disposition: attachment`: the app saves it, in a tab or in the native window. The button says how many rows ("Export 103 as CSV") once filtered. The server applies the same filters and words (`jobpilot/api/routes/state.py`); a test keeps them equal.
+- **Unconfirmed** is the server's `group=unconfirmed` list with the row action "Confirm as submitted" and bulk actions. **Archive** keeps the outcome, the reason, and a Log download link; "Archive earlier failures" asks first.
+
 ## 8. Pages still to redesign, on this standard
 
 Their brief is in UI3_BRIEF.md. What each must do with the family above:
 
 - **Needs you** (`needs.tsx`, `questions.tsx`, the `nq-` styles in `work.css`): an inbox. Group the same question across jobs ("Supervisor phone, 6 applications") with MonogramStack; list and answer pane, or better. `QuestionCard` already handles every kind of answer, including uploads through Dropzone; Enter to send and move on, "skip", "not applicable to me", progress, what answering unblocks. Questions that text can't answer look different and offer to drop the job.
-- **Applications** (`ledger.tsx`, `archive.tsx`): copy Jobs. A confident header using `TopLine` (total, today), evidence words from `evidenceLabel`, Listbox for evidence, Export as `TopActions`, `footer` for the pager; replace the remaining `Pagination` after the table.
 - **Profile** (`profile.tsx`, `knowledge.tsx`, `qform.tsx`): section navigation within the page, a two-column grid for related fields, cards that open to edit, a sticky save bar only with changes (`ax-savebar`), progress cards.
 - **Settings**: done, see section 6b.
 - **Sign-in, sign-up, reset, setup guide** (`account.tsx`, `onboarding.tsx`, `styles/onboarding.css`, `styles/setup.css`), **coming-soon** (`ComingSoon.tsx`), **error boundary** (`ErrorBoundary.tsx`), **404**: the same family; the first thing anyone sees.

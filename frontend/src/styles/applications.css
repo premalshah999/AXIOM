@@ -1,0 +1,105 @@
+/* Applications (ledger.tsx, archive.tsx): the header line, the proof in a row, the filters. Everything else is the family's. */
+
+/* The headline under the title: the number of confirmed applications and how many today, each opening the list behind it. */
+.ap-line {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0 var(--space-2);
+}
+.ap-line b {
+  color: var(--ink);
+  font-family: var(--font-data);
+  font-weight: 500;
+}
+.ap-line i {
+  color: var(--ink-3);
+  font-style: normal;
+}
+.ap-line.is-wait {
+  color: var(--ink-3);
+}
+/* Submissions without a receipt are the one thing here that needs a look: they get the lamp. */
+.ap-flag::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  vertical-align: 1px;
+  border-radius: 50%;
+  background: var(--led);
+}
+
+/* What proved the application: the kind of evidence as a small icon, then its name. */
+.ap-proof {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+.ap-proof svg {
+  flex: none;
+  color: var(--ink-3);
+}
+.ap-proof.is-none {
+  color: var(--ink-2);
+}
+
+/* When: the day in words, the clock in figures. */
+.ap-sent {
+  font-family: var(--font-text);
+  font-size: var(--text-body);
+  white-space: nowrap;
+}
+.ap-sent span {
+  margin-left: 2px;
+  color: var(--ink-2);
+  font-family: var(--font-data);
+  font-size: var(--text-data);
+}
+
+/* A row's two quiet actions: the receipt (opens the drawer) and the posting (opens the system browser). */
+.ap-act {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+/* At rest they are secondary words, so a page of them stays calm; pointing at the row lights them. */
+.ap-act .ax-lead:not(:hover):not(:focus-visible) {
+  color: var(--ink-2);
+}
+tr:hover .ap-act .ax-lead {
+  color: var(--btn-ink);
+}
+
+/* The filters sit beside the search; on a phone they slide sideways under it, like the chips do. */
+.ap-filters {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+@media (max-width: 899px) {
+  .ap-filters {
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .ap-filters::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Beside the filters the search gives way before the toolbar wraps. */
+.ap-toolbar .ax-search {
+  flex: 1 1 160px;
+  max-width: 280px;
+}
+/* In a narrower table the row's own click is the receipt: only the posting stays as a word. */
+@container ax-table (max-width: 859px) {
+  .ap-receipt {
+    display: none;
+  }
+}

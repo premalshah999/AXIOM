@@ -90,7 +90,8 @@ exercised through the HTTP test client; every router now has an HTTP test module
 | GET | `/api/agents` | Which model providers and helper switches are available (never keys) | – | summary | ✔ |
 | PUT | `/api/agents` | Choose providers per role, switch helpers | `AgentSettings` | summary; 422 on a bad choice | ✔ |
 | GET | `/api/funnel` | All time, for Overview: jobs discovered, eligible and applied to, and applied per platform (confirmed is the ledger below) | – | `{discovered, eligible, applied, platforms:{ats: n}}` | ✔ |
-| GET | `/api/successful-applications` | The ledger: one confirmed run per job | – | `{applications:[{job_id, run_id, title, company, url, applied_at, ats, website_confirmed, email_confirmed, existing_application}]}` | ✔ |
+| GET | `/api/successful-applications` | The ledger: one confirmed run per job; `proof` says what proved it (`page`, `both`, `email`, `existing`, `platform`, `final_page`, `dashboard`, `applicant`, `none`) | – | `{applications:[{job_id, run_id, title, company, url, applied_at, ats, website_confirmed, email_confirmed, existing_application, proof}]}` | ✔ |
+| GET | `/api/successful-applications.csv` | The ledger as a spreadsheet download (attachment); `?evidence=` a proof id, `&ats=`, `&since=` an instant (what AXIOM sent from then), `&q=` | – | CSV | ✔ (link) |
 | GET | `/api/archive` | Archived failed applications | – | `{applications, log_bytes}` | ✔ |
 | POST | `/api/archive/failed` | Archive all failed applications | – | summary | ✔ |
 | GET | `/api/archive/{job_id}/log` | Download one archived run log | – | gzip JSON lines | ✔ (link) |
@@ -364,7 +365,7 @@ tests found 94 of the 105 remaining routes called over HTTP (measured 2026-10-20
 | `health.py` | `/healthz`, `/api/runtime-health` |
 | `session.py` | `/api/login`, `/api/logout` |
 | `owner.py` | `/api/account`, `/api/account/{signup,login,reset,password,recovery-codes,sessions}`, `/api/onboarding` (logic and models in `owner_account.py`; cookie and throttle in `api/sessions.py`) |
-| `state.py` | `/api/snapshot` (builder and cache in `api/snapshot.py`), `/api/successful-applications` |
+| `state.py` | `/api/snapshot` (builder and cache in `api/snapshot.py`), `/api/successful-applications` and `.csv` |
 | `archive.py` | `/api/archive`, `/api/archive/failed`, `/api/archive/{job_id}/log` |
 | `profile.py` | `/api/profile` (GET, PUT), `/api/profile/{organize,extract}` |
 | `resumes.py` | `/api/resumes` (GET, POST), `/api/resumes/{id}/download`, `DELETE /api/resumes/{id}` |
