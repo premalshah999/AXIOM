@@ -327,8 +327,10 @@ class HistoryRulesMixin:
                 # Year box ("05/2026" became "05/2"), and refuses a date missing any part ("Please fill in all date
                 # fields", Schwab 2026-10-21). Each part gets its own component, all parts or none.
                 part = re.search(r"graduation (?:date )?(year|month|day)\b", label)
-                if part and part[1] == "month" and re.search(r"year", label):
-                    part = None  # "Graduation month/year" asks for both.
+                if part and part[1] == "month" and re.search(r"month\W*(?:and\W*|or\W*)?year", label):
+                    # "Graduation month/year" asks for both. A month box whose question merely says "year" ("What is
+                    # your expected year of graduation? Month", Oracle 2026-10-29) is the month part.
+                    part = None
                 evidence = [source]
                 if part:
                     whole = self.graduation_parts(f, entry.end, part[1])

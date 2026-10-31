@@ -111,6 +111,15 @@ async def read_combos(frame, dom_ids):
 def component_value(label, value):
     if month_component(label) and re.fullmatch(r"0?[1-9]|1[0-2]", str(value)):
         return month_name[int(value)]
+    if month_component(label) and re.search(r"\d{4}", str(value)):
+        # A whole month-and-year answer ("05/2026") typed into a Month box filtered every month out (Oracle
+        # 2026-10-29); the month is its part.
+        try:
+            month = int(widgets.parse_date(value)[0] or 0)
+        except (ValueError, TypeError):
+            month = 0
+        if 1 <= month <= 12:
+            return month_name[month]
     return value
 
 
