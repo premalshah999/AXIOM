@@ -1028,11 +1028,17 @@ class Adapter:
         if (handle.get("kind") != "password_reset" or not handle.get("source_run_id")
                 or not handle.get("challenge_id") or not self.accounts.store):
             return False
-        from ..db import Run
+        from ..db import MailChallenge, Run
 
         with self.service.db.session() as session:
             source = session.get(Run, handle["source_run_id"])
-            return bool(source and source.job_id == self.job["id"])
+            if not (source and source.job_id == self.job["id"]):
+                return False
+            # The handle is read from the packet this run started with. Workday's own driver consumes a matched reset
+            # before the adapter drives (Accenture, Allegion 2026-10-30/31: the reset arrived, the password was saved
+            # and the sign-in succeeded), and this still armed a second password_reset wait that no mail could answer.
+            row = session.get(MailChallenge, handle["challenge_id"])
+            return bool(row and row.state in {"pending", "matched"})
 
     def matched_link_waiting(self):
         """This run was released by an emailed sign-in link that has arrived and not been opened yet.
