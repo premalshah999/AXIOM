@@ -241,6 +241,8 @@ export type ApplicationWorkerAssignment = {
 export type ApplicationWorkers = {
   normal_workers: number;
   specialist_workers: number;
+  // Custom career-site applications run on their own slot (a third lane); absent on older servers.
+  custom_workers?: number;
   assignments: ApplicationWorkerAssignment[];
 };
 export type AutopilotRuntime = {

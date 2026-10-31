@@ -66,7 +66,7 @@ export function BatchView() {
 function useWorking(mail: MailStatus | null, workers?: ApplicationWorkers) {
   const { snapshot, rows, counts, openJob } = useWorkspace();
   const runtimeWorkers = snapshot.autopilot_runtime?.application_workers || workers;
-  const lanes = runtimeWorkers as (ApplicationWorkers & { custom_workers?: number }) | undefined;
+  const lanes = runtimeWorkers;
   const limit = lanes
     ? lanes.normal_workers + lanes.specialist_workers + (lanes.custom_workers ?? 0)
     : Math.max(0, snapshot.config.workers || 0);

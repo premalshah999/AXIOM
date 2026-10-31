@@ -324,7 +324,7 @@ function SystemStatus() {
   const pool = health.data?.application_workers || rt.application_workers;
   const slots = pool?.assignments || [];
   const busy = slots.filter((s) => s.run_id || s.job_id).length;
-  const total = pool ? pool.normal_workers + pool.specialist_workers : 0;
+  const total = pool ? pool.normal_workers + pool.specialist_workers + (pool.custom_workers ?? 0) : 0;
   const now = automation(rt, !!snapshot.control?.paused, sched, total);
   const waiting = (Array.isArray(conn.data?.fields) ? conn.data!.fields : []).filter((f) => f.pending);
   const restartFor = sched.degraded
@@ -350,7 +350,7 @@ function SystemStatus() {
           [
             "Workers",
             pool
-              ? `${pool.normal_workers} regular and ${pool.specialist_workers} difficult-flow, ${busy} busy`
+              ? `${pool.normal_workers} regular, ${pool.specialist_workers} difficult-flow${pool.custom_workers ? ` and ${pool.custom_workers} custom-site` : ""}, ${busy} busy`
               : snapshot.config?.workers_enabled
                 ? `${snapshot.config.workers ?? "—"} at most`
                 : "Disabled in configuration",
