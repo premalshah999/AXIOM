@@ -31,6 +31,17 @@ from .senders import sender_domains_overlap
 from .senders import tenant_tokens
 
 
+# A gap this long between two looks at the clocks is the machine asleep, not a slow poll.
+SLEEP_GAP_SECONDS = 4
+# Searches a window past its end still gets before it is called empty (a poll that fails does not use them up).
+LAST_SEARCHES = 3
+# How long a matched message stays claimable after it matched. The window decides what is accepted; once a mail is in
+# the vault its owner needs a worker slot to claim it. A SuccessFactors reset (Farmers 2026-10-26) matched 70 s before its
+# 180 s window closed and expired unclaimed; Allen Institute's link (2026-10-30) matched 5 s after its run parked and the
+# resume was still retrying when the window ended. A reset link outlives a code by hours.
+MATCH_HOLD_SECONDS = {"code": 600, "auto": 600, "link": 1800, "password_reset": 1800}
+
+
 def sf_tenant(session, job):
     """The SuccessFactors company id serving a job: named in its URL, or learned from its career pages (sf_tenant:)."""
     if not job or job.ats != "successfactors":
@@ -69,9 +80,33 @@ class PollingMixin:
             ended.append((run.id, run.reason))
         return ended
 
+    def sleep_credit(self, wall=None, mono=None):
+        """Seconds the machine slept since the last look at the clocks. Wall time runs through sleep, time.monotonic()
+        (mach_absolute_time on macOS) does not, so their difference is the sleep. A window is time awake: the Mac was
+        asleep 86% of 2026-10-31 and 20 of 63 windows ended while it slept, each expiring unsearched."""
+        wall = time.time() if wall is None else wall
+        mono = time.monotonic() if mono is None else mono
+        last_wall, last_mono = self.__dict__.get("awake_mark") or (wall, mono)
+        self.awake_mark = (wall, mono)
+        gap = (wall - last_wall) - (mono - last_mono)
+        return gap if gap > SLEEP_GAP_SECONDS else 0.0
+
+    async def last_search(self, challenge_id):
+        """The search a window gets after its end and before it is called empty. A mail that arrived inside the window
+        but is read after it (the poll was not running: asleep, or busy) still matches; one that arrived later never
+        does (extract_message). poll_once makes the search and expires the window; a sweep already in flight makes it."""
+        for _ in range(LAST_SEARCHES):
+            with self.db.session() as s:
+                row = s.get(MailChallenge, challenge_id)
+                if not row or row.state != "pending":
+                    return
+            await self.poll_once()
+            await asyncio.sleep(0.2)
+
     async def poll_once(self):
         from ..agent_settings import enabled
 
+        self.sleep_owed = self.__dict__.get("sleep_owed", 0.0) + self.sleep_credit()
         if not enabled(self.db, "email"):
             return
         # The active sweep already services all requests. Browser owners must
@@ -80,21 +115,32 @@ class PollingMixin:
         if self.poll_lock.locked():
             return
         async with self.poll_lock:
+            last_chance = []
             with self.db.exclusive() as s:
                 current = time.time()
+                slept, self.sleep_owed = self.sleep_owed, 0.0
                 for c in s.scalars(select(MailChallenge).where(MailChallenge.state.in_(LIVE))):
                     run = s.get(Run, c.run_id)
+                    if slept and c.state in {"pending", "matched"}:
+                        c.expires += slept
+                    proposed = c.expires
                     c.expires = self.window_deadline(run, c.expires)
-                    if (
+                    owner_gone = not run or (run.state not in {"running", "submitting"} and not self.waiting_owner(run, c.id))
+                    if owner_gone or (
                         c.expires < current
-                        or not run
-                        or (run.state not in {"running", "submitting"} and not self.waiting_owner(run, c.id))
+                        and (
+                            c.state != "pending"
+                            or c.expires < proposed  # the application's own deadline, not the delivery window
+                            or self.final_attempts.get(c.id, 0) >= LAST_SEARCHES
+                        )
                     ):
                         c.state, c.payload, c.reason = (
                             "expired",
                             "",
                             "Application or verification deadline ended",
                         )
+                    elif c.expires < current:
+                        last_chance.append(c.id)
                 ended = self.end_dead_email_waits(s)
                 pending = [
                     record(c)
@@ -102,6 +148,7 @@ class PollingMixin:
                 ]
             for run_id, why in ended:
                 self.db.event(run_id, "email_wait_ended", why)
+            searched = set()
             for c in pending:
                 with self.db.session() as s:
                     row = s.get(MailRule, c["rule_id"])
@@ -212,6 +259,7 @@ class PollingMixin:
                         "/messages",
                         {"q": query, "maxResults": 20, "includeSpamTrash": "true"},
                     )
+                    searched.add(c["id"])
                     if listed.get("nextPageToken"):
                         self.outcome(
                             c["id"],
@@ -378,7 +426,7 @@ class PollingMixin:
                         if (
                             row
                             and row.state == "pending"
-                            and row.expires > time.time()
+                            and (row.expires > time.time() or row.id in last_chance)  # extract_message bounded the mail
                             and (
                                 row.kind in {"auto", token["kind"]}
                                 or row.kind == "password_reset"
@@ -396,6 +444,10 @@ class PollingMixin:
                                 "matched",
                                 "A correlated employer email is ready",
                             )
+                            # The window decided what was accepted; the matched mail stays claimable (MATCH_HOLD_SECONDS).
+                            row.expires = self.window_deadline(
+                                owner, max(row.expires, time.time() + MATCH_HOLD_SECONDS.get(row.kind, 600))
+                            )
                             if learned_domain:
                                 current_rule.sender_domains = list(
                                     dict.fromkeys(current_rule.sender_domains + [learned_domain])
@@ -411,6 +463,9 @@ class PollingMixin:
                             s.add(MailConsumption(key=key, challenge_id=row.id))
                             meta = s.get(Setting, "mail_request:" + row.id)
                             generation = (meta.value if meta else {}).get("generation", 1)
+                            if meta:
+                                # sender_blocker stops holding the sender for a match nobody has claimed in a while.
+                                meta.value = {**meta.value, "matched_at": time.time()}
                             matched = (row.run_id, row.id, generation)
                             if self.waiting_owner(owner, row.id):
                                 from ..outbox import enqueue
@@ -448,6 +503,20 @@ class PollingMixin:
                             row.reason = "Mailbox request failed; check the connection"
                             if not box or box.state != "connected":
                                 row.state, row.payload = "failed", ""
+            if last_chance:
+                # A window past its end got its one search (or three failed ones): it is empty now.
+                with self.db.exclusive() as s:
+                    for cid in last_chance:
+                        self.final_attempts[cid] = self.final_attempts.get(cid, 0) + 1
+                        row = s.get(MailChallenge, cid)
+                        if row and row.state == "pending" and cid in searched:
+                            row.state, row.payload, row.reason = (
+                                "expired",
+                                "",
+                                "Application or verification deadline ended",
+                            )
+                while len(self.final_attempts) > 200:
+                    self.final_attempts.pop(next(iter(self.final_attempts)))
 
     async def outside_senders(self, c):
         """Diagnosis only, for a link or reset wait whose sender search listed nothing: the sender domains of reset or

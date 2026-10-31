@@ -143,6 +143,9 @@ class Inbox:
             if token := self.mail.claim(cid):
                 return token
             if time.time() >= expires:
+                await self.mail.last_search(cid)  # the window gets its last search before it is called empty
+                if token := self.mail.claim(cid):
+                    return token
                 self.mail.outcome(cid, "expired", "No uniquely matching verification email arrived in time")
                 return None
             if deadline is not None and time.monotonic() >= deadline:

@@ -81,6 +81,12 @@ class ChallengesMixin:
             holder = s.get(Run, other.run_id)
             if self.window_deadline(holder, other.expires) <= current:
                 continue
+            if other.state == "matched":
+                # Its mail is read and consumed; nobody else can take it. Held for the first five minutes (the owner
+                # is claiming it), not for the whole claim hold that keeps a long-queued resume's mail (polling.py).
+                matched_at = float((s.get(Setting, "mail_request:" + other.id) or Setting(key="", value={})).value.get("matched_at") or 0)
+                if matched_at and current - matched_at > STALE_CODE_HOLD:
+                    continue
             if (
                 other.kind in {"code", "auto"}
                 and other.state == "pending"
@@ -381,6 +387,10 @@ class ChallengesMixin:
             if token := self.claim(challenge_id):
                 return token
             if time.time() >= expires:
+                # Search once more before calling the window empty: the last poll can be older than the mail.
+                await self.last_search(challenge_id)
+                if token := self.claim(challenge_id):
+                    return token
                 self.outcome(
                     challenge_id, "expired", "No uniquely matching verification email arrived in time"
                 )
