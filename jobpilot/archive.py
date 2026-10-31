@@ -12,6 +12,12 @@ from sqlalchemy import delete, select
 from .db import Event, Job, Run, Setting, now, record
 
 
+# A job with a run in one of these states is not an earlier failure: proof, work in flight, and what waits on the owner. The Archive
+# button promises that unconfirmed submissions are never archived, and a question still waiting for its answer is open work (a
+# check on a seeded instance, 2026-10-31: one press archived every job with a waiting question and an unconfirmed submission).
+KEPT = {"confirmed", "queued", "running", "submitting", "waiting_email", "waiting_answer", "needs_review", "submission_unknown"}
+
+
 def archive_failed(service):
     db, root = service.db, service.config.data_dir / "archive"
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -26,7 +32,7 @@ def archive_failed(service):
             runs = [
                 record(r) for r in s.scalars(select(Run).where(Run.job_id == jid).order_by(Run.created_at))
             ]
-            if not runs or any(r["state"] in {"confirmed", "queued", "running", "submitting"} for r in runs):
+            if not runs or any(r["state"] in KEPT for r in runs):
                 continue
             latest = runs[-1]
             log = root / f"{jid}.jsonl.gz"
@@ -56,7 +62,7 @@ def archive_failed(service):
             }
         with db.exclusive() as s:
             current = list(s.scalars(select(Run).where(Run.job_id == jid)))
-            if any(r.state in {"confirmed", "queued", "running", "submitting"} for r in current):
+            if any(r.state in KEPT for r in current):
                 continue
             s.get(Job, jid).status = "archived"
             s.add(Setting(key="archived_application:" + jid, value=summary))

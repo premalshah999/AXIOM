@@ -1,74 +1,405 @@
-// Needs you: the questions waiting on the owner, as its own page, grouped by application. The same question asked on
-// several applications is one card (one saved answer resolves them all); the cards themselves are questions.tsx.
-import { MessageCircleQuestion } from "lucide-react";
-import { useCallback, useMemo } from "react";
+// Needs you: an inbox of what only the owner can settle. The list on the left leads with what frees the most applications; the
+// pane on the right answers one thing, and Enter moves to the next. The same question on several jobs is one entry, and supervisors
+// and references are one entry with a card per past job. What no answer can complete, and what has no question at all, look different.
+import { ArrowLeft, Check, CircleSlash, FileText, MessageCircleQuestion, Users, Video } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKey } from "react";
+import { api, applyJob } from "./api";
 import { useWorkspace } from "./context";
-import { useDraft } from "./hooks";
-import { Pagination, usePagination } from "./pagination";
-import { groupQuestions, QuestionCard, type QuestionGroup } from "./questions";
-import { ago, linkHost, plural, urlRole } from "./format";
-import { Button, Empty } from "./ui/index";
-import "./styles/work.css";
-import type { Job } from "./types";
+import { ago, employerOf, jobWords, plural } from "./format";
+import { useAction, useDraft } from "./hooks";
+import { EMAIL, entryOf, useQuestionnaires, type Field, type Module, type WorkRow } from "./qform";
+import {
+  BLIND_TITLE,
+  blockOf,
+  deliver,
+  groupQuestions,
+  isBlind,
+  postAnswer,
+  QuestionCard,
+  questionParts,
+  whoOf,
+  type QuestionGroup,
+} from "./questions";
+import { TopLine } from "./shell/Shell";
+import { useMedia } from "./shell/prefs";
+import type { Job, Review, Run } from "./types";
+import { Button, ConfirmButton, Empty, ErrorLine, Input, Monogram, MonogramStack, Segmented, Skeleton } from "./ui/index";
+import { MoreLink } from "./identity/Results";
+import "./styles/needs.css";
 
-type Bucket = { key: string; job?: Job; runId: string; since: string; cards: QuestionGroup[] };
+// ---------- supervisors and references: which saved detail answers which waiting question ----------
+// The same reading as the engine's own (jobpilot/answers/people_rules.py), so what is sent here is what the next attempt would fill.
+// A saved questionnaire alone frees nothing: a waiting application only reads its question's answer, so saving also answers them.
+const SUPERVISOR =
+  /supervisor|\bsup(?:name|title|phone|email|contact)\b|(?:reporting|direct|immediate) manager|may we contact (?:your )?(?:current |present |previous |former )?employer|employer contact permission/i;
+const REFERENCE = /\breference\b|\bref ?\d|\breferee\b/i;
+const PREVIOUS = /\b(?:prev(?:ious)?|prior|former|past|last)\b/i;
 
-const JOBS_PER_PAGE = 4;
+type Part = "name" | "first" | "last" | "title" | "name_title" | "phone" | "email" | "company" | "relationship" | "may_contact";
 
-export function NeedsView() {
-  const { snapshot, counts, go, openJob } = useWorkspace();
-  const [skipped, setSkipped] = useDraft<string[]>("needs-skipped", []);
-  const jobFor = useMemo(() => {
-    const runs = new Map(snapshot.runs.map((r) => [r.id, r.job_id]));
+function partOf(label: string): Part | null {
+  const text = label.toLowerCase();
+  if (/\bmay we\b|\bcan we\b|permission|okay to|\bok to|allow us|authori[sz]e us|contact (?:your|this)/.test(text)) return /contact/.test(text) ? "may_contact" : null;
+  if (/e-?mail/.test(text)) return "email";
+  if (/phone|telephone|mobile|\bcell\b|supphone/.test(text)) return "phone";
+  if (/name\s*(?:&|and|\/)\s*title|title\s*(?:&|and|\/)\s*name/.test(text)) return "name_title";
+  if (/first name|given name|firstname/.test(text)) return "first";
+  if (/last name|surname|family name|lastname/.test(text)) return "last";
+  if (/relationship|how do you know|how you know/.test(text)) return "relationship";
+  if (/company|employer|organi[sz]ation/.test(text) && !/supervisor/.test(text)) return "company";
+  if (/title|position|suptitle/.test(text)) return "title";
+  if (/name|supname/.test(text)) return "name";
+  return null;
+}
+
+/** The text one saved person gives one waiting question, or "" when that detail isn't filled in or doesn't fit the question. */
+function valueFor(part: Part, entry: Record<string, string>, review: Review) {
+  const name = (entry.name || "").split(/\s+/).filter(Boolean);
+  let value = "";
+  if (part === "first") value = name[0] || "";
+  else if (part === "last") value = name.slice(1).join(" ");
+  else if (part === "name_title") value = entry.name && entry.title ? `${entry.name}, ${entry.title}` : "";
+  else if (part === "may_contact") {
+    const later = review.options.find((o) => /after|upon|offer|conditional|later/i.test(o));
+    if (entry.may_contact === "after_offer") value = later || (review.options.length ? "No" : "After an offer only");
+    else if (entry.may_contact) value = entry.may_contact === "yes" ? "Yes" : "No";
+  } else value = entry[part] || "";
+  return value && (!review.options.length || review.options.includes(value)) ? value : "";
+}
+
+const same = (a?: string, b?: string) => !!a && !!b && a.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() === b.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+type Claim = { person: string; part: Part };
+
+/** Which person a short supervisor or reference box belongs to, or null when it stays a question of its own. */
+function claimOf(review: Review, rows: WorkRow[]): Claim | null {
+  const q = review;
+  const label = (q.question || "").replace(/[*:\s]+$/, "");
+  const fits = q.kind === "text" || (q.kind === "choice" && !q.multiple);
+  // A sentence ("Provide two professional references...") isn't one box: the words "name" and "email" in it say nothing.
+  if (!fits || !label || label.split(/\s+/).length > 7 || q.context?.type === "checkbox") return null;
+  const part = partOf(label);
+  if (!part || (q.kind === "choice" && part !== "may_contact")) return null;
+  if (REFERENCE.test(label) && !SUPERVISOR.test(label)) {
+    if (part === "may_contact") return null;
+    const number = /\bref(?:erence)?\s*#?\s*(\d)/i.exec(label) || /(?:reference|referee|ref)\D{0,3}(\d)/i.exec(label);
+    const index = number ? Number(number[1]) - 1 : 0;
+    return index >= 0 && index < 3 ? { person: "ref:" + index, part } : null;
+  }
+  if (!SUPERVISOR.test(label)) return null;
+  if (q.context?.history_kind) {
+    if (q.context.history_kind !== "work") return null;
+    const hits = rows.filter((r) => same(r.company, q.context?.history_identity?.company));
+    return hits.length === 1 ? { person: hits[0]!.row_id, part } : null;
+  }
+  // "Prev Supervisor Phone" doesn't say which past job; the owner decides. A form with no rows asks about the current job.
+  if (PREVIOUS.test(label)) return null;
+  const row = rows.find((r) => r.current) ?? rows[0];
+  return row ? { person: row.row_id, part } : null;
+}
+
+type Person = {
+  id: string;
+  row?: WorkRow;
+  index: number;
+  title: string;
+  where: string;
+  when: string;
+  asks: { review: Review; part: Part }[];
+  saved: Record<string, string>;
+};
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function monthOf(value: string) {
+  const m = /^(\d{4})-(\d{1,2})/.exec(value);
+  return m ? `${MONTHS[Number(m[2]) - 1] ?? ""} ${m[1]}` : value;
+}
+const spanOf = (r: WorkRow) => [monthOf(r.start), r.current ? "Present" : monthOf(r.end)].filter(Boolean).join(" to ");
+
+// ---------- the inbox's model ----------
+type Reach = { frees: { job?: Job; left: number }[]; helps: { job?: Job; left: number }[] };
+type Entry = {
+  id: string;
+  type: "people" | "question" | "blocked" | "none";
+  names: string[];
+  title: string;
+  who: string;
+  since: string;
+  reach: Reach;
+  group?: QuestionGroup;
+  run?: Run;
+  job?: Job;
+};
+const WAITING = new Set(["waiting_answer", "needs_review"]);
+const roleOf = (job: Job) => jobWords(job).role;
+
+function useInbox() {
+  const { snapshot } = useWorkspace();
+  const forms = useQuestionnaires();
+  const contacts = forms.data?.modules.find((m) => m.id === "contacts");
+  const settled = !!forms.data || !!forms.error;
+
+  const model = useMemo(() => {
+    const runs = new Map(snapshot.runs.map((r) => [r.id, r]));
     const jobs = new Map(snapshot.jobs.map((j) => [j.id, j]));
-    return (runId: string) => jobs.get(runs.get(runId) || "");
-  }, [snapshot]);
-  const groups = useMemo(() => groupQuestions(snapshot.reviews, jobFor), [snapshot.reviews, jobFor]);
-  const skippedSet = useMemo(() => new Set(skipped), [skipped]);
-  const open = groups.filter((g) => !skippedSet.has(g.review.id));
-  const parked = groups.filter((g) => skippedSet.has(g.review.id));
+    const jobOf = (runId: string) => jobs.get(runs.get(runId)?.job_id || "");
+    const reviews = snapshot.reviews;
 
-  // By application, the one that has waited longest first.
-  const buckets = useMemo(() => {
-    const by = new Map<string, Bucket>();
-    for (const g of open) {
-      const key = g.job?.id || "run:" + g.review.run_id;
-      const since = g.review.created_at || "";
-      const b = by.get(key);
-      if (b) {
-        b.cards.push(g);
-        if (since && (!b.since || since < b.since)) b.since = since;
-      } else by.set(key, { key, job: g.job, runId: g.review.run_id, since, cards: [g] });
+    const supervisors = contacts?.questions.find((q) => q.type === "work_rows");
+    const references = contacts?.questions.find((q) => q.type === "references");
+    const rows = supervisors?.rows || [];
+    const claims = new Map<string, Claim>();
+    if (contacts)
+      for (const r of reviews) {
+        const claim = claimOf(r, rows);
+        if (claim) claims.set(r.id, claim);
+      }
+
+    // Every application's open questions: an application moves only when its last one is answered (resume_review).
+    const keyOf = (r: Review) => runs.get(r.run_id)?.job_id || "run:" + r.run_id;
+    const openBy = new Map<string, Set<string>>();
+    for (const r of reviews) {
+      const key = keyOf(r);
+      if (!openBy.has(key)) openBy.set(key, new Set());
+      openBy.get(key)!.add(r.id);
     }
-    return [...by.values()].sort((a, b) => (a.since || "~").localeCompare(b.since || "~"));
-  }, [open]);
-  const paging = usePagination(buckets, "", JOBS_PER_PAGE);
+    const reachOf = (list: Review[]): Reach => {
+      const ids = new Set(list.map((r) => r.id));
+      const seen = new Map<string, { job?: Job; left: number }>();
+      for (const r of list) {
+        const key = keyOf(r);
+        if (!seen.has(key)) seen.set(key, { job: jobOf(r.run_id), left: [...(openBy.get(key) || [])].filter((id) => !ids.has(id)).length });
+      }
+      const all = [...seen.values()];
+      return { frees: all.filter((x) => !x.left), helps: all.filter((x) => x.left) };
+    };
+    const namesOf = (r: Reach) => [...r.frees, ...r.helps].map((x) => employerOf(x.job?.company, x.job?.url));
+    const jobsOf = (r: Reach) => [...r.frees, ...r.helps].map((x) => x.job);
 
-  // After an answer or a skip, the next question's field takes focus so a run of answers is typed without the mouse.
-  const advance = useCallback(
-    (id: string) => {
-      const order = paging.items.flatMap((b) => b.cards.map((c) => c.review.id));
-      const at = order.indexOf(id);
-      const next = order[at + 1] ?? order[at - 1];
-      if (!next) return;
-      window.setTimeout(() => {
-        document.querySelector<HTMLElement>(`[data-qid="${next}"] [data-answer]`)?.focus();
-      }, 60);
-    },
-    [paging.items],
-  );
+    const entries: Entry[] = [];
+    const groups = groupQuestions(reviews.filter((r) => !claims.has(r.id)), jobOf);
+    for (const group of groups) {
+      const reach = reachOf(group.reviews);
+      const { text } = questionParts(group.review);
+      entries.push({
+        id: group.review.id,
+        type: blockOf(group.review) ? "blocked" : "question",
+        names: namesOf(reach),
+        // Three "Begin Date"s on one form differ by the past job each one sits in.
+        title: isBlind(group.review) ? BLIND_TITLE : [text, group.review.context?.history_identity?.company].filter(Boolean).join(", "),
+        who: whoOf(jobsOf(reach)),
+        since: group.reviews[0]?.created_at || "",
+        reach,
+        group,
+      });
+    }
+    // What frees the most comes first; among equals, what has waited longest.
+    entries.sort(
+      (a, b) =>
+        b.reach.frees.length - a.reach.frees.length ||
+        b.reach.helps.length - a.reach.helps.length ||
+        (a.since || "~").localeCompare(b.since || "~"),
+    );
+
+    // One entry per person the forms ask about.
+    const people: Person[] = [];
+    const claimed = reviews.filter((r) => claims.has(r.id));
+    const asksOf = (id: string) =>
+      claimed.filter((r) => claims.get(r.id)!.person === id).map((review) => ({ review, part: claims.get(review.id)!.part }));
+    for (const r of rows)
+      people.push({
+        id: r.row_id,
+        row: r,
+        index: r.index,
+        title: r.title || "Role",
+        where: r.company || "Employer",
+        when: spanOf(r),
+        asks: asksOf(r.row_id),
+        saved: entryOf(supervisors?.fields, r.answer),
+      });
+    const savedRefs = (references?.answer as Record<string, string>[] | undefined) || [];
+    for (let i = 0; i < (references?.max || 3); i++) {
+      const asks = asksOf("ref:" + i);
+      if (asks.length || savedRefs[i])
+        people.push({
+          id: "ref:" + i,
+          index: i,
+          title: "Reference " + (i + 1),
+          where: savedRefs[i]?.name || (asks.length ? "Not entered yet" : ""),
+          when: "",
+          asks,
+          saved: entryOf(references?.fields, savedRefs[i]),
+        });
+    }
+    people.sort((a, b) => Number(!b.asks.length) - Number(!a.asks.length));
+    if (claimed.length) {
+      const reach = reachOf(claimed);
+      entries.unshift({
+        id: "people",
+        type: "people",
+        names: namesOf(reach),
+        title: "Supervisors and references",
+        who: whoOf(jobsOf(reach)),
+        since: claimed[0]?.created_at || "",
+        reach,
+      });
+    }
+
+    // Applications stopped on the owner with no question open. The list of questions is capped at 100, so past that it can't tell.
+    if (reviews.length < 100 && settled) {
+      const latest = new Map<string, Run>();
+      for (const r of snapshot.runs) {
+        const seen = latest.get(r.job_id);
+        if (!seen || (r.created_at || "") > (seen.created_at || "")) latest.set(r.job_id, r);
+      }
+      for (const run of latest.values()) {
+        if (!WAITING.has(run.state) || openBy.has(run.job_id)) continue;
+        const job = jobs.get(run.job_id);
+        const reach = { frees: [{ job, left: 0 }], helps: [] };
+        entries.push({
+          id: "run:" + run.id,
+          type: "none",
+          names: namesOf(reach),
+          title: job ? [jobWords(job).role, jobWords(job).hint].filter(Boolean).join(" · ") : "Application",
+          who: employerOf(job?.company, job?.url),
+          since: run.created_at || "",
+          reach,
+          run,
+          job,
+        });
+      }
+    }
+    const order = { people: 0, question: 1, blocked: 2, none: 3 };
+    entries.sort((a, b) => order[a.type] - order[b.type]);
+
+    const applications = new Set(reviews.map(keyOf)).size;
+    // The number the sidebar and Overview show: one per distinct question.
+    const questions = groups.length + groupQuestions(claimed, jobOf).length;
+    // A sentence asking for references ("Please add 3 references") can take the saved ones, once the owner has read them.
+    const saved = savedRefs.filter((r) => r && Object.values(r).some(Boolean));
+    const suggestionFor = (review: Review) =>
+      saved.length && /\breferences?\b/i.test(review.question)
+        ? {
+            label: `Use my ${plural(saved.length, "saved reference")}`,
+            value: saved.map((r) => [r.name, r.relationship, r.company, r.phone, r.email].filter(Boolean).join(", ")).join("\n"),
+          }
+        : undefined;
+    return { entries, people, applications, questions, peopleQuestions: groupQuestions(claimed, jobOf).length, suggestionFor };
+  }, [snapshot.reviews, snapshot.runs, snapshot.jobs, contacts, settled]);
+
+  return { ...model, contacts, setModule: forms.setModule, settled };
+}
+
+// ---------- the page ----------
+export function NeedsView() {
+  const { counts, go } = useWorkspace();
+  const inbox = useInbox();
+  const phone = useMedia("(max-width: 899px)");
+  const [skipped, setSkipped] = useDraft<string[]>("needs-skipped", []);
+  const [done, setDone] = useDraft("needs-done", 0);
+  const [sending, setSending] = useState<string[]>([]);
+  const [selected, setSelected] = useState("");
+  const [opened, setOpened] = useState(false);
+  const [said, setSaid] = useState("");
+  const pane = useRef<HTMLDivElement>(null);
+  // Progress is what really left the list, by whichever way: answered here, dropped, or settled by the server from another answer.
+  const seen = useRef<number | null>(null);
+  useEffect(() => {
+    if (!inbox.settled) return;
+    const gone = seen.current === null ? 0 : seen.current - inbox.questions;
+    if (gone > 0) setDone((d) => d + gone);
+    seen.current = inbox.questions;
+  }, [inbox.questions, inbox.settled, setDone]);
+  const wantFocus = useRef(!matchMedia("(pointer: coarse)").matches);
+
+  const parked = inbox.entries.filter((e) => skipped.includes(e.id) && !sending.includes(e.id));
+  const open = inbox.entries.filter((e) => !skipped.includes(e.id) && !sending.includes(e.id));
+  const answerable = open.filter((e) => e.type !== "none");
+  const current = inbox.entries.find((e) => e.id === selected && !sending.includes(e.id)) ?? open[0];
+  const currentId = current?.id;
+
+  // Answering moves straight on: the next question's field has focus, so a run of answers is typed without the mouse.
+  useEffect(() => {
+    pane.current?.scrollTo?.({ top: 0 });
+    if (!wantFocus.current || !currentId) return;
+    const field = pane.current?.querySelector<HTMLElement>('[data-answer]:not([type="file"]), .nd-control .ax-listbox, .nd-person-form input');
+    wantFocus.current = false;
+    field?.focus({ preventScroll: true });
+  }, [currentId, inbox.settled]);
+  useEffect(() => {
+    document.querySelector(".nd-row[aria-current]")?.scrollIntoView({ block: "nearest" });
+  }, [currentId]);
+
+  const pick = useCallback((id: string) => {
+    setSelected(id);
+    setOpened(true);
+    wantFocus.current = !matchMedia("(pointer: coarse)").matches;
+  }, []);
+  const order = open.map((e) => e.id);
+  const advance = (from: string) => {
+    const at = order.indexOf(from);
+    const next = order[at + 1] ?? order[at - 1] ?? "";
+    setSelected(next);
+    wantFocus.current = !matchMedia("(pointer: coarse)").matches;
+    if (!next) setOpened(false);
+  };
   const skip = (id: string) => {
     advance(id);
     setSkipped((list) => (list.includes(id) ? list : [...list, id]));
   };
+  const unskip = (id: string) => {
+    setSkipped((list) => list.filter((x) => x !== id));
+    pick(id);
+  };
 
-  if (!groups.length)
+  // Option Up and Down walk the list from anywhere; Option S skips. Nothing here fires while a drawer or dialog is on top.
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      if (!e.altKey || !currentId || document.querySelector(".ax-drawer, .ax-dialog")) return;
+      if (e.code === "KeyS") {
+        e.preventDefault();
+        skip(currentId);
+      } else if (e.code === "ArrowDown" || e.code === "ArrowUp") {
+        e.preventDefault();
+        const at = order.indexOf(currentId);
+        const next = order[at + (e.code === "ArrowDown" ? 1 : -1)];
+        if (next) pick(next);
+      }
+    };
+    window.addEventListener("keydown", on);
+    return () => window.removeEventListener("keydown", on);
+  });
+  const listKeys = (e: ReactKey<HTMLDivElement>) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const rows = [...e.currentTarget.querySelectorAll<HTMLElement>(".nd-row")];
+    const at = rows.indexOf(document.activeElement as HTMLElement);
+    const next = rows[at + (e.key === "ArrowDown" ? 1 : -1)];
+    if (next) {
+      e.preventDefault();
+      next.focus();
+      next.click();
+      wantFocus.current = false;
+    }
+  };
+
+  if (!inbox.settled)
+    return (
+      <div className="ax-page">
+        <Skeleton rows={6} />
+      </div>
+    );
+
+  if (!inbox.entries.length && !sending.length)
     return (
       <div className="ax-page">
         <Empty
-          icon={MessageCircleQuestion}
-          title="Nothing is waiting on you"
-          hint="Questions appear here when an application needs a personal fact your profile doesn't have."
+          icon={done ? Check : MessageCircleQuestion}
+          title={done ? "That's everything" : "Nothing is waiting on you"}
+          hint={
+            done
+              ? `${plural(done, "question")} cleared. The applications carry on by themselves.`
+              : "Questions appear here when an application needs a personal fact your profile doesn't have."
+          }
           action={
             <Button size="sm" onClick={() => go({ view: "batch" })}>
               Back to Overview
@@ -78,68 +409,578 @@ export function NeedsView() {
       </div>
     );
 
-  const applications = new Set(groups.map((g) => g.job?.id || g.review.run_id)).size;
+  const sections: { name: string; note?: string; items: Entry[] }[] = [
+    { name: "", items: open.filter((e) => e.type === "people") },
+    { name: "Questions", items: open.filter((e) => e.type === "question") },
+    { name: "Need something only you can make", items: open.filter((e) => e.type === "blocked") },
+    { name: "Nothing to answer", items: open.filter((e) => e.type === "none") },
+  ];
+  const left = answerable.reduce((n, e) => n + (e.type === "people" ? inbox.peopleQuestions : 1), 0);
+  const total = done + inbox.questions;
+  const showList = !phone || !opened || !current;
+  const showPane = !phone || (opened && !!current);
+
   return (
-    <div className="ax-page">
-      <div className="nq-head">
-        <p className="nq-say">
-          {plural(groups.length, "question")} {groups.length === 1 ? "is" : "are"} holding back {plural(applications, "application")}.
-        </p>
-        <p className="ax-note">
-          Answer each one once. Every application asking the same thing moves again.
-          {(counts.groups.needs ?? 0) > applications && (
-            <>
-              {" "}
-              <button type="button" className="ax-link" onClick={() => go({ view: "jobs", tab: "pipeline", filter: "needs" })}>
-                {plural(counts.groups.needs ?? 0, "application")} are marked as waiting on you
-              </button>{" "}
-              in Jobs.
-            </>
-          )}
-        </p>
-      </div>
-      {buckets.length === 0 && <p className="ax-note">Every open question is skipped for now. They are listed below.</p>}
-      {paging.items.map((b) => (
-        <section key={b.key} className="nq-row" aria-label={b.job?.company || "Application"}>
-          <div className="nq-who">
-            <h2>
-              <i className="ax-lamp is-ask" aria-hidden="true" />
-              <span title={b.job?.company}>{b.job?.company || linkHost(b.job?.url) || "Employer"}</span>
-            </h2>
-            <p title={b.job?.title}>{b.job?.title || (b.job ? urlRole(b.job.url) : "Application")}</p>
-            <p className="mono">
-              {[b.job?.ats, b.since && `waiting ${ago(b.since)}`].filter(Boolean).join(" · ")}
-            </p>
-            <button type="button" className="ax-link" onClick={() => b.job && openJob(b.job.id, b.runId)} disabled={!b.job}>
-              Open application
-            </button>
-          </div>
-          <div className="ax-stack">
-            {b.cards.map((g) => (
-              <QuestionCard key={g.review.id} group={g} onSaved={advance} onSkip={skip} />
-            ))}
-          </div>
-        </section>
-      ))}
-      <Pagination paging={paging} label="Question pages" sizes={false} />
-      {parked.length > 0 && (
-        <details className="ax-fold">
-          <summary>Skipped for now ({parked.length})</summary>
-          <ul className="ax-rows">
-            {parked.map((g) => (
-              <li key={g.review.id} className="ax-row">
-                <span className="ax-row-main">
-                  <strong>{g.job?.company || linkHost(g.job?.url) || "Employer"}</strong>
-                  <small>{g.review.display_question || g.review.question}</small>
+    <div className="ax-page ax-page-fill nd-page-root">
+      <TopLine>
+        {inbox.questions
+          ? `${plural(inbox.questions, "question")} ${inbox.questions === 1 ? "is" : "are"} holding back ${plural(inbox.applications, "application")}.`
+          : "No questions are open."}
+      </TopLine>
+      <div className={"nd" + (showList ? "" : " is-pane") + (showPane ? "" : " is-list")}>
+        {showList && (
+          <div className="nd-list">
+            <div className="nd-progress">
+              <p aria-live="polite">
+                <span>
+                  {done} of {total} cleared
                 </span>
-                <Button size="sm" variant="ghost" onClick={() => setSkipped((list) => list.filter((x) => x !== g.review.id))}>
-                  Answer now
+                {said && <small>{said}</small>}
+              </p>
+              <div className="nd-track" aria-hidden="true">
+                <i style={{ width: total ? `${(100 * done) / total}%` : 0 }} />
+              </div>
+            </div>
+            <div className="nd-scroll" onKeyDown={listKeys}>
+              {sections.map(
+                (s) =>
+                  s.items.length > 0 && (
+                    <section key={s.name || "people"} aria-label={s.name || "Supervisors and references"}>
+                      {s.name && (
+                        <h2 className="nd-sec">
+                          {s.name} <span>{s.items.length}</span>
+                        </h2>
+                      )}
+                      {s.items.map((e) => (
+                        <InboxRow key={e.id} entry={e} questions={inbox.peopleQuestions} current={e.id === currentId && !phone} onPick={() => pick(e.id)} />
+                      ))}
+                    </section>
+                  ),
+              )}
+              {parked.length > 0 && (
+                <details className="nd-parked" open={parked.some((e) => e.id === currentId) || undefined}>
+                  <summary>
+                    Skipped <span>{parked.length}</span>
+                  </summary>
+                  {parked.map((e) => (
+                    <InboxRow key={e.id} entry={e} questions={inbox.peopleQuestions} current={e.id === currentId && !phone} onPick={() => pick(e.id)} />
+                  ))}
+                </details>
+              )}
+              {(counts.groups.needs ?? 0) > inbox.applications + inbox.entries.filter((e) => e.type === "none").length && (
+                <div className="nd-foot">
+                  <MoreLink onClick={() => go({ view: "jobs", tab: "pipeline", filter: "needs" })}>
+                    All {(counts.groups.needs ?? 0).toLocaleString()} in Jobs
+                  </MoreLink>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        {showPane && (
+          <div className="nd-pane" ref={pane}>
+            {phone && (
+              <div className="nd-back">
+                <Button variant="ghost" size="sm" icon={<ArrowLeft size={14} aria-hidden="true" />} onClick={() => setOpened(false)}>
+                  All questions
                 </Button>
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
+                <span className="ax-note">{plural(left, "question")} to go</span>
+              </div>
+            )}
+            {current ? (
+              <div className="nd-pane-in">
+                {skipped.includes(current.id) && (
+                  <p className="nd-parked-note">
+                    You skipped this.{" "}
+                    <button type="button" className="ax-link" onClick={() => unskip(current.id)}>
+                      Put it back in the list
+                    </button>
+                  </p>
+                )}
+                <Asking entry={current} />
+                {current.type === "people" && inbox.contacts ? (
+                  <PeoplePane
+                    key="people"
+                    module={inbox.contacts}
+                    people={inbox.people}
+                    questions={inbox.peopleQuestions}
+                    applications={current.reach.frees.length + current.reach.helps.length}
+                    onModule={inbox.setModule}
+                    onAnswered={setSaid}
+                    onFinished={() => advance(current.id)}
+                    onSkip={() => skip(current.id)}
+                  />
+                ) : current.group ? (
+                  <QuestionCard
+                    key={current.group.review.id}
+                    group={current.group}
+                    suggestion={inbox.suggestionFor(current.group.review)}
+                    onSkip={skip}
+                    onSending={(id) => {
+                      advance(id);
+                      setSaid("");
+                      setSending((list) => [...list, id]);
+                    }}
+                    onSaved={(id, message) => {
+                      setSending((list) => list.filter((x) => x !== id));
+                      setSkipped((list) => list.filter((x) => x !== id));
+                      setSaid(message || "");
+                    }}
+                    onFailed={(id) => {
+                      setSending((list) => list.filter((x) => x !== id));
+                      setSelected(id);
+                      setOpened(true);
+                    }}
+                    onDropped={(id) => {
+                      advance(id);
+                      setSkipped((list) => list.filter((x) => x !== id));
+                    }}
+                  />
+                ) : current.run ? (
+                  <NothingPane key={current.id} entry={current} onGone={() => advance(current.id)} onSkip={() => skip(current.id)} />
+                ) : null}
+                {current.type !== "none" && <Unblocks entry={current} />}
+              </div>
+            ) : (
+              <Empty
+                compact
+                icon={Check}
+                title={parked.length ? "Only what you skipped is left" : "That's the last one"}
+                hint={parked.length ? "Open Skipped in the list whenever you're ready." : `${plural(done, "question")} cleared.`}
+              />
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
+
+// ---------- a row of the list ----------
+function InboxRow({ entry: e, questions, current, onPick }: { entry: Entry; questions: number; current: boolean; onPick: () => void }) {
+  const frees = e.reach.frees.length;
+  const asksVideo = e.type === "blocked" && !!e.group && blockOf(e.group.review)?.hard;
+  const sub =
+    e.type === "people"
+      ? `${plural(questions, "question")} on ${plural(frees + e.reach.helps.length, "application")}`
+      : [e.who, e.since && e.type !== "none" && ago(e.since)].filter(Boolean).join(" · ");
+  return (
+    <button type="button" className={"nd-row is-" + e.type} aria-current={current || undefined} data-entry={e.id} onClick={onPick}>
+      <span className="nd-row-mono">
+        {e.type === "people" ? (
+          <span className="ax-mono nd-people-mono" aria-hidden="true">
+            <Users size={13} />
+          </span>
+        ) : (
+          <MonogramStack names={e.names} max={e.names.length > 2 ? 1 : 2} />
+        )}
+      </span>
+      <span className="nd-row-main">
+        <span className="nd-row-title">{e.type === "none" ? e.who : e.title}</span>
+        <small>{e.type === "none" ? e.title : sub}</small>
+      </span>
+      <span className="nd-row-end">
+        {e.type === "blocked" && (asksVideo ? <Video size={15} aria-label="Asks for a video" /> : <FileText size={15} aria-label="Asks for your own work" />)}
+        {e.type === "none" && <CircleSlash size={15} aria-label="Nothing to answer" />}
+        {e.type !== "blocked" && e.type !== "none" && frees > 1 && <span className="nd-frees">Frees {frees}</span>}
+      </span>
+    </button>
+  );
+}
+
+// ---------- the pane's parts ----------
+/** Who is asking: the first thing in the pane, each one opening its job. */
+function Asking({ entry: e }: { entry: Entry }) {
+  const { openJob } = useWorkspace();
+  if (e.type === "people" || e.type === "none") return null;
+  const rows = [...e.reach.frees, ...e.reach.helps];
+  const only = rows.length === 1 ? rows[0]?.job : undefined;
+  const who = (
+    <>
+      <MonogramStack names={e.names} max={3} />
+      <span className="nd-asking-who" title={only?.title}>
+        <strong>{e.who}</strong>
+        {only && <span>{roleOf(only)}</span>}
+      </span>
+    </>
+  );
+  return only ? (
+    <button type="button" className="nd-asking" onClick={() => openJob(only.id, e.group?.review.run_id)}>
+      {who}
+    </button>
+  ) : (
+    <div className="nd-asking">{who}</div>
+  );
+}
+
+/** What answering changes, in the owner's terms: an application moves only once its last question is answered. */
+function Unblocks({ entry: e }: { entry: Entry }) {
+  const { openJob } = useWorkspace();
+  const { frees, helps } = e.reach;
+  const blocked = e.type === "blocked";
+  const rows = [
+    ...frees.map((x) => ({ ...x, note: blocked ? "" : "Continues" })),
+    ...helps.map((x) => ({ ...x, note: `${plural(x.left, "more question")} after this` })),
+  ];
+  if (!rows.length) return null;
+  // One application is already named at the top of the pane: a sentence is enough.
+  if (rows.length === 1 && e.type === "question")
+    return (
+      <p className="nd-reach-one">
+        <i className={"ax-lamp " + (frees.length ? "is-ok" : "is-hold")} aria-hidden="true" />
+        {frees.length
+          ? "This is the last thing it needs: answering lets the application continue."
+          : `It still needs ${plural(helps[0]!.left, "more question")} from you after this one.`}
+      </p>
+    );
+  if (rows.length === 1 && blocked) return null;
+  const heading = blocked
+    ? `Holding up ${plural(rows.length, "application")}`
+    : frees.length
+      ? `Answering frees ${plural(frees.length, "application")}${helps.length ? `, and helps ${helps.length} more` : ""}`
+      : `Helps ${plural(helps.length, "application")}, which ${helps.length === 1 ? "needs" : "need"} more from you`;
+  const SHOW = 8;
+  return (
+    <section className="nd-reach" aria-label="What this frees">
+      <h3>{heading}</h3>
+      <ul>
+        {rows.slice(0, SHOW).map((x, i) => {
+          const words = x.job ? jobWords(x.job) : null;
+          const name = words?.company || "Employer";
+          return (
+            <li key={x.job?.id || i}>
+              <button type="button" disabled={!x.job} onClick={() => x.job && openJob(x.job.id)}>
+                <Monogram name={name} />
+                <strong title={name}>{name}</strong>
+                <span className="nd-reach-role" title={x.job?.title}>
+                  {words && [words.role, x.job?.location].filter(Boolean).join(" · ")}
+                  {words?.hint && <span className="nd-reach-hint">{words.hint}</span>}
+                </span>
+                {x.note && <small>{x.note}</small>}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {rows.length > SHOW && <p className="ax-note">And {rows.length - SHOW} more.</p>}
+    </section>
+  );
+}
+
+/** An application stopped on the owner, with no question to answer. Not dressed as one. */
+function NothingPane({ entry: e, onGone, onSkip }: { entry: Entry; onGone: () => void; onSkip: () => void }) {
+  const { refresh, openJob, snapshot } = useWorkspace();
+  const { pending, run } = useAction();
+  const job = e.job;
+  const reason = (e.run?.reason || "").replace(/\s*\((?:field\s+)?f\d-[^)]*\)/g, "");
+  // Waiting for an answer with none open: every question has one, and it hasn't started again.
+  const answered = e.run?.state === "waiting_answer";
+  return (
+    <div className="nd-card">
+      <div className="nd-asking">
+        <Monogram name={e.who} size="md" />
+        <span className="nd-asking-who">
+          <strong>{e.who}</strong>
+          <span>{e.title}</span>
+        </span>
+      </div>
+      <header className="nd-card-head">
+        <h2 className="nd-q">Nothing to answer here</h2>
+        <p className="nd-meta">
+          {answered ? "Everything it asked has an answer, but it hasn't started again." : "This application stopped without leaving a question for you."}{" "}
+          {snapshot.control.paused ? "Applying is paused, so it waits for that." : "Try it again, or let it go."}
+        </p>
+      </header>
+      {reason && (
+        <div className="nd-block">
+          <CircleSlash size={18} aria-hidden="true" />
+          <p>It stopped on: {reason}</p>
+        </div>
+      )}
+      <div className="nd-actions">
+        {job && (
+          <Button
+            variant="primary"
+            loading={pending === "retry"}
+            onClick={() =>
+              void run(
+                "retry",
+                async () => {
+                  const r = await applyJob(job.id);
+                  await refresh();
+                  onGone();
+                  return r;
+                },
+                (r) => r?.message,
+              )
+            }
+          >
+            Try again
+          </Button>
+        )}
+        <Button variant="ghost" onClick={onSkip}>
+          Skip
+        </Button>
+        {job && (
+          <Button variant="ghost" onClick={() => openJob(job.id, e.run?.id)}>
+            Open job
+          </Button>
+        )}
+        {job && (
+          <span className="nd-actions-end">
+            <ConfirmButton
+              label="Drop this job"
+              confirm="Yes, drop it"
+              size="md"
+              pending={pending === "drop"}
+              onConfirm={() =>
+                run(
+                  "drop",
+                  async () => {
+                    await api("/jobs/" + job.id, "DELETE");
+                    await refresh();
+                    onGone();
+                  },
+                  "Job dropped.",
+                )
+              }
+            />
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------- supervisors and references: one entry per past job ----------
+function PeoplePane({
+  module,
+  people,
+  questions,
+  applications,
+  onModule,
+  onAnswered,
+  onFinished,
+  onSkip,
+}: {
+  module: Module;
+  people: Person[];
+  questions: number;
+  applications: number;
+  onModule: (m: Module) => void;
+  onAnswered: (message: string) => void;
+  onFinished: () => void;
+  onSkip: () => void;
+}) {
+  const { refresh, snapshot } = useWorkspace();
+  const [entries, setEntries] = useState<Record<string, Record<string, string>>>({});
+  const needed = people.filter((p) => p.asks.length);
+  const [openId, setOpenId] = useState(needed[0]?.id || people[0]?.id || "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [bad, setBad] = useState("");
+  const supervisors = module.questions.find((q) => q.type === "work_rows");
+  const references = module.questions.find((q) => q.type === "references");
+
+  const entryFor = (p: Person) => entries[p.id] ?? p.saved;
+  const fieldsFor = (p: Person) => (p.row ? supervisors : references)?.fields || [];
+  const move = (from: Person) => {
+    const at = needed.indexOf(from);
+    const next = [...needed.slice(at + 1), ...needed.slice(0, Math.max(at, 0))].find((p) => p.id !== from.id && !Object.values(entryFor(p)).some(Boolean));
+    if (next) setOpenId(next.id);
+    else onFinished();
+  };
+
+  const save = async (p: Person) => {
+    const entry = Object.fromEntries(Object.entries(entryFor(p)).map(([k, v]) => [k, (v || "").trim()]));
+    if (entry.email && !EMAIL.test(entry.email)) {
+      setBad(p.id);
+      return;
+    }
+    setBad("");
+    setError("");
+    setBusy(true);
+    try {
+      if (JSON.stringify(entry) !== JSON.stringify(p.saved)) {
+        const answers = p.row
+          ? { [supervisors!.key]: { [p.row.row_id]: entry } }
+          : {
+              [references!.key]: people
+                .filter((x) => !x.row)
+                .map((x) => (x.id === p.id ? entry : entryFor(x)))
+                .filter((x) => Object.values(x).some(Boolean)),
+            };
+        const saved = await api<{ module: Module }>(`/knowledge/questionnaires/${module.id}`, "PUT", { answers, accept_suggestions: false });
+        onModule(saved.module);
+      }
+      // Saving teaches the next form; the applications already waiting only move on their own question's answer.
+      // A form's own rows go first. An answer with no row also lands on every open row of the same field (answer_review), which
+      // would give the other jobs this supervisor's name, so it waits until those rows have their own; any save can then send it.
+      const rowOf = (r: Review) => !!r.context?.history_kind;
+      const rowed = p.asks.filter((a) => rowOf(a.review)).map((a) => ({ review: a.review, value: valueFor(a.part, entry, a.review) })).filter((a) => a.value);
+      const sent = new Set(rowed.map((a) => a.review.id));
+      const clear = (r: Review) => !snapshot.reviews.some((o) => o.key === r.key && o.id !== r.id && rowOf(o) && !sent.has(o.id));
+      const rowless = people
+        .flatMap((x) => x.asks.filter((a) => !rowOf(a.review)).map((a) => ({ review: a.review, value: valueFor(a.part, x.id === p.id ? entry : x.saved, a.review) })))
+        .filter((a) => a.value && clear(a.review));
+      const ready = [...rowed, ...rowless];
+      const values = new Map(ready.map((a) => [a.review.id, a.value]));
+      if (ready.length) {
+        await deliver(
+          ready.map((a) => a.review),
+          (r) => postAnswer(r, values.get(r.id)!),
+        );
+        await refresh();
+        onAnswered(`Saved. ${plural(ready.length, "waiting question")} answered.`);
+      }
+      move(p);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="nd-card nd-people">
+      <header className="nd-card-head">
+        <h2 className="nd-q">Supervisors and references</h2>
+        <p className="nd-meta">
+          {plural(questions, "question")} on {plural(applications, "application")} come down to {plural(needed.length, "person", "people")}. Enter each one once:
+          it goes to every form asking and stays in your profile, so new forms fill themselves.
+        </p>
+      </header>
+      <div className="nd-persons">
+        {people.map((p) => (
+          <PersonCard
+            key={p.id}
+            person={p}
+            fields={fieldsFor(p)}
+            contact={(supervisors?.option_labels?.may_contact || {}) as Record<string, string>}
+            entry={entryFor(p)}
+            open={openId === p.id}
+            busy={busy}
+            bad={bad === p.id}
+            error={openId === p.id ? error : ""}
+            onOpen={() => setOpenId(openId === p.id ? "" : p.id)}
+            onChange={(entry) => setEntries((all) => ({ ...all, [p.id]: entry }))}
+            onSave={() => void save(p)}
+            onNext={() => move(p)}
+          />
+        ))}
+      </div>
+      <div className="nd-actions">
+        <Button variant="ghost" onClick={onSkip}>
+          Skip all of these for now
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function PersonCard({
+  person: p,
+  fields,
+  contact,
+  entry,
+  open,
+  busy,
+  bad,
+  error,
+  onOpen,
+  onChange,
+  onSave,
+  onNext,
+}: {
+  person: Person;
+  fields: Field[];
+  contact: Record<string, string>;
+  entry: Record<string, string>;
+  open: boolean;
+  busy: boolean;
+  bad: boolean;
+  error: string;
+  onOpen: () => void;
+  onChange: (entry: Record<string, string>) => void;
+  onSave: () => void;
+  onNext: () => void;
+}) {
+  const form = useRef<HTMLFormElement>(null);
+  const filled = Object.values(entry).some(Boolean);
+  const hasSaved = Object.values(p.saved).some(Boolean);
+  const employers = [...new Set(p.asks.map((a) => a.review.run_id))].length;
+  // Each new card opens ready to type.
+  useEffect(() => {
+    if (open) form.current?.querySelector<HTMLElement>("input")?.focus({ preventScroll: true });
+  }, [open]);
+  // In the fields' own words: "name and title" and "name" are two questions but two details.
+  const details = [
+    ...new Set(p.asks.flatMap((a): string[] => (a.part === "name_title" ? ["name", "title"] : a.part === "first" || a.part === "last" ? ["name"] : a.part === "may_contact" ? ["permission to contact"] : [a.part]))),
+  ];
+  const asksFor = details.length > 1 ? `${details.slice(0, -1).join(", ")} and ${details[details.length - 1]}` : details[0];
+  const status = p.asks.length ? `Asked on ${plural(employers, "application")}` : hasSaved ? "Saved" : "Not asked yet";
+  const inputs = fields.filter((f) => f.key !== "may_contact");
+  return (
+    <article className={"nd-person" + (open ? " is-open" : "") + (p.asks.length ? "" : " is-quiet")}>
+      <button type="button" className="nd-person-head" aria-expanded={open} onClick={onOpen}>
+        <Monogram name={p.row ? p.where : p.title} />
+        <span className="nd-person-name">
+          <strong title={p.title}>{p.title}</strong>
+          <small title={p.where}>{[p.where, p.when].filter(Boolean).join(" · ")}</small>
+        </span>
+        <span className="nd-person-state">
+          {hasSaved && !p.asks.length && <Check size={13} aria-hidden="true" />}
+          {status}
+        </span>
+      </button>
+      {open && (
+        <form
+          ref={form}
+          className="nd-person-form"
+          onSubmit={(e: FormEvent) => {
+            e.preventDefault();
+            if (filled && !busy) onSave();
+          }}
+        >
+          <div className="nd-person-grid">
+            {inputs.map((f) => (
+              <Input
+                key={f.key}
+                label={f.prompt}
+                type={f.key === "email" ? "email" : f.key === "phone" ? "tel" : "text"}
+                autoComplete="off"
+                maxLength={200}
+                value={entry[f.key] || ""}
+                error={f.key === "email" && bad ? "Enter a valid email address" : undefined}
+                onChange={(e) => onChange({ ...entry, [f.key]: e.target.value })}
+              />
+            ))}
+          </div>
+          {fields.some((f) => f.key === "may_contact") && (
+            <div className="nd-person-contact">
+              <span className="ax-label">May we contact this supervisor?</span>
+              <Segmented
+                label={`May we contact the supervisor at ${p.where}?`}
+                value={entry.may_contact || ""}
+                options={Object.entries(contact).map(([value, label]) => ({ value, label }))}
+                onChange={(value) => onChange({ ...entry, may_contact: value })}
+              />
+            </div>
+          )}
+          <ErrorLine error={error} />
+          <div className="nd-actions">
+            <Button type="submit" variant="primary" disabled={!filled} loading={busy}>
+              {p.asks.length ? "Save and send" : "Save"}
+            </Button>
+            <Button variant="ghost" disabled={busy} onClick={onNext}>
+              Skip
+            </Button>
+            <span className="nd-actions-end nd-enter">{asksFor ? `Forms ask for ${asksFor}` : "Enter to save"}</span>
+          </div>
+        </form>
+      )}
+    </article>
+  );
+}
+
+

@@ -33,6 +33,12 @@ def router(service) -> APIRouter:
         with db.session() as s:
             return pipeline.page(s, group, q[:200], page, size)
 
+    @r.get("/api/funnel")
+    def funnel():
+        """Overview's funnel and success by platform (pipeline.funnel)."""
+        with db.session() as s:
+            return pipeline.funnel(s)
+
     @r.post("/api/jobs/apply-many")
     async def apply_many(data: ApplyMany):
         """The owner's Apply for up to 50 jobs at once, each through the one-click path; a result per job."""

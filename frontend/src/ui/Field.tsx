@@ -55,7 +55,7 @@ export function Input({
   );
 }
 
-/** A labelled select; pass <option> children. */
+/** A labelled select in a form; pass <option> children. For a filter or a choice on its own, use Listbox. */
 export function Select({
   label,
   hint,

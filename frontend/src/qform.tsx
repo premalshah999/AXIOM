@@ -2,14 +2,15 @@
 // Shared by Setup › Knowledge and the setup guide's optional step. Every answer is optional and saves on its own;
 // nothing here is required to apply. API: GET/PUT /api/knowledge/questionnaires (jobpilot/features/knowledge).
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Check, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Plus, Trash2 } from "lucide-react";
 import { api, ApiError } from "./api";
-import { Button, Input, Segmented } from "./ui/index";
+import { span as spanOf } from "./profile-fields";
+import { Button, Input, Monogram, Segmented } from "./ui/index";
 import "./styles/qform.css";
 
 // ---------- types (mirror jobpilot/features/knowledge/questionnaires.py) ----------
-type Field = { key: string; prompt: string; type: string; options: string[] };
-type WorkRow = {
+export type Field = { key: string; prompt: string; type: string; options: string[] };
+export type WorkRow = {
   row_id: string;
   index: number;
   company: string;
@@ -19,7 +20,7 @@ type WorkRow = {
   current: boolean;
   answer: Record<string, string>;
 };
-export type Question = {
+type Question = {
   key: string;
   prompt: string;
   type: "yes_no" | "choice" | "text" | "date" | "work_rows" | "references";
@@ -58,7 +59,7 @@ function mergeAnswers(before: Record<string, unknown> | undefined, next: Record<
   return out;
 }
 
-const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+export const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const fail = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : "Could not save");
 
 // ---------- data ----------
@@ -93,22 +94,6 @@ export function useQuestionnaires() {
     });
   }, []);
   return { data, error, reload: load, setModule };
-}
-
-/** The facts a module's saved answers amount to, so a caller holding a profile copy can stay current. */
-export function moduleFacts(module: Module): Record<string, unknown> {
-  const facts: Record<string, unknown> = {};
-  for (const q of module.questions) {
-    if (q.type === "work_rows") {
-      const saved: Record<string, unknown> = {};
-      for (const r of q.rows || []) if (r.answer && Object.keys(r.answer).length) saved[r.row_id] = r.answer;
-      facts[q.key] = Object.keys(saved).length ? saved : undefined;
-    } else if (q.type === "references") facts[q.key] = (q.answer as unknown[])?.length ? q.answer : undefined;
-    else facts[q.key] = q.answer === null || q.answer === "" ? undefined : q.answer;
-  }
-  if (module.id === "wotc")
-    facts.tax_credit_screening_no = module.questions.every((q) => q.answer === false) ? true : undefined;
-  return facts;
 }
 
 // ---------- controls ----------
@@ -159,37 +144,11 @@ function SaveState({ status, retry }: { status: Status; retry?: () => void }) {
   );
 }
 
-// ---------- module list ----------
-const verb = (m: Module) => (m.status === "not_started" ? "Start" : m.status === "complete" ? "Review" : "Continue");
-
-export function ModuleList({ data, onOpen }: { data: Questionnaires; onOpen: (id: string) => void }) {
-  return (
-    <ul className="ax-rows">
-      {data.modules.map((m) => (
-        <li className="ax-row" key={m.id}>
-          <span className="ax-row-main">
-            <strong>{m.title}</strong>
-            <small>{m.purpose}</small>
-          </span>
-          <span className="ax-row-end">
-            <span className="ax-hint">
-              {m.status === "complete" ? "Complete" : `${m.answered} of ${m.total} answered`}
-            </span>
-            <Button size="sm" onClick={() => onOpen(m.id)} aria-label={`${verb(m)} ${m.title}`}>
-              {verb(m)}
-            </Button>
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 // ---------- a module's form ----------
 type Local = Record<string, unknown>;
 
 const blank = (fields: Field[] = []) => Object.fromEntries(fields.map((f) => [f.key, ""])) as Record<string, string>;
-const entryOf = (fields: Field[] | undefined, saved: Record<string, string> | undefined) => ({
+export const entryOf = (fields: Field[] | undefined, saved: Record<string, string> | undefined) => ({
   ...blank(fields),
   ...(saved || {}),
 });
@@ -226,11 +185,14 @@ export function ModuleForm({
   onModule,
   onClose,
   closeLabel = "All questionnaires",
+  bare,
 }: {
   module: Module;
   onModule: (m: Module) => void;
   onClose?: () => void;
   closeLabel?: string;
+  /** The host shows the title and what it is for; only the questions and the save state remain. */
+  bare?: boolean;
 }) {
   const [local, setLocal] = useState<Local>(() => initial(module));
   const [status, setStatus] = useState<Status>({ state: "idle" });
@@ -317,20 +279,24 @@ export function ModuleForm({
 
   return (
     <section className="ax-qf" aria-label={module.title}>
-      <header className="ax-qf-head">
-        {onClose && (
-          <Button variant="ghost" size="sm" icon={<ArrowLeft size={14} aria-hidden="true" />} onClick={onClose}>
-            {closeLabel}
-          </Button>
-        )}
-        <h2>{module.title}</h2>
-        <p className="ax-hint">{module.purpose}</p>
-      </header>
+      {!bare && (
+        <header className="ax-qf-head">
+          {onClose && (
+            <Button variant="ghost" size="sm" icon={<ArrowLeft size={14} aria-hidden="true" />} onClick={onClose}>
+              {closeLabel}
+            </Button>
+          )}
+          <h2>{module.title}</h2>
+          <p className="ax-hint">{module.purpose}</p>
+        </header>
+      )}
       {/* Stays in view while you scroll, so "Saved" or a failed save with Retry is never off screen. */}
-      <div className="ax-qf-progress">
-        <span className="ax-hint">
-          {module.answered} of {module.total} answered
-        </span>
+      <div className={"ax-qf-progress" + (bare ? " is-bare" : "")}>
+        {!bare && (
+          <span className="ax-hint">
+            {module.answered} of {module.total} answered
+          </span>
+        )}
         <SaveState status={status} retry={failed.current ? retry : undefined} />
       </div>
 
@@ -492,9 +458,50 @@ function Row({
   );
 }
 
-function span(r: WorkRow) {
-  const when = [r.start, r.current ? "Present" : r.end].filter(Boolean).join(" – ");
-  return when;
+// The fields people are asked for first come first, whatever order the server lists them in.
+const FIELD_ORDER = ["name", "title", "email", "phone", "relationship", "company"];
+const byOrder = (a: Field, b: Field) => {
+  const ia = FIELD_ORDER.indexOf(a.key);
+  const ib = FIELD_ORDER.indexOf(b.key);
+  return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+};
+
+/** One person (a job's supervisor, a reference) as a row that opens: who they are, or that they are missing, then the fields. */
+function PersonCard({
+  lead,
+  title,
+  sub,
+  summary,
+  added,
+  defaultOpen,
+  children,
+}: {
+  lead?: React.ReactNode;
+  title: string;
+  sub?: string;
+  summary: string;
+  added: boolean;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return (
+    <li className={"ax-qf-person" + (open ? " is-open" : "") + (added ? " is-added" : "")}>
+      <button type="button" className="ax-qf-person-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {lead}
+        <span className="ax-qf-person-main">
+          <strong title={title}>{title}</strong>
+          {sub && <small>{sub}</small>}
+        </span>
+        <span className="ax-qf-person-state">
+          {added ? <Check size={13} aria-hidden="true" /> : <Plus size={13} aria-hidden="true" />}
+          <span>{summary}</span>
+        </span>
+        <ChevronDown size={15} aria-hidden="true" className="ax-qf-person-go" />
+      </button>
+      {open && <div className="ax-qf-person-body">{children}</div>}
+    </li>
+  );
 }
 
 function Supervisors({
@@ -513,24 +520,26 @@ function Supervisors({
   onSave: (row: string, entry: Record<string, string>) => void;
 }) {
   const rows = q.rows || [];
-  const fields = (q.fields || []).filter((f) => f.key !== "may_contact");
+  const fields = (q.fields || []).filter((f) => f.key !== "may_contact").sort(byOrder);
   const contact = (q.option_labels?.may_contact || {}) as Record<string, string>;
   if (!rows.length)
     return (
       <div className="ax-qf-block">
         <strong>{q.prompt}</strong>
-        <p className="ax-hint">Add your work history in Profile › Experience first; each job gets its own supervisor card here.</p>
+        <p className="ax-hint">Add your work history in Profile › Work and education first; each job then gets its own supervisor here.</p>
       </div>
     );
   const done = (row: WorkRow) => Object.keys(value[row.row_id] || {}).some((k) => (value[row.row_id] || {})[k]);
+  // With nothing added yet, the first job opens so the first step is already in front of you.
+  const first = rows.some(done) ? -1 : 0;
   return (
     <div className="ax-qf-block">
       <div className="ax-qf-block-head">
         <strong>{q.prompt}</strong>
         {q.help && <small className="ax-hint">{q.help}</small>}
       </div>
-      <div className="ax-qf-cards">
-        {rows.map((r) => {
+      <ul className="ax-qf-people">
+        {rows.map((r, i) => {
           const entry = entryOf(q.fields, value[r.row_id]);
           const pid = q.key + ":" + r.row_id + ":email";
           const save = (next: Record<string, string>) => {
@@ -540,16 +549,15 @@ function Supervisors({
             onSave(r.row_id, Object.fromEntries(Object.entries(next).map(([k, v]) => [k, v.trim()])));
           };
           return (
-            <article key={r.row_id} className="ax-qf-card" aria-label={`${r.title} at ${r.company}`}>
-              <header>
-                <span>
-                  <strong>{r.title || "Role"}</strong>
-                  <span className="ax-hint"> · {r.company || "Employer"}</span>
-                </span>
-                <span className="ax-hint">
-                  {[span(r), done(r) ? "Added" : "Not added"].filter(Boolean).join(" · ")}
-                </span>
-              </header>
+            <PersonCard
+              key={r.row_id}
+              lead={<Monogram name={r.company} size="md" />}
+              title={r.title || "Role"}
+              sub={[r.company || "Employer", spanOf(r.start, r.end, r.current)].filter(Boolean).join(" · ")}
+              added={done(r)}
+              summary={done(r) ? entry.name || "Added" : "Add supervisor"}
+              defaultOpen={i === first}
+            >
               <div className="ax-qf-grid">
                 {fields.map((f) => (
                   <Input
@@ -578,10 +586,10 @@ function Supervisors({
                   }}
                 />
               </div>
-            </article>
+            </PersonCard>
           );
         })}
-      </div>
+      </ul>
     </div>
   );
 }
@@ -602,7 +610,7 @@ function References({
   onSave: (list: Record<string, string>[]) => void;
 }) {
   const max = q.max || 3;
-  const fields = q.fields || [];
+  const fields = [...(q.fields || [])].sort(byOrder);
   const clean = (list: Record<string, string>[]) =>
     list.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v.trim()]))).filter((r) => Object.values(r).some(Boolean));
   const save = (list: Record<string, string>[]) => {
@@ -616,47 +624,61 @@ function References({
         <strong>{q.prompt}</strong>
         {q.help && <small className="ax-hint">{q.help}</small>}
       </div>
-      <div className="ax-qf-cards">
-        {value.map((entry, i) => (
-          <article key={i} className="ax-qf-card" aria-label={`Reference ${i + 1}`}>
-            <header>
-              <strong>Reference {i + 1}</strong>
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={<Trash2 size={13} aria-hidden="true" />}
-                aria-label={`Remove reference ${i + 1}`}
-                onClick={() => {
-                  const next = value.filter((_, j) => j !== i);
-                  onEdit(next);
-                  save(next);
-                }}
+      {value.length === 0 && <p className="ax-hint">No references yet. Applications that ask for references use these, in order.</p>}
+      {value.length > 0 && (
+        <ul className="ax-qf-people">
+          {value.map((entry, i) => {
+            const added = Object.values(entry).some((v) => v.trim());
+            return (
+              <PersonCard
+                key={i}
+                title={entry.name?.trim() || `Reference ${i + 1}`}
+                sub={[entry.relationship, entry.company].filter((x) => x?.trim()).join(" · ") || undefined}
+                added={added}
+                summary={added ? "Added" : "Add details"}
+                defaultOpen={!added}
               >
-                Remove
-              </Button>
-            </header>
-            <div className="ax-qf-grid">
-              {fields.map((f) => (
-                <Input
-                  key={f.key}
-                  label={f.prompt}
-                  type={f.key === "email" ? "email" : f.key === "phone" ? "tel" : "text"}
-                  autoComplete="off"
-                  maxLength={200}
-                  value={entry[f.key] || ""}
-                  error={f.key === "email" ? problems[`ref:${i}:email`] : undefined}
-                  onChange={(e) => onEdit(value.map((r, j) => (j === i ? { ...r, [f.key]: e.target.value } : r)))}
-                  onBlur={() => save(value)}
-                />
-              ))}
-            </div>
-          </article>
-        ))}
-      </div>
+                <div className="ax-qf-grid">
+                  {fields.map((f) => (
+                    <Input
+                      key={f.key}
+                      label={f.prompt}
+                      type={f.key === "email" ? "email" : f.key === "phone" ? "tel" : "text"}
+                      autoComplete="off"
+                      maxLength={200}
+                      value={entry[f.key] || ""}
+                      error={f.key === "email" ? problems[`ref:${i}:email`] : undefined}
+                      onChange={(e) => onEdit(value.map((r, j) => (j === i ? { ...r, [f.key]: e.target.value } : r)))}
+                      onBlur={() => save(value)}
+                    />
+                  ))}
+                </div>
+                <div className="ax-qf-contact">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={<Trash2 size={13} aria-hidden="true" />}
+                    aria-label={`Remove reference ${i + 1}`}
+                    onClick={() => {
+                      const next = value.filter((_, j) => j !== i);
+                      onEdit(next);
+                      save(next);
+                    }}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              </PersonCard>
+            );
+          })}
+        </ul>
+      )}
       {value.length < max && (
-        <Button size="sm" icon={<Plus size={14} aria-hidden="true" />} onClick={() => onEdit([...value, blank(fields)])}>
-          {value.length ? "Add another reference" : "Add a reference"}
-        </Button>
+        <div>
+          <Button size="sm" icon={<Plus size={14} aria-hidden="true" />} onClick={() => onEdit([...value, blank(fields)])}>
+            {value.length ? "Add another reference" : "Add a reference"}
+          </Button>
+        </div>
       )}
     </div>
   );

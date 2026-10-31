@@ -1,6 +1,6 @@
 // Small shared pieces for Profile and Settings, built on the ax- primitives (src/ui/index). Nothing here knows a page.
 import { Eye, EyeOff } from "lucide-react";
-import { useEffect, useId, useState, type InputHTMLAttributes, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import "./styles/setup.css";
 import { api } from "./api";
 import { useAction } from "./hooks";
@@ -139,40 +139,6 @@ export function SecretInput({
       />
       {extra}
     </div>
-  );
-}
-
-const splitList = (text: string) =>
-  text
-    .split(",")
-    .map((x) => x.trim())
-    .filter(Boolean);
-
-/**
- * A comma-separated list in one input. It keeps what is typed (the comma and the space after it included) and reports
- * the finished list; it follows the list only when that changes from outside (Discard, a reload).
- */
-export function ListInput({
-  value,
-  onChange,
-  ...rest
-}: { value: string[]; onChange: (value: string[]) => void } & Omit<
-  InputHTMLAttributes<HTMLInputElement>,
-  "value" | "onChange"
->) {
-  const [text, setText] = useState(value.join(", "));
-  useEffect(() => {
-    setText((t) => (JSON.stringify(splitList(t)) === JSON.stringify(value) ? t : value.join(", ")));
-  }, [value]);
-  return (
-    <input
-      {...rest}
-      value={text}
-      onChange={(e) => {
-        setText(e.target.value);
-        onChange(splitList(e.target.value));
-      }}
-    />
   );
 }
 

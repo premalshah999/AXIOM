@@ -1,14 +1,20 @@
-// Import primitives from "./ui/index" (not "./ui": that resolves to the legacy ui.tsx file beside this folder).
-export { Button } from "./Button";
+// Import primitives from "./ui/index". DESIGN.md says when to use each.
+export { Button, IconButton } from "./Button";
 export { ConfirmButton } from "./Confirm";
+export { Dialog } from "./Dialog";
 export { Drawer } from "./Drawer";
+export { Dropzone } from "./Dropzone";
 export { Empty } from "./Empty";
-export { ErrorLine, Loading } from "./Feedback";
+export { ErrorLine, Loading, Skeleton } from "./Feedback";
 export { Check, Field, Input, Select, Textarea } from "./Field";
 export { External } from "./Link";
+export { Listbox } from "./Listbox";
+export { Monogram, MonogramStack } from "./Monogram";
 export { Panel } from "./Panel";
+export { Popover } from "./Popover";
 export { Segmented } from "./Segmented";
 export { Pill, type PillTone } from "./Pill";
 export { RouteTabs, Tabs } from "./Tabs";
 export { Table, type Column } from "./Table";
 export { ToastStack } from "./Toast";
+export { Tooltip } from "./Tooltip";

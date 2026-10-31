@@ -1,6 +1,6 @@
-/* AXIOM design tokens (DESIGN.md): "The Instrument". A front panel: lines are the machine, dots are what it is doing.
-   Two themes, set on <html data-theme="dark|light"> before first paint; a missing or unknown value is dark. Every colour and
-   every font is declared in this file and nowhere else. tests/test_identity_contrast.py measures the pairs. */
+/* AXIOM design tokens (DESIGN.md). Two themes, graphite and bone, set on <html data-theme="dark|light"> before first paint; a
+   missing or unknown value is dark. Every colour and every font is declared in this file and nowhere else.
+   tests/test_identity_contrast.py measures the pairs. */
 
 /* Latin subsets only, bundled: nothing is fetched from a font service at run time. These files are the ones with the axes the
    look depends on, measured in Chromium (2026-10-30): Doto "full" draws differently at ROND 0 and 100 and at wght 100 and 900;
@@ -31,127 +31,178 @@
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
-/* ---------- Dark: a graphite plate ---------- */
+/* ---------- Dark: graphite ---------- */
 :root,
 :root[data-theme="dark"] {
   color-scheme: dark;
-  /* The plate. --ground is the page; --ground-2 is a hover or a raised overlay; --ground-3 is a recess cut into the plate. */
-  --ground: #232321;
-  --ground-2: #2d2d2a;
-  --ground-3: #1b1b19;
-  --raised: #2d2d2a;
-  --field: #1b1b19;
-  --tint: rgba(236, 233, 223, 0.07);
-  --line: #41413d;
-  --line-strong: #7c7a72;
+  /* Surfaces, from the back of the app forward. Each step is one real level of depth. */
+  --ground: #141413; /* behind everything: the sidebar */
+  --sheet: #1c1c1a; /* the page */
+  --raised: #232322; /* panels and tables on the page */
+  --overlay: #2a2a28; /* menus, dialogs, drawers, toasts */
+  --inset: #161615; /* a well cut into a surface: tracks, code, the search field */
+  --field: #171716; /* an input */
+  --hover: rgba(236, 233, 223, 0.06);
+  --active: rgba(236, 233, 223, 0.1);
+  /* Lines */
+  --line: #33332f; /* a hairline between things */
+  --line-soft: #2a2a27; /* a hairline between rows */
+  --line-strong: #77766e; /* the edge of a control: 3:1 */
   /* Text */
   --ink: #ece9df;
-  --ink-2: #b3b0a5;
-  --ink-3: #a8a599;
-  /* Keys. A key is lit from above and stands on an edge; --brand is the one dark or light master key. */
-  --key: #32322f;
-  --key-ink: #ece9df;
-  --key-top: #494945;
-  --key-bot: #0f0f0e;
-  --key-down: #1e1e1c;
-  --brand: #e6e2d7;
-  --brand-ink: #171613;
-  /* Links are ink and underlined: vermilion is not for decoration. */
-  --accent-text: #ece9df;
+  --ink-2: #b6b3a8;
+  --ink-3: #a3a095;
   --focus: #ece9df;
-  /* The display window stays dark at both hours. */
-  --window: #0b0b0a;
-  --window-edge: #000000;
-  --window-rule: #262623;
-  --window-ink: #ede9dd;
-  --window-ink-2: #a29e91;
-  --dot-off: #262623;
-  /* One lamp colour. It only ever means the machine is live or something needs you. */
+  /* Buttons */
+  --btn: #2f2f2c;
+  --btn-hover: #383834;
+  --btn-active: #292926;
+  --btn-edge: #454540;
+  --btn-ink: #ece9df;
+  --btn-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --brand: #ece9df;
+  --brand-hover: #fbf9f3;
+  --brand-active: #d8d5ca;
+  --brand-ink: #171613;
+  /* The one signal colour. It only ever means the machine is live, or something needs you. */
   --led: #ff4310;
   --signal: #ff4a17;
-  --signal-ink: #ff845c;
-  --signal-on-window: #ff6a3c;
+  --signal-ink: #ff8a63;
+  --signal-soft: rgba(255, 74, 23, 0.14);
+  --signal-fill: #d93505;
+  --signal-fill-ink: #ffffff;
   --bad: var(--signal-ink);
-  --shade: rgba(0, 0, 0, 0.45);
-  --shade-deep: rgba(0, 0, 0, 0.9);
-  --engrave: 0 -1px 0 rgba(0, 0, 0, 0.65);
-  /* Bead-blasted plate: a tile of noise drawn once. It is a background, not a blend over the page, so it costs nothing to keep. */
-  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.15' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1.4 -.2'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)' opacity='.028'/%3E%3C/svg%3E");
+  /* The display window stays dark in both themes. */
+  --window: #0b0b0a;
+  --window-edge: #000000;
+  --window-rule: #24241f;
+  --window-ink: #ede9dd;
+  --window-ink-2: #a9a598;
+  --dot-off: #26261f;
+  /* A dot matrix on a surface */
+  --dot-plate: #3b3b36;
+  --dot-lit: #ece9df;
+  /* Employer monograms: quiet, one step off the panel, told apart by a muted hue. */
+  --mono-ink: #ece9df;
+  --mono-0: #3d4238;
+  --mono-1: #46392f;
+  --mono-2: #333e47;
+  --mono-3: #483638;
+  --mono-4: #2f4340;
+  --mono-5: #45412c;
+  --mono-6: #3c3c39;
+  --mono-7: #2f3d33;
+  /* Depth */
+  --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --shadow-overlay: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 12px 32px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.35);
+  --scrim: rgba(0, 0, 0, 0.55);
   /* A resume page: white paper in both themes, because it is a picture of a printed page. */
   --paper: #ffffff;
   --paper-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), 0 12px 36px rgba(0, 0, 0, 0.35);
-  --overlay-shadow: 0 14px 34px rgba(0, 0, 0, 0.55);
-  --scrim: rgba(0, 0, 0, 0.5);
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23b6b3a8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4.5 6.5 3.5 3.5 3.5-3.5'/%3E%3C/svg%3E");
 }
 
-/* ---------- Light: bone aluminium ---------- */
+/* ---------- Light: bone ---------- */
 :root[data-theme="light"] {
   color-scheme: light;
-  --ground: #e5e3db;
-  --ground-2: #f0eee8;
-  --ground-3: #d4d2c9;
-  --raised: #f0eee8;
-  --field: #d4d2c9;
-  --tint: rgba(22, 21, 19, 0.06);
-  --line: #b8b6ac;
-  --line-strong: #7f7d73;
+  --ground: #e1dfd6;
+  --sheet: #eeede6;
+  --raised: #faf9f5;
+  --overlay: #fdfcfa;
+  --inset: #e7e5dd;
+  --field: #fdfcfa;
+  --hover: rgba(22, 21, 19, 0.05);
+  --active: rgba(22, 21, 19, 0.09);
+  --line: #d3d1c7;
+  --line-soft: #e4e2da;
+  --line-strong: #85837a;
   --ink: #161513;
   --ink-2: #47463f;
-  --ink-3: #55534b;
-  --key: #f8f7f3;
-  --key-ink: #161513;
-  --key-top: #ffffff;
-  --key-bot: #a3a197;
-  --key-down: #d6d4cb;
-  --brand: #161513;
-  --brand-ink: #f4f3ee;
-  --accent-text: #161513;
+  --ink-3: #575650;
   --focus: #171613;
+  --btn: #fdfcfa;
+  --btn-hover: #f3f2ec;
+  --btn-active: #e9e7e0;
+  --btn-edge: #cac8bd;
+  --btn-ink: #161513;
+  --btn-sheen: 0 1px 1px rgba(50, 46, 34, 0.06);
+  --brand: #1a1917;
+  --brand-hover: #2e2d29;
+  --brand-active: #000000;
+  --brand-ink: #f8f7f2;
+  --led: #ff4310;
+  --signal: #e93a08;
+  --signal-ink: #a32a00;
+  --signal-soft: rgba(233, 58, 8, 0.1);
+  --signal-fill: #c93106;
+  --signal-fill-ink: #ffffff;
+  --bad: var(--signal-ink);
   --window: #100f0d;
-  --window-edge: #8f8d83;
+  --window-edge: #0a0a09;
   --window-rule: #2a2925;
   --window-ink: #ede9dd;
-  --window-ink-2: #a29e91;
+  --window-ink-2: #a9a598;
   --dot-off: #2b2a26;
-  --led: #ff4310;
-  --signal: #f03a06;
-  --signal-ink: #a32a00;
-  --signal-on-window: #ff6a3c;
-  --bad: var(--signal-ink);
-  --shade: rgba(0, 0, 0, 0.33);
-  --shade-deep: rgba(0, 0, 0, 0.9);
-  --engrave: 0 1px 0 rgba(255, 255, 255, 0.55);
-  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.15' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1.4 -.2'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)' opacity='.035'/%3E%3C/svg%3E");
-  --paper: #ffffff;
-  --paper-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), 0 12px 36px rgba(0, 0, 0, 0.35);
-  --overlay-shadow: 0 14px 34px rgba(50, 46, 34, 0.28);
+  --dot-plate: #d3d1c7;
+  --dot-lit: #1a1917;
+  --mono-ink: #2a2925;
+  --mono-0: #dfe4d6;
+  --mono-1: #ecdfd1;
+  --mono-2: #d8e1e8;
+  --mono-3: #eddcdb;
+  --mono-4: #d5e5e1;
+  --mono-5: #e9e4cc;
+  --mono-6: #e2e1dc;
+  --mono-7: #d8e6da;
+  --shadow-panel: 0 1px 2px rgba(50, 46, 34, 0.06);
+  --shadow-overlay: 0 1px 2px rgba(50, 46, 34, 0.1), 0 14px 36px rgba(50, 46, 34, 0.2);
   --scrim: rgba(30, 28, 22, 0.35);
+  --paper: #ffffff;
+  --paper-shadow: 0 2px 4px rgba(0, 0, 0, 0.18), 0 12px 36px rgba(0, 0, 0, 0.18);
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%2347463f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4.5 6.5 3.5 3.5 3.5-3.5'/%3E%3C/svg%3E");
+}
+
+/* The window is dark in both themes, so what sits in it takes the dark theme's values. */
+.ax-window {
+  --surface: var(--window);
+  --focus: var(--window-ink);
+  --hover: rgba(237, 233, 221, 0.08);
+  --active: rgba(237, 233, 221, 0.12);
+  --mono-ink: #ece9df;
+  --mono-0: #3d4238;
+  --mono-1: #46392f;
+  --mono-2: #333e47;
+  --mono-3: #483638;
+  --mono-4: #2f4340;
+  --mono-5: #45412c;
+  --mono-6: #3c3c39;
+  --mono-7: #2f3d33;
 }
 
 /* ---------- scale ---------- */
 :root {
-  /* --live is what is lit when the machine runs: vermilion only then, plain ink otherwise. The shell sets data-run from real
-     state, and it starts off, so nothing claims to be live before the first answer. */
+  /* --live is what is lit when the machine runs: vermilion only then, plain ink otherwise. main.tsx sets data-run from real state,
+     and it starts off, so nothing claims to be live before the first answer. */
   --live: var(--ink);
-  /* An opaque piece of the plate (a sticky table head), with the plate's finish. */
-  --plate: var(--ground) var(--grain);
+  /* The opaque surface a sticky head or pinned cell sits on. Anything that sets a background sets this too. */
+  --surface: var(--sheet);
 
   --font-read: "Doto", var(--font-data);
   --font-text: "Archivo", Arial, sans-serif;
   --font-data: "Fragment Mono", ui-monospace, Menlo, monospace;
 
-  /* Doto is for readouts of 56px and up. Under about 20px, data is Fragment Mono and sentences are Archivo. */
-  --text-meta: 13px;
-  --text-ui: 14px;
+  /* The type scale. Five sizes: page title, section title, body, secondary and data. Doto is for readouts of 56px and up. */
+  --text-page: 24px;
+  --text-title: 15px;
   --text-body: 14px;
-  --text-sub: 16px;
-  --text-title: 20px;
-  --text-page: 30px;
-  /* Engraved labels: wide Archivo. */
-  --wide: 125%;
+  --text-meta: 13px;
+  --text-data: 12.5px;
+  /* Archivo's width axis: slightly wide for a page title, normal everywhere else. */
+  --wide: 112%;
 
-  --radius: 3px;
-  --radius-sm: 2px;
+  --radius-sm: 6px; /* buttons, inputs, list rows */
+  --radius: 8px; /* panels, tables, menus */
+  --radius-lg: 10px; /* the page sheet, dialogs */
 
   /* A 4px grid. */
   --space-1: 4px;
@@ -164,16 +215,14 @@
   --space-12: 48px;
 
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --dur: 140ms;
+  --dur: 130ms;
 
-  --page-w: 1720px;
-  --form-w: 1080px;
-  --gutter: 24px;
-  --rail: 96px;
-  --inset: 12px;
-  --bar-height: 90px;
-  /* How wide a coming-soon station is against a page's, on the tuning scale. */
-  --soon: 1;
+  --page-w: 1560px;
+  --form-w: 1040px;
+  --gutter: 32px;
+  --sidebar: 232px;
+  --control: 34px; /* the height of a control */
+  --control-sm: 28px;
 }
 :root[data-run="on"] {
   --live: var(--signal);
@@ -182,8 +231,6 @@
 @media (max-width: 899px) {
   :root {
     --gutter: 16px;
-    --bar-height: 52px;
-    --text-page: 24px;
-    --text-title: 18px;
+    --text-page: 22px;
   }
 }

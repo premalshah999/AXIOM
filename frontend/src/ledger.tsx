@@ -1,174 +1,324 @@
-import { confirmedToday } from "./identity/state";
-import { Download, ExternalLink } from "lucide-react";
-import { useMemo } from "react";
+import { CheckCheck, CopyCheck, Download, ExternalLink, FileCheck2, FileMinus, FileText, FilterX, Globe, LayoutDashboard, MailCheck, SearchX, ShieldCheck, UserCheck, type LucideIcon } from "lucide-react";
+import { useEffect, useMemo } from "react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useDraft, useNow, usePoll } from "./hooks";
-import { evidenceLabel } from "./model";
+import { confirmedToday } from "./identity/state";
+import { evidenceLabel, PROOF } from "./model";
+import type { JobRow } from "./model";
 import { usePipelinePage } from "./pipeline";
 import { Pagination, usePagination } from "./pagination";
-import type { Success } from "./types";
+import type { Archived, Proof, Success } from "./types";
 import { ArchiveList } from "./archive";
 import { useSelection } from "./bulk";
 import { RowActions } from "./jobactions";
-import type { JobRow } from "./model";
 import { PipelineBulk } from "./pipelinebulk";
-import { TopActions } from "./shell/Shell";
-import { ago, linkHost, plural, stamp, urlRole } from "./format";
-import { Button, Empty, RouteTabs, Table, type Column } from "./ui/index";
-import { JobCell, LoadError, Notice, Note, SearchBox, StatusPill } from "./worktools";
+import { TopActions, TopLine } from "./shell/Shell";
+import { ago, jobWords, platformName, stamp } from "./format";
+import { Button, Empty, Listbox, RouteTabs, Table, Tooltip, type Column } from "./ui/index";
+import { JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
+import "./styles/applications.css";
 
-const EVIDENCE = [
-  ["all", "Any evidence"],
-  ["page", "Page acknowledgement"],
-  ["email", "Employer email"],
-  ["existing", "Existing application"],
-] as const;
+// The two things a row proves: when it was sent and what proved it. Both are in the row, the receipt is one click away (the job's
+// drawer opens on its status and its Proof), and the posting opens in the system browser (a real link with a target, which the
+// native window hands to the Mac).
 
-function matches(row: Success, filter: string) {
-  if (filter === "page") return row.website_confirmed;
-  if (filter === "email") return row.email_confirmed;
-  if (filter === "existing") return row.existing_application;
-  return true;
+type Evidence = "all" | Exclude<Proof, "both">;
+type Period = "all" | "today" | "week" | "month";
+type Filters = { q: string; evidence: Evidence; period: Period; platform: string };
+
+const PERIODS: { value: Period; label: string; days: number }[] = [
+  { value: "all", label: "Any time", days: 0 },
+  { value: "today", label: "Today", days: 1 },
+  { value: "week", label: "Last 7 days", days: 7 },
+  { value: "month", label: "Last 30 days", days: 30 },
+];
+
+// The proof menu: a confirmation page or an employer email (each also counts a job proved by both), then every other proof the
+// ledger holds, in this order. One with no application is left out unless it is chosen.
+const EVIDENCE: Evidence[] = ["all", "page", "email", "existing", "platform", "final_page", "dashboard", "applicant", "none"];
+
+// What each proof means, in the words a person would use, and its small icon (both shows two).
+const PROOF_HELP: Record<Proof, string> = {
+  page: "The employer's own page said the application was received.",
+  email: "An email from the employer acknowledged the application.",
+  both: "The employer's page and an email from the employer both acknowledged it.",
+  existing: "The employer says an application from you was already on file.",
+  platform: "The platform answered the application as created.",
+  final_page: "The last page of the application said it was received.",
+  dashboard: "The employer's candidate dashboard lists the application.",
+  applicant: "You checked the employer's page or email and recorded it as sent.",
+  none: "No confirmation page or employer email is on file. Open it to see why it counts.",
+};
+const PROOF_ICON: Record<Proof, LucideIcon[]> = {
+  page: [FileCheck2],
+  email: [MailCheck],
+  both: [FileCheck2, MailCheck],
+  existing: [CopyCheck],
+  platform: [Globe],
+  final_page: [FileText],
+  dashboard: [LayoutDashboard],
+  applicant: [UserCheck],
+  none: [FileMinus],
+};
+
+function hasProof(r: Success, kind: Evidence) {
+  if (kind === "page") return r.website_confirmed;
+  if (kind === "email") return r.email_confirmed;
+  return kind === "all" || r.proof === kind;
 }
 
-function csv(rows: Success[]) {
-  // Formula-like cells are neutralized so a spreadsheet never executes them.
-  const cell = (v: unknown) => {
-    let text = String(v ?? "");
-    if (/^[\s]*[=+@-]/.test(text)) text = "'" + text;
-    return '"' + text.replaceAll('"', '""') + '"';
-  };
-  const lines = [
-    ["Company", "Job title", "Date applied", "Application link", "Platform", "Evidence"],
-    ...rows.map((r) => [
-      r.company,
-      r.title,
-      new Date(r.applied_at).toLocaleString(),
-      r.url,
-      r.ats,
-      evidenceLabel(r),
-    ]),
-  ];
-  const href = URL.createObjectURL(
-    new Blob(["﻿" + lines.map((l) => l.map(cell).join(",")).join("\r\n")], {
-      type: "text/csv;charset=utf-8",
-    }),
+// Local midnight of the first day the period covers, as epoch ms (0 for any time).
+function periodStart(period: Period, now: number) {
+  const days = PERIODS.find((p) => p.value === period)?.days ?? 0;
+  if (!days) return 0;
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - (days - 1));
+  return d.getTime();
+}
+
+// A filter that skips one field, so each menu counts what choosing its options would show. The search reads what the row shows: a
+// job saved without a company or title is found by its link, as the employer's name is taken from it.
+function passes(r: Success, f: Filters, from: number, skip?: keyof Filters) {
+  if (skip !== "evidence" && !hasProof(r, f.evidence)) return false;
+  if (skip !== "platform" && f.platform !== "all" && r.ats !== f.platform) return false;
+  // "Sent" counts what AXIOM sent: the employer's own "you already applied" notice is not that.
+  if (skip !== "period" && from && (r.existing_application || Date.parse(r.applied_at) < from)) return false;
+  const q = f.q.trim().toLowerCase();
+  return skip === "q" || !q || `${r.company || r.url} ${r.title || r.url} ${r.ats}`.toLowerCase().includes(q);
+}
+
+// When it was sent, as a person says it: "Today" and 2:14 PM, "Yesterday" and 9:30 AM, "Oct 28" and 3:05 PM.
+function sentAt(value: string, now: number) {
+  const t = new Date(value);
+  if (Number.isNaN(t.getTime())) return null;
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  const clock = t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (t.getTime() >= midnight.getTime()) return { day: "Today", clock };
+  midnight.setDate(midnight.getDate() - 1);
+  if (t.getTime() >= midnight.getTime()) return { day: "Yesterday", clock };
+  const date = t.toLocaleDateString([], { month: "short", day: "numeric", year: t.getFullYear() === new Date(now).getFullYear() ? undefined : "numeric" });
+  return { day: date, clock };
+}
+
+function Sent({ r, now }: { r: Success; now: number }) {
+  const at = sentAt(r.applied_at, now);
+  return (
+    <time className="ap-sent" dateTime={r.applied_at} title={`${stamp(r.applied_at)} · ${ago(r.applied_at, now)}`}>
+      {at ? (
+        <>
+          {at.day} <span>{at.clock}</span>
+        </>
+      ) : (
+        "—"
+      )}
+    </time>
   );
-  const a = document.createElement("a");
-  a.href = href;
-  a.download = "AXIOM-confirmed-applications.csv";
-  document.body.append(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(href), 1000);
 }
+
+function Proof({ r }: { r: Success }) {
+  return (
+    <Tooltip label={PROOF_HELP[r.proof]}>
+      <span className={"ap-proof" + (r.proof === "none" ? " is-none" : "")}>
+        {PROOF_ICON[r.proof].map((Icon, i) => (
+          <Icon key={i} size={15} aria-hidden="true" />
+        ))}
+        {evidenceLabel(r)}
+      </span>
+    </Tooltip>
+  );
+}
+
+// Only a web link opens from here; anything else a posting might hold is not a page to send the person to.
+const webLink = (url: string) => (/^https?:\/\//i.test(url) ? url : "");
 
 const TABS = ["confirmed", "unconfirmed", "archive"];
 
-// Applications: what was sent. Confirmed applications are the ledger (trustworthy evidence only); Unconfirmed are
-// submissions with no receipt, protected from any retry; Archive keeps earlier failures. Discovered and the pipeline
-// are under Jobs.
-export function LedgerView({ forceTab }: { forceTab?: string }) {
+// Applications: what was sent. Confirmed is the ledger (proof on every row); Unconfirmed holds submissions with no receipt, protected
+// from any retry; Archive keeps earlier failures. Discovered and the started list are under Jobs.
+export function LedgerView() {
   const { route, counts } = useWorkspace();
-  const tab = forceTab || (TABS.includes(route.tab || "") ? route.tab! : "confirmed");
+  const tab = TABS.includes(route.tab || "") ? route.tab! : "confirmed";
+  // Read here so the tabs can say how many there are before they are opened.
+  const ledger = usePoll<{ applications: Success[] }>((signal) => api("/successful-applications", "GET", undefined, signal), 60000);
+  const archive = usePoll<{ applications: Archived[]; log_bytes: number }>((signal) => api("/archive", "GET", undefined, signal), 60000);
   const tabs = [
-    { id: "confirmed", label: "Confirmed" },
+    { id: "confirmed", label: "Confirmed", count: ledger.data?.applications.length },
     { id: "unconfirmed", label: "Unconfirmed", count: counts.groups.unconfirmed },
-    { id: "archive", label: "Archive" },
+    { id: "archive", label: "Archive", count: archive.data?.applications.length },
   ];
   return (
     <div className="ax-page ax-page-fill">
       <RouteTabs view="ledger" tabs={tabs} label="Applications" current={tab} />
-      {tab === "confirmed" && <Confirmed />}
+      {tab === "confirmed" && <Confirmed ledger={ledger} />}
       {tab === "unconfirmed" && <Unconfirmed />}
-      {tab === "archive" && <ArchiveList />}
+      {tab === "archive" && <ArchiveList archive={archive} />}
     </div>
   );
 }
 
-function Confirmed() {
-  const { snapshot, openJob } = useWorkspace();
+function Confirmed({ ledger }: { ledger: ReturnType<typeof usePoll<{ applications: Success[] }>> }) {
+  const { route, go, counts, openJob } = useWorkspace();
   const now = useNow(60000);
-  const ledger = usePoll<{ applications: Success[] }>(
-    (signal) => api("/successful-applications", "GET", undefined, signal),
-    60000,
-  );
-  const [query, setQuery] = useDraft("ledger-query", "");
-  const [filter, setFilter] = useDraft("ledger-evidence", "all");
+  const [q, setQuery] = useDraft("ledger-query", "");
+  const [evidence, setEvidence] = useDraft<Evidence>("ledger-evidence", "all");
+  const [period, setPeriod] = useDraft<Period>("ledger-period", "all");
+  const [platform, setPlatform] = useDraft("ledger-platform", "all");
+  // A number elsewhere can open this list already searched.
+  useEffect(() => {
+    if (route.q) setQuery(route.q);
+  }, [route.q, setQuery]);
   const all = useMemo(() => ledger.data?.applications || [], [ledger.data]);
-  const q = query.trim().toLowerCase();
-  const shown = useMemo(
-    () =>
-      all.filter(
-        (r) => matches(r, filter) && (!q || `${r.company} ${r.title} ${r.ats}`.toLowerCase().includes(q)),
-      ),
-    [all, filter, q],
-  );
-  const paging = usePagination(shown, filter + "|" + q, 25);
-  const rt = snapshot.autopilot_runtime || {};
+  const from = periodStart(period, now);
+  const shown = useMemo(() => all.filter((r) => passes(r, { q, evidence, period, platform }, from)), [all, q, evidence, period, platform, from]);
+  // What each menu would show if its option were chosen (every other filter kept).
+  const menus = useMemo(() => {
+    const f = { q, evidence, period, platform };
+    const rest = (skip: keyof Filters) => all.filter((r) => passes(r, f, from, skip));
+    const byProof = rest("evidence");
+    const byPlatform = rest("platform");
+    const names = new Map<string, number>();
+    for (const r of byPlatform) names.set(r.ats, (names.get(r.ats) || 0) + 1);
+    if (platform !== "all" && !names.has(platform)) names.set(platform, 0);
+    return {
+      evidence: EVIDENCE.map((value) => ({
+        value,
+        label: value === "all" ? "All" : PROOF[value],
+        count: byProof.filter((r) => hasProof(r, value)).length,
+      })).filter((o) => o.count > 0 || o.value === "all" || o.value === evidence),
+      period: PERIODS.map((o) => ({ ...o, count: all.filter((r) => passes(r, f, periodStart(o.value, now))).length })),
+      platform: [
+        { value: "all", label: "All", count: byPlatform.length },
+        ...[...names].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([ats, count]) => ({ value: ats, label: platformName(ats), count })),
+      ],
+    };
+  }, [all, q, evidence, period, platform, from, now]);
+  const filtered = evidence !== "all" || period !== "all" || platform !== "all" || q.trim() !== "";
+  const clear = () => {
+    setQuery("");
+    setEvidence("all");
+    setPeriod("all");
+    setPlatform("all");
+  };
+  const paging = usePagination(shown, [q, evidence, period, platform].join("|"), 25);
+  const today = confirmedToday(all, now).length;
+  const unconfirmed = counts.groups.unconfirmed || 0;
+
   const columns: Column<Success>[] = [
     {
       key: "job",
       header: "Job",
       width: 440,
       truncate: true,
-      cell: (r) => <JobCell company={r.company} role={r.title} onOpen={() => openJob(r.job_id, r.run_id)} />,
-    },
-    {
-      key: "applied",
-      header: "Applied",
       cell: (r) => (
-        <time dateTime={r.applied_at} title={stamp(r.applied_at)}>
-          {ago(r.applied_at, now)}
-        </time>
+        <JobCell
+          {...jobWords(r)}
+          onOpen={() => openJob(r.job_id, r.run_id)}
+          meta={
+            <>
+              <Proof r={r} />
+              <Sent r={r} now={now} />
+            </>
+          }
+        />
       ),
     },
-    { key: "evidence", header: "Evidence", hideBelow: 600, cell: (r) => <StatusPill state="confirmed" label={evidenceLabel(r)} /> },
+    { key: "proof", header: "Proof", hideBelow: 600, cell: (r) => <Proof r={r} /> },
+    { key: "sent", header: "Sent", hideBelow: 600, cell: (r) => <Sent r={r} now={now} /> },
+    { key: "platform", header: "Platform", hideBelow: 860, width: 150, truncate: true, cell: (r) => <Note>{platformName(r.ats)}</Note> },
     {
-      key: "posting",
-      header: <span className="sr-only">Posting</span>,
+      key: "act",
+      header: <span className="sr-only">Receipt and posting</span>,
       width: "1%",
-      cell: (r) => (
-        <a
-          className="ax-link"
-          href={r.url}
-          target="_blank"
-          rel="noreferrer noopener"
-          onClick={(e) => e.stopPropagation()}
-          title={`Open the posting (${linkHost(r.url)})`}
-        >
-          Posting <ExternalLink size={12} aria-hidden="true" />
-          <span className="sr-only"> (opens in a new tab)</span>
-        </a>
-      ),
+      pin: true,
+      cell: (r) => {
+        const link = webLink(r.url);
+        return (
+          <span className="ap-act">
+            <Button size="sm" className="ax-lead ap-receipt" onClick={() => openJob(r.job_id, r.run_id)}>
+              {r.proof === "none" ? "Details" : "Receipt"}
+            </Button>
+            {link && (
+              <a
+                className="ax-btn is-sm ax-lead"
+                href={link}
+                target="_blank"
+                rel="noreferrer noopener"
+                onClick={(e) => e.stopPropagation()}
+                title="Open the posting in your browser"
+              >
+                Posting <ExternalLink size={12} aria-hidden="true" />
+                <span className="sr-only"> (opens in your browser)</span>
+              </a>
+            )}
+          </span>
+        );
+      },
     },
   ];
+
+  const exportUrl = (() => {
+    const p = new URLSearchParams();
+    if (evidence !== "all") p.set("evidence", evidence);
+    if (platform !== "all") p.set("ats", platform);
+    if (from) p.set("since", new Date(from).toISOString());
+    if (q.trim()) p.set("q", q.trim());
+    const query = p.toString();
+    return "/api/successful-applications.csv" + (query ? "?" + query : "");
+  })();
+
   return (
     <>
       <TopActions>
-        <Button size="sm" disabled={!shown.length} icon={<Download size={14} aria-hidden="true" />} onClick={() => csv(shown)}>
-          Export CSV{shown.length !== all.length ? ` (${shown.length})` : ""}
-        </Button>
+        {shown.length ? (
+          // The app serves the file (as it does a resume or a log), so it saves the same way in a browser tab and in the native window.
+          <a className="ax-btn" href={exportUrl} download="AXIOM-confirmed-applications.csv" title={`Download ${shown.length.toLocaleString()} applications as a spreadsheet`}>
+            <Download size={15} aria-hidden="true" />
+            {filtered ? `Export ${shown.length.toLocaleString()} as CSV` : "Export CSV"}
+          </a>
+        ) : (
+          <Button disabled icon={<Download size={15} aria-hidden="true" />}>
+            Export CSV
+          </Button>
+        )}
       </TopActions>
-      <div className="ax-toolbar">
-        <SearchBox value={query} onChange={setQuery} label="Search confirmed applications" placeholder="Company, role or platform" />
-        <select className="ax-control ax-inline-select" aria-label="Evidence" value={filter} onChange={(e) => setFilter(e.target.value)}>
-          {EVIDENCE.map(([id, label]) => (
-            <option key={id} value={id}>
-              {label}
-            </option>
-          ))}
-        </select>
-        <span className="ax-note ax-toolbar-note">
-          {[
-            ledger.data && `${plural(all.length, "confirmed application")} across all history`,
-            ledger.data && `${confirmedToday(all, now).length} today`,
-            rt.state === "active" && `${rt.confirmed ?? 0} of ${rt.target ?? 100} this batch`,
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-        </span>
+      <TopLine>
+        {ledger.data ? (
+          <span className="ap-line">
+            <button type="button" className="ax-quiet-link" onClick={clear}>
+              <b>{all.length.toLocaleString()}</b> confirmed
+            </button>
+            <i aria-hidden="true">·</i>
+            <button type="button" className="ax-quiet-link" onClick={() => { clear(); setPeriod("today"); }}>
+              <b>{today.toLocaleString()}</b> today
+            </button>
+            {unconfirmed > 0 && (
+              <>
+                <i aria-hidden="true">·</i>
+                <button type="button" className="ax-quiet-link ap-flag" onClick={() => go({ view: "ledger", tab: "unconfirmed" })}>
+                  <b>{unconfirmed.toLocaleString()}</b> unconfirmed
+                </button>
+              </>
+            )}
+          </span>
+        ) : (
+          !ledger.error && <span className="ap-line is-wait">Counting confirmed applications…</span>
+        )}
+      </TopLine>
+      <div className="ax-toolbar ap-toolbar">
+        <SearchBox value={q} onChange={setQuery} label="Search confirmed applications" placeholder="Company, role or platform" />
+        <div className="ap-filters">
+          <Listbox prefix="Proof" label="Proof" value={evidence} options={menus.evidence} onChange={setEvidence} />
+          <Listbox prefix="Sent" label="Sent" value={period} options={menus.period} onChange={setPeriod} />
+          <Listbox prefix="Platform" label="Platform" value={platform} options={menus.platform} onChange={setPlatform} />
+          {filtered && (
+            <Button variant="ghost" size="sm" icon={<FilterX size={14} aria-hidden="true" />} onClick={clear}>
+              Clear
+            </Button>
+          )}
+        </div>
       </div>
       {ledger.error && ledger.data && <LoadError error={ledger.error} retry={ledger.refresh} />}
       <Table
@@ -180,18 +330,33 @@ function Confirmed() {
         onRowClick={(r) => openJob(r.job_id, r.run_id)}
         loading={!ledger.data && !ledger.error}
         error={ledger.error && !ledger.data ? <LoadError error={ledger.error} retry={ledger.refresh} /> : undefined}
+        footer={paging.total > 0 ? <Pagination paging={paging} label="Confirmed pages" /> : undefined}
         empty={
-          <Empty
-            title={all.length ? "No confirmed applications match" : "No confirmed applications yet"}
-            hint={
-              all.length
-                ? "Clear the search or the evidence filter."
-                : "An application lands here once the employer's page acknowledges it or an authenticated receipt email arrives."
-            }
-          />
+          all.length ? (
+            <Empty
+              icon={SearchX}
+              title="No confirmed applications match"
+              hint="Nothing here fits this search and these filters."
+              action={
+                <Button size="sm" onClick={clear}>
+                  Clear the filters
+                </Button>
+              }
+            />
+          ) : (
+            <Empty
+              icon={CheckCheck}
+              title="No confirmed applications yet"
+              hint="An application appears here once the employer's page or an email from the employer proves it was received, with the time it was sent."
+              action={
+                <Button size="sm" onClick={() => go({ view: "batch" })}>
+                  See what is running
+                </Button>
+              }
+            />
+          )
         }
       />
-      <Pagination paging={paging} label="Confirmed pages" />
     </>
   );
 }
@@ -202,6 +367,11 @@ function Unconfirmed() {
   const now = useNow(30000);
   const list = usePipelinePage("unconfirmed", "", 25);
   const selection = useSelection(200);
+  const when = (r: JobRow) => (
+    <time dateTime={r.updated} title={stamp(r.updated)}>
+      {ago(r.updated, now)}
+    </time>
+  );
   const columns: Column<JobRow>[] = [
     {
       key: "job",
@@ -210,29 +380,25 @@ function Unconfirmed() {
       truncate: true,
       cell: (r) => (
         <JobCell
-          company={r.job.company || linkHost(r.job.url) || "Employer"}
-          role={r.job.title || urlRole(r.job.url)}
+          {...jobWords(r.job)}
           onOpen={() => openJob(r.job.id, r.run?.id)}
+          meta={
+            <>
+              <StatusPill state={r.state} />
+              {when(r)}
+            </>
+          }
         />
       ),
     },
-    { key: "status", header: "Status", cell: (r) => <StatusPill state={r.state} /> },
+    { key: "status", header: "Status", hideBelow: 600, cell: (r) => <StatusPill state={r.state} /> },
     { key: "detail", header: "Detail", hideBelow: 600, width: 300, truncate: true, cell: (r) => (r.run?.reason ? <Note>{r.run.reason}</Note> : null) },
-    {
-      key: "updated",
-      header: "Updated",
-      hideBelow: 600,
-      cell: (r) => (
-        <time dateTime={r.updated} title={stamp(r.updated)}>
-          {ago(r.updated, now)}
-        </time>
-      ),
-    },
+    { key: "updated", header: "Updated", hideBelow: 600, cell: when },
     { key: "act", header: <span className="sr-only">Actions</span>, width: "1%", pin: true, cell: (r) => <RowActions row={r} promote="confirm" /> },
   ];
   return (
     <>
-      <Notice>No receipt was captured for these. They may have been sent, so they are not in Confirmed and are never retried.</Notice>
+      <TopLine>Submitted, but no receipt was captured. They may have been sent, so they are never retried.</TopLine>
       {list.error && list.loaded && <LoadError error={list.error} retry={list.refresh} />}
       <Table
         fill
@@ -247,11 +413,13 @@ function Unconfirmed() {
         loading={!list.loaded && !list.error}
         error={list.error && !list.loaded ? <LoadError error={list.error} retry={list.refresh} /> : undefined}
         busy={list.loaded && !list.current}
+        footer={list.paging.total > 0 ? <Pagination paging={list.paging} label="Unconfirmed pages" /> : undefined}
         bulk={<PipelineBulk selection={selection} rows={list.rows} filter="unconfirmed" query="" total={list.paging.total} />}
         empty={
           <Empty
-            title="No unconfirmed submissions"
-            hint="Every submission so far has a receipt or acknowledgement."
+            icon={ShieldCheck}
+            title="Nothing is waiting for a receipt"
+            hint="Every submission so far has a confirmation page or an email from the employer."
             action={
               <Button size="sm" onClick={() => go({ view: "ledger" })}>
                 See confirmed applications
@@ -260,7 +428,6 @@ function Unconfirmed() {
           />
         }
       />
-      <Pagination paging={list.paging} label="Unconfirmed pages" />
     </>
   );
 }

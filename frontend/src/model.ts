@@ -1,6 +1,6 @@
 // Product semantics for run/job states. One place decides how a state reads,
 // which group it belongs to and which controls are honest for it.
-import type { Job, JobRequest, PipelineRow, Reserved, Review, Run, Snapshot } from "./types";
+import type { Job, JobRequest, PipelineRow, Proof, Reserved, Review, Run, Snapshot } from "./types";
 
 export type Tone = "ok" | "run" | "ask" | "hold" | "fix" | "bad" | "idle";
 export type Group =
@@ -19,66 +19,66 @@ type StateInfo = { label: string; tone: Tone; group: Group; explain: string };
 export const STATES: Record<string, StateInfo> = {
   queued: {
     label: "Queued",
-    tone: "run",
+    tone: "hold",
     group: "active",
     explain:
-      "Waiting for a free application owner. It starts automatically; nothing is needed from you.",
+      "Waiting for a free slot. It starts by itself; nothing is needed from you.",
   },
   running: {
     label: "Applying",
     tone: "run",
     group: "active",
     explain:
-      "An application owner is filling this form in its own browser tab.",
+      "AXIOM is filling in this application now.",
   },
   submitting: {
     label: "Submitting",
     tone: "run",
     group: "active",
     explain:
-      "The final submission is in progress. It can't be paused now; the outcome is verified next.",
+      "The application is being sent. It can't be paused now; the outcome is checked next.",
   },
   pausing: {
     label: "Pausing…",
     tone: "idle",
     group: "paused",
     explain:
-      "Pause requested. The owner saves the draft and then releases its browser slot. Other applications keep running.",
+      "Stopping at the next safe point. The draft is saved, and other applications keep running.",
   },
   paused: {
     label: "Paused",
     tone: "idle",
     group: "paused",
     explain:
-      "Paused by you. Other applications and the batch keep running. Resume continues from the saved draft.",
+      "Paused by you. Other applications keep running. Resume continues from the saved draft.",
   },
   waiting_answer: {
     label: "Needs your answer",
     tone: "ask",
     group: "needs",
     explain:
-      "A required personal fact is missing. The browser slot was released. Your answer is saved for future applications and this job resumes automatically.",
+      "The form asks something only you know. Your answer is saved for future applications, and this one continues by itself.",
   },
   needs_review: {
     label: "Needs your answer",
     tone: "ask",
     group: "needs",
     explain:
-      "A required personal fact is missing. Answering saves it with provenance and resumes this job.",
+      "The form asks something only you know. Your answer is saved, and this one continues by itself.",
   },
   waiting_browser: {
     label: "Repairing",
     tone: "fix",
     group: "repair",
     explain:
-      "The website rejected a control or the page couldn't be read. This isn't a missing fact: the draft is kept and automatic recovery retries it.",
+      "The site rejected a step or a page couldn't be read. Nothing is needed from you: the draft is kept and AXIOM tries again by itself.",
   },
   waiting_email: {
     label: "Waiting for email",
     tone: "hold",
     group: "active",
     explain:
-      "The employer is sending a verification code or link. The browser slot was released; when the matching email arrives this application continues by itself. Nothing is needed from you.",
+      "The employer is sending a code or link by email. When it arrives this application continues by itself. Nothing is needed from you.",
   },
   timed_out: {
     label: "Timed out",
@@ -99,21 +99,21 @@ export const STATES: Record<string, StateInfo> = {
     tone: "hold",
     group: "unconfirmed",
     explain:
-      "Submit was attempted but no trustworthy acknowledgement or receipt was captured. It may have been sent, so it is protected from any retry. Check email or record a verified outcome.",
+      "It was sent, but no confirmation page or employer email was captured. It may have gone through, so it is never retried. Check your email or record what you verified.",
   },
   confirmed: {
     label: "Confirmed",
     tone: "ok",
     group: "done",
     explain:
-      "Confirmed by a job-specific page acknowledgement or an authenticated employer receipt. Protected from duplicate applications.",
+      "Proven by the employer's confirmation page or an email from the employer. AXIOM won't apply here again.",
   },
   already_applied: {
     label: "Already applied",
     tone: "ok",
     group: "done",
     explain:
-      "The employer reports an existing application. Protected from applying again.",
+      "The employer says you have already applied. AXIOM won't apply here again.",
   },
   dry_run_passed: {
     label: "Dry run passed",
@@ -146,28 +146,28 @@ export const STATES: Record<string, StateInfo> = {
     tone: "idle",
     group: "new",
     explain:
-      "Discovered but not yet ranked against your profile. Ranking happens in batches automatically.",
+      "Found, but not yet checked against your profile. That happens by itself.",
   },
   "job:ready": {
     label: "Eligible",
-    tone: "run",
+    tone: "idle",
     group: "new",
     explain:
-      "Ranked as a match with a selected resume. The batch applies to eligible jobs automatically.",
+      "A match for your profile, with a resume chosen. A running batch applies to these by itself.",
   },
   "job:review": {
     label: "Ranked · uncertain",
     tone: "ask",
     group: "new",
     explain:
-      "Ranked as eligible with open uncertainties. It isn't applied to automatically unless autonomous mode is on.",
+      "A likely match, with some doubts. It isn't applied to automatically unless autonomous mode is on.",
   },
   "job:skipped": {
     label: "Below fit",
     tone: "idle",
     group: "new",
     explain:
-      "Ranked below your minimum fit or excluded by a keyword. It won't be applied to automatically.",
+      "Below your minimum fit, or excluded by a keyword. It won't be applied to automatically.",
   },
   // A paused attempt whose job was resumed but needs ranking again: the batch
   // only picks up never-attempted jobs, so this one waits for an explicit action.
@@ -176,7 +176,7 @@ export const STATES: Record<string, StateInfo> = {
     tone: "idle",
     group: "paused",
     explain:
-      "Resumed from pause. This job needs ranking before a new application starts, and the batch doesn't pick it up automatically. Rank it, then apply.",
+      "Resumed from pause. It needs checking against your profile before a new application starts: rank it, then apply.",
   },
   "job:paused": {
     label: "Paused",
@@ -199,7 +199,7 @@ export const STATES: Record<string, StateInfo> = {
     tone: "hold",
     group: "active",
     explain:
-      "Your request is kept. It starts on its own as soon as a worker, the platform's pacing or a shared email sender allows it.",
+      "Your request is kept. It starts by itself as soon as a slot is free and the site's pacing allows it.",
   },
   "pending:preparing": {
     label: "Preparing resume",
@@ -374,13 +374,20 @@ export function deriveRows(s: Snapshot): JobRow[] {
   return rows;
 }
 
-export function evidenceLabel(r: {
-  website_confirmed?: boolean;
-  email_confirmed?: boolean;
-  existing_application?: boolean;
-}) {
-  if (r.existing_application) return "Existing application";
-  if (r.website_confirmed && r.email_confirmed) return "Page + email";
-  if (r.email_confirmed) return "Employer email";
-  return "Page acknowledgement";
+// What proved a confirmed application, in plain words. The server picks the id from the receipt (jobpilot/api/routes/state.py, whose
+// spreadsheet says the same words, and a test keeps the two equal).
+export const PROOF: Record<Proof, string> = {
+  page: "Confirmation page",
+  both: "Confirmation page and email",
+  email: "Employer email",
+  existing: "Existing application",
+  platform: "Platform response",
+  final_page: "Final page",
+  dashboard: "Employer dashboard",
+  applicant: "Recorded by you",
+  none: "No receipt on file",
+};
+
+export function evidenceLabel(r: { proof: Proof }) {
+  return PROOF[r.proof];
 }

@@ -1,19 +1,38 @@
-// Setup › Discovery: what the job board looks for, and the employer boards it reads.
-import { useEffect, useState } from "react";
+// Settings › Job search: what AXIOM looks for and the employer boards it reads. The rules for applying to what it finds are under
+// Applying (AutoApplySettings below).
+import { useEffect, useMemo, useState } from "react";
+import { Plus } from "lucide-react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useDraft, useNow, usePoll } from "./hooks";
 import { Pagination, usePagination } from "./pagination";
-import { Actions, FormGrid, SaveBar, SwitchRow } from "./setup-kit";
-import type { Board, BoardSettings } from "./types";
+import { Actions, SaveBar, SwitchRow } from "./setup-kit";
+import type { Board, BoardSettings, Snapshot, Source } from "./types";
 import { ago, plural } from "./format";
-import { SearchBox } from "./worktools";
-import { Button, ConfirmButton, Empty, External, Input, Loading, Panel, Select, Table } from "./ui/index";
+import { Chips, SearchBox } from "./worktools";
+import "./styles/settings.css";
+import {
+  Button,
+  Check,
+  ConfirmButton,
+  Dialog,
+  Empty,
+  External,
+  Input,
+  Loading,
+  Panel,
+  Segmented,
+  Select,
+  Skeleton,
+  Table,
+} from "./ui/index";
 
 // The page needs the settings and the boards, not the listings: one listing keeps the answer from carrying them all.
 const BOARD = "/job-board?include_sources=true&page=1&size=1";
+const KINDS = ["greenhouse", "lever", "ashby", "smartrecruiters", "workday", "career_page"];
 
-export function DiscoverySettings() {
+/** One form over /api/job-board/settings. The search rules and the apply rules are saved apart but are one object on the server. */
+function useBoardForm(saved: string) {
   const { refresh } = useWorkspace();
   const board = usePoll<Board>((signal) => api(BOARD, "GET", undefined, signal), 120000);
   const { pending, run } = useAction();
@@ -22,143 +41,204 @@ export function DiscoverySettings() {
   useEffect(() => {
     if (board.data?.settings && !dirty) setForm(board.data.settings);
   }, [board.data, dirty]);
-  if (!board.data || !board.data.settings || !form)
-    return (
-      <Panel title="What to look for">
-        {board.error ? (
-          <Empty
-            title="Could not load discovery settings"
-            hint={board.error.message}
-            action={
-              <Button size="sm" onClick={board.refresh}>
-                Try again
-              </Button>
-            }
-          />
-        ) : (
-          <Loading label="Loading discovery settings…" />
-        )}
-      </Panel>
-    );
-  const b = board.data;
   const set = <K extends keyof BoardSettings>(key: K, value: BoardSettings[K]) => {
-    setForm({ ...form, [key]: value });
+    setForm((f) => (f ? { ...f, [key]: value } : f));
     setDirty(true);
   };
-  const fitError =
-    !Number.isFinite(form.minimum_auto_fit) || form.minimum_auto_fit < 0 || form.minimum_auto_fit > 100
-      ? "A number from 0 to 100."
-      : undefined;
-  const targetError =
-    !Number.isInteger(form.batch_target) || form.batch_target < 1 || form.batch_target > 500
-      ? "A whole number from 1 to 500."
-      : undefined;
   const save = () =>
     run(
       "save",
       async () => {
         // The full validated model, merged over the server's current values.
-        await api("/job-board/settings", "PUT", { ...b.settings, ...form });
+        await api("/job-board/settings", "PUT", { ...board.data!.settings, ...form });
         setDirty(false);
         await Promise.all([board.refresh(), refresh()]);
       },
-      "Discovery settings saved.",
+      saved,
     );
-  const search = b.search || { provider: "Web search", google_configured: false };
+  const discard = () => {
+    setForm(board.data?.settings ?? null);
+    setDirty(false);
+  };
+  return { board, form, set, dirty, save, discard, saving: pending === "save" };
+}
+
+function Gate({ board, form, children }: { board: ReturnType<typeof useBoardForm>["board"]; form: unknown; children: () => React.ReactNode }) {
+  if (!board.data || !board.data.settings || !form)
+    return board.error ? (
+      <Empty
+        title="Could not load these settings"
+        hint={board.error.message}
+        action={
+          <Button size="sm" onClick={board.refresh}>
+            Try again
+          </Button>
+        }
+      />
+    ) : (
+      <Loading label="Loading…" />
+    );
+  return <>{children()}</>;
+}
+
+/** A setting whose name and effect are on the left and whose choice is on the right. */
+function ChoiceRow<T extends string>({
+  name,
+  note,
+  value,
+  options,
+  onChange,
+}: {
+  name: string;
+  note: string;
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div className="ax-switch-row st-choice">
+      <span className="ax-row-main">
+        <strong>{name}</strong>
+        <small>{note}</small>
+      </span>
+      <Segmented label={name} value={value} options={options} onChange={onChange} />
+    </div>
+  );
+}
+
+export function DiscoverySettings() {
+  const f = useBoardForm("Job search settings saved.");
+  const { board, form } = f;
   return (
     <>
-      <form
-        className="ax-sections"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!fitError && !targetError) save();
+      <Gate board={board} form={form}>
+        {() => {
+          const b = board.data!;
+          const search = b.search || { provider: "Web search", google_configured: false };
+          return (
+            <>
+              <section className="st-group" aria-labelledby="st-look">
+                <div className="st-head">
+                  <div>
+                    <h2 id="st-look">What AXIOM looks for</h2>
+                    <p>It checks employer boards and searches the web on a schedule, then ranks what it finds against your profile.</p>
+                  </div>
+                </div>
+                <Panel>
+                  <SwitchRow
+                    label="Search automatically"
+                    note="Check employer boards and search on a schedule."
+                    checked={!!form!.enabled}
+                    onChange={() => f.set("enabled", !form!.enabled)}
+                  />
+                  <SwitchRow
+                    label="Early-career roles only"
+                    note="Skip postings that show no new-grad or early-career signal."
+                    checked={!!form!.early_career_only}
+                    onChange={() => f.set("early_career_only", !form!.early_career_only)}
+                  />
+                  <SwitchRow
+                    label="Search the web for new employers"
+                    note={`${search.provider}.${search.google_configured ? "" : " Free search works now; add a Serper key under Connections for Google results."}`}
+                    checked={!!form!.web_search}
+                    onChange={() => f.set("web_search", !form!.web_search)}
+                  />
+                  <ChoiceRow
+                    name="Check boards"
+                    note="How often each employer board is read."
+                    value={String(form!.interval_hours)}
+                    options={[
+                      { value: "1", label: "Hourly" },
+                      { value: "2", label: "2 hours" },
+                      { value: "3", label: "3 hours" },
+                      { value: "6", label: "6 hours" },
+                    ]}
+                    onChange={(v) => f.set("interval_hours", Number(v) as BoardSettings["interval_hours"])}
+                  />
+                  <ChoiceRow
+                    name="Posted within"
+                    note="Older postings are left alone."
+                    value={String(form!.max_age_hours)}
+                    options={[
+                      { value: "48", label: "48 hours" },
+                      { value: "168", label: "7 days" },
+                      { value: "720", label: "30 days" },
+                    ]}
+                    onChange={(v) => f.set("max_age_hours", Number(v) as BoardSettings["max_age_hours"])}
+                  />
+                </Panel>
+              </section>
+              <EmployerBoards board={b} reload={board.refresh} />
+              <CustomSources />
+            </>
+          );
         }}
-      >
-        <Panel title="What to look for">
-          <SwitchRow
-            label="Automatic discovery"
-            note="Check employer boards and search on a schedule."
-            checked={!!form.enabled}
-            onChange={() => set("enabled", !form.enabled)}
-          />
-          <SwitchRow
-            label="Early career only"
-            note="Require new-grad or early-career evidence in the posting."
-            checked={!!form.early_career_only}
-            onChange={() => set("early_career_only", !form.early_career_only)}
-          />
-          <SwitchRow
-            label="Search the web for new employers"
-            note={`${search.provider}.${search.google_configured ? "" : " Add a Serper key in Settings › Connections for Google results; free search works now."}`}
-            checked={!!form.web_search}
-            onChange={() => set("web_search", !form.web_search)}
-          />
-          <FormGrid>
-              <Select
-                label="Check boards"
-                value={form.interval_hours}
-                onChange={(e) => set("interval_hours", Number(e.target.value) as BoardSettings["interval_hours"])}
-              >
-                {[1, 2, 3, 6].map((n) => (
-                  <option key={n} value={n}>
-                    Every {n === 1 ? "hour" : `${n} hours`}
-                  </option>
-                ))}
-              </Select>
-              <Select
-                label="Posted within"
-                value={form.max_age_hours}
-                onChange={(e) => set("max_age_hours", Number(e.target.value) as BoardSettings["max_age_hours"])}
-              >
-                <option value={48}>48 hours</option>
-                <option value={168}>7 days</option>
-                <option value={720}>30 days</option>
-              </Select>
-            </FormGrid>
-        </Panel>
-        <Panel title="Automatic applications">
-          <SwitchRow
-            label="Apply to eligible matches automatically"
-            note="Saving with this on starts a batch if none is active. An active batch is never restarted."
-            checked={!!form.auto_apply}
-            onChange={() => set("auto_apply", !form.auto_apply)}
-          />
-          <FormGrid>
-              <Input
-                label="Minimum fit to apply"
-                hint="0–100. Jobs ranked below this are never applied to automatically."
-                error={fitError}
-                type="number"
-                min={0}
-                max={100}
-                value={Number.isFinite(form.minimum_auto_fit) ? form.minimum_auto_fit : ""}
-                onChange={(e) => set("minimum_auto_fit", Number(e.target.value))}
+      </Gate>
+      <SaveBar dirty={f.dirty} saving={f.saving} onSave={f.save} onDiscard={f.discard} label="Save job search settings" />
+    </>
+  );
+}
+
+/** Settings › Applying: what is applied to without asking. Saved with the same settings as the search (one object on the server). */
+export function AutoApplySettings() {
+  const f = useBoardForm("Automatic application settings saved.");
+  const { board, form } = f;
+  return (
+    <>
+      <Gate board={board} form={form}>
+        {() => {
+          const fitError =
+            !Number.isFinite(form!.minimum_auto_fit) || form!.minimum_auto_fit < 0 || form!.minimum_auto_fit > 100
+              ? "A number from 0 to 100."
+              : undefined;
+          const targetError =
+            !Number.isInteger(form!.batch_target) || form!.batch_target < 1 || form!.batch_target > 500
+              ? "A whole number from 1 to 500."
+              : undefined;
+          return (
+            <>
+              <Panel>
+                <SwitchRow
+                  label="Apply to good matches automatically"
+                  note="Saving with this on starts a batch if none is running. A running batch is never restarted."
+                  checked={!!form!.auto_apply}
+                  onChange={() => f.set("auto_apply", !form!.auto_apply)}
+                />
+                <div className="st-fields" style={{ marginTop: "var(--space-4)" }}>
+                  <Input
+                    label="Minimum fit"
+                    hint="0 to 100. A job ranked below this is never applied to on its own."
+                    error={fitError}
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={Number.isFinite(form!.minimum_auto_fit) ? form!.minimum_auto_fit : ""}
+                    onChange={(e) => f.set("minimum_auto_fit", Number(e.target.value))}
+                  />
+                  <Input
+                    label="Applications per batch"
+                    hint="How many confirmed applications a new batch aims for. 1 to 500."
+                    error={targetError}
+                    type="number"
+                    min={1}
+                    max={500}
+                    value={Number.isFinite(form!.batch_target) ? form!.batch_target : ""}
+                    onChange={(e) => f.set("batch_target", Number(e.target.value))}
+                  />
+                </div>
+              </Panel>
+              <SaveBar
+                dirty={f.dirty}
+                saving={f.saving}
+                disabled={!!fitError || !!targetError}
+                onSave={f.save}
+                onDiscard={f.discard}
+                label="Save"
               />
-              <Input
-                label="Default batch target"
-                hint="Used when a new batch starts. 1–500."
-                error={targetError}
-                type="number"
-                min={1}
-                max={500}
-                value={Number.isFinite(form.batch_target) ? form.batch_target : ""}
-                onChange={(e) => set("batch_target", Number(e.target.value))}
-              />
-            </FormGrid>
-        </Panel>
-        <SaveBar
-          dirty={dirty}
-          saving={pending === "save"}
-          disabled={!!fitError || !!targetError}
-          onSave={save}
-          onDiscard={() => {
-            setForm(b.settings);
-            setDirty(false);
-          }}
-          label="Save discovery settings"
-        />
-      </form>
-      <EmployerBoards board={b} reload={board.refresh} />
+            </>
+          );
+        }}
+      </Gate>
     </>
   );
 }
@@ -183,24 +263,36 @@ function until(value: string | null | undefined, now: number) {
 
 type BoardSource = Board["sources"][number];
 
+// What the last check found, or why it could not read the board.
+function resultOf(s: BoardSource, now: number) {
+  const failed = s.error || s.scan?.state === "error";
+  const checking = s.scan?.state === "queued" || s.scan?.state === "running";
+  if (checking) return "Checking…";
+  if (!s.enabled) return "Turned off";
+  if (failed)
+    return `${(s.scan?.error || shortError(s.error) || "Couldn't read this board").replace(/\s*\(\w*Error\)/, "")}${
+      (s.health?.failures ?? 0) > 1 ? ` · ${s.health!.failures} failed checks in a row, next try ${until(s.next_run, now)}` : ""
+    }`;
+  return `${plural(s.scan?.matched ?? 0, "match", "matches")} · ${plural(s.scan?.checked ?? 0, "posting")} checked`;
+}
+
 function EmployerBoards({ board: b, reload }: { board: Board; reload: () => Promise<void> }) {
   const { pending, run } = useAction();
   const [query, setQuery] = useState("");
-  const [name, setName] = useDraft("board-add-name", "");
-  const [url, setUrl] = useDraft("board-add-url", "");
-  const [kind, setKind] = useDraft("board-add-kind", "greenhouse");
+  const [only, setOnly] = useState("all");
+  const [adding, setAdding] = useState(false);
   const now = useNow(30000);
   const q = query.trim().toLowerCase();
-  const [failingOnly, setFailingOnly] = useState(false);
-  const sources = Array.isArray(b.sources) ? b.sources : [];
+  const sources = useMemo(() => (Array.isArray(b.sources) ? b.sources : []), [b.sources]);
   const interval = b.settings?.interval_hours ?? 2;
+  const health = b.source_health;
   const errors = sources.filter((s) => s.error || s.scan?.state === "error");
   // Boards that failed their recent scans, worst first, so the dead ones can be turned off.
   const failing = (s: BoardSource) => s.enabled && (s.health?.failures ?? 0) > 0;
   const shown = sources
-    .filter((s) => (!failingOnly || failing(s)) && (!q || `${s.name} ${s.kind} ${s.url}`.toLowerCase().includes(q)))
-    .sort((a, c) => (failingOnly ? (c.health?.failures ?? 0) - (a.health?.failures ?? 0) : 0));
-  const health = b.source_health;
+    .filter((s) => (only !== "failing" || failing(s)) && (!q || `${s.name} ${s.kind} ${s.url}`.toLowerCase().includes(q)))
+    .sort((a, c) => (only === "failing" ? (c.health?.failures ?? 0) - (a.health?.failures ?? 0) : 0));
+  const paging = usePagination(shown, q + only, 10);
   const off = (s: BoardSource, enabled: boolean) =>
     run(
       "t" + s.id,
@@ -217,175 +309,367 @@ function EmployerBoards({ board: b, reload }: { board: Board; reload: () => Prom
       },
       enabled ? "Board turned on." : "Board turned off.",
     );
-  const paging = usePagination(shown, q + failingOnly, 10);
   return (
-    <Panel
-      title={`Employer boards · ${(b.source_count ?? sources.length).toLocaleString()}`}
-      actions={
-        <ConfirmButton
-          label="Check every board now"
-          confirm="Start search"
-          variant="secondary"
-          note="Queues an immediate check of every enabled board."
-          pending={pending === "scan"}
-          onConfirm={() =>
-            run(
-              "scan",
-              async () => {
-                const r = await api<{ queued_sources: number }>("/job-board/scrape", "POST");
-                await reload();
-                return r;
-              },
-              (r) => (r ? `Checking ${plural(r.queued_sources ?? 0, "board")}.` : undefined),
-            )
-          }
-        />
+    <section className="st-group" aria-labelledby="st-boards">
+      <div className="st-head">
+        <div>
+          <h2 id="st-boards">Employer boards · {(b.source_count ?? sources.length).toLocaleString()}</h2>
+          <p>
+            Checked every {interval} {interval === 1 ? "hour" : "hours"}
+            {health?.failing
+              ? `. ${health.failing.toLocaleString()} could not be read lately${health.dead ? `, ${health.dead.toLocaleString()} for three checks in a row` : ""}.`
+              : errors.length
+                ? `. ${errors.length} could not be read last time.`
+                : "."}
+          </p>
+        </div>
+        <div className="st-head-end">
+          <Button size="sm" icon={<Plus size={15} aria-hidden="true" />} onClick={() => setAdding(true)}>
+            Add a board
+          </Button>
+          <ConfirmButton
+            label="Check every board now"
+            confirm="Start search"
+            variant="secondary"
+            note="Queues an immediate check of every enabled board."
+            pending={pending === "scan"}
+            onConfirm={() =>
+              run(
+                "scan",
+                async () => {
+                  const r = await api<{ queued_sources: number }>("/job-board/scrape", "POST");
+                  await reload();
+                  return r;
+                },
+                (r) => (r ? `Checking ${plural(r.queued_sources ?? 0, "board")}.` : undefined),
+              )
+            }
+          />
+        </div>
+      </div>
+      <div className="st-tools">
+        <SearchBox label="Search employer boards" placeholder="Search boards" value={query} onChange={setQuery} />
+        {!!health?.failing && (
+          <Chips
+            label="Show boards"
+            value={only}
+            onChange={setOnly}
+            items={[
+              { id: "all", label: "All", count: b.source_count ?? sources.length },
+              { id: "failing", label: "Failing", count: health.failing },
+            ]}
+          />
+        )}
+      </div>
+      <Table
+        label="Employer boards"
+        rows={paging.items}
+        rowKey={(s) => s.id}
+        minWidth={340}
+        footer={shown.length > 10 ? <Pagination paging={paging} label="Board pages" sizes={false} /> : undefined}
+        empty={
+          <Empty
+            title={q ? "No boards match" : "No employer boards yet"}
+            hint={q ? "Try a shorter search." : "Turn on automatic search and save to load the built-in catalog, or add a board."}
+            action={
+              q ? undefined : (
+                <Button size="sm" onClick={() => setAdding(true)}>
+                  Add a board
+                </Button>
+              )
+            }
+          />
+        }
+        columns={[
+          {
+            key: "board",
+            header: "Board",
+            truncate: true,
+            width: 260,
+            cell: (s) => (
+              <>
+                <strong>{s.name}</strong> <External href={s.url}>{(s.kind || "").replace("_", " ")}</External>
+                <small className="st-sub">{resultOf(s, now)}</small>
+              </>
+            ),
+          },
+          { key: "last", header: "Last check", hideBelow: 860, cell: (s) => ago(s.last_run, now) },
+          {
+            key: "result",
+            header: "Result",
+            truncate: true,
+            width: 360,
+            hideBelow: 600,
+            cell: (s) => {
+              const text = resultOf(s, now);
+              return <span title={text}>{text}</span>;
+            },
+          },
+          {
+            key: "act",
+            header: <span className="sr-only">Actions</span>,
+            pin: true,
+            cell: (s) =>
+              (failing(s) || !s.enabled) && s.kind !== "web_search" ? (
+                <Button size="sm" disabled={pending !== null} onClick={() => off(s, !s.enabled)}>
+                  {s.enabled ? "Turn off" : "Turn on"}
+                </Button>
+              ) : null,
+          },
+        ]}
+      />
+      <AddBoard
+        open={adding}
+        onClose={() => setAdding(false)}
+        pending={pending === "add"}
+        onAdd={async (body) => {
+          let added = false;
+          await run(
+            "add",
+            async () => {
+              await api("/job-board/sources", "POST", { ...body, enabled: true, auto_queue: false, cron: "0 */2 * * *" });
+              added = true;
+              setAdding(false);
+              await reload();
+            },
+            "Employer board added.",
+          );
+          return added;
+        }}
+      />
+    </section>
+  );
+}
+
+function AddBoard({
+  open,
+  onClose,
+  pending,
+  onAdd,
+}: {
+  open: boolean;
+  onClose: () => void;
+  pending: boolean;
+  onAdd: (body: { name: string; url: string; kind: string }) => Promise<boolean>;
+}) {
+  const [name, setName] = useDraft("board-add-name", "");
+  const [url, setUrl] = useDraft("board-add-url", "");
+  const [kind, setKind] = useDraft("board-add-kind", "greenhouse");
+  const form = "add-board";
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="Add an employer board"
+      sub="A company's own list of open roles. AXIOM reads it on the schedule above."
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" type="submit" form={form} loading={pending}>
+            Add board
+          </Button>
+        </>
       }
     >
-      <div className="ax-stack">
-      <p className="ax-hint">
-        Checked every {interval} {interval === 1 ? "hour" : "hours"}
-        {health
-          ? health.failing
-            ? `, ${health.failing} failing${health.dead ? ` (${health.dead} for 3 or more checks in a row)` : ""}`
-            : ""
-          : errors.length
-            ? `, ${errors.length} couldn't be read last time`
-            : ""}
-        .
-      </p>
       <form
+        id={form}
+        className="st-form"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (await onAdd({ name: name.trim(), url: url.trim(), kind })) {
+            setName("");
+            setUrl("");
+          }
+        }}
+      >
+        <Input label="Employer" required value={name} onChange={(e) => setName(e.target.value)} placeholder="Company name" data-autofocus />
+        <Select label="Platform" value={kind} onChange={(e) => setKind(e.target.value)}>
+          {KINDS.map((k) => (
+            <option key={k} value={k}>
+              {k.replace("_", " ")}
+            </option>
+          ))}
+        </Select>
+        <Input
+          label="Board URL"
+          hint="The company's board, not a single job."
+          required
+          type="url"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://jobs.ashbyhq.com/company"
+        />
+      </form>
+    </Dialog>
+  );
+}
+
+// Advanced: hand-configured sources outside the managed employer catalog.
+function CustomSources() {
+  const [open, setOpen] = useState(false);
+  return (
+    <details className="ax-fold st-adv" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+      <summary>
+        <strong>Custom sources</strong>
+        <span>Your own sources, each with its own schedule</span>
+      </summary>
+      <div className="st-adv-body">{open && <CustomSourceList />}</div>
+    </details>
+  );
+}
+
+function CustomSourceList() {
+  const all = usePoll<Snapshot>((signal) => api("/snapshot?include_sources=true", "GET", undefined, signal), 120000);
+  const managed = usePoll<{ sources: Source[] }>((signal) => api(BOARD, "GET", undefined, signal), 120000);
+  const { pending, run } = useAction();
+  const [query, setQuery] = useState("");
+  const [name, setName] = useDraft("src-name", "");
+  const [url, setUrl] = useDraft("src-url", "");
+  const [kind, setKind] = useDraft("src-kind", "greenhouse");
+  const [cron, setCron] = useDraft("src-cron", "0 */3 * * *");
+  const [auto, setAuto] = useDraft("src-auto", false);
+  const managedIds = useMemo(() => new Set((managed.data?.sources || []).map((s) => s.id)), [managed.data]);
+  const q = query.trim().toLowerCase();
+  const sources = (all.data?.sources || []).filter(
+    (s) => !managedIds.has(s.id) && (!q || `${s.name} ${s.kind} ${s.url}`.toLowerCase().includes(q)),
+  );
+  const paging = usePagination(sources, q, 10);
+  const reload = async () => {
+    await Promise.all([all.refresh(), managed.refresh()]);
+  };
+  if (!all.data || !managed.data)
+    return all.error || managed.error ? (
+      <Empty
+        title="Could not load the sources"
+        hint={(all.error || managed.error)?.message}
+        action={
+          <Button size="sm" onClick={reload}>
+            Try again
+          </Button>
+        }
+      />
+    ) : (
+      <Skeleton rows={3} mono={false} />
+    );
+  const put = (s: Source, patch: Partial<Source>) =>
+    api("/sources/" + s.id, "PUT", {
+      name: s.name,
+      kind: s.kind,
+      url: s.url,
+      cron: s.cron,
+      enabled: s.enabled,
+      auto_queue: s.auto_queue,
+      ...patch,
+    });
+  return (
+    <div className="ax-stack">
+      <form
+        className="st-form"
         onSubmit={(e) => {
           e.preventDefault();
           run(
             "add",
             async () => {
-              await api("/job-board/sources", "POST", {
+              await api("/sources", "POST", {
                 name: name.trim(),
                 url: url.trim(),
                 kind,
+                cron: cron.trim(),
                 enabled: true,
-                auto_queue: false,
-                cron: "0 */2 * * *",
+                auto_queue: auto,
               });
               setName("");
               setUrl("");
               await reload();
             },
-            "Employer board added.",
+            "Source added.",
           );
         }}
       >
-        <FormGrid>
-          <Input
-            label="Employer"
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Company name"
-          />
+        <div className="st-fields">
+          <Input label="Name" required maxLength={120} value={name} onChange={(e) => setName(e.target.value)} />
           <Select label="Platform" value={kind} onChange={(e) => setKind(e.target.value)}>
-            {["greenhouse", "lever", "ashby", "smartrecruiters", "workday", "career_page"].map((k) => (
+            {KINDS.map((k) => (
               <option key={k} value={k}>
                 {k.replace("_", " ")}
               </option>
             ))}
           </Select>
-          <Input
-            label="Board URL"
-            hint="The company's board, not a single job."
-            required
-            type="url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://jobs.ashbyhq.com/company"
-          />
-        </FormGrid>
-        <Actions>
+          <Input label="Board URL" hint="The company's board, not a single job." required type="url" value={url} onChange={(e) => setUrl(e.target.value)} />
+          <Input label="Schedule" hint="A cron time. 0 */3 * * * is every three hours." required value={cron} onChange={(e) => setCron(e.target.value)} />
+        </div>
+        <Check checked={auto} onChange={setAuto} label="Rank new jobs and queue the eligible ones" />
+        <Actions start>
           <Button type="submit" loading={pending === "add"} disabled={pending !== null && pending !== "add"}>
-            Add board
+            Add source
           </Button>
         </Actions>
       </form>
-      <div className="ax-stack">
-        <div className="ax-toolbar">
-          <SearchBox label="Search employer boards" placeholder="Search boards" value={query} onChange={setQuery} />
-          {!!health?.failing && (
-            <Button
-              size="sm"
-              variant={failingOnly ? "primary" : "secondary"}
-              aria-pressed={failingOnly}
-              onClick={() => setFailingOnly(!failingOnly)}
-            >
-              Failing · {health.failing}
-            </Button>
-          )}
-        </div>
-        <Table
-          label="Employer boards"
-          rows={paging.items}
-          rowKey={(s) => s.id}
-          minWidth={720}
-          empty={
-            <Empty
-              title={q ? "No boards match" : "No employer boards yet"}
-              hint={q ? undefined : "Turn on discovery and save to load the built-in catalog, or add a board above."}
-            />
-          }
-          columns={[
-            {
-              key: "board",
-              header: "Board",
-              truncate: true,
-              width: 260,
-              cell: (s) => (
-                <>
-                  <strong>{s.name}</strong>{" "}
-                  <External href={s.url}>
-                    {(s.kind || "").replace("_", " ")}
-                  </External>
-                </>
-              ),
-            },
-            { key: "last", header: "Last check", cell: (s) => ago(s.last_run, now) },
-            {
-              key: "result",
-              header: "Result",
-              truncate: true,
-              width: 360,
-              cell: (s) => {
-                const failed = s.error || s.scan?.state === "error";
-                const checking = s.scan?.state === "queued" || s.scan?.state === "running";
-                const text = checking
-                  ? "Checking…"
-                  : !s.enabled
-                    ? "Turned off"
-                    : failed
-                      ? `${(s.scan?.error || shortError(s.error) || "Couldn't read this board").replace(/\s*\(\w*Error\)/, "")}${
-                          (s.health?.failures ?? 0) > 1
-                            ? ` · ${s.health!.failures} failed checks in a row, next try ${until(s.next_run, now)}`
-                            : ""
-                        }`
-                      : `${plural(s.scan?.matched ?? 0, "match", "matches")} · ${plural(s.scan?.checked ?? 0, "posting")} checked`;
-                return <span title={text}>{text}</span>;
-              },
-            },
-            {
-              key: "act",
-              header: <span className="sr-only">Actions</span>,
-              pin: true,
-              cell: (s) =>
-                (failing(s) || !s.enabled) && s.kind !== "web_search" ? (
-                  <Button size="sm" disabled={pending !== null} onClick={() => off(s, !s.enabled)}>
-                    {s.enabled ? "Turn off" : "Turn on"}
+      <div className="st-tools">
+        <SearchBox label="Search custom sources" placeholder="Search" value={query} onChange={setQuery} />
+      </div>
+      {sources.length ? (
+        <>
+          <ul className="ax-rows">
+            {paging.items.map((s) => (
+              <li className="ax-row" key={s.id}>
+                <span className="ax-row-main">
+                  <strong>{s.name}</strong>
+                  <small>
+                    <External href={s.url}>{(s.kind || "").replace("_", " ")}</External> · <span className="mono">{s.cron}</span> · last
+                    run {ago(s.last_run)} · {s.found ?? 0} new{s.error ? ` · ${s.error}` : ""}
+                  </small>
+                </span>
+                <span className="ax-row-end">
+                  <Button
+                    size="sm"
+                    disabled={pending !== null}
+                    onClick={() =>
+                      run(
+                        "t" + s.id,
+                        async () => {
+                          await put(s, { enabled: !s.enabled });
+                          await reload();
+                        },
+                        s.enabled ? "Source paused." : "Source enabled.",
+                      )
+                    }
+                  >
+                    {s.enabled ? "Pause" : "Enable"}
                   </Button>
-                ) : null,
-            },
-          ]}
-        />
-        <Pagination paging={paging} label="Board pages" />
-      </div>
-      </div>
-    </Panel>
+                  <Button
+                    size="sm"
+                    disabled={pending !== null || !s.enabled}
+                    onClick={() => run("d" + s.id, () => api(`/sources/${s.id}/discover`, "POST"), "Check queued.")}
+                  >
+                    Check now
+                  </Button>
+                  <ConfirmButton
+                    label="Remove"
+                    confirm="Remove source"
+                    pending={pending === "r" + s.id}
+                    onConfirm={() =>
+                      run(
+                        "r" + s.id,
+                        async () => {
+                          await api("/sources/" + s.id, "DELETE");
+                          await reload();
+                        },
+                        "Source removed.",
+                      )
+                    }
+                  />
+                </span>
+              </li>
+            ))}
+          </ul>
+          <Pagination paging={paging} label="Source pages" sizes={false} />
+        </>
+      ) : (
+        <p className="ax-hint">{q ? "No custom sources match." : "No custom sources. The employer boards above cover the search."}</p>
+      )}
+    </div>
   );
 }

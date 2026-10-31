@@ -1,0 +1,892 @@
+/* The Profile page (profile.tsx, profile-work.tsx, profile-rules.tsx, profile-photo.tsx, knowledge.tsx). Tokens only; the family's
+   components (Panel, Drawer, Dialog, Input, Segmented, SwitchRow) do the rest, so this file holds only what is unique to Profile. */
+
+/* A little wider than the other form pages: the section list takes a column. */
+.ax-main.view-profile {
+  --content-w: 1120px;
+}
+
+/* ---------- layout: sections at the left, one section at the right ---------- */
+.pf {
+  display: grid;
+  grid-template-columns: 244px minmax(0, 1fr);
+  gap: var(--space-8);
+  align-items: start;
+}
+.pf-content,
+.pf-stack,
+.pf-block {
+  min-width: 0;
+}
+.pf-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+.pf-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.pf-foot-start {
+  margin-right: auto;
+}
+
+/* ---------- the section list ---------- */
+.pf-nav {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.pf-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.pf-nav-item {
+  gap: var(--space-2);
+  padding: 0 var(--space-2) 0 var(--space-3);
+}
+.pf-nav-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-nav-end {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: var(--space-2);
+}
+.pf-nav-end .ax-nav-count {
+  margin-left: 0;
+}
+.pf-nav-meta {
+  color: var(--ink-3);
+  font-size: var(--text-data);
+  font-weight: 400;
+}
+.pf-nav-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+
+/* ---------- a section's own title, and the small title above a block ---------- */
+.pf-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-4);
+}
+.pf-section-head > div:first-child {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.pf-section-head p {
+  max-width: 68ch;
+  margin-top: 2px;
+  color: var(--ink-2);
+  font-size: var(--text-body);
+}
+.pf-section-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* ---------- fields: groups on a 6-column grid ---------- */
+.pf-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+}
+.pf-group + .pf-group {
+  border-top: 1px solid var(--line-soft);
+}
+.pf-group-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.pf-group-head .ax-hint {
+  margin-top: 2px;
+}
+.pf-fields {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+.pf-fields > * {
+  grid-column: span 6;
+  min-width: 0;
+}
+.pf-fields > .pf-s2 {
+  grid-column: span 2;
+}
+.pf-fields > .pf-s3 {
+  grid-column: span 3;
+}
+/* A Listbox in a form reads as a field, not a button. */
+.pf-fields .ax-seg {
+  align-self: flex-start;
+}
+.pf-pick .ax-listbox {
+  justify-content: space-between;
+  width: 100%;
+  min-height: var(--control);
+  border-color: var(--line-strong);
+  background: var(--field);
+  box-shadow: none;
+}
+.pf-pick .ax-listbox:hover:not(:disabled) {
+  border-color: var(--ink-3);
+  background: var(--field);
+}
+.pf-form {
+  padding-top: var(--space-2);
+}
+
+/* ---------- identity header and photo ---------- */
+.pf-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  box-shadow: var(--shadow-panel);
+}
+.pf-identity-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pf-identity-text > strong {
+  overflow: hidden;
+  font-size: var(--text-title);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-identity-text > span {
+  overflow: hidden;
+  color: var(--ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 56px;
+  height: 56px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--inset);
+  color: var(--ink-2);
+  font-size: var(--text-title);
+  font-weight: 500;
+}
+.pf-avatar.is-large {
+  width: 96px;
+  height: 96px;
+  font-size: var(--text-page);
+}
+.pf-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.pf-photo-body {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+}
+.pf-photo-drop {
+  display: flex;
+  flex: 1 1 260px;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* ---------- cards that open ---------- */
+.pf-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pf-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  box-shadow: var(--shadow-panel);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease);
+}
+.pf-card:hover {
+  border-color: var(--line-strong);
+}
+.pf-card-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pf-card-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0 var(--space-3);
+}
+.pf-card-title > strong {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-card-when {
+  flex: none;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+.pf-card-sub {
+  overflow: hidden;
+  color: var(--ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-card-body {
+  display: -webkit-box;
+  margin-top: var(--space-1);
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.pf-card-go {
+  flex: none;
+  align-self: center;
+  color: var(--ink-3);
+  transition:
+    color var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
+}
+.pf-card:hover .pf-card-go {
+  color: var(--ink);
+  transform: translateX(2px);
+}
+.pf-note-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--inset);
+  color: var(--ink-2);
+}
+.pf-proposal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--inset);
+  --surface: var(--inset);
+}
+.pf-proposal-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+}
+
+/* ---------- tags ---------- */
+.pf-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  min-height: var(--control);
+  padding: 3px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  cursor: text;
+  transition: border-color var(--dur) var(--ease);
+}
+.pf-tags:hover {
+  border-color: var(--ink-3);
+}
+.pf-tags:focus-within {
+  border-color: var(--focus);
+  outline: 1px solid var(--focus);
+}
+.pf-tag {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  height: 26px;
+  padding: 0 2px 0 var(--space-2);
+  border: 1px solid var(--btn-edge);
+  border-radius: 4px;
+  background: var(--btn);
+  color: var(--btn-ink);
+  font-size: var(--text-meta);
+}
+.pf-tag > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-tag button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.pf-tag button:hover {
+  background: var(--active);
+  color: var(--ink);
+}
+.pf-tags .pf-tags-input {
+  flex: 1 1 120px;
+  width: auto;
+  min-width: 80px;
+  min-height: 26px;
+  padding: 0 var(--space-1);
+  border: 0;
+  background: none;
+}
+.pf-tags .pf-tags-input:focus-visible {
+  border: 0;
+  outline: none;
+}
+
+/* ---------- slider ---------- */
+.pf-range-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+.pf-range-row input[type="range"] {
+  flex: 1;
+  height: 22px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  appearance: none;
+  cursor: pointer;
+}
+.pf-range-row input[type="range"]:focus-visible {
+  outline-offset: 4px;
+}
+.pf-range-row input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--brand) var(--pct), var(--inset) var(--pct));
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.pf-range-row input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--inset);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.pf-range-row input[type="range"]::-moz-range-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--brand);
+}
+.pf-range-row input[type="range"]::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -5px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow:
+    0 0 0 2px var(--raised),
+    0 0 0 3px var(--line-strong);
+  appearance: none;
+}
+.pf-range-row input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow:
+    0 0 0 2px var(--raised),
+    0 0 0 3px var(--line-strong);
+}
+.pf-range output {
+  min-width: 3ch;
+  font-size: var(--text-data);
+  text-align: right;
+}
+
+/* ---------- switches and answer rules ---------- */
+.pf-subhead {
+  color: var(--ink);
+}
+.pf-switches {
+  padding: var(--space-2) var(--space-5);
+}
+.pf-switches .ax-switch-row {
+  padding-block: var(--space-3);
+}
+.pf-steps {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--inset);
+  list-style: none;
+}
+.pf-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+.pf-step + .pf-step {
+  border-top: 1px solid var(--line);
+}
+.pf-step-n {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  color: var(--ink-2);
+  font-size: var(--text-data);
+}
+.pf-step-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pf-step-text > strong {
+  font-weight: 500;
+}
+.pf-step-text > small {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.pf-step-end {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: var(--space-1);
+}
+.pf-step-end .ax-switch {
+  margin-left: var(--space-2);
+}
+.pf-topics {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pf-topic {
+  display: grid;
+  grid-template-columns: 150px 140px minmax(0, 1fr) 180px;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--line-soft);
+}
+.pf-topics-head {
+  padding-block: var(--space-3) var(--space-2);
+  border-top: 0;
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+  font-weight: 500;
+}
+.pf-topic-name {
+  font-weight: 500;
+}
+.pf-topic .ax-field {
+  gap: 0;
+}
+/* The column heads name the controls on a wide screen; each control keeps its own label for assistive technology. */
+.pf-topic .ax-field > .ax-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+/* The column head names it on a wide screen; the checkbox keeps its name for assistive technology. */
+.pf-topic-decline-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---------- supervisors and references: what is waiting on it ---------- */
+.pf-hero {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  box-shadow: var(--shadow-panel);
+}
+.pf-hero.is-waiting {
+  border-color: var(--line-strong);
+}
+.pf-hero-main {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+.pf-hero-main > div {
+  flex: 1;
+  min-width: 0;
+}
+.pf-hero h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.pf-hero p {
+  max-width: 64ch;
+  margin-top: 2px;
+  color: var(--ink-2);
+  font-size: var(--text-body);
+}
+.pf-hero-meters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-6);
+  margin: 0;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line-soft);
+}
+.pf-hero-meters > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pf-hero-meters dt {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  font-weight: 500;
+}
+.pf-hero-meters dd {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  font-size: var(--text-data);
+}
+.pf-meter {
+  display: block;
+  flex: 1;
+  min-width: 40px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--inset);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.pf-meter > i {
+  display: block;
+  height: 100%;
+  background: var(--ink);
+  transition: width 260ms var(--ease);
+}
+
+/* ---------- questionnaires as progress cards ---------- */
+.pf-quests {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(236px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pf-quest {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  box-shadow: var(--shadow-panel);
+}
+.pf-quest-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.pf-quest > p {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  line-height: 1.5;
+}
+.pf-quest-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--text-data);
+}
+.pf-quest > .pf-meter {
+  flex: none;
+  margin-top: auto;
+}
+.pf-quest > .pf-quest-left,
+.pf-quest > .pf-quest-note {
+  font-size: var(--text-meta);
+}
+.pf-quest > .pf-quest-left {
+  color: var(--ink-3);
+}
+.pf-quest > .pf-quest-note {
+  color: var(--signal-ink);
+}
+.pf-quest-state {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 6px;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+.pf-quest-state i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.pf-quest-state.is-not_started i {
+  box-shadow: inset 0 0 0 1.5px var(--ink-3);
+}
+.pf-quest-state.is-partial i {
+  background: linear-gradient(90deg, var(--ink) 50%, transparent 50%);
+  box-shadow: inset 0 0 0 1.5px var(--ink);
+}
+.pf-quest-state.is-complete {
+  color: var(--ink);
+}
+
+/* ---------- the save bar: only with a change, and it says where ---------- */
+.pf-savebar {
+  position: sticky;
+  bottom: var(--space-4);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-self: flex-end;
+  width: calc(100% - 244px - var(--space-8));
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--overlay);
+  box-shadow: var(--shadow-overlay);
+  animation: ax-rise 140ms var(--ease);
+}
+.pf-savebar-note {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-size: var(--text-body);
+}
+
+/* ---------- narrower: the section list becomes a row across the top ---------- */
+@media (max-width: 1179px) {
+  .pf-savebar {
+    align-self: stretch;
+    width: auto;
+  }
+  .pf {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-4);
+  }
+  .pf-nav {
+    z-index: 5;
+    flex-direction: row;
+    gap: var(--space-1);
+    margin-inline: calc(-1 * var(--gutter));
+    padding: var(--space-2) var(--gutter);
+    overflow-x: auto;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+    scrollbar-width: none;
+  }
+  .pf-nav::-webkit-scrollbar {
+    display: none;
+  }
+  .pf-nav-group {
+    display: contents;
+  }
+  .pf-nav-group > .ax-nav-group {
+    display: none;
+  }
+  .pf-nav-item {
+    flex: none;
+    border: 1px solid transparent;
+  }
+  .pf-nav-item[aria-current="page"] {
+    border-color: var(--line-strong);
+  }
+  .pf-nav-label {
+    flex: none;
+  }
+}
+@media (max-width: 1299px) {
+  .pf-topics-head {
+    display: none;
+  }
+  .pf-topic {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .pf-topic-name,
+  .pf-topic-decline {
+    grid-column: span 2;
+  }
+  .pf-topic .ax-field > .ax-label {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+  }
+  .pf-topic .ax-field {
+    gap: 4px;
+  }
+  .pf-topic-decline-label {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+  }
+}
+@media (max-width: 640px) {
+  .pf-group {
+    padding: var(--space-4);
+  }
+  .pf-fields > .pf-s2,
+  .pf-fields > .pf-s3 {
+    grid-column: span 6;
+  }
+  .pf-topic {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pf-topic-name,
+  .pf-topic-decline {
+    grid-column: auto;
+  }
+  /* The monograms and "See them" share the first line; the words take the whole width under them. */
+  .pf-hero-main {
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+  .pf-hero-main > div {
+    order: 3;
+    flex: 1 1 100%;
+  }
+  .pf-hero-meters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pf-identity {
+    flex-wrap: wrap;
+    padding: var(--space-4);
+  }
+  .pf-identity-text {
+    flex-basis: calc(100% - 56px - var(--space-4));
+  }
+  .pf-card {
+    padding: var(--space-3);
+  }
+  .pf-card-sub {
+    white-space: normal;
+  }
+  .pf-savebar {
+    justify-content: flex-end;
+    padding-left: var(--space-3);
+  }
+  .pf-savebar-note {
+    flex-basis: 100%;
+  }
+  .pf-step {
+    flex-wrap: wrap;
+  }
+  .pf-step-text {
+    flex-basis: calc(100% - 22px - var(--space-3));
+  }
+  .pf-step-end {
+    margin-left: calc(22px + var(--space-3));
+  }
+}
+
+/* The questionnaire forms inside a Profile section: blocks sit apart, not on rules. */
+.pf-content .ax-qf,
+.pf-content .ax-qf-section {
+  gap: var(--space-8);
+}
+.pf-content .ax-qf-block {
+  padding: 0;
+  border-bottom: 0;
+}

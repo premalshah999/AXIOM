@@ -116,7 +116,9 @@ def source_pdf(db, config, resume_id: str | None = None):
 
     policy = db.get_setting("application_resume_policy", {}) or {}
     with db.session() as s:
-        rid = resume_id or policy.get("source_resume_id")
+        # The policy names the resume it sends as resume_id (readiness and the queue read that): with two resumes uploaded, this took
+        # the first it found, so the page named and Import transcribed a PDF that wasn't the one being sent.
+        rid = resume_id or policy.get("resume_id") or policy.get("source_resume_id")
         row = s.get(Resume, rid) if rid else s.scalar(select(Resume).where(Resume.demo.is_(False)))
         if not row:
             return None, None

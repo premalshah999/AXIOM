@@ -1,0 +1,166 @@
+/* Sign-in, sign-up, recovery codes and reset (src/account.tsx), outside the shell, inside .ax-screen: the wordmark, one raised
+   card, and quiet links under it. The same card family as the setup guide. Tokens only. */
+.ax-gate {
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+  padding: var(--space-8) var(--gutter);
+}
+.ax-gate-in {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-6);
+  width: min(100%, 420px);
+}
+.ax-gate-card {
+  --surface: var(--raised);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 100%;
+  padding: var(--space-8);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+  box-shadow: var(--shadow-panel);
+  animation: ax-gate-in 180ms var(--ease);
+}
+@keyframes ax-gate-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.ax-gate-card > header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.ax-gate-card > header p {
+  color: var(--ink-2);
+}
+.ax-gate-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--inset);
+  color: var(--ink-2);
+}
+.ax-gate-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-1) var(--space-4);
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+  text-align: center;
+}
+.ax-gate-foot .ax-link {
+  color: var(--ink-2);
+}
+
+/* A password with its Show and Hide inside the field. */
+.ax-gate-pw {
+  position: relative;
+  display: block;
+}
+.ax-gate-pw > input {
+  padding-right: 40px;
+}
+.ax-gate-pw > .ax-icon-btn {
+  position: absolute;
+  top: 50%;
+  right: 3px;
+  transform: translateY(-50%);
+}
+.ax-gate-pwrow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.ax-gate-pwrow > .ax-link {
+  align-self: flex-end;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+
+/* The rules a new password must meet, ticking off as they are met. */
+.ax-gate-rules {
+  display: grid;
+  gap: 4px;
+  margin: calc(-1 * var(--space-1)) 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+}
+.ax-gate-rules li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: color var(--dur) var(--ease);
+}
+.ax-gate-rules svg {
+  opacity: 0.35;
+  transition: opacity var(--dur) var(--ease);
+}
+.ax-gate-rules .is-met {
+  color: var(--ink);
+}
+.ax-gate-rules .is-met svg {
+  opacity: 1;
+}
+
+/* Recovery codes: ten of them in a well, set in the data face. */
+.ax-gate-codes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--line-soft);
+  counter-reset: code;
+}
+.ax-gate-codes li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--inset);
+  font-family: var(--font-data);
+  font-size: var(--text-data);
+  counter-increment: code;
+}
+.ax-gate-codes li::before {
+  content: counter(code, decimal-leading-zero);
+  color: var(--ink-3);
+}
+.ax-gate-cmd {
+  margin: 0;
+}
+
+@media (max-width: 480px) {
+  .ax-gate {
+    place-items: start center;
+    padding-top: var(--space-6);
+  }
+  .ax-gate-card {
+    padding: var(--space-5);
+  }
+}
+
+/* Three ways to prove it, side by side, each on one line. */
+.ax-gate-card .ax-seg button {
+  padding: 0 var(--space-2);
+  white-space: nowrap;
+}

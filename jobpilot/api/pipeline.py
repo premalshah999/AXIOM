@@ -174,6 +174,27 @@ def counts(session):
     return {"groups": {**groups, "all": pipeline}, "states": states, "pipeline": pipeline, "jobs": jobs or 0}
 
 
+def funnel(session):
+    """All time, for Overview's funnel and success by platform. Discovered is every real job found; eligible is one that passed the
+    fit check (neither unranked nor below fit) or was started anyway; applied is one where an application really started, by
+    platform too. Dry runs prove nothing was sent, so they don't count. Archived jobs were found and tried like any other, so
+    they stay in: the confirmed count on the same panel includes them. Confirmed itself is GET /api/successful-applications."""
+    started = select(Run.job_id).where(Run.mode == "submit", Run.started_at.is_not(None))
+    applied = Job.id.in_(started).label("applied")
+    rows = session.execute(
+        select(Job.ats, Job.status, applied, func.count()).where(Job.demo.is_(False)).group_by(Job.ats, Job.status, "applied")
+    ).all()
+    out = {"discovered": 0, "eligible": 0, "applied": 0, "platforms": {}}
+    for ats, status, was_applied, n in rows:
+        out["discovered"] += n
+        if was_applied or status not in ("new", "skipped", "archived"):
+            out["eligible"] += n
+        if was_applied:
+            out["applied"] += n
+            out["platforms"][ats] = out["platforms"].get(ats, 0) + n
+    return out
+
+
 def _search(q):
     text = (q or "").strip().lower()
     if not text:
