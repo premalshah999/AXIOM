@@ -5216,6 +5216,17 @@ class FormSession:
         ]
         if final:
             return await self._reduce_submit_controls(final)
+        # Gem's form ends in two submits outside any <form>, "Apply and save" (it keeps the profile on Gem) and "Apply
+        # without saving" (Nuvo, 2026-10-31: "No final submit control"). With the resume verified they are the
+        # application's own submit, and the applicant's profile is not Gem's to keep: the application goes without saving.
+        pair = [
+            b
+            for b in self.buttons.values()
+            if re.fullmatch(r"apply (?:and|&) save|apply without saving", b["label"].strip(), re.I)
+        ]
+        if pair and self.uploaded and self.upload_verified:
+            plain = [b for b in pair if re.search(r"without", b["label"], re.I)]
+            return await self._reduce_submit_controls(plain or pair)
         for button in self.buttons.values():
             # Toast's real submit is labelled "Apply now!"; trailing punctuation must not hide it.
             if not re.fullmatch(r"apply(?: now)?[\s!.]*", button["label"], re.I):
