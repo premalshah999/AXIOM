@@ -1,6 +1,6 @@
 # AXIOM dashboard design system (2026-10-31)
 
-Read this before touching a page. It holds two stages: the **family** every page is made from, and the **reference pages** (Overview, Jobs and its drawer) to copy. Needs you, Applications, Resumes, Profile, Settings and the sign-in screens are on the new shell and tokens but not yet redesigned; section 7 says what each must become.
+Read this before touching a page. It holds two stages: the **family** every page is made from, and the **reference pages** (Overview, Jobs and its drawer) to copy. Needs you, Applications, Resumes, Profile and Settings are on the new shell and tokens but not yet redesigned; section 7 says what each must become. The first-run screens (setup guide, sign-in, coming soon, a crashed page) are done: section 7a.
 
 ## 1. Rules
 
@@ -161,9 +161,18 @@ Their brief is in UI3_BRIEF.md. What each must do with the family above:
 - **Resumes** (`ResumesView` in `setup.tsx`, `features.tsx`, `editor.tsx`, `pdfpages.tsx`): lead with what is being sent and whether tailoring is on, in one sentence and one control (`application_resume_policy` in the snapshot). Guided path for setting it up. Do not turn tailoring on yourself. Library cards or rows with preview and download; the Dropzone is already wired for upload. Tailored versions open in a preview panel. Editor: a full-height workspace with a slim bar; it currently still shows the shell's page header (`main.view-editor`, `.ax-scroll.is-fixed`). Test every path.
 - **Profile** (`profile.tsx`, `knowledge.tsx`, `qform.tsx`): section navigation within the page, a two-column grid for related fields, cards that open to edit, a sticky save bar only with changes (`ax-savebar`), progress cards.
 - **Settings** (`connections.tsx`, `autonomy.tsx`, `mail.tsx`, `discovery.tsx`, `setup.tsx`): group by what people recognise; provider cards with status, masked key and Test; internals behind an Advanced fold. Fix the mailbox showing "connected" beside "Mailbox operation failed".
-- **Sign-in, sign-up, reset, setup guide** (`account.tsx`, `onboarding.tsx`, `styles/onboarding.css`, `styles/setup.css`), **coming-soon** (`ComingSoon.tsx`), **error boundary** (`ErrorBoundary.tsx`), **404**: the same family; the first thing anyone sees.
-
 When a page moves off `.ax-grid`, `.nq-*` and the like, delete what it leaves behind. Keep this file true.
+
+## 7a. First run: the setup guide, sign-in, coming soon, a crashed page
+
+These are the first things anyone sees, so they are one family: a raised card on the page (`--raised`, hairline, `--radius-lg`), the wordmark above or beside it, a title and one line, then the task. Outside the shell, inside `.ax-screen`.
+
+- **The setup guide** (`onboarding.tsx`, `styles/onboarding.css`): a welcome, seven short steps, a finish. In order: **Data** (where the data lives), **Resume**, **Contact**, **Eligibility** (work authorization, with Background questions and Self-identification as folds most people leave closed), **Search** (roles, places), **Automation** (send for me or review first; switches), **Connections** (AI key and inbox, both skippable). The progress line has one named segment per step (a reached step is a way back), "Step 3 of 7" and "About 4 min left" (the sum of `minutes` in `STEPS`). The way on lives in a sticky bar (Back, an optional skip, one primary); Enter in a field continues. The usual answer is already chosen where one exists; nothing is defaulted for the person (`test_wizard_background_facts.py`): "Answer No to the rest" fills unanswered background questions only when pressed. The finish says "AXIOM is ready" only when nothing AXIOM needs is missing, otherwise "Almost ready" with a Fix link per line; questionnaires moved to Profile › Knowledge and are offered from the finish. Server step ids are unchanged (`server` in `STEPS`); `OPEN_AT` maps a stored step back to a guide step.
+- **The Data step is a slot.** `DatabaseStep` shows Local as chosen and nothing to fill in. The Local, Supabase and Server component from `agent8/db-config` (`frontend/src/database.tsx`) replaces its body; keep Continue enabled while Local is selected.
+- **Sign-in, sign-up, recovery codes, reset** (`account.tsx`, `styles/auth.css`): one `AuthCard` (wordmark above, quiet links to the other ways in under it); a password has its own Show and Hide inside the field; the rules a new password must meet tick off as they are met; recovery codes sit in a numbered well with Copy and Download. They appear only for someone who set a lock. Settings › System › Your sign-in is in the same file.
+- **Coming soon** (`shell/ComingSoon.tsx`, `styles/screens.css`): plainly not switched on (a dashed lamp and "Coming soon"), one sentence, three lines of what it will do, a picture of the idea drawn in tokens, and a way back. Add a page by adding to `nav.ts` and to `WILL` in the file.
+- **A crashed page** (`shell/ErrorBoundary.tsx`): what happened, that the rest still works, Try again (clears the error) and Reload, the message behind a fold.
+- **No 404 page.** Any unknown address opens Overview (§3), so there is nothing to show.
 
 ## 8. Checking your work
 

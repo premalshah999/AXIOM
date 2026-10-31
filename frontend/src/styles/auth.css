@@ -158,3 +158,9 @@
     padding: var(--space-5);
   }
 }
+
+/* Three ways to prove it, side by side, each on one line. */
+.ax-gate-card .ax-seg button {
+  padding: 0 var(--space-2);
+  white-space: nowrap;
+}

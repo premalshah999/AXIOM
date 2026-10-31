@@ -617,7 +617,7 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
         <div className="ax-ob-col">
           <nav aria-label="Setup steps" className="ax-ob-progress">
             <p className="ax-ob-caption" role="status">
-              <span>{first ? `${WORK.length} short steps` : last ? "Setup complete" : `Step ${stepNo} of ${WORK.length}`}</span>
+              <span>{first ? `${WORK.length} short steps` : last ? (unfinished ? "Nearly done" : "Setup complete") : `Step ${stepNo} of ${WORK.length}`}</span>
               {!last && <span>{timeLeft(at)}</span>}
             </p>
             <ol className="ax-ob-steps">
@@ -842,8 +842,8 @@ function ResumeStep({ draft, setDraft }: StepProps & { setDraft: (fn: (d: Draft)
           }
         }}
         accept="application/pdf,.pdf"
-        title="Drop your resume here, or click to choose"
-        hint="A text-based PDF, up to 5 MB. It is attached to applications exactly as uploaded."
+        title="Add your resume"
+        hint="Drop a text-based PDF here, or click to choose. Up to 5 MB. It is attached to applications exactly as uploaded."
         label="Resume PDF"
         disabled={busy}
       />

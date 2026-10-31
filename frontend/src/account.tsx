@@ -701,7 +701,7 @@ function TokenSignIn({
 const METHODS = [
   { id: "recovery_code", label: "Recovery code" },
   { id: "access_token", label: "Access token" },
-  { id: "cli", label: "Command line" },
+  { id: "cli", label: "Terminal" },
 ] as const;
 
 function Forgot({
