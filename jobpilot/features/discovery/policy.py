@@ -143,10 +143,11 @@ def requisition_key(url: str, title: str, location: str, description: str = "", 
     """Same requisition seen through search results, boards and direct links → same key."""
     tenant = tenant_alias(url) or ("name:" + norm(company))
     try:
-        from ...ats import canonicalize, detect
+        from ...ats import canonicalize, custom_like, detect
 
         # A recognized ATS URL has a native job identity (board + job ID, tenant + requisition).
-        if detect(url).id not in {"custom", "generic", "unknown"}:
+        found = detect(url).id
+        if not custom_like(found) and found not in {"generic", "unknown"}:
             return "req:" + canonicalize(url)[1][:32]
     except Exception:
         pass
