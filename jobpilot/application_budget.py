@@ -115,6 +115,32 @@ def allowance(session, job_id, *, exclude_run=None, at=None, aliases=None):
     return deadline, None if deadline is None else max(0.0, (deadline - at).total_seconds()), count
 
 
+# Fresh tries the owner's answers alone can earn one job (an Apply click clears the count). An answer that is reused
+# automatically for the same question could otherwise keep a failing job retrying for ever; the daily model budget
+# bounds the cost, this bounds the number of tries.
+ANSWER_TRIES = 6
+
+
+def grant_fresh_try(session, job_id, reason, *, limit=ANSWER_TRIES):
+    """The owner answered: earn this job a fresh try, as an Apply click does (owner, 2026-10-18: "give them fresh tries").
+
+    onsemi and Mattel (2026-10-26/28) were answered, and the resume was refused for having used its three starts: the
+    waiting_answer run itself is one of them. Returns False when answers alone have already earned `limit` of them.
+    It only moves the start count and deadline; the duplicate-submission guards (an active, confirmed or uncertain run
+    of the posting) are separate checks and still apply."""
+    key = "application_budget_reset:" + job_id
+    row = session.get(Setting, key)
+    grants = int((row.value or {}).get("answer_grants", 0)) if row else 0
+    if grants >= limit:
+        return False
+    value = {"at": datetime.now(UTC).isoformat(), "reason": reason[:200], "answer_grants": grants + 1}
+    if row:
+        row.value = value
+    else:
+        session.add(Setting(key=key, value=value))
+    return True
+
+
 def require_allowance(session, job_id, *, exclude_run=None, at=None, aliases=None, new_attempt=True):
     deadline, remaining, starts = allowance(
         session, job_id, exclude_run=exclude_run, at=at, aliases=aliases,

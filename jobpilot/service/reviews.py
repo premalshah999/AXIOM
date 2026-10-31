@@ -25,6 +25,17 @@ FOREIGN_POSTING = re.compile(
     re.I,
 )
 
+# Refusals the owner's answer cannot change and no later attempt will clear: a protection against a second submission,
+# the job's own state, or an employer restriction. Every other refusal can clear (a spent budget, a pause, a cap, a pool
+# that is full), so the wake is kept (resume_review).
+FINAL_REFUSALS = {
+    "archived", "archived_submission", "duplicate_posting", "submitted_or_uncertain", "job_control", "reserved_employer",
+    "eligibility_conflict", "not_found",
+}
+# Refusals that only say the start count or deadline is used up: the owner answering is the approval a fresh try needs.
+FRESH_TRY = {"application_retry_limit", "application_deadline"}
+
+
 class ReviewsMixin:
     @staticmethod
     def review_kind(question):
@@ -563,7 +574,7 @@ class ReviewsMixin:
                 if not control.get("auto_submit") or not run.packet.get("match_approved"):
                     return result
                 job.status = "ready"
-            job_id, mode, resume_id = run.job_id, run.mode, run.resume_id
+            job_id, mode, resume_id, run_id = run.job_id, run.mode, run.resume_id, run.id
             batch = s.get(Setting, "job_board_autopilot")
             batch_id = (
                 batch.value.get("started_at")
@@ -574,13 +585,24 @@ class ReviewsMixin:
         # "Application remains protected by its queue guard" and raw queue errors did too.
         saved = result["message"].split(". ")[0] + "."
         try:
-            resumed = await self.queue(job_id, mode, resume_id, retry=True, batch_id=batch_id)
+            try:
+                resumed = await self.queue(job_id, mode, resume_id, retry=True, batch_id=batch_id)
+            except QueueBlocked as exc:
+                if exc.code not in FRESH_TRY or mode != "submit" or not self._fresh_try(run_id, job_id, review_id, exc):
+                    raise
+                resumed = await self.queue(job_id, mode, resume_id, retry=True, batch_id=batch_id)
         except QueueBlocked as exc:
             if durable_delivery and exc.outcome == "deferred":
                 raise  # Keep the correlated outbox event until its temporary gate clears.
+            if exc.outcome != "deferred":
+                # Never swallowed: onsemi (2026-10-28) and Mattel (2026-10-26) were answered, refused for the start
+                # limit, and the one-shot wake stayed "delivered" with no event, no reason and no new run.
+                self._refused(run_id, job_id, review_id, exc)
+                if durable_delivery and exc.code not in FINAL_REFUSALS:
+                    raise QueueBlocked(str(exc), outcome="deferred", code=exc.code, not_before=temporary_time())
             result["message"] = saved + (
                 " The application continues on its own as soon as it can."
-                if exc.outcome == "deferred"
+                if exc.outcome == "deferred" or exc.code not in FINAL_REFUSALS
                 else " This application is on hold, so it won't restart right now."
             )
         except ValueError:
@@ -590,3 +612,34 @@ class ReviewsMixin:
         else:
             result.update(run_id=resumed["id"], message="Saved. The application is continuing.")
         return result
+
+    def _fresh_try(self, run_id, job_id, review_id, refusal):
+        """Grant the answered job a fresh try after a start-limit refusal; False when answers already earned the most."""
+        from ..application_budget import grant_fresh_try
+
+        with self.db.exclusive() as s:
+            granted = grant_fresh_try(s, job_id, "Owner answered a question")
+        self.db.event(
+            run_id,
+            "fresh_try" if granted else "fresh_try_refused",
+            "The answer earned this application a fresh try" if granted
+            else "Answers have already earned this application the most fresh tries; click Apply to start it again",
+            {"review_id": review_id, "was": str(refusal)[:200]},
+        )
+        return granted
+
+    def _refused(self, run_id, job_id, review_id, refusal):
+        """Say on the run what stopped an answered application from restarting, so it is never silent."""
+        why = f"Your answer is saved, but the application did not restart: {str(refusal).rstrip('.')}."
+        with self.db.exclusive() as s:
+            run = s.get(Run, run_id)
+            # A sibling attempt already started this job (the interactive click and the outbox wake race): no reason.
+            if run and run.state in {"waiting_answer", "needs_review"} and refusal.code != "active_run":
+                run.reason = why[:500]
+        self.db.event(
+            run_id,
+            "resume_refused",
+            why[:300],
+            {"review_id": review_id, "code": refusal.code, "outcome": refusal.outcome, "job_id": job_id,
+             "retried": refusal.code not in FINAL_REFUSALS},
+        )
