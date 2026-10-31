@@ -117,7 +117,6 @@ MAP = {
     "cli.py":                            ("control:cli.py", "split: serve/token/doctor stay; probe, login, browser, twin-browser go to applier:cli.py"),
     "verify.py":                         ("control:verify.py", "`axiom verify`, the deployment acceptance check"),
     "demo.py":                           ("control:demo/seed.py", "Synthetic application for `verify` and the first-run tour"),
-    "mcp_server.py":                     ("control:mcp_server.py", "Read-only MCP; already speaks to the running app over HTTP"),
     "dbos_sqlite.py":                    ("core:dbos_sqlite.py", ""),
 
     # ---- Foundations -------------------------------------------------------------------------------------------------

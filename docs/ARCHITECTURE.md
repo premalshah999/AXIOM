@@ -802,7 +802,6 @@ and `telegram.api`. A split must move those seams and their tests together, whic
 | `api/routes/state.py` | 64 | 1 | `gateway/routes/state.py` |  |
 | `api/sessions.py` | 128 | 4 | `gateway/sessions.py` |  |
 | `api/snapshot.py` | 238 | 3 | `gateway/snapshot.py` | Assembled from each owner's status API |
-| `mcp_server.py` | 68 | 1 | `mcp_server.py` | Read-only MCP; already speaks to the running app over HTTP |
 | `telegram.py` | 2,138 | 5 | `notify/telegram/__init__.py` | split: 6.2 |
 | `telegram_workers.py` | 406 | 4 | `notify/telegram/worker_bots.py` |  |
 | `operations/__init__.py` | 1 | 0 | `ops/__init__.py` |  |

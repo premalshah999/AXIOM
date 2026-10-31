@@ -201,7 +201,6 @@ def main():
     probe.add_argument("--company", default="")
     trace = sub.add_parser("trace", help="Summarize the step trace of a run")
     trace.add_argument("run_id")
-    sub.add_parser("mcp", help="Serve read-only application tools over MCP stdio")
     compact = sub.add_parser("compact-runs", help="Drop duplicate profiles and unneeded checkpoints from runs not in flight")
     compact.add_argument("--apply", action="store_true", help="Write the changes; without it this only reports")
     prune = sub.add_parser("prune-workflows", help="Delete finished DBOS workflows past the retention age")
@@ -236,10 +235,6 @@ def main():
         if args.command == "compact-runs":
             raise SystemExit(compact_runs(config.prepare(), args.apply))
         raise SystemExit(prune_workflows(config.prepare(), args.days, args.apply))
-    elif args.command == "mcp":
-        from .mcp_server import create_server
-
-        create_server(config).run(transport="stdio")
     elif args.command == "serve":
         import uvicorn
 

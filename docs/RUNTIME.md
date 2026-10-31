@@ -66,7 +66,7 @@ documents say worker or slot). The rest:
   rows, never an execution owner.
 - **Mail is read-only.** Gmail by app password (IMAP) or OAuth (`gmail_imap.py`, `mail/`). The app never sends mail or
   marks messages read. Codes and links go to the owning browser, never into a model prompt.
-- **CLI** (`cli.py`): `serve`, `token`, `doctor`, `probe` (dry-run one URL), `trace`, `mcp` (read-only MCP over stdio),
+- **CLI** (`cli.py`): `serve`, `token`, `doctor`, `probe` (dry-run one URL), `trace`,
   `verify` (synthetic end-to-end check), `login` (capture a session), `browser` and `twin-browser` (host Chromes).
 
 ## 3. Where each piece of state lives
