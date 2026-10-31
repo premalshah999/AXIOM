@@ -366,11 +366,11 @@
   grid-template-columns: var(--rail) repeat(var(--slots, 9), minmax(0, 1fr));
   padding-top: 10px;
 }
-.ax-lead .ax-read {
+.ax-bank-lead .ax-read {
   font-size: min(92px, calc(180px / var(--lead-chars, 1)));
   margin-top: -4px;
 }
-.ax-lead .ax-engraved {
+.ax-bank-lead .ax-engraved {
   display: block;
   margin-top: 6px;
 }
@@ -480,17 +480,17 @@
   width: 100%;
   height: auto;
 }
-.ax-bank.is-compact .ax-lead {
+.ax-bank.is-compact .ax-bank-lead {
   display: flex;
   align-items: flex-end;
   gap: var(--space-2);
   padding-block: var(--space-3) var(--space-2);
 }
-.ax-bank.is-compact .ax-lead .ax-read {
+.ax-bank.is-compact .ax-bank-lead .ax-read {
   margin: 0;
   font-size: 64px;
 }
-.ax-bank.is-compact .ax-lead .ax-engraved {
+.ax-bank.is-compact .ax-bank-lead .ax-engraved {
   margin: 0 0 1px;
   font-size: var(--text-ui);
 }

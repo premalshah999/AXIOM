@@ -259,7 +259,7 @@ export function QuestionCard({
       }}
     >
       <div>
-        <p className="nq-q" id={id}>
+        <p className={"nq-q" + (text.length > 140 ? " is-long" : "")} id={id}>
           {text}
         </p>
         {(q.requirement || others.length > 0) && (

@@ -195,7 +195,7 @@ export function ChannelBank({
 
 function Lead({ busy, slots }: { busy: number; slots: number }) {
   return (
-    <div className="ax-lead">
+    <div className="ax-bank-lead">
       <span className="ax-read">{busy}</span>
       <span className="ax-engraved">of {slots} busy</span>
     </div>

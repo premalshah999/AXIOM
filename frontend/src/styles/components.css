@@ -88,10 +88,7 @@
 }
 .ax-panel-head h2 {
   min-width: 0;
-  overflow: hidden;
-  padding-bottom: 1px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .ax-panel-actions {
   display: flex;
@@ -1128,6 +1125,28 @@ body:has(.ax-savebar) .ax-toasts {
   background: var(--tint);
   color: var(--ink);
 }
+/* A row's one action is a quiet link: twenty keys down a list would be the loudest thing on the page. */
+.ax-table .ax-btn.ax-lead {
+  height: auto;
+  margin: 0;
+  padding: 2px 4px;
+  background: none;
+  box-shadow: none;
+  color: var(--ink);
+  font-size: var(--text-meta);
+  font-stretch: 100%;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-transform: none;
+  text-underline-offset: 3px;
+}
+.ax-table .ax-btn.ax-lead:hover:not(:disabled),
+.ax-table .ax-btn.ax-lead:active:not(:disabled) {
+  background: none;
+  box-shadow: none;
+  text-decoration-thickness: 2px;
+  transform: none;
+}
 .ax-act {
   display: flex;
   align-items: center;
@@ -1392,6 +1411,13 @@ body:has(.ax-savebar) .ax-toasts {
   }
   /* A phone shows the job, its status and the menu without sliding the table far sideways. */
   .ax-table td.is-trunc {
-    min-width: 150px !important;
+    min-width: 120px !important;
+  }
+  .ax-table th,
+  .ax-table td {
+    padding-inline: 6px;
+  }
+  .ax-table .is-pin {
+    padding-inline: 0;
   }
 }

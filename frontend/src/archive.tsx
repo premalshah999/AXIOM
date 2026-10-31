@@ -7,6 +7,7 @@ import { useAction, useDraft, usePoll } from "./hooks";
 import { Pagination, usePagination } from "./pagination";
 import type { Archived } from "./types";
 import { day, plural } from "./format";
+import { stateInfo } from "./model";
 import { Button, Empty, Table, type Column } from "./ui/index";
 import { ConfirmButton, JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
 
@@ -40,7 +41,8 @@ export function ArchiveList() {
         a.uncertain_submission ? (
           <StatusPill state="submission_unknown" label="Unconfirmed · protected" />
         ) : (
-          <StatusPill state={a.state} label={a.owner_removed ? "Removed by you" : undefined} />
+          // Nothing archived needs you, whatever state it ended in: no lamp is lit here.
+          <StatusPill state="cancelled" label={a.owner_removed ? "Removed by you" : stateInfo(a.state).label} />
         ),
     },
     { key: "reason", header: "Detail", hideBelow: 600, width: 300, truncate: true, cell: (a) => (a.reason ? <Note>{a.reason}</Note> : null) },
@@ -48,6 +50,7 @@ export function ArchiveList() {
     {
       key: "log",
       header: "Log",
+      hideBelow: 600,
       cell: (a) => (
         <a className="ax-link" href={`/api/archive/${a.job_id}/log`} download>
           <Download size={13} aria-hidden="true" /> Log
