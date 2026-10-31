@@ -17,15 +17,15 @@ class Handle:
     async def click(self, **kwargs):
         self.owner.clicks += 1
         if self.owner.clicks <= self.owner.detach:
-            raise PlaywrightError("ElementHandle.click: Element is not attached to the DOM")
+            raise PlaywrightError(self.owner.message)
 
     async def dispose(self):
         pass
 
 
 class Locator:
-    def __init__(self, detach):
-        self.detach, self.clicks = detach, 0
+    def __init__(self, detach, message="ElementHandle.click: Element is not attached to the DOM"):
+        self.detach, self.clicks, self.message = detach, 0, message
 
     async def element_handle(self, timeout=None):
         return Handle(self)
@@ -50,3 +50,14 @@ async def test_a_button_that_never_settles_still_fails_after_bounded_retries():
     with pytest.raises(PlaywrightError):
         await widgets.safe_click(button)
     assert button.clicks == 4
+
+
+async def test_a_click_whose_page_context_vanished_is_re_resolved_like_a_detached_node():
+    # Oracle's Apply (2026-10-31): "Protocol error (DOM.scrollIntoViewIfNeeded): Cannot find context with specified id"
+    # ended the run as a control failure; nothing had been dispatched, so the fresh node is clicked.
+    button = Locator(
+        detach=1,
+        message="ElementHandle.click: Protocol error (DOM.scrollIntoViewIfNeeded): Cannot find context with specified id",
+    )
+    await widgets.safe_click(button)
+    assert button.clicks == 2

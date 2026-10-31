@@ -534,6 +534,34 @@
     sideLogins.set(form, side);
     return side;
   };
+  // The employer's own customer login in its site chrome (City National Bank's "Online Banking" drawer on its iCIMS
+  // job page, 2026-10-31): a login that belongs to a product the posting has nothing to do with. Read as the
+  // applicant's sign-in, the saved login was typed into the bank's login and five runs ended on a click timeout.
+  // The smallest container around the login that carries its heading decides: customer vocabulary and no
+  // applicant vocabulary. Its close control is tagged so the adapter can dismiss the drawer.
+  const CUSTOMER_LOGIN = /online banking|internet banking|mobile banking|(?:customer|client|member|patient|investor|policyholder|shareholder) (?:log ?in|sign ?in|portal|access)/i;
+  const APPLICANT_WORDS = /candidate|applicant|career|job ?seeker|application|talent/i;
+  const chromeLogins = new Map();
+  const chromeLogin = el => {
+    // The smallest ancestor holding a password box that names a customer product is the login's own container.
+    for (let box = el.parentElement, depth = 0; box && depth < 10; box = box.parentElement, depth++) {
+      const text = clean(box.innerText || '');
+      if (text.length > 1500) return false;
+      if (!box.querySelector('input[type=password]') || !CUSTOMER_LOGIN.test(text)) continue;
+      if (!chromeLogins.has(box)) {
+        const hit = !APPLICANT_WORDS.test(text);
+        chromeLogins.set(box, hit);
+        // The close control sits beside the form inside the drawer: look outward while the drawer stays small.
+        for (let up = box; hit && up && clean(up.innerText || '').length <= 1500; up = up.parentElement) {
+          const closer = [...up.querySelectorAll('button,a,[role=button]')]
+            .find(b => /^(?:close|dismiss)\b|^[×x]$/i.test(clean(b.getAttribute('aria-label') || b.innerText || '')));
+          if (closer) { closer.setAttribute('data-jp-chrome-close', '1'); break; }
+        }
+      }
+      return chromeLogins.get(box);
+    }
+    return false;
+  };
   const push = (el, f) => {
     const error = fieldError(el, f.type === 'checkboxgroup' ? f.valid ?? null : null);
     const help = (el.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean)
@@ -563,7 +591,7 @@
       name: el.getAttribute('name') || '', html_id: el.id || '', automation_id: el.dataset.automationId || '',
       placeholder: el.getAttribute('placeholder') || '', error, widget: f.widget || '', search_box: searchBox(el),
       parts: f.parts || [], accept: el.getAttribute('accept') || '', hint: clean([f.hint || '', help, description].join(' ')).slice(0,2500),
-      date_format: f.date_format || '', side_login: sideLogin(el),
+      date_format: f.date_format || '', side_login: sideLogin(el) || chromeLogin(el),
       members: (f.members || []).map(id),
     });
   };
@@ -1041,6 +1069,21 @@
       seen.add(key);
       const root = el.getRootNode();
       group = el.name ? [...root.querySelectorAll('input[type=radio]')].filter(x => x.name === el.name && (x.form || x.getRootNode()) === radioOwner) : [el];
+      // Nameless radios in no fieldset or radiogroup (Gem's Yes/No questions, Nuvo 2026-10-31: no name, the question a
+      // bare span above) read as lone "Yes" and "No" fields, so the answer never stuck and four runs stalled on the
+      // unchanged page. The smallest container holding two or more of them, all nameless, is one question's choices.
+      let nameless = false;
+      if (!el.name && !el.closest('fieldset,[role=radiogroup]')) {
+        for (let box = el.parentElement, depth = 0; box && depth < 4; box = box.parentElement, depth++) {
+          const radios = [...box.querySelectorAll('input[type=radio]')].filter(visible);
+          if (radios.length < 2) continue;
+          if (radios.length <= 12 && radios.every(x => !x.name && (x.form || x.getRootNode()) === radioOwner)) {
+            group = radios; nameless = true;
+            for (const x of radios) seen.add((x.name || id(x)) + '|' + (x.form ? id(x.form) : 'document'));
+          }
+          break;
+        }
+      }
       // Lever wraps radios in .application-question with an .application-label (no fieldset).
       const parent = el.closest('fieldset,[role=radiogroup],.application-question');
       question = parent ? (parent.querySelector('legend,.application-label,.ashby-application-form-question-title')?.innerText || label(parent)) : '';
@@ -1064,9 +1107,23 @@
       if (!question || question === 'Unlabelled field' || question === parent?.id) {
         question = wrapperLabel(el) || (parent && nearby(parent)) || nearby(el.parentElement || el) || el.name || label(el);
       }
+      if (nameless) {
+        question = precedingText(group[0], new Set(group.map(x => clean(label(x))))) || question;
+        // The caption's own box holds the required asterisk beside the question's words.
+        let box = group[0].parentElement;
+        while (box && !box.contains(group[1])) box = box.parentElement;
+        for (let up = box, hops = 0; up && hops < 4 && !radioCaptionRequired; up = up.parentElement, hops++) {
+          const caption = up.previousElementSibling;
+          if (!caption) continue;
+          radioCaptionRequired = clean(caption.innerText || '').startsWith(clean(question)) && /[*✱]/.test(caption.innerText || '');
+          break;
+        }
+      }
       // MAXIMUS's tax-credit survey (PepsiCo, 2026-10-24) prints "Are you a resident of the State of California?" as
       // plain text above an unlabelled Yes/No pair: the question read as "ctl00$MainContent$multipleChoice...".
-      if ((question === el.name || question === 'Unlabelled field') && !/^icims_f_/i.test(el.name || '')) {
+      if ((question === el.name || question === 'Unlabelled field'
+          || (group.length > 1 && !el.name && group.some(x => clean(label(x)) === clean(question))))
+          && !/^icims_f_/i.test(el.name || '')) {
         question = precedingText(group[0], new Set(group.map(x => clean(label(x))))) || question;
       }
       // iCIMS's self-identification forms (icims2 servlet) give radios no label: every choice and the question read as

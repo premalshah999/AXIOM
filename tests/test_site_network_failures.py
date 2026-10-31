@@ -34,3 +34,10 @@ def test_aborted_and_ordinary_errors_stay_control_failures():
 def test_a_dropped_or_changed_network_is_retried_once_in_place():
     assert NET_RETRY.search("net::ERR_NETWORK_CHANGED at <url>") and NET_RETRY.search("net::ERR_FAILED at <url>")
     assert not NET_RETRY.search("net::ERR_CERT_DATE_INVALID at <url>")
+
+
+def test_a_navigation_the_site_never_answered_is_the_sites_outcome():
+    # Four Greenhouse boards (2026-10-31): "Page.goto: Timeout 60000ms exceeded" read as a control failure in repair.
+    result = net_failure(NavError("Page.goto: Timeout 60000ms exceeded.\nCall log:\n  - navigating to <url>"))
+    assert result["state"] == "waiting_browser" and result["recovery_cause"] == "site_temporary"
+    assert net_failure(NavError("ElementHandle.click: Timeout 6000ms exceeded.")) is None

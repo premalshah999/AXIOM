@@ -71,7 +71,10 @@ ALREADY = re.compile(
     # iCIMS's job page for an applicant already in its pipeline (MCI 2026-10-24).
     r"you(?:'re| are) (?:currently )?submitted (?:to|for) this (?:job|position|role)|"
     # Shield AI (2026-10-29): "Your application was already submitted. We received your previous application on ...".
-    r"your application (?:was|has been) already (?:been )?(?:submitted|received)\b",
+    r"your application (?:was|has been) already (?:been )?(?:submitted|received)\b|"
+    # A posting whose Apply button turned into the status "Already Applied" (a Bullhorn career site after its form went
+    # through, 2026-10-31). Only a line of its own: "Already applied? Sign in" is a footer.
+    r"(?<![^\n])already applied(?![^\n])",
     re.I,
 )
 EMBED_FRAME = re.compile(
@@ -1159,6 +1162,10 @@ class Adapter:
 
     # ----- step handlers ------------------------------------------------------------------------
     async def on_job_details(self, obs):
+        if any(f.get("side_login") for f in obs["fields"]):
+            # The employer's own customer-login drawer covers the Apply control (scan.js chromeLogin): close it first.
+            await self.dismiss_chrome_login()
+            obs = await self.form.scan()
         button = self.find_apply(obs)
         if not button:
             return {"fallback": True, "reason": "No apply control found"}
@@ -1177,6 +1184,19 @@ class Adapter:
                 return {"fallback": True, "reason": "No apply control found"}
             await self.click(button)
         self.apply_url = self.page.url
+
+    async def dismiss_chrome_login(self):
+        """Close a site-chrome customer login drawer by its own close control, else Escape. City National Bank's
+        iCIMS job page opened its "Online Banking" login over the page (2026-10-31)."""
+        try:
+            closer = self.page.locator("[data-jp-chrome-close]").first
+            if await closer.count():
+                await closer.click(timeout=2000)
+            else:
+                await self.page.keyboard.press("Escape")
+            await self.page.wait_for_timeout(400)
+        except Exception:
+            pass  # A drawer that will not close leaves Apply covered; the click then reports it as before.
 
     async def on_apply_method(self, obs):
         return {"fallback": True, "reason": "Unknown application method chooser"}
@@ -2700,6 +2720,15 @@ class Adapter:
             # The latest request is among them (its window opens just before the click records it).
             if not resets or max(c.since for c in resets) < asked - 600:
                 return False
+            # Only the newest windows that actually waited speak (RESET_UNANSWERED_CAP of them): one reset mail that came
+            # days ago kept Farmers' 25 runs from ever reading its later silence (2026-10-26 answered, 10-30/31 not).
+            judged, waited = [], 0
+            for c in sorted(resets, key=lambda c: c.created_at, reverse=True):
+                judged.append(c)
+                waited += c.state == "expired"
+                if waited >= RESET_UNANSWERED_CAP:
+                    break
+            resets = judged
             if any(c.state not in {"expired", "cancelled"} for c in resets):
                 return False  # one matched, was claimed, failed on an ambiguous message, or is still open
             for run_id, since in {(c.run_id, c.created_at) for c in resets}:

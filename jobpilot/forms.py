@@ -5216,6 +5216,17 @@ class FormSession:
         ]
         if final:
             return await self._reduce_submit_controls(final)
+        # Gem's form ends in two submits outside any <form>, "Apply and save" (it keeps the profile on Gem) and "Apply
+        # without saving" (Nuvo, 2026-10-31: "No final submit control"). With the resume verified they are the
+        # application's own submit, and the applicant's profile is not Gem's to keep: the application goes without saving.
+        pair = [
+            b
+            for b in self.buttons.values()
+            if re.fullmatch(r"apply (?:and|&) save|apply without saving", b["label"].strip(), re.I)
+        ]
+        if pair and self.uploaded and self.upload_verified:
+            plain = [b for b in pair if re.search(r"without", b["label"], re.I)]
+            return await self._reduce_submit_controls(plain or pair)
         for button in self.buttons.values():
             # Toast's real submit is labelled "Apply now!"; trailing punctuation must not hide it.
             if not re.fullmatch(r"apply(?: now)?[\s!.]*", button["label"], re.I):
@@ -5782,11 +5793,21 @@ class FormSession:
             and scope_fields is not before.get("fields", [])
             and scope_fields
             and all(
-                f["type"] in {"checkbox", "radio", "radiogroup"}
-                and re.search(
-                    r"consent|agree|privacy|policy|terms|data|alerts?|preferences|communications",
-                    f["label"],
-                    re.I,
+                (
+                    f["type"] in {"checkbox", "radio", "radiogroup"}
+                    and re.search(
+                        r"consent|agree|privacy|policy|terms|data|alerts?|preferences|communications"
+                        # Microsoft (Eightfold) 2026-10-27: "AI-insights visibility to Microsoft Recruiting" and
+                        # "email notifications when new jobs open that match my profile".
+                        r"|visibility|insights?|notifications?|recommendations?|talent (?:network|community)",
+                        f["label"],
+                        re.I,
+                    )
+                )
+                # The same dialog opens with the country of residence, which decides which notices follow.
+                or (
+                    f["type"] in {"select", "combobox"}
+                    and re.search(r"country|region of residence", f["label"], re.I)
                 )
                 for f in scope_fields
             )
@@ -5899,10 +5920,22 @@ class FormSession:
         # Eightfold's "Create your profile" popup (Starbucks) sits over the application: judge
         # only the popup that holds this button, when there is one.
         account_form = await self.intermediate_submit(control_id, before)
+        # Apple's posting page links "Submit Resume" to its application (2026-10-27): a link to another address on a page
+        # with no application fields opens the application, it submits nothing. Refused as a final submit, the
+        # navigator repeated the click until its recovery budget ended.
+        posting_link = bool(
+            button.get("href")
+            and re.fullmatch(r"submit (?:your |my )?(?:resume|cv)(?: now)?", button["label"].strip(), re.I)
+            and not any(
+                f["type"] not in {"search", "hidden"} and not re.search(r"search|keyword|location", f["label"], re.I)
+                for f in self.fields.values()
+            )
+        )
         if (
             FINAL.search(button["label"])
             and not auth_control
             and not account_form
+            and not posting_link
             and not await self.frames[control_id].evaluate("Boolean(window.__jpArmed)")
         ):
             raise ValueError(
@@ -6596,7 +6629,11 @@ class FormSession:
                 "textarea:visible,select:visible,[contenteditable=true]:visible"
             )
             try:
-                if await editable.count():
+                # The site's own header search ("What? / Where? / Search") stays on the page after a submit; Adzuna's
+                # "Application submitted: <role>" (2026-10-31) was read as an open form because of its two text boxes.
+                if await editable.evaluate_all(
+                    "els => els.filter(e => !e.closest('header,nav,[role=search],form[action*=\"/search\"]')).length"
+                ):
                     continue
                 if await frame.get_by_role("button", name=FINAL).count():
                     continue

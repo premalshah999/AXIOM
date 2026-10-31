@@ -118,3 +118,40 @@ def test_the_status_file_says_which_database_is_in_use(tmp_path, no_postgres_bin
     sup.children = sup.plan()
     sup.write_state(force=True)
     assert json.loads(cfg.state_file.read_text())["database"] == "server"
+
+
+def fake_tools(monkeypatch, dumped=0, listed=0, toc=";\n1; 2 3 TABLE DATA public jobs owner\n"):
+    calls = []
+
+    def run(argv, **kw):
+        calls.append((argv, kw.get("env") or {}))
+        if "pg_dump" in argv[0]:
+            kw["stdout"].write(b"PGDMP")
+            return subprocess.CompletedProcess(argv, dumped, b"", b"dump failed")
+        return subprocess.CompletedProcess(argv, listed, toc, "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(pg, "find_bin", lambda cfg: Path("/pg/bin"))
+    return calls
+
+
+def test_a_backup_is_private_read_back_and_never_shows_the_password(tmp_path, monkeypatch, capsys):
+    cfg = installation(tmp_path)
+    calls = fake_tools(monkeypatch)
+    target = tmp_path / "out" / "copy.dump"
+    assert cli.cmd_backup(cfg, cli.parser().parse_args(["backup", str(target)])) == 0
+    assert target.read_bytes() == b"PGDMP" and target.stat().st_mode & 0o077 == 0
+    assert [Path(argv[0]).name for argv, _ in calls] == ["pg_dump", "pg_restore"]
+    assert all("synthetic" not in " ".join(argv) for argv, _ in calls) and calls[0][1]["PGPASSWORD"] == "synthetic"
+    assert "synthetic" not in capsys.readouterr().out
+    assert not list((tmp_path / "out").glob("*.partial"))
+
+
+@pytest.mark.parametrize("failure", [{"dumped": 1}, {"listed": 1}, {"toc": ""}])
+def test_a_failed_backup_leaves_no_file_that_looks_good(tmp_path, monkeypatch, failure):
+    cfg = installation(tmp_path)
+    fake_tools(monkeypatch, **failure)
+    target = tmp_path / "out" / "copy.dump"
+    with pytest.raises(NativeError):
+        cli.cmd_backup(cfg, cli.parser().parse_args(["backup", str(target)]))
+    assert not target.exists() and not list((tmp_path / "out").glob("*"))

@@ -168,6 +168,12 @@ def net_failure(exc, diagnostics=None):
     West Monroe's six jobs were closed on a certificate error while three siblings of the same site had confirmed the day
     before. A posting that is truly gone answers with its own page (a 404, a "no longer available" notice)."""
     match = NET_ERROR.search(str(exc))
+    if not match and re.match(r"Page\.goto: Timeout \d+ms exceeded", str(exc)):
+        # A navigation the site never answered within 30-60 s: four Greenhouse boards in three minutes (2026-10-31)
+        # each read "Browser control failed at open_application_route" and went to repair as a driver fault.
+        return {"state": "waiting_browser", "blocker_type": "site_transient", "recovery_cause": "site_temporary",
+                "reason": "The employer's site did not answer in time; it will be tried again later",
+                **({"diagnostics": diagnostics} if diagnostics else {})}
     if not match or match[1] in {"ABORTED", "BLOCKED_BY_CLIENT", "BLOCKED_BY_RESPONSE"}:
         return None  # An aborted navigation is the page's own redirect; blocked ones are this browser's guard.
     code = "net::ERR_" + match[1]
@@ -665,6 +671,10 @@ def user_agent(executable):
     return f"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
 
 
+def source_rules(engine):
+    return getattr(getattr(getattr(engine, "form", None), "resolver", None), "answer_rules", None)
+
+
 def unoffered_source_result(question, rules=None):
     """Stop at the first refusal for a saved source that the page's catalog does not offer.
 
@@ -1007,9 +1017,6 @@ class BrowserEngine:
         self.focus_sessions = []
         self.dir = self.config.data_dir / "runs" / run_id
         self.dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-
-    def source_rules(self):
-        return getattr(getattr(getattr(self, "form", None), "resolver", None), "answer_rules", None)
 
     def emit(self, kind, message, data=None):
         self.db.event(self.run_id, kind, message, data)
@@ -3203,7 +3210,13 @@ class BrowserEngine:
         """Restart this job's draft after a Workday session/server error, before submit."""
         if self.job.get("ats") != "workday" or self.armed:
             return False
-        text = await self.page.locator("body").inner_text(timeout=3000)
+        try:
+            text = await self.page.locator("body").inner_text(timeout=3000)
+        except (PlaywrightError, TimeoutError):
+            # A read-only look at a renderer that is busy (a tab re-rendering, throttled in the background) is no
+            # verdict: this check runs at the top of every Workday step, and a timeout here ended a run as a control
+            # failure (2026-10-29). The next step reads the page again.
+            return False
         if not WORKDAY_FAILURE.search(text):
             if not (page_error := WORKDAY_PAGE_ERROR.search(text)):
                 return False
@@ -5007,7 +5020,7 @@ class BrowserEngine:
                         "reason": "Internal-only posting: its application source offers only internal channels",
                     }
                 # No offered option can be the applicant's saved source; re-choosing repeats the refusal.
-                return unoffered_source_result(target.get("label", ""), self.source_rules())
+                return unoffered_source_result(target.get("label", ""), source_rules(self))
             if rejected[key] >= 2:
                 if (
                     target.get("label")
@@ -5481,7 +5494,7 @@ class BrowserEngine:
                                 + ")",
                             }
                         else:
-                            self.result = unoffered_source_result(unoffered[0].get("question", ""), self.source_rules())
+                            self.result = unoffered_source_result(unoffered[0].get("question", ""), source_rules(self))
                     elif terminal_answer_errors:
                         # Browsing a picker cannot repair a rejected supporting fact.
                         # Persist the typed cause and release this owner instead of

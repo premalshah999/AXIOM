@@ -46,6 +46,7 @@ with nothing committing 2 s, `axiom restart app` 5 s. Starting on a production-s
 | `scripts/axiom restart [name ...]` | Everything, or the named services (or `postgres`, `worker`, `twin`) alone. |
 | `scripts/axiom logs [name] [-f]` | A service's log (the first by default), `postgres` or `supervisor`. Capped at 10 MB x 3 as under Compose. |
 | `scripts/axiom psql` | `psql` on the native database. |
+| `scripts/axiom backup [file]` | Copies the database to a file, by default `~/axiom-backups/axiom-<date>.dump`, and reads it back. The app keeps running. |
 | `scripts/axiom jobpilot token` | Any app command with the running app's environment (`verify`, `reset-password`, ...). |
 | `scripts/axiom hold on\|off` | Stop or allow new applications. |
 | `scripts/axiom deploy [--wait]` | Snapshot the checkout and restart on it once nothing is active. `scripts/deploy.sh` calls this when the native app is running. |

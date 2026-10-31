@@ -37,6 +37,25 @@ def test_the_reset_button_behind_icims_tracker_is_the_reset_link():
     assert extract_message(msg, ICIMS_RULE, challenge()) == {"kind": "link", "value": TRACKED}
 
 
+def test_a_sentence_beside_the_reset_button_does_not_make_the_mail_ambiguous():
+    # Stifel's Central reset (2026-10-31): two cued tracker links, so every poll said ambiguous_token.
+    sentence = "https://clicks.icims.com/f/a/sentence~~/AAAAAQA~/RgRsentence"
+    msg = reset_mail(
+        f'<p>To <a href="{sentence}">reset your password for this account</a>, use the button.</p>'
+        f'<a href="{TRACKED}">Reset password</a> <a href="{FOOTER}">Privacy Policy</a>'
+    )
+    assert extract_message(msg, ICIMS_RULE, challenge()) == {"kind": "link", "value": TRACKED}
+
+
+def test_two_reset_buttons_stay_ambiguous_and_the_diagnosis_names_their_text():
+    other = "https://clicks.icims.com/f/a/other~~/AAAAAQA~/RgRother"
+    diagnostics = {}
+    msg = reset_mail(f'<a href="{TRACKED}">Reset password</a> <a href="{other}">Reset your password</a>')
+    assert extract_message(msg, ICIMS_RULE, challenge(), diagnostics=diagnostics) is None
+    assert diagnostics["rejection"] == "ambiguous_token"
+    assert diagnostics["ambiguous_anchors"] == ["Reset password", "Reset your password"]
+
+
 def test_a_tracked_link_needs_its_own_cue():
     diagnostics = {}
     assert extract_message(reset_mail(f'<a href="{FOOTER}">Privacy Policy</a>'), ICIMS_RULE, challenge(),
