@@ -1,14 +1,15 @@
-// Setup › Knowledge: the optional questionnaires first, then what the app already knows about you (facts, employer
-// memory, saved answers). Questionnaire forms live in qform.tsx so the setup guide can embed the same ones.
-import { useEffect, useState } from "react";
+// Profile › Knowledge: one page, no inner tabs. The questionnaires and the policies are always in view; what AXIOM
+// already knows (facts, employer memory, saved answers, option rules) sits in folds that load when opened.
+// Questionnaire forms live in qform.tsx so the setup guide can embed the same ones.
+import { useEffect, type ReactNode } from "react";
 import { api } from "./api";
+import { useWorkspace } from "./context";
 import { useDraft } from "./hooks";
 import { Attestations, EmployerMemory, Facts, useFeature } from "./features";
 import { LearnedAnswers } from "./autonomy";
-import { ErrorLine, Loading } from "./ui";
-import { Tabs } from "./ui/index";
+import { ProfileSettings } from "./profile";
+import { ErrorLine, Loading, Panel } from "./ui/index";
 import { ModuleForm, ModuleList, Unavailable, useQuestionnaires } from "./qform";
-import "./styles/knowledge.css";
 
 function Questionnaires() {
   const { data, error, reload, setModule } = useQuestionnaires();
@@ -23,18 +24,48 @@ function Questionnaires() {
   if (module) return <ModuleForm module={module} onModule={setModule} onClose={() => setOpen("")} />;
   const { answered, total } = data.completion;
   return (
-    <div className="ax-kn-list">
-      <p className="ax-kn-lead">
-        Answer these once and every application uses them. All of it is optional: skip anything, come back any time, and
-        nothing here stops an application from starting.{" "}
-        <span className="ax-kn-count">
-          {answered} of {total} answered.
-        </span>
-      </p>
+    <Panel title="Questionnaires" actions={<span className="ax-hint">{answered} of {total} answered</span>}>
       <ModuleList data={data} onOpen={setOpen} />
-    </div>
+    </Panel>
   );
 }
+
+/** A section that loads only when opened. The page remembers which ones are open while you move around. */
+function Fold({
+  id,
+  title,
+  note,
+  open,
+  onToggle,
+  children,
+}: {
+  id: string;
+  title: string;
+  note?: string;
+  open: boolean;
+  onToggle: (open: boolean) => void;
+  children: ReactNode;
+}) {
+  return (
+    <details
+      id={"knowledge-" + id}
+      className="ax-panel ax-fold"
+      open={open}
+      onToggle={(e) => {
+        if (e.currentTarget.open !== open) onToggle(e.currentTarget.open);
+      }}
+    >
+      <summary>
+        <strong>{title}</strong>
+        {note && <span className="ax-hint">{note}</span>}
+      </summary>
+      <div className="ax-panel-body">{open && children}</div>
+    </details>
+  );
+}
+
+// ?view=profile&tab=knowledge&filter=facts|policies|rules lands on that section.
+const FILTER_TARGET: Record<string, string> = { facts: "facts-json", policies: "policies", rules: "rules" };
 
 export function KnowledgeView() {
   const probe = useFeature<{
@@ -42,49 +73,51 @@ export function KnowledgeView() {
     employers: number;
     store_version: number;
   }>("knowledge", (signal) => api("/v2/knowledge/summary", "GET", undefined, signal), 120000);
-  const [tab, setTab] = useDraft("knowledge-view", "questionnaires");
+  const { route } = useWorkspace();
+  const [openIds, setOpenIds] = useDraft<Record<string, boolean>>("knowledge-open", {});
+  const fold = (id: string) => ({ id, open: !!openIds[id], onToggle: (open: boolean) => setOpenIds((o) => ({ ...o, [id]: open })) });
   const full = !probe.unavailable;
-  const tabs = [
-    { id: "questionnaires", label: "Questionnaires" },
-    ...(full
-      ? [
-          { id: "facts", label: "Facts" },
-          { id: "employers", label: "Employer memory", count: probe.data?.employers },
-        ]
-      : []),
-    { id: "answers", label: "Saved answers" },
-  ];
-  const current = tabs.some((t) => t.id === tab) ? tab : "questionnaires";
+  useEffect(() => {
+    const target = FILTER_TARGET[route.filter || ""];
+    if (!target) return;
+    if (target !== "policies") setOpenIds((o) => ({ ...o, [target]: true }));
+    window.setTimeout(() => document.getElementById("knowledge-" + target)?.scrollIntoView({ block: "start" }), 50);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.filter]);
   return (
-    <div className="ax-kn">
-      <Tabs tabs={tabs} value={current} onChange={setTab} label="Knowledge views" />
-      {current === "questionnaires" && <Questionnaires />}
-      {current === "answers" && (
-        <>
-          {!full && (
-            <p className="ax-kn-lead">
-              Categorized facts and employer memory appear here once the knowledge service is enabled. Saved answers work
-              as before.
-            </p>
-          )}
-          <LearnedAnswers />
-        </>
-      )}
-      {full && current !== "questionnaires" && current !== "answers" &&
-        (probe.data ? (
-          current === "facts" ? (
-            <>
+    <div className="ax-sections">
+      <Questionnaires />
+      <div id="knowledge-policies">
+        <ProfileSettings sections={["policies"]} />
+      </div>
+      {full && (
+        <Fold {...fold("summary")} title="Fact summary">
+          {probe.data ? (
+            <div className="ax-sections">
               <Attestations />
               <Facts summary={probe.data.categories} />
-            </>
+            </div>
+          ) : probe.error ? (
+            <ErrorLine error={probe.error} retry={probe.refresh} />
           ) : (
-            <EmployerMemory />
-          )
-        ) : probe.error ? (
-          <ErrorLine error={probe.error} retry={probe.refresh} />
-        ) : (
-          <Loading />
-        ))}
+            <Loading />
+          )}
+        </Fold>
+      )}
+      {full && (
+        <Fold {...fold("employers")} title="Employer memory" note={probe.data ? String(probe.data.employers) : undefined}>
+          <EmployerMemory />
+        </Fold>
+      )}
+      <Fold {...fold("answers")} title="Saved answers">
+        <LearnedAnswers />
+      </Fold>
+      <Fold {...fold("facts-json")} title="Edit facts as JSON">
+        <ProfileSettings sections={["facts"]} />
+      </Fold>
+      <Fold {...fold("rules")} title="When options don't match">
+        <ProfileSettings sections={["rules"]} />
+      </Fold>
     </div>
   );
 }

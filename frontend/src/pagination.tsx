@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import "./styles/work.css";
 
 export function usePagination<T>(items: T[], filterKey = "", initialSize = 25) {
   const [page, setPage] = useState(1);

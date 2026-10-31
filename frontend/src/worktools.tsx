@@ -1,20 +1,19 @@
-// Small pieces the work pages (Overview, Jobs, Applications, Needs you, the job drawer) share: the status pill that maps
-// the product's states onto the shell's Pill tones, a search box, filter chips, a company-and-role cell, an overflow
-// menu for row actions and a two-step confirm button. Tokens only; the CSS is styles/work.css.
+// Small pieces the work pages (Overview, Jobs, Applications, Needs you, the job drawer) share: the status that maps the
+// product's states onto the Pill tones, a search box, filter text, a company-and-role cell, an overflow menu for row
+// actions and a two-step confirm button. Tokens only; the CSS is styles/components.css.
 import { MoreHorizontal, Search } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import "./styles/work.css";
 import { stateInfo, type Tone } from "./model";
 import { Button, Pill, type PillTone } from "./ui/index";
 
-// model.ts tones (ok, run, ask, hold, fix, bad, idle) onto the primitives' tones.
+// model.ts tones onto the primitives' tones, one for one, so components.css can give each its own look.
 const TONE: Record<Tone, PillTone> = {
   ok: "ok",
   run: "brand",
   ask: "warn",
   hold: "info",
-  fix: "warn",
+  fix: "fix",
   bad: "bad",
   idle: "neutral",
 };
@@ -53,9 +52,9 @@ export function SearchBox({
   );
 }
 
-export type ChipItem = { id: string; label: string; count?: number };
+type ChipItem = { id: string; label: string; count?: number };
 
-/** A row of toggle chips that act as one choice (aria-pressed on each). */
+/** A row of filter keys with counts, acting as one choice (aria-pressed on each). */
 export function Chips({
   items,
   value,
@@ -79,7 +78,7 @@ export function Chips({
   );
 }
 
-/** Company in bold and the role beside it, on one line that ends in an ellipsis. Opens the job. */
+/** Company and the role beside it in muted text, on one line that ends in an ellipsis. Opens the job. */
 export function JobCell({
   company,
   role,
@@ -101,8 +100,8 @@ export function JobCell({
         onOpen();
       }}
     >
-      <strong>{company}</strong>
-      <span>{role}</span>
+      <strong title={company}>{company}</strong>
+      <span title={role}>{role}</span>
     </button>
   );
 }
@@ -360,20 +359,55 @@ export function ConfirmButton({
   );
 }
 
-/** A single sentence with an action, for things that are fine but worth a glance ("3 questions need you"). */
+/**
+ * A single plain sentence with an action ("3 questions need you"). warn and bad add a small dot; nothing else is
+ * coloured. `lead` is the sentence a page is about (Overview's state): body size and full-strength text.
+ */
 export function Notice({
   tone = "info",
   children,
   action,
+  lead,
 }: {
   tone?: "info" | "warn" | "bad";
   children: ReactNode;
   action?: ReactNode;
+  lead?: boolean;
 }) {
   return (
-    <div className={"ax-notice is-" + tone} role="status">
+    <div className={"ax-notice is-" + tone + (lead ? " is-lead" : "")} role="status">
       <span>{children}</span>
       {action}
     </div>
+  );
+}
+
+/** Rows of label and value for a read-only summary (the same markup as setup-kit's Facts, without its stylesheet). */
+export function Facts({ items }: { items: [ReactNode, ReactNode][] }) {
+  return (
+    <dl className="ax-kv">
+      {items.map(([k, v], i) => (
+        <div key={i}>
+          <dt>{k}</dt>
+          <dd>{v}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** A list that could not be read: the server's words and a way to try again. */
+export function LoadError({ error, retry }: { error: Error; retry: () => unknown }) {
+  return (
+    <Notice
+      tone="bad"
+      action={
+        <Button size="sm" onClick={() => void retry()}>
+          Try again
+        </Button>
+      }
+    >
+      {error.message}
+    </Notice>
   );
 }

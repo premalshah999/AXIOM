@@ -134,8 +134,6 @@ export function useDraft<T>(key: string, initial: T) {
   }, [key]);
   return [value, set, clear] as const;
 }
-export const hasDraft = (key: string) => drafts.has(key);
-export const dropDraft = (key: string) => drafts.delete(key);
 
 // Toasts: short outcome messages, errors stay until dismissed.
 export type Toast = { id: number; tone: "ok" | "error" | "info"; text: string };

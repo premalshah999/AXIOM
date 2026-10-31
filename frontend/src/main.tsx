@@ -1,34 +1,35 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import "@fontsource-variable/geist/index.css";
-import "@fontsource-variable/geist-mono/index.css";
 import "./styles/tokens.css";
 import "./styles/base.css";
-import "./style.css";
 import "./styles/components.css";
 import "./styles/shell.css";
+// Check, Segmented, folds and the other small pieces of Profile, Settings and sign-in that the primitives share.
+import "./styles/setup.css";
 import { api, ApiError, SIGNED_OUT, signedOut } from "./api";
 import {
+  canonical,
   NO_COUNTS,
   parseRoute,
   routeUrl,
   WorkspaceContext,
+  type AnyRoute,
   type Route,
   type Workspace,
 } from "./context";
 import { ToastContext, usePoll, type Toast } from "./hooks";
 import { deriveRows, withMarks, type Marks } from "./model";
 import type { Snapshot } from "./types";
-import { ago, Loading } from "./ui";
+import { ago } from "./format";
 import { NeedsView } from "./needs";
 import { countQuestions } from "./questions";
 import { Shell } from "./shell/Shell";
-import { BrandMark } from "./shell/Brand";
+import { isLive, panelState, STATE_WORD } from "./identity/state";
+import { Wordmark } from "./shell/Brand";
 import { CommandPalette } from "./shell/CommandPalette";
 import { ComingSoon } from "./shell/ComingSoon";
 import { ALL_ITEMS, titleFor } from "./shell/nav";
-import type { Status } from "./shell/Sidebar";
-import { ToastStack } from "./ui/index";
+import { Button, Loading, ToastStack } from "./ui/index";
 import { BatchView } from "./batch";
 import { JobsView } from "./jobs";
 import { LedgerView } from "./ledger";
@@ -37,9 +38,10 @@ import { JobLinkIntake } from "./jobintake";
 import type { AccountStatus } from "./account";
 import { guideLater } from "./guide";
 
-// Setup, the resume editor, sign-in and the setup guide are most of the dashboard's code and are rarely open: they
-// load when shown, so Batch and Jobs paint from a smaller bundle (2026-10-23).
-const SetupView = lazy(() => import("./setup").then((m) => ({ default: m.SetupView })));
+// Profile, Settings, the resume editor, sign-in and the setup guide are most of the dashboard's code and are rarely open:
+// they load when shown, so Batch and Jobs paint from a smaller bundle (2026-10-23).
+const ProfileView = lazy(() => import("./setup").then((m) => ({ default: m.ProfileView })));
+const SettingsView = lazy(() => import("./setup").then((m) => ({ default: m.SettingsView })));
 const ResumeEditor = lazy(() => import("./editor").then((m) => ({ default: m.ResumeEditor })));
 const AuthScreen = lazy(() => import("./account").then((m) => ({ default: m.AuthScreen })));
 const Onboarding = lazy(() => import("./onboarding").then((m) => ({ default: m.Onboarding })));
@@ -76,7 +78,14 @@ function App() {
       setSignOutReason((current) => reason || current);
       setAuth("out");
     };
-    const pop = () => setRoute(parseRoute());
+    // An old link (?view=setup&tab=email) is rewritten to its new home in the address bar; the page was already told.
+    const pop = () => {
+      const next = parseRoute();
+      const here = location.pathname + location.search + location.hash;
+      if (routeUrl(next) !== here) history.replaceState(null, "", routeUrl(next));
+      setRoute(next);
+    };
+    pop();
     window.addEventListener(SIGNED_OUT, out);
     window.addEventListener("popstate", pop);
     return () => {
@@ -85,7 +94,8 @@ function App() {
     };
   }, []);
 
-  const go = useCallback((next: Route) => {
+  const go = useCallback((raw: AnyRoute) => {
+    const next = canonical(raw);
     history.pushState(null, "", routeUrl(next));
     setRoute(next);
   }, []);
@@ -157,6 +167,7 @@ function App() {
     () => withMarks(derived, marks, snap.requestedAt),
     [derived, marks, snap.requestedAt],
   );
+  const lost = snap.failures >= 2;
   const workspace = useMemo<Workspace | null>(
     () =>
       snap.data && {
@@ -165,13 +176,14 @@ function App() {
         counts: snap.data.counts || NO_COUNTS,
         refresh,
         version,
+        link: { lost, updatedAt: snap.updatedAt },
         marks,
         markJobs,
         route,
         go,
         openJob: (job, run) => go({ ...route, job, run }),
       },
-    [snap.data, rows, refresh, version, marks, markJobs, route, go],
+    [snap.data, rows, refresh, version, lost, snap.updatedAt, marks, markJobs, route, go],
   );
 
   useEffect(() => {
@@ -182,6 +194,13 @@ function App() {
         ? `${rt.confirmed ?? 0}/${rt.target ?? 100} · ${label} · AXIOM`
         : `${label} · AXIOM`;
   }, [snap.data, route]);
+
+  // Vermilion means live, and only real state turns it on: the needle, the lamp in the wordmark, every running lamp.
+  const panel = snap.data ? panelState(snap.data, lost) : null;
+  const lit = !!snap.data && !!panel && isLive(snap.data, panel);
+  useEffect(() => {
+    document.documentElement.dataset.run = lit ? "on" : "off";
+  }, [lit]);
 
   // ⌘K / Ctrl-K opens the command palette from anywhere once the workspace is up.
   useEffect(() => {
@@ -236,18 +255,13 @@ function App() {
   if (!workspace)
     return (
       <div className="ax-screen">
-        <div className="boot">
-          <div className="brand">
-            <BrandMark size={22} />
-            <span>AXIOM</span>
-          </div>
+        <div className="ax-boot">
+          <Wordmark width={120} />
           {snap.error &&
           !(snap.error instanceof ApiError && snap.error.status === 401) ? (
-            <div className="boot-error" role="alert">
+            <div className="ax-boot-error" role="alert">
               <p>{snap.error.message}</p>
-              <button className="btn" onClick={() => snap.refresh()}>
-                Try again
-              </button>
+              <Button onClick={() => snap.refresh()}>Try again</Button>
             </div>
           ) : (
             <Loading label="Opening your workspace…" />
@@ -257,31 +271,8 @@ function App() {
     );
 
   const { snapshot } = workspace;
-  const rt = snapshot.autopilot_runtime || {};
-  // The Needs you badge counts what the page shows: one card per distinct question, not one per application.
+  // The Needs you count is what the page shows: one per distinct question, not one per application.
   const questions = countQuestions(snapshot.reviews);
-  const sched = rt.scheduler || snapshot.scheduler_health || {};
-  const pool = rt.application_workers;
-  const workers = pool ? pool.normal_workers + pool.specialist_workers : 0;
-  const done = rt.confirmed ?? 0;
-  const goal = rt.target ?? 100;
-  // Applications you started yourself count too, so a batch can finish above its target ("560/477" read as a mistake).
-  const progress = done > goal ? `${done} confirmed · target ${goal}` : `${done}/${goal} confirmed`;
-  // The sidebar's status dot: the worst thing true right now, in plain words.
-  const status: Status =
-    snap.failures >= 2
-      ? { tone: "bad", text: "Connection lost", sub: `Showing data from ${ago(snap.updatedAt)}` }
-      : sched.degraded
-        ? { tone: "bad", text: "Needs a restart", sub: "Automation is degraded" }
-        : snapshot.control.paused
-          ? { tone: "warn", text: "Paused", sub: "New applications are paused" }
-          : rt.state === "complete"
-            ? { tone: "ok", text: "Target reached", sub: progress }
-            : rt.intake_enabled
-              ? { tone: "ok", text: "Running", sub: workers ? `${progress} · ${workers} workers` : progress }
-              : rt.state === "active"
-                ? { tone: "warn", text: "Held", sub: rt.intake_reason || progress }
-                : { tone: "idle", text: "No batch", sub: workers ? `${workers} workers ready` : "Start one on Overview" };
   const soon = ALL_ITEMS.find((i) => i.route.view === route.view && i.soon);
 
   return (
@@ -291,9 +282,13 @@ function App() {
           route={route}
           go={go}
           needs={questions}
-          status={status}
           who={who}
-          paletteOpen={palette}
+          readouts={{
+            overview: panel ? STATE_WORD[panel] : undefined,
+            jobs: workspace.counts.pipeline?.toLocaleString(),
+            applications: (workspace.counts.states.confirmed ?? 0).toLocaleString(),
+            profile: who.name,
+          }}
           onSearch={() => setPalette(true)}
           onSignOut={async () => {
             try {
@@ -303,30 +298,14 @@ function App() {
               notify("error", (e as Error).message);
             }
           }}
-          end={
-            <div className="intake-slot">
-              <JobLinkIntake
-                request={api}
-                refresh={refresh}
-                autoApply={
-                  snapshot.profile.autonomous &&
-                  snapshot.control.auto_submit &&
-                  !snapshot.control.paused
-                }
-                onImported={(jobId, message) => {
-                  notify("ok", message);
-                  go({ ...route, job: jobId, run: undefined });
-                }}
-              />
-            </div>
-          }
           banners={
             <>
               {setupGuide === "later" && (
-                <div className="setup-banner" role="status">
-                  <span>Your profile setup isn't finished. AXIOM answers applications from it.</span>
+                <div className="ax-banner" role="status">
+                  <span>Your profile setup isn't finished.</span>
                   <button
-                    className="btn sm primary"
+                    type="button"
+                    className="ax-link"
                     onClick={() => {
                       guideLater(false);
                       setSetupGuide("needed");
@@ -336,11 +315,12 @@ function App() {
                   </button>
                 </div>
               )}
-              {snap.failures >= 2 && (
-                <div className="conn" role="status">
+              {/* Overview's sentence already says so, first. */}
+              {lost && route.view !== "batch" && (
+                <div className="ax-banner is-bad" role="status">
                   <span>
-                    Connection lost{snap.error ? ` (${snap.error.message})` : ""}.
-                    Showing data from {ago(snap.updatedAt)}; retrying automatically.
+                    Connection lost{snap.error ? ` (${snap.error.message})` : ""}. Showing data from {ago(snap.updatedAt)};
+                    retrying automatically.
                   </span>
                 </div>
               )}
@@ -353,7 +333,8 @@ function App() {
           {route.view === "needs" && <NeedsView />}
           {soon && <ComingSoon item={soon} />}
           <Suspense fallback={<Loading />}>
-            {route.view === "setup" && <SetupView />}
+            {route.view === "profile" && <ProfileView />}
+            {route.view === "settings" && <SettingsView />}
             {route.view === "editor" && <ResumeEditor />}
           </Suspense>
         </Shell>
@@ -365,6 +346,15 @@ function App() {
             close={() => go({ ...route, job: undefined, run: undefined })}
           />
         )}
+        <JobLinkIntake
+          request={api}
+          refresh={refresh}
+          autoApply={snapshot.profile.autonomous && snapshot.control.auto_submit && !snapshot.control.paused}
+          onImported={(jobId, message) => {
+            notify("ok", message);
+            go({ ...route, job: jobId, run: undefined });
+          }}
+        />
         <CommandPalette open={palette} onClose={() => setPalette(false)} />
         <ToastStack toasts={toasts} onDismiss={(id) => setToasts((list) => list.filter((x) => x.id !== id))} />
       </WorkspaceContext.Provider>

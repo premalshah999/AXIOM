@@ -1,201 +1,159 @@
-/* AXIOM design tokens (DESIGN.md §1).
+/* AXIOM design tokens (DESIGN.md): "The Instrument". A front panel: lines are the machine, dots are what it is doing.
+   Two themes, set on <html data-theme="dark|light"> before first paint; a missing or unknown value is dark. Every colour and
+   every font is declared in this file and nowhere else. tests/test_identity_contrast.py measures the pairs. */
 
-   Every colour is defined once per theme on :root[data-theme=…]. Components never use a literal colour.
-   Themes: navy (default, dark), maroon (light), slate (dark), ivory (light), system (navy when the OS is dark,
-   maroon when it is light). An unknown or missing data-theme is navy, so a first paint without the inline script in
-   index.html is still correct.
+/* Latin subsets only, bundled: nothing is fetched from a font service at run time. These files are the ones with the axes the
+   look depends on, measured in Chromium (2026-10-30): Doto "full" draws differently at ROND 0 and 100 and at wght 100 and 900;
+   Archivo "standard" runs 516px at wdth 100 and 649px at wdth 125, and its wght moves too. */
+@font-face {
+  font-family: "Doto";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/doto/files/doto-latin-full-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Archivo";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  src: url("@fontsource-variable/archivo/files/archivo-latin-standard-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Fragment Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("@fontsource/fragment-mono/files/fragment-mono-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 
-   Status colours stay distinguishable from the accent: maroon's --bad is a clear red, navy's --info is cyan not blue.
-   --hold, --fix and --idle are extra tokens the legacy style.css tones need (purple, orange, grey). */
-
+/* ---------- Dark: a graphite plate ---------- */
 :root,
-:root[data-theme="navy"],
-:root[data-theme="system"] {
-  --ground: #070b14;
-  --surface: #0b1020;
-  --surface-hover: rgba(255, 255, 255, 0.05);
-  --raised: #131a2b;
-  --card: #0e1424;
-  --field: #0a0f1c;
-  --chip: #1a2236;
-  --line: rgba(255, 255, 255, 0.085);
-  --line-strong: rgba(255, 255, 255, 0.17);
-  --ink: #eef1f8;
-  --ink-2: #a8b1c6;
-  --ink-3: #8791a8;
-  --brand: #5b8cff;
-  --brand-soft: rgba(91, 140, 255, 0.16);
-  --brand-ink: #050b1a;
-  --accent-text: #93b3ff;
-  --ok: #3ddc97;
-  --ok-soft: rgba(61, 220, 151, 0.13);
-  --warn: #f0b429;
-  --warn-soft: rgba(240, 180, 41, 0.13);
-  --bad: #ff6b7a;
-  --bad-soft: rgba(255, 107, 122, 0.13);
-  --info: #3cc8e0;
-  --info-soft: rgba(60, 200, 224, 0.13);
-  --hold: #b79cff;
-  --fix: #f59a6c;
-  --idle: #8b95ab;
-  --glow: rgba(91, 140, 255, 0.1);
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 24px 48px -12px rgba(0, 0, 0, 0.7);
-  --scrim: rgba(2, 4, 10, 0.62);
+:root[data-theme="dark"] {
   color-scheme: dark;
+  /* The plate. --ground is the page; --ground-2 is a hover or a raised overlay; --ground-3 is a recess cut into the plate. */
+  --ground: #232321;
+  --ground-2: #2d2d2a;
+  --ground-3: #1b1b19;
+  --raised: #2d2d2a;
+  --field: #1b1b19;
+  --tint: rgba(236, 233, 223, 0.07);
+  --line: #41413d;
+  --line-strong: #7c7a72;
+  /* Text */
+  --ink: #ece9df;
+  --ink-2: #b3b0a5;
+  --ink-3: #a8a599;
+  /* Keys. A key is lit from above and stands on an edge; --brand is the one dark or light master key. */
+  --key: #32322f;
+  --key-ink: #ece9df;
+  --key-top: #494945;
+  --key-bot: #0f0f0e;
+  --key-down: #1e1e1c;
+  --brand: #e6e2d7;
+  --brand-ink: #171613;
+  /* Links are ink and underlined: vermilion is not for decoration. */
+  --accent-text: #ece9df;
+  --focus: #ece9df;
+  /* The display window stays dark at both hours. */
+  --window: #0b0b0a;
+  --window-edge: #000000;
+  --window-rule: #262623;
+  --window-ink: #ede9dd;
+  --window-ink-2: #a29e91;
+  --dot-off: #262623;
+  /* One lamp colour. It only ever means the machine is live or something needs you. */
+  --led: #ff4310;
+  --signal: #ff4a17;
+  --signal-ink: #ff845c;
+  --signal-on-window: #ff6a3c;
+  --bad: var(--signal-ink);
+  --shade: rgba(0, 0, 0, 0.45);
+  --shade-deep: rgba(0, 0, 0, 0.9);
+  --engrave: 0 -1px 0 rgba(0, 0, 0, 0.65);
+  /* Bead-blasted plate: a tile of noise drawn once. It is a background, not a blend over the page, so it costs nothing to keep. */
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.15' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1.4 -.2'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)' opacity='.028'/%3E%3C/svg%3E");
+  /* A resume page: white paper in both themes, because it is a picture of a printed page. */
+  --paper: #ffffff;
+  --paper-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), 0 12px 36px rgba(0, 0, 0, 0.35);
+  --overlay-shadow: 0 14px 34px rgba(0, 0, 0, 0.55);
+  --scrim: rgba(0, 0, 0, 0.5);
 }
 
-:root[data-theme="maroon"] {
-  --ground: #f8f6f5;
-  --surface: #ffffff;
-  --surface-hover: rgba(40, 18, 24, 0.05);
-  --raised: #ffffff;
-  --card: #ffffff;
-  --field: #ffffff;
-  --chip: #efebea;
-  --line: rgba(40, 18, 24, 0.11);
-  --line-strong: rgba(40, 18, 24, 0.22);
-  --ink: #1c1517;
-  --ink-2: #50464a;
-  --ink-3: #6f6469;
-  --brand: #8c1d40;
-  --brand-soft: rgba(140, 29, 64, 0.09);
-  --brand-ink: #ffffff;
-  --accent-text: #8c1d40;
-  --ok: #0c7a53;
-  --ok-soft: rgba(12, 122, 83, 0.11);
-  --warn: #944f04;
-  --warn-soft: rgba(148, 79, 4, 0.12);
-  --bad: #c23030;
-  --bad-soft: rgba(194, 48, 48, 0.1);
-  --info: #2160c4;
-  --info-soft: rgba(33, 96, 196, 0.1);
-  --hold: #6b4bb8;
-  --fix: #b8541f;
-  --idle: #7a6f74;
-  --glow: rgba(140, 29, 64, 0.05);
-  --shadow: 0 1px 2px rgba(40, 18, 24, 0.07), 0 16px 40px -12px rgba(40, 18, 24, 0.2);
-  --scrim: rgba(28, 16, 20, 0.34);
+/* ---------- Light: bone aluminium ---------- */
+:root[data-theme="light"] {
   color-scheme: light;
+  --ground: #e5e3db;
+  --ground-2: #f0eee8;
+  --ground-3: #d4d2c9;
+  --raised: #f0eee8;
+  --field: #d4d2c9;
+  --tint: rgba(22, 21, 19, 0.06);
+  --line: #b8b6ac;
+  --line-strong: #7f7d73;
+  --ink: #161513;
+  --ink-2: #47463f;
+  --ink-3: #55534b;
+  --key: #f8f7f3;
+  --key-ink: #161513;
+  --key-top: #ffffff;
+  --key-bot: #a3a197;
+  --key-down: #d6d4cb;
+  --brand: #161513;
+  --brand-ink: #f4f3ee;
+  --accent-text: #161513;
+  --focus: #171613;
+  --window: #100f0d;
+  --window-edge: #8f8d83;
+  --window-rule: #2a2925;
+  --window-ink: #ede9dd;
+  --window-ink-2: #a29e91;
+  --dot-off: #2b2a26;
+  --led: #ff4310;
+  --signal: #f03a06;
+  --signal-ink: #a32a00;
+  --signal-on-window: #ff6a3c;
+  --bad: var(--signal-ink);
+  --shade: rgba(0, 0, 0, 0.33);
+  --shade-deep: rgba(0, 0, 0, 0.9);
+  --engrave: 0 1px 0 rgba(255, 255, 255, 0.55);
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.15' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1.4 -.2'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)' opacity='.035'/%3E%3C/svg%3E");
+  --paper: #ffffff;
+  --paper-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), 0 12px 36px rgba(0, 0, 0, 0.35);
+  --overlay-shadow: 0 14px 34px rgba(50, 46, 34, 0.28);
+  --scrim: rgba(30, 28, 22, 0.35);
 }
 
-/* system, with the OS in light mode: the same values as maroon. */
-@media (prefers-color-scheme: light) {
-  :root[data-theme="system"] {
-    --ground: #f8f6f5;
-    --surface: #ffffff;
-    --surface-hover: rgba(40, 18, 24, 0.05);
-    --raised: #ffffff;
-    --card: #ffffff;
-    --field: #ffffff;
-    --chip: #efebea;
-    --line: rgba(40, 18, 24, 0.11);
-    --line-strong: rgba(40, 18, 24, 0.22);
-    --ink: #1c1517;
-    --ink-2: #50464a;
-    --ink-3: #6f6469;
-    --brand: #8c1d40;
-    --brand-soft: rgba(140, 29, 64, 0.09);
-    --brand-ink: #ffffff;
-    --accent-text: #8c1d40;
-    --ok: #0c7a53;
-    --ok-soft: rgba(12, 122, 83, 0.11);
-    --warn: #944f04;
-    --warn-soft: rgba(148, 79, 4, 0.12);
-    --bad: #c23030;
-    --bad-soft: rgba(194, 48, 48, 0.1);
-    --info: #2160c4;
-    --info-soft: rgba(33, 96, 196, 0.1);
-    --hold: #6b4bb8;
-    --fix: #b8541f;
-    --idle: #7a6f74;
-    --glow: rgba(140, 29, 64, 0.05);
-    --shadow: 0 1px 2px rgba(40, 18, 24, 0.07), 0 16px 40px -12px rgba(40, 18, 24, 0.2);
-    --scrim: rgba(28, 16, 20, 0.34);
-    color-scheme: light;
-  }
-}
-
-:root[data-theme="slate"] {
-  --ground: #0a0d10;
-  --surface: #0f1317;
-  --surface-hover: rgba(255, 255, 255, 0.05);
-  --raised: #171c22;
-  --card: #12171c;
-  --field: #0d1115;
-  --chip: #1d242c;
-  --line: rgba(255, 255, 255, 0.08);
-  --line-strong: rgba(255, 255, 255, 0.16);
-  --ink: #eceff2;
-  --ink-2: #a4aeb8;
-  --ink-3: #818c97;
-  --brand: #2dd4bf;
-  --brand-soft: rgba(45, 212, 191, 0.14);
-  --brand-ink: #031411;
-  --accent-text: #5eead4;
-  --ok: #4ade80;
-  --ok-soft: rgba(74, 222, 128, 0.13);
-  --warn: #f5b83d;
-  --warn-soft: rgba(245, 184, 61, 0.13);
-  --bad: #ff6b6b;
-  --bad-soft: rgba(255, 107, 107, 0.13);
-  --info: #6aa8ff;
-  --info-soft: rgba(106, 168, 255, 0.13);
-  --hold: #b9a3e8;
-  --fix: #f59a6c;
-  --idle: #8b959f;
-  --glow: rgba(45, 212, 191, 0.07);
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 24px 48px -12px rgba(0, 0, 0, 0.7);
-  --scrim: rgba(2, 4, 6, 0.62);
-  color-scheme: dark;
-}
-
-:root[data-theme="ivory"] {
-  --ground: #faf8f3;
-  --surface: #fffefb;
-  --surface-hover: rgba(40, 36, 20, 0.05);
-  --raised: #ffffff;
-  --card: #fffefb;
-  --field: #ffffff;
-  --chip: #f0ede3;
-  --line: rgba(40, 36, 20, 0.11);
-  --line-strong: rgba(40, 36, 20, 0.22);
-  --ink: #1d1c18;
-  --ink-2: #504d44;
-  --ink-3: #6b675d;
-  --brand: #2f6f4e;
-  --brand-soft: rgba(47, 111, 78, 0.1);
-  --brand-ink: #ffffff;
-  --accent-text: #2a6445;
-  --ok: #117038;
-  --ok-soft: rgba(17, 112, 56, 0.11);
-  --warn: #944f04;
-  --warn-soft: rgba(148, 79, 4, 0.12);
-  --bad: #bf3434;
-  --bad-soft: rgba(191, 52, 52, 0.1);
-  --info: #2160c4;
-  --info-soft: rgba(33, 96, 196, 0.1);
-  --hold: #6b4bb8;
-  --fix: #b8541f;
-  --idle: #78746a;
-  --glow: rgba(47, 111, 78, 0.05);
-  --shadow: 0 1px 2px rgba(40, 36, 20, 0.07), 0 16px 40px -12px rgba(40, 36, 20, 0.2);
-  --scrim: rgba(30, 28, 16, 0.34);
-  color-scheme: light;
-}
-
-/* Scale, radii, motion (DESIGN.md §2). */
+/* ---------- scale ---------- */
 :root {
-  --text-micro: 11px;
-  --text-meta: 12px;
-  --text-ui: 13.5px;
-  --text-emphasis: 15px;
-  --text-display: 22px;
-  --text-title: 24px;
+  /* --live is what is lit when the machine runs: vermilion only then, plain ink otherwise. The shell sets data-run from real
+     state, and it starts off, so nothing claims to be live before the first answer. */
+  --live: var(--ink);
+  /* An opaque piece of the plate (a sticky table head), with the plate's finish. */
+  --plate: var(--ground) var(--grain);
 
-  --radius-sm: 5px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  --font-read: "Doto", var(--font-data);
+  --font-text: "Archivo", Arial, sans-serif;
+  --font-data: "Fragment Mono", ui-monospace, Menlo, monospace;
 
+  /* Doto is for readouts of 56px and up. Under about 20px, data is Fragment Mono and sentences are Archivo. */
+  --text-meta: 13px;
+  --text-ui: 14px;
+  --text-body: 14px;
+  --text-sub: 16px;
+  --text-title: 20px;
+  --text-page: 30px;
+  /* Engraved labels: wide Archivo. */
+  --wide: 125%;
+
+  --radius: 3px;
+  --radius-sm: 2px;
+
+  /* A 4px grid. */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -203,16 +161,29 @@
   --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
+  --space-12: 48px;
 
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --dur-fast: 120ms;
-  --dur: 160ms;
-  --dur-slow: 200ms;
+  --dur: 140ms;
 
-  --font-sans: "Geist Variable", "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-code: "Geist Mono Variable", "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --page-w: 1720px;
+  --form-w: 1080px;
+  --gutter: 24px;
+  --rail: 96px;
+  --inset: 12px;
+  --bar-height: 90px;
+  /* How wide a coming-soon station is against a page's, on the tuning scale. */
+  --soon: 1;
+}
+:root[data-run="on"] {
+  --live: var(--signal);
+}
 
-  --side-w: 240px;
-  --side-w-collapsed: 64px;
-  --top-h: 56px;
+@media (max-width: 899px) {
+  :root {
+    --gutter: 16px;
+    --bar-height: 52px;
+    --text-page: 24px;
+    --text-title: 18px;
+  }
 }

@@ -1,147 +1,74 @@
-/* Setup pages (Profile, Resumes, Accounts, Email, Discovery, Connections, System). Tokens only; ax- prefixed. */
-.ax-lede {
-  max-width: 76ch;
-  margin: 0 0 var(--space-4);
-  color: var(--ink-2);
-  font-size: var(--text-ui);
-  line-height: 1.5;
-}
-.ax-lede:last-child {
-  margin-bottom: 0;
-}
-.ax-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-4);
-  align-items: start;
-}
-.ax-grid > .is-wide {
-  grid-column: 1 / -1;
-}
-.ax-stack {
+/* Pieces of Profile, Settings and sign-in that components.css does not draw. Tokens only, no colours, sizes and weights
+   from outside the scale. When the identity lands, move what belongs to a primitive into components.css. */
+
+/* Sections of a page that is built from several: Profile's tabs, Knowledge. */
+.ax-sections {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-8);
   min-width: 0;
 }
-.ax-actions {
+
+/* Check (src/ui/Field.tsx): a checkbox with its name and, only where needed, one line of what it does. */
+.ax-check {
   display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
+  align-items: flex-start;
   gap: var(--space-2);
-  margin-top: var(--space-4);
-}
-.ax-actions.is-start {
-  justify-content: flex-start;
-}
-.ax-actions > .ax-actions-note {
-  margin-right: auto;
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-}
-/* A form that is dirty keeps its Save in view at the foot of the scroll region. */
-.ax-savebar {
-  position: sticky;
-  bottom: var(--space-3);
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-lg);
-  background: var(--raised);
-  box-shadow: var(--shadow);
-}
-.ax-savebar-note {
-  margin-right: auto;
-  color: var(--ink-2);
   font-size: var(--text-ui);
+  cursor: pointer;
 }
-.ax-savebar.is-dirty {
-  border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+.ax-check input {
+  margin-top: 2px;
 }
-.ax-rows {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.ax-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
-  padding: var(--space-3) 0;
-  border-bottom: 1px solid var(--line);
-}
-.ax-row:first-child {
-  padding-top: 0;
-}
-.ax-row:last-child {
-  border-bottom: 0;
-  padding-bottom: 0;
-}
-.ax-row-main {
+.ax-check-text {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  flex: 1 1 260px;
   min-width: 0;
 }
-.ax-row-main > strong {
-  font-weight: 560;
-  overflow-wrap: anywhere;
+.ax-row > .ax-check {
+  flex: 1 1 260px;
 }
-.ax-row-main > small {
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-  overflow-wrap: anywhere;
+.ax-row-main > .ax-link {
+  align-self: flex-start;
+  text-align: left;
 }
-.ax-row-end {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+
+/* A fold's summary: a quiet chevron that turns when it is open. */
+.ax-fold > summary {
+  list-style: none;
 }
-.ax-switch-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-3) 0;
+.ax-fold > summary::-webkit-details-marker {
+  display: none;
+}
+.ax-fold > summary::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 0 var(--space-1) 0 2px;
+  border-right: 1.5px solid var(--ink-2);
+  border-bottom: 1.5px solid var(--ink-2);
+  transform: rotate(-45deg);
+  transition: transform var(--dur) var(--ease);
+}
+.ax-fold[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+/* A role or a degree: a fold on a hairline, its dates at the right. */
+.ax-entry {
+  padding: var(--space-2) 0;
   border-bottom: 1px solid var(--line);
 }
-.ax-switch-row:first-child {
-  padding-top: 0;
-}
-.ax-switch-row:last-child {
+.ax-entry:last-child {
   border-bottom: 0;
-  padding-bottom: 0;
 }
-.ax-notice {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line));
-  border-radius: var(--radius-md);
-  background: var(--warn-soft);
-  font-size: var(--text-ui);
+.ax-entry > summary > .ax-hint {
+  margin-left: auto;
 }
-.ax-notice.is-info {
-  border-color: color-mix(in srgb, var(--info) 40%, var(--line));
-  background: var(--info-soft);
-}
-.ax-notice.is-bad {
-  border-color: color-mix(in srgb, var(--bad) 40%, var(--line));
-  background: var(--bad-soft);
-}
+
+/* Secrets and the photo. */
 .ax-secret {
   display: flex;
   gap: var(--space-2);
@@ -150,178 +77,137 @@
 .ax-secret > .ax-control {
   flex: 1;
 }
-.ax-confirm {
-  display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-.ax-confirm-note {
-  color: var(--ink-2);
-  font-size: var(--text-meta);
-}
-.ax-kv {
-  display: grid;
-  grid-template-columns: minmax(120px, 220px) minmax(0, 1fr);
-  margin: 0;
-}
-.ax-kv > div {
-  display: contents;
-}
-.ax-kv dt,
-.ax-kv dd {
-  margin: 0;
-  padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--line);
-  font-size: var(--text-ui);
-}
-.ax-kv dt {
-  color: var(--ink-3);
-  padding-right: var(--space-3);
-}
-.ax-kv > div:last-child dt,
-.ax-kv > div:last-child dd {
-  border-bottom: 0;
-}
-.ax-kv dd {
-  overflow-wrap: anywhere;
-}
 .ax-photo {
   display: flex;
   align-items: center;
-  gap: var(--space-4);
   flex-wrap: wrap;
+  gap: var(--space-4);
 }
 .ax-photo-frame {
   display: grid;
   place-items: center;
   flex: none;
-  width: 88px;
-  height: 88px;
-  border-radius: 50%;
+  width: 72px;
+  height: 72px;
   overflow: hidden;
-  background: var(--chip);
   border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--tint);
   color: var(--ink-2);
-  font-size: var(--text-display);
-  font-weight: 600;
+  font-size: var(--text-title);
 }
 .ax-photo-frame img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-.ax-fold > summary {
+.ax-photo-body {
   display: flex;
-  align-items: center;
+  flex: 1 1 260px;
+  flex-direction: column;
   gap: var(--space-2);
-  min-height: 48px;
-  padding: 0 var(--space-4);
-  cursor: pointer;
-  font-size: var(--text-ui);
 }
-.ax-fold > summary strong {
-  font-weight: 600;
+
+/* Segmented (src/ui/Segmented.tsx): a slide switch cut into the plate, the same object as Tabs. */
+.ax-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 100%;
+  padding: 3px;
+  border-radius: var(--radius);
+  background: var(--ground-3);
+  box-shadow: inset 0 1px 3px var(--shade);
 }
-.ax-fold[open] > summary {
-  border-bottom: 1px solid var(--line);
+.ax-seg.is-block {
+  display: flex;
 }
-.ax-fold > .ax-panel-body {
-  padding: var(--space-4);
+.ax-seg.is-block button {
+  flex: 1;
 }
-.ax-mono {
-  font-family: var(--font-code);
+.ax-seg button {
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
   font-size: var(--text-meta);
+  font-stretch: 108%;
+  font-weight: 500;
+  cursor: pointer;
 }
-@media (max-width: 760px) {
-  .ax-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .ax-kv {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .ax-kv dt {
-    padding-bottom: 0;
-    border-bottom: 0;
-  }
-  .ax-savebar {
-    bottom: var(--space-2);
-  }
+.ax-seg button:hover {
+  color: var(--ink);
 }
-.ax-switch-row > span:first-child {
+.ax-seg button[aria-checked="true"] {
+  background: var(--key);
+  box-shadow:
+    inset 0 1px 0 var(--key-top),
+    0 1px 0 var(--key-bot);
+  color: var(--key-ink);
+  font-weight: 700;
+}
+
+/* Sign-in, outside the shell. */
+.ax-auth {
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+  padding: var(--space-6) var(--space-4);
+}
+.ax-auth-card {
   display: flex;
   flex-direction: column;
+  gap: var(--space-4);
+  width: min(100%, 400px);
+}
+.ax-auth-help {
+  color: var(--ink-3);
+  font-size: var(--text-ui);
+  text-align: center;
+}
+.ax-rules-list {
+  display: grid;
   gap: 2px;
-  max-width: 62ch;
-  min-width: 0;
-}
-.ax-switch-row > span:first-child > strong {
-  font-weight: 560;
-}
-.ax-switch-row > span:first-child > small {
+  margin: 0;
+  padding: 0;
+  list-style: none;
   color: var(--ink-3);
   font-size: var(--text-meta);
 }
-.ax-page > .ax-stack {
-  gap: var(--space-5);
-}
-
-/* ---------- Profile: legacy inner markup, brought in line with the ax- panels ---------- */
-/* A toast must never cover the Save button it is reporting on. */
-body:has(.ax-savebar) .ax-toasts {
-  bottom: 96px;
-}
-.ax-page .rule-steps {
-  margin-bottom: var(--space-4);
-}
-.ax-page .rule-steps li {
+.ax-rules-list li {
+  display: flex;
   align-items: center;
+  gap: var(--space-1);
 }
-.ax-page .rules-table th,
-.ax-page .rules-table td {
-  vertical-align: middle;
+.ax-rules-list svg {
+  opacity: 0.35;
 }
-.ax-page .rules-table td input[type="checkbox"] {
-  display: block;
-  margin: 0;
-}
-/* "Example keys" and similar disclosures read as quiet text, not as a heading. */
-.ax-page details.fold {
-  margin: var(--space-3) 0;
-}
-.ax-page details.fold > summary {
-  padding: 0;
-  color: var(--ink-2);
-  font-size: var(--text-ui);
-  font-weight: 500;
-}
-.ax-page details.fold > summary:hover {
+.ax-rules-list .is-met {
   color: var(--ink);
 }
-.ax-page .entry {
-  border-radius: var(--radius-md);
-  background: var(--ground);
+.ax-rules-list .is-met svg {
+  opacity: 1;
 }
-.ax-page .entry legend {
+.ax-codes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-data);
   font-size: var(--text-ui);
-  font-weight: 600;
 }
-.ax-page .entry .form-grid + .ax-confirm,
-.ax-page .entry .form-grid + .confirm {
-  margin-top: var(--space-3);
+.ax-codes li {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
 }
-.ax-page .note-row textarea,
-.ax-page .entry textarea {
-  min-height: 72px;
-  resize: vertical;
-}
-
-/* Resume editor: the preview is under the form on a phone, so the tabs carry a way down to it. */
-.editor-jump {
-  display: none;
-}
-@media (max-width: 960px) {
-  .editor-jump {
-    display: inline-flex;
-  }
+/* A form opened in place under its row (change password, new recovery codes). */
+.ax-inline {
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--line);
 }

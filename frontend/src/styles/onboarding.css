@@ -1,368 +1,159 @@
-/* Setup guide (src/onboarding.tsx): a stepper rail beside one focused card per step. The guide is its own scroll
-   region (.ax-screen), so the header and the card's footer are sticky inside it. Tokens only; ax-ob- prefixed. */
-
+/* The setup guide (src/onboarding.tsx): one question group per step and a thin progress line. It lives outside the shell,
+   inside .ax-screen. Tokens only. */
 .ax-ob {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-width: 600px;
   min-height: 100%;
-  display: flex;
-  flex-direction: column;
-  background: var(--ground);
-  color: var(--ink);
+  margin: 0 auto;
+  padding: var(--space-4) var(--gutter) var(--space-12);
 }
-.ax-ob-fatal {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-3);
-  max-width: 520px;
-  margin: var(--space-8) auto;
-  padding: var(--space-4);
-}
-.ax-ob-fatal p {
-  color: var(--bad);
-}
-.ax-ob-fatal-actions {
-  display: flex;
-  gap: var(--space-2);
-}
-
-/* ---------- header: brand, progress, finish later ---------- */
 .ax-ob-top {
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  display: grid;
-  grid-template-columns: 220px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-5);
-  height: 56px;
-  padding: 0 var(--space-6);
-  border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--ground) 92%, transparent);
-  backdrop-filter: blur(8px);
-}
-.ax-ob-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-weight: 650;
-  letter-spacing: 0.01em;
+  gap: var(--space-3);
+  min-height: 40px;
 }
-.ax-ob-progress {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  min-width: 0;
-  max-width: 720px;
-}
-.ax-ob-progress-text {
+.ax-ob-top .ax-brand {
   flex: none;
-  color: var(--ink-2);
-  font-size: var(--text-meta);
-  white-space: nowrap;
 }
-.ax-ob-progress-name {
-  color: var(--ink-3);
+.ax-ob-count {
+  margin-left: auto;
 }
-.ax-ob-ticks {
-  flex: 1;
+
+/* The progress line: one thin segment per step. A reached step is a button back to it. */
+.ax-ob-steps {
   display: flex;
-  gap: 4px;
-  min-width: 0;
-}
-.ax-ob-ticks i {
-  flex: 1;
-  height: 4px;
-  border-radius: 999px;
-  background: var(--chip);
-  transition: background var(--dur) var(--ease);
-}
-.ax-ob-ticks i.is-done {
-  background: var(--brand);
-}
-.ax-ob-ticks i.is-now {
-  background: color-mix(in srgb, var(--brand) 55%, var(--chip));
-}
-
-/* ---------- layout ---------- */
-.ax-ob-wrap {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 220px minmax(0, 720px);
-  gap: var(--space-8);
-  justify-content: center;
-  align-items: start;
-  padding: var(--space-8) var(--space-6) 96px;
-}
-
-/* ---------- rail ---------- */
-.ax-ob-rail {
-  position: sticky;
-  top: 88px;
-}
-.ax-ob-rail ol {
-  list-style: none;
+  gap: 3px;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
+  list-style: none;
 }
-.ax-ob-rail li {
+.ax-ob-steps li {
+  flex: 1;
+}
+.ax-ob-steps button {
   position: relative;
+  display: block;
+  width: 100%;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
 }
-/* The thread joining one step to the next. */
-.ax-ob-rail li:not(:last-child)::before {
+.ax-ob-steps button::after {
   content: "";
   position: absolute;
-  left: 20px;
-  top: 34px;
-  bottom: -2px;
-  width: 1px;
+  inset: 7px 0;
+  border-radius: 1px;
   background: var(--line-strong);
 }
-.ax-ob-rail li.is-done:not(:last-child)::before {
-  background: var(--brand);
+.ax-ob-steps .is-done button::after {
+  background: var(--ink-3);
 }
-.ax-ob-rail button {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 40px;
-  padding: 0 var(--space-3) 0 var(--space-2);
-  border: 0;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--ink-3);
-  font: inherit;
-  font-size: var(--text-ui);
-  text-align: left;
-  cursor: pointer;
-  transition:
-    background var(--dur-fast) var(--ease),
-    color var(--dur-fast) var(--ease);
+.ax-ob-steps .is-now button::after {
+  background: var(--ink);
 }
-.ax-ob-rail button:disabled {
+.ax-ob-steps button:disabled {
   cursor: default;
 }
-.ax-ob-rail button:not(:disabled):hover {
-  background: var(--surface-hover);
-  color: var(--ink);
-}
-.ax-ob-rail button:focus-visible {
-  outline: 2px solid var(--brand);
-  outline-offset: -2px;
-}
-.ax-ob-rail li.is-done button {
-  color: var(--ink-2);
-}
-.ax-ob-rail li.is-now button {
-  color: var(--ink);
-  font-weight: 600;
-}
-.ax-ob-rail small {
-  margin-left: auto;
-  color: var(--ink-3);
-  font-size: var(--text-micro);
-}
-.ax-ob-n {
-  flex: none;
-  position: relative;
-  z-index: 1;
-  width: 24px;
-  height: 24px;
-  display: inline-grid;
-  place-items: center;
-  border: 1px solid var(--line-strong);
-  border-radius: 50%;
-  background: var(--ground);
-  color: var(--ink-3);
-  font-size: var(--text-micro);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-.ax-ob-rail li.is-now .ax-ob-n {
-  border-color: var(--brand);
-  background: var(--brand);
-  color: var(--brand-ink);
-}
-.ax-ob-rail li.is-done .ax-ob-n {
-  border-color: var(--brand);
-  background: var(--brand-soft);
-  color: var(--accent-text);
-}
 
-/* ---------- the card ---------- */
+.ax-ob-card,
+.ax-ob-body {
+  display: flex;
+  flex-direction: column;
+}
 .ax-ob-card {
+  gap: var(--space-6);
+}
+.ax-ob-card > header {
   display: flex;
   flex-direction: column;
-  min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--card);
-  box-shadow: var(--shadow);
-  animation: ax-rise var(--dur-slow) var(--ease);
+  gap: var(--space-1);
 }
-.ax-ob-head {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-8) var(--space-8) 0;
-}
-.ax-ob-meta {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-}
-.ax-ob-head h1 {
-  font-size: var(--text-title);
-  font-weight: 650;
-  letter-spacing: -0.015em;
+.ax-ob-card h1:focus {
   outline: none;
 }
-.ax-ob-lead {
-  max-width: 60ch;
-  color: var(--ink-2);
-  font-size: var(--text-emphasis);
-  line-height: 1.5;
-}
 .ax-ob-body {
-  padding: var(--space-6) var(--space-8) var(--space-8);
-  min-width: 0;
-  animation: ax-fade var(--dur-slow) var(--ease);
-}
-.ax-ob-error {
-  margin: 0 var(--space-8) var(--space-4);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-md);
-  background: var(--bad-soft);
-  color: var(--bad);
-  font-size: var(--text-ui);
-  line-height: 1.45;
-}
-.ax-ob-body .ax-ob-error {
-  margin: 0;
-}
-.ax-ob-status {
-  color: var(--ink-2);
-  font-size: var(--text-ui);
-}
-.ax-ob-body {
-  --qf-sticky: 56px;
-  --qf-bg: var(--card);
-}
-/* The sticky progress row spans the card, so nothing shows beside it while the questions scroll under it. */
-.ax-ob-body .ax-qf-progress {
-  margin-inline: calc(-1 * var(--space-8));
-  padding-inline: var(--space-8);
+  gap: var(--space-6);
 }
 .ax-ob-foot {
-  position: sticky;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-4) var(--space-8);
-  border-top: 1px solid var(--line);
-  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-  background: var(--card);
-}
-.ax-ob-foot-end {
-  margin-left: auto;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-}
-
-/* ---------- content ---------- */
-.ax-ob-stack {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-5);
-  min-width: 0;
-}
-.ax-ob-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-4);
-}
-.ax-ob-grid .ax-field.is-wide,
-.ax-ob-form-end {
-  grid-column: 1 / -1;
-}
-.ax-ob-form-end {
-  display: flex;
-  justify-content: flex-end;
-}
-.ax-ob-note {
-  padding: var(--space-3) var(--space-4);
-  border-left: 2px solid var(--brand);
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
-  background: var(--brand-soft);
-  color: var(--ink-2);
-  font-size: var(--text-ui);
-  line-height: 1.5;
-}
-.ax-ob-sub {
-  margin-top: var(--space-3);
-  padding-top: var(--space-5);
+  padding-top: var(--space-4);
   border-top: 1px solid var(--line);
-  font-size: var(--text-emphasis);
-  font-weight: 600;
 }
-.ax-ob-sub-lead {
-  margin-top: calc(var(--space-3) * -1);
-  color: var(--ink-3);
-  font-size: var(--text-ui);
+.ax-ob-foot-end {
+  display: flex;
+  gap: var(--space-2);
+  margin-left: auto;
 }
 
-/* a question: prompt on the left, its control on the right (or stacked under a long prompt) */
+/* Questions: the prompt at the left and its answer at the right, on hairlines. */
 .ax-ob-list {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-}
-.ax-ob-list .ax-ob-q {
-  padding: var(--space-3) var(--space-4);
-}
-.ax-ob-list .ax-ob-q + .ax-ob-q {
-  border-top: 1px solid var(--line);
 }
 .ax-ob-q {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--space-4);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--text-ui);
 }
 .ax-ob-q.is-stack {
-  grid-template-columns: minmax(0, 1fr);
+  flex-direction: column;
+  align-items: stretch;
   gap: var(--space-2);
-  align-items: start;
+  border-bottom: 0;
 }
 .ax-ob-q-text {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
 }
-.ax-ob-q-label {
-  font-size: var(--text-ui);
-  font-weight: 540;
-  line-height: 1.4;
-}
-.ax-ob-q-asked,
-.ax-ob-q-hint {
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-  line-height: 1.45;
-}
 .ax-ob-q-control {
-  min-width: 0;
+  flex: none;
+  max-width: 100%;
+}
+.ax-ob-list > .ax-check {
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--line);
+}
+.ax-ob input[type="range"] {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  accent-color: var(--ink);
+}
+.ax-ob-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-4);
+}
+.ax-ob-grid > .is-wide {
+  grid-column: 1 / -1;
+}
+@media (max-width: 560px) {
+  .ax-ob-q:not(.is-stack) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2);
+  }
+  .ax-ob-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
+/* Roles and places as removable words. */
 .ax-ob-tags {
   display: flex;
   flex-direction: column;
@@ -371,403 +162,39 @@
 .ax-ob-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-1) var(--space-2);
 }
 .ax-ob-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--ink-2);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--ink-3);
   font: inherit;
-  font-size: var(--text-meta);
+  font-size: var(--text-ui);
   cursor: pointer;
-  white-space: nowrap;
 }
 .ax-ob-chip:hover {
   color: var(--ink);
-  background: var(--surface-hover);
 }
 .ax-ob-chip.is-on {
-  border-color: var(--brand);
-  background: var(--brand-soft);
-  color: var(--accent-text);
-}
-.ax-ob-chip:focus-visible {
-  outline: 2px solid var(--brand);
-  outline-offset: 1px;
+  border-color: var(--line-strong);
+  color: var(--ink);
 }
 
 .ax-ob-drop {
-  display: grid;
-  justify-items: start;
-  gap: var(--space-2);
-  padding: var(--space-6);
-  border: 1px dashed var(--line-strong);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  color: var(--ink-2);
-  transition:
-    border-color var(--dur-fast) var(--ease),
-    background var(--dur-fast) var(--ease);
-}
-.ax-ob-drop.is-over {
-  border-color: var(--brand);
-  background: var(--brand-soft);
-}
-.ax-ob-drop strong {
-  color: var(--ink);
-  font-size: var(--text-emphasis);
-}
-.ax-ob-drop p {
-  margin: 0 0 var(--space-2);
-  font-size: var(--text-ui);
-}
-.ax-ob-resumes {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-.ax-ob-resume {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  font-size: var(--text-ui);
-}
-.ax-ob-summary {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: var(--space-4);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  font-size: var(--text-ui);
-}
-.ax-ob-summary .is-dim {
-  color: var(--ink-3);
-}
-
-/* account */
-.ax-ob-who {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-4);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-}
-.ax-ob-who > span:nth-child(2) {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  flex: 1;
-}
-.ax-ob-who strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ax-ob-who small {
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-}
-.ax-ob-avatar {
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--brand-soft);
-  color: var(--accent-text);
-  font-weight: 650;
-}
-.ax-ob-points {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-.ax-ob-points li {
-  position: relative;
-  padding-left: var(--space-5);
-  color: var(--ink-2);
-  font-size: var(--text-ui);
-  line-height: 1.5;
-}
-.ax-ob-points li::before {
-  content: "";
-  position: absolute;
-  left: 2px;
-  top: 8px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--brand);
-}
-
-/* permissions */
-.ax-ob-toggles {
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-}
-.ax-ob-toggle {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-4);
-  cursor: pointer;
-}
-.ax-ob-toggle + .ax-ob-toggle {
-  border-top: 1px solid var(--line);
-}
-.ax-ob-toggle:hover {
-  background: var(--surface-hover);
-}
-.ax-ob-toggle input {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  margin-top: 3px;
-  accent-color: var(--brand);
-}
-.ax-ob-toggle input:focus-visible {
-  outline: 2px solid var(--brand);
-  outline-offset: 2px;
-}
-.ax-ob-toggle span {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-.ax-ob-toggle strong {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--space-2);
-  font-size: var(--text-ui);
-  font-weight: 600;
-}
-.ax-ob-toggle small {
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-  line-height: 1.5;
-}
-
-/* connections */
-.ax-ob-conn {
-  display: flex;
-  flex-direction: column;
   gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-}
-.ax-ob-conn > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-.ax-ob-conn h2 {
-  font-size: var(--text-emphasis);
-  font-weight: 600;
-}
-.ax-ob-conn > p {
-  color: var(--ink-2);
-  font-size: var(--text-ui);
-  line-height: 1.5;
-}
-.ax-ob-boxes {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: var(--text-ui);
-}
-.ax-ob-boxes small {
-  margin-left: var(--space-2);
-  color: var(--ink-3);
-}
-.ax-ob-overall {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-}
-.ax-ob-overall .ax-meter {
-  flex: 0 1 200px;
-}
-
-/* review */
-.ax-ob-review {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-.ax-ob-group {
   padding: var(--space-4);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-}
-.ax-ob-group-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-bottom: var(--space-3);
-}
-.ax-ob-group-head h2 {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-ui);
-  font-weight: 600;
-}
-.ax-ob-group dl {
-  display: grid;
-  grid-template-columns: minmax(140px, 240px) minmax(0, 1fr);
-  gap: 6px var(--space-4);
-  margin: 0;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
   font-size: var(--text-ui);
 }
-.ax-ob-group dt {
-  color: var(--ink-3);
+.ax-ob-drop > p {
+  flex: 1 1 240px;
 }
-.ax-ob-group dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-.ax-ob-group dd.is-warn {
-  color: var(--warn);
-}
-
-/* the embedded questionnaire inside the card uses the card's own rhythm */
-.ax-ob-body .ax-qf-head .ax-qf-title h2 {
-  font-size: var(--text-emphasis);
-}
-.ax-ob-body .ax-qf-row {
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-/* The module list is narrower in the card: progress goes under the title instead of beside it. */
-.ax-ob-body .ax-module {
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-3) var(--space-4);
-}
-.ax-ob-body .ax-module-progress {
-  grid-column: 1;
-  grid-row: 2;
-  flex-direction: row;
-  align-items: center;
-  gap: var(--space-3);
-}
-.ax-ob-body .ax-module-progress .ax-meter {
-  flex: 0 1 160px;
-}
-.ax-ob-body .ax-module-go {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-}
-
-@media (max-width: 1100px) {
-  .ax-ob-top {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-  }
-  .ax-ob-wrap {
-    grid-template-columns: 188px minmax(0, 720px);
-    gap: var(--space-6);
-  }
-}
-
-@media (max-width: 900px) {
-  .ax-ob-top {
-    grid-template-columns: auto auto;
-    grid-template-rows: 48px auto;
-    height: auto;
-    padding: 0 var(--space-4);
-    row-gap: 0;
-    justify-content: space-between;
-  }
-  .ax-ob-brand {
-    height: 48px;
-  }
-  .ax-ob-top > .ax-btn {
-    align-self: center;
-    height: 48px;
-    margin-top: 0;
-  }
-  .ax-ob-progress {
-    grid-row: 2;
-    grid-column: 1 / -1;
-    max-width: none;
-    padding-bottom: var(--space-3);
-  }
-  .ax-ob-wrap {
-    grid-template-columns: minmax(0, 1fr);
-    padding: var(--space-4) var(--space-4) 88px;
-  }
-  .ax-ob-rail {
-    display: none;
-  }
-  .ax-ob-head {
-    padding: var(--space-5) var(--space-5) 0;
-  }
-  .ax-ob-head h1 {
-    font-size: var(--text-display);
-  }
-  .ax-ob-body {
-    padding: var(--space-5);
-    --qf-sticky: 78px;
-  }
-  .ax-ob-body .ax-qf-progress {
-    margin-inline: calc(-1 * var(--space-5));
-    padding-inline: var(--space-5);
-  }
-  .ax-ob-foot {
-    padding: var(--space-3) var(--space-5);
-  }
-  .ax-ob-error {
-    margin: 0 var(--space-5) var(--space-4);
-  }
-}
-
-@media (max-width: 560px) {
-  .ax-ob-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .ax-ob-q {
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--space-2);
-    align-items: start;
-  }
-  .ax-ob-group dl {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0;
-  }
-  .ax-ob-group dt {
-    margin-top: var(--space-2);
-  }
-  .ax-ob-body .ax-qf-row {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.ax-ob-drop.is-over {
+  border-color: var(--ink);
 }

@@ -1,0 +1,652 @@
+/* The panel: Overview only. One grid under the tuning scale, rail and then nine columns, so at nine workers each channel stands
+   under a station. Lines are the machine, dots are what it is doing. Every other page stays calm and has none of this. */
+
+.main.view-batch {
+  max-width: none;
+  padding: 0;
+}
+.ax-panel-page {
+  gap: 0;
+  padding-bottom: 0;
+}
+.ax-defs {
+  position: absolute;
+}
+.ax-engraved {
+  font-size: var(--text-meta);
+  font-stretch: var(--wide);
+  font-weight: 500;
+  line-height: 1.25;
+  text-shadow: var(--engrave);
+  text-transform: lowercase;
+}
+/* A readout looks emitted, not printed. Never under about 56px. */
+.ax-read {
+  display: block;
+  font-family: var(--font-read);
+  font-variation-settings: "ROND" 100, "wght" 900;
+  line-height: 0.82;
+  letter-spacing: -0.01em;
+}
+/* The window stays dark at both hours. */
+.ax-window {
+  --focus: var(--window-ink);
+  border-radius: var(--radius);
+  background: var(--window);
+  box-shadow:
+    inset 0 2px 5px var(--shade-deep),
+    0 1px 0 var(--key-top),
+    0 0 0 1px var(--window-edge);
+  color: var(--window-ink);
+}
+
+/* ---------- the master row ---------- */
+.ax-master {
+  display: grid;
+  grid-template-columns: var(--rail) repeat(9, minmax(0, 1fr));
+  align-items: end;
+  padding: 20px var(--gutter) 18px;
+}
+.ax-big {
+  grid-column: 1 / span 2;
+  min-width: 0;
+}
+.ax-big .ax-read {
+  /* Two digits at the concept's size; a big day gives up height rather than running into the chart. */
+  font-size: min(176px, calc(25vw / var(--chars, 2)), calc(330px / var(--chars, 2)));
+  margin-left: -1px;
+}
+.ax-big .ax-engraved {
+  display: block;
+  margin-top: var(--space-2);
+  font-size: var(--text-ui);
+}
+.ax-say {
+  grid-column: 3 / span 5;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-self: stretch;
+  min-width: 0;
+  padding: 0 36px 0 var(--inset);
+}
+.ax-sentence {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-title);
+  font-stretch: var(--wide);
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.005em;
+  text-wrap: balance;
+}
+/* Only what needs you takes the lamp colour. Paused and held are not a problem. */
+.ax-sentence.is-bad {
+  color: var(--signal-ink);
+}
+.ax-meta {
+  margin: 0 0 var(--space-3);
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.ax-day {
+  margin: var(--space-2) 0 0;
+}
+.ax-day svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.ax-day-now {
+  stroke: var(--live);
+  stroke-width: 1;
+}
+.ax-hours {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  margin-top: 5px;
+  padding-top: 7px;
+  background: linear-gradient(90deg, var(--line-strong) 1px, transparent 1px) 0 0 / calc(100% / 24) 5px repeat-x;
+  color: var(--ink-2);
+  font-family: var(--font-data);
+  font-size: 12px;
+}
+.ax-hours-now {
+  position: absolute;
+  bottom: 0;
+  margin-left: 5px;
+  font-style: normal;
+  color: var(--ink);
+}
+:root[data-run="on"] .ax-hours-now {
+  color: var(--signal-ink);
+}
+.ax-hours em {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  font-style: normal;
+}
+
+/* The lit window: the count of questions waiting. Vermilion, because they need you; dark glass with none. */
+.ax-wait {
+  grid-column: 8 / span 1;
+  display: block;
+  align-self: end;
+  min-width: 0;
+  padding-left: var(--inset);
+  color: inherit;
+  text-decoration: none;
+}
+.ax-wait:focus-visible {
+  outline-offset: 4px;
+}
+.ax-litwin {
+  display: inline-block;
+  padding: 11px 12px 9px 10px;
+}
+.ax-litwin .ax-read {
+  color: var(--led);
+  font-size: min(104px, calc(168px / var(--chars, 1)));
+}
+.ax-litwin.is-dark .ax-read {
+  color: var(--window-ink-2);
+}
+.ax-wait .ax-engraved {
+  display: block;
+  margin-top: 9px;
+}
+.ax-wait-go {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink);
+  font-size: var(--text-meta);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.ax-wait:hover .ax-wait-go {
+  text-decoration-thickness: 2px;
+}
+
+/* The power end: the state in words, and the key. */
+.ax-power {
+  grid-column: 9 / span 2;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-end;
+  gap: var(--space-4);
+  min-width: 0;
+  padding-left: var(--inset);
+}
+.ax-legend {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+  padding-bottom: 2px;
+  text-align: right;
+}
+.ax-legend-state {
+  font-size: var(--text-ui);
+  font-stretch: var(--wide);
+  font-weight: 600;
+}
+.ax-legend-note {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  line-height: 1.25;
+}
+/* "Restart automation" beside the key: two lines rather than over the questions window. */
+.ax-legend .ax-btn {
+  height: auto;
+  max-width: 132px;
+  margin-top: var(--space-2);
+  padding: 7px 10px;
+  line-height: 1.15;
+  text-align: right;
+  white-space: normal;
+}
+.ax-target {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 6px;
+  width: 132px;
+  margin-bottom: 2px;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.ax-target input {
+  flex: none;
+  width: 60px;
+  min-height: 28px;
+  padding: 3px 6px;
+  font-family: var(--font-data);
+  font-size: var(--text-meta);
+}
+.ax-masterkey {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 112px;
+  height: 112px;
+  margin: 8px 8px 10px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow:
+    0 0 0 5px var(--ground),
+    0 0 0 6px var(--ink),
+    0 3px 0 0 var(--key-bot);
+  color: var(--brand-ink);
+  font-size: var(--text-ui);
+  font-stretch: var(--wide);
+  font-weight: 600;
+  text-transform: lowercase;
+  cursor: pointer;
+  transition: transform 70ms;
+}
+.ax-masterkey svg {
+  display: block;
+  fill: currentColor;
+}
+.ax-masterkey:active:not(:disabled) {
+  transform: translateY(2px);
+}
+.ax-masterkey:focus-visible {
+  outline-offset: 9px;
+}
+.ax-masterkey:disabled {
+  background: none;
+  box-shadow:
+    0 0 0 5px var(--ground),
+    0 0 0 6px var(--line-strong);
+  color: var(--ink-2);
+  cursor: not-allowed;
+}
+.ax-panel-notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0 var(--gutter) var(--space-3);
+}
+
+/* ---------- the bank ---------- */
+.ax-bank {
+  padding-inline: var(--gutter);
+}
+.ax-ladders {
+  display: grid;
+  grid-template-columns: var(--rail) repeat(var(--slots, 9), minmax(0, 1fr));
+  padding-block: 14px 12px;
+}
+.ax-ladders.is-empty {
+  display: block;
+  padding: var(--space-6);
+  color: var(--window-ink-2);
+}
+.ax-stages {
+  align-self: end;
+  margin: 0;
+  padding: 0 0 0 var(--inset);
+  list-style: none;
+  color: var(--window-ink-2);
+  font-size: 12.5px;
+  font-stretch: var(--wide);
+}
+.ax-stages li {
+  height: 24px;
+  line-height: 24px;
+  white-space: nowrap;
+}
+.ax-ch {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  min-width: 0;
+  height: 168px;
+  padding-left: var(--inset);
+  background:
+    linear-gradient(var(--window-ink-2) 1px, transparent 1px) 0 0 / 5px 24px repeat-y,
+    linear-gradient(var(--window-rule), var(--window-rule)) 0 0 / 1px 100% no-repeat;
+}
+.ax-ch-head {
+  position: absolute;
+  top: -2px;
+  left: var(--inset);
+  color: var(--window-ink-2);
+  font-family: var(--font-data);
+  font-size: 12.5px;
+}
+.ax-ch.is-busy .ax-ch-head {
+  color: var(--window-ink);
+}
+.ax-lad {
+  display: block;
+  flex: none;
+  width: 32px;
+  height: 144px;
+}
+.ax-lad-lit {
+  opacity: 0;
+  /* Going dark, in the order they were lit: pausing puts the channels out one at a time as each run stops. */
+  transition: opacity 220ms;
+  transition-delay: calc(var(--o, 0) * 320ms);
+}
+.ax-ch.is-busy .ax-lad-lit {
+  opacity: 1;
+  transition-delay: 0s;
+}
+.ax-lad-front {
+  filter: drop-shadow(0 0 2.5px var(--led));
+}
+.ax-ch.is-busy .ax-lad-front {
+  animation: ax-pulse 1.3s ease-in-out infinite;
+  animation-delay: calc(var(--o, 0) * -0.37s);
+}
+.ax-reading {
+  position: absolute;
+  left: calc(var(--inset) + 42px);
+  right: 2px;
+  bottom: calc(var(--rung, 1) * 24px - 24px);
+  color: var(--window-ink);
+  font-family: var(--font-data);
+  font-size: 12.5px;
+  line-height: 1.2;
+}
+.ax-reading em {
+  display: block;
+  color: var(--signal-on-window);
+  font-style: normal;
+  white-space: nowrap;
+}
+.ax-labels {
+  display: grid;
+  grid-template-columns: var(--rail) repeat(var(--slots, 9), minmax(0, 1fr));
+  padding-top: 10px;
+}
+.ax-bank-lead .ax-read {
+  font-size: min(92px, calc(180px / var(--lead-chars, 1)));
+  margin-top: -4px;
+}
+.ax-bank-lead .ax-engraved {
+  display: block;
+  margin-top: 6px;
+}
+.ax-lb {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 0 8px 0 var(--inset);
+}
+.ax-lb b,
+.ax-chlist-who b {
+  display: block;
+  width: 100%;
+  font-size: var(--text-ui);
+  font-weight: 600;
+  line-height: 1.2;
+}
+.ax-ch-open,
+.ax-lb b > span,
+.ax-lb > span,
+.ax-chlist-who b > span,
+.ax-chlist-who > span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.ax-lb > span,
+.ax-chlist-who > span {
+  margin-top: 2px;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  font-stretch: 94%;
+  line-height: 1.25;
+}
+.ax-lb > .ax-lb-do,
+.ax-chlist-who > .ax-lb-do {
+  -webkit-line-clamp: 3;
+  margin-top: 5px;
+  color: var(--ink);
+}
+.ax-lb > .ax-lb-data {
+  margin-top: 5px;
+  color: var(--ink-2);
+  font-family: var(--font-data);
+  font-size: 12px;
+  font-stretch: normal;
+}
+.ax-lb.is-idle b {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+.ax-ch-open {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ax-ch-open:hover {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.ax-ch-pause {
+  margin-top: 3px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.ax-ch-pause:hover {
+  color: var(--ink);
+}
+
+/* Compact: ladders in a row over a readable list of the busy ones. What a phone and a narrow window get, and many workers. */
+.ax-bank.is-compact .ax-ladders {
+  grid-template-columns: repeat(auto-fit, minmax(36px, 1fr));
+  padding: 10px 6px;
+  row-gap: var(--space-3);
+}
+.ax-bank.is-compact .ax-ch {
+  display: block;
+  height: auto;
+  padding: 18px 2px 0;
+  background: linear-gradient(var(--window-rule), var(--window-rule)) 0 0 / 1px 100% no-repeat;
+}
+.ax-bank.is-compact .ax-ch-head {
+  left: 0;
+  right: 0;
+  top: 0;
+  text-align: center;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.ax-bank.is-compact .ax-lad {
+  width: 100%;
+  max-width: 32px;
+  height: auto;
+  margin-inline: auto;
+}
+.ax-bank.is-compact .ax-bank-lead {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  padding-block: var(--space-3) var(--space-2);
+}
+.ax-bank.is-compact .ax-bank-lead .ax-read {
+  margin: 0;
+  font-size: 64px;
+}
+.ax-bank.is-compact .ax-bank-lead .ax-engraved {
+  margin: 0 0 1px;
+  font-size: var(--text-ui);
+}
+.ax-chlist {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
+  column-gap: var(--space-6);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ax-chlist li {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 0 var(--space-2);
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+}
+.ax-chlist-ch,
+.ax-chlist-data {
+  color: var(--ink-2);
+  font-family: var(--font-data);
+  font-size: var(--text-meta);
+}
+.ax-chlist-data {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  text-align: right;
+}
+.ax-chlist-data .ax-ch-pause {
+  font-family: var(--font-text);
+}
+
+/* ---------- under the bank ---------- */
+.ax-panel-below {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-5) var(--gutter) 72px;
+}
+.ax-panel-below .ax-panel-head h2 {
+  font-size: var(--text-sub);
+}
+
+@media (max-width: 1339px) {
+  .ax-legend-note {
+    display: none;
+  }
+  .ax-big .ax-read {
+    font-size: min(150px, calc(280px / var(--chars, 2)));
+  }
+}
+/* Too narrow for the whole master row on one line. */
+@media (max-width: 1139px) {
+  .ax-master {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: var(--space-4) var(--space-5);
+    align-items: end;
+  }
+  .ax-big {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .ax-wait {
+    grid-column: 2;
+    grid-row: 1;
+    padding: 0;
+  }
+  .ax-power {
+    grid-column: 3;
+    grid-row: 1;
+    padding: 0;
+  }
+  .ax-say {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    padding: 0;
+  }
+  .ax-day {
+    max-width: 720px;
+  }
+}
+/* A phone: the same instrument, turned to fit a hand. */
+@media (max-width: 899px) {
+  .ax-master {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0 var(--space-3);
+    padding-block: 14px 16px;
+  }
+  .ax-big .ax-read {
+    font-size: min(128px, calc(240px / var(--chars, 2)));
+  }
+  .ax-power {
+    grid-column: 2;
+    grid-row: 1;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: var(--space-1);
+  }
+  .ax-legend {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .ax-masterkey {
+    width: 92px;
+    height: 92px;
+    font-size: var(--text-meta);
+  }
+  .ax-say {
+    margin-top: 14px;
+  }
+  .ax-sentence {
+    font-size: 19px;
+  }
+  .ax-hours-now {
+    display: none;
+  }
+  .ax-hours em {
+    position: static;
+    grid-column: 1 / -1;
+    text-align: right;
+  }
+  .ax-wait {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-top: var(--space-3);
+  }
+  .ax-wait .ax-litwin {
+    flex: none;
+    padding: 8px 9px 6px 8px;
+  }
+  .ax-litwin .ax-read {
+    font-size: min(64px, calc(112px / var(--chars, 1)));
+  }
+  .ax-target {
+    width: auto;
+  }
+  .ax-wait .ax-engraved {
+    margin: 0;
+  }
+  .ax-wait-go {
+    margin: 0 0 0 auto;
+  }
+}

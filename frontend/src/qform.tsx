@@ -2,9 +2,9 @@
 // Shared by Setup › Knowledge and the setup guide's optional step. Every answer is optional and saves on its own;
 // nothing here is required to apply. API: GET/PUT /api/knowledge/questionnaires (jobpilot/features/knowledge).
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Plus, Trash2 } from "lucide-react";
 import { api, ApiError } from "./api";
-import { Button, Input, Pill } from "./ui/index";
+import { Button, Input, Segmented } from "./ui/index";
 import "./styles/qform.css";
 
 // ---------- types (mirror jobpilot/features/knowledge/questionnaires.py) ----------
@@ -45,7 +45,7 @@ export type Module = {
   status: "not_started" | "partial" | "complete";
   questions: Question[];
 };
-export type Questionnaires = { modules: Module[]; completion: { answered: number; total: number; percent: number } };
+type Questionnaires = { modules: Module[]; completion: { answered: number; total: number; percent: number } };
 
 /** Later answers win; a supervisor card sent twice keeps the fields of both. */
 function mergeAnswers(before: Record<string, unknown> | undefined, next: Record<string, unknown>) {
@@ -112,48 +112,6 @@ export function moduleFacts(module: Module): Record<string, unknown> {
 }
 
 // ---------- controls ----------
-/** Two or three buttons that act as one radio group. Arrow keys move the choice. */
-export function Segmented<T extends string>({
-  value,
-  options,
-  onChange,
-  label,
-  block,
-}: {
-  value: T | "" | undefined;
-  options: { value: T; label: string }[];
-  onChange: (v: T) => void;
-  label: string;
-  block?: boolean;
-}) {
-  const move = (e: React.KeyboardEvent, i: number) => {
-    const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
-    if (!step) return;
-    e.preventDefault();
-    const next = options[(i + step + options.length) % options.length];
-    onChange(next.value);
-    (e.currentTarget.parentElement?.children[(i + step + options.length) % options.length] as HTMLElement)?.focus();
-  };
-  const tab = options.findIndex((o) => o.value === value);
-  return (
-    <div className={"ax-seg" + (block ? " is-block" : "")} role="radiogroup" aria-label={label}>
-      {options.map((o, i) => (
-        <button
-          key={o.value}
-          type="button"
-          role="radio"
-          aria-checked={value === o.value}
-          tabIndex={tab === i || (tab < 0 && i === 0) ? 0 : -1}
-          onClick={() => onChange(o.value)}
-          onKeyDown={(e) => move(e, i)}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 export function YesNo({
   value,
   onChange,
@@ -177,7 +135,7 @@ export function YesNo({
 }
 
 type Status = { state: "idle" | "saving" | "saved" | "error"; message?: string };
-export function SaveState({ status, retry }: { status: Status; retry?: () => void }) {
+function SaveState({ status, retry }: { status: Status; retry?: () => void }) {
   return (
     <span className={"ax-save is-" + status.state} role="status" aria-live="polite">
       {status.state === "saving" && "Saving…"}
@@ -196,50 +154,31 @@ export function SaveState({ status, retry }: { status: Status; retry?: () => voi
           )}
         </>
       )}
-      {status.state === "idle" && "Changes save as you go"}
+      {status.state === "idle" && "Saves as you go"}
     </span>
   );
 }
 
 // ---------- module list ----------
 const verb = (m: Module) => (m.status === "not_started" ? "Start" : m.status === "complete" ? "Review" : "Continue");
-const tone = (m: Module) => (m.status === "complete" ? "ok" : m.status === "partial" ? "brand" : "neutral");
-const stateWord = (m: Module) => (m.status === "complete" ? "Complete" : m.status === "partial" ? "In progress" : "Not started");
-
-export function Meter({ percent, label }: { percent: number; label: string }) {
-  return (
-    <div className="ax-meter" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
-      <i style={{ width: `${Math.max(percent, percent > 0 ? 3 : 0)}%` }} />
-    </div>
-  );
-}
 
 export function ModuleList({ data, onOpen }: { data: Questionnaires; onOpen: (id: string) => void }) {
   return (
-    <ul className="ax-modules">
+    <ul className="ax-rows">
       {data.modules.map((m) => (
-        <li key={m.id}>
-          <button type="button" className="ax-module" onClick={() => onOpen(m.id)}>
-            <span className="ax-module-main">
-              <span className="ax-module-title">
-                <strong>{m.title}</strong>
-                <Pill tone="neutral">Optional</Pill>
-                <Pill tone={tone(m)} dot>
-                  {stateWord(m)}
-                </Pill>
-              </span>
-              <span className="ax-module-purpose">{m.purpose}</span>
+        <li className="ax-row" key={m.id}>
+          <span className="ax-row-main">
+            <strong>{m.title}</strong>
+            <small>{m.purpose}</small>
+          </span>
+          <span className="ax-row-end">
+            <span className="ax-hint">
+              {m.status === "complete" ? "Complete" : `${m.answered} of ${m.total} answered`}
             </span>
-            <span className="ax-module-progress">
-              <Meter percent={m.percent} label={`${m.title}: ${m.answered} of ${m.total} answered`} />
-              <small>
-                {m.answered} of {m.total} answered
-              </small>
-            </span>
-            <span className="ax-module-go">
-              {verb(m)} <ArrowRight size={14} aria-hidden="true" />
-            </span>
-          </button>
+            <Button size="sm" onClick={() => onOpen(m.id)} aria-label={`${verb(m)} ${m.title}`}>
+              {verb(m)}
+            </Button>
+          </span>
         </li>
       ))}
     </ul>
@@ -384,23 +323,19 @@ export function ModuleForm({
             {closeLabel}
           </Button>
         )}
-        <div className="ax-qf-title">
-          <h2>{module.title}</h2>
-          <Pill tone="neutral">Optional</Pill>
-        </div>
-        <p className="ax-qf-purpose">{module.purpose} Skip any question; nothing here is required to apply.</p>
+        <h2>{module.title}</h2>
+        <p className="ax-hint">{module.purpose}</p>
       </header>
       {/* Stays in view while you scroll, so "Saved" or a failed save with Retry is never off screen. */}
       <div className="ax-qf-progress">
-        <Meter percent={module.percent} label={`${module.title}: ${module.answered} of ${module.total} answered`} />
-        <small>
+        <span className="ax-hint">
           {module.answered} of {module.total} answered
-        </small>
+        </span>
         <SaveState status={status} retry={failed.current ? retry : undefined} />
       </div>
 
       {hasSuggestions && open > 0 && module.id === "wotc" && (
-        <div className="ax-qf-bulk">
+        <div className="ax-notice">
           {!confirmAll ? (
             <>
               <span>{[...shared][0] || "Most people answer No to everything here."}</span>
@@ -409,13 +344,12 @@ export function ModuleForm({
               </Button>
             </>
           ) : (
-            <div className="ax-qf-confirm" role="group" aria-label="Confirm No to all">
+            <div className="ax-stack" role="group" aria-label="Confirm No to all">
               <p>
                 This saves <strong>No</strong> to the {open} question{open === 1 ? "" : "s"} you have not answered. Do it only if none
-                of them applies to you; your own answers stay as they are, and you can change any of them afterwards. The screening
-                never affects hiring.
+                of them applies to you; your own answers stay as they are. The screening never affects hiring.
               </p>
-              <span className="ax-qf-confirm-actions">
+              <span className="ax-ask">
                 <Button
                   variant="primary"
                   size="sm"
@@ -519,7 +453,7 @@ function Row({
       <input
         id={id}
         type="date"
-        className="ax-control ax-qf-input"
+        className="ax-control"
         aria-label={q.prompt}
         value={(value as string) || ""}
         onChange={(e) => setNow(e.target.value)}
@@ -529,7 +463,7 @@ function Row({
     control = (
       <input
         id={id}
-        className="ax-control ax-qf-input"
+        className="ax-control"
         aria-label={q.prompt}
         value={(value as string) || ""}
         maxLength={200}
@@ -541,8 +475,8 @@ function Row({
   return (
     <div className="ax-qf-row">
       <div className="ax-qf-text">
-        <span className="ax-qf-prompt">{q.prompt}</span>
-        {q.help && <small className="ax-qf-help">{q.help}</small>}
+        <span>{q.prompt}</span>
+        {q.help && <small className="ax-hint">{q.help}</small>}
       </div>
       <div className="ax-qf-control">
         {control}
@@ -551,7 +485,7 @@ function Row({
             Clear
           </button>
         ) : (
-          suggested && <small className="ax-qf-suggest">Usually {q.suggestion === false ? "No" : q.suggestion === true ? "Yes" : String(q.suggestion)}</small>
+          suggested && <small className="ax-hint">Usually {q.suggestion === false ? "No" : q.suggestion === true ? "Yes" : String(q.suggestion)}</small>
         )}
       </div>
     </div>
@@ -585,7 +519,7 @@ function Supervisors({
     return (
       <div className="ax-qf-block">
         <strong>{q.prompt}</strong>
-        <p className="ax-qf-help">Add your work history in Setup › Profile first; each job gets its own supervisor card here.</p>
+        <p className="ax-hint">Add your work history in Profile › Experience first; each job gets its own supervisor card here.</p>
       </div>
     );
   const done = (row: WorkRow) => Object.keys(value[row.row_id] || {}).some((k) => (value[row.row_id] || {})[k]);
@@ -593,7 +527,7 @@ function Supervisors({
     <div className="ax-qf-block">
       <div className="ax-qf-block-head">
         <strong>{q.prompt}</strong>
-        {q.help && <small className="ax-qf-help">{q.help}</small>}
+        {q.help && <small className="ax-hint">{q.help}</small>}
       </div>
       <div className="ax-qf-cards">
         {rows.map((r) => {
@@ -610,11 +544,10 @@ function Supervisors({
               <header>
                 <span>
                   <strong>{r.title || "Role"}</strong>
-                  <span className="ax-qf-dim"> · {r.company || "Employer"}</span>
+                  <span className="ax-hint"> · {r.company || "Employer"}</span>
                 </span>
-                <span className="ax-qf-card-meta">
-                  {span(r) && <small>{span(r)}</small>}
-                  <Pill tone={done(r) ? "ok" : "neutral"}>{done(r) ? "Added" : "Not added"}</Pill>
+                <span className="ax-hint">
+                  {[span(r), done(r) ? "Added" : "Not added"].filter(Boolean).join(" · ")}
                 </span>
               </header>
               <div className="ax-qf-grid">
@@ -674,14 +607,14 @@ function References({
     list.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v.trim()]))).filter((r) => Object.values(r).some(Boolean));
   const save = (list: Record<string, string>[]) => {
     const bad = list.findIndex((r) => r.email.trim() && !EMAIL.test(r.email.trim()));
-    list.forEach((r, i) => setProblem(`ref:${i}:email`, i === bad ? "Enter a valid email address" : ""));
+    list.forEach((_, i) => setProblem(`ref:${i}:email`, i === bad ? "Enter a valid email address" : ""));
     if (bad < 0) onSave(clean(list));
   };
   return (
     <div className="ax-qf-block">
       <div className="ax-qf-block-head">
         <strong>{q.prompt}</strong>
-        {q.help && <small className="ax-qf-help">{q.help}</small>}
+        {q.help && <small className="ax-hint">{q.help}</small>}
       </div>
       <div className="ax-qf-cards">
         {value.map((entry, i) => (
@@ -733,7 +666,7 @@ function References({
 export function Unavailable({ error, retry }: { error: Error; retry: () => void }) {
   const gone = error instanceof ApiError && (error.status === 404 || error.status === 405);
   return (
-    <div className="ax-qf-gone" role={gone ? undefined : "alert"}>
+    <div className="ax-notice" role={gone ? undefined : "alert"}>
       <p>
         {gone
           ? "Questionnaires arrive with the next update of this installation. Nothing else is affected."

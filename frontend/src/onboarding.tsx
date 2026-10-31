@@ -1,15 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, Upload } from "lucide-react";
 import { api, ApiError } from "./api";
-import { Loading } from "./ui";
-import { BrandMark } from "./shell/Brand";
-import { Button, Input, Pill } from "./ui/index";
+import { Wordmark } from "./shell/Brand";
+import { Facts } from "./setup-kit";
+import { Button, Check, External, Field, Input, Loading, Panel, Pill, Segmented } from "./ui/index";
 import {
-  Meter,
   ModuleForm,
   ModuleList,
   moduleFacts,
-  Segmented,
   Unavailable,
   useQuestionnaires,
   YesNo,
@@ -18,16 +16,14 @@ import {
 import type { EducationEntry, Profile, WorkEntry } from "./types";
 import "./styles/onboarding.css";
 
-// The sign-in screens and Setup → System › Your sign-in live in account.tsx.
+// The sign-in screens and Settings › System › Your sign-in live in account.tsx.
 
 // "Finish later" (guide.ts, so the shell reads it without loading this module).
-export { guideLater } from "./guide";
 
 // ---------------------------------------------------------------------------
-// Setup guide: the facts employers actually ask for, in the order a person thinks about them (DESIGN.md §6).
-// One focused card per step; progress is saved on the server (/api/onboarding), so it resumes where it stopped.
-// Frequencies come from 2,837 applications the engine ran (Oct 2026): how often an employer form
-// asked a question that this fact answers.
+// Setup guide: the facts employers actually ask for, in the order a person thinks about them (DESIGN.md §7).
+// One question group per step and a thin progress line; progress is saved on the server (/api/onboarding), so it resumes
+// where it stopped.
 // ---------------------------------------------------------------------------
 
 type StepId =
@@ -37,87 +33,29 @@ type StepId =
   | "authorization"
   | "preferences"
   | "screening"
+  | "identity"
   | "permissions"
   | "connections"
   | "questionnaires"
   | "review";
 // `server` is the id the backend stores (ONBOARDING_STEPS); two steps share one where the server has no id of its own.
-type Step = { id: StepId; title: string; lead: string; server: string; optional?: boolean; time: string };
+// `lead` is one line, and only where a person would otherwise not know what the step is for.
+type Step = { id: StepId; title: string; lead?: string; server: string; optional?: boolean };
 const STEPS: Step[] = [
-  {
-    id: "account",
-    title: "Account",
-    server: "resume",
-    time: "Done",
-    lead: "You are signed in. Setup takes about five minutes and saves as you go.",
-  },
-  {
-    id: "resume",
-    title: "Resume",
-    server: "resume",
-    time: "1 min",
-    lead: "We read your resume once to prefill your profile. You confirm everything on the next steps.",
-  },
-  {
-    id: "profile",
-    title: "Profile check",
-    server: "contact",
-    time: "1 min",
-    lead: "Filled into every application exactly as written. Check what we read from your resume.",
-  },
-  {
-    id: "authorization",
-    title: "Work authorization",
-    server: "authorization",
-    time: "1 min",
-    lead: "The questions that decide eligibility. Answer them once, accurately.",
-  },
-  {
-    id: "preferences",
-    title: "Preferences",
-    server: "preferences",
-    time: "1 min",
-    lead: "What to look for, where, and when you can start.",
-  },
-  {
-    id: "screening",
-    title: "Screening",
-    server: "background",
-    time: "2 min",
-    lead: "Standard screening questions. Your answers are used only when a form asks.",
-  },
-  {
-    id: "permissions",
-    title: "Permissions",
-    server: "permissions",
-    time: "1 min",
-    lead: "What AXIOM may do on your behalf.",
-  },
-  {
-    id: "connections",
-    title: "Connections",
-    server: "permissions",
-    time: "1 min",
-    lead: "The model key and the inbox the engine reads verification codes from. Both can wait until later.",
-  },
-  {
-    id: "questionnaires",
-    title: "Questionnaires",
-    server: "questionnaires",
-    optional: true,
-    time: "Optional",
-    lead: "Answer a few things once so applications never stop to ask. Skip any or all of this.",
-  },
-  {
-    id: "review",
-    title: "Review",
-    server: "review",
-    time: "1 min",
-    lead: "Check your answers. You can change any of them later in Setup.",
-  },
+  { id: "account", title: "Welcome", server: "resume" },
+  { id: "resume", title: "Resume", server: "resume", lead: "We read it once to prefill your profile. You confirm everything on the next steps." },
+  { id: "profile", title: "Contact details", server: "contact", lead: "Filled into every application exactly as written." },
+  { id: "authorization", title: "Work authorization", server: "authorization" },
+  { id: "preferences", title: "Preferences", server: "preferences" },
+  { id: "screening", title: "Screening", server: "background", lead: "Answer only what is true. A question you leave blank is asked of you when a form needs it." },
+  { id: "identity", title: "Self-identification", server: "identity", lead: "Voluntary equal-opportunity questions." },
+  { id: "permissions", title: "Permissions", server: "permissions", lead: "What AXIOM may do on your behalf." },
+  { id: "connections", title: "Connections", server: "permissions", lead: "The model key and the inbox that verification codes arrive in. Both can wait." },
+  { id: "questionnaires", title: "Questionnaires", server: "questionnaires", optional: true },
+  { id: "review", title: "Review", server: "review", lead: "You can change any of this later in Profile and Settings." },
 ];
 
-const EDITS_PROFILE = new Set<StepId>(["resume", "profile", "authorization", "preferences", "screening", "permissions"]);
+const EDITS_PROFILE = new Set<StepId>(["resume", "profile", "authorization", "preferences", "screening", "identity", "permissions"]);
 
 // Which step a stored server step reopens. "identity" belonged to its own step before Screening absorbed it.
 const OPEN_AT: Record<string, StepId> = {
@@ -126,30 +64,10 @@ const OPEN_AT: Record<string, StepId> = {
   authorization: "authorization",
   preferences: "preferences",
   background: "screening",
-  identity: "screening",
+  identity: "identity",
   permissions: "permissions",
   questionnaires: "questionnaires",
   review: "review",
-};
-
-const ASKED: Record<string, string> = {
-  authorization: "asked in about 44% of applications",
-  sponsorship: "asked in about 40% of applications",
-  status: "asked in about 8% of applications",
-  over18: "asked in about 13% of applications",
-  previously: "asked in about 29% of applications",
-  relatives: "asked in about 17% of applications",
-  government: "asked in about 9% of applications",
-  official: "asked in about 6% of applications",
-  noncompete: "asked in about 9% of applications",
-  relocate: "asked in about 15% of applications",
-  start: "asked in about 22% of applications",
-  salary: "asked in about 20% of applications",
-  source: "asked in about 26% of applications",
-  demographics: "asked in about 37% of applications",
-  consent: "asked in about 37% of applications",
-  linkedin: "asked in about 19% of applications",
-  phoneType: "asked in about 15% of applications",
 };
 
 type Draft = Profile;
@@ -253,16 +171,14 @@ function Choice<T extends string>({
   return <Segmented label={label} value={value} options={options.map((o) => ({ value: o, label: o }))} onChange={onChange} />;
 }
 
-/** One question: the prompt (with how often forms ask it) and its control. `stack` puts the control under a long prompt. */
+/** One question: the prompt and its control. `stack` puts the control under a long prompt. */
 function Question({
   label,
-  asked,
   hint,
   stack,
   children,
 }: {
   label: string;
-  asked?: string;
   hint?: React.ReactNode;
   stack?: boolean;
   children: React.ReactNode;
@@ -270,9 +186,8 @@ function Question({
   return (
     <div className={"ax-ob-q" + (stack ? " is-stack" : "")}>
       <div className="ax-ob-q-text">
-        <span className="ax-ob-q-label">{label}</span>
-        {asked && <small className="ax-ob-q-asked">{asked}</small>}
-        {hint && <small className="ax-ob-q-hint">{hint}</small>}
+        <span>{label}</span>
+        {hint && <small className="ax-hint">{hint}</small>}
       </div>
       <div className="ax-ob-q-control">{children}</div>
     </div>
@@ -490,9 +405,9 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
   if (error && !draft)
     return (
       <main className="ax-ob">
-        <div className="ax-ob-fatal" role="alert">
-          <p>Could not open the setup guide: {error}</p>
-          <span className="ax-ob-fatal-actions">
+        <div className="ax-notice is-bad" role="alert">
+          <span>Could not open the setup guide: {error}</span>
+          <span className="ax-ask">
             <Button variant="primary" size="sm" onClick={() => window.location.reload()}>
               Try again
             </Button>
@@ -586,119 +501,108 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
   return (
     <main className="ax-ob">
       <header className="ax-ob-top">
-        <div className="ax-ob-brand">
-          <BrandMark size={22} />
-          <span>AXIOM</span>
+        <div className="ax-brand">
+          <Wordmark />
         </div>
-        <div
-          className="ax-ob-progress"
-          role="progressbar"
-          aria-label="Setup progress"
-          aria-valuemin={1}
-          aria-valuemax={STEPS.length}
-          aria-valuenow={at + 1}
-          aria-valuetext={`Step ${at + 1} of ${STEPS.length}: ${current.title}`}
-        >
-          <span className="ax-ob-progress-text">
-            Step {at + 1} of {STEPS.length}
-            <span className="ax-ob-progress-name"> · {current.title}</span>
-          </span>
-          <span className="ax-ob-ticks" aria-hidden="true">
-            {STEPS.map((s, i) => (
-              <i key={s.id} className={i < at ? "is-done" : i === at ? "is-now" : ""} />
-            ))}
-          </span>
-        </div>
+        <span className="ax-hint ax-ob-count">
+          Step {at + 1} of {STEPS.length}
+        </span>
         <Button
           variant="ghost"
           size="sm"
           onClick={onExit}
-          title="Steps you saved are kept. Continue any time from the banner or Setup → System."
+          title="Steps you saved are kept. Continue any time from the banner or Settings › System."
         >
           Finish later
         </Button>
       </header>
-      <div className="ax-ob-wrap">
-        <nav className="ax-ob-rail" aria-label="Setup steps">
-          <ol>
-            {STEPS.map((s, i) => (
-              <li key={s.id} aria-current={i === at ? "step" : undefined} className={i < at ? "is-done" : i === at ? "is-now" : ""}>
-                <button type="button" onClick={() => go(i)} disabled={i > reached || saving}>
-                  <span className="ax-ob-n">{i < at ? <Check size={12} strokeWidth={3} aria-hidden="true" /> : i + 1}</span>
-                  <span className="ax-ob-rail-title">{s.title}</span>
-                  {s.optional && <small>Optional</small>}
-                </button>
-              </li>
-            ))}
-          </ol>
-        </nav>
-        <section className="ax-ob-card" aria-labelledby="ob-title">
-          <header className="ax-ob-head">
-            <div className="ax-ob-meta" hidden={current.time === "Done"}>
-              {current.optional ? <Pill tone="brand">Optional</Pill> : current.time !== "Done" && <span>About {current.time}</span>}
-            </div>
-            <h1 id="ob-title" ref={heading} tabIndex={-1}>
-              {current.title}
-            </h1>
-            <p className="ax-ob-lead">{current.lead}</p>
-          </header>
-          <div className="ax-ob-body" key={current.id}>
-            {current.id === "account" && <AccountStep account={account} />}
-            {current.id === "resume" && <ResumeStep draft={draft} setDraft={(fn) => setPeople(fn)} />}
-            {current.id === "profile" && <ContactStep draft={draft} setTop={setTop} setAddress={setAddress} />}
-            {current.id === "authorization" && <AuthorizationStep draft={draft} setFact={setFact} />}
-            {current.id === "preferences" && <PreferencesStep draft={draft} setTop={setTop} setFact={setFact} />}
-            {current.id === "screening" && <ScreeningStep draft={draft} setTop={setTop} setFact={setFact} />}
-            {current.id === "permissions" && (
-              <PermissionsStep
-                draft={draft}
-                setTop={setTop}
-                submit={submit?.value ?? null}
-                setSubmit={(value) => setSubmit((v) => (v ? { ...v, value } : v))}
+      <nav aria-label="Setup steps">
+        <ol className="ax-ob-steps">
+          {STEPS.map((s, i) => (
+            <li key={s.id} aria-current={i === at ? "step" : undefined} className={i < at ? "is-done" : i === at ? "is-now" : ""}>
+              <button
+                type="button"
+                aria-label={`${s.title}, step ${i + 1} of ${STEPS.length}`}
+                disabled={i > reached || saving}
+                onClick={() => go(i)}
               />
-            )}
-            {current.id === "connections" && <ConnectionsStep linked={linked} email={draft.email} refresh={refreshLinked} />}
-            {current.id === "questionnaires" && (
-              <QuestionnairesStep
-                onModule={(m) => {
-                  learn(m);
-                  setSummary((list) => list && list.map((x) => (x.id === m.id ? { ...x, answered: m.answered, total: m.total } : x)));
-                }}
-              />
-            )}
-            {current.id === "review" && <ReviewStep draft={draft} go={(id) => go(STEPS.findIndex((s) => s.id === id))} submit={submit?.value ?? null} linked={linked} summary={summary} />}
-          </div>
-          {error && (
-            <p className="ax-ob-error" role="alert">
-              {error}
-            </p>
+            </li>
+          ))}
+        </ol>
+      </nav>
+      <section className="ax-ob-card" aria-labelledby="ob-title">
+        <header>
+          <h1 id="ob-title" ref={heading} tabIndex={-1}>
+            {current.title}
+            {current.optional && <span className="ax-hint"> Optional</span>}
+          </h1>
+          {current.lead && <p className="ax-hint">{current.lead}</p>}
+        </header>
+        <div className="ax-ob-body" key={current.id}>
+          {current.id === "account" && <AccountStep account={account} />}
+          {current.id === "resume" && <ResumeStep draft={draft} setDraft={(fn) => setPeople(fn)} />}
+          {current.id === "profile" && <ContactStep draft={draft} setTop={setTop} setAddress={setAddress} />}
+          {current.id === "authorization" && <AuthorizationStep draft={draft} setFact={setFact} />}
+          {current.id === "preferences" && <PreferencesStep draft={draft} setTop={setTop} setFact={setFact} />}
+          {current.id === "screening" && <ScreeningStep draft={draft} setFact={setFact} />}
+          {current.id === "identity" && <IdentityStep draft={draft} setTop={setTop} setFact={setFact} />}
+          {current.id === "permissions" && (
+            <PermissionsStep
+              draft={draft}
+              setTop={setTop}
+              submit={submit?.value ?? null}
+              setSubmit={(value) => setSubmit((v) => (v ? { ...v, value } : v))}
+            />
           )}
-          <footer className="ax-ob-foot">
-            {at > 0 && (
-              <Button variant="ghost" icon={<ArrowLeft size={15} aria-hidden="true" />} onClick={() => go(at - 1)} disabled={saving}>
-                Back
+          {current.id === "connections" && <ConnectionsStep linked={linked} email={draft.email} refresh={refreshLinked} />}
+          {current.id === "questionnaires" && (
+            <QuestionnairesStep
+              onModule={(m) => {
+                learn(m);
+                setSummary((list) => list && list.map((x) => (x.id === m.id ? { ...x, answered: m.answered, total: m.total } : x)));
+              }}
+            />
+          )}
+          {current.id === "review" && (
+            <ReviewStep
+              draft={draft}
+              go={(id) => go(STEPS.findIndex((s) => s.id === id))}
+              submit={submit?.value ?? null}
+              linked={linked}
+              summary={summary}
+            />
+          )}
+        </div>
+        {error && (
+          <p className="ax-error" role="alert">
+            {error}
+          </p>
+        )}
+        <footer className="ax-ob-foot">
+          {at > 0 && (
+            <Button variant="ghost" icon={<ArrowLeft size={15} aria-hidden="true" />} onClick={() => go(at - 1)} disabled={saving}>
+              Back
+            </Button>
+          )}
+          <span className="ax-ob-foot-end">
+            {current.optional && (
+              <Button variant="ghost" onClick={() => persist(at + 1)} disabled={saving}>
+                Skip for now
               </Button>
             )}
-            <span className="ax-ob-foot-end">
-              {current.optional && (
-                <Button variant="ghost" onClick={() => persist(at + 1)} disabled={saving}>
-                  Skip for now
-                </Button>
-              )}
-              {!last ? (
-                <Button variant="primary" loading={saving} onClick={() => persist(at + 1)}>
-                  {current.id === "account" ? "Get started" : "Continue"}
-                  <ArrowRight size={15} aria-hidden="true" />
-                </Button>
-              ) : (
-                <Button variant="primary" loading={saving} onClick={() => persist(at, true)}>
-                  Finish setup
-                </Button>
-              )}
-            </span>
-          </footer>
-        </section>
-      </div>
+            {!last ? (
+              <Button variant="primary" loading={saving} onClick={() => persist(at + 1)}>
+                {current.id === "account" ? "Get started" : "Continue"}
+                <ArrowRight size={15} aria-hidden="true" />
+              </Button>
+            ) : (
+              <Button variant="primary" loading={saving} onClick={() => persist(at, true)}>
+                Finish setup
+              </Button>
+            )}
+          </span>
+        </footer>
+      </section>
     </main>
   );
 }
@@ -709,25 +613,15 @@ type SetFact = (key: string, value: unknown) => void;
 
 function AccountStep({ account }: { account: Account }) {
   return (
-    <div className="ax-ob-stack">
-      <div className="ax-ob-who">
-        <span className="ax-ob-avatar" aria-hidden="true">
-          {(account.email || account.name || "A").trim().charAt(0).toUpperCase()}
-        </span>
-        <span>
-          <strong>{account.email || account.name || "Your account"}</strong>
-          <small>Signed in</small>
-        </span>
-        <Pill tone="ok" dot>
-          Account ready
-        </Pill>
-      </div>
-      <ul className="ax-ob-points">
-        <li>Only your contact details and the roles you want are needed to start applying.</li>
-        <li>Everything is saved when you continue. Close this page and you will pick up at the same step.</li>
-        <li>You decide what AXIOM may do for you. Nothing is submitted until you allow it.</li>
-      </ul>
-    </div>
+    <>
+      <p>
+        Signed in as <strong>{account.email || account.name || "your account"}</strong>.
+      </p>
+      <p className="ax-hint">
+        Setup takes about five minutes and saves as you go. Only your contact details and the roles you want are needed to
+        start; nothing is submitted until you allow it.
+      </p>
+    </>
   );
 }
 
@@ -780,7 +674,7 @@ function ResumeStep({ draft, setDraft }: StepProps & { setDraft: (fn: (d: Draft)
 
   const busy = state === "uploading" || state === "reading";
   return (
-    <div className="ax-ob-stack">
+    <>
       <div
         className={"ax-ob-drop" + (over ? " is-over" : "")}
         onDragOver={(e) => {
@@ -795,9 +689,10 @@ function ResumeStep({ draft, setDraft }: StepProps & { setDraft: (fn: (d: Draft)
           if (file) upload(file);
         }}
       >
-        <Upload size={20} aria-hidden="true" />
-        <strong>Drop your resume here (PDF)</strong>
-        <p>Text-based PDF up to 5 MB. It is attached to applications exactly as uploaded.</p>
+        <Upload size={18} aria-hidden="true" />
+        <p>
+          Drop your resume here as a PDF. <span className="ax-hint">Text-based, up to 5 MB. It is attached to applications exactly as uploaded.</span>
+        </p>
         <input
           ref={input}
           type="file"
@@ -809,43 +704,51 @@ function ResumeStep({ draft, setDraft }: StepProps & { setDraft: (fn: (d: Draft)
             e.target.value = "";
           }}
         />
-        <Button variant="primary" loading={busy} onClick={() => input.current?.click()}>
+        <Button loading={busy} onClick={() => input.current?.click()}>
           {busy ? "Working…" : "Choose PDF"}
         </Button>
       </div>
       {message && (
-        <p className={state === "error" ? "ax-ob-error" : "ax-ob-status"} role={state === "error" ? "alert" : "status"}>
+        <p className={state === "error" ? "ax-error" : "ax-hint"} role={state === "error" ? "alert" : "status"}>
           {message}
         </p>
       )}
       {resumes && resumes.length > 0 && (
-        <div className="ax-ob-resumes">
-          <span className="ax-label">Uploaded</span>
+        <ul className="ax-rows" aria-label="Uploaded resumes">
           {resumes.map((r) => (
-            <div key={r.id} className="ax-ob-resume">
-              <span>{r.name}</span>
+            <li key={r.id} className="ax-row">
+              <span className="ax-row-main">{r.name}</span>
               <Button size="sm" disabled={busy} onClick={() => read(r.id)}>
                 Prefill from this resume
               </Button>
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
       {(draft.work.length > 0 || draft.education.length > 0) && (
-        <div className="ax-ob-summary">
+        <ul className="ax-rows" aria-label="Found in your resume">
           {draft.work.slice(0, 4).map((w, i) => (
-            <div key={"w" + i}>
-              <strong>{w.title}</strong> · {w.company}
-            </div>
+            <li key={"w" + i} className="ax-row">
+              <span className="ax-row-main">
+                <strong>{w.title}</strong>
+                <small>{w.company}</small>
+              </span>
+            </li>
           ))}
           {draft.education.slice(0, 3).map((e, i) => (
-            <div key={"e" + i} className="is-dim">
-              {e.degree} {e.field_of_study ? "· " + e.field_of_study : ""} · {e.school}
-            </div>
+            <li key={"e" + i} className="ax-row">
+              <span className="ax-row-main">
+                <strong>
+                  {e.degree}
+                  {e.field_of_study ? " · " + e.field_of_study : ""}
+                </strong>
+                <small>{e.school}</small>
+              </span>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
-    </div>
+    </>
   );
 }
 
@@ -863,16 +766,16 @@ function ContactStep({
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => setAddress(key, e.target.value),
   });
   return (
-    <div className="ax-ob-stack">
+    <>
       <div className="ax-ob-grid">
         <Input label="Legal first name" {...t("first_name")} autoComplete="given-name" />
         <Input label="Legal last name" {...t("last_name")} autoComplete="family-name" />
-        <Input label="Preferred first name" hint="Optional. Used where a form asks for a preferred name." {...t("preferred_name")} />
+        <Input label="Preferred first name" hint="Optional." {...t("preferred_name")} />
         <Input label="Email" type="email" {...t("email")} autoComplete="email" />
         <Input label="Phone" type="tel" {...t("phone")} autoComplete="tel-national" />
-        <Input label="Country code" hint="For example +1." {...t("phone_country_code")} />
+        <Input label="Country code" placeholder="+1" {...t("phone_country_code")} />
       </div>
-      <Question label="Phone type" asked={ASKED.phoneType}>
+      <Question label="Phone type">
         <Choice label="Phone type" value={draft.phone_type as "Mobile"} options={["Mobile", "Home", "Work"] as const} onChange={(v) => setTop("phone_type", v)} />
       </Question>
       <div className="ax-ob-grid">
@@ -883,11 +786,11 @@ function ContactStep({
         <Input label="Country" {...a("country")} autoComplete="country-name" />
       </div>
       <div className="ax-ob-grid">
-        <Input label="LinkedIn URL" hint={ASKED.linkedin} placeholder="https://www.linkedin.com/in/…" {...t("linkedin")} />
+        <Input label="LinkedIn URL" placeholder="https://www.linkedin.com/in/…" {...t("linkedin")} />
         <Input label="GitHub URL" placeholder="https://github.com/…" {...t("github")} />
         <Input label="Portfolio or website" {...t("website")} />
       </div>
-    </div>
+    </>
   );
 }
 
@@ -900,24 +803,23 @@ function AuthorizationStep({ draft, setFact }: StepProps & { setFact: SetFact })
     <YesNo label={label} value={asBool(f[key])} onChange={(v) => setFact(key, v)} />
   );
   return (
-    <div className="ax-ob-stack">
+    <>
       <div className="ax-ob-list">
-        <Question label="Are you legally authorized to work in the United States?" asked={ASKED.authorization}>
+        <Question label="Are you legally authorized to work in the United States?">
           {yn("work_authorization_us", "Authorized to work in the United States")}
         </Question>
         <Question
           label="Will you now or in the future require visa sponsorship?"
-          asked={ASKED.sponsorship}
           hint="Include future needs such as an H-1B petition after OPT."
         >
           {yn("requires_future_sponsorship_us", "Requires visa sponsorship")}
         </Question>
-        <Question label="Are you at least 18 years old?" asked={ASKED.over18}>
+        <Question label="Are you at least 18 years old?">
           {yn("over_18", "At least 18 years old")}
         </Question>
         <Question label="Do you hold an active U.S. security clearance?">{yn("has_security_clearance", "Holds a security clearance")}</Question>
       </div>
-      <Question label="Current status" asked={ASKED.status} stack>
+      <Question label="Current status" stack>
         <Choice
           label="Current status"
           value={statusChoice}
@@ -935,7 +837,7 @@ function AuthorizationStep({ draft, setFact }: StepProps & { setFact: SetFact })
         <Input label="Country of citizenship" value={String(f.country_of_citizenship || "")} onChange={(e) => setFact("country_of_citizenship", e.target.value)} />
         <Input label="Country of residence" value={String(f.country_of_residence || "")} onChange={(e) => setFact("country_of_residence", e.target.value)} />
       </div>
-    </div>
+    </>
   );
 }
 
@@ -954,7 +856,7 @@ function PreferencesStep({ draft, setTop, setFact }: StepProps & { setTop: SetTo
     .filter((t) => t && !/\b(?:intern|internship|assistant|student|volunteer|fellow)\b/i.test(t));
   const roleSuggestions = Array.from(new Set([...fromResume, ...ROLE_SUGGESTIONS]));
   return (
-    <div className="ax-ob-stack">
+    <>
       <Question label="Roles to look for" stack>
         <Tags
           label="Roles to look for"
@@ -974,7 +876,7 @@ function PreferencesStep({ draft, setTop, setFact }: StepProps & { setTop: SetTo
         />
       </Question>
       <div className="ax-ob-list">
-        <Question label="Are you willing to relocate?" asked={ASKED.relocate}>
+        <Question label="Are you willing to relocate?">
           <YesNo label="Willing to relocate" value={asBool(f.willing_to_relocate)} onChange={(v) => setFact("willing_to_relocate", v)} />
         </Question>
         {asBool(f.willing_to_relocate) === true && (
@@ -997,7 +899,7 @@ function PreferencesStep({ draft, setTop, setFact }: StepProps & { setTop: SetTo
           }}
         />
       </Question>
-      <Question label="Earliest start" asked={ASKED.start} stack>
+      <Question label="Earliest start" stack>
         <Choice
           label="Earliest start"
           value={(START_OPTIONS as readonly string[]).includes(draft.availability) ? (draft.availability as (typeof START_OPTIONS)[number]) : ""}
@@ -1011,7 +913,7 @@ function PreferencesStep({ draft, setTop, setFact }: StepProps & { setTop: SetTo
       <div className="ax-ob-grid">
         <Input
           label="Desired annual base salary (USD)"
-          hint={ASKED.salary + ". Leave empty to answer “negotiable” or pick the posted range."}
+          hint="Leave empty to answer “negotiable” or pick the posted range."
           inputMode="numeric"
           value={draft.salary_expectation}
           onChange={(e) => setTop("salary_expectation", e.target.value.replace(/[^\d]/g, ""))}
@@ -1024,43 +926,33 @@ function PreferencesStep({ draft, setTop, setFact }: StepProps & { setTop: SetTo
           onChange={(e) => setFact("notice_period", e.target.value === "" ? undefined : Number(e.target.value.replace(/\D/g, "")))}
         />
       </div>
-    </div>
+    </>
   );
 }
 
-const GENDER = ["Male", "Female", "Non-binary"] as const;
-const VETERAN = ["Not a veteran", "Protected veteran"] as const;
-const DISABILITY = ["No disability", "Yes, I have a disability"] as const;
-
-function ScreeningStep({ draft, setTop, setFact }: StepProps & { setTop: SetTop; setFact: SetFact }) {
+function ScreeningStep({ draft, setFact }: StepProps & { setFact: SetFact }) {
   const f = foldFacts(draft.facts);
   const yn = (key: string, label: string) => (
     <YesNo label={label} value={asBool(f[key])} onChange={(v) => setFact(key, v)} />
   );
   return (
-    <div className="ax-ob-stack">
-      <p className="ax-ob-note">
-        Answer only what is true. A question you leave unanswered is never answered for you: AXIOM asks you when a form
-        needs it. Tax-credit screening and more questions have their own optional step later.
-      </p>
       <div className="ax-ob-list">
         <Question
           label="Apart from the employers in your work history, have you ever worked for a company you apply to?"
-          asked={ASKED.previously}
           hint="“Have you worked for this company before?” is answered Yes for an employer in your work history. This answers it for every other employer."
         >
           {yn("previously_employed_here", "Worked for another company you apply to")}
         </Question>
-        <Question label="Do you have relatives working at companies you apply to?" asked={ASKED.relatives} hint="Answer No unless you know of one; you can add exceptions later.">
+        <Question label="Do you have relatives working at companies you apply to?" hint="Answer No unless you know of one; you can add exceptions later.">
           {yn("has_relatives_at_employer", "Relatives at companies you apply to")}
         </Question>
-        <Question label="Have you been employed by a government agency in the last 5 years?" asked={ASKED.government}>
+        <Question label="Have you been employed by a government agency in the last 5 years?">
           {yn("government_employment_history", "Government employment in the last 5 years")}
         </Question>
-        <Question label="Are you, or a close relative, a government or public official?" asked={ASKED.official}>
+        <Question label="Are you, or a close relative, a government or public official?">
           {yn("government_official", "Government or public official")}
         </Question>
-        <Question label="Are you bound by a non-compete or other restrictive agreement?" asked={ASKED.noncompete}>
+        <Question label="Are you bound by a non-compete or other restrictive agreement?">
           <YesNo
             label="Bound by a non-compete"
             value={asBool(f.has_non_compete)}
@@ -1114,10 +1006,18 @@ function ScreeningStep({ draft, setTop, setFact }: StepProps & { setTop: SetTop;
           {yn("referred_by_employee", "Referred by an employee")}
         </Question>
       </div>
+  );
+}
 
-      <h2 className="ax-ob-sub">Self-identification</h2>
-      <p className="ax-ob-sub-lead">Voluntary equal-opportunity questions.</p>
-      <Question label="How should AXIOM answer self-identification questions?" asked={ASKED.demographics} stack>
+const GENDER = ["Male", "Female", "Non-binary"] as const;
+const VETERAN = ["Not a veteran", "Protected veteran"] as const;
+const DISABILITY = ["No disability", "Yes, I have a disability"] as const;
+
+function IdentityStep({ draft, setTop, setFact }: StepProps & { setTop: SetTop; setFact: SetFact }) {
+  const f = foldFacts(draft.facts);
+  return (
+    <>
+      <Question label="How should AXIOM answer self-identification questions?" stack>
         <Segmented
           label="Self-identification answers"
           value={draft.decline_demographics ? "decline" : "answer"}
@@ -1161,34 +1061,7 @@ function ScreeningStep({ draft, setTop, setFact }: StepProps & { setTop: SetTop;
         </>
       )}
       <Input label="Pronouns (optional)" value={String(f.pronouns || "")} onChange={(e) => setFact("pronouns", e.target.value)} />
-    </div>
-  );
-}
-
-function Toggle({
-  checked,
-  onChange,
-  title,
-  detail,
-  badge,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  title: string;
-  detail: string;
-  badge?: string;
-}) {
-  return (
-    <label className="ax-ob-toggle">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      <span>
-        <strong>
-          {title}
-          {badge && <Pill tone="ok">{badge}</Pill>}
-        </strong>
-        <small>{detail}</small>
-      </span>
-    </label>
+    </>
   );
 }
 
@@ -1202,45 +1075,42 @@ function PermissionsStep({
 }: StepProps & { setTop: SetTop; submit: boolean | null; setSubmit: (v: boolean) => void }) {
   const source = draft.application_source;
   return (
-    <div className="ax-ob-stack">
-      <div className="ax-ob-toggles">
+    <>
+      <div className="ax-ob-list">
         {submit !== null && (
-          <Toggle
+          <Check
             checked={submit}
             onChange={setSubmit}
-            title="Submit applications for me"
-            badge="Recommended"
-            detail="Applications submit once every required answer is verified. When this is off, AXIOM fills each application and stops before the final submit so you can review it."
+            label="Submit applications for me (recommended)"
+            note="Applications submit once every required answer is verified. When this is off, AXIOM fills each application and stops before the final submit so you can review it."
           />
         )}
-        <Toggle
+        <Check
           checked={draft.allow_account_creation}
           onChange={(v) => setTop("allow_account_creation", v)}
-          title="Create employer accounts for me"
-          badge="Recommended"
-          detail="Workday, Oracle and similar portals need an account per employer. AXIOM generates a strong password for each and stores it encrypted. When this is off, those applications stop at the sign-in page."
+          label="Create employer accounts for me (recommended)"
+          note="Workday, Oracle and similar portals need an account per employer. AXIOM generates a strong password for each and stores it encrypted. When this is off, those applications stop at the sign-in page."
         />
-        <Toggle
+        <Check
           checked={draft.accept_all_application_terms}
           onChange={(v) => {
             setTop("accept_all_application_terms", v);
             setTop("allow_application_consents", v);
           }}
-          title="Accept application terms and privacy notices"
-          badge="Recommended"
-          detail={`Most forms require it before they submit (${ASKED.consent}). Required attestations are signed with your legal name. When this is off, those applications stop for you.`}
+          label="Accept application terms and privacy notices (recommended)"
+          note="Most forms require it before they submit. Required attestations are signed with your legal name. When this is off, those applications stop for you."
         />
-        <Toggle
+        <Check
           checked={!draft.accept_required_marketing}
           onChange={(v) => setTop("accept_required_marketing", !v)}
-          title="Decline marketing and talent-community opt-ins"
-          detail="Newsletters, job alerts and sharing your data for other roles are declined whenever the form allows it."
+          label="Decline marketing and talent-community opt-ins"
+          note="Newsletters, job alerts and sharing your data for other roles are declined whenever the form allows it."
         />
-        <Toggle
+        <Check
           checked={draft.autonomous}
           onChange={(v) => setTop("autonomous", v)}
-          title="Apply automatically to strong matches"
-          detail="AXIOM discovers jobs, ranks them against your profile, and applies without asking each time."
+          label="Apply automatically to strong matches"
+          note="AXIOM discovers jobs, ranks them against your profile, and applies without asking each time."
         />
       </div>
       {draft.autonomous && (
@@ -1255,10 +1125,10 @@ function PermissionsStep({
           onChange={(e) => setTop("minimum_fit", Number(e.target.value))}
         />
       )}
-      <Question label="“How did you hear about us?”" asked={ASKED.source} hint="Used when the form offers this option; otherwise the closest one." stack>
+      <Question label="“How did you hear about us?”" hint="Used when the form offers this option; otherwise the closest one." stack>
         <Choice label="How did you hear about us" value={source} options={SOURCES.includes(source) || !source ? SOURCES : [...SOURCES, source]} onChange={(v) => setTop("application_source", v)} />
       </Question>
-    </div>
+    </>
   );
 }
 
@@ -1285,101 +1155,116 @@ function ConnectionsStep({ linked, email, refresh }: { linked: Linked; email: st
       setBusy("");
     }
   };
+  const note = (where: "model" | "mail") =>
+    msg?.where === where && (
+      <p className={msg.ok ? "ax-hint" : "ax-error"} role={msg.ok ? "status" : "alert"}>
+        {msg.text}
+      </p>
+    );
   return (
-    <div className="ax-ob-stack">
-      <section className="ax-ob-conn" aria-labelledby="conn-model">
-        <header>
-          <h2 id="conn-model">AI model</h2>
-          {model ? <Pill tone={model.model_ready ? "ok" : "warn"} dot>{model.model_ready ? "Ready" : "Key needed"}</Pill> : <Pill>Unknown</Pill>}
-        </header>
-        <p>Reads job pages and writes your answers. One key is enough; it is stored encrypted and never shown again.</p>
-        {model && !model.model_ready && (
+    <>
+      <Panel
+        title="AI model"
+        actions={
+          model ? (
+            <Pill tone={model.model_ready ? "neutral" : "warn"} dot>
+              {model.model_ready ? "Ready" : "Key needed"}
+            </Pill>
+          ) : undefined
+        }
+      >
+        <div className="ax-stack">
+          <p className="ax-hint">Reads job pages and writes your answers. One key is enough; it is stored encrypted and never shown again.</p>
+          {model && !model.model_ready && (
+            <form
+              className="ax-stack"
+              onSubmit={(e) => {
+                e.preventDefault();
+                run("model", () => api("/connections", "PUT", { values: { llm_provider: chosen, [keyName]: key.trim() } }).then(() => setKey("")), "Key saved.");
+              }}
+            >
+              <Field label="Provider">
+                <select value={chosen} onChange={(e) => setProvider(e.target.value)}>
+                  {PROVIDERS.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Input label="API key" type="password" autoComplete="off" spellCheck={false} placeholder="Paste here" value={key} onChange={(e) => setKey(e.target.value)} />
+              <div>
+                <Button type="submit" size="sm" loading={busy === "model"} disabled={!key.trim()}>
+                  Save key
+                </Button>
+              </div>
+            </form>
+          )}
+          {note("model")}
+        </div>
+      </Panel>
+
+      <Panel
+        title="Gmail"
+        actions={
+          mailboxes ? (
+            <Pill tone="neutral" dot={!mailboxes.length}>
+              {mailboxes.length ? "Connected" : "Not connected"}
+            </Pill>
+          ) : undefined
+        }
+      >
+        <div className="ax-stack">
+          <p className="ax-hint">Reads verification codes, sign-in links and receipts. Read-only; nothing is sent from it.</p>
+          {mailboxes && mailboxes.length > 0 && (
+            <ul className="ax-rows">
+              {mailboxes.map((b) => (
+                <li key={b.id} className="ax-row">
+                  <span className="ax-row-main">
+                    <strong>{b.email}</strong>
+                    <small>{b.provider === "gmail_oauth" ? "Google sign-in" : "App password"}</small>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
           <form
-            className="ax-ob-grid"
+            className="ax-stack"
             onSubmit={(e) => {
               e.preventDefault();
-              run("model", () => api("/connections", "PUT", { values: { llm_provider: chosen, [keyName]: key.trim() } }).then(() => setKey("")), "Key saved.");
+              run("mail", () => api("/mail/imap", "POST", { email: box.email || email, app_password: box.app_password }).then(() => setBox({ email: "", app_password: "" })), "Gmail connected.");
             }}
           >
-            <div className="ax-field">
-              <label className="ax-label" htmlFor="ob-provider">
-                Provider
-              </label>
-              <select id="ob-provider" className="ax-control" value={chosen} onChange={(e) => setProvider(e.target.value)}>
-                {PROVIDERS.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <Input label="API key" type="password" autoComplete="off" spellCheck={false} placeholder="Paste here" value={key} onChange={(e) => setKey(e.target.value)} />
-            <div className="ax-ob-form-end">
-              <Button type="submit" variant="primary" size="sm" loading={busy === "model"} disabled={!key.trim()}>
-                Save key
+            <Input label={mailboxes?.length ? "Connect another Gmail" : "Gmail address"} type="email" autoComplete="off" placeholder={email || "you@gmail.com"} hint="Empty: the email in your profile." value={box.email} onChange={(e) => setBox({ ...box, email: e.target.value })} />
+            <Input
+              label="Gmail app password"
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="xxxx xxxx xxxx xxxx"
+              hint={
+                <>
+                  16 letters from <External href="https://myaccount.google.com/apppasswords">myaccount.google.com/apppasswords</External> (needs 2-Step Verification).
+                </>
+              }
+              value={box.app_password}
+              onChange={(e) => setBox({ ...box, app_password: e.target.value })}
+            />
+            <div>
+              <Button type="submit" size="sm" loading={busy === "mail"} disabled={!box.app_password.trim()}>
+                Connect Gmail
               </Button>
             </div>
           </form>
-        )}
-        {msg?.where === "model" && <p className={msg.ok ? "ax-ob-status" : "ax-ob-error"} role={msg.ok ? "status" : "alert"}>{msg.text}</p>}
-      </section>
-
-      <section className="ax-ob-conn" aria-labelledby="conn-mail">
-        <header>
-          <h2 id="conn-mail">Gmail</h2>
-          {mailboxes ? <Pill tone={mailboxes.length ? "ok" : "neutral"} dot>{mailboxes.length ? "Connected" : "Not connected"}</Pill> : <Pill>Unknown</Pill>}
-        </header>
-        <p>Reads verification codes, sign-in links and receipts. Read-only use; nothing is sent from it.</p>
-        {mailboxes && mailboxes.length > 0 && (
-          <ul className="ax-ob-boxes">
-            {mailboxes.map((b) => (
-              <li key={b.id}>
-                <strong>{b.email}</strong>
-                <small>{b.provider === "gmail_oauth" ? "Google sign-in" : "app password"}</small>
-              </li>
-            ))}
-          </ul>
-        )}
-        <form
-          className="ax-ob-grid"
-          onSubmit={(e) => {
-            e.preventDefault();
-            run("mail", () => api("/mail/imap", "POST", { email: box.email || email, app_password: box.app_password }).then(() => setBox({ email: "", app_password: "" })), "Gmail connected.");
-          }}
-        >
-          <Input label={mailboxes?.length ? "Connect another Gmail" : "Gmail address"} type="email" autoComplete="off" placeholder={email || "you@gmail.com"} hint="Empty: the email in your profile." value={box.email} onChange={(e) => setBox({ ...box, email: e.target.value })} />
-          <Input
-            label="Gmail app password"
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="xxxx xxxx xxxx xxxx"
-            hint={
-              <>
-                16 letters from{" "}
-                <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer">
-                  myaccount.google.com/apppasswords
-                </a>{" "}
-                (needs 2-Step Verification).
-              </>
-            }
-            value={box.app_password}
-            onChange={(e) => setBox({ ...box, app_password: e.target.value })}
-          />
-          <div className="ax-ob-form-end">
-            <Button type="submit" size="sm" loading={busy === "mail"} disabled={!box.app_password.trim()}>
-              Connect Gmail
-            </Button>
-          </div>
-        </form>
-        {msg?.where === "mail" && <p className={msg.ok ? "ax-ob-status" : "ax-ob-error"} role={msg.ok ? "status" : "alert"}>{msg.text}</p>}
-      </section>
-      <p className="ax-ob-note">Telegram alerts, captcha solving and extra job sources are in Setup › Connections whenever you want them.</p>
-    </div>
+          {note("mail")}
+        </div>
+      </Panel>
+      <p className="ax-hint">Telegram alerts, captcha solving and extra job sources are in Settings › Connections whenever you want them.</p>
+    </>
   );
 }
 
-// ---------- Optional questionnaires: the same modules as Setup › Knowledge, embedded ----------
+// ---------- Optional questionnaires: the same modules as Profile › Knowledge, embedded ----------
 function QuestionnairesStep({ onModule }: { onModule: (m: Module) => void }) {
   const { data, error, reload, setModule } = useQuestionnaires();
   const [open, setOpen] = useState("");
@@ -1403,19 +1288,16 @@ function QuestionnairesStep({ onModule }: { onModule: (m: Module) => void }) {
       />
     );
   return (
-    <div className="ax-ob-stack">
-      <p className="ax-ob-note">
-        Nothing here is required. Each one is saved as you answer and used by every application; change or clear any answer
-        later in Setup › Knowledge.
+    <>
+      <p className="ax-hint">
+        Nothing here is required. Each is saved as you answer and used by every application; change or clear any answer later in
+        Profile › Knowledge.
       </p>
       <ModuleList data={data} onOpen={setOpen} />
-      <div className="ax-ob-overall">
-        <Meter percent={data.completion.percent} label="Questionnaires answered" />
-        <small>
-          {data.completion.answered} of {data.completion.total} answered
-        </small>
-      </div>
-    </div>
+      <p className="ax-hint">
+        {data.completion.answered} of {data.completion.total} answered
+      </p>
+    </>
   );
 }
 
@@ -1446,7 +1328,7 @@ function ReviewStep({
     () => [
       {
         step: "profile" as StepId,
-        title: "Profile",
+        title: "Contact details",
         rows: [
           ["Name", [draft.first_name, draft.last_name].filter(Boolean).join(" ") || "Missing"],
           ["Email", draft.email || "Missing"],
@@ -1489,8 +1371,12 @@ function ReviewStep({
           ["Criminal conviction", yesno(f.criminal_conviction)],
           ["Export-control country", yesno(f.export_control_restricted_country_history)],
           ["Asylee or refugee", yesno(f.has_asylee_status)],
-          ["Self-identification", draft.decline_demographics ? "Decline to self-identify" : "Use my information"],
         ],
+      },
+      {
+        step: "identity" as StepId,
+        title: "Self-identification",
+        rows: [["Self-identification", draft.decline_demographics ? "Decline to self-identify" : "Use my information"]],
       },
       {
         step: "permissions" as StepId,
@@ -1515,55 +1401,55 @@ function ReviewStep({
   );
   const open = groups.flatMap((g) => g.rows).filter(([, v]) => WARN.has(v)).length;
   return (
-    <div className="ax-ob-review">
+    <>
       {open > 0 && (
-        <p className="ax-ob-note">
-          {open === 1 ? "1 item needs" : `${open} items need`} attention. You can finish now: when a form asks for something
-          missing, AXIOM uses your profile if the answer is certain, otherwise it pauses that application and asks you.
-        </p>
+        <div className="ax-notice is-warn">
+          <span>
+            {open === 1 ? "1 item needs" : `${open} items need`} attention. You can finish now: when a form asks for something
+            missing, AXIOM uses your profile if the answer is certain, otherwise it pauses that application and asks you.
+          </span>
+        </div>
       )}
       {groups.map((g) => (
-        <section key={g.title} className="ax-ob-group">
-          <div className="ax-ob-group-head">
-            <h2>{g.title}</h2>
+        <Panel
+          key={g.title}
+          title={g.title}
+          actions={
             <button type="button" className="ax-link" onClick={() => go(g.step)}>
               Edit
             </button>
-          </div>
-          <dl>
-            {g.rows.map(([k, v]) => (
-              <React.Fragment key={k}>
-                <dt>{k}</dt>
-                <dd className={WARN.has(v) ? "is-warn" : ""}>{v}</dd>
-              </React.Fragment>
-            ))}
-          </dl>
-        </section>
+          }
+        >
+          <Facts
+            items={g.rows.map(([k, v]): [string, React.ReactNode] => [
+              k,
+              WARN.has(v) ? (
+                <Pill tone="warn" dot>
+                  {v}
+                </Pill>
+              ) : (
+                v
+              ),
+            ])}
+          />
+        </Panel>
       ))}
-      <section className="ax-ob-group">
-        <div className="ax-ob-group-head">
-          <h2>
-            Questionnaires <Pill tone="neutral">Optional</Pill>
-          </h2>
+      <Panel
+        title="Questionnaires"
+        actions={
           <button type="button" className="ax-link" onClick={() => go("questionnaires")}>
             {summary && summary.some((m) => m.answered) ? "Edit" : "Start"}
           </button>
-        </div>
-        <dl>
-          {(summary || []).map((m) => (
-            <React.Fragment key={m.id}>
-              <dt>{m.title}</dt>
-              <dd>{m.answered ? `${m.answered} of ${m.total} answered` : "Skipped"}</dd>
-            </React.Fragment>
-          ))}
-          {!summary && (
-            <>
-              <dt>Questionnaires</dt>
-              <dd>Skipped</dd>
-            </>
-          )}
-        </dl>
-      </section>
-    </div>
+        }
+      >
+        <Facts
+          items={
+            summary
+              ? summary.map((m): [string, string] => [m.title, m.answered ? `${m.answered} of ${m.total} answered` : "Skipped"])
+              : [["Questionnaires", "Skipped"]]
+          }
+        />
+      </Panel>
+    </>
   );
 }

@@ -1,10 +1,9 @@
-/* Element defaults, type scale and the scroll model (DESIGN.md §2, §3).
+/* Element defaults and the scroll model (DESIGN.md).
 
    THE SCROLL MODEL. The document never scrolls: html, body and #root are exactly the viewport and body clips. The shell
-   (shell.css) is a grid of [sidebar | main]; main is a column of a 56px top bar and ONE scroll region (.ax-scroll).
-   Screens that are not the shell (sign-in, setup guide) wrap themselves in .ax-screen, which is their own scroll
-   region. Everything else must size to its content and let that region scroll. A page that needs a second vertical
-   scroller (a modal, a drawer, a table filling the page) owns it explicitly. */
+   (shell.css) is a column of the top bar and main; main is the page title, banners and ONE scroll region (.ax-scroll). Screens
+   that are not the shell (sign-in, setup guide) wrap themselves in .ax-screen, which is their own scroll region. A page
+   that needs a second vertical scroller (a modal, a drawer, a table filling the page) owns it explicitly. */
 
 *,
 *::before,
@@ -25,13 +24,13 @@ body,
 body {
   margin: 0;
   overflow: hidden;
-  background: var(--ground);
+  background: var(--plate);
   color: var(--ink);
-  font-family: var(--font-sans);
-  font-size: var(--text-ui);
-  line-height: 1.5;
-  font-variant-numeric: tabular-nums;
-  font-optical-sizing: auto;
+  font-family: var(--font-text);
+  font-size: var(--text-body);
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: 0.003em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -39,9 +38,6 @@ body {
   overscroll-behavior: none;
 }
 
-* {
-  font-variant-numeric: tabular-nums;
-}
 
 h1,
 h2,
@@ -50,29 +46,43 @@ p {
   margin: 0;
 }
 
+b,
+strong {
+  font-weight: 600;
+}
+
+/* Engraved: wide Archivo. Headings and labels are lowercase, like the legends on a Braun panel; sentences stay sentences. */
 h1,
 h2,
 h3 {
+  font-stretch: var(--wide);
+  font-weight: 500;
   text-wrap: balance;
+}
+h1,
+h2 {
+  text-transform: lowercase;
 }
 
 h1 {
-  font-size: var(--text-title);
-  line-height: 1.2;
-  font-weight: 600;
-  letter-spacing: -0.015em;
+  font-size: var(--text-page);
+  line-height: 1.1;
+  letter-spacing: -0.012em;
 }
 
 h2 {
-  font-size: var(--text-emphasis);
-  line-height: 1.35;
-  font-weight: 600;
+  font-size: var(--text-title);
+  line-height: 1.17;
+  letter-spacing: -0.006em;
 }
 
 h3 {
-  font-size: var(--text-ui);
-  line-height: 1.4;
-  font-weight: 600;
+  font-size: var(--text-sub);
+  line-height: 1.2;
+}
+
+small {
+  font-size: var(--text-meta);
 }
 
 a {
@@ -88,31 +98,32 @@ a,
 code,
 kbd,
 pre,
+time,
 .mono {
-  font-family: var(--font-code);
+  font-family: var(--font-data);
 }
 
 code,
-.mono {
-  font-size: 0.92em;
+.mono,
+time {
+  font-size: var(--text-meta);
 }
 
 code {
-  background: var(--chip);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 1px 5px;
+  padding: 1px 4px;
+  border-radius: var(--radius);
+  background: var(--tint);
   overflow-wrap: anywhere;
 }
 
 pre {
-  margin: 8px 0 0;
-  padding: 12px;
-  background: var(--field);
+  margin: var(--space-2) 0 0;
+  padding: var(--space-3);
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  font: 12px/1.5 var(--font-code);
+  border-radius: var(--radius);
+  background: none;
   color: var(--ink-2);
+  font: var(--text-meta) / 1.5 var(--font-data);
   overflow: auto;
   max-height: 320px;
   white-space: pre-wrap;
@@ -120,15 +131,158 @@ pre {
 }
 
 kbd {
-  font-size: var(--text-micro);
+  font-size: var(--text-meta);
 }
 
-input,
-select,
-textarea,
 button {
   font: inherit;
   color: inherit;
+}
+
+/* A control is a recess cut into the plate, with a real edge. */
+input,
+select,
+textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  box-shadow:
+    inset 0 1px 3px var(--shade),
+    0 0 0 1px var(--line-strong);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-ui);
+}
+
+textarea {
+  resize: vertical;
+  line-height: 1.45;
+}
+
+textarea.code {
+  font: var(--text-meta) / 1.55 var(--font-data);
+}
+
+/* Checkboxes and radios are drawn here, so they sit quietly in a row of text. */
+input[type="checkbox"],
+input[type="radio"] {
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  box-shadow: inset 0 1px 2px var(--shade);
+  cursor: pointer;
+}
+input[type="radio"] {
+  border-radius: 50%;
+}
+input[type="checkbox"]:checked,
+input[type="radio"]:checked {
+  border-color: var(--ink);
+  background: var(--ink);
+  box-shadow: none;
+}
+input[type="checkbox"]:checked::after {
+  content: "";
+  width: 10px;
+  height: 10px;
+  background: var(--ground);
+  clip-path: polygon(14% 44%, 0 58%, 38% 96%, 100% 22%, 86% 8%, 37% 66%);
+}
+input[type="radio"]:checked::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ground);
+}
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus-visible {
+  outline-offset: 2px;
+}
+
+input[type="file"] {
+  padding: 3px 4px;
+  color: var(--ink-2);
+}
+input[type="file"]::file-selector-button {
+  height: 26px;
+  margin-right: var(--space-2);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--key);
+  box-shadow:
+    inset 0 1px 0 var(--key-top),
+    0 1px 0 var(--key-bot);
+  color: var(--key-ink);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  box-shadow:
+    inset 0 1px 3px var(--shade),
+    0 0 0 1px var(--ink-2);
+}
+input[type="checkbox"]:hover,
+input[type="radio"]:hover {
+  border-color: var(--ink-2);
+  box-shadow: inset 0 1px 2px var(--shade);
+}
+input[type="checkbox"]:checked:hover,
+input[type="radio"]:checked:hover {
+  box-shadow: none;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 0;
+}
+
+input[aria-invalid="true"],
+textarea[aria-invalid="true"],
+select[aria-invalid="true"] {
+  box-shadow:
+    inset 0 1px 3px var(--shade),
+    0 0 0 1.5px var(--bad);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.55;
+}
+
+select {
+  appearance: none;
+  padding-right: 28px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--ink-2) 50%), linear-gradient(135deg, var(--ink-2) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 52%,
+    calc(100% - 10px) 52%;
+  background-size:
+    4px 4px,
+    4px 4px;
+  background-repeat: no-repeat;
 }
 
 select option {
@@ -138,11 +292,12 @@ select option {
 
 input::placeholder,
 textarea::placeholder {
-  color: var(--ink-3);
+  color: var(--ink-2);
+  opacity: 1;
 }
 
 :focus-visible {
-  outline: 2px solid var(--brand);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -153,8 +308,8 @@ textarea::placeholder {
 }
 
 ::selection {
-  background: var(--brand-soft);
-  color: var(--ink);
+  background: var(--ink);
+  color: var(--ground);
 }
 
 .sr-only {
@@ -183,7 +338,7 @@ textarea::placeholder {
 ::-webkit-scrollbar-thumb {
   background: var(--line-strong);
   border: 2px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--radius);
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {

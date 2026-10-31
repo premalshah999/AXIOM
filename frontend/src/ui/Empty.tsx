@@ -1,7 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
-/** One line of what is missing and the one action that fixes it. */
+/** What is missing and the one action that fixes it. The look, including whether `icon` shows, is in components.css. */
 export function Empty({
   title,
   hint,

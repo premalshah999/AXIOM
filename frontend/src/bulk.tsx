@@ -3,18 +3,17 @@
 // through the one-click path, so duplicate protection and every admission guard decide each job (POST
 // /api/jobs/apply-many); the outcome of each is listed here.
 import { useCallback, useMemo, useState } from "react";
-import { X } from "lucide-react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useAction } from "./hooks";
 import { appliedState } from "./model";
 import type { ApplyManyResult, ApplyOutcome } from "./types";
-import { plural, shortId } from "./ui";
-import { Panel } from "./ui/index";
+import { plural, shortId } from "./format";
+import { Button, Panel } from "./ui/index";
 import { StatusPill } from "./worktools";
 
 // The server applies to at most this many jobs per request (owner_apply.MANY).
-export const MAX_SELECTED = 50;
+const MAX_SELECTED = 50;
 
 export type Selection = ReturnType<typeof useSelection>;
 
@@ -69,7 +68,7 @@ const OUTCOME_LABEL: Record<ApplyOutcome, string> = {
   refused: "not applied",
 };
 
-export function summarize(summary: ApplyManyResult["summary"]) {
+function summarize(summary: ApplyManyResult["summary"]) {
   return (Object.keys(OUTCOME_LABEL) as ApplyOutcome[])
     .filter((key) => summary[key])
     .map((key) => `${summary[key]} ${OUTCOME_LABEL[key]}`)
@@ -149,16 +148,12 @@ export function ApplyOutcomes({
       waits.set(what, (waits.get(what) || 0) + 1);
     }
   const row = (r: ApplyManyResult["results"][number]) => (
-    <li key={r.job_id} className="ax-outcome">
-      <span>
+    <li key={r.job_id} className="ax-row">
+      <span className="ax-row-main">
         <button type="button" className="ax-link" onClick={() => openJob(r.job_id)}>
-          <strong>
-            {r.company || r.title
-              ? `${r.company || "Employer"} · ${r.title || ""}`
-              : shortId(r.job_id)}
-          </strong>
+          {r.company || r.title ? `${r.company || "Employer"} · ${r.title || ""}` : shortId(r.job_id)}
         </button>
-        <span className="ax-note"> {r.message}</span>
+        {r.message && <small>{r.message}</small>}
       </span>
       <StatusPill
         state={r.outcome === "refused" ? "failed" : r.outcome === "already" ? r.state : appliedState(r.outcome)}
@@ -172,29 +167,31 @@ export function ApplyOutcomes({
       actions={
         <>
           <span className="ax-note">{summarize(result.summary)}</span>
-          <button type="button" className="ax-icon-btn" aria-label="Dismiss the results" onClick={onClose}>
-            <X size={16} />
-          </button>
+          <Button size="sm" variant="ghost" onClick={onClose}>
+            Dismiss
+          </Button>
         </>
       }
     >
-      {waits.size > 0 && (
-        <p className="ax-note">
-          {[...waits].map(([what, n]) => `${n} wait for ${what}`).join(" · ")}. They start on their own, in Jobs ›
-          In progress.
-        </p>
-      )}
-      {refused.length > 0 && (
-        <ul className="ax-outcomes" aria-label="Jobs not applied to">
-          {refused.map(row)}
-        </ul>
-      )}
-      {others.length > 0 && (
-        <details className="ax-fold">
-          <summary>Show each job ({others.length})</summary>
-          <ul className="ax-outcomes">{others.map(row)}</ul>
-        </details>
-      )}
+      <div className="dr-stack">
+        {waits.size > 0 && (
+          <p className="ax-note">
+            {[...waits].map(([what, n]) => `${n} wait for ${what}`).join(" · ")}. They start on their own; follow them in
+            Pipeline.
+          </p>
+        )}
+        {refused.length > 0 && (
+          <ul className="ax-rows" aria-label="Jobs not applied to">
+            {refused.map(row)}
+          </ul>
+        )}
+        {others.length > 0 && (
+          <details className="ax-fold">
+            <summary>Show each job ({others.length})</summary>
+            <ul className="ax-rows">{others.map(row)}</ul>
+          </details>
+        )}
+      </div>
     </Panel>
   );
 }

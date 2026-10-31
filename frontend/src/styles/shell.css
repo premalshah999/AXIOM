@@ -1,62 +1,345 @@
-/* The application frame: sidebar, top bar, the one scroll region, command palette (DESIGN.md §3, §4).
-   Layout summary:  .ax-app = grid [sidebar | main];  .ax-main = column [top bar | banners | .ax-scroll]. */
+/* The application frame: the top plate, the page title, the one scroll region, command palette (DESIGN.md, Shell).
+   .ax-app = column [top plate | .ax-main | the phone's tuner];  .ax-main = column [page title | banners | .ax-scroll]. */
 
 .skip {
   position: absolute;
-  left: 12px;
+  left: var(--space-3);
   top: -48px;
   z-index: 200;
-  padding: 8px 12px;
-  background: var(--ink);
-  color: var(--ground);
-  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  background: var(--brand);
+  color: var(--brand-ink);
+  border-radius: var(--radius);
+  font-weight: 600;
 }
 .skip:focus {
-  top: 10px;
+  top: var(--space-3);
 }
 
 .ax-app {
-  /* Inside the shell the legacy bar offset is zero: the top bar is outside the scroll region, so sticky heads and
-     sticky side navs pin to the region's own top. (Screens outside the shell keep the 56px --bar-h.) */
-  --bar-h: 0px;
-  display: grid;
-  grid-template-columns: var(--side-w) minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   height: 100%;
-  background: radial-gradient(1100px 480px at 78% -12%, var(--glow), transparent 62%), var(--ground);
-  transition: grid-template-columns var(--dur-slow) var(--ease);
 }
-.ax-app.is-rail {
-  grid-template-columns: var(--side-w-collapsed) minmax(0, 1fr);
-}
-
 .ax-main {
   display: flex;
+  flex: 1;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  height: 100%;
 }
 
-/* ---------- top bar ---------- */
-.ax-top {
-  position: sticky;
-  top: 0;
-  z-index: 20;
+/* ---------- the top plate: one grid with the panel below it, the rail and then the scale ---------- */
+.ax-bar {
+  position: relative;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: var(--rail) minmax(0, 1fr);
+  flex: none;
+  height: var(--bar-height);
+  padding-inline: var(--gutter);
+  border-bottom: 1px solid var(--ink);
+}
+.ax-rail {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding-block: 15px 11px;
+}
+.ax-brand {
+  display: block;
+  width: max-content;
+  color: var(--ink);
+  text-decoration: none;
+}
+.ax-mark {
+  display: block;
+  height: auto;
+  overflow: visible;
+}
+.ax-mark path,
+.ax-mark .o {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+}
+.ax-mark .lamp {
+  fill: var(--live);
+}
+:root[data-run="on"] .ax-mark .lamp {
+  animation: ax-breathe 3.2s ease-in-out infinite;
+}
+.ax-theme {
   display: flex;
   align-items: center;
+  gap: 7px;
+  color: var(--ink-2);
+  font-family: var(--font-data);
+  font-size: 12px;
+  line-height: 1;
+}
+.ax-theme-switch {
+  position: relative;
   flex: none;
-  gap: var(--space-3);
-  height: var(--top-h);
-  padding: 0 var(--space-6);
-  border-bottom: 1px solid var(--line);
-  background: var(--surface);
+  width: 44px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--ground-3);
+  box-shadow:
+    inset 0 1px 2px var(--shade),
+    0 0 0 1px var(--line-strong);
+  cursor: pointer;
+}
+.ax-theme-switch::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 14px;
+  border-radius: 1px;
+  background: var(--key);
+  box-shadow:
+    inset 0 1px 0 var(--key-top),
+    0 1px 0 var(--key-bot);
+  transition: left 180ms cubic-bezier(0.3, 1.4, 0.6, 1);
+}
+:root[data-theme="dark"] .ax-theme-switch::before,
+:root:not([data-theme]) .ax-theme-switch::before {
+  left: 22px;
+}
+
+/* The scale. Nine stations, the last three narrower where the plate is short; the needle sits on whichever one you are on. */
+.ax-tuner {
+  --needle-at: calc((min(var(--i, 0), 6) + max(var(--i, 0) - 6, 0) * var(--soon)) / (6 + 3 * var(--soon)) * 100%);
+  position: relative;
+  min-width: 0;
+}
+.ax-stations {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  height: 100%;
+}
+.ax-st {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-width: 0;
+  padding: 0 4px 25px var(--inset);
+  color: var(--ink);
+  text-decoration: none;
+}
+/* A major tick at every station. */
+.ax-st::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 16px;
+  background: var(--ink);
+}
+.ax-st-name {
+  font-size: var(--text-ui);
+  font-stretch: var(--wide);
+  font-weight: 500;
+  line-height: 1.2;
+  text-shadow: var(--engrave);
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+.ax-st-val {
+  overflow: hidden;
+  min-height: 16px;
+  color: var(--ink-2);
+  font-family: var(--font-data);
+  font-size: 12px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ax-st:hover .ax-st-name {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.ax-st:focus-visible {
+  outline-offset: -3px;
+}
+.ax-st[aria-current] .ax-st-name {
+  font-weight: 700;
+}
+.ax-st.is-hot .ax-st-val {
+  color: var(--signal-ink);
+}
+/* Something needs you: the one lamp on the plate that is not the needle. */
+.ax-st.is-hot .ax-st-val::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+.ax-st.is-soon {
+  color: var(--ink-3);
+}
+.ax-st.is-soon .ax-st-name {
+  font-weight: 400;
+}
+.ax-st.is-soon[aria-current] {
+  color: var(--ink);
+}
+.ax-band {
+  position: absolute;
+  top: 8px;
+  left: calc(6 / (6 + 3 * var(--soon)) * 100%);
+  height: 14px;
+  padding-left: var(--inset);
+  border-left: 1px solid var(--line-strong);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-stretch: var(--wide);
+  line-height: 1.1;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.ax-scale {
+  position: absolute;
+  inset: auto 0 0;
+  height: 18px;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, var(--line-strong) 1px, transparent 1px) 0 100% / calc(100% / 108) 6px repeat-x,
+    linear-gradient(90deg, var(--ink-2) 1px, transparent 1px) 0 100% / calc(100% / 18) 10px repeat-x;
+}
+.ax-needle {
+  position: absolute;
+  top: 0;
+  bottom: -1px;
+  left: var(--needle-at);
+  width: 2px;
+  margin-left: -0.5px;
+  background: var(--live);
+  pointer-events: none;
+  transition: left 340ms cubic-bezier(0.3, 1.25, 0.55, 1);
+}
+.ax-needle::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--live);
+}
+
+/* Search and the account, in the corner the scale leaves free. */
+.ax-tools {
+  position: absolute;
+  top: 7px;
+  right: var(--gutter);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.ax-kbd {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  height: 24px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--key);
+  box-shadow:
+    inset 0 1px 0 var(--key-top),
+    0 1px 0 var(--key-bot);
+  color: var(--key-ink);
+  font-family: var(--font-data);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ax-kbd:hover {
+  background: var(--ground-2);
+}
+.ax-avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--key);
+  box-shadow:
+    inset 0 1px 0 var(--key-top),
+    0 1px 0 var(--key-bot);
+  color: var(--key-ink);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ax-avatar:hover,
+.ax-avatar[aria-expanded="true"] {
+  background: var(--key-down);
+}
+.ax-bar-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.ax-bar-pop {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  z-index: 60;
+  width: max-content;
+  min-width: 200px;
+}
+.ax-menu-who {
+  overflow: hidden;
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- the page title ---------- */
+.ax-head {
+  display: flex;
+  align-items: flex-end;
+  flex: none;
+  gap: var(--space-4);
+  width: 100%;
+  max-width: calc(var(--page-w) + 2 * var(--gutter));
+  padding: var(--space-5) var(--gutter) var(--space-3);
+}
+/* Overview's panel names it; only its buttons, if any, take a row here. */
+.ax-head.is-untitled {
+  padding: 0;
+}
+.ax-head.is-untitled .ax-top-actions:not(:empty) {
+  padding: var(--space-3) var(--gutter) 0;
+}
+.ax-main.view-profile > .ax-head,
+.ax-main.view-settings > .ax-head {
+  max-width: calc(var(--form-w) + 2 * var(--gutter));
 }
 .ax-top-title {
   min-width: 0;
-  font-size: var(--text-emphasis);
-  font-weight: 600;
-  letter-spacing: -0.01em;
   overflow: hidden;
+  padding-bottom: 2px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -67,32 +350,47 @@
   margin-left: auto;
   min-width: 0;
 }
-.ax-top-end {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex: none;
-}
 .ax-top-actions:empty,
 .ax-top-row:empty {
   display: none;
 }
 .ax-top-row {
   display: flex;
-  flex: none;
   align-items: center;
+  flex: none;
   justify-content: flex-end;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--line);
-  background: var(--surface);
+  padding: 0 var(--gutter) var(--space-3);
 }
-.ax-top-actions:empty + .ax-top-end {
-  margin-left: auto;
+
+/* One line under the title: setup unfinished, connection lost. */
+.ax-banner {
+  display: flex;
+  align-items: center;
+  flex: none;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  max-width: calc(var(--page-w) + 2 * var(--gutter));
+  padding: 0 var(--gutter) var(--space-3);
+  color: var(--ink-2);
+  font-size: var(--text-ui);
 }
-/* The job-link button lives in the bar; its dialog is a fixed overlay, so the bar must not clip or filter it. */
-.ax-top .intake-slot .button {
-  height: 32px;
+.ax-head.is-untitled ~ .ax-banner {
+  padding-top: var(--space-3);
+}
+.ax-banner.is-bad {
+  color: var(--ink);
+}
+.ax-banner.is-bad::before {
+  content: "";
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+.ax-banner > span {
+  min-width: 0;
 }
 
 /* ---------- the one scroll region ---------- */
@@ -109,463 +407,46 @@
 .ax-scroll:has(> .main > .ax-page-fill) {
   overflow: hidden;
 }
-.main:has(> .ax-page) {
-  padding: 0;
-  max-width: none;
+/* The page frame: left-aligned under the rail. Lists use the width; Profile and Settings are a calm form's width. */
+.main {
+  max-width: calc(var(--page-w) + 2 * var(--gutter));
+  margin: 0;
+  padding: 0 var(--gutter);
+  outline: none;
+}
+.main.view-profile,
+.main.view-settings {
+  max-width: calc(var(--form-w) + 2 * var(--gutter));
 }
 .main:has(> .ax-page-fill) {
   height: 100%;
+}
+.main.view-editor {
   max-width: none;
-  padding: 0;
 }
 
-/* Page titles live in the top bar; the legacy per-page <h1> would repeat it. */
-.ax-scroll .page-head > h1 {
-  display: none;
-}
-.ax-scroll .page-head:has(> h1:only-child) {
-  display: none;
-}
-
-/* Setup's sections are sidebar items now: its own side list and section heading would repeat them. */
-.setup-grid {
-  grid-template-columns: minmax(0, 1fr);
-}
-.setup-nav,
-.ax-scroll .setup-title {
-  display: none;
-}
-
-.main:has(> .ax-soon-page) {
-  display: flex;
-  height: 100%;
-  padding: 0;
-}
-.ax-soon-page {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-3);
-  max-width: 440px;
-  margin: 0 auto;
-  padding: var(--space-6) var(--space-4) 12vh;
-  text-align: center;
-  color: var(--ink-3);
-}
-.ax-soon-name {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--ink);
-  font-size: var(--text-display);
-  font-weight: 600;
-  letter-spacing: -0.015em;
-}
 .ax-soon-about {
-  color: var(--ink-2);
-  font-size: var(--text-emphasis);
-  line-height: 1.55;
-  text-wrap: pretty;
+  max-width: 52ch;
+  font-size: var(--text-sub);
+  font-stretch: 112%;
 }
-.needs-list {
-  display: flex;
-  flex-direction: column;
+
+/* The boot screen, before the workspace is up. */
+.ax-boot {
+  display: grid;
+  place-content: center;
+  justify-items: center;
   gap: var(--space-4);
-}
-.needs-page > .page-sub {
-  margin: 0 0 var(--space-4);
-}
-
-/* ---------- sidebar ---------- */
-.ax-side {
-  position: relative;
-  z-index: 30;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
-  background: var(--surface);
-  border-right: 1px solid var(--line);
-}
-.ax-side-head {
-  display: flex;
-  align-items: center;
-  flex: none;
-  gap: var(--space-2);
-  height: var(--top-h);
-  padding: 0 var(--space-3) 0 var(--space-4);
-}
-.ax-side.is-rail .ax-side-head {
-  justify-content: center;
-  padding: 0;
-}
-.ax-brand {
-  display: flex;
-  align-items: center;
-  flex: 1;
-  min-width: 0;
-  gap: 10px;
-  color: var(--ink);
-  text-decoration: none;
-  font-size: var(--text-emphasis);
-  font-weight: 650;
-  letter-spacing: 0.02em;
-}
-.ax-side.is-rail .ax-brand {
-  flex: none;
-}
-.ax-mark-bg {
-  fill: var(--brand);
-}
-.ax-mark-cell {
-  fill: var(--brand-ink);
-}
-.ax-mark-cell.is-off {
-  opacity: 0.4;
-}
-
-.ax-side-search {
-  flex: none;
-  padding: 0 var(--space-3) var(--space-2);
-}
-.ax-side.is-rail .ax-side-search {
-  display: flex;
-  justify-content: center;
-  padding: 0 0 var(--space-2);
-}
-.ax-search-btn {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  height: 34px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--ground);
-  color: var(--ink-3);
-  font-size: var(--text-ui);
-  cursor: pointer;
-  transition:
-    border-color var(--dur-fast) var(--ease),
-    color var(--dur-fast) var(--ease);
-}
-.ax-search-btn:hover {
-  border-color: var(--line-strong);
+  min-height: 100%;
+  padding: var(--space-6);
   color: var(--ink-2);
-}
-.ax-search-btn span {
-  flex: 1;
-  min-width: 0;
-  text-align: left;
-}
-.ax-search-btn kbd,
-.ax-palette-input kbd {
-  padding: 0 5px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  color: var(--ink-3);
-  font-family: var(--font-code);
-  font-size: var(--text-micro);
-  line-height: 18px;
-}
-.ax-side.is-rail .ax-search-btn {
-  width: 40px;
-  padding: 0;
-  justify-content: center;
-  border-color: transparent;
-  background: transparent;
-}
-.ax-side.is-rail .ax-search-btn:hover {
-  background: var(--surface-hover);
-}
-
-.ax-side-nav {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding-bottom: var(--space-3);
-}
-.ax-side-group {
-  margin-top: var(--space-3);
-}
-.ax-side-group:first-child {
-  margin-top: 4px;
-}
-.ax-side-group ul {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  margin: 0;
-  padding: 0 var(--space-2);
-  list-style: none;
-}
-.ax-side-label {
-  padding: 0 var(--space-4) 4px;
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-  font-weight: 560;
-}
-.ax-side-rule {
-  margin: 0 var(--space-4) var(--space-2);
-  border-top: 1px solid var(--line);
-}
-.ax-nav {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 36px;
-  padding: 0 12px;
-  border-radius: var(--radius-md);
-  color: var(--ink-2);
-  font-size: var(--text-ui);
-  text-decoration: none;
-  transition:
-    background var(--dur-fast) var(--ease),
-    color var(--dur-fast) var(--ease);
-}
-.ax-nav svg {
-  flex: none;
-  color: var(--ink-3);
-}
-.ax-nav:hover {
-  background: var(--surface-hover);
-  color: var(--ink);
-}
-.ax-nav:hover svg {
-  color: var(--ink-2);
-}
-.ax-nav.is-active {
-  background: var(--surface-hover);
-  box-shadow: inset 0 0 0 1px var(--line);
-  color: var(--ink);
-  font-weight: 560;
-}
-.ax-nav.is-active svg {
-  color: var(--brand);
-}
-.ax-nav-label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ax-side.is-rail .ax-nav {
-  justify-content: center;
-  padding: 0;
-}
-.ax-soon {
-  flex: none;
-  height: 18px;
-  padding: 0 6px;
-  border-radius: var(--radius-sm);
-  background: var(--chip);
-  color: var(--ink-3);
-  font-size: var(--text-micro);
-  font-weight: 560;
-  line-height: 18px;
-}
-.ax-badge {
-  flex: none;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: 10px;
-  background: var(--brand);
-  color: var(--brand-ink);
-  font-size: var(--text-micro);
-  font-weight: 700;
-  line-height: 20px;
   text-align: center;
 }
-.ax-badge-dot {
-  position: absolute;
-  top: 8px;
-  right: 12px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--brand);
-  box-shadow: 0 0 0 2px var(--surface);
-}
-.ax-side-expand {
-  display: flex;
-  flex: none;
-  justify-content: center;
-  padding-bottom: var(--space-1);
-}
-
-/* ---------- sidebar footer ---------- */
-.ax-side-foot {
-  flex: none;
-  padding: var(--space-2);
-  border-top: 1px solid var(--line);
-}
-.ax-foot-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 36px;
-  padding: 4px 10px;
-  border: 0;
-  border-radius: var(--radius-md);
-  background: none;
-  color: var(--ink-2);
-  font-size: var(--text-ui);
-  text-align: left;
-  text-decoration: none;
-  cursor: pointer;
-  transition: background var(--dur-fast) var(--ease);
-}
-.ax-foot-row:hover {
-  background: var(--surface-hover);
-  color: var(--ink);
-}
-.ax-foot-row > svg {
-  flex: none;
-  color: var(--ink-3);
-}
-.ax-side.is-rail .ax-foot-row {
-  justify-content: center;
-  padding: 0;
-}
-.ax-foot-label {
-  flex: 1;
-}
-.ax-foot-value {
-  color: var(--ink-3);
-  font-size: var(--text-meta);
-}
-.ax-foot-stack {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  line-height: 1.3;
-}
-.ax-foot-stack > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ax-foot-stack small {
-  color: var(--ink-3);
-  font-size: var(--text-micro);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ax-dot {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  margin: 0 3px;
-  border-radius: 50%;
-  background: var(--idle);
-}
-.ax-dot.is-ok {
-  background: var(--ok);
-  box-shadow: 0 0 0 3px var(--ok-soft);
-}
-.ax-dot.is-warn {
-  background: var(--warn);
-}
-.ax-dot.is-bad {
-  background: var(--bad);
-  box-shadow: 0 0 0 3px var(--bad-soft);
-}
-.ax-user {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 4px 4px 4px 10px;
-}
-.ax-side.is-rail .ax-user {
-  justify-content: center;
-  padding: 0;
-}
-.ax-avatar {
+.ax-boot-error {
   display: grid;
-  place-items: center;
-  flex: none;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: var(--brand-soft);
-  color: var(--accent-text);
-  font-size: var(--text-micro);
-  font-weight: 700;
-}
-.ax-user .ax-foot-stack {
-  font-size: var(--text-meta);
-  color: var(--ink-2);
-}
-
-/* ---------- popover + theme menu ---------- */
-.ax-pop {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 0;
-  z-index: 60;
-  min-width: 220px;
-  padding: 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-lg);
-  background: var(--raised);
-  box-shadow: var(--shadow);
-  animation: ax-rise var(--dur) var(--ease);
-}
-.ax-theme {
-  position: relative;
-}
-.ax-side.is-rail .ax-theme-pop {
-  left: 4px;
-}
-.ax-theme-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 7px 8px;
-  border: 0;
-  border-radius: var(--radius-md);
-  background: none;
-  color: var(--ink);
-  font-size: var(--text-ui);
-  text-align: left;
-  cursor: pointer;
-}
-.ax-theme-item:hover,
-.ax-theme-item:focus-visible {
-  background: var(--surface-hover);
-  outline: none;
-}
-.ax-theme-item[aria-checked="true"] {
-  color: var(--accent-text);
-}
-.ax-theme-name {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  line-height: 1.3;
-}
-.ax-theme-name small {
-  color: var(--ink-3);
-  font-size: var(--text-micro);
-}
-.ax-swatch {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  border: 2px solid;
-  border-radius: 50%;
+  justify-items: center;
+  gap: var(--space-3);
+  max-width: 420px;
 }
 
 /* ---------- command palette ---------- */
@@ -576,19 +457,19 @@
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: 12vh var(--space-4) var(--space-4);
+  padding: 14vh var(--space-4) var(--space-4);
   background: var(--scrim);
-  animation: ax-fade var(--dur-fast) ease;
+  animation: ax-fade var(--dur) ease;
 }
 .ax-palette {
   display: flex;
   flex-direction: column;
-  width: min(580px, 100%);
-  max-height: min(520px, 76vh);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-lg);
+  width: min(540px, 100%);
+  max-height: min(460px, 72vh);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
   background: var(--raised);
-  box-shadow: var(--shadow);
+  box-shadow: var(--overlay-shadow);
   overflow: hidden;
   animation: ax-rise var(--dur) var(--ease);
 }
@@ -596,8 +477,8 @@
   display: flex;
   align-items: center;
   flex: none;
-  gap: 10px;
-  padding: 0 var(--space-4);
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
   border-bottom: 1px solid var(--line);
   color: var(--ink-3);
 }
@@ -608,15 +489,20 @@
   padding: 0;
   border: 0;
   background: transparent;
+  box-shadow: none;
   color: var(--ink);
-  font-size: var(--text-emphasis);
+  font-size: var(--text-body);
   outline: none;
+}
+.ax-palette-input kbd {
+  font-family: var(--font-data);
+  color: var(--ink-3);
 }
 .ax-palette-list {
   flex: 1;
   min-height: 0;
   margin: 0;
-  padding: 6px;
+  padding: var(--space-1);
   overflow-y: auto;
   overscroll-behavior: contain;
   list-style: none;
@@ -627,30 +513,29 @@
   list-style: none;
 }
 .ax-palette-group {
-  padding: 8px 10px 4px;
-  color: var(--ink-3);
-  font-size: var(--text-micro);
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  padding: var(--space-3) var(--space-2) var(--space-1);
+  color: var(--ink-2);
+  font-size: var(--text-meta);
 }
 .ax-palette-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 38px;
-  padding: 0 10px;
-  border-radius: var(--radius-md);
-  color: var(--ink-2);
+  gap: var(--space-2);
+  min-height: 36px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius);
+  color: var(--ink);
   font-size: var(--text-ui);
+  font-weight: 500;
   cursor: pointer;
 }
 .ax-palette-item.is-on {
-  background: var(--brand-soft);
-  color: var(--ink);
+  background: var(--tint);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 .ax-palette-item svg {
   flex: none;
-  color: var(--ink-3);
+  color: var(--ink-2);
 }
 .ax-palette-label {
   flex: 1;
@@ -665,109 +550,138 @@
   font-size: var(--text-meta);
 }
 .ax-palette-empty {
-  padding: var(--space-4) 10px;
+  padding: var(--space-3) var(--space-2);
   color: var(--ink-3);
-}
-.ax-palette-foot {
-  display: flex;
-  flex: none;
-  flex-wrap: wrap;
-  gap: 4px var(--space-4);
-  padding: 8px var(--space-4);
-  border-top: 1px solid var(--line);
-  color: var(--ink-3);
-  font-size: var(--text-micro);
+  font-size: var(--text-ui);
 }
 
-/* ---------- mobile (< 900px): the sidebar is a drawer ---------- */
-@media (max-width: 899px) {
-  .ax-app,
-  .ax-app.is-rail {
-    grid-template-columns: minmax(0, 1fr);
+/* ---------- narrower plates: the coming-soon stations give up room, so the six pages keep their names ---------- */
+@media (max-width: 1339px) {
+  :root {
+    --soon: 0.9;
   }
-  .ax-side.is-drawer {
-    position: fixed;
-    inset: 0 auto 0 0;
-    z-index: 80;
-    width: min(288px, 86vw);
-    box-shadow: var(--shadow);
-    transform: translateX(-102%);
+  .ax-stations {
+    grid-template-columns: repeat(6, minmax(0, 1fr)) repeat(3, minmax(0, 0.9fr));
+  }
+}
+@media (max-width: 1279px) {
+  :root {
+    --soon: 0.72;
+  }
+  .ax-stations {
+    grid-template-columns: repeat(6, minmax(0, 1fr)) repeat(3, minmax(0, 0.72fr));
+  }
+  /* "ai interviewer" no longer fits under "axe"; it stays in the station's tooltip and on its page. */
+  .ax-st.is-soon .ax-st-val {
     visibility: hidden;
-    transition:
-      transform var(--dur-slow) var(--ease),
-      visibility 0s linear var(--dur-slow);
   }
-  .ax-side.is-drawer.is-open {
-    transform: none;
-    visibility: visible;
-    transition:
-      transform var(--dur-slow) var(--ease),
-      visibility 0s;
-  }
-  .ax-side-scrim {
-    position: fixed;
-    z-index: 75;
-  }
-  .ax-top {
-    padding: 0 var(--space-4) 0 var(--space-2);
-    padding-top: env(safe-area-inset-top);
-    height: calc(var(--top-h) + env(safe-area-inset-top));
-  }
-  .ax-top-menu {
-    width: 40px;
-    height: 40px;
-  }
-  .main {
-    padding: var(--space-4) var(--space-4) 56px;
+}
+@media (max-width: 1139px) {
+  :root {
+    --rail: 88px;
+    --inset: 8px;
     --gutter: 16px;
   }
+  .ax-st-name {
+    font-size: var(--text-meta);
+    font-stretch: 110%;
+  }
+  .ax-st.is-soon .ax-st-name {
+    font-stretch: 100%;
+  }
+}
+
+/* ---------- under 900px: the scale becomes a strip along the bottom, with real names, under a fixed needle ---------- */
+@media (max-width: 899px) {
+  .ax-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: calc(var(--bar-height) + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
+    padding-inline: var(--gutter);
+  }
+  .ax-rail {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-4);
+    padding: 0;
+  }
+  .ax-theme-name {
+    display: none;
+  }
+  .ax-tools {
+    position: static;
+  }
+  .ax-kbd {
+    width: 36px;
+    height: 32px;
+    padding: 0;
+  }
+  .ax-avatar {
+    width: 32px;
+    height: 32px;
+  }
+  .ax-tuner.is-phone {
+    flex: none;
+    height: calc(68px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--ink);
+    background: var(--plate);
+  }
+  .ax-tuner.is-phone .ax-stations {
+    display: flex;
+    padding-inline: 50%;
+    padding-bottom: env(safe-area-inset-bottom);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .ax-tuner.is-phone .ax-stations::-webkit-scrollbar {
+    display: none;
+  }
+  .ax-tuner.is-phone .ax-st {
+    flex: none;
+    justify-content: flex-start;
+    width: 124px;
+    padding: 10px 0 22px 10px;
+  }
+  .ax-tuner.is-phone .ax-st::before {
+    display: none;
+  }
+  .ax-tuner.is-phone .ax-st-name {
+    font-size: var(--text-ui);
+    font-stretch: var(--wide);
+  }
+  .ax-tuner.is-phone .ax-st.is-soon .ax-st-val {
+    visibility: visible;
+  }
+  .ax-tuner.is-phone .ax-scale {
+    bottom: env(safe-area-inset-bottom);
+    background: linear-gradient(90deg, var(--line-strong) 1px, transparent 1px) 0 100% / 12px 6px repeat-x;
+  }
+  .ax-tuner.is-phone .ax-needle {
+    left: 50%;
+    transition: none;
+  }
+  .ax-head {
+    padding-top: var(--space-4);
+    padding-bottom: var(--space-2);
+  }
   .ax-page {
-    padding: var(--space-4) var(--space-4) 56px;
+    padding-bottom: var(--space-8);
   }
   .ax-toasts {
     right: var(--space-4);
-    bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
+    bottom: calc(var(--space-4) + 68px + env(safe-area-inset-bottom));
   }
   .ax-palette-root {
     padding-top: 8vh;
   }
-  .ax-palette-foot span:last-child {
-    display: none;
-  }
 }
 
-/* A short window (a laptop, 800px and under) would push "Coming soon" under the footer: tighten the sidebar's rows so
-   the whole menu is in view; anything shorter than that scrolls inside the sidebar. */
-@media (min-width: 900px) and (max-height: 860px) {
-  .ax-nav {
-    height: 30px;
-  }
-  .ax-side-group {
-    margin-top: 6px;
-  }
-  .ax-foot-row {
-    min-height: 30px;
-  }
-  .ax-side-label {
-    padding-bottom: 2px;
-  }
-}
-@media (min-width: 900px) and (max-height: 780px) {
-  .ax-nav {
-    height: 27px;
-  }
-  .ax-side-group {
-    margin-top: 4px;
-  }
-  .ax-foot-row {
-    min-height: 28px;
-  }
-  .ax-side-label {
-    padding-bottom: 0;
-  }
-}
-@media (min-width: 900px) and (max-height: 740px) {
-  .ax-nav {
-    height: 26px;
+/* A short window keeps its list: the title gives up its breathing room. */
+@media (max-height: 640px) {
+  .ax-head {
+    padding-top: var(--space-2);
+    padding-bottom: var(--space-1);
   }
 }

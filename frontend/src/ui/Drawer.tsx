@@ -22,15 +22,19 @@ export function Drawer({
   width?: number;
 }) {
   const panel = useRef<HTMLDivElement>(null);
+  // Callers pass an inline onClose, new on every render: opening is the only thing that should move focus.
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
     if (!open) return;
     const opener = document.activeElement as HTMLElement | null;
     const node = panel.current;
-    node?.focus();
+    // A field marked data-autofocus takes focus when the drawer opens (after whatever closed to open it has let go of it).
+    (node?.querySelector<HTMLElement>("[data-autofocus]") ?? node)?.focus();
     const key = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        close.current();
       } else if (e.key === "Tab" && node) {
         const items = [...node.querySelectorAll<HTMLElement>('a[href],button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])')].filter((el) => el.offsetParent !== null);
         if (items.length === 0) return;
@@ -50,7 +54,7 @@ export function Drawer({
       document.removeEventListener("keydown", key);
       opener?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
   if (!open) return null;
   return (
     <div className="ax-drawer-root">
