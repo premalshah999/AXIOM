@@ -35,7 +35,9 @@ SELECT_ALL = re.compile(r"\s*(?:select|check|accept|agree to) all\b", re.I)
 # Authorization Act", "Authentication, Authorization" (a security skill), "authorized to prescribe", "government ID",
 # "Citizens" (a bank), "agenda" and "referred to as" are not disclosures (2026-10-18/19 production refusals).
 CRITICAL = re.compile(
-    IMMIGRATION_VISA + r"|sponsor|authori[sz](?:ed|ation)\b.{0,40}\b(?:work|be employed|employment)\b|"
+    IMMIGRATION_VISA + r"|sponsor(?!ed\b)|sponsored\s+(?:visa|immigration|work)|"
+    r"(?:employer|company)[- ]sponsored\s+(?:visa|immigration|work|h-?1b|employment|status|permit|green card)|"
+    r"authori[sz](?:ed|ation)\b.{0,40}\b(?:work|be employed|employment)\b|"
     r"(?:work|employment)\s+authori[sz]|\bauthori[sz]e\b|\bcitizen(?:ship)?\b|\bcitizens of\b|convict|criminal|"
     + GOVERNMENT
     + r"|\bnda\b|non.?disclosure|corrupt|restrictive|non[\s-]?(?:compet|solicit)|\breferr\w*\b(?!\s+to\s+as\b)|consent|"
@@ -162,6 +164,22 @@ def critical_question(label):
         "consent",
         "restriction",
     }
+
+
+# "Do you certify that all the details in your resume and job application are accurate and truthful?" The owner's
+# "Accept privacy notices and certify accuracy" permission (allow_application_consents) covers certifying that the saved
+# information is accurate where a form requires it; anything else a certification says is not covered by it.
+CERTIFY_ACCURACY = re.compile(
+    r"\b(?:certify|attest|affirm)\b[^.?]{0,120}\b(?:details|information|answers|statements|data|facts)\b[^.?]{0,120}"
+    r"\b(?:accurate|truthful|true and correct|correct and complete)\b",
+    re.I,
+)
+# What a certification must not also say: an arbitration, waiver, release, authorisation or contact consent.
+CERTIFY_EXTRAS = re.compile(
+    r"marketing|arbitrat|waiv|releas|background|credit|authori[sz]|consent|contact|sms|text messag|"
+    r"non[\s-]?(?:compet|solicit|disclos)|indemnif|binding",
+    re.I,
+)
 
 
 # Routine acknowledgements (reported in the consent ledger; acceptance follows the profile policy).

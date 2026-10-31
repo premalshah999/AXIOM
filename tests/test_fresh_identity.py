@@ -18,7 +18,8 @@ from jobpilot.email_alias import EMPLOYER_ALIAS_TAG, alias_refusal, applying_ema
 
 BASE = "alex.doe.applicant@gmail.com"
 SF_URL = "https://jobs.examplesoft.test/job/Springfield-Analyst/100"
-ASKED = time.time() - 4000
+# A fixed anchor, not time.time() at collection: the windows below are offsets from it, and nothing compares them with the clock.
+ASKED = datetime(2026, 10, 31, 12, tzinfo=UTC).timestamp() - 4000
 PROVEN = {
     "state": "password_unknown",
     "reset_requested_at": ASKED,

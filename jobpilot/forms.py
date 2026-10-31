@@ -126,6 +126,33 @@ def name_phone_numbers(fields):
         previous = field
 
 
+CONSENT_OPTION = re.compile(r"^(?:yes|no)\s*[-–:]\s*(?:i\s+)?(?:do not\s+)?(?:consent|agree|authori[sz]e|opt)\b", re.I)
+
+
+def name_borrowed_consent(fields):
+    """A Yes/No consent group that took the label of the text box beside it is named by its own Yes choice.
+
+    Socure's Ashby phone field holds a "Yes - I consent to receiving WhatsApp messages" radio group under the label
+    "Phone Number": the group read as a second, unfilled phone field and the owner was asked for a phone number the
+    profile already had (2026-10-29). Two controls of different kinds never share one question."""
+    fields = list(fields)
+    text_labels = {
+        str(f.get("label", "")).strip().casefold()
+        for f in fields
+        if f.get("type") in {"text", "tel", "email", "number", "textarea"}
+    }
+    for field in fields:
+        options = [str(o) for o in field.get("options") or []]
+        if (
+            field.get("type") in {"radio", "radiogroup"}
+            and options
+            and all(CONSENT_OPTION.match(o.strip()) for o in options)
+            and str(field.get("label", "")).strip().casefold() in text_labels
+        ):
+            yes = next((o for o in options if o.strip().lower().startswith("yes")), options[0])
+            field["label"] = re.sub(r"^(?:yes|no)\s*[-–:]\s*", "", yes.strip(), flags=re.I).strip()
+
+
 SELF_ID_FORM = re.compile(r"self-identification|\bCC-305\b|\bVEVRAA\b", re.I)
 # A page the applicant signs by typing: its one bare "Date" is the signature's date (Hyundai's SuccessFactors "Typed
 # Signature" then "Date", 2026-10-27: today's date was refused as unsupported and the run stalled).
@@ -643,6 +670,13 @@ LIVE_CONTROL_JS = """b => {
   if (b.disabled || b.getAttribute('aria-disabled') === 'true') return false;
   return !b.closest('[hidden],[inert],[aria-hidden="true"]');
 }"""
+# A page's own rejection that quotes the question it wants answered: "Please enter a value for 'X'", "You must select
+# ... 'X'". The quote is the field's whole label, so it may be long; apostrophes inside words never open one.
+NAMED_BY_PAGE = re.compile(
+    r"(?:please (?:enter|choose|select|provide|answer|complete)|you must (?:enter|select|choose|provide|answer))"
+    r"[^'\"“‘\n]{0,60}(?<![\w])['\"“‘]([^'\"”’\n]{2,300}?)['\"”’](?![\w])",
+    re.I,
+)
 # Questions asking where the applicant is (not a fixed office list): their pickers are search-only typeaheads.
 APPLICANT_LOCATION = re.compile(
     r"(?:location(?: \(city\))?|city|current (?:city|location)|(?:what is your )?current location|"
@@ -1242,7 +1276,7 @@ def icims_receipt(job_url, frame_url, body):
 def employer_greenhouse_page_owned(page_url, job):
     """A Greenhouse job's page is Greenhouse-hosted or on the job's own registrable domain."""
     from .accounts import registrable
-    from .ats import detect
+    from .ats import custom_like, detect
 
     job_url = str((job or {}).get("url") or "")
     job_parts = urlsplit(job_url)
@@ -1271,7 +1305,7 @@ def employer_greenhouse_page_owned(page_url, job):
                     return False
             return bool(board) and board == job_parts.path.strip("/").split("/")[0]
         return True
-    if detect(page_url).id != "custom":
+    if not custom_like(detect(page_url).id):
         return False
     return registrable(page_host) == registrable(job_host)
 
@@ -1607,7 +1641,7 @@ class FormSession:
     def on_questionnaire(self):
         """The page is the tax-credit questionnaire a launcher opened: another host than the application's, and not
         another host of the same ATS."""
-        from .ats import detect
+        from .ats import custom_like, detect
 
         origin = getattr(self, "assessment_origin", "")
         try:
@@ -1618,7 +1652,7 @@ class FormSession:
         if not origin or not host or host == origin:
             return False
         application = detect("https://" + origin + "/").id
-        return application == "custom" or detect(url).id != application
+        return custom_like(application) or detect(url).id != application
 
     async def return_from_questionnaire(self):
         """Back to the application once the questionnaire is finished: its tab, or the address it replaced."""
@@ -1880,6 +1914,7 @@ class FormSession:
         mark_history_rows(self.fields.values())
         apply_row_hints(self.fields.values(), self.row_hints, getattr(getattr(self, "resolver", None), "profile", None))
         name_phone_numbers(list(self.fields.values()))
+        name_borrowed_consent(self.fields.values())
         link_companion_text(self.fields.values())
         label_signature_date(list(self.fields.values()), "\n".join(texts))
         label_status_dates(self.fields.values())
@@ -2137,14 +2172,28 @@ class FormSession:
                         options = await widgets.visible_options(frame, await widgets._popup_scope(el))
                 option = next((o for o in options if o["id"] == option_id and not o["disabled"]), None)
                 decided = None
-                if not option and (inline or field["type"] in {"select", "select-multiple"}):
+                # ADP's sdf-select lists its items in the host's own children and commits through its own driver
+                # (fill): the open pane read above is not its catalog, so a menu that closed or re-rendered left every
+                # option id stale (Midco 2026-10-30, 31 runs on one job).
+                catalog = field.get("widget") == "sdf-select" and bool(field.get("options"))
+                if not option and (inline or catalog or field["type"] in {"select", "select-multiple"}):
                     # The controller named an option this control does not have (PepsiCo's tax-credit "Select a
                     # Language" radio, 2026-10-23: eight refused chooses). Take the option the evidence supports.
-                    offered = [o for o in options if not o["disabled"]]
+                    offered = [o for o in options if not o["disabled"]] or [
+                        {"id": "", "text": t, "leaf": True, "disabled": False} for t in field["options"] if catalog
+                    ]
                     decided = (await self.resolver.resolve([{**field, "options": [o["text"] for o in offered]}]))[0]
                     AnswerModelUnavailable.raise_for(decided)
                     if decided.disposition == "answer":
                         option = next((o for o in offered if o["text"] == decided.value), None)
+                    elif decided.blocker_type == "missing_fact":
+                        # The menu is fine; the answer is what is missing. A "stale choice" refusal sent the model round
+                        # inspect_options and choose again until the run's time ran out (Midco, 2026-10-30).
+                        self._pending(
+                            {**field, "options": [o["text"] for o in offered]}, decided.reason, "missing_fact",
+                            supporting_facts=decided.supporting_facts,
+                        )
+                        raise ChoiceRejected("missing_fact", "Applicant fact required: " + decided.reason)
                 if not option:
                     raise ValueError(STALE_CHOICE)
                 supported = None
@@ -2197,7 +2246,7 @@ class FormSession:
                                 f"Applicant evidence supports the offered option {supported.value[:80]!r} instead",
                             )
                         option = alternative
-                if inline or field["type"] == "select":
+                if inline or field["type"] == "select" or (catalog and not option["id"]):
                     await self.fill(field, option["text"])
                     # SuccessFactors (Corning, live probe) keeps aria-invalid/"…is required" from an
                     # earlier validation until the control loses focus; the value is already set.
@@ -3409,6 +3458,11 @@ class FormSession:
         if field["type"] == "combobox" and APPLICANT_LOCATION.fullmatch(field["label"].strip()) and await el.evaluate(
             "e => ['INPUT','TEXTAREA'].includes(e.tagName) && !e.readOnly && !e.disabled"
             " && ['list','both'].includes(e.getAttribute('aria-autocomplete'))"
+            # A Greenhouse custom question (question_<id>) is the employer's own, never the built-in geocoded
+            # location (candidate-location): Atto's bare "Location" listed New York / USA (other than New York) /
+            # Europe / Other, was taken for the applicant's city, answered with the applicant's own city, typed and refused as "No
+            # matching option" on every run (2026-10-31). Its list is read like any other choice.
+            " && !/^question_\\d+/.test(e.id)"
         ):
             # The applicant's own location is a search-only typeahead (Greenhouse Geocode Earth, Ashby, SmartRecruiters):
             # it lists nothing until typed, so opening it cost 1.4-2.3 s for zero choices. The resolver answers from
@@ -4227,7 +4281,8 @@ class FormSession:
 
             try:
                 letter = await cover_letter(self.resolver)
-            except (RuntimeError, ValueError, TimeoutError):
+            except (RuntimeError, ValueError, TimeoutError) as exc:
+                self.emit("cover_letter_refused", "The cover letter was not written", {"why": str(exc)[:400]})
                 self._pending(
                     field,
                     "Cover letter generation was unavailable",
@@ -4306,6 +4361,7 @@ class FormSession:
                 messages = await self.page.evaluate(PAGE_MESSAGES)
             except Exception:
                 messages = []
+            messages = [*messages, *await self.named_rejections()]
             named = self.error_named_fields(messages)
             ask = [
                 x
@@ -4787,6 +4843,15 @@ class FormSession:
         inside = set(data["inside"])
         return [f for f in fields if (self.fields.get(f["id"]) or {}).get("dom_id") in inside], data["text"]
 
+    async def named_rejections(self):
+        """The page's own sentences that name a question it refuses to leave blank, wherever it prints them: Adzuna's
+        red lines carry no alert role or error class, so the scan's error list never held them."""
+        try:
+            text = await self._page_text()
+        except PlaywrightError:
+            return []
+        return [m.group(0) for m in NAMED_BY_PAGE.finditer(text)][:12]
+
     def error_named_fields(self, messages=()):
         """Ids of fields a page-level error requires although they are not marked required.
 
@@ -4799,6 +4864,9 @@ class FormSession:
         if not text:
             return set()
         names = {normalize(n) for n in re.findall(r'"([^"]{2,60})"', text)}
+        # Adzuna's own rejection (2026-10-28) quotes the whole question in single quotes: "Please enter a value for
+        # 'Are you currently based in the USA?'", "Please choose at least one option for 'Do you certify that ...'".
+        names |= {normalize(n) for n in NAMED_BY_PAGE.findall(text)}
         complete = bool(re.search(r"select all (?:possible|required) values in the section", text, re.I))
         # "The value does not match the pattern 999-999-9999": a phone written in another shape is rewritten.
         mask = phone_fields.phone_mask(text) if re.search(r"pattern|format", text, re.I) else None
@@ -5326,6 +5394,10 @@ class FormSession:
             # without scoped keys must be verified again before counting them.
             if not key or field_id in self.fields or key in current_keys:
                 record["verified"] = False
+        # A question the page itself refuses to leave blank is required, whatever its markup says (Adzuna, 2026-10-28:
+        # a required "Yes, I certify" box, a select and a text answer read back as verified while the submit was
+        # refused for them).
+        self.error_named_fields(await self.named_rejections())
         problems = []
         if self.uploaded and not self.upload_verified and not self.workday and not self.resume_fields():
             # SuccessFactors replaces its upload control with an attachment

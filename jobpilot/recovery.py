@@ -424,7 +424,8 @@ def schedule_recovery(session, config, run, result):
             require_allowance(session, run.job_id)
         except QueueBlocked as exc:
             row = session.get(Setting, "draft_recovery:" + run.job_id)
-            value = {"scheduled": False, "status": exc.code, "source_run_id": run.id, "updated_at": now()}
+            value = {"scheduled": False, "status": exc.code, "source_run_id": run.id, "updated_at": now(),
+                     "blocker": str(exc)[:300]}
             if row:
                 row.value = {**row.value, **value}
             else:

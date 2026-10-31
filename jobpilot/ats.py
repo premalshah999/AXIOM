@@ -1,5 +1,6 @@
 import hashlib
 import functools
+import json
 import re
 from dataclasses import asdict, dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -145,6 +146,8 @@ SUCCESSFACTORS_CAREER_SITES = (
 )
 
 
+NAMED_TIER = "named platform; the generic driver runs it"
+
 REGISTRY = [
     ATS(
         "greenhouse",
@@ -241,36 +244,133 @@ REGISTRY = [
     ATS("teamtailor", "Teamtailor", ("teamtailor.com",), "Single-page form, sometimes with email code."),
     ATS("personio", "Personio", ("personio.de", "personio.com"), "Single-page form."),
     ATS("rippling", "Rippling", ("rippling.com", "rippling-ats.com"), "Single-page form."),
+    # Named platforms with no driver of their own (2026-10-31: 31 jobs on Pinpoint, Comeet, Gem, CareerPuck, ClearCompany,
+    # JobDiva and Simplify read as custom sites). The generic driver runs them exactly as it runs custom sites (LABEL_ONLY),
+    # so the label is true and the guidance reaches the page, and nothing else about their runs moves.
+    *(
+        ATS(i, n, d, g, NAMED_TIER)
+        for i, n, d, g in (
+            ("pinpoint", "Pinpoint", ("pinpointhq.com",), "Single-page form with react-select pickers; it prints the file's name."),
+            ("comeet", "Comeet", ("comeet.com", "comeet.co"), "Single-page form on Comeet's page or in the employer's embed."),
+            ("gem", "Gem", ("jobs.gem.com",), "Single-page form with resume upload and screening questions."),
+            ("careerpuck", "CareerPuck", ("careerpuck.com",), "A board over Greenhouse: its form is Greenhouse's, in an iframe after Apply."),
+            ("clearcompany", "ClearCompany", ("clearcompany.com",), "Signing in is an emailed link (clrco.com tracker); the form follows."),
+            ("jobdiva", "JobDiva", ("jobdiva.com", "jobdiva.co.uk"), "Candidate portal that asks for a sign-in."),
+            ("dover", "Dover", ("app.dover.com",), "Hosted candidate site; the generic driver reads its controls."),
+            ("csod", "Cornerstone", ("csod.com",), "Hosted candidate site; the generic driver reads its controls."),
+            ("brassring", "IBM Kenexa BrassRing", ("brassring.com",), "Hosted candidate site; the generic driver reads its controls."),
+            ("neogov", "NEOGOV", ("governmentjobs.com",), "Hosted candidate site; the generic driver reads its controls."),
+            # Job boards: the posting is the employer's, and Apply leads there.
+            ("simplify", "Simplify", ("simplify.jobs",), "Job board whose Apply leads to the employer's posting; follow it."),
+            ("adzuna", "Adzuna", ("adzuna.com",), "Job board whose Apply for this job leads to the employer's posting; follow it."),
+        )
+    ),
 ]
 
+# Career-site front ends host job pages, not applications: a script of theirs says nothing about where the application
+# is made (PwC, Ascension and Crowe's Phenom sites apply on Workday or Oracle; 2026-10-31).
+VENDORS = frozenset({"phenom"})
+# Job boards that link out to the employer's own posting.
+AGGREGATORS = frozenset({"simplify", "adzuna"})
+# Named platforms the generic driver runs. Wherever a custom site is special-cased (its sender rule, its worker lane, the
+# questionnaire and requisition checks), these are too, so that being named changes the label and nothing else.
+LABEL_ONLY = frozenset(a.id for a in REGISTRY if a.tier == NAMED_TIER)
+
+
+def custom_like(ats_id):
+    """A custom career site, or a named platform that only the generic driver runs."""
+    return ats_id == "custom" or ats_id in LABEL_ONLY
+
+
+def unsettled(ats_id):
+    """A label that has not found the application's platform: a custom site, a named platform with no driver, a
+    career-site vendor or a job board. The page still has to say where the application is."""
+    return custom_like(ats_id) or ats_id in VENDORS
+
+# What a page shows of the platform behind it besides its URLs. A page-level fingerprint (a meta tag, a stylesheet) means
+# the whole site is that platform's portal; an embed fingerprint (a script, a marker element) means the platform's widget
+# sits on the employer's page. Each was read off saved pages (2026-10-31): Two Sigma, EA and Intuit's Avature meta tags and
+# avacdn.net assets; Microsoft's and AARP's Eightfold stylesheets (a branded domain with no eightfold.ai in sight); the
+# Pinpoint CDN on four tenants including a custom domain; Greenhouse's grnhse_app/grnhse_iframe on Roblox, Abnormal, Lyft's
+# CareerPuck and Databricks; the iCIMS iframe holder on eight career sites; Comeet's widget loader.
+PAGE_FINGERPRINTS = (
+    ("avature", "meta", re.compile(r"^avature\.portal\.")),
+    ("avature", "link", re.compile(r"\.avacdn\.net/")),
+    ("eightfold", "link", re.compile(r"eightfold-font-base\.css|//static(?:-[a-z]+)?\.vscdn\.net/")),
+    ("pinpoint", "link", re.compile(r"//d2n5ied94mazop\.cloudfront\.net/")),
+)
+EMBED_FINGERPRINTS = (
+    ("greenhouse", "dom", re.compile(r"^grnhse_(?:app|iframe)$")),
+    ("icims", "dom", re.compile(r"^icims_content_iframe$")),
+    ("comeet", "dom", re.compile(r"^comeet-jsapi$")),
+    ("eightfold", "script", re.compile(r"//static(?:-[a-z]+)?\.vscdn\.net/")),
+    ("pinpoint", "script", re.compile(r"//d2n5ied94mazop\.cloudfront\.net/")),
+)
+DOM_MARKERS = sorted({"grnhse_app", "grnhse_iframe", "icims_content_iframe", "comeet-jsapi"})
+
 # Company career sites often embed or link to the real ATS; the page reveals it.
-EMBED_JS = r"""() => {
-  const urls = [];
-  for (const f of document.querySelectorAll('iframe[src]')) urls.push(['frame', f.src]);
+EMBED_JS = (
+    r"""() => {
+  const out = [], add = (k, v, cap) => { if (v && out.filter((e) => e[0] === k).length < cap) out.push([k, v]); };
+  for (const f of document.querySelectorAll('iframe[src]')) add('frame', f.src, 60);
   for (const a of document.querySelectorAll('a[href]')) {
     const t = (a.innerText || a.getAttribute('aria-label') || '').trim();
-    if (/^apply|apply now|apply for/i.test(t)) urls.push(['apply', a.href]);
+    if (/^apply|apply now|apply for/i.test(t)) add('apply', a.href, 60);
   }
-  for (const s of document.querySelectorAll('script[src]')) urls.push(['script', s.src]);
-  return urls.slice(0, 400);
-}"""
+  for (const s of document.querySelectorAll('script[src]')) add('script', s.src, 250);
+  for (const l of document.querySelectorAll('link[rel~=stylesheet][href],link[rel=preload][href],link[rel=modulepreload][href]'))
+    add('link', l.href, 120);
+  for (const m of document.querySelectorAll('meta[name],meta[property]')) {
+    add('meta', (m.getAttribute('name') || m.getAttribute('property')) + '=' + (m.content || '').slice(0, 120), 80);
+  }
+  for (const id of __DOM__) if (document.getElementById(id)) add('dom', id, 20);
+  return out;
+}""".replace("__DOM__", json.dumps(DOM_MARKERS))
+)
+
+
+def application_platform(ats_id):
+    """Where an application is made: not a custom site, a career-site vendor or a job board."""
+    return not (unsettled(ats_id) or ats_id in AGGREGATORS)
+
+
+def classify_embedded(entries):
+    """(ats id, url or None, how) for what a page shows of the platform behind it, or (None, None, "").
+
+    A real application link beats a vendor's script: PwC, Ascension and Crowe's Phenom pages carry Phenom's scripts and
+    apply on Workday or Oracle, yet a script-only hit returned "phenom" and no application link was ever followed
+    (2026-10-31). So a frame (the form itself) comes first, then an Apply link, then the page's own fingerprints (meta,
+    stylesheets), then embedded widgets (scripts, marker elements). Vendors and job boards are never an answer. A named
+    platform that only the generic driver runs is an answer for the label alone, never a place to navigate to: the page's
+    form already works where it is, and a real platform's hit outranks it."""
+    hits = []
+    for rank, kind in enumerate(("frame", "apply", "meta", "link", "script", "dom")):
+        for k, value in entries:
+            if k != kind:
+                continue
+            ats_id, url = None, None
+            if kind in {"frame", "apply", "script"} and (found := detect(value)).id != "custom":
+                ats_id, url = found.id, value
+            if ats_id is None:
+                key = value.partition("=")[0] if kind == "meta" else value
+                ats_id = next((n for n, fk, rx in PAGE_FINGERPRINTS + EMBED_FINGERPRINTS if fk == kind and rx.search(key)), None)
+            if not ats_id or ats_id in VENDORS or ats_id in AGGREGATORS:
+                continue
+            if kind == "frame" and not re.search(r"embed|job_app|in_iframe|apply|jobs/\d|careers", value, re.I):
+                continue
+            if kind == "script" or ats_id in LABEL_ONLY:
+                url = None
+            hits.append((ats_id in LABEL_ONLY, rank, ats_id, url, kind))
+    if not hits:
+        return None, None, ""
+    *_, ats_id, url, kind = min(hits, key=lambda h: h[:2])
+    return ats_id, url, kind
 
 
 def detect_embedded(entries):
-    """Return (ats, url) for an embedded application frame or apply link to a known ATS."""
-    for kind in ("frame", "apply", "script"):
-        for k, url in entries:
-            if k != kind:
-                continue
-            ats = detect(url)
-            if ats.id == "custom":
-                continue
-            if kind == "script":
-                return ats.id, None
-            if kind == "frame" and not re.search(r"embed|job_app|in_iframe|apply|jobs/\d|careers", url, re.I):
-                continue
-            return ats.id, url
-    return None, None
+    """Return (ats, url) for an embedded application frame or apply link to a known ATS, or the platform a page shows."""
+    ats_id, url, _ = classify_embedded(entries)
+    return ats_id, url
 
 
 # Avature on an employer's own domain: its locale-prefixed portal actions (jobs.lenovo.com/en_US/careers/JobDetail,
@@ -279,7 +379,7 @@ def detect_embedded(entries):
 # trusted and seven employers' resets "did not arrive" (2026-10-28).
 AVATURE_PATH = re.compile(
     r"^/(?:[a-z]{2}_[A-Z]{2}/[A-Za-z0-9_-]+/(?:JobDetail|FolderDetail|ApplicationMethods|Login|Register|"
-    r"SearchJobs|PrepareForApply|ProfileForm)\b|[A-Za-z0-9_-]+/(?:FolderDetail|ApplicationMethods)\b)"
+    r"SearchJobs|PrepareForApply|ProfileForm|ApplicationEEO)\b|[A-Za-z0-9_-]+/(?:FolderDetail|ApplicationMethods)\b)"
 )
 
 

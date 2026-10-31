@@ -767,7 +767,7 @@ class Adapter:
     def in_assessment(self):
         """The tab left the application for the tax-credit questionnaire its launcher opened. Any page of this ATS is the
         application itself, even under another host of it (Workday's myworkdaysite.com)."""
-        from ..ats import detect
+        from ..ats import custom_like, detect
 
         form = getattr(getattr(self, "e", None), "form", None)
         host = getattr(self, "assessment_from", "") or getattr(form, "assessment_origin", "")
@@ -776,7 +776,7 @@ class Adapter:
         url = self.page.url
         if (urlsplit(url).hostname or "") == host:
             return False
-        return self.id == "custom" or detect(url).id != self.id
+        return custom_like(self.id) or detect(url).id != self.id
 
     def assessment_launcher(self, obs, again=False):
         """The control that opens the tax-credit questionnaire this application requires: once per run, and once more
@@ -1026,6 +1026,11 @@ class Adapter:
             if await self.e.refresh_expired_entry(obs):
                 continue
             moved = self.handoff(obs["url"])
+            follow = getattr(self.e, "follow_embedded", None)
+            if not moved and follow and not self.committed and not self.in_assessment():
+                # Every step, not once before the first click: a frame that loads late, an Apply that opens another
+                # platform's page or a new tab changes what this page is (Roblox's Greenhouse form step, 2026-10-31).
+                moved = await follow(self.id)
             if moved:
                 return {"handoff": moved}
             # Modal precedence: an open dialog is the current step; act only on its controls.
