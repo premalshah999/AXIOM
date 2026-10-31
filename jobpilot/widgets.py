@@ -3324,33 +3324,67 @@ async def remove_prompt_pill(container, text):
         pass
 
 
-async def commit_prompt_name(frame, container, target):
+async def release_prompt(frame, container=None, inp=None):
+    """Close a prompt's results popup with real input once its search is over. A popup still loading holds no listbox,
+    so dismiss_pickers counts nothing open and leaves it standing over the fields below (Humana, 2026-10-30: an optional
+    Field of Study search left one over Education 1's Degree); Workday closes its popups on trusted pointer events."""
+    try:
+        if inp is not None:
+            await inp.fill("", timeout=1000)  # Text left in the box is searched again on blur.
+    except PlaywrightError:
+        pass
+    try:
+        await frame.page.keyboard.press("Escape")
+        await click_blank_point(frame)
+    except Exception:
+        pass
+
+
+def seconds_left(deadline, ceiling):
+    """A wait of at most `ceiling` seconds that stays inside the field's one deadline (a monotonic time, or None)."""
+    return ceiling if deadline is None else max(0.3, min(ceiling, deadline - time.monotonic()))
+
+
+def out_of_time(deadline, needed=1.0):
+    return deadline is not None and deadline - time.monotonic() < needed
+
+
+async def commit_prompt_name(frame, container, target, deadline=None):
     """Commit an exact catalog name: one search for it, then its pill. Workday selects a search's sole result by
-    itself, so any other pill this search added is removed again (REA, 2026-10-25)."""
+    itself, so any other pill this search added is removed again (REA, 2026-10-25).
+
+    A search that shows no row of that name is typed once more, inside the same deadline: on Workday the first Field of
+    Study of a form answered nothing in 4 s for a name its second row committed in under a second (Invesco, Unisys
+    2026-10-31); the cold search is the one that fails."""
     before = await prompt_pills(container)
     if any(norm(text) == norm(target) for text in before):
         return next(text for text in before if norm(text) == norm(target))
     await dismiss_pickers(frame)
     inp = await open_prompt(container)
-    await inp.fill("", timeout=4000)
-    await inp.press_sequentially(target, delay=10)
-    await inp.press("Enter")
-    deadline = time.monotonic() + 4
-    while time.monotonic() < deadline:
-        now = await prompt_pills(container)
-        if any(norm(text) == norm(target) for text in now if text not in before):
-            break  # The sole result committed itself.
-        opts = await visible_options(
-            frame, await _popup_scope(container), "[data-automation-id=promptOption],[role=option]"
-        )
-        exact = [o for o in opts if o["leaf"] and not o["disabled"] and norm(o["text"]) == norm(target)]
-        if len(exact) == 1:
-            await click_option(frame, exact[0], owner=container)
+    for attempt in range(2):
+        if attempt and out_of_time(deadline, 2.5):
             break
-        if not opts and await menu_notice(frame) == "none":
+        await inp.fill("", timeout=4000)
+        await inp.press_sequentially(target, delay=10)
+        await inp.press("Enter")
+        ends = time.monotonic() + seconds_left(deadline, 3.0 if not attempt else 4.0)
+        while time.monotonic() < ends:
+            now = await prompt_pills(container)
+            if any(norm(text) == norm(target) for text in now if text not in before):
+                break  # The sole result committed itself.
+            opts = await visible_options(
+                frame, await _popup_scope(container), "[data-automation-id=promptOption],[role=option]"
+            )
+            exact = [o for o in opts if o["leaf"] and not o["disabled"] and norm(o["text"]) == norm(target)]
+            if len(exact) == 1:
+                await click_option(frame, exact[0], owner=container)
+                break
+            if not opts and await menu_notice(frame) == "none":
+                break
+            await asyncio.sleep(0.08)
+        await asyncio.sleep(0.2)
+        if any(norm(text) == norm(target) for text in await prompt_pills(container) if text not in before):
             break
-        await asyncio.sleep(0.08)
-    await asyncio.sleep(0.2)
     now = await prompt_pills(container)
     for stray in [text for text in now if text not in before and norm(text) != norm(target)]:
         await remove_prompt_pill(container, stray)
@@ -3361,12 +3395,19 @@ async def commit_prompt_name(frame, container, target):
     await dismiss_pickers(frame)
     committed = next((text for text in await prompt_pills(container) if norm(text) == norm(target)), None)
     if not committed:
+        await release_prompt(frame, container)
         raise ValueError("No matching option is offered")
     return committed
 
 
-async def prompt(frame, container, value, choose=None, school_scope=False, catalog=None):
+async def prompt(frame, container, value, choose=None, school_scope=False, catalog=None, deadline=None, missed=None):
     """Workday multiselect prompt: search, then commit a leaf; categories are opened once.
+
+    `deadline` is the field's one monotonic deadline for every search this write makes: each wait is cut to what is
+    left, no further query starts without time to finish it, and the popup is closed when time runs out. The write used
+    to be cancelled mid-wait by the form's 12 s limit with its popup open (Field of Study: 91 deadline errors in 218
+    runs, 2026-10-24..31). `missed` (a set kept for the run) holds the (value, query) searches that already returned
+    nothing usable, so a later row or retry of the same field does not type them again.
 
     `value` may list candidates in preference order (the recorded major, then the profile's fallback). With the page's
     own full value list (`catalog`), the answer is chosen from it first and only its exact name is searched: probe
@@ -3389,7 +3430,7 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
             error = ValueError("No matching option is offered")
             error.offered = {"catalog": names[:8], "candidates": candidates}
             raise error
-        return await commit_prompt_name(frame, container, target)
+        return await commit_prompt_name(frame, container, target, deadline)
     value = candidates[0]
     interpretations = 0
     # What each search returned (the employer's own option labels), for the failure record.
@@ -3478,7 +3519,7 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
     opts = await wait_options(
         frame,
         None,
-        timeout=4,
+        timeout=seconds_left(deadline, 4),
         selector="[data-automation-id=promptOption],[role=option]",
         query=first,
         owner=container,
@@ -3493,7 +3534,14 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
     real = [o for o in opts if not re.search(r"^no items|no results|no matches", o["text"], re.I)]
     choice = await supported_leaf(real) if real else None
     fallbacks = [query for query in prompt_fallback_queries(value, school_scope) if query != first]
+    tried = missed if missed is not None else set()
+    if not choice:
+        tried.add((norm(value), norm(first)))
     for query in [] if choice else fallbacks:
+        if (norm(value), norm(query)) in tried:
+            continue  # Already searched for this value and nothing supported came of it.
+        if out_of_time(deadline, 2.0):
+            break  # Another search cannot finish inside the field's deadline.
         # Employer taxonomies may say "Management Information Systems" where
         # the resume says "Information Systems", or "University of Michigan -
         # Ann Arbor" where it says "..., Ann Arbor". Search a shorter term,
@@ -3505,7 +3553,7 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
         opts = await wait_options(
             frame,
             None,
-            timeout=4,
+            timeout=seconds_left(deadline, 4),
             selector="[data-automation-id=promptOption],[role=option]",
             query=query,
             owner=container,
@@ -3520,17 +3568,20 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
         real = [o for o in opts if not re.search(r"^no items|no results|no matches", o["text"], re.I)]
         if choice := await supported_leaf(real):
             break
+        tried.add((norm(value), norm(query)))
     if not choice and school_scope:
         # School prompts use the same applicant preference as comboboxes:
         # search the real institution first, then an offered Other fallback.
         for query in SCHOOL_NOT_LISTED_QUERIES:
+            if out_of_time(deadline, 2.0):
+                break
             await inp.fill("")
             await inp.press_sequentially(query, delay=10)
             await inp.press("Enter")
             opts = await wait_options(
                 frame,
                 None,
-                timeout=3,
+                timeout=seconds_left(deadline, 3),
                 selector="[data-automation-id=promptOption],[role=option]",
                 query=query,
                 owner=container,
@@ -3539,14 +3590,14 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
             if len(others) == 1:
                 choice = others[0]
                 break
-    if not choice:
+    if not choice and not out_of_time(deadline, 2.0):
         # Browse from the top: the value can be a leaf under a category ("Job Board" > "LinkedIn").
         await inp.fill("")
         await inp.press("Enter")
         opts = await wait_options(
             frame,
             None,
-            timeout=2,
+            timeout=seconds_left(deadline, 2),
             selector="[data-automation-id=promptOption],[role=option]",
             owner=container,
         )
@@ -3559,7 +3610,7 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
         likely = re.compile(r"social|job ?board|online|internet|web|network|media", re.I)
         categories.sort(key=lambda text: not likely.search(text))
         for index, name in enumerate(categories):
-            if choice:
+            if choice or out_of_time(deadline, 2.5):
                 break
             if index:
                 # Reopen from the top instead of depending on a Back control: tenants
@@ -3571,7 +3622,7 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
                 opts = await wait_options(
                     frame,
                     None,
-                    timeout=2,
+                    timeout=seconds_left(deadline, 2),
                     selector="[data-automation-id=promptOption],[role=option]",
                     owner=container,
                 )
@@ -3582,7 +3633,7 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
             inner = await wait_options(
                 frame,
                 None,
-                timeout=2,
+                timeout=seconds_left(deadline, 2),
                 selector="[data-automation-id=promptOption],[role=option]",
                 owner=container,
             )
@@ -3590,7 +3641,7 @@ async def prompt(frame, container, value, choose=None, school_scope=False, catal
             if choice:
                 break
     if not choice:
-        await inp.press("Escape")
+        await release_prompt(frame, container, inp)
         error = ValueError("No matching option is offered")
         error.offered = seen
         raise error
