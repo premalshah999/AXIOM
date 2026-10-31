@@ -168,6 +168,12 @@ def net_failure(exc, diagnostics=None):
     West Monroe's six jobs were closed on a certificate error while three siblings of the same site had confirmed the day
     before. A posting that is truly gone answers with its own page (a 404, a "no longer available" notice)."""
     match = NET_ERROR.search(str(exc))
+    if not match and re.match(r"Page\.goto: Timeout \d+ms exceeded", str(exc)):
+        # A navigation the site never answered within 30-60 s: four Greenhouse boards in three minutes (2026-10-31)
+        # each read "Browser control failed at open_application_route" and went to repair as a driver fault.
+        return {"state": "waiting_browser", "blocker_type": "site_transient", "recovery_cause": "site_temporary",
+                "reason": "The employer's site did not answer in time; it will be tried again later",
+                **({"diagnostics": diagnostics} if diagnostics else {})}
     if not match or match[1] in {"ABORTED", "BLOCKED_BY_CLIENT", "BLOCKED_BY_RESPONSE"}:
         return None  # An aborted navigation is the page's own redirect; blocked ones are this browser's guard.
     code = "net::ERR_" + match[1]
