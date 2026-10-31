@@ -95,3 +95,40 @@ def test_an_acknowledgement_read_from_beside_the_box_needs_no_question(service, 
         {"id": "q", "label": label, "type": "checkbox", "required": True, "options": [], "value": "", "valid": True}
     )
     assert answer is not None and answer.value == "true"
+
+
+async def test_a_generic_aria_label_reads_the_words_printed_beside_the_box(page, service, tmp_path):
+    await page.set_content(
+        """<form><input type=checkbox id=ack required aria-label="Tick">
+        <span>I acknowledge that I have read and understand the above statements.</span>
+        <label for=first>First name</label><input id=first></form>"""
+    )
+    fields = (await session(page, service, tmp_path).scan())["fields"]
+    assert next(f for f in fields if f["type"] == "checkbox")["label"].startswith("I acknowledge that I have read")
+
+
+def test_a_signature_box_under_the_terms_policy_is_ticked(service):
+    answer = Resolver(Profile(accept_all_application_terms=True), service.db, service.config).local(
+        {"id": "q", "label": "Signature", "type": "checkbox", "required": True, "options": [], "value": "", "valid": True,
+         "hint": "(checking the checkbox above is equivalent to a handwritten signature)"}
+    )
+    assert answer is not None and answer.value == "true"
+
+
+@pytest.mark.parametrize("label", ["Are you a current employee of Example Foods?", "Are you a former employee of Example Foods?"])
+def test_a_current_or_former_employee_question_follows_the_saved_no(service, label):
+    profile = Profile(facts={"previously_employed_here": False})
+    answer = Resolver(profile, service.db, service.config).local(
+        {"id": "q", "label": label, "type": "radio", "required": True, "options": ["Yes", "No"], "value": "", "valid": True}
+    )
+    assert answer is not None and answer.value == "No"
+
+
+def test_a_recorded_employer_is_not_answered_no(service):
+    profile = Profile(facts={"previously_employed_here": False}, work=[{"company": "Example Foods", "title": "Analyst"}])
+    answer = Resolver(profile, service.db, service.config).local(
+        {"id": "q", "label": "Are you a former employee of Example Foods?", "type": "radio", "required": True,
+         "options": ["Yes", "No"], "value": "", "valid": True}
+    )
+    assert answer is None or answer.value != "No"
+

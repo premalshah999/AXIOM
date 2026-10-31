@@ -625,6 +625,17 @@ class LocalRulesMixin:
         if (
             f.get("type") == "checkbox"
             and p.accept_all_application_terms
+            and f.get("required")
+            and re.fullmatch(r"\s*(?:electronic |e-?)?signature\W*", f["label"], re.I)
+        ):
+            # An application's certification page ends in a required box named "Signature" ("checking the checkbox above is
+            # equivalent to a handwritten signature", National Louis University on iCIMS, 2026-10-31).
+            return Answer(
+                field_id=f["id"], value="true", disposition="answer", evidence_ids=["policy:consent"]
+            )
+        if (
+            f.get("type") == "checkbox"
+            and p.accept_all_application_terms
             and re.search(
                 r"\bunderstand\b.{0,160}\b(?:application|resume|career profile)\b", f["label"], re.I
             )
