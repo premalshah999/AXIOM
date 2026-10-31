@@ -6,6 +6,9 @@ import asyncio
 async def lifespan(app):
     service = app.state.service
     config, db = service.config, service.db
+    from ..storage.switch import release_switch_hold
+
+    await asyncio.to_thread(release_switch_hold, db)  # The first start after a database switch lifts the switch's own hold.
     bot = None
     scheduler_task = None
     if config.enable_workers:
@@ -81,6 +84,7 @@ async def lifespan(app):
     for task in pending_notifications:
         task.cancel()
     await asyncio.gather(*pending_notifications, return_exceptions=True)
+    db.flush_events()  # A remote database's batched events: the last of them go before the pool does.
     db.engine.dispose()
 
 

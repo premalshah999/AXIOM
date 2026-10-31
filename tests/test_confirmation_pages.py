@@ -132,8 +132,8 @@ async def test_embedded_greenhouse_confirmation_is_a_receipt(page, service, tmp_
     url = "https://job-boards.greenhouse.io/embed/job_app/confirmation?for=asana&token=7962412"
     await serve(page, url, f"<html><head><title>Thank you</title></head><body>{ASANA_THANKS}</body></html>")
     receipt = await form_for(page, service, tmp_path, job=EMBED_JOB).proof()
-    assert receipt and receipt["evidence_selector"] == "employer_greenhouse_thank_you"
-    assert receipt["confirmation"].startswith("Task complete!")
+    # The confirmation route for this job's own board and post is the proof (2026-10-26), whatever the page words it as.
+    assert receipt and receipt["evidence_selector"] == "greenhouse_embed_confirmation_route"
 
 
 @pytest.mark.parametrize(
@@ -158,7 +158,7 @@ async def test_pinterest_your_application_is_in_is_a_receipt(page, service, tmp_
             "<a href='/pinterest/jobs/7011111'>Back to job post</a></div>")
     await serve(page, url, f"<html><head><title>Thank you</title></head><body>{body}</body></html>")
     receipt = await form_for(page, service, tmp_path, job=job).proof()
-    assert receipt and "your application is in" in receipt["confirmation"]
+    assert receipt and receipt["evidence_selector"] == "greenhouse_embed_confirmation_route"
 
 
 async def test_greenhouse_embed_confirmation_message_is_a_receipt(page, service, tmp_path):

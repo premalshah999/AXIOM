@@ -731,3 +731,16 @@ def test_graduated_category_with_a_contraction_is_the_completed_choice(service, 
     assert resolver.graduation_choice_valid(f, done) is True
     assert resolver.graduation_choice_valid(f, f"I{apostrophe}ll graduate after August 2026") is False
     assert resolver.local(f).value == done
+
+
+@pytest.mark.parametrize("unit,expected", [("Month", "May"), ("Year", "2027")])
+def test_a_month_box_that_says_year_in_its_question_takes_the_month_only(service, unit, expected):
+    # Oracle (2026-10-29): "What is your expected year of graduation? Month" received the whole "05/2026", which no month
+    # option matched, because "year" in the question read as "asks for month and year".
+    resolver = graduation_resolver(service)
+    answer = resolver.local(
+        {**date_part(f"What is your expected year of graduation? {unit}", "combobox"), "date_parts": []}
+    )
+    assert answer.value == expected and answer.evidence_ids == ["profile:education.0.end"]
+    both = resolver.local({**field("Graduation month and year"), "type": "text", "options": []})
+    assert both is None or "/" in both.value or "-" in both.value, "a field asking for both keeps the whole date"

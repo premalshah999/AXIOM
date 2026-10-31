@@ -20,6 +20,7 @@ from . import icims_protocol, phone_fields, taleo_protocol, widgets
 from . import profile_photo
 from .answers import CONTACT, HISTORY_UNKNOWN, WOTC, answer_key, job_catalog_search_box, normalize
 from .answers.experience import COMPUTED as EXPERIENCE_COMPUTED
+from .answers.work_status import CITIZENSHIP_ASK, holds as work_status_holds
 from .answers.text import FROM_RECORD, strip_catalog_code
 from .knowledge import topic
 from .browser_contracts import ActionResult, action_result, field_identity, fingerprint
@@ -1435,7 +1436,18 @@ class FormSession:
         REPEATED_WRITE_FAILURES times on a page that did not change in between. A changed page, new offered choices
         or a different value start the count again, so those retries still run."""
         key = self.field_key(field)
-        offered = json.dumps(getattr(exc, "offered", None), sort_keys=True, default=str)
+
+        def texts(node):
+            # What a picker offered, as the set of rows it showed. An empty search is no news: Asure's State box
+            # returned [[]], [[], []] and a one-row catalog in turn, each read as new choices that reset the count, and
+            # one Country/State write failed 8 times in a run (2026-10-29).
+            if isinstance(node, dict):
+                return {t for v in node.values() for t in texts(v)}
+            if isinstance(node, (list, tuple, set)):
+                return {t for v in node for t in texts(v)}
+            return {str(node).strip()} - {"", "None"}
+
+        offered = json.dumps(sorted(texts(getattr(exc, "offered", None))))
         signature = (self._digest(value), widgets.interaction_failure(exc), self._digest(offered))
         failing = frozenset(repr(k) for k in [*self.field_failures, key])
         context = self.write_context()
@@ -3086,6 +3098,13 @@ class FormSession:
                     return None
 
                 choose = no_guess
+            if CITIZENSHIP_ASK.search(field["label"]):
+                # A country of citizenship is a fact, never the nearest row a model can see. Twitch's search window lacked
+                # the recorded country, and the guesses left "Laos" and "Latvia" on the form (2026-10-21).
+                async def no_citizenship_guess(texts):
+                    return None
+
+                choose = no_citizenship_guess
             broad_queries, degree_pick = [], None
             if EDUCATION["degree"].search(field["label"]):
                 from .answers.history import DEGREE_FALLBACK, degree_level
@@ -3932,6 +3951,9 @@ class FormSession:
                 None,
             )
             if previous:
+                read = getattr(self.resolver, "work_status_verdict", None)
+                if read and (verdict := read(field)) and not work_status_holds(field["value"], verdict):
+                    return False  # This run's earlier wrong answer is no reason to keep it, in menus above all.
                 known = self.resolver.local(field)
                 if (
                     # A years-of-experience answer computed from the work history outranks every stored one, in
@@ -6639,7 +6661,7 @@ class FormSession:
     @staticmethod
     def review_issues(text):
         """The items a review page marks "Fields to fix: N" (Oracle's education, experience and language tiles), each named
-        by the two lines above its notice: ["Data Science / University of Maryland (Fields to fix: 2)"]."""
+        by the two lines above its notice: ["Data Science / Example State University (Fields to fix: 2)"]."""
         lines = [line.strip() for line in str(text).splitlines() if line.strip()]
         found = []
         for i, line in enumerate(lines):

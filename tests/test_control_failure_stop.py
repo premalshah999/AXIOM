@@ -122,3 +122,25 @@ async def test_the_navigator_stops_after_three_failed_results_on_one_control(pag
     assert len(asked) == 3, (len(asked), [e[0] for e in engine.events])
     assert engine.result["blocker_type"] == "control_failure" and "'Phone' failed 3 results" in engine.result["reason"]
     assert [e[0] for e in engine.events].count("navigation_stalled") == 1
+
+
+class EmptySearch(ValueError):
+    def __init__(self, offered):
+        super().__init__("No matching option is offered")
+        self.offered = offered
+
+
+def test_an_empty_search_is_not_new_offered_choices():
+    # Asure's State box (2026-10-29) returned [[]], then [[], []], so every failure looked like a new situation and one
+    # field was written 8 times in a run. The same rows, or no rows, are the same failure; a real new row is not.
+    form = form_with(DEGREE)
+    form.write_context = lambda: {"page": "p", "step": "s", "dialogs": (), "fields": (), "values": {}}
+    shapes = [
+        {"search_rows": [[]], "catalog": []},
+        {"search_rows": [[], []], "catalog": []},
+        None,
+    ]
+    counts = [form.record_write_failure(DEGREE, "Northland", EmptySearch(offered)) for offered in shapes]
+    assert counts == [False, True, True]
+    new_row = form.record_write_failure(DEGREE, "Northland", EmptySearch({"search_rows": [], "catalog": ["Southland"]}))
+    assert new_row is False and form.field_failures[form.field_key(DEGREE)]["count"] == 1

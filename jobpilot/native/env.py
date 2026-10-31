@@ -192,7 +192,10 @@ def _port(values, key, default):
 def prepare(cfg):
     """The one thing `.env` must supply, and the permissions the data must have. The data dir stays 0700, as the
     container's is, because it holds the mail key and every saved page of every application."""
-    if not cfg.password:
+    from ..storage.mode import current
+
+    # Only the database on this computer has a password of its own to create; Supabase and a server bring theirs.
+    if not cfg.password and current(cfg.values, cfg.data_dir) == "local":
         raise NativeError("POSTGRES_PASSWORD is not set in .env. Create one with: scripts/setup.sh --env-only")
     cfg.data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     cfg.data_dir.chmod(0o700)

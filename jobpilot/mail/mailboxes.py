@@ -7,6 +7,7 @@ import base64
 import hashlib
 import hmac
 import httpx
+import logging
 import re
 import secrets
 import time
@@ -14,6 +15,8 @@ from ..db import MailChallenge
 from ..db import MailOAuth
 from ..db import MailRule
 from ..db import Mailbox
+from ..db import Setting
+from ..db import now
 from ..db import record
 from ..mail_errors import MailAuthenticationError
 from .constants import API_URL
@@ -21,6 +24,11 @@ from .constants import LIVE
 from .constants import SCOPE
 from .constants import TOKEN_URL
 from .helpers import digest
+
+
+log = logging.getLogger("jobpilot.mail")
+# Failures counted per place, persisted at most this often (the counts in memory are exact).
+FAILURE_FLUSH_SECONDS = 60
 
 
 class MailboxesMixin:
@@ -36,7 +44,9 @@ class MailboxesMixin:
     def summary(self):
         with self.db.session() as s:
             boxes = [
-                {k: v for k, v in record(m).items() if k != "credentials"} | {"provider": self.provider(m)}
+                {k: v for k, v in record(m).items() if k != "credentials"}
+                | {"provider": self.provider(m)}
+                | self.health(m, s)
                 for m in s.scalars(select(Mailbox))
             ]
             rules = [record(r) for r in s.scalars(select(MailRule))]
@@ -173,10 +183,65 @@ class MailboxesMixin:
             s.flush()
             return {k: v for k, v in record(box).items() if k != "credentials"} | {"provider": "gmail_imap"}
 
+    @staticmethod
+    def health(box, session):
+        """What the Email page shows about a mailbox, with times: `status` is "ok", "retrying" (connected, and the last
+        error is newer than the last success) or "reconnect_required". `error` alone carried no time and stayed beside
+        "connected" until the next success (2026-10-31). last_ok_at is the last request Gmail answered."""
+        row = session.get(Setting, "mail_health:" + box.id)
+        saved = (row.value if row else None) or {}
+        last_error_at = saved.get("last_error_at") or None
+        retrying = bool(box.state == "connected" and last_error_at and (not box.checked_at or last_error_at > box.checked_at))
+        return {
+            "last_ok_at": box.checked_at,
+            "last_error_at": last_error_at,
+            "last_error": saved.get("last_error", "") if last_error_at else "",
+            "consecutive_failures": saved.get("consecutive_failures", 0) if retrying or box.state != "connected" else 0,
+            "failures_total": saved.get("failures_total", 0),
+            "retrying": retrying,
+            "status": "reconnect_required" if box.state != "connected" else "retrying" if retrying else "ok",
+        }
+
     def connection_error(self, mailbox_id, state, error):
         with self.db.exclusive() as s:
             if box := s.get(Mailbox, mailbox_id):
                 box.state, box.error = state, error
+                row = s.get(Setting, "mail_health:" + mailbox_id)
+                saved = dict((row.value if row else None) or {})
+                saved.update(
+                    last_error_at=now(),
+                    last_error=error[:200],
+                    consecutive_failures=saved.get("consecutive_failures", 0) + 1,
+                    failures_total=saved.get("failures_total", 0) + 1,
+                )
+                if row:
+                    row.value = saved
+                else:
+                    s.add(Setting(key="mail_health:" + mailbox_id, value=saved))
+
+    def mailbox_recovered(self, session, mailbox_id):
+        """A request succeeded: the consecutive-failure count starts over (the totals stay, so rates can be measured)."""
+        row = session.get(Setting, "mail_health:" + mailbox_id)
+        if row and (row.value or {}).get("consecutive_failures"):
+            row.value = {**row.value, "consecutive_failures": 0, "recovered_at": now()}
+
+    def note_failure(self, where, exc, run_id=None):
+        """A mailbox task that fails was swallowed in silence (the poll loop, the wait loops): log it by its class (never
+        its text, which can carry provider responses) and count it per place, so the failure rate can be measured."""
+        counts = self.__dict__.setdefault("failure_counts", {})
+        entry = counts.setdefault(where, {"count": 0, "last_at": None, "last_error": "", "flushed": 0.0})
+        entry["count"] += 1
+        entry["last_at"], entry["last_error"] = now(), type(exc).__name__
+        log.warning("mail %s failed (%s), %d so far", where, type(exc).__name__, entry["count"])
+        if time.monotonic() - entry["flushed"] >= FAILURE_FLUSH_SECONDS:
+            entry["flushed"] = time.monotonic()
+            try:
+                self.db.set_setting(
+                    "mail_failures", {k: {f: v for f, v in e.items() if f != "flushed"} for k, e in counts.items()}
+                )
+            except Exception:
+                pass  # Accounting never fails the work it counts.
+        return entry["count"]
 
     async def disconnect(self, mailbox_id):
         async with self.locks.setdefault(mailbox_id, asyncio.Lock()):

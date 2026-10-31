@@ -7,6 +7,7 @@ from .challenges import ChallengesMixin
 from .polling import PollingMixin
 from sqlalchemy import select
 import asyncio
+import time
 from ..db import Mailbox
 from .vault import Vault
 
@@ -21,6 +22,9 @@ class MailService(MailboxesMixin, TransportMixin, RulesMixin, ChallengesMixin, P
         self.poll_lock = asyncio.Lock()
         self.message_cache = {}  # Immutable messages; secrets stay in memory, never in traces.
         self.poll_diagnostics = {}  # Counts and origins only; never message text or tokens.
+        self.final_attempts = {}  # Challenge id -> searches made after its window ended (polling.LAST_SEARCHES).
+        self.awake_mark = (time.time(), time.monotonic())  # Wall and monotonic clocks at the last look (sleep_credit).
+        self.sleep_owed = 0.0  # Seconds slept that the next sweep adds to every open window.
         if config.gmail_address and config.gmail_app_password:
             email = config.gmail_address.strip().lower()
             with db.exclusive() as s:

@@ -1,6 +1,6 @@
 """The applicant's profile: save, organise evidence, propose history from a resume, unresolved facts."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks
 from sqlalchemy import select
 
 from ...db import Resume
@@ -36,7 +36,8 @@ def router(service) -> APIRouter:
         )
 
     @r.put("/api/profile")
-    def profile(data: Profile):
+    def profile(data: Profile, background: BackgroundTasks):
+        edited = False
         # Do not replace exact answers added concurrently by Telegram reviews.
         with db.exclusive() as s:
             from ...db import Setting
@@ -59,9 +60,12 @@ def router(service) -> APIRouter:
                 for key in ("approved_answers", "reviewed_answers", "forgotten_answers"):
                     value[key] = stored.get(key, {} if key == "approved_answers" else [])
                 sync_address(stored, value)
+                edited = value != stored
                 row.value = value
             else:
                 s.add(Setting(key="profile", value=value))
+        if edited:
+            background.add_task(service.reconsider_open_questions)  # A corrected fact may answer a waiting question.
         return {"saved": True}
 
     @r.post("/api/profile/organize")

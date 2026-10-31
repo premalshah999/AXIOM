@@ -2925,6 +2925,25 @@ MULTI_SELECTED_JS = """e=>{
 }"""
 
 
+# Removes every chip of a single-answer multi picker except `keep`. A chip's own remove control fires the widget's handler.
+DROP_OTHER_CHIPS_JS = r"""(e, keep) => {
+    const same = t => t.replace(/\s+/g, ' ').trim().toLowerCase() === keep.replace(/\s+/g, ' ').trim().toLowerCase();
+    const react = e.closest('[class*=__control]');
+    if (react) {
+        for (const chip of react.querySelectorAll('[class*=__multi-value__label]')) {
+            if (same(chip.textContent)) continue;
+            chip.parentElement?.querySelector('[class*=__multi-value__remove]')?.click();
+        }
+        return;
+    }
+    for (const chip of e.querySelectorAll('.select2-selection__choice')) {
+        const copy = chip.cloneNode(true);
+        copy.querySelectorAll('.select2-selection__choice__remove').forEach(x => x.remove());
+        if (!same(copy.textContent)) chip.querySelector('.select2-selection__choice__remove')?.click();
+    }
+}"""
+
+
 async def multi_combobox(frame, el, value, **options):
     """Every value of a multiselect answer ("A\\nB\\nC"), each picked once. An Oracle CX multiselect was given the
     whole answer as one search and refused it ("No matching option is offered", 2026-10-27); values already shown as
@@ -2986,6 +3005,7 @@ async def combobox(
         return picked
     # Greenhouse "mark all that apply" questions are react-select multi
     # comboboxes: the commit is a chip, never a single-value or input value.
+    one_answer = not multi and not re.search(r"[\n;]", str(value))
     multi = multi or await el.evaluate(
         "e => e.matches('.select2-selection--multiple') || !!e.closest('[class*=__control]')?.querySelector('[class*=__value-container--is-multi]')"
     )
@@ -3014,6 +3034,7 @@ async def combobox(
     )
     scope = await _popup_scope(el)
     opts = []
+    listed = []
     choice = None
 
     def eligible(options):
@@ -3143,7 +3164,13 @@ async def combobox(
         choice = best_option(opts, value)
     if not choice:
         await el.press("Escape")
-        raise ValueError("No matching option is offered")
+        error = ValueError("No matching option is offered")
+        # The rows the control did offer, so the failure record says what format to match (a month list that offers
+        # "05 - May" refuses "May") and the repeat breaker sees a changed list as new; option labels only.
+        error.offered = {
+            "rows": list(dict.fromkeys(o["text"] for o in [*listed, *opts] if o.get("text")))[:20]
+        }
+        raise error
     await click_option(frame, choice, owner=el)
     await asyncio.sleep(0.1)
     if multi:
@@ -3151,6 +3178,15 @@ async def combobox(
         selected = await el.evaluate(MULTI_SELECTED_JS)
         if norm(choice["text"]) not in {norm(v) for v in selected.splitlines()}:
             raise ValueError("Multiselect did not retain the selected option")
+        if one_answer and len([v for v in selected.splitlines() if v.strip()]) > 1:
+            # The answer is this one option, and every other chip is a claim nobody made: Twitch's citizenship menu kept
+            # "Laos" and "Latvia" from earlier passes, and veteran menus kept "I elect not to self-identify" beside "No"
+            # (2026-10). Repairing the value would only have added a third.
+            await el.evaluate(DROP_OTHER_CHIPS_JS, choice["text"])
+            await asyncio.sleep(0.1)
+            selected = await el.evaluate(MULTI_SELECTED_JS)
+            if {norm(v) for v in selected.splitlines() if v.strip()} != {norm(choice["text"])}:
+                raise ValueError("Multiselect kept options nobody chose")
         return selected
     deadline = time.monotonic() + 2
     while time.monotonic() < deadline:

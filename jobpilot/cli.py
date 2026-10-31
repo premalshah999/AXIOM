@@ -235,6 +235,9 @@ def main():
     verify.add_argument("--timeout", type=int, default=420, help="Total queue wait budget in seconds")
     login = sub.add_parser("login", help="Capture an employer session using your own local browser")
     login.add_argument("url")
+    from .storage.cli import add_parser as add_database_parser
+
+    add_database_parser(sub)
     desktop = sub.add_parser("browser", help="Open the local application browser for Docker workers")
     desktop.add_argument("--port", type=int, default=9224)
     twin = sub.add_parser(
@@ -242,6 +245,10 @@ def main():
     )
     twin.add_argument("--port", type=int, default=9225)
     args = parser.parse_args()
+    if args.command == "database":
+        from .storage.cli import command as database_command
+
+        raise SystemExit(database_command(args, settings))
     config = settings()
     if args.command == "token":
         print(config.app_token)
