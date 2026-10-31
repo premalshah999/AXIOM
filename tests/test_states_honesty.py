@@ -304,6 +304,8 @@ async def test_a_parked_model_outage_resumes_once_the_provider_is_back(service, 
         seed_job(service, job_id, "greenhouse")
         with service.db.exclusive() as s:
             s.get(Job, job_id).company = "Company " + job_id
+            # Two employers on the platform's own address: a path elsewhere no longer names an employer (employer_partition).
+            s.get(Job, job_id).url = f"https://job-boards.greenhouse.io/{job_id}/jobs/1"
         add_run(service, "src-" + job_id, job_id, "waiting_browser", 0, PROVIDER,
                 {"match_approved": True, "profile": {"autonomous": True}})
         service.db.set_setting("draft_recovery:" + job_id, {
