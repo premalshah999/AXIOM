@@ -331,7 +331,6 @@ async def start(service):
     from .recovery import schedule_version_repairs
 
     schedule_version_repairs(service)
-    service.audit_legacy_confirmation_evidence()
     from . import dbos_sqlite  # noqa: F401 - old SQLite needs the pinned DBOS clock default
 
     DBOS(

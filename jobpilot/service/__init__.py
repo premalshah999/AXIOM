@@ -24,19 +24,12 @@ class Service(QueueingMixin, ExecutionMixin, CompletionMixin, ReviewsMixin, Migr
         self.mail = MailService(db, config)
         self.inbox = Inbox(self)
         self.migrate_reviewed_answers()
-        from ..grandfather import grandfather_preferences
-
-        grandfather_preferences(db)
-        from ..corrections import revert_unfinished_receipts
-
-        revert_unfinished_receipts(db)
         from ..operations.superseded import close_superseded_waits
 
         close_superseded_waits(self)  # 108 email waits a newer run had replaced were never closed (2026-10-29)
         from ..operations.closed_postings import close_gone_postings
 
         close_gone_postings(db)
-        self.migrate_legacy()
         self.relabel_custom_ats()
         self.employer_names_from_titles()
         from ..features._store import create_tables
