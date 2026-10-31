@@ -700,9 +700,17 @@
     if (!q || q === 'Unlabelled field' || q === box.id) continue;
     // Oracle CX disclosure questions render their choices as unnamed checkboxes in one labelled .input-row group
     // (Rice 2026-10-27: each option read as its own required box and the page never validated).
-    if (!/CheckboxGroup/i.test(box.dataset.automationId || '') && !box.matches('.input-row[role=group]')
-        && !/select all|choose all|check all|select \d|which (?:locations|interests)|where.{0,40}relocat/i.test(q)) continue;
     const options = group.map(c=>label(c));
+    // A legend that asks a question or gives an instruction owns its boxes as alternatives (Workable's "Please indicate
+    // which active clearances you have", Credence 2026-10-26: 11 boxes each read as a separate required item, and the
+    // run stalled on the one that matches the applicant). Consents and attestations stay separate booleans: each is its
+    // own agreement, however the fieldset is titled.
+    const asksChoice = /\?\s*$|^\s*(?:please\s+)?(?:select|choose|indicate|check|mark|tick|pick|which|what|where|who|how)\b/i.test(q)
+      && !options.some(o=>/^\s*(?:i|we)\s+(?:agree|consent|acknowledge|certify|confirm|understand|authori[sz]e|accept|have read|hereby)\b|\b(?:terms|privacy|consent|policy|policies)\b/i.test(o))
+      && new Set(options.map(o=>o.toLowerCase())).size === options.length && !options.some(o=>!o || o === 'Unlabelled field')
+      && !options.every(o=>/^(?:yes|no|n\/?a|not applicable)\b/i.test(o)); // Yes/No boxes keep their existing handling.
+    if (!/CheckboxGroup/i.test(box.dataset.automationId || '') && !box.matches('.input-row[role=group]') && !asksChoice
+        && !/select all|choose all|check all|select \d|which (?:locations|interests)|where.{0,40}relocat/i.test(q)) continue;
     const value = group.filter(c=>c.checked).map(c=>label(c)).join('\n');
     const req = isReq(box,q) || group.some(c=>c.required || c.getAttribute('aria-required')==='true');
     group.forEach(c=>consumed.add(c));box.querySelectorAll('[role=checkbox]').forEach(c=>consumed.add(c));consumed.add(box);
