@@ -1,33 +1,4 @@
-/* What the work pages (Overview, Jobs, Applications, Needs you, the job drawer) still draw for themselves: layout only.
-   Every look comes from src/ui, worktools.tsx and the tokens. */
-
-/* Jobs: the paste box above the Pipeline */
-.ax-queue-box {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  flex: none;
-}
-.ax-queue {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-}
-.ax-queue textarea {
-  flex: 1;
-  resize: none;
-}
-/* The bulk line wraps on a phone, so Remove and Clear stay reachable (the Table primitive's does not yet). */
-.ax-bulk,
-.ax-bulk-actions {
-  flex-wrap: wrap;
-}
-/* A phone keeps the job, its status and the row menu readable: the row's one button is in the job's drawer. */
-@container ax-table (max-width: 599px) {
-  .ax-table .ax-lead {
-    display: none;
-  }
-}
+/* What the work pages (Needs you, the job drawer) draw for themselves. Every look comes from src/ui, worktools.tsx and the tokens. */
 
 /* Needs you: who is asking on the left, the question and its answer on the right, on hairlines. */
 .nq-head {
@@ -39,9 +10,8 @@
 }
 .nq-say {
   font-size: var(--text-title);
-  font-stretch: var(--wide);
   font-weight: 500;
-  line-height: 1.2;
+  line-height: 1.3;
 }
 .ax-page:has(> .nq-head) {
   gap: 0;
@@ -64,11 +34,8 @@
   display: flex;
   align-items: baseline;
   gap: var(--space-2);
-  font-size: var(--text-sub);
-  font-stretch: 100%;
+  font-size: var(--text-title);
   font-weight: 600;
-  letter-spacing: 0;
-  text-transform: none;
 }
 .nq-who .mono {
   margin-top: var(--space-1);
@@ -90,19 +57,15 @@
 .nq-q {
   max-width: 62ch;
   font-size: var(--text-title);
-  font-stretch: var(--wide);
   font-weight: 500;
-  line-height: 1.2;
-  letter-spacing: -0.006em;
+  line-height: 1.35;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 /* A long question is read, not announced. */
 .nq-q.is-long {
-  font-size: var(--text-sub);
-  font-stretch: 100%;
-  letter-spacing: 0;
-  line-height: 1.3;
+  font-size: var(--text-body);
+  line-height: 1.45;
 }
 .nq-q + .ax-note,
 .dr-stack > div > .ax-note {
@@ -119,61 +82,42 @@
 .nq-answer {
   min-width: 0;
 }
-/* A few short choices are keys: one presses in and its lamp lights. */
+/* A few short choices: one row of plain options, the chosen one filled. */
 .nq-answer [role="radiogroup"].nq-opts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-  gap: var(--space-1);
+  gap: var(--space-2);
 }
 .nq-answer [role="radiogroup"] .ax-check {
   position: relative;
-  align-items: flex-end;
-  min-height: 72px;
-  padding: 0 var(--space-2) 10px var(--space-3);
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control);
+  padding: 4px var(--space-3);
+  border: 1px solid var(--btn-edge);
   border-radius: var(--radius-sm);
-  background: var(--key);
-  box-shadow:
-    inset 0 1px 0 var(--key-top),
-    0 1px 0 1px var(--key-bot),
-    0 2px 0 1px var(--key-bot);
-  color: var(--key-ink);
-  font-size: var(--text-sub);
-  font-stretch: var(--wide);
+  background: var(--btn);
+  box-shadow: var(--btn-sheen);
+  color: var(--btn-ink);
   font-weight: 500;
+  transition: background var(--dur) var(--ease);
+}
+.nq-answer [role="radiogroup"] .ax-check:hover {
+  background: var(--btn-hover);
 }
 .nq-answer [role="radiogroup"] .ax-check input {
   position: absolute;
-  top: 10px;
-  left: var(--space-3);
-  width: 8px;
-  height: 8px;
-  margin: 0;
-  border: 0;
-  border-radius: 50%;
-  background: var(--ground-3);
-  box-shadow: inset 0 0 0 1px var(--line-strong);
-}
-.nq-answer [role="radiogroup"] .ax-check input::after {
-  display: none;
+  opacity: 0;
+  pointer-events: none;
 }
 .nq-answer [role="radiogroup"] .ax-check:has(input:checked) {
-  background: var(--key-down);
-  box-shadow:
-    inset 0 2px 3px var(--shade),
-    0 0 0 1px var(--key-bot);
-  font-weight: 700;
-  transform: translateY(1px);
-}
-.nq-answer [role="radiogroup"] .ax-check input:checked {
-  background: var(--signal);
-  box-shadow: none;
+  border-color: var(--brand);
+  background: var(--brand);
+  color: var(--brand-ink);
 }
 .nq-answer [role="radiogroup"] .ax-check:has(input:focus-visible) {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
-}
-.nq-answer [role="radiogroup"] .ax-check input:focus-visible {
-  outline: none;
 }
 .nq-opts {
   display: flex;
@@ -203,4 +147,97 @@
 .ax-code textarea {
   font-family: var(--font-data);
   font-size: var(--text-meta);
+}
+
+/* The job drawer: where and what, then the status block with its next step, then history; raw detail folds away. */
+.dr-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px var(--space-3);
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.dr-meta .ax-more-link {
+  margin-left: auto;
+  color: var(--ink);
+}
+.dr-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--inset);
+}
+.dr-status-word .ax-pill {
+  font-size: var(--text-title);
+  font-weight: 600;
+}
+.dr-status-why {
+  color: var(--ink-2);
+}
+.dr-status-reason {
+  color: var(--ink);
+}
+.dr-status > .ax-toolbar {
+  margin-top: var(--space-2);
+}
+.dr-question {
+  margin-top: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+/* Attempts down a line, newest first; the one on screen is marked. */
+.dr-history {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dr-history li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto minmax(52px, auto);
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 36px;
+}
+.dr-history li > i {
+  position: relative;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+.dr-history li + li::before {
+  content: "";
+  position: absolute;
+  top: -11px;
+  left: 3px;
+  width: 1px;
+  height: 22px;
+  background: var(--line);
+}
+.dr-history li.is-here > i {
+  background: var(--ink);
+}
+.dr-history .ax-link {
+  justify-self: start;
+}
+.dr-history .ax-pill {
+  font-size: var(--text-meta);
+}
+.dr-history-note {
+  color: var(--ink-3);
+  font-family: var(--font-data);
+  font-size: var(--text-data);
+  text-align: right;
+}
+.ax-drawer .ax-stack {
+  gap: var(--space-5);
+}
+.ax-drawer .ax-panel-head h2,
+.ax-dialog .ax-panel-head h2 {
+  font-size: var(--text-body);
 }

@@ -1,0 +1,820 @@
+/* Overview only: the instrument. Everything else is the shared family (components.css). Lines are the machine, dots are what it is
+   doing, the window stays dark in both themes. */
+
+.ov-page {
+  gap: var(--space-4);
+}
+.ax-defs {
+  position: absolute;
+}
+/* A readout looks emitted, not printed. Never under about 56px. */
+.ax-read {
+  display: block;
+  font-family: var(--font-read);
+  font-variation-settings: "ROND" 100, "wght" 900;
+  line-height: 0.82;
+  letter-spacing: -0.01em;
+}
+.ax-window {
+  border-radius: var(--radius);
+  background: var(--window);
+  box-shadow: 0 0 0 1px var(--window-edge);
+  color: var(--window-ink);
+}
+.ov-label {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  font-weight: 500;
+}
+
+/* ---------- the top: count | state, progress, day | questions | key ---------- */
+.ov-hero {
+  display: grid;
+  grid-template-columns: minmax(200px, auto) minmax(0, 1fr) auto auto;
+  align-items: stretch;
+}
+.ov-hero > * {
+  padding: var(--space-5) var(--space-6);
+  border-left: 1px solid var(--line-soft);
+}
+.ov-hero > :first-child {
+  border-left: 0;
+}
+.ov-big {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  color: var(--ink);
+  text-decoration: none;
+  transition: background var(--dur) var(--ease);
+}
+.ov-big:hover,
+.ov-wait:hover {
+  background: var(--hover);
+}
+.ov-big:focus-visible,
+.ov-wait:focus-visible {
+  outline-offset: -3px;
+}
+.ov-big .ax-read {
+  /* Two digits at full size; a big day gives up height rather than running into the sentence. */
+  font-size: min(148px, calc(290px / var(--chars, 2)));
+  margin-left: -2px;
+}
+.ov-say {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.ov-sentence {
+  font-size: 20px;
+  font-stretch: 106%;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.008em;
+  text-wrap: balance;
+}
+.ov-sentence.is-bad {
+  color: var(--signal-ink);
+}
+.ov-sub {
+  margin-top: 2px;
+  color: var(--ink-2);
+}
+.ov-progress p {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 2px var(--space-3);
+  margin-bottom: 6px;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.ov-progress b {
+  color: var(--ink);
+  font-weight: 400;
+}
+.ov-bar {
+  position: relative;
+  display: block;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--inset);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.ov-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 3px;
+  background: var(--live);
+  transition: width 400ms var(--ease);
+}
+
+/* The day */
+.ax-day {
+  position: relative;
+  margin: auto 0 0;
+}
+.ax-day svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.ax-day-col {
+  fill: var(--hover);
+}
+.ax-day-now {
+  stroke: var(--live);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.ax-day-tip {
+  position: absolute;
+  bottom: calc(100% - 6px);
+  z-index: 3;
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--overlay);
+  box-shadow: var(--shadow-overlay);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+.ax-day-tip b {
+  font-family: var(--font-data);
+  font-weight: 400;
+}
+.ax-hours {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  margin-top: var(--space-1);
+  color: var(--ink-3);
+  font-family: var(--font-data);
+  font-size: 11.5px;
+  line-height: 1.2;
+}
+.ax-hours-now {
+  position: absolute;
+  top: 0;
+  color: var(--live);
+  font-style: normal;
+  transform: translateX(-50%);
+}
+.ax-hours em {
+  position: absolute;
+  right: 0;
+  top: 0;
+  font-style: normal;
+}
+
+/* Questions waiting: lit while there are any. */
+.ov-wait {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  color: var(--ink);
+  text-decoration: none;
+  transition: background var(--dur) var(--ease);
+}
+.ov-lit {
+  display: grid;
+  place-items: center;
+  width: 124px;
+  height: 84px;
+  overflow: hidden;
+  color: var(--led);
+}
+.ov-lit .ax-read {
+  font-size: min(64px, calc(132px / var(--chars, 2)));
+  line-height: 1;
+}
+.ov-lit.is-dark {
+  color: var(--dot-off);
+}
+
+/* The key */
+.ov-key {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  width: 212px;
+  padding-inline: var(--space-3) !important;
+}
+.ax-masterkey {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  width: 96px;
+  height: 96px;
+  margin: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow:
+    0 0 0 5px var(--raised),
+    0 0 0 6px var(--line-strong);
+  color: var(--brand-ink);
+  font-size: var(--text-meta);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    transform 80ms var(--ease);
+}
+.ax-masterkey svg {
+  fill: currentColor;
+}
+.ax-masterkey:hover:not(:disabled) {
+  background: var(--brand-hover);
+}
+.ax-masterkey:active:not(:disabled) {
+  background: var(--brand-active);
+  transform: translateY(1px);
+}
+.ax-masterkey:focus-visible {
+  outline-offset: 8px;
+}
+.ax-masterkey:disabled {
+  background: var(--hover);
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+.ov-key-note {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  line-height: 1.35;
+  text-align: center;
+}
+.ov-target {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+.ov-target input {
+  width: 46px;
+  min-height: 26px;
+  padding: 2px 4px;
+  font-family: var(--font-data);
+  font-size: var(--text-data);
+  text-align: center;
+  -moz-appearance: textfield;
+}
+.ov-target input::-webkit-outer-spin-button,
+.ov-target input::-webkit-inner-spin-button {
+  appearance: none;
+}
+
+/* ---------- live work: what is really running, in the window ---------- */
+.ov-live {
+  --live-cols: 32px minmax(180px, 1.1fr) minmax(300px, 1.5fr) 124px 72px;
+  --ink: var(--window-ink);
+  --ink-2: var(--window-ink-2);
+  --ink-3: var(--window-ink-2);
+  container: ov-live / inline-size;
+}
+.ov-live-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 44px;
+  padding: 0 var(--space-4);
+}
+.ov-live-head h2 {
+  font-size: var(--text-title);
+}
+.ov-live-head p {
+  margin-left: auto;
+  color: var(--window-ink-2);
+  font-family: var(--font-data);
+  font-size: var(--text-data);
+}
+/* One dot a slot: at a glance, how full the machine is. */
+.ov-cap {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-left: auto;
+}
+.ov-cap + p {
+  margin-left: 0;
+}
+.ov-cap i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dot-off);
+}
+.ov-cap i.is-on {
+  background: var(--led);
+}
+.ov-legend {
+  display: none;
+}
+@container ov-live (min-width: 860px) {
+  .ov-legend {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 4px;
+    /* Over the third column: the same grid arithmetic as a row. */
+    width: calc((100% - 32px - 124px - 72px - 4 * var(--space-4) - 2 * var(--space-4)) * 1.5 / 2.6);
+    margin-left: calc(var(--space-4) + 32px + var(--space-4) + (100% - 32px - 124px - 72px - 4 * var(--space-4) - 2 * var(--space-4)) * 1.1 / 2.6 + var(--space-4));
+    padding-bottom: 6px;
+    color: var(--window-ink-2);
+    font-size: 11.5px;
+    line-height: 1.2;
+  }
+}
+.ov-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ov-row {
+  display: grid;
+  grid-template-columns: var(--live-cols);
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 60px;
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--window-rule);
+}
+.ov-who {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--window-ink);
+  font: inherit;
+  text-align: left;
+}
+button.ov-who {
+  cursor: pointer;
+}
+button.ov-who:hover b {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.ov-who b,
+.ov-who span,
+.ov-doing {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-who b {
+  font-weight: 600;
+}
+.ov-who span {
+  color: var(--window-ink-2);
+  font-size: var(--text-meta);
+}
+.ov-step {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.ov-track {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+}
+/* The channel motif, laid on its side: three rows of dots to a step. */
+.ov-track i {
+  height: 18px;
+  background-image: radial-gradient(circle at center, var(--dot-off) 2.2px, transparent 2.6px);
+  background-repeat: round;
+  background-size: 6px 6px;
+}
+.ov-track i.is-past {
+  background-image: radial-gradient(circle at center, var(--led) 1.3px, transparent 1.7px);
+}
+.ov-track i.is-now {
+  background-image: radial-gradient(circle at center, var(--led) 2.5px, transparent 2.9px);
+}
+.ov-track i.is-pulse {
+  animation: ax-pulse 1.6s ease-in-out infinite;
+}
+.is-parked .ov-track i.is-past,
+.is-parked .ov-track i.is-now {
+  background-image: radial-gradient(circle at center, var(--window-ink-2) 2px, transparent 2.4px);
+}
+.ov-doing {
+  color: var(--window-ink-2);
+  font-size: var(--text-meta);
+}
+.ov-data {
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  color: var(--window-ink-2);
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+.ov-data time {
+  color: var(--window-ink);
+  font-size: var(--text-body);
+}
+.ov-row-act {
+  display: flex;
+  justify-content: flex-end;
+}
+.ov-live-empty {
+  padding: var(--space-5) var(--space-4);
+  border-top: 1px solid var(--window-rule);
+  color: var(--window-ink-2);
+}
+.ov-live-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--space-5);
+  padding: 10px var(--space-4);
+  border-top: 1px solid var(--window-rule);
+  color: var(--window-ink-2);
+  font-size: var(--text-meta);
+}
+.ov-live-foot b {
+  color: var(--window-ink);
+  font-family: var(--font-data);
+  font-size: var(--text-data);
+  font-weight: 400;
+}
+.ov-foot-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.ov-foot-link:hover {
+  color: var(--window-ink);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+@container ov-live (max-width: 859px) {
+  .ov-row {
+    position: relative;
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    gap: var(--space-2) var(--space-3);
+    padding-block: var(--space-3);
+  }
+  .ov-step {
+    grid-row: 2;
+    grid-column: 1 / -1;
+  }
+  .ov-doing {
+    padding-right: 72px;
+  }
+  /* Pause sits on the line that says what it would stop. */
+  .ov-row-act {
+    position: absolute;
+    right: var(--space-2);
+    bottom: var(--space-2);
+  }
+}
+
+/* ---------- below: what needs you, the newest proof, and how the whole thing is doing ---------- */
+.ov-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-4);
+}
+.ov-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.ov-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ov-list > li + li {
+  border-top: 1px solid var(--line-soft);
+}
+.ov-pad {
+  padding: 0 var(--space-4);
+}
+.ov-q {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+}
+.ov-q .ax-mono-stack {
+  justify-self: start;
+}
+.ov-q-text p {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+.ov-q-text small {
+  color: var(--ink-3);
+}
+.ov-ok {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto 56px;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 52px;
+  padding: var(--space-2) var(--space-4);
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+.ov-ok:hover {
+  background: var(--hover);
+}
+.ov-ok:focus-visible {
+  outline-offset: -2px;
+}
+.ov-ok-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ov-ok-who b,
+.ov-ok-who span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-ok-who b {
+  font-weight: 500;
+}
+.ov-ok-who span {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.ov-ok-proof {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+.ov-ok time {
+  color: var(--ink-2);
+  text-align: right;
+}
+/* The funnel: one scale, one baseline, dots like the rest of the page. */
+.ov-funnel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ov-funnel-tip {
+  display: block;
+  width: 100%;
+}
+.ov-funnel-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) 56px 36px;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  margin-inline: calc(-1 * var(--space-2));
+  width: calc(100% + 2 * var(--space-2));
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+.ov-funnel-row:hover {
+  background: var(--hover);
+}
+.ov-funnel-label {
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+.ov-funnel-bar {
+  display: block;
+  height: 12px;
+  background-image: radial-gradient(circle at center, var(--dot-plate) 1.4px, transparent 1.8px);
+  background-size: 6px 6px;
+}
+.ov-funnel-bar i {
+  display: block;
+  height: 100%;
+  background-image: radial-gradient(circle at center, var(--ink-3) 2.2px, transparent 2.6px);
+  background-size: 6px 6px;
+}
+.ov-funnel-bar i.is-lit {
+  background-image: radial-gradient(circle at center, var(--dot-lit) 2.4px, transparent 2.8px);
+}
+.ov-num,
+.ov-rate {
+  font-family: var(--font-data);
+  font-size: var(--text-data);
+  text-align: right;
+}
+.ov-rate {
+  color: var(--ink-3);
+}
+.ov-caption {
+  margin-top: var(--space-3);
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+}
+.ov-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-body);
+}
+.ov-table thead th {
+  height: 32px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+  font-weight: 500;
+  text-align: left;
+}
+.ov-table tbody th {
+  padding: 0 var(--space-3);
+  font-weight: 400;
+  text-align: left;
+  white-space: nowrap;
+}
+.ov-table td {
+  height: 36px;
+  padding: 0 var(--space-3);
+  white-space: nowrap;
+}
+.ov-table tbody tr + tr > * {
+  border-top: 1px solid var(--line-soft);
+}
+.ov-table th:first-child {
+  padding-left: var(--space-4);
+}
+.ov-table th:last-child,
+.ov-table td:last-child {
+  padding-right: var(--space-4);
+}
+.ov-table .is-num {
+  font-family: var(--font-data);
+  font-size: var(--text-data);
+  text-align: right;
+}
+.ov-table thead .is-num {
+  font-family: var(--font-text);
+  font-size: var(--text-meta);
+}
+.ov-meter {
+  display: inline-block;
+  width: 56px;
+  height: 4px;
+  margin-right: var(--space-2);
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--inset);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  vertical-align: middle;
+}
+.ov-meter i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--ink-2);
+}
+
+/* ---------- narrower ---------- */
+@media (max-width: 1239px) {
+  .ov-hero {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+  .ov-say {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--line-soft);
+    border-left: 0;
+  }
+  .ov-big {
+    grid-row: 1;
+  }
+  .ov-wait,
+  .ov-key {
+    grid-row: 1;
+  }
+}
+@media (max-width: 1099px) {
+  .ov-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 899px) {
+  .ov-hero {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .ov-hero > * {
+    padding: var(--space-4);
+  }
+  .ov-big .ax-read {
+    font-size: min(112px, calc(52vw / var(--chars, 2)));
+  }
+  .ov-lit {
+    width: 104px;
+    height: 72px;
+  }
+  .ov-lit .ax-read {
+    font-size: min(56px, calc(112px / var(--chars, 2)));
+  }
+  .ov-say {
+    order: 3;
+  }
+  .ov-key {
+    grid-row: 3;
+    grid-column: 1 / -1;
+    flex-direction: row;
+    justify-content: space-between;
+    width: auto;
+    border-top: 1px solid var(--line-soft);
+    border-left: 0;
+  }
+  .ax-masterkey {
+    order: 2;
+    width: 72px;
+    height: 72px;
+    gap: 3px;
+    font-size: 12px;
+  }
+  .ax-masterkey svg {
+    width: 14px;
+    height: 16px;
+  }
+  .ov-key-note {
+    text-align: left;
+  }
+  .ov-ok {
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+  }
+  .ov-ok-proof {
+    display: none;
+  }
+  .ov-q {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .ov-q .ax-mono-stack {
+    display: none;
+  }
+  .ov-meter {
+    display: none;
+  }
+  .ov-funnel-row {
+    grid-template-columns: 72px minmax(0, 1fr) 52px 32px;
+    gap: var(--space-2);
+  }
+  .ax-hours em {
+    position: static;
+    grid-column: 1 / -1;
+    margin-top: 2px;
+    text-align: right;
+  }
+}

@@ -4,7 +4,7 @@ import { useWorkspace } from "./context";
 import { useAction, useDraft } from "./hooks";
 import type { Job, Review } from "./types";
 import { ago, linkHost } from "./format";
-import { Button } from "./ui/index";
+import { Button, Dropzone } from "./ui/index";
 import "./styles/work.css";
 
 export type QuestionGroup = { review: Review; job?: Job; others: Job[] };
@@ -136,15 +136,7 @@ export function QuestionCard({
   const label = note ? "Resolution note" : "Your answer";
   const control =
     kind === "upload" ? (
-      <input
-        data-answer
-        className="ax-control"
-        type="file"
-        aria-label="File to attach"
-        accept={q.accept || ".pdf,.doc,.docx,.txt,.rtf,.odt,.png,.jpg,.jpeg"}
-        required
-        onChange={(e) => setFile(e.target.files?.[0] || null)}
-      />
+      <Dropzone label="File to attach" accept={q.accept || ".pdf,.doc,.docx,.txt,.rtf,.odt,.png,.jpg,.jpeg"} file={file} onFile={setFile} hint="PDF, Word, text or an image." />
     ) : kind === "choice" && q.multiple ? (
       <fieldset className="nq-opts" aria-label="Your answers">
         {q.options.map((x, i) => {
@@ -273,8 +265,8 @@ export function QuestionCard({
       </div>
       <div className="nq-ctl">
         <div className="nq-answer">{control}</div>
-        <Button type="submit" variant="primary" round disabled={!ready} loading={pending === "save"} aria-label={kind === "upload" ? "Attach file" : "Save answer"}>
-          {kind === "upload" ? "Attach" : "Send"}
+        <Button type="submit" variant="primary" disabled={!ready} loading={pending === "save"} aria-label={kind === "upload" ? "Attach file" : "Save answer"}>
+          {kind === "upload" ? "Attach" : "Save"}
         </Button>
       </div>
       <div className="ax-toolbar">
