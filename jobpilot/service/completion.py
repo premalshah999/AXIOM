@@ -26,6 +26,10 @@ CLOSED_POSTING = re.compile(
     r"\b(?:job|posting|requisition)\b[^.]{0,30}\bdoes not exist\b|\bjob\b[^.]{0,60}\bhas been filled\b",
     re.I,
 )
+# Stops whose closing rule is code, not wording: workday.missing_posting_result closes on the employer's own search or on
+# a second run at the posting, and its "posting page does not exist" reason also reads as gone. Promoting it here closed
+# live Workday postings on their first sight (HNTB, Moffitt, Nordstrom, Varian, WVU Medicine, Evolent 2026-10-29).
+OWN_CLOSING_RULE = {"posting_unavailable", "route_unavailable"}
 OWNER_FINISHABLE = {"waiting_browser", "waiting_email", "waiting_answer", "needs_review", "timed_out", "paused"}
 
 
@@ -140,6 +144,7 @@ class CompletionMixin:
                 and run.state != "submitting"
                 and not result.get("reviews")
                 and not result.get("receipt")
+                and result.get("recovery_cause") not in OWN_CLOSING_RULE
                 and CLOSED_POSTING.search(str(result.get("reason") or ""))
             ):
                 state = "closed"
