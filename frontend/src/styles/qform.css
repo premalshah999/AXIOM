@@ -24,6 +24,33 @@
   border-bottom: 1px solid var(--line);
   background: var(--surface);
 }
+/* In a host that has its own title: only the save state, as a small pill that floats at the top while the questions scroll. */
+.ax-qf-progress.is-bare {
+  align-items: flex-start;
+  justify-content: flex-end;
+  height: 0;
+  margin-bottom: calc(-1 * var(--space-6));
+  padding: 0;
+  overflow: visible;
+  border-bottom: 0;
+  background: none;
+  pointer-events: none;
+}
+.ax-qf-progress.is-bare .ax-save {
+  padding: 4px var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--overlay);
+  box-shadow: var(--shadow-overlay);
+  color: var(--ink);
+  pointer-events: auto;
+}
+.ax-qf-progress.is-bare .ax-save.is-idle {
+  display: none;
+}
+.ax-qf-progress.is-bare .ax-save.is-error {
+  color: var(--bad);
+}
 .ax-save {
   display: inline-flex;
   align-items: center;
@@ -77,22 +104,99 @@
   flex-direction: column;
   gap: 2px;
 }
-.ax-qf-cards {
+/* A supervisor or a reference: a row that opens (qform.tsx PersonCard). */
+.ax-qf-people {
+  --surface: var(--raised);
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  box-shadow: var(--shadow-panel);
+  list-style: none;
+}
+.ax-qf-person + .ax-qf-person {
+  border-top: 1px solid var(--line-soft);
+}
+.ax-qf-person-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 56px;
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+.ax-qf-person-head:hover {
+  background: var(--hover);
+}
+.ax-qf-person-head:focus-visible {
+  outline-offset: -2px;
+}
+.ax-qf-person-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ax-qf-person-main > strong {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ax-qf-person-main > small {
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ax-qf-person-state {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: var(--space-1);
+  max-width: 45%;
+  color: var(--ink);
+  font-size: var(--text-meta);
+  font-weight: 500;
+}
+.ax-qf-person-state > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Not added yet: it reads as the action it is. */
+.ax-qf-person:not(.is-added) .ax-qf-person-state {
+  height: 26px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--btn-edge);
+  border-radius: var(--radius-sm);
+  background: var(--btn);
+  color: var(--btn-ink);
+}
+.ax-qf-person-go {
+  flex: none;
+  color: var(--ink-3);
+  transition: transform var(--dur) var(--ease);
+}
+.ax-qf-person.is-open .ax-qf-person-go {
+  transform: rotate(180deg);
+}
+.ax-qf-person-body {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-}
-.ax-qf-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-.ax-qf-card > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+  padding: var(--space-1) var(--space-4) var(--space-4);
 }
 .ax-qf-grid {
   display: grid;
@@ -109,5 +213,16 @@
   .ax-qf-row,
   .ax-qf-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* A phone has no room for "Add supervisor" beside a job's name: the plus says it, the whole row is the target. */
+@media (max-width: 520px) {
+  .ax-qf-person:not(.is-added) .ax-qf-person-state > span {
+    display: none;
+  }
+  .ax-qf-person:not(.is-added) .ax-qf-person-state {
+    width: 26px;
+    justify-content: center;
+    padding: 0;
   }
 }

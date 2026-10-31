@@ -40,9 +40,9 @@ import { guideLater } from "./guide";
 
 // Profile, Resumes, Settings, the resume editor, sign-in and the setup guide are most of the dashboard's code and are rarely open:
 // they load when shown, so Batch and Jobs paint from a smaller bundle (2026-10-23).
-const ProfileView = lazy(() => import("./setup").then((m) => ({ default: m.ProfileView })));
+const ProfileView = lazy(() => import("./profile").then((m) => ({ default: m.ProfilePage })));
 const ResumesView = lazy(() => import("./resumes").then((m) => ({ default: m.ResumesView })));
-const SettingsView = lazy(() => import("./setup").then((m) => ({ default: m.SettingsView })));
+const SettingsView = lazy(() => import("./settings").then((m) => ({ default: m.SettingsView })));
 const ResumeEditor = lazy(() => import("./editor").then((m) => ({ default: m.ResumeEditor })));
 const AuthScreen = lazy(() => import("./account").then((m) => ({ default: m.AuthScreen })));
 const Onboarding = lazy(() => import("./onboarding").then((m) => ({ default: m.Onboarding })));

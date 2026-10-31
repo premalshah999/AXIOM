@@ -1,13 +1,14 @@
-// Profile photo control: upload, replace and remove with a preview.
+// The identity header of Profile › Personal details: the photo, the name and one line of contact, and a dialog to change the photo.
 //   GET    /api/profile/photo       -> {saved: boolean, name?, content_type?, size?, sha256?, saved_at?}
 //   GET    /api/profile/photo/file  -> the image bytes (404 when none)
 //   POST   /api/profile/photo       -> multipart "file" (JPEG, PNG, GIF or WebP, up to 5 MB)
 //   DELETE /api/profile/photo       -> {deleted}
 // Isolated: nothing else on the Profile page depends on it, and a failed read leaves initials in place.
-import { useEffect, useRef, useState } from "react";
+import { Camera } from "lucide-react";
+import { useEffect, useState } from "react";
 import { api } from "./api";
 import { useNotify, usePoll } from "./hooks";
-import { Button, ConfirmButton, Panel } from "./ui/index";
+import { Button, ConfirmButton, Dialog, Dropzone } from "./ui/index";
 
 type Info = { saved: boolean; sha256?: string; name?: string };
 const TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
@@ -21,15 +22,24 @@ const initials = (name: string) =>
     .map((w) => w[0]!.toUpperCase())
     .join("") || "?";
 
-export function ProfilePhoto({ name }: { name: string }) {
+function Avatar({ name, src, alt, large }: { name: string; src: string; alt: string; large?: boolean }) {
+  return (
+    <span className={"pf-avatar" + (large ? " is-large" : "")}>
+      {src ? <img key={src} src={src} alt={alt} /> : <span aria-hidden="true">{initials(name)}</span>}
+    </span>
+  );
+}
+
+export function IdentityHeader({ name, detail }: { name: string; detail: string }) {
   const notify = useNotify();
   const info = usePoll<Info>((signal) => api("/profile/photo", "GET", undefined, signal), 120000);
+  const [open, setOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<"" | "upload" | "remove">("");
-  const input = useRef<HTMLInputElement>(null);
   const has = !!info.data?.saved;
+  const saved = has ? `/api/profile/photo/file?v=${info.data?.sha256 || ""}` : "";
 
   useEffect(() => {
     if (!file) return setPreview("");
@@ -38,11 +48,14 @@ export function ProfilePhoto({ name }: { name: string }) {
     return () => URL.revokeObjectURL(url);
   }, [file]);
 
+  const close = () => {
+    setOpen(false);
+    setFile(null);
+    setError("");
+  };
   const choose = (f: File | null) => {
     setError("");
-    if (!f) return setFile(null);
-    if (!TYPES.includes(f.type)) return setError("Use a JPEG, PNG, GIF or WebP image.");
-    if (f.size > MAX_BYTES) return setError("That image is over 5 MB. Choose a smaller one.");
+    if (f && f.size > MAX_BYTES) return setError("That image is over 5 MB. Choose a smaller one.");
     setFile(f);
   };
   const upload = async () => {
@@ -53,10 +66,9 @@ export function ProfilePhoto({ name }: { name: string }) {
       const body = new FormData();
       body.append("file", file);
       await api("/profile/photo", "POST", body);
-      setFile(null);
       await info.refresh();
-      if (input.current) input.current.value = "";
       notify("ok", "Profile photo saved.");
+      close();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -69,71 +81,64 @@ export function ProfilePhoto({ name }: { name: string }) {
       await api("/profile/photo", "DELETE");
       await info.refresh();
       notify("ok", "Profile photo removed.");
+      close();
     } catch (e) {
-      notify("error", (e as Error).message);
+      setError((e as Error).message);
     } finally {
       setBusy("");
     }
   };
-  const src = preview || (has ? `/api/profile/photo/file?v=${info.data?.sha256 || ""}` : "");
 
   return (
-    <Panel title="Photo">
-      <div className="ax-photo">
-        <span className="ax-photo-frame">
-          {src ? (
-            <img key={src} src={src} alt={preview ? "Preview of the new photo" : "Your profile photo"} />
-          ) : (
-            <span aria-hidden="true">{initials(name)}</span>
-          )}
-        </span>
-        <div className="ax-photo-body">
-          <p className="ax-hint">Optional. Used where an application asks for a photo. JPEG, PNG, GIF or WebP, up to 5 MB.</p>
-          <input
-            ref={input}
-            type="file"
-            accept={TYPES.join(",")}
-            className="sr-only"
-            aria-label="Choose a profile photo"
-            tabIndex={-1}
-            onChange={(e) => choose(e.target.files?.[0] || null)}
-          />
-          <div className="ax-row-end">
-            {file ? (
-              <>
-                <Button variant="primary" size="sm" loading={busy === "upload"} onClick={upload}>
-                  Save photo
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={busy !== ""}
-                  onClick={() => {
-                    setFile(null);
-                    if (input.current) input.current.value = "";
-                  }}
-                >
-                  Cancel
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button size="sm" disabled={busy !== ""} onClick={() => input.current?.click()}>
-                  {has ? "Replace photo" : "Upload photo"}
-                </Button>
-                {has && (
-                  <ConfirmButton label="Remove" confirm="Remove photo" pending={busy === "remove"} onConfirm={remove} />
-                )}
-              </>
+    <div className="pf-identity">
+      <Avatar name={name} src={saved} alt="Your profile photo" />
+      <div className="pf-identity-text">
+        <strong title={name}>{name || "Your name"}</strong>
+        {detail && <span title={detail}>{detail}</span>}
+      </div>
+      <Button size="sm" icon={<Camera size={14} aria-hidden="true" />} onClick={() => setOpen(true)}>
+        {has ? "Change photo" : "Add photo"}
+      </Button>
+      <Dialog
+        open={open}
+        onClose={close}
+        title="Profile photo"
+        sub="Optional. Used where an application asks for a photo."
+        footer={
+          <>
+            {has && !file && (
+              <span className="pf-foot-start">
+                <ConfirmButton label="Remove photo" confirm="Remove" pending={busy === "remove"} onConfirm={remove} />
+              </span>
+            )}
+            <Button variant="ghost" onClick={close}>
+              Cancel
+            </Button>
+            <Button variant="primary" loading={busy === "upload"} disabled={!file} onClick={upload}>
+              Save photo
+            </Button>
+          </>
+        }
+      >
+        <div className="pf-photo-body">
+          <Avatar name={name} src={preview || saved} alt={preview ? "Preview of the new photo" : "Your profile photo"} large />
+          <div className="pf-photo-drop">
+            <Dropzone
+              file={file}
+              onFile={choose}
+              accept={TYPES.join(",")}
+              label="Choose a profile photo"
+              title={has ? "Drop a new photo, or click to choose" : "Drop a photo, or click to choose"}
+              hint="JPEG, PNG, GIF or WebP, up to 5 MB"
+            />
+            {error && (
+              <p className="ax-error" role="alert">
+                {error}
+              </p>
             )}
           </div>
-          {error && (
-            <p className="ax-error" role="alert">
-              {error}
-            </p>
-          )}
         </div>
-      </div>
-    </Panel>
+      </Dialog>
+    </div>
   );
 }

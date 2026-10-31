@@ -68,7 +68,7 @@ Doto (`.ax-read`) is for hero readouts of 56px and up, on Overview only. The Arc
 - **Page header:** the shell renders the title from `nav.ts`. From inside a page, `<TopActions>` puts the page's actions at its right and `<TopLine>` puts one short line under the title, only if it helps. They portal and unmount with the page. Don't put a title in a page.
 - **Phones (under 900px):** a slim top bar (wordmark, live status, search) and a five-item tab bar (Overview, Jobs, Needs you, Applications, More). More opens a bottom sheet with the other pages, the theme and sign out. Actions wrap under the title by themselves.
 - **Command palette:** `⌘K` or Ctrl-K: pages, tabs, jobs (with monograms), Add a job, switch theme.
-- **Scrolling:** a page that is one table uses `<div className="ax-page ax-page-fill">` and `<Table fill footer={<Pagination/>}>`: the table is the only scroller and its head stays put. Any other page is `<div className="ax-page">` and scrolls in `.ax-scroll`. Widths: `.ax-main` sets `--content-w`; Profile and Settings use `--form-w`.
+- **Scrolling:** a page that is one table uses `<div className="ax-page ax-page-fill">` and `<Table fill footer={<Pagination/>}>`: the table is the only scroller and its head stays put. Any other page is `<div className="ax-page">` and scrolls in `.ax-scroll`. Widths: `.ax-main` sets `--content-w`; Settings uses `--form-w`, Profile widens it (`profile.css`) to make room for its section list.
 
 ### Routes
 
@@ -185,6 +185,19 @@ Rules this page set:
 4. **The preview panel** (`VersionPreview`, a Drawer): what happened to this version first, then a fold of what it reworded, then the PDF filling the rest. ← → and the footer step through the list; the address follows.
 
 **The editor** hides the shell's header and takes the region: a slim bar (back, whose document this is, build status, Discard when changed, Download, the one primary), the form at the left, the page on an inset well at the right. Entries are rows that open; bullets grow with their text; reordering and hiding appear on pointing (always, on touch). Source shows what the controls produce now, in full. Your copy opens with the two documents side by side and the form closed. Under 960px the form and the page take turns. Each address is its own load (`EditorLoader` is keyed by it): never reuse the last answer for a new address.
+
+## 6c. Profile: the reference for a page of sections (`profile.tsx`, `profile-work.tsx`, `profile-rules.tsx`, `profile-photo.tsx`, `profile-fields.tsx`, `knowledge.tsx`, `qform.tsx`, `styles/profile.css`)
+
+Copy this for Settings. The page is a section list at the left and **one section at a time** at the right (a scrolling row of sections under the header below 1180px), over **one draft and one Save**.
+
+- **Sections and their addresses.** `SECTIONS` in `profile.tsx` holds them; each keeps an old address alive through `tab` (the old tab it grew out of) and `filter` (the old section name, or a new one): Personal details (`identity`), Work and education (`experience`), Job preferences (`experience` + `preferences`), Supervisors and references (`knowledge` + `references`), Questionnaires (`knowledge`), What AXIOM may do for you (`knowledge` + `policies`), When options don't match (`knowledge` + `rules`), Saved facts and memory (`knowledge` + `memory`; the old `facts` opens its JSON tab). Add a section there, not in `nav.ts`.
+- **What the list shows beside a name** is real or nothing: a vermilion count for applications actually waiting (Supervisors and references: open questions that ask for a supervisor or a reference, counted once per application from the live snapshot), a count of basic details still empty, a quiet tally (`26/37` answered, `7/9` permissions on), a dot where the draft has an unsaved change.
+- **One draft** (`ProfileProvider`, kept in memory across sections by `useDraft`). `dirty` means the draft really differs from what is saved (keys compared in sorted order, so an edit undone is not a change). The **save bar** (`pf-savebar`) exists only then, says which sections hold changes, and saves on Ctrl or ⌘ S. Questionnaires (supervisors, references, FAQ) save on their own as you go and say so.
+- **Fields** sit on a 6-column grid inside one Panel per section, in titled `Group`s: give a field `pf-s2` (a third), `pf-s3` (a half) or nothing (the row); everything is one column on a phone. First, middle and last name share a line. `Tags` (type and press Enter or a comma) replaces a comma-separated input, `Range` a number on a slider, `Pick` a choice in a form (a Listbox filled to the field's width).
+- **Experience, education and notes are cards** (`pf-card`: monogram, title, employer, dates, two lines of what you did). A card opens in a **Drawer** to edit, with Remove asking first. A card added and left empty is taken back on close.
+- **Supervisors and references** is where applications are waiting. The section leads with how many (the employers' monograms, "See them" opening Needs you), says AXIOM never invents these, and shows two meters. Below, one row per job in the work history that opens in place (`PersonCard` in `qform.tsx`; the first opens by itself while none is added), and up to three references. `ModuleForm` takes `bare` when the host supplies the title: only a floating save pill remains.
+- **Questionnaires are progress cards**: state, what it is for, which sections are still open, a meter, one button (Start, Continue, Review).
+- **Permissions** are plain sentences with a switch, grouped (Applying, Agreements and consents, Your privacy), with the count that are on.
 
 ## 8. Pages still to redesign, on this standard
 
