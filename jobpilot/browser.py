@@ -665,11 +665,18 @@ def user_agent(executable):
     return f"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
 
 
-def unoffered_source_result(question):
+def unoffered_source_result(question, rules=None):
     """Stop at the first refusal for a saved source that the page's catalog does not offer.
 
-    Recovery cannot repair it truthfully (no offered option matches), so the run waits
-    for the owner instead of repeating choose/search actions."""
+    Recovery cannot repair it truthfully (no offered option matches), so the run waits for the owner instead of repeating
+    choose/search actions. A profile that accepts any plain channel has already answered: nothing offered is true for this
+    applicant (GE Vernova's "Agency / Search Firm", "Current Employee", "GE Vernova Recruiter"; owner 2026-10-31: "leave and
+    delete those jobs"), so the job is closed, not put to the owner."""
+    if getattr(rules, "source_any_channel", False):
+        return {
+            "state": "closed",
+            "reason": "No source this posting offers is true for this applicant: " + str(question)[:160],
+        }
     return {
         "state": "waiting_browser",
         "blocker_type": "control_failure",
@@ -1000,6 +1007,9 @@ class BrowserEngine:
         self.focus_sessions = []
         self.dir = self.config.data_dir / "runs" / run_id
         self.dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+    def source_rules(self):
+        return getattr(getattr(getattr(self, "form", None), "resolver", None), "answer_rules", None)
 
     def emit(self, kind, message, data=None):
         self.db.event(self.run_id, kind, message, data)
@@ -4997,7 +5007,7 @@ class BrowserEngine:
                         "reason": "Internal-only posting: its application source offers only internal channels",
                     }
                 # No offered option can be the applicant's saved source; re-choosing repeats the refusal.
-                return unoffered_source_result(target.get("label", ""))
+                return unoffered_source_result(target.get("label", ""), self.source_rules())
             if rejected[key] >= 2:
                 if (
                     target.get("label")
@@ -5471,7 +5481,7 @@ class BrowserEngine:
                                 + ")",
                             }
                         else:
-                            self.result = unoffered_source_result(unoffered[0].get("question", ""))
+                            self.result = unoffered_source_result(unoffered[0].get("question", ""), self.source_rules())
                     elif terminal_answer_errors:
                         # Browsing a picker cannot repair a rejected supporting fact.
                         # Persist the typed cause and release this owner instead of
