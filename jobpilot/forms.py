@@ -5909,10 +5909,22 @@ class FormSession:
         # Eightfold's "Create your profile" popup (Starbucks) sits over the application: judge
         # only the popup that holds this button, when there is one.
         account_form = await self.intermediate_submit(control_id, before)
+        # Apple's posting page links "Submit Resume" to its application (2026-10-27): a link to another address on a page
+        # with no application fields opens the application, it submits nothing. Refused as a final submit, the
+        # navigator repeated the click until its recovery budget ended.
+        posting_link = bool(
+            button.get("href")
+            and re.fullmatch(r"submit (?:your |my )?(?:resume|cv)(?: now)?", button["label"].strip(), re.I)
+            and not any(
+                f["type"] not in {"search", "hidden"} and not re.search(r"search|keyword|location", f["label"], re.I)
+                for f in self.fields.values()
+            )
+        )
         if (
             FINAL.search(button["label"])
             and not auth_control
             and not account_form
+            and not posting_link
             and not await self.frames[control_id].evaluate("Boolean(window.__jpArmed)")
         ):
             raise ValueError(
