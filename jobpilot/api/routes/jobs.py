@@ -3,7 +3,7 @@
 import asyncio
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -15,6 +15,7 @@ from ...network import public_url
 from ...owner_apply import MANY
 from ...schemas import JobInput, QueueInput
 from .. import pipeline
+from ..success import success as success_report
 
 Group = Literal["all", "active", "needs", "repair", "unconfirmed", "paused", "done", "stopped", "new", "reserved"]
 
@@ -38,6 +39,13 @@ def router(service) -> APIRouter:
         """Overview's funnel and success by platform (pipeline.funnel)."""
         with db.session() as s:
             return pipeline.funnel(s)
+
+    @r.get("/api/success")
+    def success(days: int = Query(7, ge=1, le=90)):
+        """The success number, overall and per platform, for the last `days` days (success.py). Read-only; a plain `def`, so it
+        runs in the threadpool, off the event loop the browser owners share."""
+        with db.session() as s:
+            return success_report(s, days)
 
     @r.post("/api/jobs/apply-many")
     async def apply_many(data: ApplyMany):
