@@ -9,7 +9,7 @@ from jobpilot.adapters.base import CODE_LABEL, code_label
 from jobpilot.db import Job, Mailbox, Run
 from jobpilot.email_browser import CODE_LABEL as BROWSER_CODE_LABEL
 from jobpilot.mail import extract_message
-from jobpilot.receipts import _DRAFT_COMPARED, reconcile_recent_drafts, title_matches, trusted_sender
+from jobpilot.receipts import _DRAFT_COMPARED, observed_words, reconcile_recent_drafts, title_in, trusted_sender
 from support_mail import EMAIL, message
 
 
@@ -25,13 +25,16 @@ def test_successfactors_eu_data_center_sends_receipts_like_its_com_hosts():
 
 
 def test_title_glued_to_requisition_in_the_subject_still_matches_exactly():
-    assert title_matches("Data Engineer", "application for data engineerrequisition number 74967.")
-    assert title_matches(
+    def matches(title, body):
+        return title_in(title, observed_words(body))
+
+    assert matches("Data Engineer", "application for data engineerrequisition number 74967.")
+    assert matches(
         "Applications Developer & Integration Specialist",
         "Application for Applications Developer & Integration\n Specialistrequisition number 77378.",
     )
-    assert not title_matches("Data Engineer I", "application for data engineer iirequisition number 1.")
-    assert title_matches("Requisition Analyst", "application for requisition analyst")
+    assert not matches("Data Engineer I", "application for data engineer iirequisition number 1.")
+    assert matches("Requisition Analyst", "application for requisition analyst")
 
 
 def test_required_marker_does_not_hide_a_passcode_field():

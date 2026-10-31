@@ -95,10 +95,6 @@ def title_in(title, observed):
     return bool(expected and f" {expected} " in observed)
 
 
-def title_matches(title, body):
-    return title_in(title, observed_words(body))
-
-
 def receipt_employer_key(session, job):
     """Read-only identity: display punctuation/suffixes cannot split competitors."""
     from .features.knowledge.employers import name_aliases, resolve
@@ -162,11 +158,6 @@ UNFINISHED = re.compile(
     r"application (?:is )?(?:still )?(?:in progress|pending submission|saved as a draft)|\bsaved (?:as a )?draft\b",
     re.I,
 )
-
-
-def unfinished_receipt(receipt):
-    """A stored email receipt whose subject is a started-or-incomplete notice (it never confirmed anything)."""
-    return bool(UNFINISHED.search(str((receipt or {}).get("subject", ""))))
 
 
 # What a message says, whatever job it is compared with: parsed once per message. The receipt poller compares
