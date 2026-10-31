@@ -13,9 +13,10 @@ from copy import deepcopy
 from pydantic import BaseModel, Field
 from playwright.async_api import Error as PlaywrightError
 
-from .answer_context import SPONSOR_KEYS, defined_screening, digest, relevant_context
+from .answer_context import SPONSOR_KEYS, defined_screening, digest, relevant_context, screening_text
 from .answer_rules import delegated_facts
 from .answers import critical_question, degree_level, normalize
+from .answers.work_status import decide, false_claim, holds, yes_no_value
 from .db import Run
 from .knowledge import applicable, relevant_fact, topic
 from .models import structured
@@ -23,7 +24,7 @@ from .schemas import Answer
 from . import phone_fields, widgets
 
 
-VERSION = "quality-v15"
+VERSION = "quality-v16"
 NARRATIVE = re.compile(
     r"why\b|cover.?letter|motivat|describe|description|tell us|achievement|accomplish|experience with|responsibilit|duties",
     re.I,
@@ -516,6 +517,18 @@ def supported_local(form, field):
         # An employer's, supervisor's or reference's contact detail is not the applicant's own: the audit blocked a correct
         # "Employer City" because the applicant's city was "the confirmed fact" (2026-10-29).
         return own
+    read = getattr(form.resolver, "work_status_verdict", None)
+    if read and (verdict := read(field)) and verdict.value is not None:
+        # The question's own definition outranks saved answers here too. A held answer of the same polarity stands: the
+        # form may word it differently, and rewriting it only loops. A contradiction is a confirmed-fact mismatch, which
+        # blocks the submit; the model's findings on these fields were advisory, and none was ever repaired (2026-10).
+        return Answer(
+            field_id=field["id"],
+            disposition="answer",
+            value=field.get("value") if holds(field.get("value"), verdict) else verdict.value,
+            evidence_ids=list(verdict.refs),
+            reason=verdict.why,
+        )
     if re.fullmatch(r"degree(?: type| level)?", normalize(field.get("label", ""))) and re.fullmatch(
         r"Education \d+", field.get("group", "")
     ):
@@ -664,6 +677,98 @@ def local_corrections(form, fields):
                     "punctuation_policy",
                 )
     return result
+
+
+STATUS_CONTEXT = re.compile(
+    r"citizen|immigration|work authori|authori[sz]ed|sponsor|\bvisa\b|u\.?s\.? person|export|itar|nationalit|permanent resid|"
+    r"work status|eligib",
+    re.I,
+)
+PICKERS = {"combobox", "dropdown", "select", "prompt", "pills", "select-multiple"}
+CITIZENSHIP_MENU = re.compile(
+    r"\bcountr(?:y|ies)\b[^.?]{0,25}?\b(?:citizenship|nationality)\b|^(?:please select your )?citizenship(?: status)?\W*$", re.I
+)
+
+
+def recorded_citizenships(facts):
+    """Every country the facts record a citizenship in, as written."""
+    from .answers.work_status import FURTHER_CITIZENSHIP_KEY
+
+    keys = ("country_of_citizenship", "citizenship", "nationality", "country_of_nationality")
+    values = {str(k).casefold(): v for k, v in (facts or {}).items()}
+    named = [values[k] for k in values if (k in keys or FURTHER_CITIZENSHIP_KEY.match(k)) and isinstance(values[k], str)]
+    return [str(v).strip() for v in named if str(v).strip()]
+
+
+def wrong_citizenship(field, facts):
+    """A citizenship menu holding a country the facts do not record. Twitch's react-select kept the chips "Laos" and
+    "Latvia" and "Citizen (India)" sat beside "Non-citizen (Afghanistan)" at Caterpillar (2026-10): the model's review
+    said "Wrong country selected" and the application was sent anyway."""
+    own = recorded_citizenships(facts)
+    value = str(field.get("value") or "").strip()
+    if not own or not value or field.get("type") not in PICKERS or not CITIZENSHIP_MENU.search(str(field.get("label") or "")):
+        return False
+    by_country = re.search(r"\bcountr", str(field.get("label") or ""), re.I)
+    for line in filter(None, (x.strip() for x in re.split(r"[\n;]", value))):
+        stated = re.fullmatch(r"(non-?\s?)?citizen\s*\((.+)\)", line, re.I)
+        # A bare "Citizenship Status" menu also offers "(f) Other": only its "Citizen (country)" rows name a country.
+        if (not stated and not by_country) or re.search(r"\bnot?\b|\bnone\b|\bother\b|\bn/?a\b|\bu\.?\s?s\.?\b|\bunited states\b", line, re.I):
+            continue
+        name = stated[2] if stated else line
+        if (stated and stated[1]) or not any(normalize(o) in normalize(name) or demonym_of(name, o) for o in own):
+            return True
+    return False
+
+
+def work_status_problems(form):
+    """One application, one story, checked on what the form holds just before it may be sent. Each answer against the
+    facts by the question's own definition, and answers the facts cannot settle against each other. Nothing here is
+    advisory: the browser engine stops the submit on any of these. 43 confirmed runs mixed Yes and No on sponsorship, and the
+    Twitch and Credence findings above were only logged (2026-10)."""
+    profile = getattr(form.resolver, "profile", None)
+    if profile is None or not hasattr(form, "ledger"):
+        return []
+    facts = getattr(profile, "facts", None) or {}
+    problems, said, seen = [], {}, set()
+    for field in candidates(form):
+        label, value = str(field.get("label") or ""), field.get("value")
+        if value in (None, "") or field.get("type") in {"file", "password"} or (field["id"], value) in seen:
+            continue
+        seen.add((field["id"], value))
+        verdict = decide({**field, "label": screening_text(field)}, facts)
+        reason = None
+        if verdict and not holds(value, verdict):
+            reason = f'"{label[:80]}" holds "{str(value)[:40]}", and the recorded status makes it "{str(verdict.value)[:40]}"'
+        elif STATUS_CONTEXT.search(label) and (claim := false_claim(value, facts)):
+            reason = f'"{label[:80]}" holds "{str(value)[:60]}", a status the recorded facts deny ({", ".join(sorted(claim))})'
+        elif wrong_citizenship(field, facts):
+            reason = f'"{label[:80]}" holds a country the recorded citizenship does not name'
+        elif verdict and verdict.value is None and (answer := yes_no_value(value)) is not None:
+            # The facts are silent: the application must at least agree with itself.
+            key = "us_person" if verdict.kind == "status_list" else verdict.kind
+            said.setdefault(key, {}).setdefault(answer, label)
+        if reason:
+            problems.append({"field_id": field["id"], "question": label, "reason": reason, "kind": verdict.kind if verdict else "status"})
+    for kind, answers in said.items():
+        if len(answers) > 1 and kind in {"sponsor_plain", "sponsor_defined", "auth_plain", "term", "status_held", "us_person"}:
+            problems.append(
+                {
+                    "field_id": "",
+                    "question": answers[True],
+                    "reason": f'"{answers[True][:60]}" is answered Yes and "{answers[False][:60]}" No, and no fact settles which',
+                    "kind": kind,
+                }
+            )
+    if said.get("us_person", {}).get(True) and said.get("status_held", {}).get(True):
+        problems.append(
+            {
+                "field_id": "",
+                "question": said["us_person"][True],
+                "reason": "The application claims a U.S. status and a nonimmigrant status at once",
+                "kind": "us_person",
+            }
+        )
+    return problems
 
 
 def narrative(field):

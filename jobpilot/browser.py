@@ -3882,6 +3882,27 @@ class BrowserEngine:
                 }
         return None
 
+    def work_status_stop(self):
+        """The last check before anything can be sent, whatever the answer review did or is configured to do: a
+        contradiction it could not repair stops the submit, with its reason (answer_quality.work_status_problems)."""
+        from .answer_quality import work_status_problems
+
+        problems = work_status_problems(self.form) if getattr(self.form, "resolver", None) else []
+        if not problems:
+            return None
+        self.emit(
+            "work_status_stop",
+            "Not submitted: the work-authorization answers contradict the recorded facts or each other",
+            {"fields": [str(p["question"])[:80] for p in problems][:5], "kinds": sorted({p["kind"] for p in problems})},
+        )
+        return {
+            "state": "waiting_browser",
+            "reason": ("Not submitted: " + "; ".join(p["reason"] for p in problems))[:400],
+            "blocker_type": "control_failure",
+            "recoverable": False,
+            "report": {"work_status": problems},
+        }
+
     async def confirm_post_commit(self):
         """One bounded look at the page after an exit that follows a commit (mail wait, deadline,
         control failure). Only the explicit proof finish() accepts counts, and only if it is not
@@ -4058,6 +4079,8 @@ class BrowserEngine:
         if quality_blocker := await self.quality_gate():
             return quality_blocker
         report = await self.form.verify()
+        if not self.armed and (contradiction := self.work_status_stop()):
+            return contradiction
         if not report["ok"]:
             return {
                 "state": "waiting_browser",
