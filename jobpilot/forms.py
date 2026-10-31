@@ -2131,14 +2131,28 @@ class FormSession:
                         options = await widgets.visible_options(frame, await widgets._popup_scope(el))
                 option = next((o for o in options if o["id"] == option_id and not o["disabled"]), None)
                 decided = None
-                if not option and (inline or field["type"] in {"select", "select-multiple"}):
+                # ADP's sdf-select lists its items in the host's own children and commits through its own driver
+                # (fill): the open pane read above is not its catalog, so a menu that closed or re-rendered left every
+                # option id stale (Midco 2026-10-30, 31 runs on one job).
+                catalog = field.get("widget") == "sdf-select" and bool(field.get("options"))
+                if not option and (inline or catalog or field["type"] in {"select", "select-multiple"}):
                     # The controller named an option this control does not have (PepsiCo's tax-credit "Select a
                     # Language" radio, 2026-10-23: eight refused chooses). Take the option the evidence supports.
-                    offered = [o for o in options if not o["disabled"]]
+                    offered = [o for o in options if not o["disabled"]] or [
+                        {"id": "", "text": t, "leaf": True, "disabled": False} for t in field["options"] if catalog
+                    ]
                     decided = (await self.resolver.resolve([{**field, "options": [o["text"] for o in offered]}]))[0]
                     AnswerModelUnavailable.raise_for(decided)
                     if decided.disposition == "answer":
                         option = next((o for o in offered if o["text"] == decided.value), None)
+                    elif decided.blocker_type == "missing_fact":
+                        # The menu is fine; the answer is what is missing. A "stale choice" refusal sent the model round
+                        # inspect_options and choose again until the run's time ran out (Midco, 2026-10-30).
+                        self._pending(
+                            {**field, "options": [o["text"] for o in offered]}, decided.reason, "missing_fact",
+                            supporting_facts=decided.supporting_facts,
+                        )
+                        raise ChoiceRejected("missing_fact", "Applicant fact required: " + decided.reason)
                 if not option:
                     raise ValueError(STALE_CHOICE)
                 supported = None
@@ -2191,7 +2205,7 @@ class FormSession:
                                 f"Applicant evidence supports the offered option {supported.value[:80]!r} instead",
                             )
                         option = alternative
-                if inline or field["type"] == "select":
+                if inline or field["type"] == "select" or (catalog and not option["id"]):
                     await self.fill(field, option["text"])
                     # SuccessFactors (Corning, live probe) keeps aria-invalid/"…is required" from an
                     # earlier validation until the control loses focus; the value is already set.
