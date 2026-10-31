@@ -14,13 +14,13 @@ import { RowActions } from "./jobactions";
 import type { JobRow } from "./model";
 import { PipelineBulk } from "./pipelinebulk";
 import { TopActions } from "./shell/Shell";
-import { ago, linkHost, plural, stamp, urlRole } from "./format";
+import { ago, employerOf, linkHost, plural, stamp, urlRole } from "./format";
 import { Button, Empty, RouteTabs, Table, type Column } from "./ui/index";
 import { JobCell, LoadError, Notice, Note, SearchBox, StatusPill } from "./worktools";
 
 const EVIDENCE = [
   ["all", "Any evidence"],
-  ["page", "Page acknowledgement"],
+  ["page", "Confirmation page"],
   ["email", "Employer email"],
   ["existing", "Existing application"],
 ] as const;
@@ -113,7 +113,7 @@ function Confirmed() {
       header: "Job",
       width: 440,
       truncate: true,
-      cell: (r) => <JobCell company={r.company} role={r.title} onOpen={() => openJob(r.job_id, r.run_id)} />,
+      cell: (r) => <JobCell company={employerOf(r.company, r.url)} role={r.title || urlRole(r.url)} onOpen={() => openJob(r.job_id, r.run_id)} />,
     },
     {
       key: "applied",
@@ -210,7 +210,7 @@ function Unconfirmed() {
       truncate: true,
       cell: (r) => (
         <JobCell
-          company={r.job.company || linkHost(r.job.url) || "Employer"}
+          company={employerOf(r.job.company, r.job.url)}
           role={r.job.title || urlRole(r.job.url)}
           onOpen={() => openJob(r.job.id, r.run?.id)}
         />

@@ -10,8 +10,9 @@ import { appliedState, rowFromServer, stateInfo, STATES, withMarks, type JobRow 
 import { Pagination, type Paging } from "./pagination";
 import type { ReservedEmployer, ReservedPage, ReservedRules } from "./types";
 import { ago, linkHost, plural } from "./format";
+import { ShieldCheck, SearchX } from "lucide-react";
 import { Button, Check, Drawer, Empty, Table, Textarea, type Column } from "./ui/index";
-import { TopActions } from "./shell/Shell";
+import { TopActions, TopLine } from "./shell/Shell";
 import { Chips, ConfirmButton, JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
 
 export function ReservedJobs() {
@@ -80,21 +81,23 @@ export function ReservedJobs() {
     {
       key: "job",
       header: "Job",
-      width: 400,
+      width: 520,
       truncate: true,
       cell: (r) => (
         <JobCell
           company={r.job.company || linkHost(r.job.url) || r.reserved?.employer || "Employer"}
           role={r.job.title || r.job.url}
           onOpen={() => openJob(r.job.id, r.run?.id)}
+          meta={r.state !== "reserved" ? <StatusPill state={r.state} /> : r.job.score != null ? <span className="mono">Fit {r.job.score}</span> : undefined}
         />
       ),
     },
-    { key: "where", header: "Location", hideBelow: 600, width: 200, truncate: true, cell: (r) => <Note>{r.job.location}</Note> },
+    { key: "where", header: "Location", hideBelow: 860, width: 170, truncate: true, cell: (r) => <Note>{r.job.location}</Note> },
     {
       key: "status",
       header: "Status",
-      width: 300,
+      hideBelow: 600,
+      width: 240,
       truncate: true,
       cell: (r) =>
         // Every row here waits for approval; what it shows is the job's fit or its last try.
@@ -143,16 +146,16 @@ export function ReservedJobs() {
   return (
     <>
       <TopActions>
-        <Button size="sm" onClick={() => setEditing(true)} disabled={!data}>
+        <Button onClick={() => setEditing(true)} disabled={!data}>
           Edit employers
         </Button>
       </TopActions>
       {data && (
-        <p className="ax-lede">
+        <TopLine>
           {data.enabled
-            ? `${plural(waiting, "job")} waiting for your approval.${current && current.employers.length > 0 ? ` ${current.label}: ${current.employers.join(", ")}.` : ""}`
+            ? `Employers that wait for your approval: ${plural(waiting, "job")} held.${current && current.employers.length > 0 ? ` ${current.label}: ${current.employers.slice(0, 6).join(", ")}${current.employers.length > 6 ? ` and ${current.employers.length - 6} more` : ""}.` : ""}`
             : "Reserved employers are off: every employer is applied to as usual."}
-        </p>
+        </TopLine>
       )}
       {data && data.enabled && data.sections.length > 0 && (
         <div className="ax-toolbar">
@@ -190,15 +193,16 @@ export function ReservedJobs() {
           loading={!data && !list.error}
           error={list.error && !data ? <LoadError error={list.error} retry={list.refresh} /> : undefined}
           busy={!!data && data.key !== key}
+          footer={data && data.enabled && paging.total > 0 ? <Pagination paging={paging} label="Reserved pages" /> : undefined}
           empty={
             <Empty
+              icon={q ? SearchX : ShieldCheck}
               title={q ? "No reserved jobs match this search" : `No ${current?.label || ""} jobs are waiting`}
               hint={q ? "Try a company name or clear the search." : "New postings at these employers appear here as they are found."}
             />
           }
         />
       )}
-      {data && data.enabled && <Pagination paging={paging} label="Reserved pages" />}
       {data && (
         <Drawer open={editing} onClose={() => setEditing(false)} title="Reserved employers" width={560}>
           <EmployerEditor rules={data.rules} />

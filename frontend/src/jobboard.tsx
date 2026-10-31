@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Radar, SearchX } from "lucide-react";
 import { api } from "./api";
 import { ApplyOutcomes, useApplyMany, useSelection } from "./bulk";
 import { useWorkspace } from "./context";
 import { useAction, useDraft, useNow, usePoll } from "./hooks";
 import { Pagination, type Paging } from "./pagination";
-import { TopActions } from "./shell/Shell";
+import { TopActions, TopLine } from "./shell/Shell";
 import type { Board, Listing } from "./types";
-import { ago, plural, stamp } from "./format";
-import { Button, Empty, Table, type Column } from "./ui/index";
+import { ago, platformName, plural, stamp } from "./format";
+import { Button, Empty, Listbox, Table, Tooltip, type Column } from "./ui/index";
 import { Chips, JobCell, LoadError, Notice, Note, SearchBox, StatusPill } from "./worktools";
 
 // A listing in any of these states is already owned or protected.
@@ -33,6 +33,13 @@ function whyNot(r: NonNullable<Listing["rejection"]>) {
   const label = r.outcome === "deferred" || !r.outcome ? "Waiting" : "Not started";
   return `${label}: ${text.charAt(0).toLowerCase()}${text.slice(1)}`;
 }
+
+const LEVELS = [
+  { value: "all", label: "All levels" },
+  { value: "New grad", label: "New grad" },
+  { value: "Early career", label: "Early career" },
+  { value: "Experience unspecified", label: "Experience unspecified" },
+];
 
 const FITS = [
   ["all", "Any fit"],
@@ -130,11 +137,12 @@ export function DiscoveredJobs() {
         `Searching ${plural(r.queued_sources, "employer board")} and the new-grad lists. New jobs appear here as they arrive.`,
     );
 
+  const statusOf = (j: Listing) => <StatusPill state={RUN_STATES.has(j.status) || j.status.startsWith("pending:") ? j.status : "job:" + j.status} />;
   const columns: Column<Listing>[] = [
     {
       key: "job",
       header: "Job",
-      width: 400,
+      width: 520,
       truncate: true,
       cell: (j) => (
         <JobCell
@@ -142,10 +150,16 @@ export function DiscoveredJobs() {
           role={j.title}
           title={j.rejection && j.status === "ready" ? whyNot(j.rejection) : undefined}
           onOpen={() => openJob(j.id)}
+          meta={
+            <>
+              {statusOf(j)}
+              {j.score != null && <span className="mono">Fit {j.score}</span>}
+            </>
+          }
         />
       ),
     },
-    { key: "where", header: "Location", hideBelow: 600, width: 200, truncate: true, cell: (j) => <Note>{j.location || "United States"}</Note> },
+    { key: "where", header: "Location", hideBelow: 860, width: 170, truncate: true, cell: (j) => <Note>{j.location || "United States"}</Note> },
     {
       key: "posted",
       header: "Posted",
@@ -160,18 +174,22 @@ export function DiscoveredJobs() {
       key: "fit",
       header: "Fit",
       num: true,
-      cell: (j) => <span title={j.reason || j.match_reason}>{j.score == null ? "—" : j.score}</span>,
+      hideBelow: 600,
+      cell: (j) => (
+        <Tooltip label={j.reason || j.match_reason}>
+          <span>{j.score == null ? "—" : j.score}</span>
+        </Tooltip>
+      ),
     },
     {
       key: "status",
       header: "Status",
+      hideBelow: 600,
       cell: (j) => (
-        <>
-          <StatusPill state={RUN_STATES.has(j.status) || j.status.startsWith("pending:") ? j.status : "job:" + j.status} />
-          {j.rejection && j.status === "ready" && (
-            <Note title={`${j.rejection.code || "reason"} · ${stamp(j.rejection.at)} · ${whyNot(j.rejection)}`}> · held</Note>
-          )}
-        </>
+        <Tooltip label={j.rejection && j.status === "ready" ? `${whyNot(j.rejection)} (${stamp(j.rejection.at)})` : undefined}>
+          {statusOf(j)}
+          {j.rejection && j.status === "ready" && <Note>&nbsp;· held</Note>}
+        </Tooltip>
       ),
     },
     {
@@ -202,7 +220,6 @@ export function DiscoveredJobs() {
     <>
       <TopActions>
         <Button
-          size="sm"
           loading={searching}
           disabled={pending !== null || !settings?.enabled}
           onClick={scan}
@@ -212,14 +229,13 @@ export function DiscoveredJobs() {
         </Button>
       </TopActions>
       {b && (
-        <p className="ax-lede">
-          {plural(fresh, "job")} not applied to yet, US roles posted in the last {span}
-          {searching ? " · searching now" : b.last_requested_at ? ` · last search ${ago(b.last_requested_at, now)}` : ""}
-          {!settings?.auto_apply && " · automatic applications are off"}.{" "}
+        <TopLine>
+          Found and not applied to yet: US roles posted in the last {span}
+          {searching ? ", searching now" : b.last_requested_at ? `, last searched ${ago(b.last_requested_at, now)}` : ""}.{!settings?.auto_apply && " Automatic applications are off."}{" "}
           <button type="button" className="ax-link" onClick={() => go({ view: "settings", tab: "discovery" })}>
             Discovery settings
           </button>
-        </p>
+        </TopLine>
       )}
       {b && !settings?.enabled && (
         <Notice
@@ -236,20 +252,13 @@ export function DiscoveredJobs() {
       {!canApply && <Notice tone="warn">Applying from this list is unavailable: {blockers.join("; ")}.</Notice>}
       <div className="ax-toolbar">
         <SearchBox value={query} onChange={setQuery} label="Search discovered jobs" placeholder="Role, company or city" />
-        <select className="ax-control ax-inline-select" aria-label="Platform" value={ats} onChange={(e) => setAts(e.target.value)}>
-          <option value="all">All platforms</option>
-          {platforms.map((a) => (
-            <option key={a} value={a}>
-              {a}
-            </option>
-          ))}
-        </select>
-        <select className="ax-control ax-inline-select" aria-label="Career level" value={level} onChange={(e) => setLevel(e.target.value)}>
-          <option value="all">All levels</option>
-          <option>New grad</option>
-          <option>Early career</option>
-          <option>Experience unspecified</option>
-        </select>
+        <Listbox
+          label="Platform"
+          value={ats}
+          onChange={setAts}
+          options={[{ value: "all", label: "All platforms" }, ...platforms.map((a) => ({ value: a, label: platformName(a) }))]}
+        />
+        <Listbox label="Career level" value={level} onChange={setLevel} options={LEVELS} />
         <Chips
           items={chips}
           value={fit}
@@ -272,6 +281,7 @@ export function DiscoveredJobs() {
         loading={!b && !board.error}
         error={board.error && !b ? <LoadError error={board.error} retry={board.refresh} /> : undefined}
         busy={!!b && !current}
+        footer={paging.total > 0 ? <Pagination paging={paging} label="Listing pages" /> : undefined}
         bulk={
           <>
             {(b?.selectable_total ?? 0) > jobs.length && (
@@ -292,6 +302,7 @@ export function DiscoveredJobs() {
         }
         empty={
           <Empty
+            icon={fresh ? SearchX : Radar}
             title={
               fresh ? "No jobs match these filters" : searching ? "Searching for new jobs" : "Nothing new to apply to right now"
             }
@@ -300,12 +311,11 @@ export function DiscoveredJobs() {
                 ? "Clear a filter to see more."
                 : searching
                   ? "Employer boards and new-grad lists are being checked. Jobs appear as they arrive."
-                  : `Jobs you applied to are in Pipeline. Only US roles posted in the last ${span} with a known date are listed; the next scheduled search checks again.`
+                  : `Jobs you applied to are under Started. Only US roles posted in the last ${span} with a known date are listed; the next scheduled search checks again.`
             }
           />
         }
       />
-      <Pagination paging={paging} label="Listing pages" />
     </>
   );
 }

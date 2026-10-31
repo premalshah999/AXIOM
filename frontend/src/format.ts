@@ -51,13 +51,42 @@ export function seconds(total: number) {
   return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
 }
 
+const PLATFORMS: Record<string, string> = {
+  adp: "ADP",
+  ashby: "Ashby",
+  custom: "Company site",
+  dayforce: "Dayforce",
+  eightfold: "Eightfold",
+  general: "Company site",
+  greenhouse: "Greenhouse",
+  icims: "iCIMS",
+  jazzhr: "JazzHR",
+  lever: "Lever",
+  oracle: "Oracle",
+  paycom: "Paycom",
+  paylocity: "Paylocity",
+  smartrecruiters: "SmartRecruiters",
+  successfactors: "SAP SuccessFactors",
+  taleo: "Taleo",
+  ukg: "UKG",
+  workable: "Workable",
+  workday: "Workday",
+};
+/** A platform's own name: "icims" reads as iCIMS. */
+export function platformName(ats?: string) {
+  const id = (ats || "").toLowerCase();
+  return PLATFORMS[id] || id.charAt(0).toUpperCase() + id.slice(1).replaceAll("_", " ") || "Unknown";
+}
+
 /** "examplecorp · boards.greenhouse.io" for a pasted link whose title isn't known until ranking. */
 // A readable role for a job saved as a bare link: the last wordy path segment ("Exton-Associate%2C-Data-Science" ->
 // "Exton Associate, Data Science"), never a 300-character query string in the table (owner 2026-10-28: "cluttered").
 export function urlRole(url?: string) {
   try {
     const u = new URL(url || "");
-    const generic = /^(?:jobs?|careers?|details?|apply|en|us|en-us|posting|positions?|openings?|view|search)$/i;
+    const generic = /^(?:jobs?|careers?|details?|apply|applications?|en|us|en-us|postings?|positions?|openings?|view|search)$/i;
+    // A shared board's first segment is the employer, not the role.
+    const board = /greenhouse\.io$|lever\.co$|ashbyhq\.com$/.test(u.hostname) ? u.pathname.split("/").filter(Boolean)[0]?.toLowerCase() : "";
     const segment = u.pathname
       .split("/")
       .filter(Boolean)
@@ -69,7 +98,7 @@ export function urlRole(url?: string) {
         }
       })
       .reverse()
-      .find((s) => /[a-z]{3,}/i.test(s) && !generic.test(s) && !/^[0-9a-f-]{16,}$/i.test(s));
+      .find((s) => /[a-z]{3,}/i.test(s) && !generic.test(s) && s.toLowerCase() !== board && !/^[0-9a-f-]{16,}$/i.test(s));
     const title = (segment || u.searchParams.get("title") || "")
       .replace(/[-_+]+/g, " ")
       .replace(/\b(?=\w*\d)[0-9a-z]{8,}\b/gi, "")
@@ -79,6 +108,15 @@ export function urlRole(url?: string) {
   } catch {
     return "Untitled role";
   }
+}
+
+/** Who a job is with, for a list: its company, or for a job saved as a bare link, the employer its address names ("Blossom Health"). */
+export function employerOf(company?: string, url?: string) {
+  if (company) return company;
+  const name = linkHost(url).split(" · ")[0] ?? "";
+  // A plain host ("careers.example.com") says nothing better than itself.
+  if (!name || name.includes(".")) return name || "Employer";
+  return name.replace(/[-_]+/g, " ").replace(/\b[a-z]/g, (c) => c.toUpperCase());
 }
 
 export function linkHost(url?: string) {

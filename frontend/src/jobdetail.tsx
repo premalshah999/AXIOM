@@ -1,5 +1,5 @@
 import { lazy, Suspense, useMemo, useState } from "react";
-import { Copy } from "lucide-react";
+import { Copy, ExternalLink } from "lucide-react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useDraft, usePoll } from "./hooks";
@@ -14,8 +14,8 @@ import {
 } from "./model";
 import { groupQuestions, QuestionCard } from "./questions";
 import type { Detail, Job, JobRequest, Reserved, Run } from "./types";
-import { linkHost, plural, seconds, shortId, stamp, words } from "./format";
-import { Button, Drawer, Panel, Select, Textarea } from "./ui/index";
+import { employerOf, platformName, plural, seconds, shortId, stamp, words } from "./format";
+import { Button, Drawer, Monogram, Panel, Select, Skeleton, Textarea } from "./ui/index";
 import { Facts, Notice, StatusPill } from "./worktools";
 
 // The tailored-resume section lives with Setup's resume features; it loads with the panel's first open.
@@ -86,20 +86,15 @@ export function JobPanel({
   const selectedRun = runId || row?.run?.id || runs[0]?.id;
   const job = row?.job;
   const latest = !runId || runId === row?.run?.id;
-  const title = job
-    ? [job.company || linkHost(job.url), job.title].filter(Boolean).join(" · ") || "Saved job link"
-    : "Application record";
+  const company = job ? employerOf(job.company, job.url) : "Application record";
   const actions = row && (!selectedRun || latest) ? <DrawerActions row={row} started={!!selectedRun} asking={!!row.reviews.length} /> : null;
   return (
-    <Drawer open onClose={close} title={title} width={640}>
+    <Drawer open onClose={close} title={company} sub={job?.title || undefined} lead={job ? <Monogram name={company} size="lg" /> : undefined} width={640}>
       <div className="ax-stack">
         {job ? (
           <JobSummary row={row!} />
         ) : (
-          <p className="ax-note">
-            This job isn't in the current workspace list (it may be archived or older history). Its recorded attempt is
-            shown below.
-          </p>
+          <p className="ax-note">This job isn't in the current list (it may be archived or older history). Its recorded attempt is shown below.</p>
         )}
         {!workspaceRow && historical.error && <Notice tone="bad">{historical.error.message}</Notice>}
         {selectedRun ? (
@@ -112,48 +107,66 @@ export function JobPanel({
             <JobResume jobId={job.id} eligible={job.status === "ready"} />
           </Suspense>
         )}
+        {job && <Technical jobId={job.id} />}
       </div>
     </Drawer>
   );
 }
 
+/** Where, what platform, how good a fit, and the way to the posting. */
 function JobSummary({ row }: { row: JobRow }) {
   const { job } = row;
-  const notify = useAction();
   return (
-    <p className="ax-note">
-      <a className="ax-link" href={job.url} target="_blank" rel="noreferrer noopener">
-        Open posting<span className="sr-only"> (opens in a new tab)</span>
+    <p className="dr-meta">
+      <span>{job.location || "Location not listed"}</span>
+      <span>{platformName(job.ats)}</span>
+      {job.score != null && (
+        <span>
+          Fit <span className="mono">{job.score}</span>
+        </span>
+      )}
+      <a className="ax-more-link" href={job.url} target="_blank" rel="noreferrer noopener">
+        Open posting
+        <ExternalLink size={13} aria-hidden="true" />
+        <span className="sr-only"> (opens in a new tab)</span>
       </a>
-      {" · "}
-      {job.location || "Location not listed"}
-      {" · "}
-      {job.ats}
-      {job.score != null && ` · Fit ${job.score}/100`}
-      {" · "}
-      <button
-        type="button"
-        className="ax-link mono"
-        title="Copy job ID"
-        onClick={() => notify.run("copy", () => navigator.clipboard.writeText(job.id), "Job ID copied.")}
-      >
-        {shortId(job.id)} <Copy size={12} aria-hidden="true" />
-        <span className="sr-only">Copy job ID</span>
-      </button>
     </p>
   );
 }
 
-/** The status as a sentence, then what the attempt said about itself. The state's label starts the sentence. */
-function StatusSentence({ state, reason, earlier }: { state: string; reason?: string; earlier?: string }) {
+/** IDs, tucked away: they matter only when reporting a problem. */
+function Technical({ jobId }: { jobId: string }) {
+  const notify = useAction();
+  return (
+    <details className="ax-fold">
+      <summary>Technical details</summary>
+      <Facts
+        items={[
+          [
+            "Job ID",
+            <button type="button" className="ax-link mono" title="Copy job ID" onClick={() => notify.run("copy", () => navigator.clipboard.writeText(jobId), "Job ID copied.")}>
+              {shortId(jobId)} <Copy size={12} aria-hidden="true" />
+              <span className="sr-only">Copy job ID</span>
+            </button>,
+          ],
+        ]}
+      />
+    </details>
+  );
+}
+
+/** The status first, in words, with what to do next inside it. */
+function StatusBlock({ state, reason, earlier, children }: { state: string; reason?: string; earlier?: string; children?: React.ReactNode }) {
   const info = stateInfo(state);
   return (
-    <section className="dr-stack" aria-label="Status">
+    <section className="dr-status" aria-label="Status">
       {earlier && <p className="ax-note">Earlier attempt, {earlier}</p>}
-      <p>
-        <strong>{info.label}.</strong> {info.explain}
+      <p className="dr-status-word">
+        <StatusPill state={state} />
       </p>
-      {reason && <p>{reason}</p>}
+      {info.explain && <p className="dr-status-why">{info.explain}</p>}
+      {reason && <p className="dr-status-reason">{reason}</p>}
+      {children}
     </section>
   );
 }
@@ -188,19 +201,16 @@ function RunSection({
   const jobs = new Map(snapshot.jobs.map((j) => [j.id, j]));
   return (
     <>
-      <div className="dr-stack">
-        <StatusSentence
-          state={state}
-          reason={run?.reason && state !== "confirmed" ? run.reason : undefined}
-          earlier={run && !latest ? stamp(run.created_at) : undefined}
-        />
+      <StatusBlock state={state} reason={run?.reason && state !== "confirmed" ? run.reason : undefined} earlier={run && !latest ? stamp(run.created_at) : undefined}>
         {questions.length > 0 &&
           groupQuestions(questions, (id) => jobs.get(snapshot.runs.find((r) => r.id === id)?.job_id || "")).map((g) => (
-            <QuestionCard key={g.review.id} group={g} compact />
+            <div key={g.review.id} className="dr-question">
+              <QuestionCard group={g} compact />
+            </div>
           ))}
         {actions}
         {run && (run.state === "submission_unknown" || run.state === "confirmed") && <EvidenceActions run={run} />}
-      </div>
+      </StatusBlock>
 
       {detail.error && (
         <Notice
@@ -214,32 +224,8 @@ function RunSection({
           {detail.error.message}
         </Notice>
       )}
-      {!detail.data && !detail.error && (
-        <p className="ax-note" role="status">
-          Loading attempt details…
-        </p>
-      )}
-      {detail.data && <DetailBody detail={detail.data} state={state} />}
-
-      {runs.length > 1 && (
-        <Panel title={`Attempts (${runs.length})`}>
-          <ol className="ax-rows">
-            {runs.map((r, i) => (
-              <li key={r.id} className="ax-row" aria-current={r.id === runId || undefined}>
-                <button type="button" className="ax-link" onClick={() => openJob(r.job_id, i === 0 ? undefined : r.id)}>
-                  {stamp(r.created_at)}
-                </button>
-                <span className="ax-row-end">
-                  <StatusPill state={r.state} />
-                  <span className="ax-note">
-                    {words(r.mode)} · {r.model_calls} AI steps
-                  </span>
-                </span>
-              </li>
-            ))}
-          </ol>
-        </Panel>
-      )}
+      {!detail.data && !detail.error && <Skeleton rows={3} mono={false} />}
+      {detail.data && <DetailBody detail={detail.data} state={state} runs={runs} runId={runId} open={openJob} />}
     </>
   );
 }
@@ -331,17 +317,17 @@ function EvidenceActions({ run }: { run: Run }) {
 function receiptLines(receipt: Record<string, unknown>) {
   const lines: string[] = [];
   const email = receipt.email as { sender_trusted?: boolean } | undefined;
-  if (receipt.website_confirmed) lines.push("Job-specific page acknowledgement captured");
+  if (receipt.website_confirmed) lines.push("Employer's confirmation page captured");
   if (receipt.email_confirmed || (email && Object.keys(email).length && email.sender_trusted !== false))
-    lines.push("Authenticated employer receipt email");
-  if (receipt.existing_application_notice) lines.push("Employer reported an existing application");
+    lines.push("Confirmation email from the employer");
+  if (receipt.existing_application_notice) lines.push("The employer says you already applied");
   if (receipt.evidence_reconciliation === "pending")
-    lines.push("Evidence reconciliation pending: excluded from success counts until resolved");
+    lines.push("Still being checked: not counted as confirmed yet");
   return lines;
 }
 
 // The history: what this attempt did, from the newest facts to the raw record. The long ones fold.
-function DetailBody({ detail, state }: { detail: Detail; state: string }) {
+function DetailBody({ detail, state, runs, runId, open }: { detail: Detail; state: string; runs: Run[]; runId: string; open: (job: string, run?: string) => void }) {
   const { run, failure_report: report } = detail;
   const [shot, setShot] = useState(false);
   const answers = Object.values(detail.answers || {});
@@ -354,7 +340,7 @@ function DetailBody({ detail, state }: { detail: Detail; state: string }) {
       {report && stateInfo(state).group !== "needs" && (
         <Panel
           title="What stopped this attempt"
-          actions={<span className="ax-note">{report.source === "ai" ? "Summarized from recorded evidence" : "Recorded evidence"}</span>}
+          actions={<span className="ax-note">{report.source === "ai" ? "Summarized from the record" : "From the record"}</span>}
         >
           <div className="dr-stack">
             {report.summary !== run.reason && <p>{report.summary}</p>}
@@ -375,39 +361,39 @@ function DetailBody({ detail, state }: { detail: Detail; state: string }) {
           </div>
         </Panel>
       )}
-      <Panel title="This attempt">
-        <Facts
-          items={[
-            ["Mode", run.mode === "dry_run" ? "Dry run (never submits)" : "Submit"],
-            ["Started", stamp(run.started_at || run.created_at)],
-            ["Finished", run.finished_at ? stamp(run.finished_at) : "In progress"],
-            ["Time", run.elapsed ? seconds(run.elapsed) : "—"],
-            ["AI usage", `${run.model_calls} steps · $${run.cost.toFixed(3)}`],
-            ["Attempt ID", <span className="mono">{shortId(run.id)}</span>],
-          ]}
-        />
-      </Panel>
-      {(lines.length > 0 || Object.keys(receipt).length > 0) && (
-        <Panel title="Evidence">
-          <div className="dr-stack">
-            {lines.length ? (
-              <ul className="ax-rows">
-                {lines.map((l) => (
-                  <li key={l} className="ax-row">
-                    {l}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="ax-note">No acknowledgement or receipt recorded.</p>
-            )}
-            <details className="ax-fold">
-              <summary>Raw receipt</summary>
-              <pre>{JSON.stringify(receipt, null, 2)}</pre>
-            </details>
-          </div>
+      {lines.length > 0 && (
+        <Panel title="Proof">
+          <ul className="ax-rows">
+            {lines.map((l) => (
+              <li key={l} className="ax-row">
+                {l}
+              </li>
+            ))}
+          </ul>
         </Panel>
       )}
+      <Panel title={runs.length > 1 ? `History, ${runs.length} attempts` : "History"}>
+        <ol className="dr-history">
+          {(runs.length ? runs : [run]).map((r, i) => (
+            <li key={r.id} className={r.id === runId ? "is-here" : ""}>
+              <i aria-hidden="true" />
+              {runs.length > 1 && r.id !== runId ? (
+                <button type="button" className="ax-link" onClick={() => open(r.job_id, i === 0 ? undefined : r.id)}>
+                  {stamp(r.created_at)}
+                </button>
+              ) : (
+                <span>{stamp(r.created_at)}</span>
+              )}
+              <StatusPill state={r.state} />
+              <span className="dr-history-note">
+                {r.mode === "dry_run" ? "Dry run" : ""}
+                {r.mode === "dry_run" && r.elapsed ? " · " : ""}
+                {r.elapsed ? seconds(r.elapsed) : ""}
+              </span>
+            </li>
+          ))}
+        </ol>
+      </Panel>
       {detail.screenshot && (
         <Panel title="Final page">
           {shot ? (
@@ -458,6 +444,26 @@ function DetailBody({ detail, state }: { detail: Detail; state: string }) {
           <p className="ax-note">No events recorded yet.</p>
         )}
       </details>
+      <details className="ax-fold">
+        <summary>This attempt in detail</summary>
+        <div className="dr-stack">
+          <Facts
+            items={[
+              ["Mode", run.mode === "dry_run" ? "Dry run (never sends)" : "Sends"],
+              ["Started", stamp(run.started_at || run.created_at)],
+              ["Finished", run.finished_at ? stamp(run.finished_at) : "In progress"],
+              ["AI usage", `${run.model_calls} steps · $${run.cost.toFixed(3)}`],
+              ["Attempt ID", <span className="mono">{shortId(run.id)}</span>],
+            ]}
+          />
+          {Object.keys(receipt).length > 0 && (
+            <details className="ax-fold">
+              <summary>Raw receipt</summary>
+              <pre>{JSON.stringify(receipt, null, 2)}</pre>
+            </details>
+          )}
+        </div>
+      </details>
     </>
   );
 }
@@ -466,9 +472,8 @@ function DetailBody({ detail, state }: { detail: Detail; state: string }) {
 function NotStarted({ row, actions }: { row: JobRow; actions: React.ReactNode }) {
   const job = row.job;
   return (
-    <div className="dr-stack">
-      <StatusSentence state={row.state} reason={row.state === "pending:waiting" && row.request?.reason ? row.request.reason : job.reason} />
+    <StatusBlock state={row.state} reason={row.state === "pending:waiting" && row.request?.reason ? row.request.reason : job.reason}>
       {actions}
-    </div>
+    </StatusBlock>
   );
 }
