@@ -31,6 +31,19 @@ def pool(monkeypatch):
     return _Pool("alex@example.test", "app-password"), connections
 
 
+def test_profile_logs_in_so_a_wrong_app_password_is_refused(pool, monkeypatch):
+    pool, connections = pool
+    assert _request(pool, "alex@example.test", "/profile", {}) == {"emailAddress": "alex@example.test"}
+    assert len(connections) == 1  # the login happened, on the connection the pool keeps
+
+    def refuse(address, password):
+        raise gmail_imap.MailAuthenticationError("Gmail authentication failed; check the saved app password")
+
+    monkeypatch.setattr(gmail_imap, "_connect", refuse)
+    with pytest.raises(gmail_imap.MailAuthenticationError):
+        gmail_imap.request("alex@example.test", "wrongwrongwrongw", "/profile")
+
+
 def test_each_folder_keeps_its_own_connection_and_trash_is_never_searched(pool):
     pool, connections = pool
     first = _request(pool, "alex@example.test", "/messages", {"q": "after:1"})

@@ -243,6 +243,10 @@ def _search(client, *criteria):
 
 def _request(client, address, path, params):
     if path == "/profile":
+        # A real login: "Connect Gmail" and the connection check call this to verify the app password, and answering
+        # without one accepted any 16 letters as connected (found driving the sign-up guide, 2026-10-31). The login
+        # is the control connection the pool keeps, so a later mailbox request reuses it.
+        client.control()
         return {"emailAddress": address}
     if path == "/messages":
         # Raw Gmail queries otherwise exclude Spam. Selected folders still
