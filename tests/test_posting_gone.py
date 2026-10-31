@@ -91,9 +91,38 @@ async def test_a_gh_jid_page_finds_its_board_by_domain(monkeypatch):
         "seatgeek", "8248135", True)
 
 
+class Boards(Paths):
+    """Answers a board's own page with the name it calls itself."""
+
+    def __init__(self, names, seen):
+        super().__init__({f"/boards/{board}": 200 for board in names}, seen)
+        self.names = names
+
+    async def get(self, url):
+        response = await super().get(url)
+        board = url.rsplit("/boards/", 1)[-1]
+        if response.status_code == 200 and board in self.names:
+            return httpx.Response(200, json={"name": self.names[board]}, request=httpx.Request("GET", url))
+        return response
+
+
 async def test_a_gh_jid_job_its_board_no_longer_lists_is_closed(monkeypatch):
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **k: Paths({"/boards/seatgeek": 200}, []))
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **k: Boards({"seatgeek": "SeatGeek"}, []))
     assert "no longer lists it" in await browser.posting_gone("https://seatgeek.com/jobs/8247550?gh_jid=8247550", "SeatGeek")
+
+
+@pytest.mark.parametrize("board_name", ["Ever.green", "Evergreen Education", ""])
+async def test_a_404_from_a_guessed_board_that_is_another_companys_proves_nothing(monkeypatch, board_name):
+    # Evergreen Trading (2026-10-29): the domain's label guessed a board named after another company; a 404 there is not
+    # the posting's answer. Only a board that names itself as this employer can close it.
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **k: Boards({"evergreen": board_name}, []))
+    assert await browser.posting_gone("https://evergreen.test/careers?gh_jid=4743432005", "Evergreen Trading") == ""
+    assert await browser.greenhouse_board("https://evergreen.test/careers?gh_jid=4743432005", "Evergreen Trading") is None
+
+
+@pytest.mark.parametrize("board_name,company", [("Lucid Motors", "Lucid Motors"), ("Nuro, Inc.", "Nuro"), ("ESRI", "Esri Inc")])
+def test_a_board_names_itself_as_the_employer(board_name, company):
+    assert browser.same_employer(board_name, company)
 
 
 async def test_an_unknown_board_is_no_verdict(monkeypatch):

@@ -258,6 +258,17 @@ async def icims_site_posting_gone(url):
     )
 
 
+COMPANY_NOISE = re.compile(r"\b(?:inc|llc|ltd|limited|corp|corporation|co|company|the)\b")
+
+
+def same_employer(board_name, company):
+    """Whether a Greenhouse board names itself as this company (case, punctuation and 'Inc.' aside)."""
+    def key(name):
+        return re.sub(r"[^a-z0-9]", "", COMPANY_NOISE.sub("", re.sub(r"[.,]", "", str(name or "").lower())))
+
+    return bool(key(company)) and key(board_name) == key(company)
+
+
 async def greenhouse_board(url, company=""):
     """(board, job id, listed) for an employer career page that names its Greenhouse job (?gh_jid=), or None.
 
@@ -278,9 +289,13 @@ async def greenhouse_board(url, company=""):
                 job = await client.get(f"https://boards-api.greenhouse.io/v1/boards/{name}/jobs/{job_id}")
                 if job.status_code == 200:
                     return name, job_id, True
-                if job.status_code == 404 and (await client.get(f"https://boards-api.greenhouse.io/v1/boards/{name}")).status_code == 200:
-                    return name, job_id, False
-    except httpx.HTTPError:
+                if job.status_code == 404:
+                    # A board that merely exists under the guessed name says nothing about this posting: it may be
+                    # another company's, or an old one. Only the employer's own board (it names itself) can close it.
+                    board = await client.get(f"https://boards-api.greenhouse.io/v1/boards/{name}")
+                    if board.status_code == 200 and same_employer(board.json().get("name"), company):
+                        return name, job_id, False
+    except (httpx.HTTPError, ValueError):  # ValueError: a board page that is not JSON
         return None
     return None
 
