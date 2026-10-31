@@ -2836,7 +2836,7 @@ class Adapter:
                 manual,
                 state="waiting_browser",
                 blocker_type="email_wait",
-            )
+            ) | {"recovery_cause": "reset_cooldown"}
         if record.get("resets", 0) >= 3 and recent:
             return self.defer(
                 "Password resets for this employer are exhausted; sign in manually once",
@@ -3081,7 +3081,7 @@ class Adapter:
             return self.defer(
                 "A password reset was requested recently; no additional reset will be requested during the cooldown",
                 state="waiting_browser", blocker_type="email_wait",
-            )
+            ) | {"recovery_cause": "reset_cooldown"}
 
         # Resumed mail is reclaimed by _drive before this request path. This guard covers both a fresh recovery and a
         # run reopened directly on the reset page, including requests whose page did not confirm submission.

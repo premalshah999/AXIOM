@@ -23,6 +23,8 @@ CAUSES = {
     "model_output",
     "email_matched",
     "sender_busy",
+    # A password reset was asked for recently and may not be asked again yet (base.RESET_COOLDOWN_REASON).
+    "reset_cooldown",
     "browser_unavailable",
     # One model timeout parked Lumen and PayPal (2026-10-14) while 293/295 calls succeeded.
     "provider_unavailable",
@@ -30,6 +32,7 @@ CAUSES = {
     "host_overloaded",
 }
 SENDER_BUSY = "Another application kept the same email sender busy"
+RESET_COOLDOWN = "A password reset was requested recently"
 # Lease waits more than an hour apart are separate attempts: Ford's two waits on 10-17 exhausted its 10-18 retry.
 SENDER_CHAIN_SECONDS = 3600
 # Waits that sent nothing: (first delay, longest delay, waits before giving up; None = never). Each wait doubles the
@@ -38,6 +41,10 @@ SENDER_CHAIN_SECONDS = 3600
 # for as long as it lasted, one job eight times in 12 minutes (2026-10-28, 102 runs on 50 jobs).
 WAIT_BACKOFF = {
     "sender_busy": (15, 300, 40),
+    # A reset cooldown is minutes to hours (5 min while the mail may still come, 6 h before another request): a retry every
+    # 15-60 minutes finds the late mail (earlier_reset_mail) or asks again. These runs sent nothing and spent a repair
+    # attempt each, 11 runs on 7 jobs from 10-28 (base.py cooldown deferrals).
+    "reset_cooldown": (900, 3600, 10),
     "browser_unavailable": (30, 600, 20),
     "host_overloaded": (30, 600, 20),
     "provider_unavailable": (60, 1800, None),
@@ -133,7 +140,7 @@ def automatic_attempts(session, job_id):
             and not run.packet.get("email_wait_resume")
             and run.packet.get("recovery_continuation_cause") != "worker_interrupted"
             # Waiting behind a sibling's email, a dead Chrome or an overloaded host sent nothing; not a repair attempt.
-            and not (run.reason or "").startswith((SENDER_BUSY, *BROWSER_OUTAGE, HOST_OVERLOADED))
+            and not (run.reason or "").startswith((SENDER_BUSY, RESET_COOLDOWN, *BROWSER_OUTAGE, HOST_OVERLOADED))
         )
         for run in session.scalars(select(Run).where(Run.job_id == job_id))
     )
@@ -455,7 +462,7 @@ def schedule_recovery(session, config, run, result):
         else:
             session.add(Setting(key=key, value=value))
         return
-    if cause in {"sender_busy", "browser_unavailable", "provider_unavailable", "host_overloaded"}:
+    if cause in {"sender_busy", "reset_cooldown", "browser_unavailable", "provider_unavailable", "host_overloaded"}:
         # Another owner holds this employer's email sender (usually a sibling job
         # waiting for its verification email), the browser or model is down, or the host is overloaded.
         # Nothing was sent: defer behind it without spending a repair attempt, marking an unchanged
