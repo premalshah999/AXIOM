@@ -2755,6 +2755,8 @@ class Adapter:
             and time.time() - float(record["reset_requested_at"]) > UNANSWERED_RESET_SECONDS
         )
         recent = time.time() - float(record.get("reset_requested_at") or 0) < RESET_WINDOW_SECONDS
+        if (late := await self.earlier_reset_mail(url, record)) is not None:
+            return late
         if record.get("state") == "password_unknown" and not unanswered:
             since = str(record.get("password_unknown_at") or "")
             try:
@@ -3018,6 +3020,46 @@ class Adapter:
             return None
         return {**blocker, "reason": reason + ". The employer page remains open in Chrome."}
 
+    async def earlier_reset_mail(self, url, record):
+        """Use the reset mail an earlier request of this employer got after its window closed, instead of asking again.
+
+        Accenture's reset arrived 39 s after its 20-minute window, Fresenius' 2 min 14 s (2026-10-31); the next run saw
+        "requested recently" and waited, or asked again, which voids the first link. A window opened now starts at that
+        request (challenges.late_since), so one search finds the mail. None when nothing arrived (or none was asked)."""
+        from ..mail.challenges import LATE_MAIL_VALIDITY
+
+        asked = float((record or {}).get("reset_requested_at") or 0)
+        if (
+            not asked
+            or not (record or {}).get("reset_submitted_at")
+            or time.time() - asked > LATE_MAIL_VALIDITY
+            or self.attempts["late_reset"]
+            or not (inbox := getattr(self, "inbox", None))
+            or not inbox.configured
+            or inbox.live(getattr(self, "challenge", None))  # this run's own request is still open: it is the one waited for
+        ):
+            return None
+        self.attempts["late_reset"] += 1
+        if not await self.arm_mail("password_reset") or not (self.challenge or {}).get("late_window"):
+            self.release_mail()
+            return None
+        arrived = False
+        try:
+            await self.service.mail.poll_once()
+            from ..db import MailChallenge
+
+            with self.service.db.session() as session:
+                row = session.get(MailChallenge, self.challenge["id"])
+                arrived = bool(row and row.state == "matched")
+        except Exception:
+            pass  # A failed look never blocks the run; it asks the usual way.
+        if not arrived:
+            self.release_mail()
+            return None
+        self.emit("auth", "The earlier password reset's email arrived after its window closed; using it instead of asking again")
+        self.reset_in_progress = True
+        return await self.complete_password_reset(url)
+
     async def request_reset(self, obs, detail):
         """Explicit reset-email step: fill the email, open the request window, click, confirm the page took the
         request, then wait for the email."""
@@ -3038,6 +3080,8 @@ class Adapter:
         # Resumed mail is reclaimed by _drive before this request path. This guard covers both a fresh recovery and a
         # run reopened directly on the reset page, including requests whose page did not confirm submission.
         if cooling_down():
+            if (late := await self.earlier_reset_mail(url, self.accounts.record(url))) is not None:
+                return late
             return cooldown_result()
         view = self.dialog_view(obs) or obs
         one_page = self.one_page_reset(obs)

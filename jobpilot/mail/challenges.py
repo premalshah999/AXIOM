@@ -1,6 +1,7 @@
 """Challenges: begin, wait, claim and consume a code or link, with the shared-sender gate."""
 
 from datetime import datetime
+from sqlalchemy import or_
 from sqlalchemy import select
 import asyncio
 import re
@@ -29,6 +30,11 @@ from .senders import sender_domains_overlap
 CENTRAL_RESET_WAIT = 180
 # Seconds before a reset wait opens that its mail may already be dated (see begin()).
 RESET_SENT_EARLY_SECONDS = 30
+# How long after the request an unanswered reset or activation can still be answered. A later window of the
+# same employer and address starts at that request, so a mail that arrives late is matched instead of discarded, and the
+# run does not ask the employer again (a new request voids the link of the earlier one). Accenture's reset arrived 39 s
+# after its 20-minute window, Fresenius' 2 min 14 s, Barclays' activation 2 min 38 s (2026-10-29/31).
+LATE_MAIL_VALIDITY = 3600
 SHARED_RESET_SENDERS = {"icims.com", "successfactors.com", "successfactors.eu", "sapsf.com", "sapsf.eu"}
 
 
@@ -303,6 +309,11 @@ class ChallengesMixin:
                 ]
                 if earlier:
                     request_since = min(request_since, min(earlier))
+            late = None
+            if kind in {"password_reset", "link"} and not (observed and since is not None):
+                late = self.late_since(s, rule, recipient, kind, current)
+                if late is not None:
+                    request_since = min(request_since, late)
             previous_requests = list(
                 s.scalars(select(MailChallenge.id).where(MailChallenge.run_id == run_id))
             )
@@ -331,7 +342,29 @@ class ChallengesMixin:
                     value={"request_id": c.id, "generation": generation, "at": now()},
                 )
             )
-            return {**record(c), "request_id": c.id, "generation": generation}
+            return {**record(c), "request_id": c.id, "generation": generation, "late_window": late is not None}
+
+    @staticmethod
+    def late_since(s, rule, recipient, kind, current):
+        """The start of this employer's earliest unanswered request of this kind that ended within LATE_MAIL_VALIDITY,
+        or None. Windows that matched are not here (their mail is consumed); cancelled ones count only when the
+        request itself was made (the run ended or was replaced), not when no mail was needed."""
+        rows = s.scalars(
+            select(MailChallenge).where(
+                MailChallenge.rule_id == rule["id"],
+                MailChallenge.recipient == recipient.lower(),
+                MailChallenge.kind == kind,
+                MailChallenge.state.in_(["expired", "cancelled"]),
+                MailChallenge.since >= current - LATE_MAIL_VALIDITY,
+                or_(MailChallenge.message_id.is_(None), MailChallenge.message_id == ""),
+            )
+        )
+        sinces = [
+            float(x.since)
+            for x in rows
+            if x.since and (x.state == "expired" or str(x.reason or "").startswith(("A newer attempt", "Browser attempt")))
+        ]
+        return min(sinces) if sinces else None
 
     def narrow(self, challenge_id, kind):
         """The website now shows what it sent (a code field, or a check-your-email page): an open

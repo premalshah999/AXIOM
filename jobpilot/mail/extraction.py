@@ -519,6 +519,21 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
     return reject("ambiguous_token" if len(codes) > 1 or len(valid_links) > 1 else "token_format")
 
 
+def newest_reset_link(matches, rule, challenge):
+    """Several reset links for one employer's address: the newest is the valid one. Asking again voids the earlier link,
+    and a window that reaches back to an unanswered request (challenges.late_since) can see both. Only when every link
+    is on the employer's own exact origin (so none can be another employer's) and the newest is strictly newer."""
+    if (
+        len(matches) < 2
+        or challenge.get("kind") != "password_reset"
+        or any(token.get("kind") != "link" for _, token, _, _ in matches)
+        or set(rule.get("link_origins") or []) != {_origin_or_none(rule.get("employer_origin", ""))}
+    ):
+        return matches
+    dated = sorted(matches, key=lambda item: int(item[2]["internalDate"]), reverse=True)
+    return dated[:1] if int(dated[0][2]["internalDate"]) != int(dated[1][2]["internalDate"]) else matches
+
+
 def names_employer(message, tokens):
     """Whether a message's subject, sender name or snippet names an employer (a tenant token of 4+ letters)."""
     headers = {h["name"].lower(): h["value"] for h in message.get("payload", {}).get("headers", [])}

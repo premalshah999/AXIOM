@@ -22,6 +22,7 @@ from .extraction import UNBRANDED_MAX_CANDIDATES
 from .extraction import UNBRANDED_SEARCH_TERMS
 from .extraction import extract_message
 from .extraction import latest_employer_code
+from .extraction import newest_reset_link
 from .helpers import origin
 from .senders import EMPLOYER_SENDER_FAMILIES
 from .senders import KNOWN_SENDERS
@@ -386,7 +387,7 @@ class PollingMixin:
                                 "outside_senders": outside,
                             },
                         )
-                    matches = latest_employer_code(matches, c)
+                    matches = newest_reset_link(latest_employer_code(matches, c), rule, c)
                     if len(matches) != 1:
                         if len(matches) > 1:
                             self.outcome(
