@@ -3146,8 +3146,13 @@ class FormSession:
 
                     rules = getattr(self.resolver, "answer_rules", None)
                     fallback = (getattr(rules, "major_fallback", "") or "").strip()
-                    # A partial catalog is not proof the major is absent; search the picker in that case.
-                    if not any(major_option(candidate, catalog) for candidate in (value, fallback) if candidate):
+                    # A partial catalog is not proof the major is absent; search the picker in that case. The list
+                    # decides by meaning, as the answer policy does: the tenant's own wording of the recorded or
+                    # fallback major ("Computer and Information Science") counts as offered, so no probe search runs
+                    # (REA 2026-10-25; 36 of 41 Workday education rows with a saved list, 2026-10-24..31).
+                    if not any(major_option(candidate, catalog) for candidate in (value, fallback) if candidate) and not (
+                        self.resolver and self.resolver.policy_choice(field, catalog)
+                    ):
                         catalog = None
                 if catalog:
                     # The page's own Field of Study list decides first; only the chosen exact name is searched, so no

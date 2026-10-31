@@ -33,6 +33,25 @@ async def pills(page):
     return await page.evaluate("[...document.querySelectorAll('[data-automation-id=selectedItem]')].map(n => n.innerText.trim())")
 
 
+async def test_the_pages_list_in_the_tenants_wording_decides_without_probe_searches(page, service, tmp_path):
+    from jobpilot.forms import FormSession
+
+    await open_prompt(page, ["Accounting", "Biology", "Computer and Information Science", "Mathematics"])
+    form = FormSession(page, Resolver(Profile.model_validate(PROFILE), service.db, service.config),
+                       tmp_path / "unused.pdf", lambda *a: None)
+    form.network = SimpleNamespace(
+        value_list=lambda kind: ["Accounting", "Biology", "Computer and Information Science", "Mathematics"],
+        quiet=lambda *_: True,
+    )
+    field = next(f for f in (await form.scan())["fields"] if f["label"] == "Field of Study")
+    field["group"] = "Education 1"
+    started = time.monotonic()
+    assert await form.fill(field, "Marine Biology") == "Computer and Information Science"
+    # Only the chosen name was searched: the recorded major and its first word were never probed.
+    assert await page.evaluate("window.SEARCHES") == ["Computer and Information Science"]
+    assert time.monotonic() - started < 4
+
+
 async def test_a_prompt_returns_inside_its_deadline_and_closes_its_popup(page):
     # Every search answers after 3 s with rows that are not the value: the stacked waits (the value, its first word,
     # the full list, each category) outran the form's limit and the cancelled write left the popup open.
