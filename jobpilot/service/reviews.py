@@ -178,6 +178,7 @@ class ReviewsMixin:
     def answer_review(self, review_id, answer, *, document=False):
         """Save the owner's answer. `document` is True only when an uploaded file answers an upload question."""
         from .. import owner_questions as oq
+        from ..answers.validate import BARE_HISTORY_DATE
 
         if not answer.strip() or len(answer) > 8000:
             raise ValueError("Provide an answer of 1–8000 characters")
@@ -271,6 +272,13 @@ class ReviewsMixin:
                             or (other.context or {}).get("history_identity") != context.get("history_identity")
                         ):
                             continue  # Another row's "End Date" is a different question.
+                        if not row_scoped and (
+                            (other.context or {}).get("history_kind") or BARE_HISTORY_DATE.fullmatch(oq.tidy(review.question))
+                        ):
+                            # A rowless "End Date Month" answered one form's field; copied onto a history row it became
+                            # that row's date (4fe4eac6, run 6d2635b1, 2026-10). An answer with no row names no row, and
+                            # a bare date caption is never carried to another form's field.
+                            continue
                         fits = answer in other.options or oq.free_text_allowed(other.options, other.context)
                         if fits and (
                             scope == "personal" or employer.company.casefold() == job.company.casefold()
@@ -362,6 +370,36 @@ class ReviewsMixin:
             settled += 1
         return settled
 
+    _reconsidering = False
+    _reconsider_again = False
+
+    async def reconsider_open_questions(self):
+        """Check every open question again after the owner saved something (a questionnaire, the profile, an answer).
+
+        Owner 2026-10-31: "a lot of needs answer applications are just stuck", "never ask me what you can answer".
+        Settling and revalidating ran only when the app started, so a saved questionnaire freed nothing until the next
+        restart. A save during a pass asks for one more pass; passes never overlap."""
+        if self._reconsidering:
+            self._reconsider_again = True
+            return None
+        self._reconsidering = True
+        outcome = {"settled": 0}
+        try:
+            while True:
+                self._reconsider_again = False
+                try:
+                    outcome["settled"] += await self.settle_open_questions()
+                except Exception:
+                    pass  # They stay asked, as before.
+                try:
+                    outcome.update(await self.revalidate_open_questions())
+                except Exception:
+                    pass
+                if not self._reconsider_again:
+                    return outcome
+        finally:
+            self._reconsidering = False
+
     async def revalidate_open_questions(self):
         """Ask the current engine every open question again.
 
@@ -397,6 +435,7 @@ class ReviewsMixin:
 
         outcome = {"closed": 0, "recovered": 0, "answered": 0, "merged": 0}
         moved, seen, duplicates = set(), set(), []
+        saved_profile = self.db.get_setting("profile", {}) or {}
         for rid, run_id, question, options, context, reason, key, packet, job in await asyncio.to_thread(candidates):
             if run_id in moved or key in {"manual", "session"}:
                 continue
@@ -410,6 +449,12 @@ class ReviewsMixin:
             from ..run_profile import full as full_profile
 
             options, context, profile = options or [], context or {}, full_profile(packet, self.db)
+            if saved_profile:
+                # What the owner has saved since this run started (a questionnaire answer, a salary, a corrected
+                # status) outranks the run's own copy: answering resumes the job as a new run on the current profile,
+                # so the old copy kept open a question the next attempt answers. The run's email, an alias some
+                # platforms bind, stays.
+                profile = {**profile, **saved_profile, **({"email": profile["email"]} if profile.get("email") else {})}
             outside = residence_outside(question, options, profile.get("facts"), profile.get("location", ""))
             from ..sensitive_ids import sensitive_field
 
