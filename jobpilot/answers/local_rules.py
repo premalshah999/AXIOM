@@ -60,6 +60,24 @@ from ..widgets import foreign_fallback
 from .text import yes_no
 from .third_party import other_party_email
 
+# What a tax-credit screener lists: public benefits, military service, rehabilitation, unemployment, a felony, "not sure".
+SCREENER_ITEM = re.compile(
+    r"\bSNAP\b|food stamps|\bAFDC\b|\bTANF\b|\bSSI\b|supplemental security|rehab|unemploy|felony|convicted|"
+    r"served in (?:the )?(?:u\.?s\.? )?military|armed forces|veteran|^not sure$",
+    re.I,
+)
+# "If you currently work in the gaming industry, would you be able to end that employment ...?": the industry named.
+CURRENT_INDUSTRY = re.compile(
+    r"\b(?:currently|presently) (?:work|employed|working)\b[^?.]{0,30}\b(?:in|for|at|with|within) (?:the |a |an )?"
+    r"(?:(?P<industry>[a-z]{4,}) (?:industry|sector|establishments?)|(?:industry|sector) of (?P<industry2>[a-z]{4,}))",
+    re.I,
+)
+NOT_WORKING_OPTION = re.compile(r"\s*(?:no,? )?i (?:do not|don['’]t|am not|currently do not)\b[^.]{0,40}\b(?:work|employ)", re.I)
+# "Have you been employed at any time in the last 6 months?": a question about now, not about one employer.
+RECENT_EMPLOYMENT = re.compile(
+    r"^(?:have you been|were you|are you)(?: currently)? (?:employed|working)\b(?: at any (?:time|point))?[^?.]{0,25}"
+    r"\b(?:in |during |within )?the (?:last|past|previous) (?:\d+|six|three|twelve|few) (?:months?|weeks?)\b[^?.]{0,20}\??$"
+)
 PAGE_LANGUAGE = re.compile(r"(?:select|choose|change) (?:a |your |the )?language|\b(?:rb|ddl|cbo|lst)language\b|"
                            r"(?:display|site|page) language")
 ENDONYMS = {"español", "espanol", "français", "francais", "deutsch", "português", "portugues", "italiano", "中文",
@@ -134,6 +152,15 @@ def applicant_age(facts, today=None):
 
 
 class LocalRulesMixin:
+    def history_attested(self):
+        """The applicant confirmed that the saved work history is complete."""
+        from ..features.knowledge import employment_history_complete
+
+        try:
+            return bool(employment_history_complete(self.db))
+        except Exception:
+            return False  # Minimal stores (tests) have no knowledge tables.
+
     def _local(self, f):
         from ..widgets import placeholder_option
 
@@ -163,6 +190,56 @@ class LocalRulesMixin:
                     supporting_facts=["fact:country_of_residence"],
                     reason="Applicant does not reside in the region this box applies to",
                 )
+        if f.get("type") == "checkbox" and f.get("list_items") and (p.facts or {}).get("tax_credit_screening_no") is True:
+            # A "None of the Above" under a tax-credit screener's list (Smithfield's Workday page, 2026-10-29): ticked only
+            # when every box above it is a program the applicant's whole-screener No denies. Any other list is the owner's.
+            if all(SCREENER_ITEM.search(str(x)) for x in f["list_items"]):
+                return Answer(
+                    field_id=f["id"],
+                    value="true",
+                    disposition="answer",
+                    evidence_ids=["fact:tax_credit_screening_no"],
+                    supporting_facts=["fact:tax_credit_screening_no"],
+                    reason="The applicant said No to every tax-credit screener item listed",
+                )
+        if (
+            options
+            and re.search(r"\b(?:(?:type|kind) of|which|what) device\b[^?.]{0,50}\b(?:using|use)\b", label)
+            and f.get("type") in {"select", "dropdown", "combobox", "radio", "radiogroup", "pills"}
+        ):
+            # ADP's "Please indicate which type of device you are using to apply." (Midco, 2026-10-31): the application is
+            # filled in a desktop browser, so the computer is the true answer.
+            computers = [o for o in options if re.search(r"\b(?:computer|laptop|desktop|pc)\b", str(o), re.I)
+                         and not re.search(r"tablet|phone", str(o), re.I)]
+            if len(computers) == 1:
+                return Answer(field_id=f["id"], value=computers[0], disposition="answer", evidence_ids=["policy:device"],
+                              reason="The application is completed in a desktop browser")
+        if (
+            options
+            and f.get("type") in {"select", "dropdown", "combobox", "radio", "radiogroup", "pills", "buttonchoice"}
+            and RECENT_EMPLOYMENT.search(label)
+            and (current := [i for i, w in enumerate(p.work) if w.current or not (w.end or "").strip()])
+        ):
+            # "Have you been employed at any time in the last 6 months?" (Caesars' tax-credit questionnaire, 2026-10-29) read as
+            # "have you worked for this employer" and was answered No; the conditional "As you indicated above, you are
+            # currently unemployed ..." then had no answer for 32 runs. A role the profile holds as current answers it.
+            yes = [o for o in options if yes_no(str(o)) == "Yes"]
+            if len(yes) == 1:
+                refs = [f"profile:work.{i}" for i in current]
+                return Answer(field_id=f["id"], value=yes[0], disposition="answer", evidence_ids=refs, supporting_facts=refs,
+                              reason="The profile holds a current role")
+        if (industry := CURRENT_INDUSTRY.search(str(f.get("label", "")))) and options and self.history_attested():
+            # "If you currently work in the gaming industry, would you be able to end that employment ...?" (Hancock Whitney's
+            # Workday, 2026-10-31) offers "I do not work for ..." and was refused as a restriction/NDA disclosure. It asks
+            # where the applicant works now: the confirmed complete history answers it when no current role is in that industry.
+            word = (industry["industry"] or industry["industry2"]).lower()
+            current = [i for i, w in enumerate(p.work) if w.current or not (w.end or "").strip()]
+            named = any(word in f"{p.work[i].company} {p.work[i].title}".lower() for i in current)
+            none = [o for o in options if NOT_WORKING_OPTION.match(str(o))]
+            if len(none) == 1 and not named:
+                refs = ["fact:employment_history_complete"] + [f"profile:work.{i}" for i in current]
+                return Answer(field_id=f["id"], value=none[0], disposition="answer", evidence_ids=refs,
+                              supporting_facts=refs, reason=f"No current role is in the {word} industry")
         if (
             "language" in label
             and not re.search(

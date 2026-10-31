@@ -592,7 +592,7 @@
       placeholder: el.getAttribute('placeholder') || '', error, widget: f.widget || '', search_box: searchBox(el),
       parts: f.parts || [], accept: el.getAttribute('accept') || '', hint: clean([f.hint || '', help, description].join(' ')).slice(0,2500),
       date_format: f.date_format || '', side_login: sideLogin(el) || chromeLogin(el),
-      members: (f.members || []).map(id),
+      members: (f.members || []).map(id), list_caption: f.list_caption || '', list_items: f.list_items || [],
     });
   };
 
@@ -666,7 +666,12 @@
     const chosen = items.find(i => i.hasAttribute('selected') || i.getAttribute('aria-selected') === 'true')
       || items.find(i => raw && (i.getAttribute('value') === raw || i.value === raw || itemText(i) === raw));
     const value = chosen ? itemText(chosen) : '';
-    const q = label(host, { visibleFirst: true });
+    let q = label(host, { visibleFirst: true });
+    // ADP's pick list names itself only "Add response." (an ARIA prompt, Midco 2026-10-31): the question is the text printed
+    // just above it ("Please indicate which type of device you are using to apply.").
+    if (/^(?:add|enter|provide) (?:a )?(?:response|answer)\.?$|^unlabelled field$/i.test(q)) {
+      q = precedingText(host, new Set(items.map(itemText))) || q;
+    }
     const req = isReq(host, q) || host.hasAttribute('required');
     consumed.add(host);
     // Each item is listed twice (a light-DOM copy and the rendered one); duplicates made "Cell" ambiguous (Midco
@@ -798,10 +803,15 @@
     push(group[0], { label: q, type: 'checkboxgroup', options: group.map(c => label(c)), required: req, members: group,
       value, maxlength: -1, valid: !req || !!value });
   }
-  for (const [name, group] of Object.entries(boxNames)) {
-    if (group.length < 2 || excluded(group[0]) || consumed.has(group[0])) continue;
-    const shown = group.filter(c => visible(c) || (c.labels && c.labels[0] && visible(c.labels[0])));
+  for (const [name, all_] of Object.entries(boxNames)) {
+    if (all_.length < 2 || excluded(all_[0]) || consumed.has(all_[0])) continue;
+    const shown = all_.filter(c => visible(c) || (c.labels && c.labels[0] && visible(c.labels[0])));
     if (!shown.length) continue;
+    // Atlas Copco's SAP sign-up form (2026-10-31) keeps hidden copies of "Receive new job posting notifications" from its
+    // other screens under the same name: the group read as three boxes ("*", "*", the caption) with no question, and the
+    // owner was asked an empty label. Only the boxes on the page are one question; a single one is a lone checkbox.
+    if (shown.length < 2) continue;
+    const group = shown;
     group.forEach(c => consumed.add(c));
     const parent = group[0].closest('.application-question,fieldset,[role=group]');
     // Without a legend the question is the plain text just before the boxes; the first box's own caption ("Yes, I
@@ -1162,7 +1172,7 @@
       value = group.find(x => x.checked); value = value ? options[group.indexOf(value)] : '';
       // A phone field can contain a separate SMS-consent radio group. Its
       // question title belongs to the phone input, not these consent choices.
-      if (!parent && /(?:text messages?|sms|marketing|newsletter)/i.test(options.join(' '))) {
+      if (!parent && /(?:text messages?|whatsapp|sms|marketing|newsletter)/i.test(options.join(' '))) {
         question = options.find(o => /^yes\b/i.test(o))?.replace(/^yes\s*[-–:]?\s*/i, '') || el.name;
       }
     } else if (type === 'radiogroup') {
@@ -1197,7 +1207,7 @@
       value = chosen ? optionLabel(chosen) : '';
       // A consent group whose long caption is not its label is named by its Yes choice, as a lone radio group is.
       if ([el.id, el.getAttribute('name'), 'Unlabelled field'].includes(question)
-          && /(?:text messages?|sms|marketing|newsletter)/i.test(options.join(' '))) {
+          && /(?:text messages?|whatsapp|sms|marketing|newsletter)/i.test(options.join(' '))) {
         question = options.find(o => /^yes\b/i.test(o))?.replace(/^yes\s*[-–:]?\s*/i, '') || question;
       }
       // Its question is a caption inside the group, before the choices, tied to nothing ("Are you under the age of 40?").
@@ -1319,8 +1329,32 @@
         question = t.replace(/\s*[*✱]+\s*$/, '').trim();
       }
     }
+    // "None of the Above" ends a check-all-that-apply list; alone it names no proposition (Smithfield's Workday tax-credit
+    // page, 2026-10-29: two of them, "None of the Above" asked twice with nothing to answer). The list's own heading and the
+    // boxes above it are carried beside the label: the answer rules read what a "none" would deny.
+    let listCaption = '', listItems = [];
+    if (type === 'checkbox' && /^none(?: of (?:the )?(?:above|these|them))?\.?$/i.test(clean(question || ''))) {
+      const sibs = [];
+      let caption = '';
+      const walker = document.createTreeWalker(el.getRootNode().body || el.getRootNode(), NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+      walker.currentNode = el;
+      for (let n = walker.previousNode(), steps = 0; n && steps < 120; n = walker.previousNode(), steps++) {
+        if (n.nodeType === 1) {
+          if (n.matches('input[type=checkbox]') && visible(n) && n !== el) sibs.unshift(clean(label(n)));
+          continue;
+        }
+        const t = clean(n.textContent), host = n.parentElement;
+        if (!t || !host || host.closest('script,style,noscript,button,a,option,label') || !visible(host) || !/[a-z]{3}/i.test(t)) continue;
+        caption = t;
+        break;
+      }
+      if (caption && sibs.length && sibs.length <= 12 && !sibs.some(x => !x || x === 'Unlabelled field')) {
+        listCaption = caption.slice(0, 300);
+        listItems = sibs;
+      }
+    }
     const req = isReq(el, question) || (select2Native?.matches('select') && isReq(select2Native, question)) || uploadRequired || questionRequired || radioCaptionRequired || (group && group.some(x => x.required || x.getAttribute('aria-required') === 'true'));
-    push(el, { label: question, type, required: req, options, value, widget, date_format: dateFormat, parts:dateParts, members:['radio','radiogroup'].includes(type) ? group : [],
+    push(el, { label: question, type, required: req, options, value, widget, date_format: dateFormat, list_caption: listCaption, list_items: listItems, parts:dateParts, members:['radio','radiogroup'].includes(type) ? group : [],
       valid: (el.validity ? el.validity.valid : true) && el.getAttribute('aria-invalid') !== 'true' });
   }
 
@@ -1364,13 +1398,27 @@
   // their existing formatting until the association is actually observed.
   const callingCodes = fields.filter(f => /\bcountry(?:\s*(?:\/|or)\s*(?:region|territory))?(?: phone)? code\b|\bphone country\b|\bdial(?:ing)? code\b|\bcalling code\b/i.test(f.label)
     && (/\+\s*\d/.test(f.value) || f.options.some(o => /\+\s*\d/.test(o))));
-  const phoneNumbers = fields.filter(f => (/phone|telephone|mobile/i.test(f.label)
+  const phoneNumbers = fields.filter(f => (/phone|telephone|mobile|\bcell(?:ular)?\b/i.test(f.label)
       || /^number\b.*###-###-####/i.test(f.label))
     && !/code|consent|messages?|sms|type|\bext(?:ension)?\b/i.test(f.label) && ['text','tel','number'].includes(f.type));
   if(callingCodes.length === 1 && phoneNumbers.length === 1) {
     phoneNumbers[0].phone_format = 'national';
     phoneNumbers[0].phone_calling_code = callingCodes[0].value.match(/\+\s*\d{1,4}\b/)?.[0] || '';
     if (/###-###-####/.test(phoneNumbers[0].label)) phoneNumbers[0].phone_display = 'us-hyphenated';
+  }
+  // A box that states its format in its own caption or placeholder ("Format as xxx-xxx-xxxx", Taleo 2026-10-31) takes the
+  // number that way: the unformatted digits were refused as not matching the required pattern, eight runs in a row.
+  for (const f of phoneNumbers) {
+    if (f.phone_display) continue;
+    const node = document.querySelector('[data-jp-id="' + f.id + '"]');
+    if (!node) continue;
+    const said = [...(node.labels || [])].map(l => l.getAttribute('aria-label') || l.title || '').concat(
+      node.getAttribute('aria-label') || '', node.getAttribute('placeholder') || '', node.title || '', f.hint || '').join(' ');
+    if (/(?:format(?:ted)?(?: as)?|like|e\.?g\.?|ex\.?:?)?\s*(?:x{3}|#{3}|9{3}|\d{3})-(?:x{3}|#{3}|9{3}|\d{3})-(?:x{4}|#{4}|9{4}|\d{4})\b/i.test(said)
+        && /format|pattern|xxx|###|999/i.test(said)) {
+      f.phone_format = 'national';
+      f.phone_display = 'us-hyphenated';
+    }
   }
 
   // Resolve conditional labels in document order across different widget scans.
@@ -1384,6 +1432,21 @@
       .filter(p=>p.node && (node.compareDocumentPosition(p.node)&Node.DOCUMENT_POSITION_PRECEDING))
       .sort((a,b)=>(a.node.compareDocumentPosition(b.node)&Node.DOCUMENT_POSITION_FOLLOWING)?-1:1).at(-1);
     if(prior) f.related_question={label:prior.field.label,value:prior.field.value,options:prior.field.options};
+  }
+  // A bare "Other (free text)" box that opens once a pick list is answered "Other" asks for that list's own subject
+  // (Bosch's SmartRecruiters form, 2026-10-29: two of them, after "current degree" and "class standing", reached the owner
+  // as "Other (free text)" with nothing to answer). The question is the pick list's, plus the specifying.
+  for (const f of fields) {
+    if (!['text', 'textarea'].includes(f.type) || !/^(?:other|please specify|specify)\b\W*(?:\(?(?:free[- ]?text|please specify|specify|text)\)?)?\W*$/i.test(f.label)) continue;
+    const node = document.querySelector('[data-jp-id="' + f.id + '"]');
+    if (!node) continue;
+    const prior = fields.filter(p => p !== f && ['combobox', 'select', 'radiogroup', 'radio'].includes(p.type) && /^other\b/i.test(p.value || ''))
+      .map(p => ({field: p, node: document.querySelector('[data-jp-id="' + p.id + '"]')}))
+      .filter(p => p.node && (node.compareDocumentPosition(p.node) & Node.DOCUMENT_POSITION_PRECEDING))
+      .sort((a, b) => (a.node.compareDocumentPosition(b.node) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1).at(-1);
+    if (!prior) continue;
+    f.related_question = {label: prior.field.label, value: prior.field.value, options: prior.field.options};
+    f.label = clean(prior.field.label).replace(/\s*[*✱]+\s*$/, '') + ' (Other, please specify)';
   }
   const fieldIds = new Set(fields.map(f => f.id));
   const historyEditor = el => el.matches('[data-profile-item-tile="true"][tabindex]')
