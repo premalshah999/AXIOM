@@ -618,6 +618,31 @@ def date_text(field, value):
     return "/".join(parts[k] for k in kinds)
 
 
+# A React page is interactive once a control carries React's own props (or Remix has set its route modules). Greenhouse's
+# server-rendered form shows every input before that: values typed into it are wiped when React takes over, its
+# react-selects stay unreadable and a file set in the window is never seen (Esri 2026-10-31: 277 s of fills on a form
+# that never hydrated; "Resume upload has not been accepted" on 14 jobs in a week, all confirmed on a later try).
+REACT_HYDRATED_JS = """() => !!window.__remixRouteModules || [...document.querySelectorAll('input,select,textarea')]
+  .some(e => Object.keys(e).some(k => k.startsWith('__reactProps$') || k.startsWith('__reactFiber$')))"""
+
+
+async def wait_react_hydrated(page, seconds=12):
+    """True once the page's React has hydrated; a page that has not after `seconds` is reloaded once (nothing has been
+    filled yet) and given the same time again. False when it still has not: the caller goes on, and verify() decides."""
+    for attempt in range(2):
+        try:
+            await page.wait_for_function(REACT_HYDRATED_JS, timeout=seconds * 1000)
+            return True
+        except PlaywrightError:
+            if attempt:
+                return False
+            try:
+                await page.reload(wait_until="domcontentloaded", timeout=25000)
+            except PlaywrightError:
+                return False
+    return False
+
+
 async def visible_options(frame, scope=None, selector=OPTION_SELECTOR):
     try:
         return await frame.evaluate(VISIBLE_OPTIONS, {"scope": scope, "selector": selector})

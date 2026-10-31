@@ -1452,8 +1452,16 @@ class BrowserEngine:
                     )
                 except PlaywrightError:
                     pass  # The scanner/navigator can handle an employer-hosted entry page.
-                # File upload clients initialize after React hydration.
-                await page.wait_for_timeout(2000)
+                # File upload clients initialize after React hydration. The job-boards form is React: wait for
+                # it to hydrate, reloading once if it does not, rather than a fixed pause (Esri, 2026-10-31).
+                if (urlsplit(page.url).hostname or "").startswith("job-boards"):
+                    from .widgets import wait_react_hydrated
+
+                    if not await wait_react_hydrated(page):
+                        self.emit("browser", "The Greenhouse form did not hydrate; continuing on the page as it is")
+                    await page.wait_for_timeout(500)
+                else:
+                    await page.wait_for_timeout(2000)
             from .run_profile import full as full_profile
 
             self.profile = Profile.model_validate(full_profile(run["packet"], self.db))
