@@ -10,8 +10,8 @@ The order of reading, each from the question's own wording:
    that list. One more clause opening it to anyone with valid work authorization makes it an authorization question.
 3. "Indefinite", "permanent" or "unrestricted" authorization: time-limited status (OPT, H-1B ...) is not that.
 4. "Do you currently hold OPT?": the recorded status, whatever the question before it said.
-5. Sponsorship whose own definition names OPT, EAD, CPT, a STEM extension, Form I-983 or forms for a school or
-   government agency: what the employer asked, whatever the generic fact says.
+5. Sponsorship whose own definition names OPT, EAD, CPT, a STEM extension, Form I-983, forms for a school or government
+   agency, a temporary visa or authorization that expires: what the employer asked, whatever the generic fact says.
 6. Plain sponsorship and plain authorization: the saved facts.
 
 THE ONE PLACE TO CHANGE THE PLAIN SPONSORSHIP ANSWER is the applicant's saved fact `requires_future_sponsorship_US`
@@ -117,7 +117,8 @@ EXTRA_CONDITION = re.compile(
     r"\b(?:and|with|who)\b[^?]{0,50}\b(?:ability|able|eligible|willing|obtain|clearance|without)\b", re.I
 )
 TERM_WORDS = re.compile(
-    r"\bindefinite(?:ly)?\b|\bpermanent(?:ly)?\b(?!\s+resid)|\bunrestricted\b|\bwithout\s+(?:any\s+)?(?:restrictions?|limitations?)\b",
+    r"\bindefinite(?:ly)?\b|\bpermanent(?:ly)?\b(?!\s+resid)|\bunrestricted\b|\bwithout\s+(?:any\s+)?(?:restrictions?|limitations?)\b|"
+    r"\bnow\s+and\s+in\s+the\s+future\b[^.?]{0,40}\bany\s+employer\b|\bany\s+employer\b[^.?]{0,40}\bnow\s+and\s+in\s+the\s+future\b",
     re.I,
 )
 TERM_CONTEXT = re.compile(r"\b(?:work\w*|employ\w*)\b", re.I)
@@ -143,6 +144,25 @@ STUDENT_NAMES = (
 )
 # "H-4 EAD" and "L-2 EAD" are someone else's card.
 EAD_NAMES = r"(?<!H-4 )(?<!H4 )(?<!L-2 )(?<!L2 )\bEAD\b|(?i:employment\s+authori[sz]ation\s+document)"
+# A definition that reaches any time-limited status without naming one: "(for example, if you are on a temporary visa)",
+# "work authorization that expires in the next 2-3 years", "work authorization outside of permanent residence/citizenship",
+# "work authorization which MAY later require sponsorship", "any type of immigration filing", "a F, J, H or L visa status".
+# "Require sponsorship to maintain your work authorization" is no definition: that is the plain question, and the saved fact's.
+TIME_LIMITED_NAMES = (
+    r"(?i:\btemporary\s+(?:\w+\s+)?visas?\b|"
+    r"\bauthori[sz]ation\b[^.?]{0,40}\bexpir(?:e|es|ing|ation)\b|"
+    r"\b(?:work|employment)\s+authori[sz]ation\s+(?:outside|other\s+than)\s+(?:of\s+)?(?:permanent\s+resid\w+|citizenship)|"
+    r"\bwork\s+authori[sz]ation\s+(?:which|that)\s+may\b[^.?]{0,30}\brequire\b|"
+    r"\bany\s+(?:type\s+of\s+)?immigration\s+filing\b|\bother\s+action\s+requiring\b|"
+    r"\bprovide\s+(?:\w+\s+)?(?:documentation|paperwork|forms?)\b[^.?]{0,80}\b(?:immigration|work\s+authori[sz]ation)\b)|"
+    r"\bF(?:,\s*|\s+or\s+|\s*/\s*)[JHLM]\b"
+)
+# "Are you authorized to work in the United States? This does not include practical training."
+AUTH_EXCLUDES_STUDENT = re.compile(
+    r"\b(?:(?:does|do|did)\s+not\s+includ\w+|not\s+including|excluding|excludes?)\b[^.?]{0,40}"
+    r"(?:(?i:practical\s+training)|\bOPT\b|\bCPT\b|(?i:student\s+visa))",
+    re.I,
+)
 FORM_DUTY = re.compile(
     r"\b(?:forms?|letters?|paperwork|documents?|documentation|submissions?|verifications?|signature|sign)\b[^.?]{0,110}"
     r"\b(?:schools?|government\s+agenc\w+|federal\s+agenc\w+|program\s+sponsors?|DSO)\b|"
@@ -323,6 +343,8 @@ def sponsorship_defined(text, stand):
     """The employer's definition of sponsorship covers the applicant's recorded status, or does not name it at all."""
     if not stand.names:
         return False
+    if stand.nonimmigrant and _named(text, TIME_LIMITED_NAMES):
+        return True
     if "f1" in stand.names and (
         _named(text, STUDENT_NAMES) or _named(text, EAD_NAMES) or FORM_DUTY.search(text) or _indefinite(text)
     ):
@@ -444,6 +466,8 @@ def _reading(label, options, facts):
         if AUTH_ASK.search(ask) and not no_need and not re.search(r"\bthat\s+country\b", ask, re.I):
             if OTHER_COUNTRY.search(text):
                 return None
+            if "f1" in stand.names and AUTH_EXCLUDES_STUDENT.search(text):
+                return Reading("auth_defined", False, (STATUS_REF,), "The question excludes this status")
             known = plain_authorization(facts)
             return Reading(
                 "auth_plain", known[0] if known else None, tuple(known[1]) if known else (), "The applicant's saved authorization"

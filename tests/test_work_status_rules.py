@@ -279,3 +279,67 @@ def test_the_status_rule_leaves_yes_no_boxes_alone(service):
     assert not (got and got.value == "F-1 OPT")
     asked = field("What is your current immigration status?", [], "text")
     assert r._local({**asked, "own_label": asked["label"]}).value == "F-1 OPT"
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "Will you now or in the future require sponsorship for an employment visa for any of the posted locations "
+        "(for example, if you are on a temporary visa)?",
+        "Will you now or in the future require sponsorship for employment (including but not limited to F1, OPT/CPT (with EAD) visas)?",
+        "Will you now or in the future require immigration sponsorship from the company to work in the United States? "
+        "This includes, but is not limited to, H-1B, F-1 OPT/CPT, STEM OPT extensions, TN, E-3 and O-1.",
+        "Will you now or in the future require sponsorship to work in the US? (This includes work authorization that expires in the next 2-3 years.)",
+        "Will you require visa sponsorship at some time in the future to continue to work in the U.S. (e.g. your current work "
+        "authorization will expire on some future date and you would need us to obtain a new form of work authorization)?",
+        "Will you need us to sponsor you for work authorization, or for a renewal of any current work authorization that may expire in the future?",
+        "Will you now or in the future require sponsorship or work authorization in the country you are applying for? "
+        "*Please select yes if you currently have work authorization outside of permanent residence/citizenship",
+        'Will you now or in the future require immigration related sponsorship? *If you possess U.S. Citizenship, a green card, '
+        'or any type of visa that definitely will NOT require future sponsorship, please answer "no". If you possess a type of '
+        'work authorization which MAY later require sponsorship, please select "yes".',
+        "Do you now or in the future require any type of immigration filing or visa sponsorship to maintain work authorization, "
+        "including sponsorship by us for any renewals/extensions or permanent residency?",
+        "Will you now or in the future require us to file, petition for, sponsor, support, provide documentation for, or "
+        "otherwise participate in an immigration or work authorization matter in order for you to begin or continue employment?",
+        "Will you now, or in the future, require sponsorship to work in the United States (for example if you currently have a F, J, H or L visa status)?",
+    ],
+)
+def test_a_definition_reaching_time_limited_status_is_answered_for_it(label):
+    assert answer(label, OPT) == "Yes"
+    assert answer(label, CITIZEN) == "No"
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "Will you now or in the future require any visa sponsorships or transfers for employment in the US?",
+        "Will you now or in the future require sponsorship for employment visa status (e.g., H-1B visa status)?",
+        "Will you now or in the future require visa transfer or sponsorship? (if yes, please share more details on the kind of visa you have, when it expires)",
+        "Will you at any time need us to sponsor you for a visa? Answer no below if you can renew employment authorization without our sponsorship.",
+        "Will you now or in the future require sponsorship by the company to attain or maintain your employment eligibility?",
+        "Will you now or in the future require visa sponsorship to maintain work authorization?",
+        "Will you now or in the future require visa sponsorship for employment here (e.g., H1B, O1, TN, J1)? NOTE: If you are "
+        "currently sponsored by another employer for your work authorization, you may require sponsorship when changing employers.",
+        "Will you now or in the future require sponsorship? For the purposes of this question, sponsorship means an H-1B visa, an O-1 visa, or TN status.",
+    ],
+)
+def test_the_plain_question_still_follows_the_saved_fact(label):
+    assert answer(label, OPT) == "No"
+
+
+def test_authorization_that_excludes_practical_training_is_no_for_opt():
+    label = "Are you authorized to work in the United States? This does not include practical training."
+    assert answer(label, OPT) == "No"
+    assert answer(label, CITIZEN) == "Yes"
+
+
+def test_now_and_in_the_future_for_any_employer_is_not_time_limited_status():
+    label = "Are you legally authorized to work in the US now and in the future for any employer without visa sponsorship?"
+    assert answer(label, OPT) == "No"
+    assert answer(label, CITIZEN) == "Yes"
+
+
+def test_not_limited_to_is_no_negation_but_excluding_still_is():
+    assert answer("Will you require sponsorship (excluding OPT)?", OPT) == "No"
+    assert answer("Will you require sponsorship (including but not limited to OPT)?", OPT) == "Yes"
