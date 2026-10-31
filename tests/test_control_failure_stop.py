@@ -142,5 +142,5 @@ def test_an_empty_search_is_not_new_offered_choices():
     ]
     counts = [form.record_write_failure(DEGREE, "Maryland", EmptySearch(offered)) for offered in shapes]
     assert counts == [False, True, True]
-    new_row = form.record_write_failure(DEGREE, "Maryland", EmptySearch({"search_rows": [], "catalog": ["Gujarat"]}))
+    new_row = form.record_write_failure(DEGREE, "Northland", EmptySearch({"search_rows": [], "catalog": ["Southland"]}))
     assert new_row is False and form.field_failures[form.field_key(DEGREE)]["count"] == 1
