@@ -439,9 +439,8 @@ function DetailBody({ detail, state, runs, runId, open }: { detail: Detail; stat
           <Facts
             items={detail.events.map((e): [React.ReactNode, React.ReactNode] => [
               <time dateTime={e.created_at}>{stamp(e.created_at)}</time>,
-              <span>
-                <span className="ax-note">{words(e.kind)}</span> {e.message}
-              </span>,
+              // The message says it; the event's own kind ("settle timing", "phase timing") is engine vocabulary and only a hint.
+              <span title={words(e.kind)}>{e.message}</span>,
             ])}
           />
         ) : (
