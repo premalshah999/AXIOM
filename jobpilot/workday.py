@@ -626,6 +626,19 @@ class WorkdayAuth:
                 e.email_verification.challenge_id = None
         await page.goto(e.job["url"], wait_until="domcontentloaded", timeout=25000)
 
+    def activation_mail_waiting(self):
+        """This run was released by an activation link that matched and has not been opened."""
+        from .db import MailChallenge
+
+        e = self.engine
+        resume = e.run_record["packet"].get("email_wait_resume") or {}
+        challenge_id = resume.get("challenge_id") or resume.get("id")
+        if not challenge_id or self.activated or not getattr(e.email_verification, "rule", None):
+            return False
+        with e.db.session() as session:
+            row = session.get(MailChallenge, challenge_id)
+            return bool(row and row.state == "matched" and row.kind == "link" and row.expires > time.time())
+
     async def reverify(self):
         """An account an earlier run left unverified: request a fresh email, then follow it."""
         page = self.engine.page
@@ -793,7 +806,7 @@ class WorkdayAuth:
                 await self.enter(field, credentials["password"])
             button = page.get_by_role(
                 "button",
-                name=re.compile(r"^(Reset Password|Submit|Change Password)$", re.I),
+                name=re.compile(r"^(Reset Password|Submit|Change Password|Save(?: New)? Password|Set(?: New)? Password|Update Password)$", re.I),
                 include_hidden=True,
             )
             # A click_filter overlay repeats the button's label; the button itself is the target.
@@ -951,6 +964,12 @@ class WorkdayAuth:
         if not e.form.resolver.profile.allow_account_creation:
             return False
         self.watch_responses()
+        if self.activation_mail_waiting():
+            # The link that released this run is in the vault: it is the way in, whatever the tab shows. A tenant with no Resend
+            # button went on to a password reset, which refused the matched request ("saved email request ... does not belong").
+            c = e.service.mail.begin(e.run_id, e.email_verification.rule, e.form.resolver.profile.email, "link")
+            e.email_verification.challenge_id = c["id"]
+            await self.activate()
         saved = e.db.get_setting(self.account_key(), {})
         if 0 < time.time() - saved.get("reset_requested_at", 0) < 900 and not await self.form_ready():
             await self.recover()

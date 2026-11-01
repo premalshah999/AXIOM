@@ -302,3 +302,13 @@ async def test_a_window_that_ends_empty_on_another_address_says_which_two_addres
         s.get(MailChallenge, challenge["id"]).state = "expired"
         service.mail.end_dead_email_waits(s)
         assert "alex@school.example" in row.reason and ME in row.reason
+
+
+@pytest.mark.parametrize("label", ["Save Password", "Save New Password", "Set New Password", "Update Password", "Change My Password", "Reset Password", "Save"])
+def test_a_new_password_form_is_sent_by_whatever_its_button_says(label):
+    from jobpilot.adapters.base import Adapter
+
+    adapter = Adapter.__new__(Adapter)
+    control = {"id": "b1", "label": label, "aria_label": "", "automation_id": "", "href": ""}
+    obs = {"controls": [{**control, "id": "b0", "label": "Privacy policy", "href": "/privacy"}, control], "fields": [], "text": ""}
+    assert adapter.auth_button(obs, "reset")["id"] == "b1"

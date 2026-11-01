@@ -3088,8 +3088,9 @@ class Adapter:
             "sign_in": r"^(?:sign in|log ?in|continue|next|submit)$",
             "create": r"^(?:create(?: (?:an? )?account)?|register|sign up|create profile|submit|continue|next)$",
             "reset": r"^(?:submit|send|send (?:a |the )?(?:reset )?(?:link|email|code|instructions)|send reset link|"
-            r"reset(?: (?:my )?password)?|request (?:a )?reset|continue|set password|change password|save|"
-            r"update password)$",
+            r"reset(?: (?:my )?password)?|request (?:a )?reset|continue|set(?: (?:my |a |new )*)?password|"
+            r"change(?: (?:my |new )*)?password|save(?: (?:my |new |and continue|changes)*)?(?: password)?|"
+            r"update(?: (?:my |new )*)?(?:password)?|confirm(?: (?:my |new )*password)?)$",
         }[mode]
         hits = [
             b

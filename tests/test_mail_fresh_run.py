@@ -98,12 +98,15 @@ def certificate(folder):
 class Employer:
     """One employer's site. `used` is its own record of what it took; `kind` is which mail its account step sends."""
 
-    def __init__(self, platform, kind, box, delay=DELAY):
-        self.platform, self.kind, self.box, self.delay = platform, kind, box, delay
-        self.spec = PLATFORMS[platform]
+    def __init__(self, platform, kind, box, delay=DELAY, other=False, serve=True):
+        self.platform, self.kind, self.box, self.delay, self.other = platform, kind, box, delay, other
+        self.spec = {**PLATFORMS[platform], **PLATFORMS[platform]["other"]} if other else PLATFORMS[platform]
+        self.tenants = {}  # Host -> another employer this server answers for.
         self.used, self.sent, self.posts, self.hits = set(), [], [], []
         self.verified, self.code, self.link, self.password = False, None, None, "the-password-only-the-applicant-forgot"
         self.expected_email = ME
+        if not serve:
+            return
         folder = tempfile.mkdtemp(prefix="mailfresh-")
         self.folder = folder
         outer = self
@@ -123,11 +126,11 @@ class Employer:
                 self.wfile.write(page)
 
             def do_GET(self):
-                outer.get(self)
+                outer.tenants.get(self.headers.get("Host", "").split(":")[0], outer).get(self)
 
             def do_POST(self):
                 size = int(self.headers.get("Content-Length") or 0)
-                outer.post(self, self.rfile.read(size))
+                outer.tenants.get(self.headers.get("Host", "").split(":")[0], outer).post(self, self.rfile.read(size))
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -148,7 +151,7 @@ class Employer:
         else:
             self.link = link_for(self.spec, kind)
         self.sent.append(kind)
-        timer = threading.Timer(self.delay, lambda: deliver(self.box, self.platform, kind, code=self.code, link=self.link))
+        timer = threading.Timer(self.delay, lambda: deliver(self.box, self.platform, kind, code=self.code, link=self.link, other=self.other))
         timer.daemon = True
         timer.start()
 
@@ -196,7 +199,12 @@ class Employer:
             if self.kind == "reset":
                 return h.reply("Sign In", SIGNIN.format(message="<p role=alert>An account with this email already exists. Please sign in.</p>"))
             self.mail(self.kind)
-            return h.reply("Verify your email", CODE.format(message="")) if self.kind == "code" else h.reply("Check your email", CHECK)
+            if self.kind == "code":
+                return h.reply("Verify your email", CODE.format(message=""))
+            if self.platform == "workday":
+                # Workday returns to Sign In with a banner; the account is pending until its link is opened.
+                return h.reply("Sign In", SIGNIN.format(message="<p role=alert>Please verify your account: check your email.</p>"))
+            return h.reply("Check your email", CHECK)
         if path == "/verify-code":
             if form.get("code") == self.code:
                 self.used.add("code")
@@ -372,3 +380,73 @@ async def test_a_new_install_receives_and_uses_the_mail(client, service, imap, p
                                 "state": outcome["state"], "reason": outcome["reason"][:160], "sent": site.sent,
                                 "runs": outcome.get("runs"), "challenges": [c[:2] for c in challenges], "rules": len(rules)}) + "\n")
     assert kind in site.used, why
+
+
+@pytest.mark.parametrize("platform", ["icims", "oracle"])
+async def test_two_employers_on_one_shared_sender_in_two_real_runs_each_type_their_own_code(client, service, imap, platform):
+    """Two real runs at once on one platform's sender. Both employers' codes land within a second of each other; each site
+    records the code it took, and a wrong code would be on its own record."""
+    from jobpilot.outbox import poll as poll_outbox
+    from jobpilot.owner_apply import apply
+
+    config = service.config
+    spec = PLATFORMS[platform]
+    config.repair_agent_enabled = False
+    config.mimo_api_key = "no-model"
+    config.mimo_base_url = "http://127.0.0.1:9/v1"
+    config.mail_poll_seconds = 0.5
+    config.headless = True
+    onboard(client)
+    pdf = blank_pdf()
+    (config.data_dir / "resumes").mkdir(exist_ok=True)
+    (config.data_dir / "resumes" / "alex.pdf").write_bytes(pdf)
+    with service.db.exclusive() as s:
+        s.add(Resume(name="Alex", filename="alex.pdf", sha256=hashlib.sha256(pdf).hexdigest(), text="Alex Rivera, analyst."))
+    service.db.set_setting("profile", {"name": "Alex Rivera", "email": ME, "first_name": "Alex", "last_name": "Rivera",
+                                       "autonomous": False, "allow_account_creation": True, "accept_all_application_terms": True,
+                                       "facts": {"first_name": "Alex", "last_name": "Rivera"}})
+    service.db.set_setting("control", {"paused": False, "auto_submit": True})
+    tasks = set()
+
+    async def dispatch(run_id):
+        task = asyncio.create_task(service.execute(run_id))
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+
+    service.dispatch = dispatch
+    first = Employer(platform, "code", imap, delay=4)
+    second = Employer(platform, "code", imap, delay=4, other=True, serve=False)
+    first.tenants[urlsplit(second.spec["url"]).hostname] = second
+    temp = tempfile.mkdtemp(prefix="mailfresh-chrome-")
+    process, config.browser_cdp_url = await start_chrome(temp, first.port)
+    jobs = []
+    for site in (first, second):
+        job, _ = add_job(service.db, JobInput(url=site.spec["url"], title="Analyst", company=site.spec["company"], location="Remote", description="A synthetic posting."))
+        with service.db.exclusive() as s:
+            row = s.get(Job, job["id"])
+            row.status, row.ats = "ready", spec["ats"]
+        jobs.append(job["id"])
+    poller = asyncio.create_task(service.mail.poll())
+    service.outbox_running = True
+    outbox = asyncio.create_task(poll_outbox(service))
+    try:
+        for job_id in jobs:
+            await apply(service, job_id)
+        deadline = time.monotonic() + RUN_SECONDS
+        while time.monotonic() < deadline and not ("code" in first.used and "code" in second.used):
+            await asyncio.sleep(1)
+    finally:
+        service.outbox_running = False
+        for task in (poller, outbox, *tasks):
+            task.cancel()
+        await asyncio.gather(poller, outbox, *tasks, return_exceptions=True)
+        first.close()
+        process.terminate()
+        await process.wait()
+        shutil.rmtree(temp, ignore_errors=True)
+    with service.db.session() as s:
+        states = [(r.state, (r.reason or "")[:90]) for r in s.scalars(select(Run))]
+        windows = [(c.kind, c.state, c.reason[:70]) for c in s.scalars(select(MailChallenge))]
+    # The employer's own record: neither ever saw a code that was not its own.
+    assert not getattr(first, "wrong_code", None) and not getattr(second, "wrong_code", None), (states, windows)
+    assert "code" in first.used and "code" in second.used, (first.sent, second.sent, states, windows)
