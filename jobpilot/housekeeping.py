@@ -51,8 +51,9 @@ def _cutoff(days, at):
     return (at - timedelta(days=days)).isoformat()
 
 
-def _protected(session):
-    """Job ids the owner or a scheduled recovery still holds."""
+def _protected(session, *, removals=False):
+    """Job ids the owner or a scheduled recovery still holds. `removals`: also those the owner removed, whose row is the
+    verdict: gone, the next sweep of its board adds the posting back as new."""
     from .reserved import held
 
     keep = set(held(session))
@@ -66,7 +67,7 @@ def _protected(session):
         )
     ):
         prefix, _, job_id = key.partition(":")
-        if prefix == "owner_apply" or (isinstance(value, dict) and (value.get("state") == "paused" or value.get("scheduled"))):
+        if prefix == "owner_apply" or (isinstance(value, dict) and (value.get("state") == "paused" or value.get("scheduled") or (removals and value.get("state") == "deleted"))):
             keep.add(job_id)
     return keep
 
@@ -142,7 +143,7 @@ def _trim_folder(runs_root, run_id, apply):
 
 def stale_jobs(session, runs, committed, job_cutoff, ready_cutoff, listing_cutoff):
     """Job ids with no application behind them, past their age."""
-    protected = _protected(session)
+    protected = _protected(session, removals=True)
     listed = set(
         session.scalars(select(JobListing.job_id).where(JobListing.active.is_(True), JobListing.last_seen >= listing_cutoff))
     )

@@ -67,6 +67,22 @@ def test_an_old_job_never_applied_to_goes_with_everything_tied_to_it(service):
     assert not (service.config.data_dir / "runs" / run_id).exists()
 
 
+def test_a_job_the_owner_removed_stays_removed(service):
+    """The row is the verdict. Gone, the next sweep of its board adds the posting back as new and the autopilot applies to a
+    job the owner took off the list; after a week away no listing is fresh, so every removal went at the first sweep."""
+    removed = job(service, "a", status="archived")
+    ruled_out = job(service, "b", status="archived")
+    never_removed = job(service, "c", status="archived")
+    run_id = run(service, ruled_out, "cancelled", days=20, files=["steps/1.json"], events=["agent_step"])
+    with service.db.session() as s:
+        s.add(Setting(key=f"job_control:{removed}", value={"state": "deleted", "at": ago(30)}))
+        s.add(Setting(key=f"job_control:{ruled_out}", value={"state": "deleted", "reason": "sensitive_id", "at": ago(20)}))
+    clean(service)
+    assert has_job(service, removed) and has_job(service, ruled_out) and not has_job(service, never_removed)
+    # Its logs still go on schedule: it is the verdict that stays, not the run's files.
+    assert not (service.config.data_dir / "runs" / run_id).exists()
+
+
 def test_a_dry_run_counts_the_same_and_changes_nothing(service):
     gone = job(service, "a", status="closed")
     run_id = run(service, gone, "closed", files=["steps/1.json"], events=["agent_step"])

@@ -125,11 +125,14 @@ SENSITIVE_STEPS = {"sign_in", "create_account", "email_code", "verify_link", "re
 # Analytics and telemetry hosts are not part of an application's commit.
 # Paths of telemetry calls a page makes on its own site while a form is submitted (Oracle's recruitingCEUserTrackings).
 COMMIT_TRACKING = re.compile(
-    r"track|analytic|telemetr|beacon|metric|collect|/log(?:s|ging)?\b|/events?\b|/report/?$|data-ingestion|"
+    # A path that names the application is never a pixel: "applicant tracking" is what these systems are, and a false
+    # "nothing was sent" gives the reservation back and applies again.
+    r"^(?!.*(?:appl(?:y|ication|icant)|submit))"
+    r".*(?:track|analytic|telemetr|beacon|metric|collect|/log(?:s|ging)?\b|/events?\b|/report/?$|data-ingestion|"
     # Google's conversion pixels fire on the page's submit event; they are not the application (IXL, 2026-10-28).
     r"/pagead/|/ccm/form-data|"
     # A CAPTCHA widget's own reloads and checks during the click are not the application.
-    r"/recaptcha/|getcaptcha|checksiteconfig|/vslog/?$",
+    r"/recaptcha/|getcaptcha|checksiteconfig|/vslog/?$)",
     re.I,
 )
 # A page load the network refused once and may answer on a second try.
@@ -5613,7 +5616,7 @@ class BrowserEngine:
                             self.reroute_submit_hint not in str(exc)
                             or self.armed
                             or self.submit_rerouted
-                            or self.form.buttons.get(decision.control_id, {}).get("type") != "submit"
+                            or self.form.buttons.get(decision.control_id, {}).get("type") not in {"submit", ""}
                         ):
                             raise
                         # Only a control that reads as the final submit ("Edit" is also type=submit, SAIC),

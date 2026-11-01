@@ -55,6 +55,25 @@ def test_ready_counts_only_what_can_start_and_each_held_job_says_why(service):
     assert codes == {"internship": 1, "role": 1, "aged": 1}
 
 
+def test_every_listed_job_is_read_with_its_listing_not_only_the_first(service):
+    """`extra`, the dispatcher's own list of jobs a sweep has not re-seen, was overwritten by each job's count details: from
+    the second job on, a posting whose listing names another country read as a US job the dispatcher would start. The
+    dispatcher refuses it, so "can start" counted jobs that never do."""
+    profile(service)
+    stale = (datetime.now(UTC) - timedelta(hours=12)).isoformat()
+    ids = [ready(service, n, listed=False) for n in range(20, 24)]
+    with service.db.exclusive() as s:
+        for jid in ids:
+            s.get(Job, jid).location = "Remote"
+            s.add(JobListing(job_id=jid, source_id="src", posted_at=stale, date_basis="Employer first_published",
+                             location="Remote", country="DE", career_level="New grad", match_reason="x",
+                             first_seen=stale, last_seen=stale, active=True))
+    service.db.set_setting("execution_services", {"enabled": True})
+    got = startable.read(service)
+    assert got["startable"] == 0, got
+    assert {got["jobs"][jid]["code"] for jid in ids} == {"gate"}
+
+
 def test_a_job_at_the_employer_limit_is_held_with_the_dispatchers_own_message(service):
     profile(service)
     service.db.set_setting("application_pacing:company_limit", {"limit": 2})

@@ -249,11 +249,11 @@ def unknown_resubmit_allowed(session, runs, at=None, *, checked=True):
         return False
     # A post-submit screenshot that shows the employer's confirmation means the
     # application went through; a receipt or portal check confirms it, never a resubmit.
-    triage = (
-        session.get(Setting, "unknown_triage:" + unknown[0].job_id) if hasattr(unknown[0], "job_id") else None
-    )
-    if triage and triage.value.get("verdict") == "submitted":
-        return False
+    # Of every listing among these runs: admission passes the runs of a posting's twins too.
+    for job_id in {r.job_id for r in unknown if hasattr(r, "job_id")}:
+        triage = session.get(Setting, "unknown_triage:" + job_id)
+        if triage and triage.value.get("verdict") == "submitted":
+            return False
     last = newest_unknown(runs)
     try:
         finished = datetime.fromisoformat(last.finished_at or last.created_at)
