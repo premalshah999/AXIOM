@@ -200,3 +200,30 @@ async def due(service, limit, retries=None):
         started += 1
         retried += job_id in attempted
     return started
+
+
+def restore(service, job_id):
+    """Bring a removed job back to Ready. Refused where an application may have reached the employer, since that record is what
+    stops a second one. The job's page offered this ("restore it before applying") with no way to do it."""
+    from sqlalchemy import select
+
+    from .db import Event, Job, Run, Setting
+
+    with service.db.exclusive() as s:
+        job = s.get(Job, job_id)
+        if job is None:
+            raise ValueError("Job not found")
+        if job.status != "archived":
+            return {"job_id": job_id, "state": job.status, "message": "This job was not removed."}
+        runs = list(s.execute(select(Run.id, Run.state).where(Run.job_id == job_id)))
+        sent = any(state in {"confirmed", "already_applied", "submission_unknown", "submitting"} for _, state in runs) or bool(
+            runs and s.scalar(select(Event.id).where(Event.run_id.in_([r for r, _ in runs]), Event.kind == "submitting").limit(1))
+        )
+        if sent:
+            raise ValueError("An application for this job may already have reached the employer, so it stays removed")
+        job.status = "ready"
+        saved = s.get(Setting, "archived_application:" + job_id)
+        if saved:
+            s.delete(saved)
+    return {"job_id": job_id, "state": "ready", "message": "Restored. It can be applied to again."}
+

@@ -86,8 +86,8 @@ const STEPS: Step[] = [
   {
     id: "connections",
     name: "Connections",
-    title: "Connect your AI key and inbox",
-    lead: "AXIOM needs one AI key to read job pages and write answers, and an inbox to read verification codes. Both can wait.",
+    title: "Connect AI and your inbox",
+    lead: "AXIOM uses AI to read job pages and write answers, and your inbox for the codes employers email. This takes about two minutes.",
     server: "permissions",
     minutes: 0.5,
     skip: "Set up later",
@@ -746,7 +746,10 @@ function WelcomeStep() {
           </li>
         ))}
       </ol>
-      <p className="ax-hint">Setup saves as you go, so you can stop and pick it up later. Nothing is sent to an employer until you allow it.</p>
+      <p className="ax-hint">
+        AXIOM applies to jobs in your name, using the answers you give it, so what it sends is yours to stand behind. Nothing goes to an employer until
+        you allow it, and setup saves as you go.
+      </p>
     </>
   );
 }
@@ -1397,6 +1400,7 @@ function ConnectionsStep({ linked, email, refresh }: { linked: Linked; email: st
   const { model, mailboxes } = linked;
   const [provider, setProvider] = useState("");
   const [key, setKey] = useState("");
+  const [code, setCode] = useState("");
   const [box, setBox] = useState({ email: "", app_password: "" });
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState<{ where: "model" | "mail"; ok: boolean; text: string } | null>(null);
@@ -1417,6 +1421,22 @@ function ConnectionsStep({ linked, email, refresh }: { linked: Linked; email: st
   };
   const saveKey = () =>
     run("model", () => api("/connections", "PUT", { values: { llm_provider: chosen, [keyName]: key.trim() } }).then(() => setKey("")), "Key saved.");
+  // OpenRouter's keys say so themselves, so one box is all most people need. It is tried before anyone is told it worked, because
+  // a person new to this cannot tell a bad key from a broken app.
+  const saveCode = () =>
+    run(
+      "model",
+      async () => {
+        await api("/connections", "PUT", { values: { llm_provider: "openrouter", openrouter_api_key: code.trim() } });
+        const tried = await api<{ ok: boolean }>("/connections/openrouter_api_key/test", "POST");
+        if (!tried.ok) {
+          await api("/connections", "PUT", { values: { openrouter_api_key: "" } });
+          throw new Error("That key didn't work. Check you copied all of it, and that your OpenRouter account has credit.");
+        }
+        setCode("");
+      },
+      "You're connected.",
+    );
   const connectMail = () =>
     run("mail", () => api("/mail/imap", "POST", { email: box.email || email, app_password: box.app_password }).then(() => setBox({ email: "", app_password: "" })), "Gmail connected.");
   const enter = (fn: () => void, ready: boolean) => (e: React.KeyboardEvent) => {
@@ -1440,36 +1460,66 @@ function ConnectionsStep({ linked, email, refresh }: { linked: Linked; email: st
             <Sparkles size={16} aria-hidden="true" />
           </span>
           <span className="ax-ob-conn-main">
-            <h2>AI key</h2>
-            <p className="ax-hint">Reads job pages and writes your answers. One key is enough; it is stored encrypted and never shown again.</p>
+            <h2>AI</h2>
+            <p className="ax-hint">Reads job pages and writes your answers. It is stored encrypted on this Mac and never shown again.</p>
           </span>
-          {model && <Pill tone={model.model_ready ? "ok" : "warn"} dot>{model.model_ready ? "Ready" : "Key needed"}</Pill>}
+          {model && <Pill tone={model.model_ready ? "ok" : "warn"} dot>{model.model_ready ? "Ready" : "Not connected"}</Pill>}
         </header>
         {model && !model.model_ready && (
-          <div className="ax-ob-conn-form">
-            <Select label="Provider" value={chosen} onChange={(e) => setProvider(e.target.value)}>
-              {PROVIDERS.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
-                </option>
-              ))}
-            </Select>
-            <Input
-              label="API key"
-              type="password"
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="Paste here"
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-              onKeyDown={enter(saveKey, !!key.trim())}
-            />
-            <div>
-              <Button size="sm" loading={busy === "model"} disabled={!key.trim()} onClick={saveKey}>
-                Save key
-              </Button>
+          <>
+            <ol className="ax-ob-gmail-steps">
+              <li>
+                Create a free account at <External href="https://openrouter.ai/">OpenRouter</External> and <External href="https://openrouter.ai/settings/credits">add a little credit</External>. You pay OpenRouter directly for what AXIOM uses.
+              </li>
+              <li>
+                Open <External href="https://openrouter.ai/settings/keys">your keys page</External>, press Create, and copy the key.
+              </li>
+              <li>Paste it below.</li>
+            </ol>
+            <div className="ax-ob-conn-form">
+              <Input
+                label="Your OpenRouter key"
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="sk-or-..."
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                onKeyDown={enter(saveCode, !!code.trim())}
+              />
+              <div>
+                <Button size="sm" loading={busy === "model"} disabled={!code.trim()} onClick={saveCode}>
+                  Connect
+                </Button>
+              </div>
             </div>
-          </div>
+            <Optional title="Use a different AI provider">
+              <div className="ax-ob-conn-form">
+                <Select label="Provider" value={chosen} onChange={(e) => setProvider(e.target.value)}>
+                  {PROVIDERS.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </Select>
+                <Input
+                  label="API key"
+                  type="password"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="Paste here"
+                  value={key}
+                  onChange={(e) => setKey(e.target.value)}
+                  onKeyDown={enter(saveKey, !!key.trim())}
+                />
+                <div>
+                  <Button size="sm" loading={busy === "model"} disabled={!key.trim()} onClick={saveKey}>
+                    Save key
+                  </Button>
+                </div>
+              </div>
+            </Optional>
+          </>
         )}
         {note("model")}
       </section>
@@ -1481,7 +1531,7 @@ function ConnectionsStep({ linked, email, refresh }: { linked: Linked; email: st
           </span>
           <span className="ax-ob-conn-main">
             <h2>Gmail</h2>
-            <p className="ax-hint">Reads verification codes, sign-in links and receipts. Read-only; nothing is sent from it.</p>
+            <p className="ax-hint">Employers email codes and confirmations. AXIOM reads those and never sends mail from your account.</p>
           </span>
           {mailboxes && <Pill tone={mailboxes.length ? "ok" : "neutral"} dot={!mailboxes.length}>{mailboxes.length ? "Connected" : "Not connected"}</Pill>}
         </header>
@@ -1497,9 +1547,21 @@ function ConnectionsStep({ linked, email, refresh }: { linked: Linked; email: st
             ))}
           </ul>
         )}
+        {!mailboxes?.length && (
+          <ol className="ax-ob-gmail-steps">
+            <li>
+              Turn on <External href="https://myaccount.google.com/signinoptions/twosv">2-Step Verification</External>, if it isn't on already.
+            </li>
+            <li>
+              Open <External href="https://myaccount.google.com/apppasswords">Google's app passwords page</External>, type <strong>AXIOM</strong> as the name
+              and press Create.
+            </li>
+            <li>Copy the 16 letters Google shows you and paste them below. This is not your Gmail password.</li>
+          </ol>
+        )}
         <div className="ax-ob-conn-form">
           <Input
-            label={mailboxes?.length ? "Connect another Gmail" : "Gmail address"}
+            label={mailboxes?.length ? "Connect another Gmail" : "Your Gmail address"}
             type="email"
             autoComplete="off"
             placeholder={email || "you@gmail.com"}
@@ -1508,16 +1570,11 @@ function ConnectionsStep({ linked, email, refresh }: { linked: Linked; email: st
             onChange={(e) => setBox({ ...box, email: e.target.value })}
           />
           <Input
-            label="Gmail app password"
+            label="The 16 letters from Google"
             type="password"
             autoComplete="off"
             spellCheck={false}
             placeholder="xxxx xxxx xxxx xxxx"
-            hint={
-              <>
-                16 letters from <External href="https://myaccount.google.com/apppasswords">myaccount.google.com/apppasswords</External> (needs 2-Step Verification).
-              </>
-            }
             value={box.app_password}
             onChange={(e) => setBox({ ...box, app_password: e.target.value })}
             onKeyDown={enter(connectMail, !!box.app_password.trim())}
@@ -1530,7 +1587,7 @@ function ConnectionsStep({ linked, email, refresh }: { linked: Linked; email: st
         </div>
         {note("mail")}
       </section>
-      <p className="ax-hint">Telegram alerts, captcha solving and extra job sources are in Settings › Connections whenever you want them.</p>
+      <p className="ax-hint">That's all you need. Phone alerts and extra job sources are in Settings if you ever want them.</p>
     </>
   );
 }

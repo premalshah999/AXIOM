@@ -101,7 +101,8 @@ SECURITY_ANSWER = re.compile(
 
 
 GUEST = re.compile(
-    r"apply without (?:an |a )?account|apply as (?:a )?guest|continue as (?:a )?guest|"
-    r"guest (?:apply|application)|apply without signing in|continue without (?:an |a )?account",
+    r"(?:apply|continue) without (?:an? )?(?:account|registering|registration|login|logging in|signing in)|"
+    r"(?:apply|continue) as (?:a )?guest|guest (?:apply|application)|(?:quick|easy|express) apply|"
+    r"skip (?:sign.?in|log.?in|registration|account creation)",
     re.I,
 )

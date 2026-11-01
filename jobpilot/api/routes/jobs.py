@@ -138,6 +138,15 @@ def router(service) -> APIRouter:
 
         return await apply(service, job_id)
 
+    @r.post("/api/jobs/{job_id}/restore")
+    def restore_job(job_id: str):
+        from ...owner_apply import restore
+
+        try:
+            return restore(service, job_id)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+
     @r.post("/api/jobs/{job_id}/queue")
     async def queue(job_id: str, data: QueueInput):
         if not service.dispatch:

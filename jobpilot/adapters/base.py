@@ -2368,10 +2368,29 @@ class Adapter:
         # The observation may be older than the page (a failed sign-in reloads it).
         return (passwords[0].get("frame_url") if passwords else None) or self.page.url
 
+    async def take_guest_route(self, obs):
+        """A page that offers applying without an account is taken at its word, once a run, before any sign-in or sign-up.
+        Textron's Taleo (2026-10-28..31) showed "Apply as guest" on 20 of 28 runs, which each went on to a sign-in and a
+        reset that never came: only the Dayforce path looked for it."""
+        from ..accounts.pages import GUEST
+
+        rules = getattr(getattr(self.form, "resolver", None), "answer_rules", None)
+        if self.attempts["guest"] or not rules or not rules.guest_apply_first:
+            return False
+        guest = [b for b in obs["controls"] if GUEST.fullmatch(str(b.get("label") or "").strip())]
+        if len(guest) != 1:
+            return False
+        self.attempts["guest"] += 1
+        await self.click(guest[0], auth=True)
+        self.emit("account", "Chose the employer's guest application; no account needed")
+        return True
+
     async def authenticate(self, obs, mode):
         from ..agent_settings import require
 
         require(self.service.db, "accounts")
+        if await self.take_guest_route(obs):
+            return None
         if not self.accounts.ready:
             return self.defer("Add your email to the profile so I can identify you to employers")
         url = self.auth_url(obs)
