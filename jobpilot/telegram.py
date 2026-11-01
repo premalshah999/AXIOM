@@ -16,7 +16,7 @@ from .answers import normalize
 from .db import Event, Job, Review, Run, Setting, now
 
 HELP = (
-    "✈️ ApplyPilot\nYour application companion\n\n"
+    "✈️ AXIOM\nYour application companion\n\n"
     "💬 /query anything — chat with your application assistant.\n"
     "🔗 Send a job link and I’ll check it, choose your resume and queue it.\n"
     "📊 Ask for status, recent applications or failures.\n"
@@ -79,7 +79,7 @@ COMMANDS = [
         ("resume", "Resume applications"),
         ("query", "Chat with your AI assistant"),
         ("accounts", "Your employer accounts"),
-        ("help", "How to use ApplyPilot"),
+        ("help", "How to use AXIOM"),
     ]
 ]
 
@@ -993,7 +993,7 @@ async def _ask_one_question(service, allow_live):
             {
                 "chat_id": service.config.telegram_user_id,
                 "text": f"{chosen.company} asks for a private detail. Please answer it on the Needs you list in the "
-                "ApplyPilot app, not here in Telegram.",
+                "AXIOM app, not here in Telegram.",
                 "reply_markup": MENU,
             },
         )
@@ -1151,7 +1151,7 @@ async def chat(service, text, job_id=None):
             service.config,
             service.db,
             ChatReply,
-            "You are the applicant's conversational ApplyPilot assistant. Answer briefly in plain language "
+            "You are the applicant's conversational AXIOM assistant. Answer briefly in plain language "
             "using the supplied application status. You can also help with general questions, career advice, "
             "interview preparation and writing. Explain failures honestly; submitted means confirmed. "
             "You cannot perform actions in this response. Never claim to have applied, changed settings, or "
@@ -1892,7 +1892,7 @@ async def _handle_update(service, update):
             counts = Counter(r["state"] for r in rows)
             control = service.db.get_setting("control", {})
             reply = (
-                "📊 ApplyPilot status\n\n"
+                "📊 AXIOM status\n\n"
                 + f"✅ {len(confirmed_rows(service))} confirmed applications\n"
                 + f"⚙️ {sum(counts[s] for s in ['queued', 'running', 'submitting'])} queued or running\n"
                 + f"💬 {counts['waiting_answer']} waiting for an answer\n"

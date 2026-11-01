@@ -623,9 +623,15 @@ class PollingMixin:
                     box.state, box.error = "connected", ""
         return healed
 
+    async def replies_pass(self, check):
+        try:
+            await check(self)
+        except Exception as exc:
+            self.note_failure("replies", exc)  # the figure stays as it was; the next pass resumes from its cursor
+
     async def poll(self):
-        last_receipts = last_drafts = 0
-        receipt_task = draft_task = None
+        last_receipts = last_drafts = last_replies = 0
+        receipt_task = draft_task = reply_task = None
         try:
             while True:
                 try:
@@ -657,11 +663,22 @@ class PollingMixin:
                             await asyncio.gather(draft_task, return_exceptions=True)
                         last_drafts = time.time()
                         draft_task = asyncio.create_task(reconcile_recent_drafts(self))
+                    from ..replies import EVERY_SECONDS, check_replies
+
+                    if (
+                        enabled(self.db, "email")
+                        and time.time() - last_replies > EVERY_SECONDS
+                        and (reply_task is None or reply_task.done())
+                    ):
+                        if reply_task is not None:
+                            await asyncio.gather(reply_task, return_exceptions=True)
+                        last_replies = time.time()
+                        reply_task = asyncio.create_task(self.replies_pass(check_replies))
                 except Exception as exc:
                     self.note_failure("poll_loop", exc)  # by class only: public diagnostics never expose raw secrets
                 await asyncio.sleep(self.config.mail_poll_seconds)
         finally:
-            for task in (receipt_task, draft_task):
+            for task in (receipt_task, draft_task, reply_task):
                 if task is not None:
                     task.cancel()
                     await asyncio.gather(task, return_exceptions=True)

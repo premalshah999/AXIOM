@@ -117,10 +117,8 @@ _CONTENT: dict = {}
 _CONTENT_LIMIT = 4000
 
 
-def message_content(message):
-    key = (message.get("id"), message.get("internalDate")) if message.get("id") else None
-    if key in _CONTENT:
-        return _CONTENT[key]
+def parse_content(message):
+    """A message's (text, links), with no shared state: safe in a worker thread."""
     text, links = [], []
     size = 0
 
@@ -142,7 +140,14 @@ def message_content(message):
             walk(p, depth + 1)
 
     walk(message.get("payload", {}))
-    content = (tuple(text), tuple(links))
+    return tuple(text), tuple(links)
+
+
+def message_content(message):
+    key = (message.get("id"), message.get("internalDate")) if message.get("id") else None
+    if key in _CONTENT:
+        return _CONTENT[key]
+    content = parse_content(message)
     if key is not None:
         if len(_CONTENT) >= _CONTENT_LIMIT:
             _CONTENT.pop(next(iter(_CONTENT)))
@@ -188,7 +193,7 @@ RECEIPT_WORDING = re.compile(
 # Every RECEIPT_WORDING phrase carries one of these words: the mailbox search asks Gmail for them only. Unfiltered,
 # the search from the oldest unconfirmed run (18 days of codes and alerts) paged through old mail while new receipts
 # waited for the sweep to wrap; Lyft's "Thank you for your application" was never read (2026-10-25).
-RECEIPT_SEARCH = "(application OR applying OR resume OR Bewerbung OR candidature OR solicitud OR postulación)"
+RECEIPT_SEARCH = "(application OR applying OR resume OR Bewerbung OR candidature OR solicitud OR postulacion)"
 # How firmly an acknowledgement names its job: by its link, by its title, or only by arriving after the submit.
 BASIS_STRENGTH = {"job_url": 3, "title": 2, "submit_window": 1}
 # The "submitting" event is logged after the click that sends the application, and some employers' systems answer within
@@ -291,43 +296,7 @@ def acknowledgement(message, job, run, allow_missing_title=False, any_time=False
     floor = run.get("receipt_floor") or run["created_at"]
     if not any_time and facts["received"] < datetime.fromisoformat(floor).timestamp():
         return None
-    company = re.sub(r"[^a-z0-9]", "", job["company"].casefold())
-    first = job["company"].split()[0].casefold() if job["company"].split() else ""
-    # Workday can omit the employer name from the message text. Its authenticated
-    # tenant sender (snapchat@myworkday.com for snapchat.wd1.myworkdayjobs.com)
-    # is a precise match when the title and receipt wording also match.
-    host = (urlsplit(job.get("url", "")).hostname or "").casefold()
-    tenant = host.split(".")[0]
-    sender_local = facts["address"].partition("@")[0].split("+")[0].casefold()
-    if domain == "myworkday.com" and host.endswith(".myworkdayjobs.com") and sender_local != tenant:
-        return None
-    workday_tenant_match = (
-        domain == "myworkday.com"
-        and host.endswith(".myworkdayjobs.com")
-        and len(tenant) >= 4
-        and not re.fullmatch(r"wd\d+", tenant)
-        and sender_local == tenant
-    )
-    # Dayforce's applicant notifications never name the employer ("We have received your application
-    # for the position - Data Engineer II", notify@dayforce.com). The exact title, the run's own window and
-    # the one-possible-job rule below identify it.
-    dayforce_notice = domain in {"dayforce.com", "dayforcehcm.com"} and job.get("ats") == "dayforce"
-    company_match = (
-        dayforce_notice
-        # A short name is found only as a word: "EY", "ING" and "Check" were inside every message ("they", "thinking")
-        # and made every acknowledgement ambiguous (2026-10-25).
-        or (len(company) >= 6 and company in facts["compact_body"])
-        or (bool(company) and title_in(job["company"], facts["observed"]))
-        or (len(first) >= 3 and bool(re.search(r"\bto\s+" + re.escape(first) + r"\s*[!.]?$", subject, re.I)))
-        or workday_tenant_match
-    )
-    if not company_match:
-        from .features.knowledge.employers import name_aliases
-
-        company_match = any(
-            len(re.sub(r"[^a-z0-9]", "", alias)) >= 4 and title_in(alias, facts["observed"])
-            for alias in name_aliases(job["company"])
-        )
+    company_match = employer_named(job, facts)
     job_url_match = bool(job.get("url") and job["url"].rstrip("/") in facts["links"])
     role_match = title_in(job["title"], facts["observed"])
     if (
@@ -350,6 +319,49 @@ def acknowledgement(message, job, run, allow_missing_title=False, any_time=False
         "subject": subject,
         "received_at": datetime.fromtimestamp(int(message["internalDate"]) / 1000, UTC).isoformat(),
     }
+
+
+def employer_named(job, facts):
+    """Whether a message's facts (domain, address, subject, compact_body, observed) name this job's employer."""
+    domain, subject = facts["domain"], facts["subject"]
+    company = re.sub(r"[^a-z0-9]", "", job["company"].casefold())
+    first = job["company"].split()[0].casefold() if job["company"].split() else ""
+    # Workday can omit the employer name from the message text. Its authenticated
+    # tenant sender (snapchat@myworkday.com for snapchat.wd1.myworkdayjobs.com)
+    # is a precise match when the title and receipt wording also match.
+    host = (urlsplit(job.get("url", "")).hostname or "").casefold()
+    tenant = host.split(".")[0]
+    sender_local = facts["address"].partition("@")[0].split("+")[0].casefold()
+    if domain == "myworkday.com" and host.endswith(".myworkdayjobs.com") and sender_local != tenant:
+        return False
+    workday_tenant_match = (
+        domain == "myworkday.com"
+        and host.endswith(".myworkdayjobs.com")
+        and len(tenant) >= 4
+        and not re.fullmatch(r"wd\d+", tenant)
+        and sender_local == tenant
+    )
+    # Dayforce's applicant notifications never name the employer ("We have received your application
+    # for the position - Data Engineer II", notify@dayforce.com). The exact title, the run's own window and
+    # the one-possible-job rule below identify it.
+    dayforce_notice = domain in {"dayforce.com", "dayforcehcm.com"} and job.get("ats") == "dayforce"
+    named = (
+        dayforce_notice
+        # A short name is found only as a word: "EY", "ING" and "Check" were inside every message ("they", "thinking")
+        # and made every acknowledgement ambiguous (2026-10-25).
+        or (len(company) >= 6 and company in facts["compact_body"])
+        or (bool(company) and title_in(job["company"], facts["observed"]))
+        or (len(first) >= 3 and bool(re.search(r"\bto\s+" + re.escape(first) + r"\s*[!.]?$", subject, re.I)))
+        or workday_tenant_match
+    )
+    if named:
+        return True
+    from .features.knowledge.employers import name_aliases
+
+    return any(
+        len(re.sub(r"[^a-z0-9]", "", alias)) >= 4 and title_in(alias, facts["observed"])
+        for alias in name_aliases(job["company"])
+    )
 
 
 def verification_pending(mail, mailbox_id):
@@ -376,7 +388,7 @@ def employer_hint(company):
 
 async def receipt_messages(
     mail, mailbox_id, recipient, since, *, max_pages=2, max_messages=100, durable=True, narrow="", seconds=15,
-    report=None,
+    report=None, search=RECEIPT_SEARCH, cursor="receipt_mail_page:",
 ):
     """One bounded mailbox search per cycle, with durable progress through older pages. A one-run check
     (durable=False) reads its own window from the newest message and leaves the shared cursor alone; `narrow` adds
@@ -389,9 +401,9 @@ async def receipt_messages(
     since = int(since) // 3600 * 3600
     # One mailbox can receive a profile address and its per-platform plus-addresses (email_alias.py).
     recipients = sorted({recipient} if isinstance(recipient, str) else set(recipient))
-    to = f"to:{recipients[0]}" if len(recipients) == 1 else "{" + " ".join(f"to:{r}" for r in recipients) + "}"
-    query = f"after:{since} {to} {RECEIPT_SEARCH}" + (f" {narrow}" if narrow else "")
-    key = "receipt_mail_page:" + mailbox_id
+    to = "" if not recipients else f"to:{recipients[0]}" if len(recipients) == 1 else "{" + " ".join(f"to:{r}" for r in recipients) + "}"
+    query = " ".join(filter(None, [f"after:{since}", to, search, narrow]))
+    key = cursor + mailbox_id
     query_id = digest(query)
     saved = mail.db.get_setting(key, {}) if durable else {}
     state = dict(saved) if saved.get("query_id") == query_id else {"query_id": query_id}
@@ -415,8 +427,12 @@ async def receipt_messages(
                     break
                 state, upgraded = {"query_id": query_id}, True
                 continue
-            except (TimeoutError, MailTransportError, MailOperationError):
+            except (TimeoutError, MailTransportError, MailOperationError) as exc:
                 report["failed"] = True
+                # Counted where it can be seen: a search that failed on every pass for five days looked like an empty mailbox
+                # (a non-ASCII search term, 2026-10-27 to 2026-11-01).
+                if note := getattr(mail, "note_failure", None):
+                    note("mail_search", exc)
                 break  # Keep the cursor; a mailbox transport outage changes no receipt.
             fetched_pages += 1
             ids = [item["id"] for item in listed.get("messages", []) if item.get("id")]
