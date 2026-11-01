@@ -188,12 +188,8 @@ function App() {
   );
 
   useEffect(() => {
-    const rt = snap.data?.autopilot_runtime;
     const label = titleFor(route);
-    document.title =
-      rt?.state === "active"
-        ? `${rt.confirmed ?? 0}/${rt.target ?? 100} · ${label} · AXIOM`
-        : `${label} · AXIOM`;
+    document.title = `${label} · AXIOM`;
   }, [snap.data, route]);
 
   // Vermilion means live, and only real state turns it on: the lamp in the wordmark, every running lamp.

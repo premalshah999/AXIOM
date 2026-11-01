@@ -143,7 +143,7 @@ export function AccountSettings() {
               width: 300,
               cell: (a) => (
                 <span className="st-who2" title={[a.host, a.login_email].filter(Boolean).join(" · ")}>
-                  <Monogram name={a.employer || a.host} />
+                  <Monogram name={a.employer || a.host} employer={!!a.employer} />
                   <span>
                     <strong>{a.employer || a.host}</strong>
                     <small>

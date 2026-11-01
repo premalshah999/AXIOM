@@ -349,7 +349,7 @@ export function MailSettings() {
                 const name = row?.job.company || row?.job.title || "";
                 return name ? (
                   <button type="button" className="ax-link st-who2" onClick={() => openJob(row!.job.id, c.run_id)}>
-                    <Monogram name={name} />
+                    <Monogram name={name} employer={!!row?.job.company} />
                     <span>
                       <strong>{name}</strong>
                     </span>

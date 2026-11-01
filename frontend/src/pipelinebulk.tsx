@@ -4,7 +4,7 @@ import { useWorkspace } from "./context";
 import { useAction } from "./hooks";
 import type { Selection } from "./bulk";
 import { reconcileRun } from "./jobactions";
-import { appliedState, type Group, type JobRow } from "./model";
+import { appliedState, type Group, type JobRow, type Word } from "./model";
 import { plural } from "./format";
 import { Button } from "./ui/index";
 import { ConfirmButton } from "./worktools";
@@ -20,7 +20,7 @@ export function PipelineBulk({
 }: {
   selection: Selection;
   rows: JobRow[];
-  filter: Group | "all";
+  filter: Group | Word | "all";
   query: string;
   total: number;
 }) {
@@ -115,7 +115,7 @@ export function PipelineBulk({
           {total > 200 ? "Select the first 200" : `Select all ${total.toLocaleString()}`}
         </Button>
       )}
-      {filter === "unconfirmed" && (
+      {(filter === "unconfirmed" || rows.some((r) => r.run?.state === "submission_unknown")) && (
         <>
           <Button size="sm" variant="primary" disabled={busy} loading={pending === "confirm"} onClick={() => verdict(true)}>
             Confirm submitted

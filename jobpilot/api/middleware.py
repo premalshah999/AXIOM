@@ -55,7 +55,9 @@ def install(app, config, sessions, cache):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["X-Frame-Options"] = "DENY"
-        if path.startswith("/api/"):
+        if path.startswith("/api/") and "cache-control" not in response.headers:
+            # An answer that says how long it keeps (a company's logo, versioned in its address) is left as it is: forcing
+            # no-store here made the browser fetch every logo again on every page and every row (measured 2026-11-01).
             response.headers["Cache-Control"] = "no-store"
         return response
 

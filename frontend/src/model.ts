@@ -15,199 +15,208 @@ export type Group =
   | "new"
   | "reserved";
 
+/** The five words every screen uses (jobpilot/vocabulary.py WORDS). */
+export type Word = "applied" | "applying" | "needs" | "failed" | "not";
 type StateInfo = { label: string; tone: Tone; group: Group; explain: string };
 
 export const STATES: Record<string, StateInfo> = {
   queued: {
-    label: "Queued",
+    label: "Applying",
     tone: "hold",
     group: "active",
     explain:
-      "Waiting for a free slot. It starts by itself; nothing is needed from you.",
+      "Waiting for a free worker. It starts by itself.",
   },
   running: {
     label: "Applying",
     tone: "run",
     group: "active",
     explain:
-      "AXIOM is filling in this application now.",
+      "Filling in the application now.",
   },
   submitting: {
-    label: "Submitting",
+    label: "Applying",
     tone: "run",
     group: "active",
     explain:
-      "The application is being sent. It can't be paused now; the outcome is checked next.",
+      "Sending it now. It can't be paused.",
   },
   pausing: {
-    label: "Pausing…",
+    label: "Not applying",
     tone: "idle",
     group: "paused",
     explain:
-      "Stopping at the next safe point. The draft is saved, and other applications keep running.",
+      "Stopping at the next safe point.",
   },
   paused: {
-    label: "Paused",
+    label: "Not applying",
     tone: "idle",
     group: "paused",
     explain:
-      "Paused by you. Other applications keep running. Resume continues from the saved draft.",
+      "Paused by you. Resume continues from where it stopped.",
   },
   waiting_answer: {
-    label: "Needs your answer",
+    label: "Needs you",
     tone: "ask",
     group: "needs",
     explain:
-      "The form asks something only you know. Your answer is saved for future applications, and this one continues by itself.",
+      "The form asks something only you know. Your answer is saved for next time.",
   },
   needs_review: {
-    label: "Needs your answer",
+    label: "Needs you",
     tone: "ask",
     group: "needs",
     explain:
-      "The form asks something only you know. Your answer is saved, and this one continues by itself.",
+      "The form asks something only you know. Your answer is saved for next time.",
   },
   waiting_browser: {
-    label: "Repairing",
+    label: "Applying",
     tone: "fix",
     group: "repair",
     explain:
-      "The site rejected a step or a page couldn't be read. Nothing is needed from you: the draft is kept and AXIOM tries again by itself.",
+      "It stopped on a problem and will try again on its own.",
   },
   waiting_email: {
-    label: "Waiting for email",
+    label: "Applying",
     tone: "hold",
     group: "active",
     explain:
-      "The employer is sending a code or link by email. When it arrives this application continues by itself. Nothing is needed from you.",
+      "Waiting for the employer's emailed code or link.",
   },
   timed_out: {
-    label: "Timed out",
+    label: "Applying",
     tone: "fix",
     group: "repair",
     explain:
-      "The application ran past its time limit before submitting. The draft is kept and can be retried.",
+      "It stopped on a problem and will try again on its own.",
   },
   failed: {
-    label: "Not submitted",
+    label: "Applying",
     tone: "bad",
     group: "repair",
     explain:
-      "This attempt stopped before submission. Nothing was sent to the employer.",
+      "It stopped on a problem and will try again on its own.",
   },
   submission_unknown: {
-    label: "Unconfirmed",
+    label: "Needs you",
     tone: "hold",
     group: "unconfirmed",
     explain:
-      "It was sent, but no confirmation page or employer email was captured. It may have gone through, so it is never retried. Check your email or record what you verified.",
+      "Sent, but no receipt was captured. Check your email, or confirm it yourself.",
   },
   confirmed: {
-    label: "Confirmed",
+    label: "Applied",
     tone: "ok",
     group: "done",
     explain:
-      "Proven by the employer's confirmation page or an email from the employer. AXIOM won't apply here again.",
+      "The employer has your application.",
   },
   already_applied: {
-    label: "Already applied",
+    label: "Not applying",
     tone: "ok",
     group: "existing",
     explain:
-      "The employer says you have already applied. AXIOM won't apply here again.",
+      "The employer already has an application from you.",
   },
   dry_run_passed: {
-    label: "Dry run passed",
+    label: "Not applying",
     tone: "ok",
     group: "stopped",
     explain:
-      "A dry run reached the final step and stopped. Dry runs never submit.",
+      "A practice run. Nothing was sent.",
   },
   cancelled: {
-    label: "Stopped",
+    label: "Not applying",
     tone: "idle",
     group: "stopped",
-    explain: "This attempt was stopped before submission.",
+    explain: "Stopped before anything was sent.",
   },
   skipped: {
-    label: "Skipped",
+    label: "Not applying",
     tone: "idle",
     group: "stopped",
-    explain: "Skipped. No application was sent.",
+    explain: "Skipped. Nothing was sent.",
   },
   closed: {
-    label: "Posting closed",
+    label: "Not applying",
     tone: "idle",
     group: "stopped",
-    explain: "The posting closed before an application was sent.",
+    explain: "The posting is closed or no longer available.",
   },
   // Jobs with no application attempt yet (Job.status).
   "job:new": {
-    label: "Not ranked",
+    label: "To apply",
     tone: "idle",
     group: "new",
     explain:
-      "Found, but not yet checked against your profile. That happens by itself.",
+      "Found. It is checked against your profile by itself.",
   },
   "job:ready": {
-    label: "Eligible",
+    label: "To apply",
     tone: "idle",
     group: "new",
     explain:
-      "A match for your profile, with a resume chosen. A running batch applies to these by itself.",
+      "A match for your profile. A running batch applies to it by itself.",
   },
   "job:review": {
-    label: "Ranked · uncertain",
+    label: "To apply",
     tone: "ask",
     group: "new",
     explain:
-      "A likely match, with some doubts. It isn't applied to automatically unless autonomous mode is on.",
+      "A likely match with some doubts. It is applied to only if you say so.",
   },
   "job:skipped": {
-    label: "Below fit",
+    label: "Not applying",
     tone: "idle",
     group: "new",
     explain:
-      "Below your minimum fit, or excluded by a keyword. It won't be applied to automatically.",
+      "Below your minimum fit, or ruled out by the posting.",
   },
   // A paused attempt whose job was resumed but needs ranking again: the batch
   // only picks up never-attempted jobs, so this one waits for an explicit action.
   resumed: {
-    label: "Resumed · rank to apply",
+    label: "Not applying",
     tone: "idle",
     group: "paused",
     explain:
-      "Resumed from pause. It needs checking against your profile before a new application starts: rank it, then apply.",
+      "Resumed from a pause. Rank it, then apply.",
   },
   "job:paused": {
-    label: "Paused",
+    label: "Not applying",
     tone: "idle",
     group: "paused",
-    explain: "Paused by you. It is held out of automatic intake.",
+    explain: "Paused by you.",
+  },
+  // A stopped job the app has given up on (server word "failed": jobpilot/outlook.py). Never a backend state.
+  gave_up: {
+    label: "Couldn't apply",
+    tone: "bad",
+    group: "repair",
+    explain: "The app has stopped trying.",
   },
   // A reserved employer's job (FAANG, MANGO, the Big Four) the owner has not approved yet (pipeline.py "reserved",
   // owner 2026-10-27). Whatever its latest attempt said, nothing starts it until the owner approves it.
   reserved: {
-    label: "Needs your approval",
+    label: "Not applying",
     tone: "ask",
     group: "reserved",
     explain:
-      "A reserved employer. AXIOM finds and ranks these jobs but applies only after you approve the job in Jobs › Reserved.",
+      "A reserved employer. It applies only after you approve it.",
   },
   // Shown right after an Apply click until the next poll confirms what the server did (optimistic marks).
   "pending:waiting": {
-    label: "Waiting to start",
+    label: "Applying",
     tone: "hold",
     group: "active",
     explain:
-      "Your request is kept. It starts by itself as soon as a slot is free and the site's pacing allows it.",
+      "Your request is kept. It starts by itself as soon as a worker is free.",
   },
   "pending:preparing": {
-    label: "Preparing resume",
+    label: "Applying",
     tone: "hold",
     group: "active",
     explain:
-      "A tailored resume is being prepared. The application starts on its own when it's ready.",
+      "A tailored resume is being prepared. The application starts when it is ready.",
   },
 };
 
@@ -255,6 +264,8 @@ export const RETRYABLE = new Set([
 
 export type JobRow = {
   job: Job;
+  word?: PipelineRow["word"];
+  sentence?: string;
   run?: Run;
   attempts: number;
   state: string;
@@ -309,7 +320,10 @@ export function rowFromServer(r: PipelineRow): JobRow {
     run,
     attempts: r.attempts,
     // A confirmed job reads Confirmed unless another attempt is running now (the Jobs "Confirmed" chip lists it).
-    state: r.confirmed && !(run && ACTIVE.has(run.state)) ? "confirmed" : displayState(r.job, run, control, r.request, r.reserved),
+    // The app has given up on it (server word "failed"): its own entry, never the run's internal state.
+    state: r.confirmed && !(run && ACTIVE.has(run.state)) ? "confirmed" : r.word === "failed" ? "gave_up" : displayState(r.job, run, control, r.request, r.reserved),
+    word: r.word,
+    sentence: r.sentence,
     control,
     request: r.request,
     reserved: r.reserved,
