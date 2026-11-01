@@ -27,8 +27,8 @@ FIELDS = {
     "openrouter_api_key": ("Model", "OpenRouter API key", True,
                            "openrouter.ai > Keys. DeepSeek V4.1 Flash 1017 served by Relace, reasoning off."),
     "typesafe_api_key": ("Model", "TypeSafe Jev key", True, "Optional. Answers multiple-choice questions first."),
-    "telegram_bot_token": ("Telegram", "Telegram bot token", True, "From @BotFather in Telegram: /newbot."),
-    "telegram_user_id": ("Telegram", "Your Telegram user ID", False, "A number, from @userinfobot in Telegram."),
+    "telegram_bot_token": ("Telegram", "Telegram bot token", True, "In Telegram, message @BotFather and send /newbot. Paste the token it gives you, then open your new bot and press Start, or it can't message you."),
+    "telegram_user_id": ("Telegram", "Your Telegram user ID", False, "A number. Message @userinfobot in Telegram and it replies with yours."),
     "twocaptcha_api_key": ("Captcha", "2Captcha API key", True, "Optional, paid per solve. 2captcha.com > Dashboard."),
     "company_logos": ("Appearance", "Show company logos", False,
                       "Finds a company's icon once, in the background, and keeps a small copy on this computer: from the company's own "
