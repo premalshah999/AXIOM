@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -16,6 +17,11 @@ class ControlDecision(BaseModel):
     query: str = Field(default="", max_length=80)
     direction: Literal["up", "down"] = "down"
     reason: str = Field(default="", max_length=240)
+
+
+def answer_is_amount_not_choice(desired, option):
+    """A plain money amount against an option with no digit in it."""
+    return bool(re.fullmatch(r"\$?\s*\d[\d,]*(?:\.\d+)?", str(desired or "").strip())) and not re.search(r"\d", str(option or ""))
 
 
 def pending_matches(field, pending):
@@ -174,6 +180,11 @@ async def recover(form, report):
             if decision.action == "stop":
                 break
             chosen = next((o for o in obs["options"] if o["id"] == decision.option_id), None)
+            if chosen and chosen.get("leaf") and answer_is_amount_not_choice(answer.value, chosen["text"]):
+                # The desired answer is a number and this option holds none, so no search can make them the same answer.
+                # A "Salary Expectation - Currency" menu given 105000 had its first row picked: Australian Dollar (2026-11-01).
+                history.append({"action": decision.action, "outcome": "That option does not hold the desired answer"})
+                continue
             strategy = hashlib.sha256(
                 json.dumps(
                     {

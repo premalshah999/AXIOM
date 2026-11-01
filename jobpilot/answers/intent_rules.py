@@ -21,6 +21,42 @@ from .text import boolean_detail
 from .text import yes_no
 
 
+# A pay box in one period. "Hourly salary expectations" took the annual 105000, sent as $105,000 an hour (a Workable form,
+# 2026-10-31), and "Salary expectation per hour" the same (10-29). "Salary or hourly rate" accepts the annual figure.
+PAY_PERIODS = (
+    (re.compile(r"\bhourly\b|\bper hour\b|\ban hour\b", re.I), 2080),
+    (re.compile(r"\bweekly\b|\bper week\b", re.I), 52),
+    (re.compile(r"\bmonthly\b|\bper month\b", re.I), 12),
+)
+EITHER_PERIOD = re.compile(
+    r"\b(?:salary|annual(?:ly)?|yearly|base)\b[^.?!]{0,20}?(?:\bor\b|/)[^.?!]{0,12}?\b(?:hourly|monthly|weekly)\b|"
+    r"\b(?:hourly|monthly|weekly)\b[^.?!]{0,20}?(?:\bor\b|/)[^.?!]{0,12}?\b(?:salary|annual(?:ly)?|yearly|base)\b|"
+    r"\bannual(?:ized|ly)?\b|\bper year\b|\byearly\b",
+    re.I,
+)
+
+
+ASKS_FOR_EMPLOYER = re.compile(
+    r"\s*who\b.{0,30}\byour\b.{0,30}\b(?:employer|company)\b|"
+    r"\s*what is (?:the name of )?your (?:current|previous|most recent|last)[\w /]{0,20}\b(?:employer|company)\b|"
+    r"\s*(?:what|which) (?:company|employer|organi[sz]ation)\b.{0,30}\byou\b.{0,30}\b(?:currently|most recently|employed|work)\b",
+    re.I,
+)
+ASKS_FOR_A_NAME = re.compile(r"\s*(?:who|whom)\b|\s*(?:what|which) (?:company|employer|organi[sz]ation|firm)\b", re.I)
+
+
+def pay_in_period(label, amount):
+    """The saved annual amount in the one period this box asks for, or the amount as it is."""
+    text = str(amount).strip().replace(",", "")
+    # "in THB monthly": the saved figure is in dollars, and dividing it would not make it baht.
+    if not re.fullmatch(r"\d{4,7}", text) or EITHER_PERIOD.search(label) or re.search(r"\b(?!USD\b)[A-Z]{3}\b", label):
+        return amount
+    for pattern, periods in PAY_PERIODS:
+        if pattern.search(label):
+            return str(round(int(text) / periods))
+    return amount
+
+
 class IntentRulesMixin:
     def _intent_answer(self, f, label):
         if f.get("type") != "checkbox" and status_defined_answer(f["label"], self._facts()):
@@ -64,7 +100,7 @@ class IntentRulesMixin:
             ):
                 # A number input takes one amount: the middle of the applicant's saved range (a "Salary Range" number
                 # box would otherwise get no answer, or the range text it cannot hold).
-                return self._ans(f, amount, ["policy:compensation_choice"])
+                return self._ans(f, pay_in_period(f["label"], amount), ["policy:compensation_choice"])
             if (
                 "desired_salary" in keys
                 and f.get("type") in {"text", "textarea"}
@@ -97,6 +133,11 @@ class IntentRulesMixin:
                 and not RECORD_STATEMENT.search(f["label"])
             ):
                 return None  # Willingness to undergo a check is consent, not the applicant's record.
+            if "previously_employed_here" in keys and ASKS_FOR_EMPLOYER.match(f["label"]) and not f.get("options"):
+                # "Who is your current or previous employer?" asks for a name. "former employee"-style wording matched it
+                # and "No" was sent as the employer's name (Stripe 2026-11-01, Headway 10-24, Klaviyo 10-22).
+                current = next((w for w in p.work if w.current), p.work[0] if p.work else None)
+                return self._ans(f, current.company, ["profile:work.current.company"]) if current and current.company else None
             if "previously_employed_here" in keys and self.names_recorded_employer(f["label"]):
                 return None  # A recorded employer is named: the owner's "No" policy cannot apply.
             if "previously_employed_here" in keys and re.search(
@@ -131,6 +172,8 @@ class IntentRulesMixin:
                 and not re.search(r"\b(?:from|to)\s*:?\s*$", f["label"], re.I)
             ):
                 value = amount  # The saved pay expectation is a range and this box takes one amount.
+            if "desired_salary" in keys and not f.get("options"):
+                value = pay_in_period(f["label"], value)
             if value is None and "requires_relocation_assistance" in keys:
                 return None  # Never fall through to the broader willingness-to-relocate fact.
             if value is None:
@@ -200,6 +243,8 @@ class IntentRulesMixin:
             boolean = isinstance(value, bool) or str(value).lower() in {"true", "false", "yes", "no"}
             if boolean and boolean_detail(f):
                 return None  # Retrieve and interpret the requested detail separately from its parent fact.
+            if boolean and not options and ASKS_FOR_A_NAME.match(f["label"]):
+                return None  # "Who were you referred by?" is not answered with "No" (2026-10-29).
             if boolean and f.get("type") == "text" and len(f["label"]) > 120:
                 return None  # A long free-text prompt is not a yes/no screening question.
             if (
