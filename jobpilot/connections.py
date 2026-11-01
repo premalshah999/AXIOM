@@ -263,6 +263,15 @@ async def test(config, name):
                 return {"ok": True, "message": "Saved."}
     except httpx.HTTPError as exc:
         return {"ok": False, "message": f"Could not reach the service ({type(exc).__name__})."}
+    if response.status_code == 200 and name == "openrouter_api_key":
+        # /key answers 200 for a key whose account has nothing left to spend, and the first application then fails at its first
+        # model question. Said now, in words, where it can be fixed (a friend's first run: out of credit looked like "no jobs").
+        try:
+            remaining = response.json().get("data", {}).get("limit_remaining")
+        except (ValueError, AttributeError):
+            remaining = None
+        if isinstance(remaining, (int, float)) and remaining <= 0:
+            return {"ok": False, "message": "The key is right, but this OpenRouter account is out of credit. Add credit at openrouter.ai/settings/credits, then connect again."}
     if response.status_code == 200:
         return {"ok": True, "message": "Connected."}
     if response.status_code in {401, 403}:

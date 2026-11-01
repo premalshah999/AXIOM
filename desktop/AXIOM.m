@@ -11,6 +11,8 @@
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
 #include <signal.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 typedef NS_ENUM(NSInteger, Mode) { ModeSplash, ModeDashboard, ModeFailed, ModeQuitting };
 
@@ -68,14 +70,19 @@ static NSString *const SplashHTML =
      "h1{font-size:20px;font-weight:600;margin:0 0 6px}p{margin:0;color:var(--dim);min-height:46px;-webkit-user-select:text}"
      "#bar{height:3px;background:var(--line);margin-top:18px;border-radius:2px;overflow:hidden;visibility:hidden}"
      "#fill{height:100%;width:0;background:#ff4310;transition:width .3s}"
-     "#acts{margin-top:18px;display:none;gap:18px}a{color:#ff4310;text-decoration:none}a:hover{text-decoration:underline}"
+     "#acts{margin-top:18px;display:none;gap:18px;flex-wrap:wrap}a{color:#ff4310;text-decoration:none}a:hover{text-decoration:underline}"
      "</style><main><svg viewBox='0 0 32 32'><circle cx=16 cy=16 r=10.5 fill=none stroke=currentColor stroke-width=2.4 />"
      "<circle cx=16 cy=16 r=4.4 fill=#ff4310 /></svg><h1 id=t>Starting AXIOM</h1><p id=m></p><div id=bar><div id=fill></div></div>"
-     "<div id=acts><a href='axiom://retry'>Try again</a><a href='axiom://logs'>Open logs</a></div></main>"
-     "<script>function show(t,m,p,f){document.getElementById('t').textContent=t;document.getElementById('m').textContent=m;"
+     "<div id=acts></div></main>"
+     // `kind` picks the links: a failure offers a retry, a plain stop only offers to open AXIOM again, and a copy that stopped
+     // part way can only be fixed by copying it again.
+     "<script>var K={fail:[['Try again','retry'],['Copy diagnostics','diagnostics'],['Open logs','logs']],"
+     "stopped:[['Open AXIOM again','retry']],damaged:[['Show in Finder','reveal'],['Copy diagnostics','diagnostics']]};"
+     "function show(t,m,p,f){document.getElementById('t').textContent=t;document.getElementById('m').textContent=m;"
      "var b=document.getElementById('bar');b.style.visibility=p==null?'hidden':'visible';"
      "if(p!=null)document.getElementById('fill').style.width=p+'%';"
-     "document.getElementById('acts').style.display=f?'flex':'none'}</script>";
+     "var a=document.getElementById('acts');a.textContent='';(K[f]||[]).forEach(function(x){var e=document.createElement('a');"
+     "e.textContent=x[0];e.href='axiom://'+x[1];a.appendChild(e)});a.style.display=K[f]?'flex':'none'}</script>";
 
 // The dashboard says when its session ended (frontend/src/api.ts, SIGNED_OUT). On your own Mac that is not a reason to show a
 // sign-in screen, so the window signs in again. The API's token check stays exactly as it is.
@@ -135,6 +142,10 @@ static NSString *const SignedOutScript =
 @property(assign) BOOL dashboardTimed;
 @property(assign) BOOL quietQuit;
 @property(assign) BOOL batteryWarned;
+@property(assign) BOOL damaged;
+@property(assign) BOOL bootSignalled;
+@property(strong) NSAlert *updateAlert;
+@property(strong) NSString *updateURL;
 @property(assign) int bootStatus;
 @property(assign) pid_t verifiedPid;
 @property(assign) NSInteger snapshots;
@@ -156,6 +167,25 @@ static NSString *const SignedOutScript =
   if ([self refuseWhereItIs]) return;
   [self buildWindow];
   [self buildStatusItem];
+  if (getenv("AXIOM_SHELL_DRIVE")) {
+    self.driveTimer = [NSTimer timerWithTimeInterval:0.2 target:self selector:@selector(driveTick) userInfo:nil repeats:YES];
+    [NSRunLoop.mainRunLoop addTimer:self.driveTimer forMode:NSRunLoopCommonModes];
+  }
+  NSString *incomplete = [self installProblem];
+  if (incomplete) {
+    // Python and PostgreSQL are in this bundle, so a copy that stopped part way fails with a Python error that means nothing to
+    // anyone ("No module named importlib", 2026-11-01). Say what happened, and what to do, before starting anything.
+    Log([@"The installed copy is incomplete: " stringByAppendingString:incomplete]);
+    self.damaged = YES;
+    self.mode = ModeFailed;
+    [self showSplash:@"AXIOM was not copied completely"
+             message:@"Some of AXIOM's files did not make it to this Mac, so it cannot start. Move AXIOM to the Bin, then drag it from the "
+                     @"AXIOM disk image to Applications again, using Finder. If the Mac says \"Operation not permitted\", copy it with "
+                     @"Finder rather than Terminal."
+             percent:nil
+                kind:@"damaged"];
+    return;  // No supervisor, no timers: Quit has nothing to wait for.
+  }
 
   // `kill` is how a test or a script asks for Quit; it takes the same draining path as the menu.
   signal(SIGTERM, SIG_IGN);
@@ -180,10 +210,6 @@ static NSString *const SignedOutScript =
   self.timer = [NSTimer timerWithTimeInterval:1.0 target:self selector:@selector(tick) userInfo:nil repeats:YES];
   self.timer.tolerance = 0.4;
   [NSRunLoop.mainRunLoop addTimer:self.timer forMode:NSRunLoopCommonModes];
-  if (getenv("AXIOM_SHELL_DRIVE")) {
-    self.driveTimer = [NSTimer timerWithTimeInterval:0.2 target:self selector:@selector(driveTick) userInfo:nil repeats:YES];
-    [NSRunLoop.mainRunLoop addTimer:self.driveTimer forMode:NSRunLoopCommonModes];
-  }
 }
 
 // AppKit ignores Quit while a sheet or modal panel is up. Nobody is there to answer one when the Mac is shutting down.
@@ -206,6 +232,36 @@ static NSString *const SignedOutScript =
   [alert runModal];
   [NSApp terminate:nil];
   return YES;
+}
+
+// What a whole copy has: the files the app cannot start without, and every file of the build at its size (install-manifest.txt,
+// written by desktop/build.sh just before signing). Returns nil when all is well, else a sentence for the log.
+- (NSString *)installProblem {
+  NSString *resources = NSBundle.mainBundle.resourcePath;
+  for (NSString *relative in @[ @"python/bin/python3", @"python/lib/python3.12/importlib/__init__.py", @"app/jobpilot/native/desktop.py",
+                                @"postgres/bin/postgres", @"tex/bin/universal-darwin/pdflatex" ]) {
+    if (access([resources stringByAppendingPathComponent:relative].fileSystemRepresentation, R_OK) != 0)
+      return [relative stringByAppendingString:@" is missing"];
+  }
+  NSString *manifest = [NSString stringWithContentsOfFile:[resources stringByAppendingPathComponent:@"install-manifest.txt"]
+                                                 encoding:NSUTF8StringEncoding
+                                                    error:nil];
+  if (!manifest) return nil;  // A build from before the manifest, or a test bundle: the key files above were enough.
+  NSInteger bad = 0, total = 0;
+  NSString *first = nil;
+  for (NSString *line in [manifest componentsSeparatedByString:@"\n"]) {
+    NSRange tab = [line rangeOfString:@"\t"];
+    if (!tab.length) continue;
+    total++;
+    NSString *relative = [line substringFromIndex:NSMaxRange(tab)];
+    struct stat info;
+    if (lstat([resources stringByAppendingPathComponent:relative].fileSystemRepresentation, &info) != 0 ||
+        (long long)info.st_size != [[line substringToIndex:tab.location] longLongValue]) {
+      if (!first) first = relative;
+      bad++;
+    }
+  }
+  return bad ? [NSString stringWithFormat:@"%ld of %ld files are missing or damaged, such as %@", (long)bad, (long)total, first] : nil;
 }
 
 - (void)buildWindow {
@@ -274,6 +330,7 @@ static NSString *const SignedOutScript =
 }
 
 - (void)tick {
+  if (self.damaged) return;  // An incomplete copy has nothing to start: the screen says so, and Quit still works.
   NSDictionary *state = ReadJSON(Native(@"state.json"));
   self.state = state;
   BOOL alive = [self supervisorAlive:state];
@@ -291,7 +348,7 @@ static NSString *const SignedOutScript =
                                                                (long)active, active == 1 ? @"" : @"s"]
                                   : @"Saving your work. AXIOM closes by itself."
                percent:nil
-                failed:NO];
+                kind:nil];
     }
     return;
   }
@@ -303,14 +360,14 @@ static NSString *const SignedOutScript =
   if (alive) {
     // A window opened again while the last one's supervisor is still draining waits for it, then starts.
     self.mode = ModeSplash;
-    [phase isEqual:@"stopping"] ? [self showSplash:@"Finishing the last session" message:@"Saving your work first. This can take up to three minutes." percent:nil failed:NO]
-                                : [self showSplash:@"Starting AXIOM" message:[self startingLine:state] percent:nil failed:NO];
+    [phase isEqual:@"stopping"] ? [self showSplash:@"Finishing the last session" message:@"Saving your work first. This can take up to three minutes." percent:nil kind:nil]
+                                : [self showSplash:@"Starting AXIOM" message:[self startingLine:state] percent:nil kind:nil];
     return;
   }
   if (self.boot.running) {
     self.mode = ModeSplash;
     NSDictionary *progress = ReadJSON(Native(@"boot.json"));
-    [self showSplash:@"Starting AXIOM" message:progress[@"message"] ?: @"" percent:progress[@"percent"] failed:NO];
+    [self showSplash:@"Starting AXIOM" message:progress[@"message"] ?: @"" percent:progress[@"percent"] kind:nil];
     return;
   }
   if (!self.triedBoot) {
@@ -319,7 +376,10 @@ static NSString *const SignedOutScript =
   }
   if (self.mode == ModeFailed) return;
   // Exit 0 without a supervisor: another copy holds the boot lock, and its state.json is on its way.
-  if (self.bootStatus == 0 && self.bootEnded && -self.bootEnded.timeIntervalSinceNow < 20 && self.mode != ModeDashboard) return;
+  // Not when the supervisor has said it stopped: that is its own word, and twenty seconds of "finishing" afterwards reads as stuck.
+  if (self.bootStatus == 0 && self.bootEnded && -self.bootEnded.timeIntervalSinceNow < 20 && self.mode != ModeDashboard &&
+      ![state[@"phase"] isEqual:@"stopped"])
+    return;
   [self showFailure:state];
 }
 
@@ -337,15 +397,33 @@ static NSString *const SignedOutScript =
   return @"";
 }
 
+// A person who sees "could not start" after an ordinary stop (a Quit from the Terminal, Activity Monitor, a restart from Settings
+// that took the supervisor with it) believes AXIOM is broken. The supervisor says how it ended: phase "stopped", with a reason only
+// when it failed. Anything else that is gone with no word is a signal from outside, or a crash.
 - (void)showFailure:(NSDictionary *)state {
   self.mode = ModeFailed;
   self.base = nil;
   NSDictionary *progress = ReadJSON(Native(@"boot.json"));
   NSString *reason = [progress[@"step"] isEqual:@"failed"] ? progress[@"message"] : state[@"reason"];
-  if (![reason isKindOfClass:NSString.class] || !reason.length)
-    reason = @"Something stopped unexpectedly, and the logs say what. Your data is safe.";
+  BOOL hasReason = [reason isKindOfClass:NSString.class] && reason.length;
+  BOOL plainStop = [state[@"phase"] isEqual:@"stopped"] &&
+                   (!hasReason || [reason isEqual:@"Stopped by request."] || [reason hasPrefix:@"The AXIOM window went away"]);
+  BOOL outside = !hasReason && [state[@"phase"] isEqual:@"running"] && self.bootSignalled;
+  if (plainStop || outside) {
+    Log(plainStop ? @"AXIOM was stopped; showing the stopped screen." : @"AXIOM was stopped from outside; showing the stopped screen.");
+    [self showSplash:@"AXIOM has stopped"
+             message:outside ? @"Something else on this Mac closed AXIOM. Your work is safe. Open it again to carry on."
+                             : @"AXIOM was stopped, and nothing was lost. Open it again to carry on."
+             percent:nil
+                kind:@"stopped"];
+    return;
+  }
+  if (!hasReason) reason = @"AXIOM stopped unexpectedly. Your work is safe. Try again, and if it happens again use Copy diagnostics and send it to the person who gave you AXIOM.";
   Log([@"Showing a failure: " stringByAppendingString:reason]);
-  [self showSplash:@"AXIOM could not start" message:reason percent:nil failed:YES];
+  [self showSplash:[progress[@"step"] isEqual:@"failed"] ? @"AXIOM could not start" : @"AXIOM stopped unexpectedly"
+           message:reason
+           percent:nil
+              kind:@"fail"];
   [self.window makeKeyAndOrderFront:nil];
 }
 
@@ -354,7 +432,7 @@ static NSString *const SignedOutScript =
   self.bootEnded = nil;
   self.mode = ModeSplash;
   self.splashKey = nil;
-  [self showSplash:@"Starting AXIOM" message:@"" percent:nil failed:NO];
+  [self showSplash:@"Starting AXIOM" message:@"" percent:nil kind:nil];
   NSString *resources = NSBundle.mainBundle.resourcePath;
   NSMutableDictionary *env = [NSProcessInfo.processInfo.environment mutableCopy];
   // The app's Python and nothing else's. A terminal can hand down any of these.
@@ -387,7 +465,12 @@ static NSString *const SignedOutScript =
     dispatch_async(dispatch_get_main_queue(), ^{
       weakSelf.bootStatus = ended.terminationStatus;
       weakSelf.bootEnded = NSDate.date;
-      Log([NSString stringWithFormat:@"The supervisor exited with status %d.", ended.terminationStatus]);
+      // A signal's number is not an exit status: 15 is the Mac's polite "please stop", which Activity Monitor, `axiom stop` and a
+      // shutdown all send.
+      Log(ended.terminationReason == NSTaskTerminationReasonUncaughtSignal
+              ? [NSString stringWithFormat:@"The supervisor was stopped by signal %d.", ended.terminationStatus]
+              : [NSString stringWithFormat:@"The supervisor exited with status %d.", ended.terminationStatus]);
+      weakSelf.bootSignalled = ended.terminationReason == NSTaskTerminationReasonUncaughtSignal;
     });
   };
   NSError *error;
@@ -401,9 +484,9 @@ static NSString *const SignedOutScript =
   Log([NSString stringWithFormat:@"Started the supervisor (pid %d).", task.processIdentifier]);
 }
 
-- (void)showSplash:(NSString *)title message:(NSString *)message percent:(id)percent failed:(BOOL)failed {
+- (void)showSplash:(NSString *)title message:(NSString *)message percent:(id)percent kind:(NSString *)kind {
   NSString *number = [percent isKindOfClass:NSNumber.class] ? [percent stringValue] : @"null";
-  NSString *call = [NSString stringWithFormat:@"show(%@,%@,%@,%@)", JSString(title), JSString(message), number, failed ? @"true" : @"false"];
+  NSString *call = [NSString stringWithFormat:@"show(%@,%@,%@,%@)", JSString(title), JSString(message), number, JSString(kind)];
   if ([call isEqual:self.splashKey] && self.splashLoaded) return;
   self.splashKey = call;
   if (self.splashLoaded) {
@@ -497,6 +580,10 @@ static NSString *const SignedOutScript =
       self.mode = ModeSplash;
     } else if ([url.host isEqual:@"logs"]) {
       [self openLogs:nil];
+    } else if ([url.host isEqual:@"diagnostics"]) {
+      [self copyDiagnostics:nil];
+    } else if ([url.host isEqual:@"reveal"]) {
+      [NSWorkspace.sharedWorkspace activateFileViewerSelectingURLs:@[ NSBundle.mainBundle.bundleURL ]];
     }
     return;
   }
@@ -545,6 +632,7 @@ static NSString *const SignedOutScript =
   if (webView == self.web && self.base && !self.dashboardTimed) {
     self.dashboardTimed = YES;
     Log([NSString stringWithFormat:@"The dashboard loaded %.1f s after the window opened.", -self.launched.timeIntervalSinceNow]);
+    if (!getenv("AXIOM_SHELL_DRIVE")) [self checkUpdates:NO];  // At most once a day, and silent unless there is something new.
   }
   [self snapshotForATest];
 }
@@ -712,14 +800,23 @@ static NSString *const SignedOutScript =
     return NSTerminateNow;
   }
   NSInteger active = IntOr(state[@"active"], 0);
+  // The system's own quit (log out, restart, shut down) carries a reason in the Apple event. Cancelling it here would make macOS
+  // say AXIOM stopped the Mac from shutting down, and nobody is there to answer a question while it does.
+  NSAppleEventDescriptor *event = NSAppleEventManager.sharedAppleEventManager.currentAppleEvent;
+  if ([event paramDescriptorForKeyword:'why?'] || [event attributeDescriptorForKeyword:'why?']) self.quietQuit = YES;
   if (active > 0 && !self.quietQuit) {
+    // Quit can arrive while another app is in front (a script, the Dock): the question must be seen, or the quit waits for it.
+    [NSApp activateIgnoringOtherApps:YES];
     NSAlert *alert = [NSAlert new];
     alert.messageText = [NSString stringWithFormat:@"%ld application%@ in progress", (long)active, active == 1 ? @" is" : @"s are"];
     alert.informativeText = @"Quitting finishes whatever is being submitted, then stops. Nothing is sent twice, and anything "
                             @"unfinished carries on the next time you open AXIOM. This can take up to three minutes.";
     [alert addButtonWithTitle:@"Quit"];
     [alert addButtonWithTitle:@"Keep Running"];
-    if ([alert runModal] != NSAlertFirstButtonReturn) return NSTerminateCancel;
+    if ([alert runModal] != NSAlertFirstButtonReturn) {
+      Log(@"Quit: kept running, as asked.");
+      return NSTerminateCancel;
+    }
   }
   // As long as a whole stop can take (supervisor.stop_budget), plus time to notice.
   NSInteger budget = 60;
@@ -735,7 +832,7 @@ static NSString *const SignedOutScript =
   self.base = nil;
   self.splashLoaded = NO;
   self.splashKey = nil;
-  [self showSplash:@"Finishing up" message:@"Saving your work. AXIOM closes by itself." percent:nil failed:NO];
+  [self showSplash:@"Finishing up" message:@"Saving your work. AXIOM closes by itself." percent:nil kind:nil];
   if (!getenv("AXIOM_SHELL_BACKGROUND")) [self showWindow:nil];
   [self tick];
   return NSTerminateLater;
@@ -751,15 +848,19 @@ static NSString *const SignedOutScript =
     return;
   }
   if (IntOr(state[@"active"], 0) <= 0 || self.batteryWarned || self.mode == ModeQuitting) return;
-  self.batteryWarned = YES;
+  self.batteryWarned = YES;  // Once for each time the charger is pulled out, never again while it stays out.
+  if ([NSUserDefaults.standardUserDefaults boolForKey:@"HideBatteryWarning"]) return;
   Log(@"Warned: applying on battery.");
   // Not a sheet: AppKit ignores Quit while one is attached, and a warning must never be what stops a safe stop.
   NSAlert *alert = [NSAlert new];
   alert.alertStyle = NSAlertStyleWarning;
-  alert.messageText = @"AXIOM is applying on battery power";
-  alert.informativeText = [NSString stringWithFormat:@"The battery is at %ld%%. Your Mac sleeps when the lid closes or the battery runs "
-                                                     @"out, and that freezes applications in progress. Plug in to keep them going.",
+  alert.messageText = @"Plug in your Mac while AXIOM applies";
+  alert.informativeText = [NSString stringWithFormat:@"It is running on battery (%ld%%). If you close the lid or the battery runs out, "
+                                                     @"your Mac goes to sleep and applications stop until it wakes. Plugged in "
+                                                     @"with the lid open, they keep going.",
                                                      (long)IntOr(power[@"percent"], 0)];
+  alert.showsSuppressionButton = YES;
+  alert.suppressionButton.title = @"Don't remind me again";
   NSButton *ok = [alert addButtonWithTitle:@"OK"];
   ok.target = self;
   ok.action = @selector(dismissBatteryWarning:);
@@ -770,6 +871,8 @@ static NSString *const SignedOutScript =
 }
 
 - (IBAction)dismissBatteryWarning:(id)sender {
+  if (self.batteryAlert.suppressionButton.state == NSControlStateValueOn)
+    [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"HideBatteryWarning"];
   [self.batteryAlert.window orderOut:nil];
   self.batteryAlert = nil;
 }
@@ -838,6 +941,9 @@ static NSString *const SignedOutScript =
   NSApp.windowsMenu = window;
 
   NSMenu *help = [self addMenu:@"Help" to:bar];
+  [help addItemWithTitle:@"Copy Diagnostics" action:@selector(copyDiagnostics:) keyEquivalent:@""].target = self;
+  [help addItemWithTitle:@"Check for Updates\u2026" action:@selector(checkForUpdates:) keyEquivalent:@""].target = self;
+  [help addItem:NSMenuItem.separatorItem];
   [help addItemWithTitle:@"Open Logs" action:@selector(openLogs:) keyEquivalent:@""].target = self;
   [help addItemWithTitle:@"Open Data Folder" action:@selector(openData:) keyEquivalent:@""].target = self;
   NSApp.helpMenu = help;
@@ -938,6 +1044,119 @@ static NSString *const SignedOutScript =
 - (IBAction)zoomOut:(id)sender { self.web.pageZoom = MAX(self.web.pageZoom - 0.1, 0.5); }
 - (IBAction)openLogs:(id)sender { [self openForReal:[NSURL fileURLWithPath:Logs()]]; }
 - (IBAction)openData:(id)sender { [self openForReal:[NSURL fileURLWithPath:Support()]]; }
+
+// ---- help: diagnostics for the person who sent AXIOM, and whether a newer one exists ------------------------------------------
+
+// Runs `python -m jobpilot.native.desktop <args>` and hands over what it printed. The same module serves a broken or stopped AXIOM,
+// which is when anyone asks for diagnostics.
+- (void)runDesktop:(NSArray<NSString *> *)arguments then:(void (^)(NSString *output))then {
+  NSString *resources = NSBundle.mainBundle.resourcePath;
+  NSTask *task = [NSTask new];
+  task.executableURL = [NSURL fileURLWithPath:[resources stringByAppendingPathComponent:@"python/bin/python3"]];
+  task.arguments = [@[ @"-m", @"jobpilot.native.desktop" ] arrayByAddingObjectsFromArray:arguments];
+  task.environment = @{
+    @"PYTHONPATH" : [resources stringByAppendingPathComponent:@"app"],
+    @"AXIOM_BUNDLE" : resources,
+    @"HOME" : Home(),
+    @"PATH" : @"/usr/bin:/bin",
+    @"PYTHONDONTWRITEBYTECODE" : @"1",
+    @"PYTHONSAFEPATH" : @"1",
+    @"OPENSSL_CONF" : [resources stringByAppendingPathComponent:@"openssl.cnf"],
+  };
+  task.currentDirectoryURL = [NSURL fileURLWithPath:resources];
+  NSPipe *out = [NSPipe pipe];
+  task.standardOutput = out;
+  task.standardError = NSFileHandle.fileHandleWithNullDevice;
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+    NSString *text = @"";
+    if ([task launchAndReturnError:nil]) {
+      NSData *data = [out.fileHandleForReading readDataToEndOfFile];
+      [task waitUntilExit];
+      text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{ then(text); });
+  });
+}
+
+- (IBAction)copyDiagnostics:(id)sender {
+  [self runDesktop:@[ @"diagnostics" ]
+              then:^(NSString *text) {
+                NSAlert *alert = [NSAlert new];
+                if (text.length) {
+                  [NSPasteboard.generalPasteboard clearContents];
+                  [NSPasteboard.generalPasteboard setString:text forType:NSPasteboardTypeString];
+                  alert.messageText = @"Diagnostics copied";
+                  alert.informativeText = @"Paste it into a message to the person who gave you AXIOM (Command-V). It has no passwords, "
+                                          @"keys, email addresses or mail in it.";
+                } else {
+                  alert.messageText = @"Could not collect diagnostics";
+                  alert.informativeText = @"Use Help, Open Logs instead, and send the person who gave you AXIOM the file named supervisor.log.";
+                }
+                [self driveAnswer:alert kind:@"diagnostics"];
+                [NSApp activateIgnoringOtherApps:YES];
+                [alert runModal];
+              }];
+}
+
+// A person has no other way to learn that a newer AXIOM exists. This only asks GitHub for the newest release's number and opens its
+// page: it never downloads or replaces anything, and says nothing when there is nothing new, unless they asked.
+- (IBAction)checkForUpdates:(id)sender { [self checkUpdates:YES]; }
+
+- (void)checkUpdates:(BOOL)asked {
+  NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+  if (!asked) {
+    NSDate *last = [defaults objectForKey:@"LastUpdateCheck"];
+    if (last && -last.timeIntervalSinceNow < 24 * 3600) return;
+  }
+  [defaults setObject:NSDate.date forKey:@"LastUpdateCheck"];
+  [self runDesktop:@[ @"update-check" ]
+              then:^(NSString *text) {
+                NSData *data = [text dataUsingEncoding:NSUTF8StringEncoding];
+                id parsed = data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+                NSDictionary *answer = [parsed isKindOfClass:NSDictionary.class] ? parsed : @{};
+                NSString *latest = answer[@"latest"], *url = answer[@"url"], *error = answer[@"error"];
+                if ([answer[@"newer"] boolValue] && [url isKindOfClass:NSString.class]) {
+                  if (!asked && [[defaults stringForKey:@"UpdateToldVersion"] isEqual:latest]) return;  // Told once; not every day.
+                  [defaults setObject:latest forKey:@"UpdateToldVersion"];
+                  Log([@"A newer version exists: " stringByAppendingString:latest]);
+                  NSAlert *alert = [NSAlert new];
+                  alert.messageText = [NSString stringWithFormat:@"AXIOM %@ is available", latest];
+                  alert.informativeText = [NSString stringWithFormat:@"You have %@. Open the download page, get the new disk image, and drag AXIOM "
+                                                                     @"over the old one in Applications. Your jobs and settings stay.",
+                                                                     answer[@"current"] ?: @"an older version"];
+                  NSButton *get = [alert addButtonWithTitle:@"Open the download page"];
+                  NSButton *later = [alert addButtonWithTitle:@"Later"];
+                  get.target = later.target = self;
+                  get.action = @selector(updateAlertOpen:);
+                  later.action = @selector(updateAlertLater:);
+                  self.updateAlert = alert;
+                  self.updateURL = url;
+                  [alert layout];
+                  [alert.window center];
+                  [alert.window orderFront:nil];  // Not a sheet or a modal: Quit must always work (see the battery warning).
+                } else if (asked) {
+                  NSAlert *alert = [NSAlert new];
+                  alert.messageText = error.length ? @"Could not check for updates" : @"AXIOM is up to date";
+                  alert.informativeText = error.length ? [error stringByAppendingString:@" Check your internet connection and try again."]
+                                                       : [NSString stringWithFormat:@"You have version %@, the newest.", answer[@"current"] ?: @""];
+                  [self driveAnswer:alert kind:@"update"];
+                  [NSApp activateIgnoringOtherApps:YES];
+                  [alert runModal];
+                }
+              }];
+}
+
+- (IBAction)updateAlertOpen:(id)sender {
+  NSURL *url = [NSURL URLWithString:self.updateURL ?: @""];
+  [self.updateAlert.window orderOut:nil];
+  self.updateAlert = nil;
+  if (url) [self openExternally:url];
+}
+
+- (IBAction)updateAlertLater:(id)sender {
+  [self.updateAlert.window orderOut:nil];
+  self.updateAlert = nil;
+}
 
 // ---- the driver: how the parity list is proved in this very binary ---------------------------------------------------------
 //

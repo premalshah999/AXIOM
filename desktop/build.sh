@@ -164,6 +164,12 @@ hardened=""
 [ "$sign_id" = "-" ] || hardened="--timestamp --options runtime --entitlements $root/desktop/entitlements.plist"
 # Inside out, each binary on its own: --deep does not reach code under Resources.
 grep -v "/Contents/MacOS/AXIOM$" "$build/machos.txt" | tr '\n' '\0' | xargs -0 -n 40 codesign --force --sign "$sign_id" $hardened
+# Every file and its size, for the window to check at each start: a copy that stopped part way must say so, not fail inside Python.
+# After the inner signatures (they change a binary's size) and before the seal that covers Resources.
+PYTHONDONTWRITEBYTECODE=1 PYTHONSAFEPATH=1 PYTHONPATH="$resources/app" "$py" -c "
+import sys
+from jobpilot.native.desktop import write_install_manifest
+print(write_install_manifest(sys.argv[1]), 'files in the install manifest')" "$resources"
 codesign --force --sign "$sign_id" $hardened "$app"
 codesign --verify --deep --strict "$app"
 
@@ -171,6 +177,8 @@ say "The disk image"
 mkdir -p "$build/dmg"
 ditto "$app" "$build/dmg/AXIOM.app"
 ln -s /Applications "$build/dmg/Applications"
+# Beside the app and the folder to drag it to: where someone without a Developer ID's first open is explained (docs/FRIENDS.md).
+cp "$root/desktop/dmg-readme.txt" "$build/dmg/Read me first.txt"
 hdiutil create -quiet -volname AXIOM -srcfolder "$build/dmg" -ov -format ULMO "$build/AXIOM.dmg"
 rm -rf "$build/dmg"
 if [ "$sign_id" != "-" ]; then

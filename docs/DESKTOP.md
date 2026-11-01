@@ -67,6 +67,8 @@ without a session `/api/snapshot` answers 401. If the dashboard reports that its
 
 **Links.** The window shows the app and nothing else. A link to an employer's page opens in the person's own browser, and a frame from anywhere else does not load.
 
+**When it stops.** The window tells an ordinary stop (`axiom stop`, a signal from another program) from a failure by the supervisor's own word: phase `stopped` with no reason shows "AXIOM has stopped" and a link to open it again, never "could not start". **An incomplete copy** is caught before anything starts, from `install-manifest.txt`. **Help** has Copy Diagnostics (no keys, addresses or mail) and Check for Updates (asks GitHub for the newest release, only ever opens its page).
+
 **Quit** is `axiom stop`: an alert if applications are in progress, then the same drain, for up to `SHUTDOWN_DRAIN_SECONDS + 30`, with the window saying so. Past the deadline the window closes and the supervisor finishes without it. Closing the window is not quitting.
 
 **If the window dies.** A force-quit or a crash must not leave an engine submitting real applications with nothing on screen, so the supervisor notices within five seconds and drains as usual (`tick_owner`). A window opened meanwhile waits for it, then starts. A checkout install sets no owner, and outlives its terminal.
@@ -202,6 +204,8 @@ What would lower it, none of it needing a downloaded binary to be run on the bui
 1. Double-clicking AXIOM says "Apple could not verify 'AXIOM' is free of malware", with only Done and Move to Trash. Control-click, Open no longer works on macOS 15.
 2. The person opens System Settings, Privacy & Security, scrolls to "AXIOM was blocked", clicks Open Anyway and enters their password.
 3. They open AXIOM again and confirm once more. It is remembered after that.
+
+The same steps, and a message to paste to a friend, are in [FRIENDS.md](FRIENDS.md); the disk image carries them as `Read me first.txt`.
 
 Someone comfortable in a terminal can skip that with `xattr -dr com.apple.quarantine /Applications/AXIOM.app`. Opened from the disk image rather than Applications, macOS runs it from a temporary read-only path, and the app says to move it first.
 
