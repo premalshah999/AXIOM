@@ -488,9 +488,11 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
 
   // The Gmail connected on the first step is the likeliest contact email: don't make anyone type it twice. It stays editable.
   const connectedEmail = linked.mailboxes?.[0]?.email;
+  // Also when the profile arrives after the mailbox does: reopened on a later step, the email stayed empty (2026-11-01).
+  const drafted = !!draft;
   useEffect(() => {
     if (connectedEmail) setDraft((d) => (d && !d.email.trim() ? { ...d, email: connectedEmail } : d));
-  }, [connectedEmail]);
+  }, [connectedEmail, drafted]);
 
   const go = useCallback((index: number) => {
     setError("");
