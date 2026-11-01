@@ -22,3 +22,29 @@ def test_holding_a_license_answers_only_the_question_about_holding_one(service):
                   "If the position requires driving, do you have a current and valid California Driver's License?"):
         answer = r.local(field(label, yes_no))
         assert answer is None or answer.value != "Yes", label
+
+
+def test_permission_to_contact_employers_is_not_prior_employment(service):
+    """JPL (Workday, 2026-11-01): "May we contact your present and previous employer(s)?" took No from "worked here before"."""
+    from jobpilot.answers import Resolver
+    from jobpilot.schemas import Profile
+
+    r = Resolver(Profile(facts={"previously_employed_here": "No"}), service.db, service.config,
+                 job={"ats": "custom", "url": "https://example.test/job"})
+    yes_no = ["Yes", "No"]
+    assert r.local(field("Have you previously been employed by ExampleSoft?", yes_no)).value == "No"
+    answer = r.local(field("May we contact your present and previous employer(s) after your offer acceptance?", yes_no))
+    assert answer is None or "fact:previously_employed_here" not in answer.evidence_ids
+
+
+def test_a_certification_naming_previous_employers_is_not_prior_employment(service):
+    """A certification ending "... I grant ExampleSoft permission to contact any previous employer(s) ..." was answered No."""
+    from jobpilot.answers import Resolver
+    from jobpilot.schemas import Profile
+
+    r = Resolver(Profile(facts={"previously_employed_here": "No"}), service.db, service.config,
+                 job={"ats": "custom", "url": "https://example.test/job"})
+    label = ("I affirm that all information in this document is complete. I grant ExampleSoft permission to contact any "
+             "previous employer(s) listed on this application, and any such employer to disclose my previous employment.")
+    answer = r.local(field(label, ["Yes", "No"]))
+    assert answer is None or answer.value != "No"

@@ -124,6 +124,12 @@ class IntentRulesMixin:
                 and not RECORD_STATEMENT.search(f["label"])
             ):
                 return None  # Willingness to undergo a check is consent, not the applicant's record.
+            if "previously_employed_here" in keys and re.search(
+                r"\b(?:may|can|could|do we have permission to) (?:we|the company)? ?contact\b|\bcontact your\b", f["label"], re.I
+            ):
+                # "May we contact your present and previous employer(s)?" is permission, not "have you worked here": its "No"
+                # opened a required "If no, when?" (JPL, Workday, 2026-11-01). The owner's reviewed answer decides it.
+                continue
             if "previously_employed_here" in keys and self.names_recorded_employer(f["label"]):
                 return None  # A recorded employer is named: the owner's "No" policy cannot apply.
             if "previously_employed_here" in keys and re.search(
