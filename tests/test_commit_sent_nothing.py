@@ -30,6 +30,14 @@ async def test_tracking_calls_alone_with_the_form_still_open_sent_nothing():
     assert await BrowserEngine.commit_sent_nothing(engine()) is True
 
 
+@pytest.mark.parametrize("path", ["/applicant-tracking/applications", "/api/ApplicantTracking/submit", "/track/apply"])
+async def test_a_write_that_names_the_application_is_not_tracking_because_of_a_word_in_its_path(path):
+    """"Applicant tracking" is what these systems are. Read as a pixel, the application's own POST was "nothing sent", the
+    reservation went back and the next run applied again."""
+    apply = {"method": "POST", "host": "ats.example.test", "path": path, "status": 200}
+    assert await BrowserEngine.commit_sent_nothing(engine(requests=[*TRACKING, apply])) is False
+
+
 async def test_a_write_the_employer_refused_with_a_client_error_accepted_nothing():
     refused = {"method": "POST", "host": "acme.fa.ocs.oraclecloud.com",
                "path": "/hcmRestApi/resources/latest/recruitingCECandidatePreviousExpItems", "status": 400}
