@@ -6,6 +6,7 @@
 .ag-heading p { color: var(--ink-2); margin-top: var(--space-2); max-width: 64ch; }
 .ag-heading > a { flex-shrink: 0; }
 .ag-status { border-left: 2px solid var(--line-strong); padding: var(--space-3) var(--space-4); background: var(--raised); }
+.ag-warning { border-left: 2px solid var(--bad); padding: var(--space-3) var(--space-4); background: var(--raised); font-weight: 600; }
 .ag-error { color: var(--bad); }
 .ag-meta { color: var(--ink-2); font-size: var(--text-meta); }
 .ag-projects { display: grid; gap: var(--space-3); }

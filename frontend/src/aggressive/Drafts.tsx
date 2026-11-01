@@ -32,6 +32,8 @@ export type DraftWorkspace = {
 
 const path = (id: string) => `/v2/resumes/aggressive/${encodeURIComponent(id)}`;
 
+const INSPIRED_WARNING = "The generated resume is an inspired version. Please verify every detail on this resume before using it for applications. We are constantly trying to help our users get interviews, and this could help you get an idea of what an ideal dream candidate would look like, by our standards.";
+
 /** The server invalidates approval on each project change. Refresh the parent
  * view after mutations; Update project PDF creates a new file without AI.
  * This component never approves an application. */
@@ -86,6 +88,7 @@ export function AggressiveDrafts({ workspaceId, jobId, needsUpdate, disabled, on
   const originals = data.source_doc.sections.filter(s => s.include && s.kind === "projects").flatMap(s => s.entries.filter(e => e.include));
   const unapproved = data.drafts.filter(d => data.selected_drafts.includes(d.id) && !d.confirmed).length;
   return <section className="ag-drafts" aria-label="Aggressive project drafts" aria-busy={busy}>
+    <p className="ag-warning" role="note">{INSPIRED_WARNING}</p>
     <div className="ag-heading">
       <div><h2>Choose your projects</h2><p>Drafts are included in this preview. Keep them, or switch to projects from your master resume.</p></div>
       <a className="ax-btn" target="_blank" rel="noreferrer" href={`/api${path(data.id)}/preview.pdf?revision=${data.revision}`}>Preview PDF</a>
@@ -108,7 +111,7 @@ export function AggressiveDrafts({ workspaceId, jobId, needsUpdate, disabled, on
       <p className="ag-meta">{d.confirmed ? "Approved project" : "Draft · Not built yet"} · {d.archetype}</p>
       <ul>{d.bullets.map((b, i) => <li key={i}>{b}</li>)}</ul>
       <details><summary>How to build it</summary><ol>{d.build_plan.map((s, i) => <li key={i}>{s}</li>)}</ol></details>
-      {!d.confirmed && <div className="ag-approve"><p>Approve this exact project content for your resume.</p>
+      {!d.confirmed && <div className="ag-approve"><p>Approve only once you've verified every detail of this project is accurate.</p>
         <Button disabled={busy || disabled} onClick={() => change(`/drafts/${encodeURIComponent(d.id)}/approve`, "POST", { approved: true, revision: data.revision })}>Approve project</Button></div>}
     </article>)}</div>
     <h3>Your original projects</h3>

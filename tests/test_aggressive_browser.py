@@ -259,6 +259,9 @@ async def test_drafts_approval_original_switch_and_exact_upload(page, tmp_path):
         assert await approval.is_disabled()
         assert await page.get_by_role("button", name="Approve project", exact=True).count() == 3
         assert "3 selected projects need" in await page.locator(".ag-status").inner_text()
+        warning = await page.locator(".ag-warning").inner_text()
+        assert "Please verify every detail on this resume before using it for applications." in warning
+        assert await page.get_by_text("Approve only once you've verified every detail of this project is accurate.").count() == 3
         pdf = await page.request.get(url + f"/api/v2/resumes/artifacts/{initial['artifact']['id']}/pdf")
         assert pdf.ok
         blocked = await page.request.post(
