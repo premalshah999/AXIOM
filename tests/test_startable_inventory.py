@@ -72,6 +72,7 @@ def test_a_job_at_the_employer_limit_is_held_with_the_dispatchers_own_message(se
 
 
 def test_nothing_startable_says_why_runners_are_idle_in_the_same_tally(service):
+    service.config.mimo_api_key = "unit-test-only"
     profile(service)
     for n in range(3):
         ready(service, n, title="Software Engineer Intern")

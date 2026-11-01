@@ -29,12 +29,28 @@ INVALID_WINDOW_SECONDS = 180
 # A provider that just "recovered" on a probe and answers unreadably again is not recovered.
 RECOVERY_GRACE_SECONDS = 90
 INVALID = "invalid_response"
+# Failures only the account's owner can end. They wait longer than an outage, say what to do, and a new key ends them at once.
+ACCOUNT_FAILURES = {"quota_exhausted", "auth_rejected"}
+ACCOUNT_REASONS = {
+    "auth_rejected": "The AI provider refused your API key. Paste a working key in Settings > Connections; saved work is kept",
+    "quota_exhausted": "Your AI provider account is out of credit. Top it up, or paste another key in Settings > Connections; "
+    "saved work is kept",
+}
 _invalid: dict[str, list[float]] = {}
 
 
 def key(config):
     identity = f"{config.llm_provider}:{config.llm_base_url}:{config.llm_model}"
     return "provider_health:" + hashlib.sha256(identity.encode()).hexdigest()
+
+
+def key_digest(config):
+    return hashlib.sha256(str(config.llm_api_key or "").encode()).hexdigest()[:16]
+
+
+def replaced_key(value, config):
+    """An account failure recorded against a key that is no longer the one in use says nothing about this one."""
+    return value.get("last_error") in ACCOUNT_FAILURES and value.get("key") != key_digest(config)
 
 
 def acquire(db, config, timeout):
@@ -44,6 +60,9 @@ def acquire(db, config, timeout):
         row = s.get(Setting, key(config))
         value = dict(row.value) if row else {}
         generation = value.get("generation", 0)
+        if value.get("retry_at") and replaced_key(value, config):
+            row.value = {"generation": generation, "failures": 0}
+            return generation, None
         if not value.get("retry_at"):
             return generation, None
         if value["retry_at"] > at:
@@ -78,12 +97,14 @@ def finish(db, config, ticket, *, failure=None, retry_after=None):
             return
         failures = value.get("failures", 0) + 1
         value = {"generation": generation, "failures": failures, "last_error": failure}
-        if failures >= 2 or lease or failure in {"rate_limited", "quota_exhausted"}:
+        if failure in ACCOUNT_FAILURES:
+            value["key"] = key_digest(config)
+        if failures >= 2 or lease or failure == "rate_limited" or failure in ACCOUNT_FAILURES:
             seconds = (
                 (max(1, min(3600, retry_after)) if retry_after is not None else 60)
                 if failure == "rate_limited"
                 else QUOTA_COOLDOWN_SECONDS
-                if failure == "quota_exhausted"
+                if failure in ACCOUNT_FAILURES
                 else TRANSPORT_COOLDOWN_SECONDS
                 if failure == "transport_error"
                 else COOLDOWN_SECONDS
@@ -156,6 +177,8 @@ def status(db, config):
     at = time.time()
     retry = value.get("retry_at")
     state = "ready"
+    if retry and replaced_key(value, config):
+        retry = None
     if retry:
         state = "cooldown" if retry > at else "recovery_ready"
         if value.get("lease_until", 0) > at:
@@ -184,13 +207,18 @@ def dispatch_gate(db, config):
     """Whether, and how widely, new work may start: the model's cooldown first, then the host (host_health.check)."""
     chosen = selected(db, config).values()
     if any(s["state"] in {"cooldown", "recovering"} for s in chosen):
-        unreadable = any(s["state"] in {"cooldown", "recovering"} and s.get("last_error") == INVALID for s in chosen)
+        stuck = [s.get("last_error") for s in chosen if s["state"] in {"cooldown", "recovering"}]
+        unreadable = INVALID in stuck
+        account = next((ACCOUNT_REASONS[e] for e in stuck if e in ACCOUNT_REASONS), None)
         return host_health.Gate(
             0,
             "provider_unavailable",
-            "The selected model keeps answering with replies that cannot be read (invalid response); saved work is retained"
-            if unreadable
-            else "The selected model is cooling down after failed requests; saved work is retained",
+            account
+            or (
+                "The selected model keeps answering with replies that cannot be read (invalid response); saved work is retained"
+                if unreadable
+                else "The selected model is cooling down after failed requests; saved work is retained"
+            ),
         )
     # HTTP acquire() already allows exactly one productive recovery request.
     # A browser can spend time on local fields/mail before needing the model;
