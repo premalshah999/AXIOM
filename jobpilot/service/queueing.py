@@ -480,7 +480,7 @@ class QueueingMixin:
                 source = s.get(Run, recovery_source_run)
                 control = s.get(Setting, "control").value
                 from ..pipeline_comparison import SPECIALIST, assign_pool
-                from ..recovery import specialist_attempts
+                from ..recovery import MAIL_CAUSES, specialist_attempts
 
                 specialist = source and assign_pool(s, job, source) == SPECIALIST
                 exhausted = (
@@ -494,7 +494,8 @@ class QueueingMixin:
                     not retry
                     or mode != "submit"
                     or control.get("paused")
-                    or not profile.autonomous
+                    # A run waiting on an employer's mail is the same attempt, whatever the switch says (recovery.MAIL_CAUSES).
+                    or not (profile.autonomous or (recovery_row and recovery_row.value.get("cause") in MAIL_CAUSES))
                     or not recovery_row
                     or not recovery_row.value.get("scheduled")
                     or recovery_row.value.get("source_run_id") != recovery_source_run

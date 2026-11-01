@@ -98,11 +98,11 @@ class ReviewsMixin:
                     code="paused",
                     not_before=temporary_time(),
                 )
-            if (
-                source.mode != "submit"
-                or not source.packet.get("match_approved")
-                or not source.packet.get("profile", {}).get("autonomous")
-            ):
+            # Not `autonomous`: that switch decides whether jobs start without being asked for, and this one already started.
+            # It is off for everyone who leaves onboarding's default, so on a new install every link or reset that took longer
+            # than three seconds to arrive matched here and stopped: the run read "waiting for an email" with the mail sitting
+            # in the vault, then "did not arrive", on every platform. Only the owner's own database had it on (2026-11-01).
+            if source.mode != "submit" or not source.packet.get("match_approved"):
                 return
             require_intake(s, source.job_id)
             from ..application_budget import require_allowance

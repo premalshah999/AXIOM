@@ -89,6 +89,9 @@ REPAIR_STRATEGY_VERSION = "owned-review-repair-observation-v4"
 # Browser/control repairs have only eight minutes including all waits. Provider
 # and site outages retain their own admission/circuit gates.
 LOCAL_RETRY_DELAY_SECONDS = 30
+# Waits on the employer's mail: the run the person started continues once its mail or sender is free. Nothing here is a new
+# decision to apply, so the "apply on its own" switch, off on a new install, has no say.
+MAIL_CAUSES = {"email_matched", "sender_busy", "reset_cooldown"}
 SPECIALIST_CAUSES = {
     "control_timeout",
     "operation_timeout",
@@ -472,7 +475,7 @@ def schedule_recovery(session, config, run, result):
         or run.state not in {"waiting_browser", "timed_out"}
         or run.mode != "submit"
         or not run.packet.get("match_approved")
-        or not run.packet.get("profile", {}).get("autonomous")
+        or not (run.packet.get("profile", {}).get("autonomous") or cause in MAIL_CAUSES)
         or not config.recovery_max_attempts
     ):
         return
