@@ -19,15 +19,15 @@ function FunnelPanel({ data, error, retry, confirmed }: { data: Funnel | null; e
   const { go, counts } = useWorkspace();
   const stages: { label: string; n: number; help: string; to: AnyRoute; lit?: boolean }[] = data
     ? [
-        { label: "Found", n: data.discovered, help: "Every posting AXIOM has found, all time.", to: { view: "jobs", tab: "discovered", filter: "all" } },
-        { label: "Passed fit", n: data.eligible, help: "Passed the fit check, or you picked it yourself.", to: { view: "jobs", tab: "discovered", filter: "all" } },
-        { label: "Started", n: data.applied, help: "An application started. Not all of these reached the final step.", to: { view: "jobs", tab: "applying" } },
-        { label: "Applied", n: confirmed ?? 0, help: "Proven by the employer's confirmation page or an email from the employer.", to: { view: "ledger" }, lit: true },
+        { label: "Discovered", n: data.discovered, help: "Every posting AXIOM has found, all time.", to: { view: "jobs", tab: "discovered" } },
+        { label: "Eligible", n: data.eligible, help: "Passed the fit check, or you picked it yourself.", to: { view: "jobs", tab: "discovered", filter: "eligible" } },
+        { label: "Applied", n: data.applied, help: "An application started. Not all of these reached the final step.", to: { view: "jobs", tab: "pipeline" } },
+        { label: "Confirmed", n: confirmed ?? 0, help: "Proven by the employer's confirmation page or an email from the employer.", to: { view: "ledger" }, lit: true },
       ]
     : [];
   const top = Math.max(1, ...stages.map((s) => s.n));
   return (
-    <Panel title="From found to applied">
+    <Panel title="From discovered to confirmed">
       {error && !data ? (
         <ErrorLine error={error} retry={retry} />
       ) : !data ? (
@@ -73,8 +73,8 @@ function ScoreRow({ row, target, below }: { row: SuccessReport["platforms"][numb
       <button
         type="button"
         className="ov-score-row"
-        onClick={() => go({ view: "ledger", q: row.ats })}
-        title={`See what was applied on ${platformName(row.ats)}`}
+        onClick={() => go({ view: "jobs", tab: "pipeline", q: row.ats })}
+        title={`See ${plural(row.tried, "job")} on ${platformName(row.ats)}`}
       >
         <span className="ov-score-name">
           {platformName(row.ats)}
@@ -208,19 +208,5 @@ export function MoreLink({ children, onClick }: { children: React.ReactNode; onC
       {children}
       <ArrowRight size={13} aria-hidden="true" />
     </button>
-  );
-}
-
-/**
- * Settings › Details: everything Overview used to show beside its four numbers, for when you want to check it. The funnel (all
- * time), the success figure by platform against the target, and how each is counted. Nothing here is needed to use the app.
- */
-export function Details() {
-  const ledger = usePoll<{ applications: Success[] }>((signal) => api("/successful-applications", "GET", undefined, signal), 60000);
-  return (
-    <>
-      <p className="ov-caption">For checking the numbers. Overview shows only Applied, Applying, Needs you and Success.</p>
-      <Results ledger={ledger.data?.applications ?? null} />
-    </>
   );
 }
