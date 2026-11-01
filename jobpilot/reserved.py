@@ -22,6 +22,11 @@ by its company name, word by word, or by its posting's host and path:
   part of a shared platform's host ("nvidia.*.myworkdayjobs.com") and a leading path ("jobs.ashbyhq.com/openai").
 
 The first section that lists the employer is the job's section (Apple and Google are FAANG before MANGO).
+
+Every user manages their own list (owner, 2026-11-01: "add reserved category for users, where users could actually reserve job
+boards, companies they like"): the section YOURS holds what the user reserves, by company name or by a job board's link, from a
+row on the Job board or from Needs you › Reserved employers, and is held whatever the switch says. FAANG, MANGO and the Big Four
+are only the defaults a new user starts with: held only while the switch is on, and removable one by one.
 """
 
 from dataclasses import dataclass
@@ -40,6 +45,7 @@ from .admission import QueueBlocked
 from .db import Job, Setting, now
 
 KEY = "reserved_employers"
+YOURS = "mine"  # the section of what this user reserved; always held
 # reserved_approval:<job id> — the owner's permission for that one job ({"at", "section", "employer"}).
 APPROVAL = "reserved_approval:"
 CODE = "reserved_employer"
@@ -104,8 +110,9 @@ class Section(BaseModel):
 
 
 class Rules(BaseModel):
-    """The owner's reserved employers (setting `reserved_employers`). Off unless the owner turns it on in Needs you ›
-    Reserved (owner 2026-10-28: "no blockages till I tell you")."""
+    """The user's reserved employers (setting `reserved_employers`). `enabled` holds the suggested sections (FAANG, MANGO,
+    Big Four), off unless the user turns it on in Needs you › Reserved (owner 2026-10-28: "no blockages till I tell you");
+    the user's own section (YOURS) is held whatever it says."""
 
     enabled: bool = False
     sections: list[Section] = Field(default_factory=list, max_length=12)
@@ -191,6 +198,76 @@ DEFAULT = {
 }
 
 
+def active(rules):
+    """The sections whose employers are held: all of them while the switch is on, else only the user's own."""
+    return [section for section in rules.sections if rules.enabled or section.id == YOURS]
+
+
+def employer_of(text):
+    """(name, sites) for what a user typed or the Job board gave: a company's name, or a link to its job board or career
+    site. A link keeps its host and path ("boards.greenhouse.io/example"); the name is the board's name in the path, else
+    the host's main label. A bare shared platform ("boards.greenhouse.io") would hold every employer on it, so it is refused."""
+    from .board_data import ATS_DOMAINS
+
+    text = " ".join(str(text or "").split())
+    if not text:
+        raise ValueError("Type a company name or paste a link to its job board")
+    site = re.sub(r"^www\.", "", re.sub(r"^[a-z]+://", "", text.casefold()).split("?")[0].split("#")[0].rstrip("/"))
+    if " " in text or not SITE.match(site):
+        return text[:80], []
+    host, _, path = site.partition("/")
+    shared = next((d for d in ATS_DOMAINS if host == d or host.endswith("." + d)), "")
+    tenant = host.removesuffix(shared).strip(".") if shared else ""
+    if shared and tenant in {"", "www", "boards", "job-boards", "jobs", "apply", "careers"}:
+        # A platform that names the employer in the path (boards.greenhouse.io/example): the first part is the board.
+        board = path.split("/")[0]
+        if not board:
+            raise ValueError(f"{shared} hosts many employers. Paste the company's own board link, the one that ends with its name.")
+        name, site = board, f"{host}/{board}"
+    elif shared:
+        name, site = tenant.split(".")[0], host  # the employer's own subdomain (example.wd5.myworkdayjobs.com)
+    else:
+        # The employer's own site, or a platform this app does not know: when the first part of the path names a board
+        # (boards.example.test/acme) keep it, so a host shared by many employers is not held whole.
+        board = path.split("/")[0]
+        named = board and not re.fullmatch(r"[a-z]{2}(?:[-_][a-z]{2})?|jobs?|careers?|openings?|search|positions?|vacancies|about|us|company|join|work|hiring|opportunities|apply|talent|index\.html?", board)
+        main = host.split(".")[-2] if host.count(".") else host
+        site = f"{host}/{board}" if named else host
+        name = board if named and host.split(".")[0] in {"boards", "job-boards", "jobs", "apply", "hire", "careers", "work"} else main
+    return name.replace("-", " ").replace("_", " ").title()[:80], [site]
+
+
+def with_employer(rules, name, sites=(), aliases=()):
+    """`rules` with the employer reserved under YOURS (created when missing). An employer already reserved in any section
+    stays where it is, and its new sites join it."""
+    key = words(name)
+    out = rules.model_copy(deep=True)
+    for section in out.sections:
+        for employer in section.employers:
+            if words(employer.name) == key:
+                employer.sites = _clean([*employer.sites, *sites], 200)
+                return out
+    mine = next((section for section in out.sections if section.id == YOURS), None)
+    if mine is None:
+        mine = Section(id=YOURS, label="Yours")
+        out.sections.insert(0, mine)
+    mine.employers.append(Employer(name=name, aliases=list(aliases), sites=list(sites)))
+    return Rules.model_validate(out.model_dump())
+
+
+def without_employer(rules, name):
+    """(rules, count): `rules` without the employer named `name` in any section (compared by its words), and how many were
+    removed. An emptied YOURS stays, so the user's list keeps its place."""
+    key = words(name)
+    out = rules.model_copy(deep=True)
+    removed = 0
+    for section in out.sections:
+        keep = [employer for employer in section.employers if words(employer.name) != key]
+        removed += len(section.employers) - len(keep)
+        section.employers = keep
+    return out, removed
+
+
 @dataclass(frozen=True)
 class Match:
     section: str
@@ -220,7 +297,7 @@ class Matcher:
         self.wildcards = []  # (order, host pattern, path, match)
         company_terms, site_terms = set(), set()
         order = 0
-        for section in rules.sections if rules.enabled else ():
+        for section in active(rules):
             for employer in section.employers:
                 match = Match(section.id, section.label, employer.name)
                 names = [words(name) for name in (employer.name, *employer.aliases)]

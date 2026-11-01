@@ -190,6 +190,14 @@
 .bd-job > .ax-mono {
   grid-row: 1 / span 2;
 }
+.bd-cell {
+  min-width: 0;
+}
+.bd-more {
+  display: block;
+  margin: -2px 0 var(--space-2) 44px;
+  font-size: var(--text-meta);
+}
 .bd-title,
 .bd-sub {
   min-width: 0;

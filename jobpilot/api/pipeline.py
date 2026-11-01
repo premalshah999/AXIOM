@@ -432,7 +432,7 @@ def reserved_page(session, section="", q="", page=1, size=25):
     """Jobs › Reserved: the jobs held for the owner's approval, one section (FAANG, MANGO, Big Four...) at a time, newest
     first, with every section's count (whatever the search: "Approve all" covers them all). The first section with held
     jobs when none is chosen."""
-    from ..reserved import rules as saved_rules
+    from ..reserved import active as reserved_active, rules as saved_rules
 
     every = awaiting_approval(session)
     shown = awaiting_approval(session, *_search(q)) if _search(q) else every
@@ -447,7 +447,7 @@ def reserved_page(session, section="", q="", page=1, size=25):
             "employers": list(dict.fromkeys(employer.name for employer in item.employers)),
             "held": held.get(item.id, 0),
         }
-        for item in (rules.sections if rules.enabled else [])
+        for item in reserved_active(rules)
     ]
     ids = [item["id"] for item in sections]
     chosen = section if section in ids else next((item["id"] for item in sections if item["held"]), ids[0] if ids else "")
@@ -456,7 +456,7 @@ def reserved_page(session, section="", q="", page=1, size=25):
     pages = max(1, -(-len(items) // size))
     page = min(max(1, int(page)), pages)
     return {
-        "enabled": rules.enabled,
+        "enabled": bool(sections),
         "sections": sections,
         "section": chosen,
         "rows": rows_for(session, items[(page - 1) * size : page * size]),

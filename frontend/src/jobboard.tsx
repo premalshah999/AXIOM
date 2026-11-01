@@ -1,7 +1,7 @@
 // Job board: which real, open postings the app found, and why each one fits or doesn't (owner, 2026-11-01: "make the job board good
 // and legit"). Pages, filters and exact counts come from the server (GET /api/board, jobpilot/board_view.py), the same reading the
 // Queue is made from, so In queue 4 here is number 4 there. Closed, stale and duplicate rows never reach it.
-import { ExternalLink, FilterX, Plus, Radar, RefreshCw, SearchX } from "lucide-react";
+import { ExternalLink, FilterX, Plus, Radar, RefreshCw, SearchX, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { addToQueue, api, moveToFront } from "./api";
 import { useSelection } from "./bulk";
@@ -12,7 +12,7 @@ import { OPEN_JOB_LINK } from "./jobintake";
 import { Pagination, type Paging } from "./pagination";
 import { TopActions, TopLine } from "./shell/Shell";
 import type { BoardFacet, BoardPage, BoardRow } from "./types";
-import { Button, Empty, Listbox, Monogram, Table, type Column } from "./ui/index";
+import { Button, Dialog, Empty, Input, Listbox, Monogram, Table, type Column } from "./ui/index";
 import { LoadError, Notice, SearchBox } from "./worktools";
 import "./styles/queue.css";
 
@@ -64,6 +64,9 @@ export function BoardView() {
   const [place, setPlace] = useDraft("board-place", "all");
   const [posted, setPosted] = useDraft("board-posted", "all");
   const [platform, setPlatform] = useDraft("board-platform", "all");
+  const [level, setLevel] = useDraft("board-level", "all");
+  // Grouped by company is the default: a company with hundreds of postings shows its best few and "N more at X".
+  const [grouped, setGrouped] = useDraft("board-group", true);
   const [sort, setSort] = useDraft<Sort>("board-sort", "fit");
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(25);
@@ -74,8 +77,8 @@ export function BoardView() {
     const timer = window.setTimeout(() => setQ(query.trim()), 250);
     return () => window.clearTimeout(timer);
   }, [query]);
-  useEffect(() => setPage(1), [q, fit, role, company, place, posted, platform, sort, size]);
-  const key = new URLSearchParams({ q, fit, role, company, place, posted, platform, sort, page: String(page), size: String(size) }).toString();
+  useEffect(() => setPage(1), [q, fit, role, level, company, place, posted, platform, sort, grouped, size]);
+  const key = new URLSearchParams({ q, fit, role, level, company, place, posted, platform, sort, group: grouped ? "1" : "0", page: String(page), size: String(size) }).toString();
   const board = usePoll<BoardPage & { key: string }>(
     async (signal) => ({ ...(await api<BoardPage>(`/board?${key}`, "GET", undefined, signal)), key }),
     15000,
@@ -93,11 +96,12 @@ export function BoardView() {
   const rows = useMemo(() => b?.rows ?? [], [b]);
   const selection = useSelection();
   const paging: Paging = { items: rows, total: b?.total ?? 0, page: b?.page ?? page, pages: b?.pages ?? 1, size, initialSize: 25, setPage, setSize };
-  const filtered = !!q || fit !== "match" || role !== "all" || company !== "all" || place !== "all" || posted !== "all" || platform !== "all";
+  const filtered = !!q || fit !== "match" || role !== "all" || level !== "all" || company !== "all" || place !== "all" || posted !== "all" || platform !== "all";
   const clear = () => {
     setQuery("");
     setFit("match");
     setRole("all");
+    setLevel("all");
     setCompany("all");
     setPlace("all");
     setPosted("all");
@@ -127,6 +131,35 @@ export function BoardView() {
       },
       (out) => out && `${plural(out.added, "job")} added to the queue.${out.refused ? ` ${out.refused} could not be added.` : ""}`,
     );
+  const reserve = (r: BoardRow) =>
+    run(
+      "reserve:" + r.id,
+      async () => {
+        const out = r.reserved
+          ? await api("/reserved/employers?name=" + encodeURIComponent(r.reserved), "DELETE")
+          : await api("/reserved/employers", "POST", { text: r.company });
+        await again();
+        return out;
+      },
+      () =>
+        r.reserved
+          ? `${r.reserved} is no longer reserved. Its jobs apply like any other.`
+          : `${r.company} is reserved. AXIOM still finds and ranks its jobs, and applies only after you approve each one.`,
+    );
+  const [adding, setAdding] = useState(false);
+  const [boardLink, setBoardLink] = useDraft("board-add-link", "");
+  const addBoard = () =>
+    run(
+      "board",
+      async () => {
+        const out = await api<{ name: string }>("/job-board/sources/link", "POST", { url: boardLink.trim() });
+        setBoardLink("");
+        setAdding(false);
+        void refresh();
+        return out;
+      },
+      (out) => out && `${out.name} added. It is searched on the schedule; press Search now to read it at once.`,
+    );
   const scan = () =>
     run(
       "scan",
@@ -151,6 +184,7 @@ export function BoardView() {
       truncate: true,
       min: 220,
       cell: (r) => (
+        <div className="bd-cell">
         <button
           type="button"
           className="bd-job"
@@ -175,6 +209,19 @@ export function BoardView() {
             <StateCell r={r} />
           </span>
         </button>
+        {r.more > 0 && (
+          <button
+            type="button"
+            className="ax-link bd-more"
+            onClick={(e) => {
+              e.stopPropagation();
+              setCompany(r.company);
+            }}
+          >
+            {r.more.toLocaleString()} more at {r.company}
+          </button>
+        )}
+        </div>
       ),
     },
     { key: "fit", header: "Fit", num: true, hideBelow: 600, cell: (r) => (r.score == null ? "—" : r.score) },
@@ -217,6 +264,22 @@ export function BoardView() {
                 Queue
               </Button>
             )}
+            <Button
+              size="sm"
+              variant="ghost"
+              className="ax-lead"
+              disabled={pending !== null}
+              loading={pending === "reserve:" + r.id}
+              icon={<ShieldCheck size={13} aria-hidden="true" />}
+              title={
+                r.reserved
+                  ? `${r.reserved} is reserved: AXIOM applies there only after you approve each job. Press to stop holding it.`
+                  : `Reserve ${r.company}: AXIOM finds and ranks its jobs, and applies only after you approve each one.`
+              }
+              onClick={() => reserve(r)}
+            >
+              {r.reserved ? "Unreserve" : "Reserve"}
+            </Button>
             {link && (
               <a className="ax-btn is-sm ax-lead bd-link" href={link} target="_blank" rel="noreferrer noopener" title="Open the employer's posting in your browser">
                 Posting <ExternalLink size={12} aria-hidden="true" />
@@ -237,9 +300,38 @@ export function BoardView() {
     value === "all" || options.some((o) => o.value === value) ? options : [...options, { value, label: value, count: 0 }];
   return (
     <div className="ax-page ax-page-fill">
+      <Dialog
+        open={adding}
+        onClose={() => setAdding(false)}
+        title="Add a company's job board"
+        sub="Paste the link to its list of open roles, or to any one posting on it. AXIOM reads the board on its schedule."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setAdding(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit" form="add-board-link" loading={pending === "board"} disabled={!boardLink.trim()}>
+              Add board
+            </Button>
+          </>
+        }
+      >
+        <form
+          id="add-board-link"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (boardLink.trim()) void addBoard();
+          }}
+        >
+          <Input label="Link" value={boardLink} onChange={(e) => setBoardLink(e.target.value)} placeholder="https://boards.greenhouse.io/example" autoFocus />
+        </form>
+      </Dialog>
       <TopActions>
         <Button variant="secondary" icon={<Plus size={15} aria-hidden="true" />} onClick={() => window.dispatchEvent(new Event(OPEN_JOB_LINK))}>
           Add a link
+        </Button>
+        <Button variant="secondary" onClick={() => setAdding(true)}>
+          Add a board
         </Button>
         <Button loading={searching || pending === "scan"} disabled={pending !== null || !b?.enabled || !snapshot.config.workers_enabled} onClick={scan} icon={<RefreshCw size={14} aria-hidden="true" />}>
           {searching ? "Searching…" : "Search now"}
@@ -249,6 +341,23 @@ export function BoardView() {
         <TopLine>
           {b.all.toLocaleString()} open US postings from the last {span}, with closed ones and duplicates left out
           {progress ? `. Searching: ${progress}.` : b.searched_at ? `. Last searched ${ago(b.searched_at, now)}.` : "."}{" "}
+          {grouped && company === "all" ? (
+            <>
+              Each company shows its best {b.per_company ?? 3} (
+              <button type="button" className="ax-link" onClick={() => setGrouped(false)}>
+                show every job
+              </button>
+              ).{" "}
+            </>
+          ) : !grouped ? (
+            <>
+              All jobs are shown (
+              <button type="button" className="ax-link" onClick={() => setGrouped(true)}>
+                group by company
+              </button>
+              ).{" "}
+            </>
+          ) : null}
           <button type="button" className="ax-link" onClick={() => go({ view: "settings", tab: "discovery" })}>
             What it looks for
           </button>
@@ -264,6 +373,7 @@ export function BoardView() {
           <SearchBox value={query} onChange={setQuery} label="Search the job board" placeholder="Role, company or city" />
           <Listbox label="Fit" value={fit} options={(b?.facets.fit?.length ? b.facets.fit : [{ value: "match", label: "Good fits" }]) as { value: Fit; label: string; count?: number }[]} onChange={setFit} />
           <Listbox prefix="Role" label="Role" value={role} options={keep(role, all("Any", b?.facets.role))} onChange={setRole} />
+          <Listbox prefix="Level" label="Level" value={level} options={keep(level, all("Any", b?.facets.level))} onChange={setLevel} />
           <Listbox prefix="Company" label="Company" value={company} options={keep(company, all("Any", b?.facets.company))} onChange={setCompany} />
           <Listbox prefix="Location" label="Location" value={place} options={keep(place, all("Any", b?.facets.place))} onChange={setPlace} />
           <Listbox prefix="Posted" label="Posted" value={posted} options={all("Any", b?.facets.posted)} onChange={setPosted} />

@@ -754,6 +754,10 @@ export type BoardRow = {
   can_add: boolean;
   level: string;
   approval: "" | "over" | "reserved";
+  /** The reserved employer this row's company is on the user's list as ("" when it is not). */
+  reserved: string;
+  /** Grouped by company: how many more of this company's rows the page hides after this one. */
+  more: number;
 };
 export type BoardFacet = { value: string; label: string; count: number };
 export type BoardPage = {
@@ -772,7 +776,9 @@ export type BoardPage = {
   scan_total?: number;
   enabled: boolean;
   window: number;
-  facets: Record<"fit" | "role" | "company" | "place" | "platform" | "posted", BoardFacet[]>;
+  grouped?: boolean;
+  per_company?: number;
+  facets: Record<"fit" | "role" | "level" | "company" | "place" | "platform" | "posted", BoardFacet[]>;
 };
 // GET /api/jobs/{id}/posting: the job panel's posting.
 export type JobPosting = { text: string; link: string; posted_at: string; dated: boolean; source: string; level: string; listed: boolean | null; last_seen: string | null };

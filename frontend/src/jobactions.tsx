@@ -70,6 +70,21 @@ function useJobActions(row: JobRow, detailed = false) {
       },
       (r) => r?.message,
     );
+  // The user's own reserved list: hold this company (or stop holding it); AXIOM then applies only after they approve each job.
+  const reserve = () =>
+    run(
+      "reserve",
+      async () => {
+        const out = row.reserved
+          ? await api("/reserved/employers?name=" + encodeURIComponent(row.reserved.employer), "DELETE")
+          : await api("/reserved/employers", "POST", { text: row.job.company });
+        void refresh();
+        return out;
+      },
+      row.reserved
+        ? `${row.reserved.employer} is no longer reserved. Its jobs apply like any other.`
+        : `${row.job.company} is reserved. AXIOM still finds and ranks its jobs, and applies only after you approve each one.`,
+    );
   const withdraw = () =>
     run(
       "withdraw",
@@ -130,6 +145,7 @@ function useJobActions(row: JobRow, detailed = false) {
   else if (run_ && RETRYABLE.has(run_.state) && !needs && !committed)
     acts.push({ id: "retry", label: "Retry", tone: "primary", run: () => control("resume") });
   if (detailed && needs) acts.push({ id: "pause", label: "Pause", run: () => control("pause") });
+  if (row.job.company && !row.job.demo) acts.push({ id: "reserve", label: row.reserved ? `Stop reserving ${row.reserved.employer}` : `Reserve ${row.job.company}`, run: reserve });
   const deletable = !run_ || !["confirmed", "already_applied", "submitting"].includes(run_.state);
   if (deletable && (detailed || !committed))
     acts.push({

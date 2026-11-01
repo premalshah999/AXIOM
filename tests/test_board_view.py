@@ -74,7 +74,7 @@ def test_every_filter_count_equals_the_rows_it_opens(service):
     listing(service, "c", company="Beta Example", title="Software Engineer", location="Remote", ats="workday", age=24 * 10)
     listing(service, "d", company="Gamma Example", title="Mechanical Engineer", status="skipped", score=20, reason="Mechanical role; not your field.")
     facets = rows(service, fit="all")["facets"]
-    for name, arg in (("company", "company"), ("place", "place"), ("platform", "platform"), ("role", "role"), ("posted", "posted"), ("fit", "fit")):
+    for name, arg in (("company", "company"), ("place", "place"), ("platform", "platform"), ("role", "role"), ("posted", "posted"), ("fit", "fit"), ("level", "level")):
         for option in facets[name]:
             assert rows(service, **{"fit": "all", arg: option["value"]})["total"] == option["count"], (name, option)
 

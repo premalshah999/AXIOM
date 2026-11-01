@@ -192,3 +192,92 @@ def admitted_by_title(title, reason="", roles=()):
     if VISA_BAR.search(NOT_A_BAR.sub(" ", reason or "")):
         return False
     return bool(matching_role(title, specific))
+
+
+# The job board's level filter (owner, 2026-11-01: "role level filters in job board"). One place reads a posting's level, from
+# its title first and its text second, and says "Unknown" when neither states one. Nothing else guesses a level.
+LEVELS = ("Intern", "New grad", "Entry", "Mid", "Senior", "Unknown")
+_INTERN = re.compile(r"\b(?:interns?|internships?|co-?op|apprentice(?:ship)?s?)\b", re.I)
+_NEW_GRAD = re.compile(
+    r"\b(?:new[ -]?(?:college[ -])?grad(?:uate)?s?|recent graduates?|(?:university|college)[ -]?grad(?:uate)?s?|early[ -]?career|"
+    r"graduate (?:engineer|developer|scientist|analyst|program(?:me)?|software|data|trainee|rotational)|"
+    r"(?:engineer|developer|scientist|analyst),? (?:new )?grad)\b",
+    re.I,
+)
+_SENIOR_ASSOCIATE = r"associate(?:\s+(?:vice|general|managing))|associate (?:director|principal|partner|dean|professor)"
+_ENTRY = re.compile(
+    r"\b(?:entry[ -]?level|junior|jr\.?|level\s*(?:1|i)|(?:engineer|developer|scientist|analyst|swe|sde|specialist|"
+    r"programmer|technician|designer|consultant)\s*(?:1|i)(?![\w+])|associate\s+(?:software|data|machine|ai|ml|cloud|"
+    r"backend|frontend|full|systems?|network|security|product|business|research|analytics?)?\s*(?:engineer|developer|"
+    r"scientist|analyst|consultant|programmer))\b",
+    re.I,
+)
+_MID = re.compile(
+    r"\b(?:mid[ -]?level|intermediate|(?<=[,(–-] )mid(?=\s*\)?$)|(?:engineer|developer|scientist|analyst|swe|sde|specialist|programmer|designer|"
+    r"consultant)\s*(?:2|ii)(?![\w+]))\b",
+    re.I,
+)
+_SENIOR = re.compile(
+    r"\b(?:senior|sr\.?|staff|principal|prin|distinguished|lead|director|head of|vp|vice president|avp|fellow|chief|architect|"
+    r"(?:engineer|developer|scientist|analyst|swe|sde|specialist|programmer|designer|consultant)\s*(?:[3-9]|iii|iv|v)(?![\w+])|"
+    r"engineering manager|manager,? engineering|group manager|general manager)\b",
+    re.I,
+)
+# "5+ years of experience", "3-5 years' experience", "Five years of ... experience": the stated minimum.
+_SPELLED = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+_YEARS = re.compile(
+    r"\b(?P<low>\d{1,2}|" + "|".join(_SPELLED) + r")\b(?:\s*\(\d{1,2}\))?\s*(?:\+|(?:[-–—]|to)\s*\d{1,2}\+?)?\s*"
+    r"(?:years?|yrs?)[’']?\s+(?:[-–—:]\s+)?(?:[a-z][\w/,&-]*\s+){0,8}?(?:experience|exp\b)",
+    re.I,
+)
+# A mention that is not the job's own minimum: a preferred skill (around it), or what a higher degree substitutes (before it: "a
+# Master's with 3 years" is the alternative, "a Bachelor's with 5 years or a Master's" names 5 first).
+_OPTIONAL = re.compile(r"preferred|nice.to.have|bonus|ideally|a plus|desired", re.I)
+_ALTERNATIVE = re.compile(r"master|ph\.?d|doctora|advanced degree", re.I)
+# Only an experience claim about the candidate: a company's "60 years of experience across industries" is not one.
+_MOST_YEARS = 20
+_ENTRY_TEXT = re.compile(r"\bentry[ -]?level\b|\bno (?:prior )?experience (?:is )?(?:required|necessary)\b", re.I)
+_BULLET_YEARS = re.compile(r"(?m)^[\W_]*(?P<low>\d{1,2})\s*\+?\s*(?:years?|yrs?)\b")
+
+
+def stated_years(text):
+    """The largest minimum of experience a posting's text requires, in years, or None: the headline requirement ("5+ years") outranks
+    the skill-by-skill ones under it ("3+ years of Python"). A mention is read within its own line; preferred skills, a higher
+    degree's alternative and absurd figures (a company's age) are left out."""
+    text = text or ""
+    found = []
+    for match in [*_YEARS.finditer(text), *_BULLET_YEARS.finditer(text)]:
+        start, end = text.rfind("\n", 0, match.start()) + 1, text.find("\n", match.end())
+        end = min(end if end >= 0 else len(text), match.end() + 80)
+        if _OPTIONAL.search(text[max(start, match.start() - 120) : end]) or _ALTERNATIVE.search(text[max(start, match.start() - 45) : match.start()]):
+            continue
+        if re.search(r"education|school|study|degree", match.group(0), re.I):  # "4 years of relevant education and/or experience"
+            continue
+        low = match["low"].casefold()
+        years = _SPELLED.get(low) or int(low)
+        if years <= _MOST_YEARS:
+            found.append(years)
+    return max(found) if found else None
+
+
+def career_level(title, text="", stored=""):
+    """A posting's level, one of LEVELS. The title decides when it says a level ("Senior", "Engineer II", "New Grad",
+    "Intern"); otherwise the posting's stated years of experience (0-1 entry, 2-4 mid, 5 or more senior) or its own
+    'entry level' wording; otherwise what the feed called it ('New grad'); otherwise "Unknown", never a guess."""
+    title = " ".join(str(title or "").split())
+    if _INTERN.search(title):
+        return "Intern"
+    if _NEW_GRAD.search(title):
+        return "New grad"
+    if _SENIOR.search(title) or re.search(_SENIOR_ASSOCIATE, title, re.I):
+        return "Senior"
+    if _MID.search(title):
+        return "Mid"
+    if _ENTRY.search(title):
+        return "Entry"
+    years = stated_years(text)
+    if years is not None:
+        return "Entry" if years <= 1 else "Mid" if years <= 4 else "Senior"
+    if _ENTRY_TEXT.search((text or "")[:6000]):
+        return "Entry"
+    return "New grad" if str(stored).casefold() == "new grad" else "Unknown"

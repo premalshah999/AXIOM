@@ -1,5 +1,6 @@
-// Needs you › Reserved employers: FAANG, MANGO and the Big Four apply only with the owner's approval (owner, 2026-10-27: "make a
-// different section for FAANG, MANGO, Big four consulting, and these scrapers should not apply before my permission").
+// Needs you › Reserved: the companies and job boards the user reserves (and, if they switch it on, FAANG, MANGO and the Big Four)
+// apply only with their approval (owner, 2026-10-27: "these scrapers should not apply before my permission"; 2026-11-01: "users
+// could actually reserve job boards, companies they like").
 // Their jobs are found and ranked as usual and wait here, one section at a time; Approve starts one exactly as Apply
 // does, and Approve all lifts the hold on a whole section so the autopilot applies to the ones that fit.
 import { useEffect, useMemo, useState } from "react";
@@ -11,7 +12,7 @@ import { Pagination, type Paging } from "./pagination";
 import type { ReservedEmployer, ReservedPage, ReservedRules } from "./types";
 import { ago, jobWords, plural } from "./format";
 import { ShieldCheck, SearchX } from "lucide-react";
-import { Button, Check, Drawer, Empty, Table, Textarea, type Column } from "./ui/index";
+import { Button, Check, Drawer, Empty, Input, Table, type Column } from "./ui/index";
 import { Chips, ConfirmButton, JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
 
 export function ReservedJobs() {
@@ -145,14 +146,15 @@ export function ReservedJobs() {
   return (
     <>
       <header className="nd-card-head">
-        <h2 className="nd-q">Reserved employers</h2>
+        <h2 className="nd-q">Reserved</h2>
         {data && (
           <p className="nd-meta">
+            Companies and job boards you reserve. AXIOM finds and ranks them, and applies only after you approve each one.{" "}
             {data.enabled
-              ? `Employers that wait for your approval: ${plural(waiting, "job")} held.${current && current.employers.length > 0 ? ` ${current.label}: ${current.employers.slice(0, 6).join(", ")}${current.employers.length > 6 ? ` and ${current.employers.length - 6} more` : ""}.` : ""}`
-              : "Reserved employers are off: every employer is applied to as usual."}{" "}
+              ? `${plural(waiting, "job")} waiting.${current && current.employers.length > 0 ? ` ${current.label}: ${current.employers.slice(0, 6).join(", ")}${current.employers.length > 6 ? ` and ${current.employers.length - 6} more` : ""}.` : ""}`
+              : "Nothing is reserved yet."}{" "}
             <button type="button" className="ax-link" disabled={!data} onClick={() => setEditing(true)}>
-              Edit employers
+              Manage reserved
             </button>
           </p>
         )}
@@ -184,7 +186,7 @@ export function ReservedJobs() {
       {list.error && data && <LoadError error={list.error} retry={list.refresh} />}
       {(!data || data.enabled) && (
         <Table
-          label="Reserved employers"
+          label="Reserved"
           columns={columns}
           rows={rows}
           rowKey={(r) => r.job.id}
@@ -203,92 +205,101 @@ export function ReservedJobs() {
         />
       )}
       {data && (
-        <Drawer open={editing} onClose={() => setEditing(false)} title="Reserved employers" width={560}>
-          <EmployerEditor rules={data.rules} />
+        <Drawer open={editing} onClose={() => setEditing(false)} title="Reserved" width={560}>
+          <Manager rules={data.rules} />
         </Drawer>
       )}
     </>
   );
 }
 
-// One employer per line: name | other names | career sites. The server validates and normalizes every field.
-const toText = (employers: ReservedEmployer[]) =>
-  employers
-    .map((e) => [e.name, e.aliases.join(", "), e.sites.join(", ")].join(" | ").replace(/( \| )+$/, ""))
-    .join("\n");
-
-const commaList = (text = "") =>
-  text
-    .split(",")
-    .map((x) => x.trim())
-    .filter(Boolean);
-
-const fromText = (text: string): ReservedEmployer[] =>
-  text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [name, aliases, sites] = line.split("|").map((x) => x.trim());
-      return { name, aliases: commaList(aliases), sites: commaList(sites) };
-    });
-
-function EmployerEditor({ rules }: { rules: ReservedRules }) {
+// The user's own list: add a company by name or a job board by its link, take any off (the suggested FAANG, MANGO and Big Four
+// included). The server keeps and validates the list; each press is one request.
+function Manager({ rules }: { rules: ReservedRules }) {
   const { refresh } = useWorkspace();
   const { pending, run } = useAction();
-  const saved = useMemo(() => rules.sections.map((s) => toText(s.employers)), [rules]);
-  // Null while untouched: the editor follows the saved list as polls bring it.
-  const [draft, setDraft] = useState<{ texts: string[]; enabled: boolean } | null>(null);
-  const texts = draft?.texts ?? saved;
-  const enabled = draft?.enabled ?? rules.enabled;
-  const dirty =
-    draft !== null && (draft.enabled !== rules.enabled || draft.texts.some((t, i) => t !== saved[i]));
-  const setTexts = (next: (all: string[]) => string[]) => setDraft({ texts: next(texts), enabled });
-  const setEnabled = (value: boolean) => setDraft({ texts, enabled: value });
-  const save = () =>
+  const [text, setText] = useDraft("reserve-text", "");
+  const add = () =>
     run(
-      "save",
+      "add",
       async () => {
-        const body: ReservedRules = {
-          enabled,
-          sections: rules.sections.map((s, i) => ({ id: s.id, label: s.label, employers: fromText(texts[i] ?? "") })),
-        };
-        const r = await api<ReservedPage>("/reserved", "PUT", body);
-        setDraft(null);
+        const r = await api<{ reserved: string }>("/reserved/employers", "POST", { text: text.trim() });
+        setText("");
         void refresh();
         return r;
       },
-      "Reserved employers saved.",
+      (r) => r && `${r.reserved} is reserved. AXIOM applies there only after you approve each job.`,
     );
+  const remove = (name: string) =>
+    run(
+      "rm:" + name,
+      async () => {
+        await api("/reserved/employers?name=" + encodeURIComponent(name), "DELETE");
+        void refresh();
+      },
+      `${name} is no longer reserved.`,
+    );
+  const suggested = (on: boolean) =>
+    run(
+      "suggested",
+      async () => {
+        await api("/reserved", "PUT", { ...rules, enabled: on });
+        void refresh();
+      },
+      on ? "FAANG, MANGO and the Big Four are held until you approve." : "FAANG, MANGO and the Big Four apply like any other employer.",
+    );
+  const mine = rules.sections.find((x) => x.id === "mine");
+  const others = rules.sections.filter((x) => x.id !== "mine");
+  const line = (e: ReservedEmployer, off = false) => (
+    <li key={e.name} className={"rs-item" + (off ? " is-off" : "")}>
+      <span className="rs-name">
+        {e.name}
+        {e.sites.length > 0 && <small>{e.sites.slice(0, 2).join(", ")}</small>}
+      </span>
+      <Button size="sm" variant="ghost" disabled={pending !== null} loading={pending === "rm:" + e.name} onClick={() => remove(e.name)}>
+        Remove
+        <span className="sr-only"> {e.name}</span>
+      </Button>
+    </li>
+  );
   return (
     <div className="ax-stack">
-      <Check checked={enabled} onChange={setEnabled} label="Hold these employers until I approve each job" />
-      {rules.sections.map((s, i) => (
-        <Textarea
-          key={s.id}
-          label={s.label}
-          hint={
-            i === 0
-              ? "One employer per line: name | other names | career sites. Sites include their subdomains; * stands for one part of a shared platform's address, as in nvidia.*.myworkdayjobs.com."
-              : undefined
-          }
-          className="ax-code"
-          rows={Math.min(10, Math.max(3, (texts[i] ?? "").split("\n").length + 1))}
-          value={texts[i] ?? ""}
-          disabled={!enabled}
-          onChange={(e) => setTexts((all) => all.map((t, j) => (j === i ? e.target.value : t)))}
-        />
-      ))}
-      <div className="ax-toolbar">
-        <Button size="sm" variant="primary" disabled={!dirty} loading={pending === "save"} onClick={save}>
-          Save employers
+      <p className="nd-meta">
+        Reserving a company or a job board keeps AXIOM finding and ranking its jobs, but it applies only after you approve each one.
+      </p>
+      <form
+        className="rs-add"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (text.trim()) void add();
+        }}
+      >
+        <Input label="Company name or job board link" value={text} onChange={(e) => setText(e.target.value)} placeholder="Example Inc, or boards.greenhouse.io/example" />
+        <Button variant="primary" type="submit" disabled={!text.trim() || pending !== null} loading={pending === "add"}>
+          Reserve
         </Button>
-        {dirty && (
-          <Button size="sm" variant="ghost" disabled={pending !== null} onClick={() => setDraft(null)}>
-            Discard changes
-          </Button>
+      </form>
+      <section>
+        <h3 className="rs-head">Yours</h3>
+        {mine && mine.employers.length > 0 ? (
+          <ul className="rs-list">{mine.employers.map((e) => line(e))}</ul>
+        ) : (
+          <p className="nd-meta">Nothing yet. Add one above, or press Reserve on a job in the Job board.</p>
         )}
-      </div>
+      </section>
+      <section>
+        <Check checked={rules.enabled} disabled={pending !== null} onChange={suggested} label="Also hold FAANG, MANGO and the Big Four" />
+        {others.map((sec) => (
+          <div key={sec.id}>
+            <h3 className="rs-head">{sec.label}</h3>
+            {sec.employers.length > 0 ? (
+              <ul className="rs-list">{sec.employers.map((e) => line(e, !rules.enabled))}</ul>
+            ) : (
+              <p className="nd-meta">None left.</p>
+            )}
+          </div>
+        ))}
+      </section>
     </div>
   );
 }

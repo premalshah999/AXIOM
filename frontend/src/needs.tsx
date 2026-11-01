@@ -303,7 +303,7 @@ function useDecisions(): Decision[] {
   const reserved = usePoll<ReservedPage>((signal) => api("/reserved?page=1&size=1", "GET", undefined, signal), 30000, [version]);
   const list: Decision[] = [
     { id: "decide:over", title: "Over your employer limit", note: "Approve to apply anyway", count: over.data?.count ?? 0 },
-    { id: "decide:reserved", title: "Reserved employers", note: "Nothing is applied there until you approve", count: (reserved.data?.sections ?? []).reduce((n, s) => n + s.held, 0) },
+    { id: "decide:reserved", title: "Reserved", note: "Applied only after you approve each one", count: (reserved.data?.sections ?? []).reduce((n, s) => n + s.held, 0) },
     { id: "decide:unconfirmed", title: "Sent, with no receipt", note: "Check your email, or confirm it yourself", count: counts.groups.unconfirmed ?? 0 },
   ];
   return list.filter((d) => d.count > 0 || d.id === "decide:" + route.filter);

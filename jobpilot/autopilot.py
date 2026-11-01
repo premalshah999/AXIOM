@@ -887,9 +887,15 @@ def screen_job(db, cfg, owner_profile, job, busy, *, board_ids, integrated, use_
     jid = job["id"]
     target_roles = owner_profile.target_roles
     with db.session() as s:
+        current = s.get(Job, jid)
+        from .reserved import require_approval
+
+        # A company or job board the user reserved waits for their approval of this job. The tick leaves held jobs out of its
+        # candidates and queue admission refuses them too; the screen says it first of all, so a reservation made while a tick
+        # was under way (or a caller that passes a held id) cannot reach a browser slot.
+        require_approval(s, current)
         if attempted_job_ids(s, [jid]):
             return "previous", None, None
-        current = s.get(Job, jid)
         # Owner focus: platforms set aside for now are not dispatched.
         if current.ats in set(db.get_setting("ats_focus", {}).get("exclude", [])):
             return "focus", None, None
