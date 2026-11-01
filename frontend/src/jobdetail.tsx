@@ -13,7 +13,7 @@ import {
   type JobRow,
 } from "./model";
 import { groupQuestions, QuestionCard } from "./questions";
-import type { Detail, Hold, Job, JobRequest, Reserved, Run } from "./types";
+import type { Detail, Hold, Job, JobRequest, Reserved, Run, Snapshot } from "./types";
 import { day, jobWords, plainReason, platformName, plural, seconds, shortId, shownFit, stamp, words } from "./format";
 import { Button, Drawer, Monogram, Panel, Select, Skeleton, Textarea } from "./ui/index";
 import { Facts, Notice, StatusPill } from "./worktools";
@@ -165,7 +165,7 @@ function StatusBlock({ state, reason, earlier, hold, children }: { state: string
     <section className="dr-status" aria-label="Status">
       {earlier && <p className="ax-note">Earlier attempt, {earlier}</p>}
       <p className="dr-status-word">
-        {hold ? <StatusPill state={state} label="Held" tone="hold" /> : <StatusPill state={state} />}
+        {hold ? <StatusPill state={state} label={hold.label ?? "Held"} tone="hold" /> : <StatusPill state={state} />}
       </p>
       {(hold ? hold.reason : info.explain) && <p className="dr-status-why">{hold ? hold.reason : info.explain}</p>}
       {(hold ? hold.next : reason) && <p className="dr-status-reason">{hold ? hold.next : reason}</p>}
@@ -337,30 +337,28 @@ function DetailBody({ detail, state, runs, runId, open }: { detail: Detail; stat
   const verified = answers.filter((a) => a.verified).length;
   const receipt = run.receipt || {};
   const lines = receiptLines(receipt);
+  // A report from before 2026-11-01 may hold the engine's empty finding ("does not establish a more specific cause", "browser
+  // trace"), which told someone new nothing and sounded like a job for them.
+  const cause = report?.likely_cause && !/does not establish a more specific cause/.test(report.likely_cause) ? report.likely_cause : "";
+  const steps = (report?.next_steps || []).filter((s) => !/browser trace/.test(s));
+  const reportSays = !!report && (report.summary !== run.reason || !!cause || steps.length > 0);
   return (
     <>
       {/* The status above already says what a question or the attempt's own reason says; the report adds the cause and next steps. */}
-      {report && stateInfo(state).group !== "needs" && (
-        <Panel
-          title="What stopped this attempt"
-          actions={<span className="ax-note">{report.source === "ai" ? "Summarized from the record" : "From the record"}</span>}
-        >
+      {report && stateInfo(state).group !== "needs" && reportSays && (
+        <Panel title="What stopped this attempt">
           <div className="dr-stack">
             {report.summary !== run.reason && <p>{report.summary}</p>}
-            {report.likely_cause && <p className="ax-note">{report.likely_cause}</p>}
-            {report.next_steps?.length > 0 && (
+            {cause && <p className="ax-note">{cause}</p>}
+            {steps.length > 0 && (
               <ul className="ax-rows">
-                {report.next_steps.map((s, i) => (
+                {steps.map((s, i) => (
                   <li key={i} className="ax-row">
                     {s}
                   </li>
                 ))}
               </ul>
             )}
-            <details className="ax-fold">
-              <summary>Diagnostic evidence</summary>
-              <pre>{JSON.stringify(report.evidence, null, 2)}</pre>
-            </details>
           </div>
         </Panel>
       )}
@@ -466,6 +464,12 @@ function DetailBody({ detail, state, runs, runId, open }: { detail: Detail; stat
               <pre>{JSON.stringify(receipt, null, 2)}</pre>
             </details>
           )}
+          {report && (
+            <details className="ax-fold">
+              <summary>Diagnostic evidence</summary>
+              <pre>{JSON.stringify(report.evidence, null, 2)}</pre>
+            </details>
+          )}
         </div>
       </details>
     </>
@@ -475,6 +479,37 @@ function DetailBody({ detail, state, runs, runId, open }: { detail: Detail; stat
 // A job with no attempt yet: why it is where it is. Its actions (Apply now, Dry run, Rank) come in under More.
 function NotStarted({ row, actions, hold }: { row: JobRow; actions: React.ReactNode; hold?: Hold | null }) {
   const job = row.job;
+  const { refresh } = useWorkspace();
+  const { pending, run } = useAction();
+  // The job was added with sending off: it can never start until that changes, so say so and offer the switch here.
+  const sendingOff = row.state === "pending:waiting" && row.request?.code === "submission_disabled";
+  if (sendingOff)
+    return (
+      <StatusBlock
+        state={row.state}
+        hold={{ code: "submission_disabled", label: "Sending is off", reason: "Nothing has gone to this employer.", next: "It starts once you turn sending on." }}
+      >
+        <Button
+          variant="primary"
+          loading={pending === "send"}
+          onClick={() =>
+            void run(
+              "send",
+              async () => {
+                // Read the current controls right before writing them back.
+                const fresh = await api<Snapshot["control"]>("/control");
+                await api("/control", "PUT", { ...fresh, auto_submit: true });
+                await refresh();
+              },
+              "Sending is on.",
+            )
+          }
+        >
+          Turn on sending
+        </Button>
+        {actions}
+      </StatusBlock>
+    );
   return (
     <StatusBlock
       state={row.state}

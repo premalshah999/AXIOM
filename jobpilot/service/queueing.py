@@ -540,7 +540,7 @@ class QueueingMixin:
                 control = s.get(Setting, "control").value
                 if not control.get("auto_submit"):
                     raise QueueBlocked(
-                        "Enable automatic submission in Settings first",
+                        "Sending is off in Settings, so this job is waiting",
                         outcome="deferred",
                         code="submission_disabled",
                         not_before=temporary_time(),

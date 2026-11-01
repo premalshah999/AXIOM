@@ -562,8 +562,8 @@ function Preferences({ p, set }: { p: Profile; set: Setter }) {
               label="Apply first to"
               value={p.job_priority ?? "new_grad_first"}
               options={[
-                { value: "new_grad_first", label: "New grad roles, then best fit" },
-                { value: "best_fit_first", label: "Best fit, any level" },
+                { value: "new_grad_first", label: "New grad roles, then closest match" },
+                { value: "best_fit_first", label: "Closest match, any level" },
               ]}
               onChange={(v) => set("job_priority", v)}
             />
@@ -578,8 +578,8 @@ function Preferences({ p, set }: { p: Profile; set: Setter }) {
           </div>
           <Range
             className="pf-s6"
-            label="Minimum fit"
-            hint="Jobs that score below this are not marked ready to apply. 0 to 100."
+            label="How close a match"
+            hint="AXIOM won't apply to a job that scores lower than this. 0 to 100."
             value={p.minimum_fit}
             onChange={(v) => set("minimum_fit", v)}
           />

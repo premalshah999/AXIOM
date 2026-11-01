@@ -494,7 +494,7 @@ export type Listing = Job & {
   // A Ready job the batch will not start: the plain reason and what happens next (jobpilot/startable.py).
   hold?: Hold;
 };
-export type Hold = { code: string; reason: string; next: string };
+export type Hold = { code: string; reason: string; next: string; label?: string };
 // GET /api/startable: Ready jobs that can start, and the rest by reason; `idle` says why runners wait when none can.
 export type Startable = {
   at: string;

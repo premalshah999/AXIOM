@@ -80,7 +80,7 @@ export function AddJobDialog() {
           return;
         }
         setOpen(false);
-        notify("ok", only.message || "Added to the queue.");
+        notify("ok", only.message || "Added.");
         go({ ...route, job: only.job_id, run: undefined });
       } else setResults(out);
     } catch (e) {
@@ -96,7 +96,7 @@ export function AddJobDialog() {
       open={open}
       onClose={close}
       title="Add a job"
-      sub={autoApply ? "It goes straight into the queue, without the fit check." : "It waits in the queue until automatic submission is on."}
+      sub={snapshot.control.auto_submit ? (autoApply ? "AXIOM applies to it next, whether or not it's a close match." : "AXIOM applies to it next.") : "Sending is off in Settings, so it waits until you turn sending on."}
       footer={
         results.length ? (
           <Button variant="primary" onClick={close}>
@@ -108,7 +108,7 @@ export function AddJobDialog() {
               Cancel
             </Button>
             <Button variant="primary" disabled={!links.length} loading={pending} onClick={submit}>
-              {links.length > 1 ? `Add ${Math.min(links.length, MAX_LINKS)} jobs` : "Add to queue"}
+              {links.length > 1 ? `Add ${Math.min(links.length, MAX_LINKS)} jobs` : "Add job"}
             </Button>
           </>
         )

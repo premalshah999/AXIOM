@@ -118,10 +118,10 @@ export function useApplyMany() {
 
 // What a waiting job waits for, by the admission code that deferred it (owner_apply.start).
 const WAITS_FOR: Record<string, string> = {
-  worker_capacity: "a free worker",
-  ats_pacing: "the platform's pacing",
+  worker_capacity: "a free moment",
+  ats_pacing: "the site to allow another",
   sender_busy: "a shared email sender",
-  submission_disabled: "automatic submission to be turned on",
+  submission_disabled: "sending to be turned on",
   employer_cooldown: "the employer's cooldown",
   site_circuit: "the employer's site to recover",
   provider_unavailable: "the model provider",
