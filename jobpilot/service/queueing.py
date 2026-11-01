@@ -75,6 +75,26 @@ class QueueingMixin:
         return "submission_cooldown:" + hashlib.sha256(employer.encode()).hexdigest()
 
     def check_cooldown(self, session, job):
+        self.check_site_wait(session, job)
+        busy = [
+            other
+            for other, other_job in session.execute(
+                select(Run.id, Job).join(Job, Run.job_id == Job.id).where(Run.state.in_(ACTIVE), Job.id != job.id)
+            )
+            if employer_partition(other_job) == employer_partition(job)
+        ]
+        if busy:
+            # One application per employer at a time: seven Amazon retries signed in to one account together and locked
+            # it out (2026-10-27). The next starts when this employer's run ends.
+            raise QueueBlocked(
+                "Another application at this employer is running; this one starts when it ends",
+                outcome="deferred",
+                code="employer_busy",
+                not_before=temporary_time(),
+            )
+
+    def check_site_wait(self, session, job):
+        """What a platform or an employer's site has asked to wait for, whichever job asks (startable.read reads it too)."""
         outage = session.get(Setting, "ats_outage:" + job.ats)
         if outage and datetime.fromisoformat(outage.value["until"]) > datetime.now(UTC):
             raise QueueBlocked(
@@ -91,22 +111,6 @@ class QueueingMixin:
                 outcome="deferred",
                 code="employer_cooldown",
                 not_before=item.value["until"],
-            )
-        busy = [
-            other
-            for other, other_job in session.execute(
-                select(Run.id, Job).join(Job, Run.job_id == Job.id).where(Run.state.in_(ACTIVE), Job.id != job.id)
-            )
-            if employer_partition(other_job) == employer_partition(job)
-        ]
-        if busy:
-            # One application per employer at a time: seven Amazon retries signed in to one account together and locked
-            # it out (2026-10-27). The next starts when this employer's run ends.
-            raise QueueBlocked(
-                "Another application at this employer is running; this one starts when it ends",
-                outcome="deferred",
-                code="employer_busy",
-                not_before=temporary_time(),
             )
         key = "site_circuit:" + hashlib.sha256(employer_partition(job).encode()).hexdigest()
         circuit = session.get(Setting, key)
@@ -439,6 +443,12 @@ class QueueingMixin:
                     and waited.value.get("cause") == "email_matched"
                     and waited.value.get("source_run_id") == recovery_source_run
                 )
+                if not job.demo and not email_continuation:
+                    from ..loop_guard import stop_of
+
+                    # Before the job's own counts, so it says what actually holds it: the employer's limit, or a loop.
+                    if stopped := stop_of(s, job):
+                        raise stopped
                 # A matched email continues the attempt that waited for it (service.reviews); it is not a retry.
                 require_allowance(s, job_id, aliases=aliases, new_attempt=not email_continuation)
                 from ..application_pacing import require_company_limit, require_ats_admission

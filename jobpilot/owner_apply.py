@@ -109,9 +109,9 @@ def _approve(service, job_id):
             job.status = "ready"
             if not (job.reason or "").startswith(OWNER_APPROVED):
                 job.reason = OWNER_APPROVED + (job.reason or "")
-        from .application_budget import MAX_STARTS, allowance, repeat_stop_block
+        from .application_budget import MAX_STARTS, allowance, job_ceiling_block, repeat_stop_block
 
-        if allowance(s, job_id)[2] >= MAX_STARTS or repeat_stop_block(s, job_id):
+        if allowance(s, job_id)[2] >= MAX_STARTS or repeat_stop_block(s, job_id) or job_ceiling_block(s, job_id):
             # The owner's click is the approval a fresh try needs (owner, 2026-10-18: "give them fresh tries").
             # Jobs that may already be submitted returned above, so this never repeats a submission.
             key = "application_budget_reset:" + job_id

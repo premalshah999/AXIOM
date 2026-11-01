@@ -12,9 +12,11 @@ from types import SimpleNamespace
 
 from sqlalchemy import or_, select
 
-from .admission import QueueBlocked, active_runs
+from .admission import QueueBlocked, active_runs, employer_partition
 from .db import Job, Run, Setting
 from .features.knowledge.employers import name_aliases, tenant_alias
+from .employer_limit import application_cap as application_cap  # the employer's own limit, read from what it says
+from .employer_limit import wait_until, waiting_sentence
 from .features.knowledge.tables import KnAlias
 
 ASHBY_GAP = 150
@@ -228,25 +230,6 @@ def require_ats_admission(session, job, run_id=None, owner_pick=False):
 
 
 EMPLOYER_CAP_PREFIX = "employer_cap:"
-# The employer's own application limit, read from its refusal (Ashby, 2026-10-18/19):
-#   Benchling: "You've reached the maximum of 3 active applications at Benchling."
-#   Aurora Innovation: "candidates are limited to 3 applications every 30 days."
-#   OpenAI: "Candidates may not apply more than 5 times in any 180 day span."
-APPLICATION_CAP = (
-    re.compile(r"maximum of (?P<n>\d+) active applications", re.I),
-    re.compile(r"limited to (?P<n>\d+) applications? (?:every|per|in(?: any)?(?: a)?) (?P<days>\d+)[ -]days?", re.I),
-    re.compile(r"(?:may not|cannot|can.t) apply (?:to more than|more than) (?P<n>\d+) (?:times?|roles?|positions?|jobs?)?"
-               r"\s*(?:in|within|per) (?:any|a|each) (?P<days>\d+)[ -]day", re.I),
-)
-
-
-def application_cap(text):
-    """{"limit", "days"} when an employer's refusal states its application limit, else None."""
-    for pattern in APPLICATION_CAP:
-        if match := pattern.search(text or ""):
-            days = match.groupdict().get("days")
-            return {"limit": int(match["n"]), "days": int(days) if days else None}
-    return None
 
 
 def employer_key(alias_rows, name, url=""):
@@ -291,31 +274,67 @@ def employer_keys(alias_rows):
 CAP_RUN_STATES = ("confirmed", "already_applied", "queued", "running", "submitting")
 
 
+def employer_identity(session, job):
+    """Who a job applies to across every link to it: the knowledge base's employer or its name, so a short link and the
+    employer's own site are one employer. A job with no name falls back on its site."""
+    alias_rows = {a.alias: (a.employer_id, a.kind) for a in session.scalars(select(KnAlias))}
+    return employer_keys(alias_rows)(_get(job, "company", ""), _get(job, "url", "")) or "site:" + employer_partition(job)
+
+
+def remember_employer_cap(session, job, cap, run_id=None):
+    """The employer refused this applicant over its own limit: all of its jobs wait until the period is over. Inside the
+    caller's transaction. An earlier refusal that named a later end stands."""
+    if cap is None:
+        return None
+    target = employer_identity(session, job)
+    at = datetime.now(UTC)
+    until = wait_until(cap, at)
+    row = session.get(Setting, EMPLOYER_CAP_PREFIX + target)
+    if row and (row.value or {}).get("until", "") > until:
+        return row.value
+    company = _get(job, "company", "")
+    value = {**cap, "company": company, "at": at.isoformat(), "until": until, "run_id": run_id,
+             "sentence": waiting_sentence(company, cap, until)}
+    if row:
+        row.value = value
+    else:
+        session.add(Setting(key=EMPLOYER_CAP_PREFIX + target, value=value))
+    return value
+
+
 def record_employer_cap(db, job, cap):
-    """Remember an employer's stated limit so its other jobs wait instead of being refused one by one."""
+    """remember_employer_cap in its own transaction."""
     with db.exclusive() as s:
-        alias_rows = {a.alias: (a.employer_id, a.kind) for a in s.scalars(select(KnAlias))}
-        target = employer_key(alias_rows, _get(job, "company", ""), _get(job, "url", ""))
-        if not target or not cap or not cap.get("limit"):
-            return None
-        value = {**cap, "company": _get(job, "company", ""), "at": datetime.now(UTC).isoformat()}
-        row = s.get(Setting, EMPLOYER_CAP_PREFIX + target)
-        if row:
-            row.value = value
-        else:
-            s.add(Setting(key=EMPLOYER_CAP_PREFIX + target, value=value))
-        return value
+        return remember_employer_cap(s, job, cap)
 
 
 def cap_reason(company, cap):
+    name = company or "This employer"
+    if not cap.get("limit"):
+        return f"{name} says you've reached its application limit; this one was not submitted"
     window = f" every {cap['days']} days" if cap.get("days") else " at a time"
-    return f"{company or 'This employer'} accepts at most {cap['limit']} applications{window}; this one was not submitted"
+    return f"{name} accepts at most {cap['limit']} applications{window}; this one was not submitted"
+
+
+def employer_cap_block(session, target):
+    """The refusal of an employer's stated limit still in force, whatever this app has counted: the applications that used
+    it up may predate the app (TikTok refused with no confirmed application in the database, 2026-11-01). Or None."""
+    row = session.get(Setting, EMPLOYER_CAP_PREFIX + target) if target else None
+    cap = (row.value or {}) if row else {}
+    until = cap.get("until")
+    if not until or until <= datetime.now(UTC).isoformat():
+        return None
+    return QueueBlocked(cap.get("sentence") or cap_reason(cap.get("company"), cap), outcome="deferred", code="employer_cap", not_before=until)
 
 
 def require_employer_cap(session, target, occupied):
+    """A refusal's limit holds until its period ends. One an earlier build saved has no end: it holds once this app has
+    counted that many."""
+    if blocked := employer_cap_block(session, target):
+        raise blocked
     row = session.get(Setting, EMPLOYER_CAP_PREFIX + target) if target else None
     cap = (row.value or {}) if row else {}
-    if not cap.get("limit") or len(occupied) < int(cap["limit"]):
+    if not cap.get("limit") or "until" in cap or len(occupied) < int(cap["limit"]):
         return
     until = None
     if cap.get("days"):

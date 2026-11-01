@@ -283,6 +283,27 @@ class CompletionMixin:
                 and not rejected
             ):
                 state = "submission_unknown"
+            from ..employer_limit import APPLICATION_LIMIT, application_cap
+
+            waits_for_employer = False
+            said = str(result.get("reason") or "")
+            limit_refused = result.get("blocker_type") == "employer_limit" or (
+                # A path that only described the refusal: the navigator wrote "the page shows a hard site-imposed limit:
+                # 'You've reached the application limit'" and parked the job for repair (TikTok, 2026-11-01).
+                state in {"waiting_browser", "timed_out", "failed", "closed"} and bool(APPLICATION_LIMIT.search(said))
+            )
+            if limit_refused and not s.get(Job, run.job_id).demo:
+                from ..application_pacing import remember_employer_cap
+                from ..admission import EMPLOYER_WAIT
+
+                cap = result.get("employer_cap") or application_cap(said) or {"limit": None, "days": None}
+                held = remember_employer_cap(s, s.get(Job, run.job_id), cap, run_id=run.id)
+                if run.state != "submitting" and not result.get("receipt"):
+                    # Nothing reached the employer. This job waits with the others and starts when the period ends: closed
+                    # it would stay closed for good, 33 jobs of one employer over a limit that ends on a known date.
+                    waits_for_employer = True
+                    state = "cancelled"
+                    result = {**result, "state": "cancelled", "reason": EMPLOYER_WAIT + held["sentence"]}
             if state == "waiting_browser" and result.get("waiting_kind") == "email":
                 # A run parked on a durable email wait is waiting, not broken: the matched email resumes it in a
                 # continuation run. It used to share "waiting_browser" with "a control needs repair" and was
@@ -321,6 +342,10 @@ class CompletionMixin:
                     item.value = cooldown
                 else:
                     s.add(Setting(key=key, value=cooldown))
+                from ..loop_guard import hold_site_wait
+
+                hold_site_wait(s, s.get(Job, run.job_id), cooldown["until"],
+                               "This employer rejected an application as possible spam, so its jobs wait six hours.", key)
             other_confirmed = s.scalar(
                 select(Run.id).where(Run.job_id == run.job_id, Run.id != run.id, Run.state == "confirmed")
             )
@@ -334,6 +359,8 @@ class CompletionMixin:
                 if other_confirmed
                 else ("ready" if state == "dry_run_passed" and run.packet.get("match_approved") else state)
             )
+            if waits_for_employer and s.get(Job, run.job_id).status == "cancelled":
+                s.get(Job, run.job_id).status = "ready"
             from ..recovery import schedule_recovery
 
             from ..application_slots import release_slot
@@ -343,6 +370,10 @@ class CompletionMixin:
             from ..recovery import open_blocked_site_circuit
 
             open_blocked_site_circuit(s, run, state)
+            from ..loop_guard import note_finished
+
+            # Whatever the reason: an employer whose jobs keep ending without a confirmation gets no more starts for a while.
+            note_finished(s, run, s.get(Job, run.job_id), state, result.get("reason", ""))
             # Questions already asked live during the run (Telegram) are persisted; never duplicate.
             known = {
                 r.key

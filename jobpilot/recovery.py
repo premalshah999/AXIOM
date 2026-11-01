@@ -422,10 +422,38 @@ def schedule_version_repairs(service):
     return scheduled
 
 
+def honour_site_wait(session, run, result):
+    """A wait the site itself imposed (a sign-in lockout, "try again in 30 minutes", a pause it names) holds this employer
+    whatever becomes of this job, and whatever the build. Written before any of the job's own limits are looked at: a job
+    that had used its three starts returned first, and its siblings started inside the lock."""
+    cooldown = int(result.get("site_cooldown_seconds") or 0) if result.get("recovery_cause") == "site_temporary" else 0
+    if not cooldown:
+        return 0
+    job = session.get(Job, run.job_id)
+    key = "site_circuit:" + hashlib.sha256(employer_partition(job).encode()).hexdigest()
+    until = (datetime.now(UTC) + timedelta(seconds=cooldown)).isoformat()
+    reason = (result.get("reason") or "")[:200] or "This employer's site asked for a wait before another attempt."
+    # No build recorded: a deploy cannot lift it. The admission check holds a circuit only when it carries the running build
+    # or no build, and this one carried a different word for it, so every other job at the employer started inside the lock
+    # (Amazon 2026-10-27: fourteen more sign-ins after "you can't log in right now").
+    data = {"until": until, "source_run_id": run.id, "failure_signature": failure_signature(run, result), "reason": reason}
+    circuit = session.get(Setting, key)
+    if circuit:
+        circuit.value = data
+    else:
+        session.add(Setting(key=key, value=data))
+    from .loop_guard import hold_site_wait
+
+    # The circuit is the site's; the employer's jobs under another link (a short link) wait too.
+    hold_site_wait(session, job, until, reason, key)
+    return cooldown
+
+
 def schedule_recovery(session, config, run, result):
     from .application_budget import require_allowance
     from .admission import QueueBlocked
 
+    honour_site_wait(session, run, result)
     if run.mode == "submit":
         try:
             require_allowance(session, run.job_id)
@@ -602,25 +630,18 @@ def schedule_recovery(session, config, run, result):
         row.value = value
     else:
         session.add(Setting(key=key, value=value))
-    if cooldown or (unchanged and cause == "site_temporary"):
+    if not cooldown and unchanged and cause == "site_temporary":
         # Only an observed recurring site failure blocks this exact employer.
         # Widget/model failures are job-local and cannot disable an ATS family.
         job = session.get(Job, run.job_id)
         partition = employer_partition(job)
         key = "site_circuit:" + hashlib.sha256(partition.encode()).hexdigest()
         circuit = session.get(Setting, key)
-        until = (datetime.now(UTC) + timedelta(seconds=cooldown or 600)).isoformat()
+        until = (datetime.now(UTC) + timedelta(seconds=600)).isoformat()
         data = {"until": until, "source_run_id": run.id, "failure_signature": signature}
-        if cooldown:
-            # A wait the site itself imposed (a sign-in lockout, "try again in 30 minutes") holds whatever the build: a deploy
-            # cannot lift it. The admission check holds a circuit only when it carries the running build or no build, and
-            # this one carried a different word for it, so every other job at the employer started inside the lock
-            # (Amazon 2026-10-27: fourteen more sign-ins after "you can't log in right now").
-            data["reason"] = (result.get("reason") or "")[:200] or "This employer's site asked for a wait before another attempt."
-        else:
-            from .runtime import engine_version
+        from .runtime import engine_version
 
-            data["engine"] = engine_version()  # a recurring failure: a deploy may have fixed it
+        data["engine"] = engine_version()  # a recurring failure: a deploy may have fixed it
         if circuit:
             circuit.value = data
         else:

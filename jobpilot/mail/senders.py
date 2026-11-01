@@ -398,7 +398,9 @@ KNOWN_SENDERS = {
 # Platforms whose leases span employers on one sender rule. A start waits while another job holds its lease (Oracle:
 # since per-tenant attribution, only a run for the same tenant), instead of starting a browser that can only defer at
 # its own code step ("email sender busy", 2026-10-17/18).
-SHARED_SENDER_ATS = {"oracle", "icims"}
+# SuccessFactors mails every tenant from one address too (see application_pacing.ATS_LIMITS): 19 of the 69 "sender busy" runs
+# of 2026-10-18..11-01 started, opened a browser and gave up behind another tenant's window.
+SHARED_SENDER_ATS = {"oracle", "icims", "successfactors"}
 
 
 def authenticated_sender(receiving_auth, domain):
