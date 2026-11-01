@@ -104,10 +104,10 @@ def read(service):
     ]
     board = board_snapshot(db, limit=None, jobs_only=True)["jobs"]
     listed = {j["id"]: j for j in board}
-    extra = {j["id"]: j for j in unlisted_ready(db, cfg, set(listed))}
+    unlisted = {j["id"]: j for j in unlisted_ready(db, cfg, set(listed))}
     # Pasted links have no board listing; the dispatcher lists them itself (autopilot.tick, "manual").
     manual = {r.id for r in ready if db.get_setting("job_origin:" + r.id, {}).get("kind") == "manual"}
-    board_ids = set(listed) | set(extra) | manual
+    board_ids = set(listed) | set(unlisted) | manual
     integrated, use_master = services_enabled(db), bool(master_policy(db))
     reserved = held_ids(db)
     rejections = db.get_setting("job_board_autopilot", {}).get("rejections") or {}
@@ -118,7 +118,7 @@ def read(service):
     from .application_pacing import require_company_limit
 
     for r in ready:
-        job = listed.get(r.id) or extra.get(r.id) or {
+        job = listed.get(r.id) or unlisted.get(r.id) or {
             "id": r.id, "title": r.title, "company": r.company, "location": r.location, "country": "",
             "ats": r.ats, "status": r.status, "score": r.score, "posted_at": r.created_at or "", "career_level": "",
         }
