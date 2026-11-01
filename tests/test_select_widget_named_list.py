@@ -21,7 +21,7 @@ PAGE = """
     for (const c of choices.filter(c => c.toLowerCase().includes(input.value.toLowerCase()))) {
       const row = document.createElement('div');
       row.setAttribute('role', 'listitem'); row.textContent = c; row.style = 'height:24px';
-      row.addEventListener('mousedown', e => { e.preventDefault(); input.value = ''; shown.textContent = c; list.remove(); shown.style.display = ''; });
+      row.addEventListener('mousedown', e => { e.preventDefault(); input.value = c; shown.textContent = c; list.remove(); shown.style.display = ''; });
       list.append(row);
     }
     document.body.append(list);
