@@ -69,7 +69,7 @@ export function DatabaseSettings() {
   return (
     <Panel>
       <p>
-        <Pill tone={s.mode === "local" ? "ok" : "info"}>{NAMES[s.mode]}</Pill> {SENTENCE[s.mode]}
+        {SENTENCE[s.mode]}
         {s.mode !== "local" && s.options[s.mode].target && <small> {s.options[s.mode].target}</small>}
       </p>
       {s.mode !== "local" && s.ping && (
