@@ -17,7 +17,7 @@ from ...schemas import JobInput, QueueInput
 from .. import pipeline
 from ..success import success as success_report
 
-Group = Literal["all", "active", "needs", "repair", "unconfirmed", "paused", "done", "stopped", "new", "reserved"]
+Group = Literal["all", "active", "needs", "repair", "unconfirmed", "paused", "done", "existing", "stopped", "new", "reserved"]
 
 
 class ApplyMany(BaseModel):

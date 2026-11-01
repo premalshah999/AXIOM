@@ -144,15 +144,8 @@ def build_snapshot(service, include_sources: bool):
             )
         ]
         today = finished_today(s, tz)
-        confirmed_total = s.scalar(
-            select(func.count(func.distinct(Run.job_id)))
-            .join(Job, Run.job_id == Job.id)
-            .where(
-                Run.state == "confirmed",
-                Job.demo.is_(False),
-                Run.receipt["evidence_reconciliation"].as_string().is_distinct_from("pending"),
-            )
-        )
+        # The ledger's number (pipeline.confirmed_jobs), counted once with the group counts.
+        confirmed_total = counts["confirmed"]
         budget = s.get(Budget, day)
         spend, submissions = (budget.spent, budget.submissions) if budget else (0, 0)
         sources = [record(x) for x in s.scalars(select(Source))] if include_sources else []

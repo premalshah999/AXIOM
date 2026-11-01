@@ -370,6 +370,8 @@ export type Counts = {
   states: Record<string, number>;
   pipeline: number;
   jobs: number;
+  // CONFIRMED: jobs with a settled confirmed run. The Applications ledger's count and the Jobs "Confirmed" chip.
+  confirmed?: number;
   // Jobs › Discovered: fresh listings not applied to yet (the same number its page shows).
   discovered?: number;
 };

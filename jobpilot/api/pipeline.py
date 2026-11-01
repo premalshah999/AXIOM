@@ -32,21 +32,25 @@ COMMITTED = ("confirmed", "submission_unknown", "already_applied", "submitting")
 STARTED = ("queued", "running", *COMMITTED)
 WAITING = "pending:waiting"
 # The group of a run's state (model.ts STATES). A state not listed reads as "stopped".
+# "done" is the Applications ledger and nothing else (`confirmed_jobs`): the Jobs chip and the ledger tab are one number.
+# "existing" is the employer saying you had already applied: nothing was sent, so it is not in the ledger (2026-11-01: the
+# Done chip said 3,302 beside a ledger of 3,155; 146 of the difference were these, one was a dry run).
 RUN_GROUPS = {
     "active": ("queued", "running", "submitting", "waiting_email"),
     "needs": ("waiting_answer", "needs_review"),
     "repair": ("waiting_browser", "timed_out", "failed"),
     "unconfirmed": ("submission_unknown",),
-    "done": ("confirmed", "already_applied", "dry_run_passed"),
-    "stopped": ("cancelled", "skipped", "closed"),
+    "done": ("confirmed",),
+    "existing": ("already_applied",),
+    "stopped": ("cancelled", "skipped", "closed", "dry_run_passed"),
 }
 # The group of a job that has no run yet (model.ts "job:<status>"). A status not listed reads as "new".
 JOB_GROUPS = {"new": ("new", "ready", "review", "skipped"), "paused": ("paused",)}
-GROUPS = ("active", "needs", "repair", "unconfirmed", "paused", "done", "stopped", "new", "reserved")
+GROUPS = ("active", "needs", "repair", "unconfirmed", "paused", "done", "existing", "stopped", "new", "reserved")
 # Groups outside the pipeline: never started, or held for the owner's approval.
 OUTSIDE = ("new", "reserved")
 # List order for "All": what needs attention first (model.ts PRIORITY).
-PRIORITY = {group: index for index, group in enumerate(GROUPS[:5] + ("new", "done", "stopped", "reserved"))}
+PRIORITY = {group: index for index, group in enumerate(GROUPS[:5] + ("new", "done", "existing", "stopped", "reserved"))}
 # A stopped run whose own reason says what it needs reads by that, not by its state: "Repairing" is for stops the engine
 # can still fix. 2026-10-29: 28 of 32 Repairing jobs waited on the employer's mail or the owner's own browser (a refused
 # password, Amazon's Persona identity check), and waits that sent nothing (sender busy, model or browser down) retry
@@ -60,6 +64,18 @@ OWNER_ONLY = (
 STOPPED = ("waiting_browser", "timed_out", "failed")
 # Latest runs the Batch page shows live: owners at work, waits and questions.
 LIVE = ("queued", "running", "submitting", "waiting_email", "waiting_answer", "needs_review")
+
+
+def settled_confirmation():
+    """The one test of a confirmed run: its evidence is not still being reconciled (a legacy marker). Every number that
+    says "confirmed" (the ledger, the Jobs chip, Overview, the batch goal) counts runs that pass it."""
+    return and_(Run.state == "confirmed", Run.receipt["evidence_reconciliation"].as_string().is_distinct_from("pending"))
+
+
+def confirmed_jobs():
+    """CONFIRMED: the ids of the real jobs with at least one settled confirmed run, a later failed attempt or not. This is
+    the Applications ledger, the Jobs "Confirmed" chip (group "done") and Overview's total: one definition, one query."""
+    return select(Run.job_id).join(Job, Job.id == Run.job_id).where(Job.demo.is_(False), settled_confirmation()).distinct()
 
 
 def held_jobs():
@@ -104,13 +120,18 @@ def classified(*where, reserved=()):
         waiting = and_(waiting, ~reserving)
     # A job an earlier run confirmed is done, whatever a later attempt says: Dayforce's confirmed application read as
     # "Repairing" after a follow-up run failed (2026-10-25).
-    succeeded = Job.id.in_(select(Run.job_id).where(Run.state.in_(("confirmed", "already_applied"))))
+    succeeded = Job.id.in_(confirmed_jobs())
+    applied_before = Job.id.in_(select(Run.job_id).where(Run.state == "already_applied"))
+    # A confirmed run whose evidence is still being reconciled is not in the ledger: it reads as unconfirmed, not done.
+    unsettled = and_(state == "confirmed", func.coalesce(last.receipt["evidence_reconciliation"].as_string(), "") == "pending")
     group = case(
         (succeeded, "done"),
+        (applied_before, "existing"),
         (paused_by_owner, "paused"),
         *([(reserving, "reserved")] if reserving is not None else []),
         (waiting, "active"),
         (state == "paused", "paused"),
+        (unsettled, "unconfirmed"),
         (owner_only, "needs"),
         (retrying, "active"),
         *[(state.in_(states), name) for name, states in RUN_GROUPS.items()],
@@ -132,7 +153,8 @@ def classified(*where, reserved=()):
         .select_from(Job)
         .outerjoin(latest, latest.c.job_id == Job.id)
         .outerjoin(last, last.id == latest.c.id)
-        .where(Job.demo.is_(False), Job.status != "archived", *where)
+        # The ledger keeps an archived job's confirmation, so the Confirmed chip does too.
+        .where(Job.demo.is_(False), or_(Job.status != "archived", succeeded), *where)
         .subquery("classified")
     )
 
@@ -171,7 +193,15 @@ def counts(session):
         select(func.count()).select_from(Job).where(Job.demo.is_(False), Job.status != "archived")
     )
     pipeline = sum(n for group, n in groups.items() if group not in OUTSIDE)
-    return {"groups": {**groups, "all": pipeline}, "states": states, "pipeline": pipeline, "jobs": jobs or 0}
+    # CONFIRMED, read straight from its definition: the ledger's count, and the Jobs "Confirmed" chip (groups["done"]).
+    confirmed = session.scalar(select(func.count()).select_from(confirmed_jobs().subquery()))
+    return {
+        "groups": {**groups, "all": pipeline},
+        "states": states,
+        "pipeline": pipeline,
+        "jobs": jobs or 0,
+        "confirmed": confirmed or 0,
+    }
 
 
 def funnel(session):
