@@ -422,6 +422,11 @@ async def enrich(db, config, job_id):
         # Read the exact requisition document used by the application owner.
         fetch_url = ICIMS.prepare_url(fetch_url)
     html, url = await fetch(fetch_url, allow_private=config.allow_private_urls)
+    from .platform_label import label_job_from_page
+
+    # The page fetched to read the posting also shows where its application is made: a career site that is really
+    # Greenhouse, iCIMS or Workday leaves the custom-site lane now, not after a run has found out (2026-11-01).
+    await asyncio.to_thread(label_job_from_page, db, job_id, html, url)
     soup = BeautifulSoup(html, "html.parser")
     details = {}
     for script in soup.select('script[type="application/ld+json"]'):

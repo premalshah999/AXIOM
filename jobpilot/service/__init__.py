@@ -30,6 +30,7 @@ class Service(QueueingMixin, ExecutionMixin, CompletionMixin, ReviewsMixin, Migr
 
         close_gone_postings(db)
         self.relabel_custom_ats()
+        self.label_platforms_from_history()
         self.employer_names_from_titles()
         from ..features._store import create_tables
 
