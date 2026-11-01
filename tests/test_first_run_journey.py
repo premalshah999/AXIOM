@@ -221,3 +221,26 @@ def test_the_failure_report_says_nothing_when_it_knows_nothing_more(service):
     report = service.db.get_setting("failure_report:r2")
     assert report["summary"] == "The page did not load"
     assert report["likely_cause"] == "" and report["next_steps"] == []
+
+
+@pytest.mark.parametrize(
+    "reason, words",
+    [
+        ("Browser control failed at browser.py:441; application tab retained for recovery", "got stuck"),
+        ("Worker interrupted before submission; draft recovery scheduled", "interrupted before anything was sent"),
+        ("Worker error: KeyError", "problem of its own"),
+        ("Open the ApplyPilot Chrome window: the browser is responding, but its automation connection is unavailable.", "use its browser"),
+        ("Chromium did not expose a debugging endpoint", "use its browser"),
+    ],
+)
+def test_the_engine_never_explains_itself_in_its_own_words(reason, words):
+    from jobpilot.vocabulary import plain_sentence
+
+    said = plain_sentence(reason)
+    assert words in said and ".py" not in said and "Worker" not in said and "Error" not in said
+
+
+def test_an_employers_words_are_left_alone():
+    from jobpilot.vocabulary import plain_sentence
+
+    assert plain_sentence("The posting is closed or no longer available") == "The posting is closed or no longer available."
