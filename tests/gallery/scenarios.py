@@ -410,6 +410,109 @@ ssn_survey = Scenario(
     expect={},
 )
 
+# ---- questions and controls real forms stopped on (2026-11-01) ------------------------------------------------------------
+
+
+def combo(name, label, options, extra=""):
+    """A react-select: the menu exists only while open and rebuilds its rows, with a hidden input the form posts."""
+    rows = repr(options)
+    return f"""<label for="{name}">{label}</label>
+    <div class="select__control" id="c-{name}"><input id="{name}" class="select__input" role="combobox" aria-haspopup="true" aria-autocomplete="list" aria-expanded="false" autocomplete="off" {extra}></div>
+    <div id="m-{name}"></div><input type="hidden" name="{name}" id="h-{name}">
+    <script>(function(){{const inp=document.getElementById({name!r}),box=document.getElementById('m-{name}'),all={rows};
+      function show(items){{box.innerHTML='';if(!items)return;const l=document.createElement('div');l.className='select__menu-list';l.setAttribute('role','listbox');
+        if(!items.length){{const n=document.createElement('div');n.className='select__menu-notice--no-options';n.textContent='No results';l.append(n)}}
+        for(const t of items){{const o=document.createElement('div');o.className='select__option';o.setAttribute('role','option');o.textContent=t;
+          o.addEventListener('mousedown',e=>{{e.preventDefault();inp.value=t;document.getElementById('h-{name}').value=t;inp.setAttribute('aria-expanded','false');box.innerHTML='';inp.dispatchEvent(new Event('change',{{bubbles:true}}))}});l.append(o)}}
+        box.append(l);inp.setAttribute('aria-expanded','true')}}
+      inp.addEventListener('focus',()=>show(inp.dataset.search?[]:all));inp.addEventListener('click',()=>show(inp.dataset.search?[]:all));
+      inp.addEventListener('input',()=>{{const q=inp.value.toLowerCase();show(all.filter(t=>t.toLowerCase().includes(q)))}});
+      inp.addEventListener('keydown',e=>{{if(e.key==='Escape')box.innerHTML=''}});inp.addEventListener('blur',()=>setTimeout(()=>box.innerHTML='',150));}})();</script>"""
+
+
+simple_apply = {"/jobs/1": page("Software Engineer", POSTING + APPLY_LINK), "/submit/1": THANKS}
+
+visa_if_yes = Scenario(
+    "an_if_yes_question_after_a_no_takes_the_menus_na",
+    "\"If yes, please enter visa type\" after No to sponsorship offered H1B, TN, F1 ... OTHER, NA; \"N/A\" was not found in it and five runs stopped (ALTEN 2026-11-01).",
+    {**simple_apply, "/apply/1": page("Apply", "<h1>Apply: Software Engineer</h1>" + form(
+        NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD,
+        combo("sponsor", "Will you now or in the future require sponsorship ?", ["Yes", "No"], "required"),
+        combo("visa", "If yes, please enter visa type", ["H1B", "TN", "F1", "E2", "L1", "L2", "OTHER", "NA"], "required"),
+        SUBMIT_BUTTON))},
+    expect={"sponsor": "No", "visa": "NA"},
+    facts={"requires_future_sponsorship_US": False, "work_authorization_US": "Yes, authorized to work for any employer in the USA", "us_citizen": False, "permanent_resident": False, "has_asylee_status": False, "current_immigration_status_US": "OPT"},
+)
+
+form_sum = Scenario(
+    "a_forms_own_sum_is_computed",
+    "\"What is 10 times 10?\" as a required question went to the applicant and stopped the run (Arize 2026-11-01).",
+    {**simple_apply, "/apply/1": page("Apply", "<h1>Apply: Software Engineer</h1>" + form(
+        NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD, '<label for="q">What is 10 times 10?</label><input id="q" name="check" required>', SUBMIT_BUTTON))},
+    expect={"check": "100"},
+)
+
+_AGREE = "I confirm that I have read, understand and agree to the written terms of the Mutual Agreement to Arbitrate Claims."
+_REFUSE = "I do not agree to the written terms of the Mutual Agreement to Arbitrate Claims."
+long_agreements = Scenario(
+    "required_agreements_in_long_legal_text",
+    "An arbitration agreement mentioning \"the plans' sponsors\" read as a sponsorship question, and three paragraphs on polygraphs ending \"Have you read and understood "
+    "these statements?\" as a background check: both refused as out of scope, eleven runs (Voya, Transamerica 2026-11-01).",
+    {**simple_apply, "/apply/1": page("Apply", "<h1>Apply: Software Engineer</h1>" + form(
+        NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD,
+        f"""<label for="arb">MUTUAL AGREEMENT TO ARBITRATE CLAIMS I understand that ExampleSoft is requiring me, as a condition of my application for employment, to arbitrate
+        claims. The Company and I mutually consent to arbitration of all claims against its benefit plans or the plans' sponsors, fiduciaries and agents. The agreement remains
+        applicable even if I am not employed by the Company.</label><select id="arb" name="arbitration" required><option value="">Select One</option><option>{_AGREE}</option><option>{_REFUSE}</option></select>""",
+        """<label for="pol">No ExampleSoft company engages in polygraph testing for pre-employment screening. Applicants, please note: I understand that it is unlawful to require a lie
+        detector test as a condition of employment. Have you read and understood these statements?</label><select id="pol" name="statements" required><option value="">Select One</option><option>Yes</option><option>No</option></select>""",
+        SUBMIT_BUTTON))},
+    expect={"arbitration": _AGREE, "statements": "Yes"},
+    terms=True,
+)
+
+resume_modal = Scenario(
+    "a_popup_that_only_asks_for_the_resume",
+    "\"Apply with resume\" over the form with one Upload button that opens the computer's file picker: its click changed nothing, four runs (Paylocity, CleanSlate 2026-11-01).",
+    {**simple_apply, "/apply/1": page("Apply", """<h1>Associate Engineer</h1>
+    <div class="modal in" role="dialog" aria-labelledby="t" id="gate" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:505"><div class="modal-dialog" style="background:#fff;width:420px;margin:120px auto;padding:20px">
+      <h4 id="t">Apply with resume</h4><p>Upload your resume and we'll automatically fill out your application</p>
+      <input accept=".doc,.docx,.pdf" id="force" type="file" style="display:none" onchange="document.getElementById('gate').remove()">
+      <button type="button" class="button" onclick="document.getElementById('force').click()"><span>Upload Resume</span></button></div></div>""" + form(NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD, SUBMIT_BUTTON))},
+)
+
+_ADDRESS = {"address": {"street": "1 Example Way", "city": "Exampleton", "state": "MD", "postal_code": "20000", "country": "United States of America"}, "location": "Exampleton, MD"}
+country_location = Scenario(
+    "a_location_box_that_lists_countries",
+    "\"Location, Country you're currently residing in\" answered \"No results\" for the city on three runs (ElevenLabs on Ashby, 2026-11-01). A person types the country.",
+    {**simple_apply, "/apply/1": page("Apply", "<h1>Apply: Software Engineer</h1>" + form(
+        NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD,
+        combo("location", "Location", ["United States", "United Kingdom", "Canada", "Poland", "India"],
+              'required data-search="1" class="ashby-application-form-input-autocomplete"').replace('class="select__input" ', ""),
+        SUBMIT_BUTTON))},
+    expect={"location": "United States"},
+    profile=_ADDRESS,
+)
+
+no_answer_saved = Scenario(
+    "a_saved_not_answered_is_not_typed",
+    "\"Not Answered\", chosen once from a county's menu labelled \"Other\", was typed into an optional \"Other\" website box and refused as an invalid URL, three runs (MSK's Workday, 2026-11-01).",
+    {**simple_apply, "/apply/1": page("Apply", "<h1>Apply: Software Engineer</h1>" + form(
+        NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD, '<label for="o">Other</label><input id="o" name="other" type="text">', SUBMIT_BUTTON))},
+    expect={"other": ""},
+    profile={"reviewed_answers": [{"id": "r1", "question": "Other", "answer": "Not Answered", "options": ["Give 'Other' Explanation", "Not Answered"], "employer": "Example County", "scope": "personal", "layer": "fact"}]},
+)
+
+_MENTIONS_PASSWORD = ("Are you a current ExampleSoft employee? (If you are currently an ExampleSoft employee, you MUST apply using your ExampleSoft username and password "
+                      "via the Jobs Hub in Workday)")
+long_question_with_password = Scenario(
+    "a_question_that_mentions_a_password_is_a_question",
+    "Read as a credential field, a required Yes/No question was never answered and every write was refused as \"missing\", three runs (Brown University Health 2026-11-01).",
+    {**simple_apply, "/apply/1": page("Apply", "<h1>Apply: Software Engineer</h1>" + form(
+        NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD, f'<label for="c">10. {_MENTIONS_PASSWORD}</label><select id="c" name="current" required><option value="">Select One</option><option>Yes</option><option>No</option></select>', SUBMIT_BUTTON))},
+    expect={"current": "No"},
+    profile={"reviewed_answers": [{"id": "r2", "question": "10. " + _MENTIONS_PASSWORD, "answer": "No", "options": ["Yes", "No"], "employer": "", "scope": "personal", "layer": "fact"}]},
+)
+
 SCENARIOS = [
     plain,
     search_box,
@@ -429,4 +532,11 @@ SCENARIOS = [
     survey_return_link,
     personal_test,
     ssn_survey,
+    visa_if_yes,
+    form_sum,
+    long_agreements,
+    resume_modal,
+    country_location,
+    no_answer_saved,
+    long_question_with_password,
 ]

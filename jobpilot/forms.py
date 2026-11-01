@@ -642,7 +642,10 @@ ENTRY = re.compile(
 )
 # A sign-in or code field. "password" is a word: "Why 1Password?" (1Password's own question, Ashby 2026-10-27) was
 # taken for a sign-in field, never answered, and every run stopped as "Employer sign-in must complete".
-AUTH = re.compile(r"\bpasswords?\b|verification code|one.time|authentication code|security code", re.IGNORECASE)
+# A field that asks for a credential says so in a few words. "Are you a current employee? (If you are, you MUST apply using your username
+# and password via the Jobs Hub)" is a Yes/No question: read as a credential it was never answered, every write was refused as "missing", and
+# the required question stopped three runs (Brown University Health's Workday, 2026-11-01).
+AUTH = re.compile(r"^(?=.{0,120}$).*?(?:\bpasswords?\b|verification code|one.time|authentication code|security code)", re.IGNORECASE | re.DOTALL)
 BACK_STEP = re.compile(r"^(?:back|previous|go back)(?: step)?$", re.I)
 RESUME = re.compile(r"r[eé]sum[eé]|cv\b|curriculum", re.IGNORECASE)
 # What a last step says about itself. The page's own furniture ("Application FAQs", "Privacy Policy") says none of it.
@@ -1344,6 +1347,18 @@ SURVEY_DONE = re.compile(
 SURVEY_ONWARD = re.compile(
     r"\s*(?:next|continue|finish|done|proceed|ok(?:ay)?|return\b.{0,30}|(?:go )?back to\b.{0,30}|close(?: this)?(?: window| tab)?)\W*", re.I
 )
+RESUME_GATE_JS = r"""() => {
+  const shown = e => { const r = e.getBoundingClientRect(), c = getComputedStyle(e); return r.width > 0 && r.height > 0 && c.visibility !== 'hidden' && c.display !== 'none'; };
+  for (const d of document.querySelectorAll('[role=dialog],[aria-modal=true],.modal')) {
+    if (!shown(d)) continue;
+    const file = d.querySelector('input[type=file]');
+    if (!file) continue;
+    if ([...d.querySelectorAll('input,select,textarea')].some(i => i.type !== 'file' && i.type !== 'hidden' && shown(i))) continue;
+    const buttons = [...d.querySelectorAll('button,a,[role=button]')].filter(shown);
+    if (buttons.length === 1 && /\b(?:upload|select|attach|choose|add)\b.*\b(?:resume|r[eé]sum[eé]|cv)\b/i.test(buttons[0].textContent)) return file;
+  }
+  return null;
+}"""
 # How long a finished questionnaire gets to close or leave by itself: "you will be redirected in 5 seconds".
 SURVEY_LEAVE_SECONDS = 8
 LAUNCHER = (
@@ -1695,6 +1710,22 @@ class FormSession:
             return False
         application = detect("https://" + origin + "/").id
         return custom_like(application) or detect(url).id != application
+
+    async def resume_gate(self):
+        """A pop-up that blocks the form until a resume is given, with one Upload button and no way to close it: Paylocity's "Apply with
+        resume" over CleanSlate's form (2026-11-01). The button opens the computer's file picker, which a click cannot answer, so its click
+        "changed nothing" and four runs stopped on "Only an observed dismiss control can close a dialog". A person picks their resume."""
+        try:
+            handle = await self.page.evaluate_handle(RESUME_GATE_JS)
+            target = handle.as_element()
+            if not target or not Path(self.resume_path).exists():
+                return False
+            await target.set_input_files(str(self.resume_path))
+        except (PlaywrightError, TypeError):
+            return False
+        self.emit("resume_gate", "Gave the resume to the pop-up that asked for it")
+        await self.settle(timeout=8)
+        return True
 
     async def survey_leaves(self, seconds=None):
         """A finished questionnaire can still be telling the application: give it a moment to close or leave by itself."""
@@ -3157,6 +3188,14 @@ class FormSession:
                 # nothing on Lyft's Greenhouse form, and the refill cleared a choice already made (2026-10-25). The city
                 # is searched too, and the address picks its own state's result.
                 search_queries = [*search_queries, city]
+            country = getattr(getattr(getattr(self.resolver, "profile", None), "address", None), "country", "") or ""
+            if country and self.location_resolver(field) and normalize(country) != normalize(value):
+                # Some location boxes list countries only: "Location, Country you're currently residing in" answered "No results" for the
+                # city on three of ElevenLabs' Ashby forms and the value stayed unaccepted (2026-11-01). A person types the country.
+                # Its short name too ("United States" for "United States of America"): each search is one request to the employer.
+                whole = normalize(country)
+                short = sorted((a for a in widgets._alias_group(country) if a != whole and len(a) >= 4 and whole.startswith(a)), key=len, reverse=True)[:1]
+                search_queries = [*search_queries, *short, country]
             rules = getattr(self.resolver, "answer_rules", None)
             fallback = (getattr(rules, "major_fallback", "") or "").strip()
             major_pick = None
@@ -3561,6 +3600,7 @@ class FormSession:
     def location_resolver(self, field):
         """For a location search box, pick the result matching the applicant's address."""
         from .answers import CONTACT, address_location_option
+        from .answers.contact import address_country_option
 
         if not self.resolver or normalize(field.get("label", "")) not in CONTACT["location"] | {
             "city",
@@ -3568,7 +3608,7 @@ class FormSession:
         }:
             return None
         address = self.resolver.profile.address
-        return lambda texts: address_location_option(texts, address)
+        return lambda texts: address_location_option(texts, address) or address_country_option(texts, address)
 
     async def discover_options(self, field):
         """Open custom selects once to read their real choices before the resolver decides."""

@@ -26,6 +26,17 @@ def address_location_option(options, address):
     return unique[0] if len(unique) == 1 else None
 
 
+def address_country_option(options, address):
+    """A box that lists countries only: the applicant's own country, never a city or another country."""
+    from ..widgets import _alias_group, norm
+
+    if not address.country:
+        return None
+    own = _alias_group(address.country) | {norm(address.country)}
+    named = [option for option in options if norm(option) in own]
+    return named[0] if len(named) == 1 else None
+
+
 # "USA (other than New York)", "United States (excluding California)".
 REGION_EXCLUDING = re.compile(r"^(?P<region>.+?)\s*\((?:other than|outside(?: of)?|excluding|except)\s+(?P<excluded>.+)\)\s*$", re.I)
 

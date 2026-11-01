@@ -52,7 +52,7 @@ async def run_scenario(service, scenario, mode="submit"):
         resume_id = resume.id
     service.db.set_setting("profile", {"name": "Alex Example", "email": "alex@example.test", "autonomous": True,
                                        "accept_all_application_terms": scenario.terms,
-                                       "facts": {"first_name": "Alex", "last_name": "Example", **scenario.facts}})
+                                       "facts": {"first_name": "Alex", "last_name": "Example", **scenario.facts}, **scenario.profile})
     service.db.set_setting("control", {"paused": False, "auto_submit": True})
 
     async def dispatch(_run_id):

@@ -185,6 +185,8 @@ CLOSED = re.compile(
     r"\b(?:job|position|role|opening|requisition|vacancy)\b[^.!?]{0,50}\bhas (?:already )?been filled\b|"
     r"job (?:posting |ad |listing |opening )?(?:has (?:been )?)?(?:closed|expired|removed)|this (?:job|position|requisition) (?:is )?"
     r"(?:closed|unavailable|no longer)|job not found|the page you are looking for (?:does not|doesn't) exist|"
+    # Ashby's own 404 (Cursor's removed requisitions, 2026-11-01): nothing else is on the page, so three decisions went to "return to the job".
+    r"\bthe (?:page|job) you requested was not found\b|"
     # Paylocity (Monti 2026-10-26): "We're sorry, that job does not exist or is not currently active."
     r"\b(?:that|this|the) (?:job|position|posting|requisition|opening) (?:you(?:'re| are) looking for )?"
     r"(?:does not|doesn't|no longer) exists?\b(?! yet)|"
@@ -1248,6 +1250,7 @@ class Adapter:
                 return self.e.result
             await self.form.settle(timeout=10)
             await self.dismiss_overlays()
+            await self.form.resume_gate()
             if await self.captcha_open():
                 # An open challenge (e.g. hCaptcha after an email step) is solved before anything
                 # else; the scanner never shows CAPTCHA frames as fields or controls.
