@@ -136,7 +136,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       group: "Jobs",
       label: h.company + (h.title ? " · " + h.title : ""),
       note: stateInfo(h.status in STATES ? h.status : "job:" + h.status).label,
-      icon: <Monogram name={h.company} />,
+      icon: <Monogram name={h.company} employer />,
       run: done(() => openJob(h.id)),
     }));
     // With no query, offer the pages and adding a link; with a query, every match: pages and tabs, then jobs, then actions.

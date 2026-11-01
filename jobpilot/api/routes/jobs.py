@@ -144,33 +144,61 @@ def router(service) -> APIRouter:
             "hold": ((reading(service).peek() or {}).get("jobs") or {}).get(job_id),
         }
 
+    def logo_postings(company):
+        with db.session() as s:
+            rows = s.execute(select(Job.url, Job.description).where(Job.company == company).order_by(Job.created_at.desc()).limit(6)).all()
+        return [(u, (d or "")[:20_000]) for u, d in rows]
+
+    @r.get("/api/logos")
+    async def company_logo_states(name: list[str] = Query(default=[])):
+        """Where each named company's icon stands, from memory: "ready" (with the version to ask /api/logo for), "pending" (queued
+        to be looked up in the background; ask again in a few seconds) or "none". Nothing here waits on the network or the disk,
+        and a company is looked up once however many rows name it. {"off": true} when logos are off in Settings."""
+        from ...logos import key_for, shelf
+
+        if not config.company_logos:
+            return {"off": True, "logos": {}}
+        kept = shelf(config.data_dir)
+        if not kept.scanned:
+            await asyncio.to_thread(kept.scan)
+        out = {}
+        for company in dict.fromkeys(n[:120] for n in name[:100]):
+            key = key_for(company)
+            state = kept.state(key) if key else "none"
+            if state is None:
+                kept.request(company, logo_postings)
+                out[company] = {"state": "pending"}
+            elif state == "ready":
+                out[company] = {"state": "ready", "v": kept.ready[key][1]}
+            else:
+                out[company] = {"state": "none"}
+        return {"off": False, "logos": out}
+
     @r.get("/api/logo")
-    async def company_logo(company: str = "", url: str = ""):
-        """A company's icon from this computer's cache, found once. 404 means the page shows its letter tile. Only a company that
-        has a job here, at the address given, is looked up: the pages asked are that company's own postings, never the caller's."""
+    async def company_logo(company: str = "", v: int = 0, url: str = ""):
+        """A company's kept icon: a file read, never a lookup (`url` is an old page's argument, ignored). Cached for a year when
+        the address carries its version, so a browser asks once."""
         from fastapi.responses import Response
 
-        from ...logos import MEDIA, logo
+        from ...logos import MEDIA, key_for, shelf
 
         if not config.company_logos:
             raise HTTPException(404, "No logo")
-
-        def postings():
-            with db.session() as s:
-                match = Job.company == company
-                shown = s.execute(select(Job.url, Job.description).where(match, Job.url == url).limit(1)).all()
-                others = s.execute(select(Job.url, Job.description).where(match, Job.url != url).order_by(Job.created_at.desc()).limit(5)).all()
-            return [*shown, *others] if shown else []  # The job on screen first.
-
-        rows = await asyncio.to_thread(postings)
-        found = await logo(config.data_dir, company, [r.url for r in rows], [r.description[:20_000] for r in rows]) if rows else None
+        kept = shelf(config.data_dir)
+        if not kept.scanned:
+            await asyncio.to_thread(kept.scan)
+        found = kept.read(key_for(company) or "")
         if not found:
             raise HTTPException(404, "No logo")
-        body, ext = found
+        body, ext, version = found
         return Response(
             body,
             media_type=MEDIA[ext],
-            headers={"Cache-Control": "private, max-age=604800", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'"},
+            headers={
+                "Cache-Control": "private, max-age=31536000, immutable" if v == version else "private, max-age=3600",
+                "X-Content-Type-Options": "nosniff",
+                "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+            },
         )
 
     @r.post("/api/jobs/{job_id}/rank")
