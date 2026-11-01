@@ -82,23 +82,25 @@ export function OverLimitJobs() {
             meta={
               <>
                 {r.score != null && <span className="mono">Fit {r.score}</span>}
-                <span>{r.hold.reason}</span>
+                <span>{`Has ${plural(r.hold.count, "application")}; limit ${r.hold.limit}`}</span>
               </>
             }
           />
         ),
       },
       { key: "fit", header: "Fit", hideBelow: 600, num: true, cell: (r) => r.score ?? "—" },
-      { key: "why", header: "Employer's applications", hideBelow: 600, truncate: true, width: 400, cell: (r) => <Note title={r.hold.reason}>{r.hold.reason}</Note> },
+      { key: "why", header: "Employer's applications", hideBelow: 600, truncate: true, width: 340, cell: (r) => <Note title={r.hold.reason}>{`Already has ${plural(r.hold.count, "application")}; your limit is ${r.hold.limit}.`}</Note> },
       {
         key: "act",
         header: <span className="sr-only">Actions</span>,
         width: "1%",
         pin: true,
         cell: (r) => (
-          <Button size="sm" className="ax-lead" disabled={pending !== null} loading={pending === "approve:" + r.id} onClick={() => approve(r)}>
-            Approve
-          </Button>
+          <div className="ax-act" onClick={(e) => e.stopPropagation()}>
+            <Button size="sm" className="ax-lead" disabled={pending !== null} loading={pending === "approve:" + r.id} onClick={() => approve(r)}>
+              Approve
+            </Button>
+          </div>
         ),
       },
     ],
@@ -111,7 +113,7 @@ export function OverLimitJobs() {
     <>
       <TopLine>
         {total > 0
-          ? `${plural(total, "job")} at employers that already have ${limit != null ? `${limit} applications` : "as many applications as your limit"}. AXIOM will not apply to these by itself. Approve applies to one now; the limit stays as it is.`
+          ? `${plural(total, "job")} at employers that have reached your limit${limit != null ? ` of ${limit} applications` : ""}. AXIOM will not apply to these by itself. Approve applies to one now; the limit stays as it is.`
           : "Jobs whose employer has reached your limit wait here for your approval."}
       </TopLine>
       <div className="ax-toolbar">
