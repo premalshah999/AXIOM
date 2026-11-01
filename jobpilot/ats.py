@@ -307,15 +307,39 @@ EMBED_FINGERPRINTS = (
     ("pinpoint", "script", re.compile(r"//d2n5ied94mazop\.cloudfront\.net/")),
 )
 DOM_MARKERS = sorted({"grnhse_app", "grnhse_iframe", "icims_content_iframe", "comeet-jsapi"})
+# An Apply link's words (the page's links to a platform's marketing or privacy pages say other things).
+APPLY_TEXT = re.compile(r"^(?:apply|(?:start|begin|submit) (?:your |an |the )?application)|apply now|apply for", re.I)
+# What an application's address looks like on a platform's host. A frame, form or script from a platform's domain that is
+# not shaped like one (an analytics pixel, a consent banner, a newsletter form) does not show where the application is made.
+APPLICATION_SHAPE = re.compile(r"embed|job_app|in_iframe|apply|application|jobs?/\d|/jobs?(?:/|$|\?)|candidate|careers?", re.I)
+NOT_AN_APPLICATION = re.compile(r"analytics|pixel|track|beacon|gtag|gtm|consent|cookie|newsletter|subscribe|unsubscribe|search", re.I)
 
 # Company career sites often embed or link to the real ATS; the page reveals it.
 EMBED_JS = (
     r"""() => {
   const out = [], add = (k, v, cap) => { if (v && out.filter((e) => e[0] === k).length < cap) out.push([k, v]); };
   for (const f of document.querySelectorAll('iframe[src]')) add('frame', f.src, 60);
+  for (const f of document.querySelectorAll('form[action]')) {
+    try { add('form', new URL(f.getAttribute('action'), document.baseURI).href, 20); } catch (e) {}
+  }
   for (const a of document.querySelectorAll('a[href]')) {
-    const t = (a.innerText || a.getAttribute('aria-label') || '').trim();
-    if (/^apply|apply now|apply for/i.test(t)) add('apply', a.href, 60);
+    const t = (a.innerText || a.getAttribute('aria-label') || a.title || '').trim();
+    if (__APPLY__.test(t)) add('apply', a.href, 60);
+  }
+  for (const s of document.querySelectorAll('script[type="application/ld+json"]')) {
+    try {
+      const stack = [JSON.parse(s.textContent)];
+      while (stack.length) {
+        const o = stack.pop();
+        if (Array.isArray(o)) { stack.push(...o); continue; }
+        if (!o || typeof o !== 'object') continue;
+        if (o['@graph']) stack.push(o['@graph']);
+        if ([].concat(o['@type'] || []).includes('JobPosting')) {
+          const acts = [].concat(o.potentialAction || []).map((x) => x && x.target && (x.target.urlTemplate || x.target));
+          for (const v of [o.url, o.applyUrl, ...acts]) if (typeof v === 'string') add('jsonld', v, 10);
+        }
+      }
+    } catch (e) {}
   }
   for (const s of document.querySelectorAll('script[src]')) add('script', s.src, 250);
   for (const l of document.querySelectorAll('link[rel~=stylesheet][href],link[rel=preload][href],link[rel=modulepreload][href]'))
@@ -325,8 +349,17 @@ EMBED_JS = (
   }
   for (const id of __DOM__) if (document.getElementById(id)) add('dom', id, 20);
   return out;
-}""".replace("__DOM__", json.dumps(DOM_MARKERS))
+}""".replace("__DOM__", json.dumps(DOM_MARKERS)).replace("__APPLY__", "/" + APPLY_TEXT.pattern + "/i")
 )
+
+
+# The registrable domains of the platforms themselves (not their employer-domain career sites).
+VENDOR_SITES = frozenset(
+    d for ats in REGISTRY for d in ats.domains if d.count(".") == 1 and d not in SUCCESSFACTORS_CAREER_SITES
+)
+
+
+UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
 
 def application_platform(ats_id):
@@ -334,37 +367,147 @@ def application_platform(ats_id):
     return not (unsettled(ats_id) or ats_id in AGGREGATORS)
 
 
+def marketing_host(url):
+    """A platform's own marketing or corporate site (www.workable.com, icims.com), not a tenant of it. A link or script
+    from there is a footer, a "Powered by" badge or a tracker: it says nothing about where this application is made.
+    Tenants live on subdomains (acme.icims.com, jobs.lever.co, boards.greenhouse.io); an employer's own career-site
+    domain that the registry lists (basf.jobs, careers.oracle.com, jobs.gem.com) is a place to apply, not a vendor's site."""
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if not (host in VENDOR_SITES or (host.startswith("www.") and host[4:] in VENDOR_SITES)):
+        return False
+    # Comeet's and GovernmentJobs' postings live on the vendor's own host (www.comeet.com/jobs/acme/12.345).
+    return not re.search(r"/jobs?(?:/|$)|apply|application|candidate|embed|job_app|portal", parts.path, re.I)
+
+
+def application_address(kind, value):
+    """Whether this frame, form, script or link of a known platform's domain is shaped like the application (or its loader)
+    and not like the platform's marketing site or a tracking pixel."""
+    if marketing_host(value):
+        return False
+    path = urlsplit(value).path + "?" + urlsplit(value).query
+    if kind in {"frame", "form"}:
+        return bool(APPLICATION_SHAPE.search(path)) and not (
+            NOT_AN_APPLICATION.search(path) and not re.search(r"job_app|embed|apply", path, re.I)
+        )
+    if kind == "script":
+        # SAP serves a SuccessFactors Career Site Builder page's jquery from performancemanager*.successfactors.com: the
+        # platform's own runtime on an employer's domain is the proof, so a script is rejected by what it is for.
+        return not NOT_AN_APPLICATION.search(path)
+    return True
+
+
 def classify_embedded(entries):
     """(ats id, url or None, how) for what a page shows of the platform behind it, or (None, None, "").
 
     A real application link beats a vendor's script: PwC, Ascension and Crowe's Phenom pages carry Phenom's scripts and
     apply on Workday or Oracle, yet a script-only hit returned "phenom" and no application link was ever followed
-    (2026-10-31). So a frame (the form itself) comes first, then an Apply link, then the page's own fingerprints (meta,
-    stylesheets), then embedded widgets (scripts, marker elements). Vendors and job boards are never an answer. A named
-    platform that only the generic driver runs is an answer for the label alone, never a place to navigate to: the page's
-    form already works where it is, and a real platform's hit outranks it."""
+    (2026-10-31). So a frame (the form itself) comes first, then an Apply link or the posting's own structured data
+    (JSON-LD), then a form that posts to a platform, then the page's own fingerprints (meta, stylesheets), then embedded
+    widgets (scripts, marker elements). Vendors and job boards are never an answer. A named platform that only the generic driver runs is an answer
+    for the label alone, never a place to navigate to: the page's form already works where it is, and a real platform's hit
+    outranks it. A platform's domain is not proof by itself: its marketing site, a tracking script or a newsletter form
+    on it shows only that the employer uses the vendor for something (application_address)."""
     hits = []
-    for rank, kind in enumerate(("frame", "apply", "meta", "link", "script", "dom")):
+    for rank, kind in enumerate(("frame", "apply", "jsonld", "form", "meta", "link", "script", "dom")):
         for k, value in entries:
             if k != kind:
                 continue
             ats_id, url = None, None
-            if kind in {"frame", "apply", "script"} and (found := detect(value)).id != "custom":
-                ats_id, url = found.id, value
+            if kind in {"frame", "form", "apply", "jsonld", "script"} and (found := detect(value)).id != "custom":
+                if application_address(kind, value):
+                    ats_id, url = found.id, value
+                else:
+                    continue
             if ats_id is None:
                 key = value.partition("=")[0] if kind == "meta" else value
                 ats_id = next((n for n, fk, rx in PAGE_FINGERPRINTS + EMBED_FINGERPRINTS if fk == kind and rx.search(key)), None)
             if not ats_id or ats_id in VENDORS or ats_id in AGGREGATORS:
                 continue
-            if kind == "frame" and not re.search(r"embed|job_app|in_iframe|apply|jobs/\d|careers", value, re.I):
-                continue
-            if kind == "script" or ats_id in LABEL_ONLY:
-                url = None
+            if kind in {"script", "form"} or ats_id in LABEL_ONLY:
+                url = None  # A script or a form's action is no page to open.
             hits.append((ats_id in LABEL_ONLY, rank, ats_id, url, kind))
     if not hits:
         return None, None, ""
     *_, ats_id, url, kind = min(hits, key=lambda h: h[:2])
     return ats_id, url, kind
+
+
+def entries_from_html(html, base_url=""):
+    """EMBED_JS read from fetched HTML instead of a live page: the same entries, for the moment a job is added and no
+    browser is open. Server-rendered markup only: a frame a script adds later (Roblox's, after Apply) is found live."""
+    from urllib.parse import urljoin
+
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html or "", "html.parser")
+    out = []
+
+    def add(kind, value, cap):
+        if value and sum(1 for e in out if e[0] == kind) < cap:
+            out.append((kind, urljoin(base_url, value) if kind in {"frame", "form", "apply", "script", "link", "jsonld"} else value))
+
+    for tag in soup.select("iframe[src]"):
+        add("frame", tag["src"], 60)
+    for tag in soup.select("form[action]"):
+        add("form", tag["action"], 20)
+    for tag in soup.select("a[href]"):
+        text = (tag.get_text(" ", strip=True) or tag.get("aria-label") or tag.get("title") or "").strip()
+        if APPLY_TEXT.search(text):
+            add("apply", tag["href"], 60)
+    for tag in soup.select('script[type="application/ld+json"]'):
+        try:
+            stack = [json.loads(tag.string or tag.get_text())]
+        except ValueError:
+            continue
+        while stack:
+            node = stack.pop()
+            if isinstance(node, list):
+                stack.extend(node)
+            elif isinstance(node, dict):
+                stack.append(node.get("@graph"))
+                if "JobPosting" in (node.get("@type") if isinstance(node.get("@type"), list) else [node.get("@type")]):
+                    actions = node.get("potentialAction") or []
+                    for action in actions if isinstance(actions, list) else [actions]:
+                        target = action.get("target") if isinstance(action, dict) else None
+                        for value in (target.get("urlTemplate") if isinstance(target, dict) else target,):
+                            add("jsonld", value if isinstance(value, str) else "", 10)
+                    for key in ("url", "applyUrl"):
+                        add("jsonld", node[key] if isinstance(node.get(key), str) else "", 10)
+    for tag in soup.select("script[src]"):
+        add("script", tag["src"], 250)
+    for tag in soup.select("link[href]"):
+        if re.search(r"stylesheet|preload|modulepreload", " ".join(tag.get("rel") or []), re.I):
+            add("link", tag["href"], 120)
+    for tag in soup.select("meta[name],meta[property]"):
+        add("meta", f"{tag.get('name') or tag.get('property')}={(tag.get('content') or '')[:120]}", 80)
+    for marker in DOM_MARKERS:
+        if soup.find(id=marker):
+            add("dom", marker, 20)
+    return out
+
+
+# Addresses that carry their platform's own parameter on an employer's domain. Jibe (iCIMS's career-site front end,
+# careers.example.com/jobs/12345?icims=1) and Greenhouse's and Ashby's board embeds (an employer page opened with the
+# platform's posting id) were each the application's platform on every saved run that could be checked (2026-11-01: 13 of
+# 14 iCIMS jobs, 7 of 11 Greenhouse and 1 of 1 Ashby were seen on the platform; none on another, the rest never reached a form). The address names a platform for the label only:
+# identity and every address-keyed record stay on the employer's URL (detect).
+def url_platform(url):
+    """The platform an employer-domain posting URL names by its own parameters, or None. Never for a platform's own host."""
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    if detect(url).id != "custom":
+        return None
+    query = {k.lower(): v for k, v in parse_qsl(parts.query)}
+    if query.get("icims") == "1" and re.search(r"/jobs?/\d+", parts.path):
+        return "icims"
+    if re.fullmatch(r"\d{4,}", query.get("gh_jid", "")):
+        return "greenhouse"
+    if re.fullmatch(UUID, query.get("ashby_jid", ""), re.I):
+        return "ashby"
+    return None
 
 
 def detect_embedded(entries):
@@ -543,7 +686,6 @@ def canonicalize(url: str, *, keep_platform_hint=False, requisition_ids=True, le
     return clean, hashlib.sha256(identity.encode()).hexdigest()
 
 
-UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 ICIMS_TENANT_PREFIX = re.compile(r"^(?:careers?|talent|employees|internal|intranet)-")
 
 

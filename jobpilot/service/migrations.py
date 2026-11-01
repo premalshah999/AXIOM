@@ -16,6 +16,13 @@ class MigrationsMixin:
                 if (ats := detect(job.url).id) != "custom":
                     job.ats = ats
 
+    def label_platforms_from_history(self):
+        """Career-site jobs take the platform an earlier run's hand-off or the address's own parameter names, as a run's
+        observation does (2026-11-01: 70 jobs whose pages showed a platform kept the custom label and its single lane)."""
+        from ..platform_label import label_jobs_from_history
+
+        label_jobs_from_history(self.db)
+
     def employer_names_from_titles(self):
         """Jobs and sources saved with a portal page title as their employer ("Job Listings at PepsiCo") take the
         employer's name (2026-10-23: 669 iCIMS jobs; receipts and employer caps never matched them)."""

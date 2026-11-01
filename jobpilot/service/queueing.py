@@ -7,7 +7,9 @@ from datetime import UTC, datetime, timedelta
 import functools
 import hashlib
 
-from sqlalchemy import select
+from urllib.parse import urlsplit
+
+from sqlalchemy import or_, select
 from sqlalchemy.orm import defer
 
 from ..db import Event, Job, Resume, Run, Setting, now, record
@@ -359,19 +361,29 @@ class QueueingMixin:
                     code="archived_submission",
                 )
             # Columns only: whole rows (descriptions included) for every job on the platform were read per attempt.
+            # The same address under another label too: a career-site job relabelled with the platform it runs on
+            # (platform_label) leaves its label's list, and its earlier runs must still count.
+            host = urlsplit(job.url).hostname or job.url
             aliases = [
                 candidate.id
-                for candidate in s.execute(select(Job.id, Job.url, Job.ats, Job.company).where(Job.ats == job.ats))
+                for candidate in s.execute(
+                    select(Job.id, Job.url, Job.ats, Job.company).where(
+                        or_(Job.ats == job.ats, Job.url.icontains(host, autoescape=True))
+                    )
+                )
                 if url_identity(candidate.url) == identity or icims_requisition_alias(job, candidate)
             ]
             # The same posting under its other link: the target of this short link, or short links that lead here.
             linked = []
             if final and url_identity(final) != identity:
                 final_ats, final_identity = detect(final).id, url_identity(final)
+                final_host = urlsplit(final).hostname or final
                 linked = [
                     candidate.id
                     for candidate in s.execute(
-                        select(Job.id, Job.url, Job.ats, Job.company).where(Job.ats == final_ats)
+                        select(Job.id, Job.url, Job.ats, Job.company).where(
+                            or_(Job.ats == final_ats, Job.url.icontains(final_host, autoescape=True))
+                        )
                     )
                     if url_identity(candidate.url) == final_identity
                 ]
