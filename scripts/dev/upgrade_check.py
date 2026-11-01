@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -90,8 +91,11 @@ class Home:
 
     def start(self, wait=START_SECONDS):
         """As the window does. True when every service came up in time."""
-        subprocess.Popen([self.axiom, "boot"], env=self.env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True)
+        boot = subprocess.Popen([self.axiom, "boot"], env=self.env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                start_new_session=True)
+        # `boot` becomes the supervisor, in this same process. Unreaped it would stay a zombie after it stops, which `axiom stop` reads as
+        # still running: the window reaps it in the real app.
+        threading.Thread(target=boot.wait, daemon=True).start()
         deadline = time.monotonic() + wait
         while time.monotonic() < deadline:
             state = self.state()

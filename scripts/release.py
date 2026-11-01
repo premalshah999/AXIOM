@@ -214,7 +214,10 @@ class Release:
         if done is None:
             return
         lines = done.stdout.strip().splitlines()
-        self.say("real pages: " + (lines[0] if lines else "no answer") + (" (full list: replay_corpus's last-compare.txt)" if done.returncode == 3 else ""))
+        if not lines:
+            self.say(f"real pages: not read, the replay exited {done.returncode}: {(done.stderr or '')[-200:].strip()}")
+            return
+        self.say("real pages: " + lines[0] + (" (the full list is in replay_corpus's last-compare.txt: read it)" if done.returncode == 3 else ""))
 
     # ---- build -------------------------------------------------------------------------------------------------------
 
