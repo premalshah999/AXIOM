@@ -40,6 +40,20 @@ NON_CHOICES = re.compile(
     r"no (?:results?|match(?:es|ing)?(?: \w+)?)(?: found)?|loading\W*|no options?(?: available)?|searching\W*", re.I
 )
 PAGE_SIZE = 8
+# Page furniture read as a caption or heading: an upload box's "or drag and drop here" (Saalex, Spectral Labs, Stockholm
+# Environment Institute 2026-11-01), a "required field" note, a bare "Profile" heading. It names nothing the owner can answer.
+JUNK_CAPTION = re.compile(
+    r"(?:or\s+)?(?:drag(?:\s+(?:and|&)\s+drop)?|drop)(?:\s+(?:your\s+)?files?)?(?:\s+here)?|"
+    r"(?:choose|browse|select|attach|upload)(?:\s+(?:a|your))?(?:\s+files?)?|required(?:\s+field)?|\(?optional\)?|"
+    r"\*|no file (?:chosen|selected)|profile|details|application|questions?|additional (?:information|questions)",
+    re.I,
+)
+
+
+def clean_caption(text):
+    """A caption or heading worth showing, "" when it is upload-widget text, a required marker or a generic heading."""
+    text = " ".join(str(text or "").split())
+    return "" if not text or JUNK_CAPTION.fullmatch(text.strip(" :.*")) else text
 
 
 def context_from(item):
@@ -48,12 +62,12 @@ def context_from(item):
     extra = item.get("context") or {}
     value = {
         "type": item.get("type") or extra.get("type") or "",
-        "section": scope.get("section") or extra.get("section") or "",
+        "section": clean_caption(scope.get("section") or extra.get("section") or ""),
         "group": scope.get("group") or extra.get("group") or "",
         # The question printed above a control that carries only a generic caption ("None of the Above", "Make
         # Selection Here"), and the heading it sits under (forms.enrich_pending).
-        "caption": str(extra.get("caption") or "")[:300],
-        "heading": str(extra.get("heading") or "")[:160],
+        "caption": clean_caption(extra.get("caption"))[:300],
+        "heading": clean_caption(extra.get("heading"))[:160],
         "row_index": extra.get("row_index") if isinstance(extra.get("row_index"), int) else 0,
         "hint": str(extra.get("hint") or "")[:600],
         "accept": str(extra.get("accept") or "")[:200],
@@ -116,7 +130,7 @@ def where(context):
     elif context.get("history_kind") == "education":
         label, parts = "Education", [identity.get("school", ""), identity.get("degree", "")]
     else:
-        return _human(context.get("section"))
+        return _human(clean_caption(context.get("section")))
     detail = " · ".join(p for p in parts if p)
     return f"{label}: {detail}" if detail else label
 
@@ -124,7 +138,7 @@ def where(context):
 # A caption that is no question: it names a choice or a control, and the question is printed above it.
 GENERIC = re.compile(
     r"none of the above|none|make selection here|(?:please )?select(?: one| an option| here)?|choose(?: one| here)?|"
-    r"other(?: free text)?|please specify|specify|yes|no|n a|not applicable|"
+    r"other(?: free text)?|please specify|specify|yes|no|n a|not applicable|tick(?: box| here)?|check(?: ?box| here)?|"
     r"(?:start|begin|from)? ?(?:(?:and|&)? ?(?:end|to)?)? ?dates?|start end date|begin date"
 )
 
@@ -139,9 +153,23 @@ def display(question, context=None):
     printed above a generic caption ("None of the Above" under "Do you have any of the following…")."""
     context = context or {}
     text = tidy(question)
-    caption = " ".join(str(context.get("caption") or "").split())
-    if caption and normalize(caption) not in normalize(text) and (generic(question) or len(normalize(text).split()) <= 4):
+    caption = clean_caption(context.get("caption"))
+    # A caption is the question printed above a bare control, so it ends like one; a paragraph of terms above "Apex Video
+    # URL" is not that label's question.
+    if caption and normalize(caption) not in normalize(text) and (
+        generic(question) or (len(normalize(text).split()) <= 4 and caption.endswith(("?", ":")))
+    ):
         text = f"{caption} › {text}"
+    group = _human(clean_caption(context.get("group")))
+    if (
+        context.get("type") in {"checkbox", "radio"}
+        and group
+        and not context.get("history_kind")
+        and normalize(group) not in normalize(text)
+        and len(normalize(text).split()) <= 4
+    ):
+        # "Third Shift" is one box of "Preferred shift (Mark all that apply)" (Intertek, 2026-10).
+        text = f"{group} › {text}"
     place = where(context)
     if place and normalize(place) not in normalize(text):
         return f"{place} › {text}"
@@ -211,7 +239,8 @@ def inferable(db, config, profile, question, options=(), employer="", job=None):
     if found := reusable_answer(KnowledgeBase(db), question, options, {}, "", employer):
         return f"the owner already answered this question ({found[:60]})"
     field = {"id": "q", "label": text, "type": "select" if listed else "text", "options": list(options or []),
-             "required": True, "section": "", "group": "", "value": "", "valid": True}
+             "required": True, "section": "", "group": "", "value": "", "valid": True,
+             "widget": "date-text" if DATE_IN_TEXT.search(text) else ""}
     try:
         answer = Resolver(profile, db, config, None, employer, job or {}).local(field)
     except Exception:
@@ -245,7 +274,10 @@ FRAGMENT = re.compile(
     r"(?:(?:start|end|from|to|graduation|completion) )?(?:date|month|day|year)(?: (?:month|day|year))?|"
     r"(?:from|to|start|end) date(?: (?:month|day|year))?|division|department|type|c|search|search for|keywords?|"
     r"dates? employed|employment dates?|job title|employer(?: name)?|company(?: name)?|"
-    r"country|state|state province|province|city|postal code|zip(?: code)?|location",
+    r"country|state|state province|province|city|postal code|zip(?: code)?|location|"
+    # Whose phone? "Employer Phone Number" with no history row named (City National Bank, 2026-11-01).
+    r"(?:employer|company|school|institution)(?: (?:name|phone|phone number|telephone|email|"
+    r"e mail|address|title|contact))+",
 )
 # "Please indicate all entities for which you are currently working or have worked" (Federal Reserve): the follow-up to
 # a prior-employment question whose answer is No. It is shown required only when the engine misread that parent.
@@ -296,7 +328,7 @@ def defect(question, options=(), context=None, reason=""):
     if SITE_CHROME.fullmatch(text):
         return "This is the website's search box, not an application question"
     located = any(
-        _human(context.get(k)) for k in ("section", "group", "heading")
+        _human(clean_caption(context.get(k))) for k in ("section", "group", "heading")
     ) or bool(context.get("history_identity") or context.get("caption") or context.get("peers"))
     if (FRAGMENT.fullmatch(normalize(text)) or GENERIC.fullmatch(normalize(text))) and not located:
         # "None of the Above" with no group, "Make Selection Here" with no instruction, "Start & end date" with no row
@@ -320,12 +352,22 @@ def defect(question, options=(), context=None, reason=""):
     return None
 
 
+def tick_options(options, context=None):
+    """The options the owner is offered: a lone tick box has none of its own, so Yes (tick it) and No (leave it empty).
+
+    Intertek's "Third Shift" and National Louis' certification "Tick" reached the owner as free-text questions with
+    nothing to tap (2026-10/11): "sometimes they'd come to me on telegram in a helpless state"."""
+    if (context or {}).get("type") == "checkbox" and not choices(options):
+        return ["Yes", "No"]
+    return list(options or [])
+
+
 def kind(question, options=(), context=None, reason=""):
     """choice, upload or text. An upload field is never asked as a text question."""
     context = context or {}
     if context.get("type") == "file" or reason == "Required document upload":
         return "upload"
-    if choices(options):
+    if choices(tick_options(options, context)):
         return "choice"
     if UPLOAD_WORDING.search(tidy(question)):
         return "upload"
@@ -334,6 +376,11 @@ def kind(question, options=(), context=None, reason=""):
 
 DATE_SHAPES = {"mdy": "MM/DD/YYYY", "dmy": "DD/MM/YYYY", "ymd": "YYYY-MM-DD", "month-year": "MM/YYYY",
                "year": "YYYY", "month": "MM"}
+
+
+# A date's shape named in the question itself: the repair agent words a field as "(enter as MM/DD/YYYY)", and its question
+# carries no field type (OmegaHires, 2026-11-01).
+DATE_IN_TEXT = re.compile(r"\b(?:MM/DD/YYYY|DD/MM/YYYY|YYYY-MM-DD|month/day/year|as a date)\b", re.I)
 
 
 def expected_format(context=None):
@@ -356,6 +403,7 @@ def requirement(question, options=(), context=None, reason=""):
     """One line telling the owner what kind of field this is and what to send."""
     context = context or {}
     question_kind = kind(question, options, context, reason)
+    options = tick_options(options, context)
     listed = choices(options)
     field_type = str(context.get("type") or "")
     if question_kind == "upload":
@@ -391,6 +439,8 @@ def requirement(question, options=(), context=None, reason=""):
 
 def free_text_allowed(options, context=None):
     """A searchable or partly read list, or one whose only "option" was a placeholder, takes a typed answer."""
+    if (context or {}).get("type") == "checkbox":
+        return False  # Yes or No: nothing else sets a box.
     return bool((context or {}).get("options_partial")) or not choices(options)
 
 
@@ -518,6 +568,13 @@ def cannot_automate(question, options=(), context=None, reason=""):
     if VIDEO_ASK.search(text) and not (POLAR.search(tidy(question)) and sorted(
         normalize(t) for _, t in choices(options)) == ["no", "yes"]):
         return "This application needs a video recording of you. The app can't record or upload video.", True
+    if re.search(r"\bvideo\b", tidy(question), re.I) and kind(question, options, context, reason) == "text":
+        # "Apex Video URL" (Carvana, 2026-11-01): the box takes a link, and the video is a recording of the applicant.
+        return (
+            "This application needs a video recording of you. The app can't record one: send a link only if you "
+            "already have one, or drop this job.",
+            True,
+        )
     if kind(question, options, context, reason) == "upload" and SAMPLE_ASK.search(text):
         return (
             "This application needs a piece of your own work (a writing sample, publication or portfolio). The app "
@@ -533,7 +590,7 @@ def present(review):
     `cannot_automate` is a plain reason when no answer can complete the field ("" otherwise); `kind` is then
     "cannot_automate" when nothing the owner could type or send fits, and `input_kind` keeps the answer type."""
     context = review.get("context") or {}
-    options = review.get("options") or []
+    options = tick_options(review.get("options") or [], context)
     question_kind = kind(review.get("question", ""), options, context, review.get("reason", ""))
     blocked, hard = cannot_automate(review.get("question", ""), options, context, review.get("reason", ""))
     return {

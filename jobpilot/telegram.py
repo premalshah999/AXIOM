@@ -671,14 +671,16 @@ def option_keyboard(review_id, listed, page=0):
     return {"inline_keyboard": rows}
 
 
-def question_payload(service, review_id, question, options, context, reason, company, title):
+def question_payload(service, review_id, question, options, context, reason, company, title, job_id=""):
     """The complete owner question: employer, section or history row, full wording, every option, how to answer."""
     from . import owner_questions as oq
     from .failure_reports import clean
 
     context = context or {}
+    options = oq.tick_options(options, context)
     kind = oq.kind(question, options, context, reason)
     listed = oq.choices(options)
+    blocked, hard = oq.cannot_automate(question, options, context, reason)
     header = " · ".join(x for x in (clean(company or "") or "Employer", clean(title or "")) if x)
     body = oq.display(question, context)
     if len(body) > 2500:
@@ -705,16 +707,31 @@ def question_payload(service, review_id, question, options, context, reason, com
             "reuse it when another one asks for the same document."
         )
         markup = {"force_reply": True, "selective": True}
+    elif hard:
+        tail = "Reply with a link if you have one."
+        markup = {"force_reply": True, "selective": True}
     else:
         tail = "Reply to this message with your answer. I'll remember it for future applications."
         markup = {"force_reply": True, "selective": True}
+    if blocked:
+        # A video of the applicant, or a piece of their own work: say so plainly and let them remove the job.
+        lines = [lines[0], "", body, "", "⚠️ " + blocked]
+        if hard:
+            lines += ["", "No file or typed answer fits this one."]
+        if job_id:
+            drop = [{"text": "🗑 Drop this job", "callback_data": f"j:delete:{job_id}"}]
+            if kind == "choice":
+                markup["inline_keyboard"].append(drop)
+            elif markup.get("force_reply"):
+                markup = {"inline_keyboard": [drop]}
+            tail += " Or tap Drop this job to remove it from your applications."
     text = "\n".join([*lines, *listing, "", tail])
     if len(text) > 4000:
         text = "\n".join([*lines, "", f"{len(listed)} choices: use the buttons below.", "", tail])
     return {"chat_id": service.config.telegram_user_id, "text": text[:4000], "reply_markup": markup}
 
 
-from .owner_questions import allows_several  # noqa: E402  (one rule for the dashboard and Telegram)
+from .owner_questions import allows_several, tick_options as oq_tick  # noqa: E402  (one rule for the dashboard and Telegram)
 
 
 def multiple_picks(text, options):
@@ -952,6 +969,8 @@ def next_question(service, allow_live):
                 key=review.key,
                 company=job.company,
                 title=job.title,
+                job_id=job.id,
+                shown=employer_name(job),
             )
     return None
 
@@ -1001,7 +1020,8 @@ async def _ask_one_question(service, allow_live):
             service.db.set_setting("telegram_question_sent:" + rid, {"sent": True, "private": True})
         return False
     payload = question_payload(
-        service, rid, chosen.question, chosen.options, chosen.context, chosen.reason, chosen.company, chosen.title
+        service, rid, chosen.question, chosen.options, chosen.context, chosen.reason, chosen.shown, chosen.title,
+        chosen.job_id,
     )
     sent = await send_help(
         service,
@@ -1066,6 +1086,8 @@ async def answer_from_text(service, message):
     row = found[0]
     question, options, context, reason = row.question, list(row.options or []), row.context or {}, row.reason or ""
     from . import owner_questions as oq
+
+    options = oq.tick_options(options, context)
 
     text = message.get("text", "").strip()
     kind = oq.kind(question, options, context, reason)
@@ -1660,7 +1682,9 @@ async def _handle_update(service, update):
                 {
                     "chat_id": c.telegram_user_id,
                     "message_id": source["message_id"],
-                    "reply_markup": option_keyboard(rid, choices(found[0].options), int(page or 0)),
+                    "reply_markup": option_keyboard(
+                        rid, choices(oq_tick(found[0].options, found[0].context)), int(page or 0)
+                    ),
                 },
             )
         else:
@@ -1681,9 +1705,10 @@ async def _handle_update(service, update):
                 answered = bool(review and review.answer is not None)
             found = live_review(service, parts[1])
             idx = int(parts[2])
-            if answered or not found or idx < 0 or idx >= len(found[0].options):
+            offered = oq_tick(list(found[0].options or []), found[0].context or {}) if found else []
+            if answered or not found or idx < 0 or idx >= len(offered):
                 raise ValueError("Expired, answered or superseded question")
-            value = found[0].options[idx]
+            value = offered[idx]
             reply = (await service.resolve_review(parts[1], value))["message"]
         except (ValueError, IndexError):
             value = None
