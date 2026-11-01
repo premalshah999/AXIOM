@@ -8,6 +8,7 @@ from sqlalchemy import select
 from jobpilot.admission import QueueBlocked
 from jobpilot.ats import canonicalize, requisition_keys
 from jobpilot.db import Event, Job, Run
+from jobpilot.features.discovery.policy import requisition_key
 
 UUID_A = "11111111-2222-3333-4444-555555555555"
 UUID_B = "99999999-2222-3333-4444-555555555555"
@@ -364,3 +365,21 @@ async def test_the_board_job_finds_a_short_link_that_led_to_the_employers_page(s
     with pytest.raises(QueueBlocked) as err:
         await service.queue("board", "submit", owner_pick=True)
     assert err.value.code == "duplicate_posting"
+
+
+@pytest.mark.parametrize("text", [
+    "A bachelor's degree is required. Python is required.",
+    "Requirements: five years of work.",
+    "Requisition Type: Regular. Job ID: see below.",
+])
+def test_ordinary_words_in_a_posting_are_not_a_requisition_number(text):
+    first = requisition_key("https://careers.acme.test/roles/data-engineer", "Data Engineer", "Austin", text, "Acme")
+    second = requisition_key("https://careers.acme.test/roles/ml-engineer", "ML Engineer", "Austin", text, "Acme")
+    assert first != second
+
+
+@pytest.mark.parametrize("text", ["Requisition ID: R12345", "Req #98765", "Job ID 4471", "REQ-2025-0042", "Req: AB1234"])
+def test_a_stated_requisition_number_still_joins_two_links_of_one_posting(text):
+    first = requisition_key("https://careers.acme.test/a", "Data Engineer", "Austin", text, "Acme")
+    second = requisition_key("https://acme.test/careers/b", "Engineer, Data", "Austin, TX", text, "Acme")
+    assert first == second

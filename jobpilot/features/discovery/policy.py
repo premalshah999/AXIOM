@@ -134,8 +134,10 @@ def gate(job: dict, policy: DiscoveryPolicy) -> str | None:
 
 
 # ---------- requisition identity and dedup ----------
+# The label ends at a word's end and the id holds a digit. "required" read as "req" + "uired", so every posting of an employer
+# whose text said "required" was one requisition, and each newer role was dropped as its duplicate (2026-11-01).
 REQ_IN_TEXT = re.compile(
-    r"\b(?:req(?:uisition)?(?:\s*(?:id|#|number|no\.?))?|job\s*id)\s*[:#]?\s*([A-Z0-9][A-Z0-9-]{3,})", re.I
+    r"\b(?:req(?:uisition)?(?:\s*(?:id|#|number|no\.?))?|job\s*id)(?![a-z])\s*[:#-]?\s*((?=[A-Z0-9-]*\d)[A-Z0-9][A-Z0-9-]{3,})", re.I
 )
 
 
