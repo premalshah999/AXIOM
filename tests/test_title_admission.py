@@ -255,3 +255,21 @@ def test_jobs_behind_a_shared_short_link_host_are_separate_employers():
     assert employer_partition(b) == employer_partition(c)
     site = {"url": "https://careers.example.test/jobs/1", "company": "Example", "ats": "custom"}
     assert employer_partition(site) == "careers.example.test"
+
+
+@pytest.mark.parametrize("reason", [
+    "Strong fit, but the posting explicitly bars F-1 OPT/STEM OPT, conflicting with confirmed status.",
+    "The posting contains an explicit mandatory immigration restriction naming OPT/CPT as disqualifying.",
+    "Temporary visas including F-1 are not eligible for this role.",
+])
+def test_a_title_never_overrides_a_visa_bar_the_ranking_read(reason):
+    assert not admitted_by_title("Data Engineer I", reason, ROLES)
+
+
+@pytest.mark.parametrize("reason", [
+    "No explicit sponsorship or F-1/OPT restriction appears in the posting.",
+    "A general visa-category note, not an explicit F-1/OPT ban.",
+    "The company may opt to exclude nothing; applicant is on OPT and needs no sponsorship.",
+])
+def test_a_ranking_that_finds_no_visa_bar_does_not_block_the_title(reason):
+    assert admitted_by_title("Data Engineer I", reason, ROLES)

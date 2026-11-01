@@ -152,6 +152,16 @@ HARD_BLOCKER = re.compile(
     re.I,
 )
 
+# A ranking that reads a visa bar in the posting: "explicitly bars F-1 OPT", "restriction naming OPT/CPT as disqualifying",
+# which a title admitted anyway (2026-11-01). A ranking may also say the opposite, "no explicit F-1/OPT prohibition appears".
+_VISA = r"(?:f-?1|(?-i:OPT|CPT)|h-?1b|temporary.visas?)"
+_BARS = r"(?:bars?|barred|barring|prohibit\w*|exclu\w+|disqualif\w+)"
+VISA_BAR = re.compile(
+    rf"\b{_VISA}\b[^.;|]{{0,80}}\b(?:{_BARS}|ineligible|not eligible)\b|\b(?:{_BARS}|restriction)\b[^.;|]{{0,80}}\b{_VISA}\b",
+    re.I,
+)
+NOT_A_BAR = re.compile(r"\b(?:no|not|without|nor|never)\b[^.;|]{0,60}\b(?:prohibit\w*|restrict\w*|ban|bars?|exclu\w+)\b", re.I)
+
 
 def specific_roles(roles):
     """The target roles named by a discipline rather than only by a generic word."""
@@ -170,5 +180,7 @@ def admitted_by_title(title, reason="", roles=()):
     if outside and re.search(r"\b(?:" + "|".join(outside) + r")\b", title or "", re.I):
         return False
     if LEVEL.search(title or "") or HARD_BLOCKER.search(reason or ""):
+        return False
+    if VISA_BAR.search(NOT_A_BAR.sub(" ", reason or "")):
         return False
     return bool(matching_role(title, specific))
