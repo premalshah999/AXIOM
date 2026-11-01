@@ -2058,7 +2058,7 @@ class BrowserEngine:
             if external and hasattr(self, "page"):
                 if self.retain_owned_draft():
                     await self.retain_desktop_draft()
-                    if self.run_record["packet"].get("steer"):
+                    if self.steering():
                         await self.hand_page_to_owner()
                     if self.releases_retained_tab() or getattr(self, "renderer_crashed", False):
                         # The saved route and checkpoint reopen this draft on its next run (the inactive-tab path).
@@ -4772,16 +4772,20 @@ class BrowserEngine:
             getattr(self.email_verification, "challenge_id", None)
         )
 
+    def steering(self):
+        """True for Take over's rebuilding run: its tab is kept open for the owner whatever the result."""
+        return bool(((getattr(self, "run_record", None) or {}).get("packet") or {}).get("steer"))
+
     def releases_retained_tab(self):
         """A retained draft whose tab may close: nothing was sent and no live wait needs the page. Uncertain submissions,
         email waits, pauses and dry runs keep theirs."""
-        if self.run_record["packet"].get("steer"):
+        if self.steering():
             return False  # Take over: the owner works in this tab next (steer.py).
         return not self.armed and (self.result or {}).get("state") in RELEASED_TAB_STATES
 
     def retain_owned_draft(self):
         """Retain unfinished owned pages independently of paid retry admission."""
-        if self.run_record["packet"].get("steer") and (self.result or {}).get("state") not in {"confirmed", "already_applied"}:
+        if self.steering() and (self.result or {}).get("state") not in {"confirmed", "already_applied"}:
             return True
         return (self.result or {}).get("state") in {
             "waiting_browser",

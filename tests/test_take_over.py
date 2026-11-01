@@ -138,7 +138,7 @@ class World:
 
     def trail(self, n=25):
         with self.service.db.session() as s:
-            return [f"{e.kind}: {e.message[:110]} {str(e.data)[:200] if e.kind.startswith('model') else ''}" for e in s.scalars(select(Event).order_by(Event.id.desc()).limit(n))][::-1]
+            return [f"{e.kind}: {e.message[:110]} {str(e.data)[:200] if e.kind.startswith(('model', 'option')) else ''}" for e in s.scalars(select(Event).order_by(Event.id.desc()).limit(n))][::-1]
 
     def live(self):
         return any(not t.done() for t in self.tasks)
