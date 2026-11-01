@@ -171,9 +171,23 @@ def matches(pattern: str, text: str) -> bool:
     return re.search(pattern, text or "", re.I | re.A) is not None
 
 
+# A posting read from an API often arrives as one long line, with its headings still in it as capitalized words.
+FLAT_HEAD = re.compile(
+    r"(?<=[\s.!?:;])((?:(?:Minimum|Basic|Required|Preferred|Desired|Additional|Key|Core) )?(?:Qualifications|Requirements|Responsibilities|Duties)|Preferred|Nice to Have|Nice-to-Have|"
+    r"What [Yy]ou(?:'|’| wi)ll [Dd]o|What [Yy]ou(?:'|’| wi)ll (?:[Nn]eed|[Bb]ring)|What [Ww]e(?:'|’| a)re [Ll]ooking [Ff]or|What [Ww]e [Oo]ffer|About (?:[Uu]s|[Yy]ou|[Tt]he (?:[Rr]ole|[Cc]ompany|[Tt]eam))|Who [Yy]ou [Aa]re|Benefits|Perks|Compensation|Equal Opportunity)"
+    r"(?=\s+[A-Z•\-]|\s*:)"
+)
+
+
+def _unflatten(description: str) -> str:
+    if description.count("\n") >= 3:
+        return description
+    return FLAT_HEAD.sub(lambda m: "\n" + m.group(1) + "\n", description)
+
+
 def blocks(description: str) -> dict:
     """The posting by what each part is. Without any heading, all of it describes the work."""
-    text = INLINE_HEAD.sub(lambda m: "\n" + m.group(1) + "\n", description or "")
+    text = INLINE_HEAD.sub(lambda m: "\n" + m.group(1) + "\n", _unflatten(description or ""))
     out = {"required": [], "duties": [], "preferred": [], "other": []}
     current, seen = None, False
     head_lines = []
@@ -250,11 +264,12 @@ def _candidates(text: str, own_terms: list[str]) -> dict[str, str]:
         add(m.group(0))
     for m in LEAD_INS.finditer(text):
         for item in _list_items(m.group(1)):
-            if item and len(item.split()) <= 4:
+            if item and len(item.split()) <= 4 and not any(w.lower() in GENERIC for w in item.split()):
                 add(item)
     for m in TITLE_PHRASE.finditer(text):
         phrase = _clean_candidate(m.group(0))
-        if len(phrase.split()) >= 2:
+        # "Tableau Knowledge of GAAP" is a flattened sentence, not a name.
+        if len(phrase.split()) >= 2 and not any(w.lower() in GENERIC for w in phrase.split()):
             add(phrase)
     # Recurring phrases: a posting repeats what it cares about, in any field.
     words = re.findall(r"[a-z][a-z+#/-]{2,}", low)

@@ -752,7 +752,7 @@ export function JobResume({
             </p>
           )
         )}
-        {eligible && (!a || a.status === "failed" || a.status === "cancelled") && (
+        {eligible && !masterOnly && !tailored && (!a || a.status === "failed" || a.status === "cancelled") && (
           <div>
             <Button
               size="sm"
@@ -782,9 +782,7 @@ export function JobResume({
                 ? "Preparing…"
                 : a
                   ? "Try again"
-                  : masterOnly
-                    ? "Make a version for this job"
-                    : "Prepare now"}
+                  : "Prepare now"}
             </Button>
           </div>
         )}

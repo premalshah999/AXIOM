@@ -32,23 +32,28 @@
 .tl-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(240px, 380px);
-  gap: var(--space-2) var(--space-5);
-  align-items: end;
+  gap: var(--space-3) var(--space-5);
+  align-items: start;
+}
+.tl-head-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
 }
 .tl-back {
-  grid-column: 1 / -1;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  justify-self: start;
 }
-.tl-head h1 {
+.tl-page .tl-head h2 {
   margin: 0;
-  font-size: var(--text-title, 20px);
+  font-size: 18px;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
-.tl-head h1 span {
+.tl-page .tl-head h2 span {
   color: var(--ink-2);
   font-weight: 400;
 }
@@ -318,6 +323,10 @@
 .tl-diff del {
   color: var(--ink-3);
   text-decoration: line-through;
+}
+.tl-diff del + ins,
+.tl-diff ins + del {
+  margin-left: 0.3em;
 }
 .tl-lists {
   display: flex;

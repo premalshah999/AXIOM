@@ -155,12 +155,12 @@ function Diff({ from, to }: { from: string; to: string }) {
       out.push(a[i]);
       i++;
       j++;
-    } else if (j < b.length && (i >= a.length || dp[i]![j + 1]! >= dp[i + 1]![j]!)) {
-      out.push(<ins key={k++}>{b[j]}</ins>);
-      j++;
-    } else {
+    } else if (i < a.length && (j >= b.length || dp[i + 1]![j]! >= dp[i]![j + 1]!)) {
       out.push(<del key={k++}>{a[i]}</del>);
       i++;
+    } else {
+      out.push(<ins key={k++}>{b[j]}</ins>);
+      j++;
     }
   }
   return <span className="tl-diff">{out}</span>;
@@ -310,13 +310,15 @@ export function TailorView() {
   return (
     <div className="ax-page tl-page">
       <header className="tl-head">
-        <button type="button" className="ax-link tl-back" onClick={back}>
-          <ArrowLeft size={14} aria-hidden="true" /> Queue
-        </button>
-        <h1>
-          {view.job.title || "Untitled role"}
-          {view.job.company ? <span> at {view.job.company}</span> : null}
-        </h1>
+        <div className="tl-head-main">
+          <button type="button" className="ax-link tl-back" onClick={back}>
+            <ArrowLeft size={14} aria-hidden="true" /> Queue
+          </button>
+          <h2>
+            {view.job.title || "Untitled role"}
+            {view.job.company ? <span> at {view.job.company}</span> : null}
+          </h2>
+        </div>
         <ModePicker view={view} onChanged={() => void refresh.current()} />
       </header>
       {view.choice?.state === "preparing" ? (

@@ -131,6 +131,28 @@ def test_a_sentence_saying_preferred_doesnt_make_the_whole_paragraph_optional():
     assert rows["welding"] == "duties"
 
 
+def test_a_posting_flattened_to_one_line_still_splits_at_its_headings():
+    flat = (
+        "About Us We are a winning culture and a global family of curious people who love snacks and offsites every quarter of the year. "
+        "Responsibilities Build dashboards for the finance team and own the monthly reporting calendar with care and attention to detail. "
+        "Requirements Experience with Python, SQL and Tableau. Knowledge of GAAP. "
+        "Nice to Have Experience with dbt. Benefits Dental cover and a free snack cupboard for everyone who works in the office."
+    )
+    parts = ats.blocks(flat)
+    assert "Python" in parts["required"] and "dashboards" in parts["duties"] and "dbt" in parts["preferred"]
+    assert "winning culture" in parts["other"] and "Dental" in parts["other"]
+    found = {t["term"].lower(): t["tier"] for t in ats.terms(flat, "")}
+    assert found["python"] == "required" and found["dbt"] == "preferred"
+    assert not any("snack" in t or "culture" in t for t in found)
+
+
+def test_a_short_flattened_posting_splits_too_and_a_sentence_isnt_a_name():
+    flat = "What you'll do Build reporting in Python. Requirements Experience with Python, SQL and Tableau Knowledge of GAAP and financial reporting Preferred Experience with dbt is a plus About us We have a winning culture"
+    found = {t["term"]: t["tier"] for t in ats.terms(flat, "")}
+    assert found["GAAP"] == "required" and found["Tableau"] == "required" and found["dbt"] == "preferred"
+    assert "Tableau Knowledge of GAAP" not in found
+
+
 def test_the_score_is_the_weighted_share_and_says_what_a_missing_term_is():
     rows = [
         {"term": "Python", "pattern": ats.pattern_for("Python"), "tier": "required", "weight": 3},

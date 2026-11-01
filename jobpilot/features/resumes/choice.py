@@ -94,6 +94,7 @@ async def run(db, config, job_id: str, *, model=None, compile_fn=None, fresh=Fal
         return {"state": "off"}
     kwargs = {"compile_fn": compile_fn} if compile_fn else {}
     try:
+        await read_posting(db, config, job_id)
         result = await pipeline.prepare_resume(db, config, job_id, mode=row.mode, model=model, fresh=fresh, **kwargs)
     except asyncio.CancelledError:
         raise
@@ -124,6 +125,22 @@ async def run(db, config, job_id: str, *, model=None, compile_fn=None, fresh=Fal
     error = result.error.model_dump() if result.error else {"code": "tailoring_error", "retryable": True, "detail": ""}
     _record(db, job_id, state="failed", error=error)
     return {"state": "failed", "error": error}
+
+
+async def read_posting(db, config, job_id: str) -> None:
+    """A job added by link has no text until a run reads it, and there's nothing to tailor to without it. Read it now, through the ordinary loader."""
+    from ...db import Job
+    from ...discovery import enrich
+    from ..discovery.policy import unfetched
+
+    with db.session() as s:
+        job = s.get(Job, job_id)
+        missing = job is not None and unfetched(job.description)
+    if missing:
+        try:
+            await enrich(db, config, job_id)
+        except Exception as exc:  # A site that won't load says so below, as the missing posting text it is.
+            log.info("posting read failed for %s: %s", job_id, type(exc).__name__)
 
 
 def _record(db, job_id, **fields) -> None:
