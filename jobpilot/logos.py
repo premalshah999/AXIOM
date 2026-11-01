@@ -602,25 +602,25 @@ class Shelf:
     def scan(self):
         """Reads the folder once. Files kept by older versions (a full-size PNG, an ICO) are served as they are and shrunk by the
         worker; a "no logo" verdict from older rules is dropped, because those rules refused every wide wordmark."""
-        self.ready.clear()
-        self.missed.clear()
-        legacy = []
+        ready, missed, legacy = {}, {}, []  # Built aside and swapped in: two first requests may both scan.
         if self.folder.is_dir():
             for entry in self.folder.iterdir():
                 stem, _, ext = entry.name.rpartition(".")
                 if not KEY.fullmatch(stem):
                     continue
                 if ext in MEDIA:
-                    old = self.ready.get(stem)
+                    old = ready.get(stem)
                     if old and EXTENSIONS.index(old[0]) < EXTENSIONS.index(ext):
                         continue
-                    self.ready[stem] = (ext, int(entry.stat().st_mtime))
+                    ready[stem] = (ext, int(entry.stat().st_mtime))
                     if ext not in ("webp", "svg"):
                         legacy.append(stem)
                 elif ext == f"miss{RULES}":
-                    self.missed[stem] = entry.stat().st_mtime
+                    missed[stem] = entry.stat().st_mtime
                 elif ext == "none":
                     entry.unlink(missing_ok=True)
+        self.ready.update(ready)
+        self.missed.update(missed)
         self.legacy = legacy
         self.scanned = True
 
@@ -660,6 +660,7 @@ class Shelf:
             self.queue = asyncio.Queue()
         self.waiting.add(key)
         self.queue.put_nowait((key, company, lookup))
+        self.tasks = [t for t in self.tasks if not t.done()]
         while len(self.tasks) < self.WORKERS:
             self.tasks.append(asyncio.create_task(self._work()))
 

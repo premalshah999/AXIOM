@@ -2,7 +2,6 @@
 sharp enough is kept, and a miss shows its letter."""
 
 import struct
-import time
 
 import httpx
 import pytest
@@ -293,18 +292,19 @@ def test_the_endpoint_serves_a_kept_image_with_its_own_type_a_year_of_cache_and_
     assert n.asked == []  # serving never looks anything up
 
 
-def test_an_unknown_company_is_queued_not_fetched_while_the_page_waits(client, config, jobs, net):
+def test_an_unknown_company_is_queued_not_fetched_while_the_page_waits(client, config, jobs, net, monkeypatch):
     n = net({POSTING: OG, LOGO: png(128, 128)})
+    queued = []
+    monkeypatch.setattr(logos.Shelf, "request", lambda self, company, lookup: queued.append((company, lookup)))
     # Before: the first GET /api/logo fetched the posting page, the company's site and Google inside the request, on the shared loop.
     first = client.get("/api/logos", params={"name": ["Acme", "Acme", "Nobody Inc"]}).json()
     assert first["logos"]["Acme"]["state"] == "pending" and first["logos"]["Nobody Inc"]["state"] == "pending"
-    for _ in range(100):  # the background worker finds it, and the page's next ask gets the version to load
-        time.sleep(0.05)
-        got = client.get("/api/logos", params={"name": ["Acme"]}).json()["logos"]["Acme"]
-        if got["state"] != "pending":
-            break
-    assert got["state"] == "ready" and n.asked.count(LOGO) == 1 and "x.test" not in " ".join(n.asked)
-    assert client.get("/api/logo", params={"company": "Nobody Inc"}).status_code == 404
+    assert [c for c, _ in queued] == ["Acme", "Nobody Inc"]  # once per company, however many rows name it
+    assert n.asked == []  # nothing was fetched while the page waited
+    lookup = queued[0][1]
+    assert sorted(u for u, _ in lookup("Acme")) == sorted([POSTING, "https://acme.wd5.myworkdayjobs.com/careers/job/2"])
+    assert lookup("Nobody Inc") == []  # the worker looks at this company's own postings only
+    assert client.get("/api/logo", params={"company": "Acme"}).status_code == 404  # nothing kept, and no lookup from here
 
 
 def test_every_request_is_answered_with_nothing_when_logos_are_off(client, config, jobs, net):
