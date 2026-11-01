@@ -187,6 +187,12 @@ function App() {
     [snap.data, rows, refresh, version, lost, snap.updatedAt, marks, markJobs, route, go],
   );
 
+  // The Mac app's Dock badge (desktop/AXIOM.m); a browser has no such handler.
+  const waitingQuestions = snap.data ? countQuestions(snap.data.reviews) : 0;
+  useEffect(() => {
+    (window as unknown as { webkit?: { messageHandlers?: { axiom?: { postMessage: (m: string) => void } } } }).webkit?.messageHandlers?.axiom?.postMessage("needs:" + waitingQuestions);
+  }, [waitingQuestions]);
+
   useEffect(() => {
     const label = titleFor(route);
     document.title = `${label} · AXIOM`;
