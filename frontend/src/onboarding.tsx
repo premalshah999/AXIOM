@@ -90,7 +90,7 @@ const STEPS: Step[] = [
     id: "ready",
     name: "Ready",
     title: "AXIOM is ready",
-    lead: "Your profile is saved. Open AXIOM to see your overview and start applying.",
+    lead: "Your profile is saved. Press Start on the next screen. AXIOM looks for jobs first, which can take a while, then applies one at a time. You can close this window while it works.",
     server: "review",
     minutes: 0,
   },
@@ -587,7 +587,7 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
   const lines = last ? readyLines(draft, submit?.value ?? null, linked) : [];
   const unfinished = lines.filter((l) => !l.ok && !l.optional).length;
   const title = current.id === "welcome" && hello ? `Welcome, ${hello}` : last && unfinished ? "Almost ready" : current.title;
-  const lead = last && unfinished ? "Your profile is saved. You can finish the rest here, or any time later." : current.lead;
+  const lead = last && unfinished ? "Your profile is saved. You can finish the rest here, or any time later, then press Start on the next screen." : current.lead;
   const stepNo = at - FIRST_WORK + 1;
   // The resume step moves on once something was read from a resume; "I'll type it instead" is the way past it without one.
   const waiting = current.id === "resume" && !draft.work.length && !draft.education.length && !draft.skills.length;
@@ -602,8 +602,9 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
           <Button
             variant="ghost"
             size="sm"
-            onClick={onExit}
-            title="Steps you saved are kept. Continue any time from the banner or Settings › Your account."
+            // What is typed on this step is kept too: a dozen fields lost to "Finish later" is a reason to leave for good.
+            onClick={() => (first ? onExit() : persist(at, false, onExit))}
+            title="What you've entered is kept. Continue any time from the banner or Settings › Your account."
           >
             Finish later
           </Button>
