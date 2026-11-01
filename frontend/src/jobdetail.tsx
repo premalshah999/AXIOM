@@ -13,6 +13,7 @@ import {
   type JobRow,
 } from "./model";
 import { groupQuestions, QuestionCard } from "./questions";
+import { SteerPanel, TakeOverButton } from "./steer";
 import type { Detail, Hold, Job, JobPosting, JobRequest, QueuePlace, Reserved, Run, Snapshot } from "./types";
 import { ago, day, jobWords, plainReason, platformName, plural, seconds, shortId, shownFit, stamp, words } from "./format";
 import { Button, Drawer, Monogram, Panel, Select, Skeleton, Textarea } from "./ui/index";
@@ -250,6 +251,12 @@ function RunSection({
             </div>
           ))}
         {actions}
+        {row && latest && <SteerPanel jobId={row.job.id} />}
+        {row && latest && ["needs", "repair"].includes(stateInfo(state).group) && (
+          <div className="ax-toolbar">
+            <TakeOverButton jobId={row.job.id} />
+          </div>
+        )}
         {run && (run.state === "submission_unknown" || run.state === "confirmed") && <EvidenceActions run={run} />}
       </StatusBlock>
 

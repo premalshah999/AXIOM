@@ -178,7 +178,9 @@ class ExecutionMixin:
                     return
                 from ..job_control import state as job_state
 
-                if job_state(self.db, row.job_id).get("state") == "paused":
+                held = job_state(self.db, row.job_id)
+                # Take over's rebuilding dry run starts although the job is paused: the pause is what keeps everything else away.
+                if held.get("state") == "paused" and not (row.packet.get("steer") and held.get("steering") == "opening"):
                     row.state, row.finished_at = "paused", now()
                     return
                 from ..reserved import held_match

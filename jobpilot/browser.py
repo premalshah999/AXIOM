@@ -1617,6 +1617,8 @@ class BrowserEngine:
                 resume_artifact_id=run["packet"].get("resume_artifact_id"),
             )
             self.form = FormSession(page, resolver, resume, self.emit)
+            if run["packet"].get("owner_hands"):
+                self.form.owner_hands = True  # Take over's hand-back: the page's values are the owner's (forms.adopt_owner_values)
             self.form.on_checkpoint = self.checkpoint_draft
             self.form.network = NetworkMonitor(page)
             self.form.on_popup = self.prepare_popup
@@ -2056,6 +2058,8 @@ class BrowserEngine:
             if external and hasattr(self, "page"):
                 if self.retain_owned_draft():
                     await self.retain_desktop_draft()
+                    if self.run_record["packet"].get("steer"):
+                        await self.hand_page_to_owner()
                     if self.releases_retained_tab() or getattr(self, "renderer_crashed", False):
                         # The saved route and checkpoint reopen this draft on its next run (the inactive-tab path).
                         # Every unfinished run kept its tab open: two Chrome profiles grew to 47 GB each on a 16 GB
@@ -2334,6 +2338,17 @@ class BrowserEngine:
         except Exception:
             pass  # Corrupt/stale metadata cannot turn into a browser destination.
         return None
+
+    async def hand_page_to_owner(self):
+        """Take over: this tab is the owner's now. The page's submit guard (GUARD) stays in the live document after this run
+        lets go of it and would swallow the owner's own click on Submit, so it is lifted; the next run that resumes the tab
+        puts it back before it touches anything (prepare_page, GUARD)."""
+        for page in {self.page, getattr(getattr(self, "form", None), "page", self.page)}:
+            for frame in list(page.frames):
+                try:
+                    await asyncio.wait_for(frame.evaluate("window.__jpArmed = true"), 2)
+                except Exception:
+                    continue
 
     async def retain_desktop_draft(self):
         """Cleanup must not replace a completed result or its durable email wait."""
@@ -4760,10 +4775,14 @@ class BrowserEngine:
     def releases_retained_tab(self):
         """A retained draft whose tab may close: nothing was sent and no live wait needs the page. Uncertain submissions,
         email waits, pauses and dry runs keep theirs."""
+        if self.run_record["packet"].get("steer"):
+            return False  # Take over: the owner works in this tab next (steer.py).
         return not self.armed and (self.result or {}).get("state") in RELEASED_TAB_STATES
 
     def retain_owned_draft(self):
         """Retain unfinished owned pages independently of paid retry admission."""
+        if self.run_record["packet"].get("steer") and (self.result or {}).get("state") not in {"confirmed", "already_applied"}:
+            return True
         return (self.result or {}).get("state") in {
             "waiting_browser",
             "waiting_answer",
