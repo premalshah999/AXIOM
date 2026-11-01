@@ -304,6 +304,11 @@ class ChallengesMixin:
                 request_since = max(
                     start, current - self.config.mail_wait_seconds, min(float(since), current)
                 )
+            if kind == "code" and since is not None:
+                # A code page already on screen (EmailBrowser.handle): the click that led here asked for the mail, and a fast
+                # sender's arrives before the page has been read. As with a reset, it may be a little older than this wait.
+                start = datetime.fromisoformat(run.started_at or run.created_at).timestamp()
+                request_since = max(start, current - RESET_SENT_EARLY_SECONDS, min(float(since), current))
             if kind in {"code", "auto"}:
                 # Starbucks (Eightfold) 2026-10-14: the code mail arrived 3-9 s after this run's
                 # general wait opened, that wait was cancelled ("No email was needed"), and the

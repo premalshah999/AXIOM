@@ -1512,7 +1512,7 @@ class Adapter:
     async def on_verify_link(self, obs):
         if not self.inbox.configured:
             return self.defer(
-                "This employer emailed a verification link. Connect Gmail (GMAIL_APP_PASSWORD)."
+                "This employer emailed a verification link. Connect your Gmail in Settings > Connections."
             )
         if not self.mail_rule_known:
             return await self.discover_verification()
@@ -1588,7 +1588,7 @@ class Adapter:
 
     async def on_email_code(self, obs):
         if not self.inbox.configured:
-            return self.defer("This employer emailed a one-time code. Connect Gmail (GMAIL_APP_PASSWORD).")
+            return self.defer("This employer emailed a one-time code. Connect your Gmail in Settings > Connections.")
         if not self.mail_rule_known:
             return await self.discover_verification()
         self.attempts["email_code"] += 1
@@ -2520,7 +2520,7 @@ class Adapter:
     def mail_problem(self, what):
         reason = self.inbox.reason(self.challenge) if self.challenge else ""
         if self.challenge is None and not self.mail_rule_known:
-            return f"No trusted sender is known for this employer's {what}; add a rule in Settings › Email"
+            return f"AXIOM has no connected Gmail that receives this application's address, so it can't read this employer's {what}. Check Settings > Connections"
         return f"The {what} email did not arrive or was not unique" + (f" ({reason})" if reason else "")
 
     async def discover_verification(self):
@@ -3271,7 +3271,7 @@ class Adapter:
         ):
             # Without a trusted sender, a reset email could never be matched: do not burn a reset.
             return self.defer(
-                f"Could not sign in ({detail}). Connect Gmail and an email rule for this employer to "
+                f"Could not sign in ({detail}). Connect your Gmail in Settings > Connections to "
                 "recover the account automatically.",
                 manual,
                 state="waiting_browser",

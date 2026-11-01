@@ -426,6 +426,30 @@ KNOWN_SENDERS = {
 }
 
 
+# Senders production learned for employers whose mail comes neither from their platform's domain nor a domain named after
+# them. Of 1,098 rules, these 13 held a sender the code cannot derive; everyone else would learn each by missing its first
+# mail (2026-11-01). Facts about employers, nothing about an applicant.
+SEEDED_SENDERS = {
+    "aig.wd1.myworkdayjobs.com": ["aig.com"],
+    "barclays.wd3.myworkdayjobs.com": ["barclays.com"],
+    "bmo.wd3.myworkdayjobs.com": ["bmo.com"],
+    "careers-publicisgroupe.icims.com": ["publicisgroupe.com"],
+    "crowe.wd12.myworkdayjobs.com": ["workday.crowe.com"],
+    "edbz.fa.us2.oraclecloud.com": ["recruiting.ti.com"],
+    "humana.wd5.myworkdayjobs.com": ["humana.com"],
+    "invesco.wd1.myworkdayjobs.com": ["invesco.com"],
+    "lifeattiktok.com": ["mail.bytedance.net"],
+    "roche.wd3.myworkdayjobs.com": ["roche.com"],
+    "transunion.wd5.myworkdayjobs.com": ["transunionapps.com"],
+    "valeo.wd3.myworkdayjobs.com": ["valeo.com"],
+    "vanguard.wd5.myworkdayjobs.com": ["vanguardhr.com"],
+}
+
+
+def seeded_senders(host):
+    return list(SEEDED_SENDERS.get((host or "").lower(), []))
+
+
 # Platforms whose leases span employers on one sender rule. A start waits while another job holds its lease (Oracle:
 # since per-tenant attribution, only a run for the same tenant), instead of starting a browser that can only defer at
 # its own code step ("email sender busy", 2026-10-17/18).

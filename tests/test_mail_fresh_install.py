@@ -127,3 +127,152 @@ async def test_a_matched_mail_wakes_its_run_whatever_the_apply_on_its_own_switch
 def onboard_box(service):
     with service.db.exclusive() as s:
         s.add(Mailbox(email=ME, credentials=service.mail.vault.seal({"provider": "gmail_imap", "address": ME, "app_password": "abcdefghijklmnop"})))
+
+
+SHARED = [p for p in PLATFORMS if p != "custom"]
+
+
+@pytest.mark.parametrize("platform", SHARED)
+async def test_two_employers_on_one_shared_sender_never_get_each_others_code(client, service, imap, platform):
+    """Both employers' runs are open, or the second waits behind the first's lease; both codes arrive, the other's first. Each
+    run gets its own code or nothing, on every platform that mails all its employers from one sender."""
+    service.config.mail_poll_seconds = 0.1
+    spec, other = PLATFORMS[platform], PLATFORMS[platform]["other"]
+    onboard(client)
+    job_a, run_a = start_run(service, spec["url"], spec["ats"], spec["company"])
+    job_b, run_b = start_run(service, other["url"], spec["ats"], other["company"])
+    first = await service.inbox.arm(run_a["id"], job_a, ME, "code", patience=0)
+    assert first
+    try:
+        second = await service.inbox.arm(run_b["id"], job_b, ME, "code", patience=0)
+    except ValueError as exc:
+        assert "Another application" in str(exc)
+        second = None  # Held behind the first employer's lease: it asks for no mail until that is over.
+    time.sleep(1.1)
+    code_b = deliver(imap, platform, "code", other=True) if second else None
+    code_a = deliver(imap, platform, "code")
+    got = {}
+    for name, challenge in (("a", first), ("b", second)):
+        if not challenge:
+            continue
+        try:
+            token = await service.inbox.wait(challenge, max_wait_seconds=4)
+            got[name] = token["value"] if token else None
+        except Exception:
+            got[name] = None
+    if second:
+        assert got.get("a") in {code_a, None} and got.get("b") in {code_b, None}, (platform, "took the other employer's code")
+        assert got.get("a") == code_a and got.get("b") == code_b, (platform, "own code not recognised", got == {})
+    else:
+        assert got["a"] == code_a
+        # The first finishes and releases; the second, asked only now, sees its own code and not the first's, which was consumed.
+        service.inbox.finish(first, "verified", "Website accepted")
+        second = await service.inbox.arm(run_b["id"], job_b, ME, "code", patience=0)
+        assert second
+        time.sleep(1.1)
+        code_b = deliver(imap, platform, "code", other=True)
+        token = await service.inbox.wait(second, max_wait_seconds=4)
+        assert token and token["value"] == code_b
+
+
+async def test_a_code_from_another_employer_on_the_shared_sender_is_refused_in_a_sole_window(client, service, imap):
+    """A code that arrives for an employer whose run has ended, in the window of another on the same platform that mails naming
+    the tenant in its sender."""
+    service.config.mail_poll_seconds = 0.1
+    spec = PLATFORMS["icims"]
+    onboard(client)
+    job, run = start_run(service, spec["url"], spec["ats"], spec["company"])
+    challenge = await service.inbox.arm(run["id"], job, ME, "code", patience=0)
+    time.sleep(1.1)
+    stranger = deliver(imap, "icims", "code", other=True)
+    with pytest.raises(Exception):
+        await service.inbox.wait(challenge, max_wait_seconds=2)
+    assert stranger not in json.dumps(service.mail.summary())
+
+
+async def test_mail_to_an_address_that_forwards_into_the_connected_gmail_is_read(client, service, imap):
+    """Someone applies as a school address and connects the Gmail it forwards to. No rule existed for them on any platform."""
+    service.config.mail_poll_seconds = 0.1
+    spec = PLATFORMS["greenhouse"]
+    school = "alex@school.example"
+    onboard(client)
+    job, run = start_run(service, spec["url"], spec["ats"], spec["company"], email=school)
+    challenge = await service.inbox.arm(run["id"], job, school, "code")
+    assert challenge, "no window: the Gmail that receives the forwarded mail was not used"
+    time.sleep(1.1)
+    code = deliver(imap, "greenhouse", "code", to=school, delivered_to=ME)
+    assert (await service.inbox.wait(challenge, max_wait_seconds=4))["value"] == code
+
+
+async def test_mail_to_someone_else_never_matches_an_address_forwarded_here(client, service, imap):
+    service.config.mail_poll_seconds = 0.1
+    spec = PLATFORMS["greenhouse"]
+    onboard(client)
+    job, run = start_run(service, spec["url"], spec["ats"], spec["company"], email="alex@school.example")
+    challenge = await service.inbox.arm(run["id"], job, "alex@school.example", "code")
+    time.sleep(1.1)
+    deliver(imap, "greenhouse", "code", to=ME)  # Addressed to the Gmail itself, not to this application's address.
+    with pytest.raises(Exception):
+        await service.inbox.wait(challenge, max_wait_seconds=2)
+
+
+async def test_two_gmails_and_neither_is_this_address_says_nothing_rather_than_guessing(client, service, imap):
+    onboard(client)
+    onboard(client, "second.applicant@gmail.com")
+    spec = PLATFORMS["greenhouse"]
+    job, run = start_run(service, spec["url"], spec["ats"], spec["company"], email="alex@school.example")
+    assert await service.inbox.arm(run["id"], job, "alex@school.example", "code") is None
+
+
+async def test_a_mailbox_connected_in_the_app_reads_as_connected_and_checks_out(client, service, imap):
+    onboard(client)
+    assert client.get("/api/snapshot").json()["config"]["imap"] is True
+    checked = client.post("/api/inbox/check", json={}).json()
+    assert checked.get("connected") is True, checked
+
+
+async def test_one_gmail_label_that_cannot_be_parsed_does_not_stop_the_search():
+    class Client:
+        def list(self):
+            return "OK", [b'(\\HasNoChildren) "/" "INBOX"', (b'(\\HasNoChildren) "/" {3}', b'a"b'), b"", b'(\\All) "/" "[Gmail]/All Mail"', b'(\\Junk) "/" "[Gmail]/Spam"']
+
+    assert gmail_imap._folders(Client()) == ['"INBOX"', '"[Gmail]/All Mail"', '"[Gmail]/Spam"']
+
+
+def test_a_mail_in_the_second_its_window_opened_is_inside_it():
+    from jobpilot.mail import extract_message
+    from support_mail import message
+
+    now_s = int(time.time())
+    rule = {"sender_domains": ["notify.example.test"], "link_origins": ["https://careers.example.test"]}
+    window = {"recipient": "alex@example.test", "since": now_s + 0.7, "expires": now_s + 60, "kind": "code"}
+    assert extract_message(message(received=now_s), rule, window)["value"] == "483921"
+    assert extract_message(message(received=now_s - 1), rule, window) is None
+
+
+def test_google_saying_a_domain_without_dmarc_aligns_counts_and_nothing_else_does():
+    from jobpilot.mail import authenticated_sender
+
+    assert authenticated_sender("mx.google.com; dkim=pass; dmarc=bestguesspass header.from=small.example", "small.example")
+    assert not authenticated_sender("mx.google.com; dkim=fail; dmarc=fail header.from=small.example", "small.example")
+    assert not authenticated_sender("mx.google.com; dkim=pass", "small.example")
+
+
+async def test_seeded_senders_are_on_a_new_rule(client, service, imap):
+    onboard(client)
+    url = "https://humana.wd5.myworkdayjobs.com/en-US/Careers/job/Analyst_R1"
+    job, _ = start_run(service, url, "workday", "Humana")
+    rule = await service.mail.ensure_rule(job, ME)
+    assert "humana.com" in rule["sender_domains"] and "myworkday.com" in rule["sender_domains"]
+
+
+async def test_a_page_already_showing_a_code_box_reaches_back_to_the_click_that_sent_it(client, service, imap):
+    onboard(client)
+    spec = PLATFORMS["lever"]
+    job, run = start_run(service, spec["url"], spec["ats"], spec["company"])
+    rule = await service.mail.ensure_rule(job, ME)
+    with service.db.exclusive() as s:
+        s.get(Run, run["id"]).started_at = "2020-01-01T00:00:00+00:00"
+    begun = time.time()
+    c = service.mail.begin(run["id"], rule, ME, "code", since=begun - 900)
+    assert begun - 31 <= c["since"] <= begun - 29  # the click just before this page, never the whole run

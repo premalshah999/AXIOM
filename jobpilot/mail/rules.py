@@ -18,6 +18,7 @@ from .helpers import origin
 from .models import RuleInput
 from .senders import KNOWN_SENDERS
 from .senders import employer_label
+from .senders import seeded_senders
 from .senders import tenant_tokens
 
 
@@ -186,6 +187,7 @@ class RulesMixin:
         from ..accounts.tenants import registrable
 
         senders = known.get(job["ats"]) or [registrable(own_site)]
+        senders = [*senders, *(d for d in seeded_senders(url.hostname) if d not in senders)]
         return await self.save_rule(
             RuleInput(mailbox_id=mailbox_id, employer_origin=origin(job["url"]) + prefix, sender_domains=senders)
         )

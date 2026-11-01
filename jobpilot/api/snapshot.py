@@ -224,7 +224,8 @@ def build_snapshot(service, include_sources: bool):
             "multipage_timeout": config.multipage_timeout,
             "account": bool(config.application_password),
             "account_email": config.account_email or profile.email,
-            "imap": bool(config.gmail_address and config.gmail_app_password),
+            # A mailbox connected in the app, as everyone's but the first install's is, read "Not connected" on Accounts.
+            "imap": bool((config.gmail_address and config.gmail_app_password) or service.inbox.configured),
             "twocaptcha": bool(config.twocaptcha_api_key),
             "telegram_wait": config.telegram_wait_seconds,
         },

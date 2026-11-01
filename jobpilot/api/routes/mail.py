@@ -107,17 +107,24 @@ def router(service) -> APIRouter:
 
     @r.post("/api/inbox/check")
     async def inbox_check():
-        if not (config.gmail_address and config.gmail_app_password):
-            raise ValueError("Set GMAIL_ADDRESS and GMAIL_APP_PASSWORD in .env, then restart")
         from ...gmail_imap import request
 
         try:
+            if not (config.gmail_address and config.gmail_app_password):
+                # A mailbox connected in the app has its own password: this button said "Set GMAIL_ADDRESS in .env" to all of them.
+                box = service.inbox.mailbox()
+                if not box:
+                    raise ValueError("Connect your Gmail in Settings > Connections first")
+                await mail.request(box, "/profile")
+                return {"connected": True, "folder": "INBOX", "host": "imap.gmail.com"}
             await asyncio.to_thread(
                 request,
                 config.gmail_address.strip().lower(),
                 "".join(config.gmail_app_password.split()),
                 "/profile",
             )
+        except ValueError:
+            raise
         except Exception as exc:
             # imaplib errors carry the server's reply, never the password.
             raise ValueError(
