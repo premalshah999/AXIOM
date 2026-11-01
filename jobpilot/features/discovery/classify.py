@@ -85,7 +85,14 @@ async def classify(db, jobs: list[dict], fn: ClassifyFn, policy: DiscoveryPolicy
     with db.session() as s:
         for job in jobs:
             row = s.get(DcClassification, cache_key(job, pversion))
-            if row and (row.status in {"ok", "rejected"} or (row.retry_at and row.retry_at > at.isoformat())):
+            # A gate rejection is a pure function of the posting and today's gate, never a verdict worth keeping: 46
+            # listed jobs stayed "non_us_or_unknown" for good after the gate read a city-only location without its
+            # country, and the cache hid them from every later pass even once the gate passed them (2026-11-01).
+            kept_gate = row and row.status == "rejected" and (row.result or {}).get("gate") and (
+                gate(job, policy) or graduation_gate(job, profile, at)
+            )
+            if row and (kept_gate or (row.status in {"ok", "rejected"} and not (row.result or {}).get("gate"))
+                        or (row.status == "failed" and row.retry_at and row.retry_at > at.isoformat())):
                 report["cached" if row.status != "failed" else "deferred"] += 1
                 continue
             todo.append(job)

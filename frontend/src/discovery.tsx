@@ -166,6 +166,24 @@ export function DiscoverySettings() {
                     ]}
                     onChange={(v) => f.set("max_age_hours", Number(v) as BoardSettings["max_age_hours"])}
                   />
+                  <ChoiceRow
+                    name="Employer boards: posted within"
+                    note="Greenhouse, Ashby, Lever and SmartRecruiters list only open postings, so older ones are usually still open."
+                    value={String(form!.live_board_age_hours ?? "auto")}
+                    options={[
+                      { value: "auto", label: "Automatic" },
+                      { value: "720", label: "30 days" },
+                      { value: "1080", label: "45 days" },
+                      { value: "1440", label: "60 days" },
+                      { value: "2160", label: "90 days" },
+                    ]}
+                    onChange={(v) =>
+                      f.set(
+                        "live_board_age_hours",
+                        v === "auto" ? null : (Number(v) as NonNullable<BoardSettings["live_board_age_hours"]>),
+                      )
+                    }
+                  />
                 </Panel>
               </section>
               <EmployerBoards board={b} reload={board.refresh} />

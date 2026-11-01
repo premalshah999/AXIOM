@@ -477,6 +477,8 @@ export type BoardSettings = {
   batch_target: number;
   minimum_auto_fit: number;
   max_age_hours: 48 | 168 | 720;
+  // Public board APIs list only live postings; null follows max_age_hours (60 days when that is 30 days).
+  live_board_age_hours: 48 | 168 | 720 | 1080 | 1440 | 2160 | null;
 };
 export type Listing = Job & {
   posted_at: string;

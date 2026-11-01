@@ -33,6 +33,25 @@ class BoardSettings(BaseModel):
     batch_target: int = Field(default=100, ge=1, le=500)
     minimum_auto_fit: int = Field(default=70, ge=0, le=100)
     max_age_hours: Literal[48, 168, 720] = 720
+    # Postings read from a public board API (Greenhouse, Ashby, Lever, SmartRecruiters) are live when listed, so their
+    # window may be longer than the rest: unset, it is 60 days when `max_age_hours` is the 30-day maximum and follows a
+    # tighter choice. In a 30-day replay over 11,486 postings of 270 boards, 55% were refused as older; 60 days admits
+    # 89% more matches, 22 of 24 sampled pages answered live (2026-11-01).
+    live_board_age_hours: Literal[48, 168, 720, 1080, 1440, 2160] | None = None
+
+    def window_hours(self, kind=None):
+        """How old a posting from a source of this kind may be. Sources that cannot show a posting is live (custom
+        sites, short-link feeds, search results, Workday's undated "30+ days") keep `max_age_hours`."""
+        from .features.discovery.policy import LIVE_API_KINDS
+
+        if kind not in LIVE_API_KINDS:
+            return self.max_age_hours
+        if self.live_board_age_hours:
+            return self.live_board_age_hours
+        return max(self.max_age_hours, LIVE_BOARD_DEFAULT_HOURS) if self.max_age_hours >= 720 else self.max_age_hours
+
+
+LIVE_BOARD_DEFAULT_HOURS = 1440
 
 
 US = {"us", "usa", "united states", "united states of america", "u.s.", "u.s.a."}
@@ -153,14 +172,17 @@ def us_location(location, country=""):
 def role_matches(title, description, profile):
     if any(re.search(r"\b" + re.escape(x) + r"\b", title, re.I) for x in profile.excluded_keywords if x):
         return False
-    if not profile.include_internships and re.search(r"\bintern(?:ship)?\b", title, re.I):
+    # Co-ops and work-study are internships here as in the feeds (an internship stays out unless the applicant asks).
+    from .features.discovery.feeds import INTERN
+
+    if not profile.include_internships and INTERN.search(title):
         return False
-    from .features.discovery.roles import matching_role, related_role
+    from .features.discovery.roles import NOISE, role_fits
 
     roles = profile.target_roles  # A profile with no roles matches nothing: the applicant sets them in Setup.
     # Synonym-aware: "Software Development Engineer" also matches "Software Engineer II" and "SDE". A profile's
     # own role wins over the generic exclusions below (a product manager's profile targets "Product Manager").
-    if matching_role(title, roles) or related_role(title, roles):
+    if role_fits(title, roles):
         return True
     if re.search(r"\b(?:sales|recruiter|account executive|product manager)\b", title, re.I):
         return False
@@ -175,7 +197,7 @@ def role_matches(title, description, profile):
         # The unattended batch still needs a strong resume score before queuing them.
         if adjacent and len(supported_tools) >= 3:
             return True
-        return bool(ML_ROLE.search(title)) or bool(
+        return bool(ML_ROLE.search(title) and not NOISE.search(title)) or bool(
             re.search(r"\b(?:software|data) engineer\b", title, re.I)
             and re.search(
                 r"\b(?:machine learning|LLM|deep learning|model training|AI agents?)\b", description, re.I
@@ -236,6 +258,50 @@ def candidate_title(title, profile):
     )
 
 
+# Spelled and ranged ways a posting states its years ("Five (5) years", "6-10+ years in data engineering") that YEARS, which
+# wants the word experience nearby, does not read. Used only to keep a posting that states no experience out of the
+# accepted-years admission when it does name a high minimum.
+SPELLED = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+STATED_YEARS = re.compile(
+    r"\b(?P<low>\d{1,2}|" + "|".join(SPELLED) + r")\b(?:\s*\(\d{1,2}\))?\s*(?:\+|(?:[-–—]|to)\s*\d{1,2}\+?)?\s*"
+    r"(?:years?|yrs?)\b",
+    re.I,
+)
+UNSTATED_MIN_CHARS = 800
+HARD_BARRIER = re.compile(
+    r"\bcleared\b|security clearance|clearance required|active (?:secret|top secret)|ts/sci|polygraph|"
+    r"(?:u\.?s\.?|united states) citizen(?:ship)?\s+(?:is\s+)?required|must be a (?:u\.?s\.?|united states) citizen",
+    re.I,
+)
+
+
+def high_minimum_stated(description):
+    """Whether a posting names a minimum above three years anywhere, however it words it (preferred ones excluded)."""
+    for match in STATED_YEARS.finditer(description):
+        context = description[max(0, match.start() - 70) : match.end() + 50]
+        if re.search(r"preferred|nice.to.have|bonus|ideally", context, re.I):
+            continue
+        low = match["low"].casefold()
+        if (SPELLED.get(low) or int(low)) > 3:
+            return True
+    return False
+
+
+def accepts_unstated_experience(profile, post):
+    """A profile that accepts roles asking up to N years of experience also accepts a plain-titled role that asks for
+    none: it cannot ask for more than N. Without it, early-career-only refused "Software Engineer", "Data Engineer" and
+    "AI Engineer" for saying nothing about years (62 of 1,816 US postings in the 30-day window, 45 matched, 2026-11-01);
+    the ranking reads the whole posting against the accepted years. A posting that names a clearance or citizenship
+    requirement, or any high minimum, would only be ranked and refused, so it stays out."""
+    return (
+        int(getattr(profile, "accept_experience_years", 0) or 0) > 0
+        # Silence means something only in a posting that was read: a listing's label or a few lines says nothing.
+        and len(post.description) >= UNSTATED_MIN_CHARS
+        and not high_minimum_stated(post.description)
+        and not HARD_BARRIER.search(post.title + "\n" + post.description)
+    )
+
+
 def screen(post, profile, settings):
     if not us_location(post.location, post.country):
         return None, "non_us_or_unknown"
@@ -258,7 +324,7 @@ def screen(post, profile, settings):
         re.I,
     )
     if not entry and not (years and min(years) <= 3) and not description_entry:
-        if settings.early_career_only:
+        if settings.early_career_only and not accepts_unstated_experience(profile, post):
             return None, "experience_unspecified"
         return ("Experience unspecified", "Relevant role; verify career level before applying"), None
     level = "New grad" if new_grad else "Early career"
@@ -353,6 +419,7 @@ async def read_feed(source, profile, cfg, at, known=None):
     parsed = urlsplit(url)
     slug = parsed.path.strip("/").split("/")[0]
     kind, company = source["kind"], source["name"]
+    window = cfg.window_hours(kind)
     posts, seen = [], set()
     complete = True
     detail_errors = 0
@@ -418,12 +485,12 @@ async def read_feed(source, profile, cfg, at, known=None):
                 us_location(post.location)
                 and not (cfg.early_career_only and SENIOR.search(post.title))
                 and candidate_title(post.title, profile)
-                and (published_at is None or fresh(j["first_published"], at, cfg.max_age_hours))
+                and (published_at is None or fresh(j["first_published"], at, window))
             ):
                 candidates.append((j, post))
         candidates.sort(
             key=lambda item: (
-                fresh(item[0].get("updated_at"), at, cfg.max_age_hours),
+                fresh(item[0].get("updated_at"), at, window),
                 bool(ENTRY.search(item[1].title)),
                 item[0].get("updated_at", ""),
             ),
@@ -447,7 +514,7 @@ async def read_feed(source, profile, cfg, at, known=None):
 
         await asyncio.gather(*(read_detail(item) for item in candidates[:30]))
     elif kind == "smartrecruiters":
-        after = (at - timedelta(hours=cfg.max_age_hours)).isoformat()
+        after = (at - timedelta(hours=window)).isoformat()
         from urllib.parse import urlencode
 
         for offset in range(0, 500, 100):
@@ -472,7 +539,7 @@ async def read_feed(source, profile, cfg, at, known=None):
                 )
                 post.level = j.get("experienceLevel", {}).get("label", "").replace("_", " ")
                 if (
-                    fresh(post.posted, at, cfg.max_age_hours)
+                    fresh(post.posted, at, window)
                     and us_location(post.location, post.country)
                     and not (cfg.early_career_only and SENIOR.search(post.title))
                     and candidate_title(post.title, profile)
@@ -658,7 +725,8 @@ def screen_fingerprint(profile, cfg):
 
     basis = [
         sorted(profile.target_roles), sorted(profile.skills), sorted(profile.excluded_keywords),
-        profile.include_internships, cfg.early_career_only, cfg.max_age_hours, "screen-1",
+        profile.include_internships, cfg.early_career_only, cfg.max_age_hours, cfg.window_hours("greenhouse"),
+        profile.accept_experience_years, "screen-3",
     ]
     return hashlib.sha1(json.dumps(basis).encode()).hexdigest()[:16]
 
@@ -701,13 +769,14 @@ def persist_scan(db, source, posts, seen, complete, cfg, profile, at, report):
     from .ats import identity_variants
     from .discovery import add_job
 
+    window = cfg.window_hours(source["kind"])
     created, rejected = [], set()
     for post in posts:
         if not published(post.posted):
             report["unknown_date"] += 1
             rejected.add(post.url)
             continue
-        if not fresh(post.posted, at, cfg.max_age_hours):
+        if not fresh(post.posted, at, window):
             report["old"] += 1
             rejected.add(post.url)
             continue
@@ -727,7 +796,7 @@ def persist_scan(db, source, posts, seen, complete, cfg, profile, at, report):
             ),
             origin="source",
         )
-        if not new and published(row["created_at"]) < at - timedelta(hours=cfg.max_age_hours):
+        if not new and published(row["created_at"]) < at - timedelta(hours=window):
             # Already seeing this public job earlier proves it isn't a newly posted job.
             report["old"] += 1
             rejected.add(post.url)
@@ -855,6 +924,22 @@ def _field(job, name):
     return job[name] if isinstance(job, dict) else getattr(job, name)
 
 
+def within_window(cfg, at):
+    """SQL: the listing was posted inside its source kind's window (BoardSettings.window_hours)."""
+    from sqlalchemy import and_, or_
+
+    from .features.discovery.policy import LIVE_API_KINDS
+
+    short = (at - timedelta(hours=cfg.max_age_hours)).isoformat()
+    live = (at - timedelta(hours=cfg.window_hours("greenhouse"))).isoformat()
+    if short == live:
+        return JobListing.posted_at >= short
+    on_live_board = JobListing.source_id.in_(select(Source.id).where(Source.kind.in_(LIVE_API_KINDS)))
+    return or_(
+        and_(JobListing.posted_at >= live, on_live_board), and_(JobListing.posted_at >= short, ~on_live_board)
+    )
+
+
 def board_snapshot(db, limit=500, *, jobs_only=False):
     """The fresh listings and, unless `jobs_only`, every source with its last scan and the autopilot's state.
 
@@ -862,7 +947,6 @@ def board_snapshot(db, limit=500, *, jobs_only=False):
     dropped were 22% of the executor threads' interpreter time and most of this function's garbage (py-spy 2026-10-30)."""
     cfg = settings(db)
     at = datetime.now(UTC)
-    cutoff = (at - timedelta(hours=cfg.max_age_hours)).isoformat()
     seen_cutoff = (at - timedelta(hours=max(6, cfg.interval_hours * 2 + 1))).isoformat()
     ids = set() if jobs_only else managed_ids(db)
     with db.session() as s:
@@ -883,7 +967,7 @@ def board_snapshot(db, limit=500, *, jobs_only=False):
             .where(
                 JobListing.active.is_(True),
                 JobListing.country == "US",
-                JobListing.posted_at >= cutoff,
+                within_window(cfg, at),
                 JobListing.posted_at <= at.isoformat(),
                 JobListing.last_seen >= seen_cutoff,
                 Job.demo.is_(False),
@@ -913,7 +997,8 @@ def board_snapshot(db, limit=500, *, jobs_only=False):
                 "already_applied",
             }:
                 job["status"] = "paused"
-        if cfg.early_career_only:
+        if cfg.early_career_only and not int((db.get_setting("profile", {}) or {}).get("accept_experience_years") or 0):
+            # A profile that accepts N years admits postings that state none (accepts_unstated_experience).
             jobs = [j for j in jobs if j["career_level"] != "Experience unspecified"]
         jobs = [j for j in jobs if us_location(j["location"], j["country"])]
         # Nearly every source is managed: read them all and keep the managed, without an IN list of 4,479 bound

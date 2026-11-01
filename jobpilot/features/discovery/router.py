@@ -14,9 +14,12 @@ STATUS_SECONDS = 20
 
 
 def policy_for(db) -> DiscoveryPolicy:
+    from ...jobboard import BoardSettings
+
     board = db.get_setting("job_board_settings", {}) or {}
     return DiscoveryPolicy(
         max_age_days=max(1, int(board.get("max_age_hours", 720)) // 24),
+        live_max_age_days=max(1, BoardSettings.model_validate(board).window_hours("greenhouse") // 24),
         early_career_only=board.get("early_career_only", False),
         minimum_fit=board.get("minimum_auto_fit", 70),
     )

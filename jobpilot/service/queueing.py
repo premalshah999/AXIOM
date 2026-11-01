@@ -44,9 +44,9 @@ def fit_blocker(profile, board, title):
     these; a run that reads a title the job did not have at queue time applies them again (posting_read.py)."""
     from ..features.discovery.feeds import INTERN
     from ..features.discovery.policy import SENIOR
-    from ..features.discovery.roles import matching_role
+    from ..features.discovery.roles import role_fits
 
-    if profile.target_roles and not matching_role(title, profile.target_roles):
+    if profile.target_roles and not role_fits(title, profile.target_roles):
         return "Outside the profile's target roles", "target_role"
     if INTERN.search(title) and not profile.include_internships:
         return "Internships are excluded from application discovery", "internship"

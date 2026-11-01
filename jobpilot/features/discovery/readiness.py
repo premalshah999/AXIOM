@@ -53,7 +53,7 @@ def capacity(db, owners_total=7) -> Capacity:
 def _candidates(db, policy: DiscoveryPolicy, at, manual_only=False) -> tuple[list[dict], dict]:
     """Never-attempted, non-archived jobs that are fresh (listed) or manually imported. `manual_only` reads only
     the applicant's pasted links: the master-resume path wanted those few and read all 7,000 postings each tick."""
-    from ...db import Job, JobListing, Run, Setting
+    from ...db import Job, JobListing, Run, Setting, Source
 
     stats = {"stale_or_undated": 0, "protected": 0, "controlled": 0, "attempted": 0, "out_of_scope": 0}
     # Classification and tailoring spend only on the owner's ATS scope (ats_focus.exclude):
@@ -98,8 +98,10 @@ def _candidates(db, policy: DiscoveryPolicy, at, manual_only=False) -> tuple[lis
                 Job.id, Job.url, Job.identity, Job.title, Job.company, Job.location, Job.ats, Job.status, Job.score,
                 Job.resume_id, JobListing.job_id.label("listed"), JobListing.posted_at, JobListing.date_basis,
                 JobListing.first_seen, JobListing.last_seen, JobListing.active, JobListing.country,
+                Source.kind.label("source_kind"),
             )
             .outerjoin(JobListing, JobListing.job_id == Job.id)
+            .outerjoin(Source, Source.id == JobListing.source_id)
             .where(Job.demo.is_(False), Job.status.not_in(["archived", "closed"]))
         )
         rows = s.execute(query.where(Job.id.in_(manual)) if manual_only else query).all()
@@ -128,7 +130,7 @@ def _candidates(db, policy: DiscoveryPolicy, at, manual_only=False) -> tuple[lis
                     )
                 continue
             if listing is not None:
-                ok, basis = fresh(listing.posted_at, listing.date_basis, listing.first_seen, policy, at)
+                ok, basis = fresh(listing.posted_at, listing.date_basis, listing.first_seen, policy, at, listing.source_kind)
                 try:
                     seen = datetime.fromisoformat(listing.last_seen.replace("Z", "+00:00"))
                     seen = seen if seen.tzinfo else seen.replace(tzinfo=UTC)
@@ -203,13 +205,13 @@ def gated(job, policy):
 
 
 def _eligible(db, jobs, profile, policy):
-    from .roles import matching_role
+    from .roles import role_fits
 
     # Backpressure must count jobs dispatch can actually use. Old high scores
     # cannot make off-role, senior or otherwise gated jobs block new ranking.
     roles = profile.get("target_roles") or []
     jobs = [j for j in jobs if not gated(j, policy)
-            and (not roles or matching_role(j["title"], roles))]
+            and (not roles or role_fits(j["title"], roles))]
     mine = classified_eligible(db, jobs, profile, policy)
     # Jobs the application's ranker already marked ready count as eligible too,
     # unless the posting's stated graduation window excludes every recorded degree.
@@ -357,6 +359,13 @@ def discover_due(
         if j["id"] not in good
         and (
             j["id"] not in outcomes
+            # A gate rejection recorded when the gate read the posting wrongly (a city-only location without its country,
+            # 46 listed jobs, 2026-11-01) is ranked once the gate passes it; the cheap check below keeps it out otherwise.
+            or (
+                outcomes[j["id"]]["status"] == "rejected"
+                and outcomes[j["id"]]["result"].get("gate")
+                and not graduation_gate(j, profile, at)
+            )
             or (
                 outcomes[j["id"]]["status"] == "failed"
                 and (outcomes[j["id"]]["retry_at"] or "") <= at.isoformat()
@@ -485,7 +494,18 @@ def status(db, policy: DiscoveryPolicy | None = None, cap: Capacity | None = Non
     for j in jobs:
         basis[j["posted_basis"]] = basis.get(j["posted_basis"], 0) + 1
     failed_cls = sum(1 for o in outcomes.values() if o["status"] == "failed")
-    unclassified = sum(1 for j in jobs if j["id"] not in outcomes and j["id"] not in good)
+    # What the classification plan ranks (discover_due): unranked new postings the gate lets through. Counting every
+    # posting without a classification row put 718 on the Batch page while the plan held none: jobs ranked by the older
+    # path and postings the gate refuses (experience, seniority, a PhD) never get a row (2026-11-01).
+    unclassified = sum(
+        1
+        for j in jobs
+        if j["id"] not in outcomes
+        and j["id"] not in good
+        and j["status"] == "new"
+        and j.get("score") is None
+        and not gated(j, policy)
+    )
     free = max(0, cap.owners_total - cap.owners_busy)
     if not jobs:
         bottleneck = "No fresh, unattempted listings. Discovery continues on schedule."
