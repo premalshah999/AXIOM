@@ -16,7 +16,7 @@ def test_pasted_links_are_saved_and_queued_as_the_owners_pick(client, service, m
         return {"job_id": job_id, "state": "queued", "run_id": "r-" + job_id[:4], "message": "Application queued."}
 
     monkeypatch.setattr("jobpilot.api.routes.queue.apply", fake_apply)
-    monkeypatch.setattr("jobpilot.api.routes.queue.posting_api_text", lambda *a: _noop())
+    monkeypatch.setattr("jobpilot.api.routes.queue.read_added_posting", lambda *a: _noop())
     answer = client.post(
         "/api/queue/links",
         json={"urls": [
@@ -49,7 +49,7 @@ def test_a_refused_link_reports_why_and_the_others_still_queue(client, service, 
         return {"job_id": job_id, "state": "waiting", "message": "This worker pool is busy."}
 
     monkeypatch.setattr("jobpilot.api.routes.queue.apply", fake_apply)
-    monkeypatch.setattr("jobpilot.api.routes.queue.posting_api_text", lambda *a: _noop())
+    monkeypatch.setattr("jobpilot.api.routes.queue.read_added_posting", lambda *a: _noop())
     results = client.post(
         "/api/queue/links",
         json={"urls": ["https://boards.example.test/acme/jobs/1", "https://boards.example.test/acme/jobs/2"]},

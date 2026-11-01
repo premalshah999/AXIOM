@@ -74,6 +74,11 @@ def router(service) -> APIRouter:
         # The insert, the profile read and ranking stay off the event loop the browser owners share.
         row, created = await asyncio.to_thread(add_job, db, data, origin="manual")
         result = {"job": row, "created": created}
+        if created:
+            from ...discovery import read_added_posting
+
+            await read_added_posting(db, config, row["id"])  # The role, before anyone sees "Role not read yet".
+            result["job"] = row = await asyncio.to_thread(saved_job, row["id"])
         profile = await asyncio.to_thread(db.get_setting, "profile", {})
         control = await asyncio.to_thread(db.get_setting, "control", {})
         if created and profile.get("autonomous") and control.get("auto_submit"):
@@ -101,6 +106,14 @@ def router(service) -> APIRouter:
                     "Job saved. Automatic classification or queueing could not finish. You can retry from this job."
                 )
         return result
+
+    @r.get("/api/jobs/{job_id}/outlook")
+    def job_outlook(job_id: str):
+        """Whether the app is still trying, and when its next try is where that is known (problems.next_for_job)."""
+        from ...problems import next_for_job
+
+        with db.session() as s:
+            return next_for_job(s, job_id) or {"word": "not", "kind": "", "sentence": "", "at": ""}
 
     @r.get("/api/jobs/{job_id}")
     def get_job(job_id: str):

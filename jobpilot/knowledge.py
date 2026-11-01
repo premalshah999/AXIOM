@@ -500,7 +500,7 @@ class KnowledgeBase:
     def _compatible(entry, options, kind):
         from .widgets import foreign_fallback, norm, placeholder_option
 
-        if foreign_fallback(entry.answer, getattr(entry, "options", None), options):
+        if foreign_fallback(entry.answer, getattr(entry, "options", None), options, getattr(entry, "question", "")):
             return None
         if kind == "checkbox":
             return as_checkbox(entry.answer)

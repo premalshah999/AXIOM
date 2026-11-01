@@ -489,6 +489,11 @@ async def enrich(db, config, job_id):
         from .posting_identity import placeholder_title
 
         page_title = job_title(soup.title.get_text(strip=True)) if soup.title else ""
+        # A page with one heading that names a role says it better than its <title> does ("Data Analyst" over "Data Analyst at
+        # Employer"); a page with several headings is a list, and its title stays what it was.
+        headings = [h.get_text(" ", strip=True) for h in soup.find_all("h1")]
+        if len(headings) == 1 and 3 <= len(headings[0]) <= 120 and not placeholder_title(headings[0]):
+            page_title = job_title(headings[0])
         details = {
             "description": soup.get_text(" ", strip=True)[:40000],
             "title": "" if placeholder_title(page_title) else page_title,
@@ -499,6 +504,38 @@ async def enrich(db, config, job_id):
             if value and (key == "description" or not getattr(item, key)):
                 setattr(item, key, value[:40000])
     return details
+
+
+async def read_added_posting(db, config, job_id):
+    """Read a job's role (and text) from its page right after a link adds it: "Role not read yet" stayed on a pasted link's job
+    for good because only API-listed postings were read at that moment (clean-install run, 2026-11-01). Best effort."""
+    try:
+        await asyncio.wait_for(enrich(db, config, job_id), 30)
+    except Exception:  # noqa: BLE001 - a page that will not answer leaves the job as it was; the next start tries once more.
+        return False
+    return True
+
+
+UNREAD_TRIES = "title_read:"
+
+
+async def read_blank_titles(db, config, limit=30):
+    """Jobs saved with no role (links pasted before the role was read at adding): read each page once a day, a few per start."""
+    from .db import Setting
+
+    with db.session() as s:
+        blank = [j for j in s.scalars(select(Job.id).where(Job.title == "", Job.demo.is_(False), Job.status.notin_(("archived", "closed"))).limit(limit * 3))]
+    done = 0
+    for job_id in blank:
+        if done >= limit:
+            break
+        tried = db.get_setting(UNREAD_TRIES + job_id, {}).get("at", "")
+        if tried and tried > (datetime.now(UTC) - timedelta(hours=24)).isoformat():
+            continue
+        db.set_setting(UNREAD_TRIES + job_id, {"at": datetime.now(UTC).isoformat()})
+        await read_added_posting(db, config, job_id)
+        done += 1
+    return done
 
 
 PROTECTED = {"queued", "running", "submitting", "confirmed", "submission_unknown", "archived"}

@@ -232,12 +232,20 @@ CATALOG_FALLBACK = re.compile(r"^\W*(?:other|none of the above)\b|\bnot (?:liste
 NO_ANSWER = re.compile(r"not answered|unanswered|no response|no answer|not provided|not specified|not selected|none selected")
 
 
-def foreign_fallback(answer, saved_options, options):
-    """A fallback chosen from a saved catalog, asked by a field whose options do not include it (or that has none)."""
+# A self-identification menu's "Not specified" / "Not provided" is its decline choice, a real answer to that question.
+SELF_ID_QUESTION = re.compile(
+    r"gender|\bsex\b|pronoun|race|ethnic|hispanic|latino|veteran|disabilit|orientation|transgender|self.identif", re.I
+)
+
+
+def foreign_fallback(answer, saved_options, options, question=""):
+    """A fallback chosen from a saved catalog, asked by a field whose options do not include it (or that has none).
+    `question` is the saved answer's own: a decline choice of a self-identification menu is its answer, not a fallback."""
+    no_answer = NO_ANSWER.fullmatch(norm(answer)) if isinstance(answer, str) and not SELF_ID_QUESTION.search(question or "") else None
     return (
         bool(saved_options)
         and isinstance(answer, str)
-        and bool(CATALOG_FALLBACK.search(answer) or NO_ANSWER.fullmatch(norm(answer)))
+        and bool(CATALOG_FALLBACK.search(answer) or no_answer)
         and not any(norm(o) == norm(answer) for o in options or [])
     )
 
