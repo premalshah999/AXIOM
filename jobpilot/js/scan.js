@@ -31,6 +31,10 @@
       if (n.nodeType !== Node.ELEMENT_NODE) return '';
       if (!top && (style(n).display === 'none' || style(n).visibility === 'hidden')) return '';
       if (!top && n.matches('input,select,textarea,button,[role=option],script,style')) return '';
+      // A searchable select shows its chosen value inside the label that wraps it. Paylocity's address block read
+      // "State Maryland" / "Country Select a country": a question that changed with every answer, so each
+      // fill was refused as "Value not accepted: State MDMD" and Commence stopped there (2026-11-01).
+      if (!top && n.matches('[class*=single-value],[class*=singleValue],[class*=__multi-value]')) return '';
       // An SVG's never-rendered fallback: Workable's icons hold "SVGs not supported by this browser." in <desc>,
       // which became part of every checkbox option and no fill matched it (JeffreyM Consulting 2026-10-27).
       if (!top && n.matches('svg desc,svg metadata')) return '';
@@ -979,7 +983,9 @@
     }
     const role = el.getAttribute('role');
     let type = ['combobox', 'radiogroup'].includes(role) ? role : (el.type || el.tagName.toLowerCase());
-    if (el.matches('input[aria-autocomplete="list"][aria-haspopup="listbox"]')) type = 'combobox';
+    // The popup may be declared on the wrapper around the typing input (Paylocity's address Country and State).
+    if (el.matches('input[aria-autocomplete="list"][aria-haspopup="listbox"]')
+        || (type === 'text' && el.matches('input[aria-autocomplete="list"]') && el.closest('[aria-haspopup=listbox]'))) type = 'combobox';
     if (el.matches('[aria-haspopup=listbox]') && !el.matches('input,[role=combobox]') || selectButton(el)) type = 'dropdown';
     if (el.matches('[role=checkbox],[role=switch]') && !el.matches('input')) type = 'checkbox';
     if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
@@ -1277,8 +1283,10 @@
       if (PLACEHOLDER_VALUE.test(clean(value))) value = '';
     } else if (type === 'combobox' && !value && widget !== 'select2-multiselect') {
       // react-select keeps the chosen value outside the input.
-      const chosen = el.closest('[class*=__control]')?.querySelectorAll('[class*=__single-value],[class*=__multi-value__label]') || [];
-      value = [...chosen].map(x => clean(x.textContent)).filter(Boolean).join(', ');
+      const chosen = el.closest('[class*=__control],[aria-haspopup=listbox]')?.querySelectorAll('[class*=__single-value],[class*=__multi-value__label],[class*=input-select-input-single-value]') || [];
+      // Paylocity's empty select prints its prompt ("Select a state") in the same single-value box.
+      value = [...chosen].filter(x => !(x.matches('[class*=input-select-input-single-value]') && GENERIC_PLACEHOLDER.test(clean(x.textContent))))
+        .map(x => clean(x.textContent)).filter(Boolean).join(', ');
       const flag = el.matches('.iti__selected-country') && [...(el.querySelector('.iti__flag')?.classList || [])]
         .map(c => /^iti__([a-z]{2})$/.exec(c)?.[1]).find(Boolean);
       if (!value && flag) {
