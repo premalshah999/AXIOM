@@ -1999,6 +1999,7 @@ class Adapter:
         ):
             raise ValueError("Refusing to click a final submit control outside the commit step")
         await self.dismiss_overlays()
+        await self.leave_focused_field()
         before = set(self.page.context.pages)
         # An adapter that classified a "Submit ..." label as a step (iCIMS "Submit Profile") vouches for it; the form's
         # own guard sees only the label and refused it after the profile's CAPTCHA (America's Tire, Noblis 2026-10-26).
@@ -3024,6 +3025,21 @@ class Adapter:
             await asyncio.sleep(0.4)
         return "unknown", "; ".join(obs["errors"][:2])
 
+    async def leave_focused_field(self):
+        """Blur the focused field before a control is clicked. A page that focuses its empty email box shows "An email address
+        is required" when the mouse goes down on anything else; the message pushes the control away before the mouse comes
+        up, and the click lands on nothing (Farmers' SuccessFactors "Create an account", 2026-11-01). Doing first what the
+        press would do lets the page settle under the pointer. A menu's options are not clicked through here."""
+        try:
+            async with asyncio.timeout(1.5):
+                for frame in self.page.frames:
+                    await frame.evaluate(
+                        "() => { const e = document.activeElement; if (e && e !== document.body && e.blur) e.blur(); }"
+                    )
+                await self.page.evaluate("() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
+        except Exception:
+            pass  # A page in the middle of navigating has nothing focused worth leaving.
+
     async def form_changed(self, before, wait=8.0):
         """A click left the form in `before`. A slow postback still shows the old page for seconds, and the next step would
         act on the page it is leaving; False after `wait` means the click opened nothing."""
@@ -3162,7 +3178,8 @@ class Adapter:
             self.attempts["create_first"] += 1
             before = await self.form.scan()
             if self.accounts.may_create and not create_spent(record) and create_allowed(record, self.e.run_id) and await self.switch(obs, CREATE_LINK):
-                if await self.form_changed(before):
+                # One more press: the first can only have moved the page (leave_focused_field).
+                if await self.form_changed(before, wait=4.0) or (await self.switch(obs, CREATE_LINK) and await self.form_changed(before)):
                     self.accounts.mark(url, "no_account", self.accounts.saved(url) or self.accounts.credentials(url))
                     self.emit("account", "Nothing shows this employer has an account for this address; trying its sign-up route before asking for a reset")
                     return None
