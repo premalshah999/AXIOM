@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { routeUrl, useWorkspace, type View } from "../context";
 
 export type TabItem = { id: string; label: string; count?: number };
@@ -9,8 +10,13 @@ export type TabItem = { id: string; label: string; count?: number };
 export function RouteTabs({ view, tabs, label, current }: { view: View; tabs: TabItem[]; label: string; current?: string }) {
   const { route, go } = useWorkspace();
   const active = tabs.some((t) => t.id === (current ?? route.tab)) ? (current ?? route.tab) : tabs[0]?.id;
+  const nav = useRef<HTMLElement>(null);
+  // On a narrow screen the tabs scroll sideways: bring the open one into view (a long label was cut off at the edge).
+  useEffect(() => {
+    nav.current?.querySelector('[aria-current="page"]')?.scrollIntoView?.({ inline: "center", block: "nearest" });
+  }, [active, tabs.length]);
   return (
-    <nav className="ax-tabs" aria-label={label}>
+    <nav className="ax-tabs" aria-label={label} ref={nav}>
       {tabs.map((t) => (
         <a
           key={t.id}

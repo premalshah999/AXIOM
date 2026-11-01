@@ -414,4 +414,6 @@ def require_company_limit(session, job, run_id=None):
             outcome="excluded" if permanent else "deferred",
             code="company_limit",
             not_before=None if permanent else datetime.fromtimestamp(time.time() + 60, UTC).isoformat(),
+            # What Jobs › Over employer limit says per job (startable.py): how many the employer has, and the limit.
+            detail={"count": len(occupied), "limit": limit},
         )
