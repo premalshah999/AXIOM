@@ -127,16 +127,32 @@ def router(service) -> APIRouter:
 
     @r.get("/api/logo")
     async def company_logo(company: str = "", url: str = ""):
-        """A company's icon from this computer's cache, fetched once. 404 means the page shows its letter tile."""
+        """A company's icon from this computer's cache, found once. 404 means the page shows its letter tile. Only a company that
+        has a job here, at the address given, is looked up: the pages asked are that company's own postings, never the caller's."""
         from fastapi.responses import Response
 
-        from ...logos import domain_for, logo
+        from ...logos import MEDIA, logo
 
-        domain = domain_for(company, url) if config.company_logos else None
-        image = await logo(config.data_dir, domain) if domain else None
-        if not image:
+        if not config.company_logos:
             raise HTTPException(404, "No logo")
-        return Response(image, media_type="image/png", headers={"Cache-Control": "private, max-age=604800"})
+
+        def postings():
+            with db.session() as s:
+                match = Job.company == company
+                shown = s.execute(select(Job.url, Job.description).where(match, Job.url == url).limit(1)).all()
+                others = s.execute(select(Job.url, Job.description).where(match, Job.url != url).order_by(Job.created_at.desc()).limit(5)).all()
+            return [*shown, *others] if shown else []  # The job on screen first.
+
+        rows = await asyncio.to_thread(postings)
+        found = await logo(config.data_dir, company, [r.url for r in rows], [r.description[:20_000] for r in rows]) if rows else None
+        if not found:
+            raise HTTPException(404, "No logo")
+        body, ext = found
+        return Response(
+            body,
+            media_type=MEDIA[ext],
+            headers={"Cache-Control": "private, max-age=604800", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'"},
+        )
 
     @r.post("/api/jobs/{job_id}/rank")
     async def classify(job_id: str):
