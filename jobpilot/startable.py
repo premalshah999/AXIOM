@@ -376,6 +376,12 @@ class Reading:
                 self.value = without(self.value, job_ids)
                 self.at = 0.0  # stale: the next get() serves this and reads again in the background
 
+    def reload(self, service):
+        """Read again now, on the calling thread: the user's own change (a reservation, an approval) must show on the next read, not
+        after the minute a reading is reused."""
+        with self.busy:
+            self._load(service)
+
     def peek(self):
         """The reading if there is one: never reads."""
         return self.value

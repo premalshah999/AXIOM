@@ -6,13 +6,18 @@ not to, applies at once through the owner's one-click Apply. Approving a whole s
 then join the pipeline like any other employer's, and the autopilot applies to the ones that fit the profile.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ... import reserved
 from ...db import Run, now
 from ...service.queueing import off_loop
 from .. import pipeline
+
+
+class Reserve(BaseModel):
+    # A company's name, or a link to its job board or career site.
+    text: str = Field(min_length=1, max_length=300)
 
 
 class Approve(BaseModel):
@@ -35,6 +40,22 @@ def router(service) -> APIRouter:
             result["rules"] = reserved.rules(s).model_dump()
         return result
 
+    def refreshed():
+        """Every list that reads the holds (the dispatcher's reading, the Queue's plan, the Job board) reads them again now: each reuses
+        its last read for seconds to a minute, and a reservation the user just made or lifted must show on the next look."""
+        import logging
+
+        from ...board_view import board
+        from ...queue_order import plans
+        from ...startable import reading
+
+        try:
+            reading(service).reload(service)
+            plans(service).now(service)
+            board(service).reload(service)
+        except Exception:
+            logging.getLogger(__name__).exception("The lists could not be read again after a reservation changed")
+
     @r.get("/api/reserved")
     def listing(section: str = "", q: str = "", page: int = 1, size: int = 25):
         """One section's held jobs (newest first), every section's count and the saved employer list."""
@@ -44,7 +65,37 @@ def router(service) -> APIRouter:
     def save(data: reserved.Rules):
         """Replace the reserved employers. Jobs that stop matching are released at once; new matches are held."""
         db.set_setting(reserved.KEY, {**data.model_dump(), "updated_at": now()})
+        refreshed()
         return view()
+
+    def changed(rules, what, detail):
+        """Save the list, read the lists that depend on it again at once, and say what changed."""
+        db.set_setting(reserved.KEY, {**rules.model_dump(), "updated_at": now()})
+        db.event("", "reserved_list", what, detail)
+        refreshed()
+
+    @r.post("/api/reserved/employers")
+    def reserve(data: Reserve):
+        """Reserve a company or a job board for this user: AXIOM still finds and ranks it, and applies only after approval."""
+        try:
+            name, sites = reserved.employer_of(data.text)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        with db.exclusive() as s:
+            rules = reserved.rules(s)
+        changed(reserved.with_employer(rules, name, sites), f"Reserved {name}", {"employer": name, "sites": sites})
+        return {"reserved": name, **view()}
+
+    @r.delete("/api/reserved/employers")
+    def release(name: str):
+        """Take a company off the list (a default or the user's own). Its jobs are no longer held; approvals stay."""
+        with db.exclusive() as s:
+            rules = reserved.rules(s)
+        rules, removed = reserved.without_employer(rules, name)
+        if not removed:
+            raise HTTPException(404, "That company is not on the list")
+        changed(rules, f"No longer reserved: {name}", {"employer": name})
+        return {"removed": name, **view()}
 
     def approve_one(job_id):
         from sqlalchemy import select
@@ -60,6 +111,7 @@ def router(service) -> APIRouter:
     async def approve_job(job_id: str, data: Approve | None = None):
         """The owner's permission for one reserved job, then (by default) the one-click Apply."""
         found = await off_loop(approve_one, job_id)
+        await off_loop(refreshed)
         result = {"job_id": job_id, "approved": True, **found.as_dict()}
         if data is not None and not data.apply:
             return {**result, "state": "approved", "message": f"Approved. The autopilot may now apply to this {found.employer} job."}
@@ -78,6 +130,7 @@ def router(service) -> APIRouter:
         """Withdraw the permission: the job is held again."""
         with db.exclusive() as s:
             removed = reserved.revoke(s, job_id)
+        refreshed()
         return {"job_id": job_id, "approved": False, "removed": removed}
 
     @r.post("/api/reserved/approve-all")
@@ -94,6 +147,7 @@ def router(service) -> APIRouter:
                 reserved.approve(s, job_id)
         db.event("", "reserved_approval", f"Owner approved {len(ids)} reserved job(s)",
                  {"section": data.section, "count": len(ids)})
+        refreshed()
         return {"approved": len(ids), "section": data.section}
 
     return r

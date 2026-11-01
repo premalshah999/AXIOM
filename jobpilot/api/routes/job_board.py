@@ -122,11 +122,12 @@ def router(service) -> APIRouter:
     def job_board_page(
         q: str = "", role: str = "all", company: str = "all", place: str = "all", posted: str = "all", platform: str = "all",
         fit: Literal["match", "other", "all"] = "match", sort: Literal["fit", "newest", "company"] = "fit", page: int = 1, size: int = 25,
+        level: str = "all", group: bool = True,
     ):
         """The Job board (board_view.py): one page of open postings, filters with exact counts. A `def` route: it reads on a worker thread."""
         from ...board_view import page as board_page
 
-        return board_page(service, q[:200], role[:200], company[:200], place[:40], posted[:4], platform[:40], fit, sort, page, size)
+        return board_page(service, q[:200], role[:200], company[:200], place[:40], posted[:4], platform[:40], fit, sort, page, size, level[:20], group)
 
     @r.get("/api/job-board")
     def snapshot(

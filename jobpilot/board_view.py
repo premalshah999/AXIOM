@@ -97,6 +97,28 @@ def _line(reason, source):
     return (text[0].upper() + text[1:]) if text else ""
 
 
+_LEVELS = {}  # job id -> (title, feed label, level): a posting's level changes only when its title does
+LEVEL_CHUNK = 400
+
+
+def levels_of(db, listed):
+    """{job id: level} for the listed rows, read from the title and the posting text (roles.career_level). The text is read once per
+    job and remembered, so the board's refresh costs no more than before."""
+    from .db import Job
+    from .features.discovery.roles import career_level
+
+    todo = [j for j in listed if _LEVELS.get(j["id"], (None,))[0:2] != (j.get("title"), j.get("career_level") or "")]
+    for i in range(0, len(todo), LEVEL_CHUNK):
+        chunk = todo[i : i + LEVEL_CHUNK]
+        with db.session() as s:
+            rows = s.execute(select(Job.id, func.substr(Job.description, 1, 20000)).where(Job.id.in_([j["id"] for j in chunk])))
+            text = {row[0]: row[1] for row in rows}
+        for j in chunk:
+            stored = j.get("career_level") or ""
+            _LEVELS[j["id"]] = (j.get("title"), stored, career_level(j.get("title"), text.get(j["id"]) or "", stored))
+    return {j["id"]: _LEVELS[j["id"]][2] for j in listed}
+
+
 def collect(service):
     """Every row the board can show, cleaned and classified, with what will happen to each. Reads on a worker thread."""
     from .jobboard import LOCKED, board_snapshot, settings as board_settings
@@ -115,9 +137,11 @@ def collect(service):
     profile = Profile.model_validate(db.get_setting("profile", {}) or {})
     board_rules = db.get_setting("job_board_settings", {}) or {}
     listed = board_snapshot(db, limit=None, jobs_only=True)["jobs"]
-    from .reserved import held_ids
+    from .reserved import held, matcher
 
-    reserved = held_ids(db)
+    with db.session() as s:
+        reserved = set(held(s))
+        reserving = matcher(s)  # a row says whether its company is on the user's reserved list, approved or not
     positions = plan["positions"]
     holds = value.get("jobs", {})
     have = {j["id"] for j in listed}
@@ -142,6 +166,7 @@ def collect(service):
                     "match_reason": row.match_reason or "", "career_level": row.career_level or "", "attempted": False, "requested": row.id in positions,
                 })
     roles_memo, titles_memo, out = {}, {}, {}
+    levels = levels_of(db, listed)
     hidden = {"blank": 0, "stale": 0, "closed": 0, "applied": 0, "twin": 0}
     for job in listed:
         jid = job["id"]
@@ -189,7 +214,7 @@ def collect(service):
             "score": None if restricted and not job.get("score") else job.get("score"),
             "state": state, "fit": fit, "line": sentence[:400], "position": positions.get(jid), "approval": ("over" if code == "employer_limit" else "reserved") if state == "approval" else "",
             "can_add": state != "queue" and not restricted and code not in {"employer_limit", "reserved"} and jid not in reserved,
-            "roles": roles, "places": places_of(job.get("location")), "level": job.get("career_level") or "",
+            "roles": roles, "places": places_of(job.get("location")), "level": levels.get(jid, "Unknown"), "reserved": (found.employer if (found := reserving(company, job.get("url"))) else ""),
         }
         key = key_of(row)
         kept = out.get(key)
@@ -270,6 +295,11 @@ class Board:
     def stale(self):
         self.at = 0.0
 
+    def reload(self, service):
+        """Clean the board again now, on the calling thread (the user changed what holds a job)."""
+        with self.busy:
+            self.value, self.at = collect(service), time.monotonic()
+
 
 def board(service):
     if not hasattr(service, "board_view"):
@@ -277,13 +307,21 @@ def board(service):
     return service.board_view
 
 
-def page(service, q="", role="all", company="all", place="all", posted="all", platform="all", fit="match", sort="fit", number=1, size=25):
-    """One page of the board, and each filter's choices with how many rows choosing it would show (every other filter kept)."""
+PER_COMPANY = 3  # rows one company shows before "N more at X": one employer posting hundreds of roles filled the first pages
+LEVEL_NAMES = ("Intern", "New grad", "Entry", "Mid", "Senior", "Unknown")
+
+
+def page(service, q="", role="all", company="all", place="all", posted="all", platform="all", fit="match", sort="fit", number=1, size=25, level="all", group=True):
+    """One page of the board, and each filter's choices with how many rows choosing it would show (every other filter kept).
+
+    Grouped (the default, while no company is chosen) a company shows its best PER_COMPANY rows in the order asked for, the last
+    carrying `more`: how many it hides. Every count here, the total and each filter's, is of the rows shown, so a filter's number is
+    the number of rows it opens; choosing the company shows them all and the company filter counts all of them."""
     data = board(service).ready(service)
     if data is None:
         return {
             "planning": True, "rows": [], "total": 0, "page": 1, "pages": 1, "size": size, "all": 0, "hidden": {}, "searched_at": None, "scanning": 0, "scan_read": 0, "scan_total": 0,
-            "enabled": True, "window": 720, "facets": dict.fromkeys(("fit", "role", "company", "place", "platform", "posted"), []),
+            "enabled": True, "window": 720, "facets": dict.fromkeys(("fit", "role", "company", "place", "platform", "posted", "level"), []),
         }
     rows = data["rows"]
     text = " ".join((q or "").casefold().split())
@@ -299,40 +337,70 @@ def page(service, q="", role="all", company="all", place="all", posted="all", pl
             return False
         if skip != "place" and place != "all" and place not in row["places"]:
             return False
+        if skip != "level" and level != "all" and row["level"] != level:
+            return False
         if skip != "platform" and platform != "all" and row["ats"] != platform:
             return False
         if skip != "posted" and since and row["posted_at"] < since:
             return False
         return not text or text in f"{row['title']} {row['company']} {row['location']}".casefold()
 
-    def facet(skip, values):
+    grouped = group and company == "all"
+
+    def capped(per):
+        return sum(min(n, PER_COMPANY) if grouped else n for n in per.values())
+
+    def facet(skip, values, full=False):
+        """{value: rows choosing it would show}: grouped, a company counts at most PER_COMPANY of its rows toward each value
+        (`full`: all of them, for the company list, since choosing a company shows every one of its rows)."""
         seen = {}
         for row in rows:
             if passes(row, skip):
                 for v in values(row):
-                    seen[v] = seen.get(v, 0) + 1
-        return seen
+                    per = seen.setdefault(v, {})
+                    per[row["company"]] = per.get(row["company"], 0) + 1
+        return {v: sum(per.values()) if full else capped(per) for v, per in seen.items()}
 
-    shown = [row for row in rows if passes(row)]
+    def shown_count(skip, test):
+        per = {}
+        for row in rows:
+            if passes(row, skip) and test(row):
+                per[row["company"]] = per.get(row["company"], 0) + 1
+        return capped(per)
+
     if sort == "newest":
-        shown.sort(key=lambda r: (r["posted_at"], r["id"]), reverse=True)
+        key = lambda r: (r["posted_at"], r["id"])
     elif sort == "company":
-        shown.sort(key=lambda r: (r["company"].casefold(), -(r["score"] or -1), r["id"]))
+        key = lambda r: (r["company"].casefold(), -(r["score"] or -1), r["id"])
     else:
-        shown.sort(key=lambda r: (-(r["score"] if r["score"] is not None else -1), r["posted_at"] and -_stamp(r["posted_at"]), r["id"]))
+        key = lambda r: (-(r["score"] if r["score"] is not None else -1), r["posted_at"] and -_stamp(r["posted_at"]), r["id"])
+    shown = sorted((row for row in rows if passes(row)), key=key, reverse=sort == "newest")
+    more = {}
+    if grouped:
+        # A company's best rows in the order asked for; the last one kept carries how many it hides.
+        count, tail, kept = {}, {}, []
+        for row in shown:
+            count[row["company"]] = count.get(row["company"], 0) + 1
+            if count[row["company"]] <= PER_COMPANY:
+                kept.append(row)
+                tail[row["company"]] = row["id"]
+        more = {tail[name]: n - PER_COMPANY for name, n in count.items() if n > PER_COMPANY}
+        shown = kept
     size = max(1, min(100, int(size)))
     pages = max(1, -(-len(shown) // size))
     number = max(1, min(int(number), pages))
     by_count = lambda counts: sorted(counts.items(), key=lambda kv: (-kv[1], kv[0].casefold()))
-    posted_rows = [row for row in rows if passes(row, "posted")]
-    keep = ("id", "title", "company", "location", "url", "ats", "posted_at", "dated", "source", "score", "state", "line", "position", "can_add", "level", "approval")
+    keep = ("id", "title", "company", "location", "url", "ats", "posted_at", "dated", "source", "score", "state", "line", "position", "can_add", "level", "approval", "reserved")
+    levels = facet("level", lambda r: [r["level"]])
     return {
-        "rows": [{k: row[k] for k in keep} for row in shown[(number - 1) * size : number * size]],
+        "rows": [{**{k: row[k] for k in keep}, "more": more.get(row["id"], 0)} for row in shown[(number - 1) * size : number * size]],
         "total": len(shown),
         "page": number,
         "pages": pages,
         "size": size,
         "all": len(rows),
+        "grouped": grouped,
+        "per_company": PER_COMPANY,
         "hidden": data["hidden"],
         "searched_at": data["searched_at"],
         "scanning": data["scanning"],
@@ -341,13 +409,14 @@ def page(service, q="", role="all", company="all", place="all", posted="all", pl
         "enabled": data["enabled"],
         "window": data["window"],
         "facets": {
-            "fit": [{"value": k, "label": FITS[k], "count": sum(1 for r in rows if passes(r, "fit") and (k == "all" or r["fit"] == k))} for k in FITS],
+            "fit": [{"value": k, "label": FITS[k], "count": shown_count("fit", lambda r: k == "all" or r["fit"] == k)} for k in FITS],
             "role": [{"value": k, "label": k, "count": n} for k, n in by_count(facet("role", lambda r: r["roles"]))],
-            "company": [{"value": k, "label": k, "count": n} for k, n in by_count(facet("company", lambda r: [r["company"]]))][:300],
+            "level": [{"value": k, "label": k, "count": levels.get(k, 0)} for k in LEVEL_NAMES],
+            "company": [{"value": k, "label": k, "count": n} for k, n in by_count(facet("company", lambda r: [r["company"]], full=True))][:300],
             "place": [{"value": k, "label": STATES.get(k, k), "count": n} for k, n in by_count(facet("place", lambda r: r["places"]))],
             "platform": [{"value": k, "label": k, "count": n} for k, n in by_count(facet("platform", lambda r: [r["ats"]]))],
             "posted": [
-                {"value": k, "label": label, "count": sum(1 for r in posted_rows if r["posted_at"] >= (now_at - timedelta(hours=hours)).isoformat())}
+                {"value": k, "label": label, "count": shown_count("posted", lambda r: r["posted_at"] >= (now_at - timedelta(hours=hours)).isoformat())}
                 for k, (label, hours) in POSTED.items()
             ],
         },
