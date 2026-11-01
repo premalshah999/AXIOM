@@ -7,6 +7,7 @@ from ..mail import origin
 from .dayforce import DAYFORCE_ID_ACCOUNT
 from .dayforce import dayforce_id_page
 from .dayforce import dayforce_id_password_ok
+from . import password_rules
 from .errors import AccountActionError
 from .pages import ACCOUNT_EXISTS
 from .pages import CONFIRM_EMAIL
@@ -251,7 +252,7 @@ class FlowHandleMixin:
             signature in self.attempts
             and creating
             and ("password_rules", scope) not in self.attempts
-            and PASSWORD_MAXIMUM.search(obs.get("text", ""))
+            and (PASSWORD_MAXIMUM.search(obs.get("text", "")) or password_rules.refused(" ".join(errors)))
         ):
             # Westinghouse (SuccessFactors) 2026-10-17 printed "Password must not be longer than 18 characters"
             # only after Create refused the longer password; retry once inside the stated limits.
@@ -302,6 +303,14 @@ class FlowHandleMixin:
             if reuse or (saved and not creating)
             else self.store.shared(max_length=min(maxima) if maxima else None)
         )
+        if creating and ("password_rules", scope) in self.attempts and not configured:
+            # The first Create was refused for the password's rules (or its length): this employer gets a random password
+            # that meets what the page states, kept for it alone. The main password was the first choice.
+            creds = {**creds, "password": self.store.fallback(
+                " ".join(errors) + " " + obs.get("text", ""), tried=[creds["password"]], maximum=min(maxima) if maxima else None)}
+            getattr(e, "emit", lambda *args: None)(
+                "account", "The employer refused the main password; creating the account with a random one that meets its rules"
+            )
         if maxima and len(creds["password"]) > min(maxima):
             if not creating:
                 raise AccountActionError(

@@ -7,6 +7,7 @@ import { ago, stamp } from "./format";
 import { Pagination, usePagination } from "./pagination";
 import type { AccountRow, AccountSummary, EmployerAccountStatus } from "./types";
 import { Actions, Facts, FormGrid, SecretInput } from "./setup-kit";
+import { MainPassword } from "./mainpassword";
 import { Chips, RowMenu, SearchBox } from "./worktools";
 import "./styles/settings.css";
 import { Button, Drawer, Dropzone, Empty, External, Field, Input, Monogram, Pill, Table, Tooltip, type PillTone } from "./ui/index";
@@ -24,6 +25,8 @@ const TONE: Record<EmployerAccountStatus, PillTone> = {
   registered: "neutral",
   unknown: "neutral",
 };
+// Whose password a row holds, in a few words: "its own" is the random one an employer got after it refused the main password.
+const KIND: Record<string, string> = { main: "Main password", own: "Its own password", yours: "Password you saved" };
 const QUIET = new Set<string>(["created", "signing_in", "registered", "unknown"]);
 const FILTERS = [
   { id: "all", label: "All", match: () => true },
@@ -45,6 +48,7 @@ export function AccountSettings() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [resetting, setResetting] = useState<AccountRow | null>(null);
+  const [showing, setShowing] = useState<AccountRow | null>(null);
   const q = query.trim().toLowerCase();
   const all = useMemo(() => {
     const list = Array.isArray(summary.data?.accounts) ? summary.data!.accounts : [];
@@ -171,7 +175,14 @@ export function AccountSettings() {
               truncate: true,
               hideBelow: 860,
               width: 220,
-              cell: (a) => <span title={a.login_email}>{a.login_email || "—"}</span>,
+              cell: (a) => (
+                <span className="st-who2" title={a.login_email}>
+                  <span>
+                    <strong>{a.login_email || "—"}</strong>
+                    {KIND[a.password_kind] && <small>{KIND[a.password_kind]}</small>}
+                  </span>
+                </span>
+              ),
             },
             {
               key: "updated",
@@ -203,6 +214,7 @@ export function AccountSettings() {
                       busy={pending !== null}
                       actions={[
                         ...(a.can_retry_verification ? [{ id: "verify", label: "Retry verification", onSelect: () => retry(a) }] : []),
+                        ...(a.password_kind ? [{ id: "show", label: "Show or copy the password", onSelect: () => setShowing(a) }] : []),
                         { id: "reset", label: "Set the password myself", onSelect: () => setResetting(a) },
                         ...(a.origin ? [{ id: "open", label: "Open the site", onSelect: () => window.open(a.origin, "_blank", "noopener") }] : []),
                         {
@@ -233,6 +245,9 @@ export function AccountSettings() {
 
       <HowItSignsIn summary={summary.data} />
       <SessionImport />
+      <Drawer open={!!showing} onClose={() => setShowing(null)} title="Password" sub={showing ? showing.employer || showing.host : undefined} width={480}>
+        {showing && <ShowPassword account={showing} close={() => setShowing(null)} />}
+      </Drawer>
       <Drawer
         open={!!resetting}
         onClose={() => setResetting(null)}
@@ -271,7 +286,7 @@ function HowItSignsIn({ summary }: { summary: AccountSummary | null }) {
         <Facts
           items={[
             ["Signs in as", cfg.account_email || "The email on your profile"],
-            ["Password", cfg.account ? "One shared password, set on the server" : "One shared password, generated and encrypted"],
+            ["Password", cfg.account ? "Your main password, tried first" : "One password AXIOM made, encrypted on this Mac"],
             ["Gmail", cfg.imap ? "Connected" : <Pill tone="warn" dot>Not connected</Pill>],
             ["Captcha solving", cfg.twocaptcha ? "On" : "Off"],
             [
@@ -280,6 +295,7 @@ function HowItSignsIn({ summary }: { summary: AccountSummary | null }) {
             ],
           ]}
         />
+        <MainPassword />
         {problems.length > 0 && (
           <div className="ax-notice is-warn">
             <span>Some portals may reject the shared password: {problems.join("; ")}.</span>
@@ -297,6 +313,81 @@ function HowItSignsIn({ summary }: { summary: AccountSummary | null }) {
         </Actions>
       </div>
     </details>
+  );
+}
+
+const WHOSE: Record<string, string> = {
+  main: "This is your main password. AXIOM tried it first on this employer and it was accepted (or it is the one AXIOM made).",
+  own: "This employer refused your main password, so AXIOM made this one for it. No other employer has it.",
+  yours: "You saved this password here. The next application signs in with it.",
+};
+
+/** One employer's login, shown only when asked for: fetched on the press, hidden again when the drawer closes. */
+function ShowPassword({ account: a, close }: { account: AccountRow; close: () => void }) {
+  const notify = useNotify();
+  const [login, setLogin] = useState<{ email: string; password: string } | null>(null);
+  const [shown, setShown] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const reveal = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      setLogin(await api<{ email: string; password: string }>(`/accounts/${encodeURIComponent(a.id)}/reveal`, "POST", {}));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="ax-stack">
+      <p className="ax-hint">{WHOSE[a.password_kind] || "AXIOM keeps this employer's login."}</p>
+      {!login ? (
+        <Actions start>
+          <Button loading={busy} onClick={reveal}>
+            Show the password
+          </Button>
+        </Actions>
+      ) : (
+        <>
+          <Facts
+            items={[
+              ["Sign-in email", login.email],
+              ["Password", <code key="p">{shown ? login.password : "•".repeat(Math.min(login.password.length, 16))}</code>],
+            ]}
+          />
+          <Actions start>
+            <Button size="sm" variant="ghost" aria-pressed={shown} onClick={() => setShown((v) => !v)}>
+              {shown ? "Hide" : "Show"}
+            </Button>
+            <Button
+              size="sm"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(login.password);
+                  notify("ok", "Password copied.");
+                } catch {
+                  setError("This browser would not copy it. Press Show and copy it by hand.");
+                }
+              }}
+            >
+              Copy password
+            </Button>
+          </Actions>
+        </>
+      )}
+      {error && (
+        <p className="ax-error" role="alert">
+          {error}
+        </p>
+      )}
+      <Actions>
+        <Button variant="ghost" onClick={close}>
+          Close
+        </Button>
+      </Actions>
+    </div>
   );
 }
 

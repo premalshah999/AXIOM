@@ -101,6 +101,23 @@ def employer(tenant: str) -> str:
     return ""
 
 
+def password_kind(service, record: dict) -> str:
+    """Whose password the record holds, never the value: "yours" (you typed it here), "main" (your main password, or the
+    shared one AXIOM made), "own" (a random one this employer alone has: it refused the main one), "" when none is kept."""
+    if not record.get("credentials"):
+        return ""
+    if record.get("owner_set_at"):
+        return "yours"
+    try:
+        login = service.mail.vault.open(record["credentials"])
+        from .store import AccountStore
+
+        main = AccountStore(service, str(login.get("email", ""))).shared_peek()
+    except Exception:
+        return ""
+    return "main" if main and login.get("password") == main else "own"
+
+
 def login_email(service, record: dict) -> str:
     try:
         return (
@@ -186,6 +203,7 @@ def row(service, key: str, record: dict, drafts) -> dict:
         "detail": detail(status, record, retry),
         "attention": status in ATTENTION,
         "login_email": login_email(service, record),
+        "password_kind": password_kind(service, record),
         "updated_at": record.get("updated_at", ""),
         "confirmed_at": record.get("confirmed_at"),
         "owner_set_at": record.get("owner_set_at"),

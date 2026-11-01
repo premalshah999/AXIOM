@@ -48,9 +48,11 @@ FIELDS = {
     "vision_model": ("Vision", "Screenshot model", False, "Model id at that address."),
     "account_email": ("Accounts", "Email for employer accounts", False,
                       "Used to sign up and sign in on career sites. Empty: the email in your profile."),
-    "application_password": ("Accounts", "Shared employer password", True,
-                             "One password for every employer account the app creates. A site that refuses it gets a "
-                             "stronger variant, kept in Settings › Accounts."),
+    "application_password": ("Accounts", "Main password", True,
+                             "Optional. One password AXIOM tries first when it creates or resets an employer account. A site that "
+                             "refuses it gets a random one that meets its rules, kept for that employer in Settings › Accounts. "
+                             "Using one password on many sites is your choice, and a risk: if one employer leaks it, the others "
+                             "can be tried with it."),
     "telegram_enabled": ("Telegram", "Telegram messages", False, "Send questions and alerts to Telegram."),
     "captcha_image_rounds": ("Captcha", "Paid image rounds per puzzle", False, "More rounds solve more puzzles and cost more."),
     "captcha_timeout": ("Captcha", "Seconds to wait for a solve", False, "How long one captcha may take."),
@@ -180,7 +182,7 @@ def save(config, updates):
             from .config import password_problems
 
             if problems := password_problems(value):
-                raise ValueError("Shared employer password: " + "; ".join(problems))
+                raise ValueError("Main password: " + "; ".join(problems))
         if value:
             values[name] = value
         else:
@@ -204,7 +206,8 @@ def status(config):
         current = getattr(config, name, "")
         value = ("true" if current else "false") if kind(name) == "bool" else str(current if current is not None else "")
         source = "app" if name in saved else "env" if env.get(name) else ""
-        shown = ("••••" + value[-4:] if len(value) > 8 else "••••") if secret and value else value
+        # A password has no shown tail: the last characters of a password given to many sites are part of it.
+        shown = ("••••" + value[-4:] if len(value) > 8 and name != "application_password" else "••••") if secret and value else value
         pending = ""
         if name in RESTART and (name in saved or env.get(name)):
             # Saved, not yet running: the next start uses it.

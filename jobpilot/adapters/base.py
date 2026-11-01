@@ -16,7 +16,7 @@ from urllib.parse import urljoin, urlsplit
 from playwright.async_api import Error as PlaywrightError
 
 from ..service import Service
-from ..accounts import Accounts
+from ..accounts import Accounts, password_rules
 from ..captcha_observation import ARM_JS
 from ..forms import AUTH, COOKIE_NOTICE, FINAL, LAUNCHER, SURVEY_DONE
 from ..privacy import acknowledge_privacy_notice, dismiss_cookies
@@ -425,7 +425,10 @@ def lockout_result(said):
 
 
 PASSWORD_RULES = re.compile(
-    r"password (?:must|should|needs to|requirements)|at least \d+ characters|must contain|not meet.{0,40}requirements",
+    r"password (?:must|should|needs to|requirements)|at least \d+ characters|must contain|not meet.{0,40}requirements|"
+    # A refusal a different password answers: history ("must differ from your previous 3 passwords", Lenovo), likeness
+    # ("too similar to your name") and strength, in the page's own words (accounts/password_rules.py).
+    + password_rules.REFUSAL.pattern,
     re.I,
 )
 NOT_APPLICATION = re.compile(
@@ -2687,6 +2690,34 @@ class Adapter:
             self.emit("auth", "Trying the configured password for this existing account")
         using_alternate = bool(alternate and self.attempts[alternate_key])
         credentials = alternate if using_alternate else self.accounts.credentials(url)
+        # The random password a refused sign-up fell back to stays this run's choice for that employer's sign-up page.
+        own = getattr(self, "own_passwords", {}).get(location.scheme + "://" + location.netloc.lower())
+        if own and mode == "create":
+            credentials = own
+        # A password this employer refused at sign-in is not typed again until the owner saves one or a reset sets one:
+        # every run that retried it walked the account toward a lockout. The main password is the next candidate, then a reset.
+        said_now = " ".join([*obs.get("errors", []), str(obs.get("text", ""))])
+        failures = int(record.get("sign_in_failures") or 0)
+        if mode == "sign_in" and not own:
+            refused = {fingerprint for fingerprint, _ in self.accounts.store.rejected(url)}
+            fp = self.accounts.credential_fingerprint(url, credentials)
+            if fp in refused:
+                if (
+                    alternate
+                    and not using_alternate
+                    and self.accounts.credential_fingerprint(url, alternate) not in refused
+                    and password_rules.may_try_again(failures, said_now)
+                ):
+                    self.attempts[alternate_key] += 1
+                    using_alternate, credentials = True, alternate
+                    self.emit("auth", "The saved password was refused earlier; trying the main password")
+                else:
+                    self.emit("auth", "Every password on file was refused here; using password recovery, not another sign-in")
+                    return await self.recover(obs, "The employer refused every saved password")
+            elif not password_rules.may_try_again(failures, said_now):
+                # The page states how many failed sign-ins lock the account, and the last one would: recovery lifts it.
+                self.emit("auth", "Another failed sign-in could lock this account; using password recovery")
+                return await self.recover(obs, "The employer's lockout limit is near")
         # Only skip a recently and explicitly rejected login for a known account. The identifier is included in
         # the opaque context so changing a configured username permits a fresh attempt. Legacy records lack this
         # context and are not assumed to refer to the identifier currently shown on the page.
@@ -2821,6 +2852,19 @@ class Adapter:
                 state="waiting_browser",
                 blocker_type="account",
             )
+        if outcome == "password_rules" and mode == "create" and not self.attempts["own_password"]:
+            # The employer refused the main password at sign-up (rules not met, too like the name): this employer gets a
+            # random one that meets the rules the page states. It is saved before the second Create, as the first was,
+            # and replaced by nothing else: a refused Create never overwrote a working login (AMETEK, 2026-10-18).
+            fresh = await self.form.scan()
+            said = " ".join([detail, *fresh.get("errors", []), str(fresh.get("text", ""))])
+            maxima = [f.get("maxlength", -1) for f in fresh["fields"] if f["type"] == "password" and f.get("maxlength", -1) > 0]
+            own_password = {**credentials, "password": self.accounts.store.fallback(
+                said, tried=[credentials["password"]], maximum=min(maxima) if maxima else None)}
+            self.attempts["own_password"] += 1
+            self.own_passwords = {**getattr(self, "own_passwords", {}), location.scheme + "://" + location.netloc.lower(): own_password}
+            self.emit("auth", "The employer refused the main password; creating the account with a random one that meets its rules")
+            return None
         if outcome == "password_rules":
             return self.defer(
                 "The shared account password does not meet this employer's rules: " + detail,
@@ -2847,19 +2891,27 @@ class Adapter:
                 and time.time() - float(record.get("reset_requested_at") or 0) > UNANSWERED_RESET_SECONDS
             )
             unknown = record.get("state") == "password_unknown" or unanswered_reset
+            fingerprint = self.accounts.credential_fingerprint(url, credentials)
+            kept = [list(item) for item in self.accounts.store.rejected(url) if item[0] != fingerprint]
             self.accounts.mark(
                 url,
                 "password_unknown" if unknown else "credentials_rejected",
                 self.accounts.saved(url) or credentials,
-                rejected_credentials=self.accounts.credential_fingerprint(url, credentials),
+                rejected_credentials=fingerprint,
                 rejected_login_context=context,
                 rejected_at=now(),
+                rejected_fingerprints=[*kept, [fingerprint, time.time()]][-6:],
+                sign_in_failures=failures + 1,
                 **({"password_unknown_at": now()} if unanswered_reset else {}),
             )
+            said_after = " ".join([detail, *(await self.form.scan()).get("errors", [])])
             if alternate and not using_alternate and self.attempts[mode] < 2:
-                self.attempts[alternate_key] += 1
-                self.emit("auth", "Trying the configured password for this existing account")
-                return None
+                if password_rules.may_try_again(failures + 1, said_now + " " + said_after):
+                    self.attempts[alternate_key] += 1
+                    self.emit("auth", "Trying the main password for this existing account")
+                    return None
+                # One more refusal could lock the account (the page counts its tries): the reset is the way in.
+                self.emit("auth", "The employer's lockout limit is near; not trying the main password, recovering instead")
             # "No account / couldn't find an account" means create one, even when an
             # earlier rejection stored this tenant as known (a reset cannot help).
             not_found = bool(NOT_FOUND.search(str(detail or "")))
@@ -3618,6 +3670,25 @@ class Adapter:
         if challenge := await self.after_auth_click():
             return challenge
         outcome, refusal = await self.reset_outcome(one_page=one_page)
+        if one_page and outcome == "refused" and credentials and not self.attempts["own_reset_password"]:
+            # The new password went in with the request and the page refused it: the main password is tried first, then a
+            # random one that meets the rules the page states (nothing was sent, so this is the same request again).
+            page = await self.form.scan()
+            page = page if isinstance(page, dict) else {"fields": []}
+            said = refusal + " " + " ".join(map(str, page.get("errors", []))) + " " + str(page.get("text", ""))
+            again = self.dialog_view(page) or page
+            boxes = [f for f in again.get("fields", []) if f["type"] == "password"]
+            if boxes and (PASSWORD_HISTORY.search(said) or password_rules.refused(said)):
+                self.attempts["own_reset_password"] += 1
+                maxima = [f.get("maxlength", -1) for f in boxes if f.get("maxlength", -1) > 0]
+                credentials = {**credentials, "password": self.accounts.store.fallback(
+                    said, tried=[credentials["password"]], maximum=min(maxima) if maxima else None)}
+                self.emit("auth", "The employer refused the main password; using a random one that meets its rules")
+                for f in boxes:
+                    await self.type_password(self.form.locator(f["id"]), credentials["password"])
+                if retry_button := self.reset_button(again):
+                    await self.click(retry_button, auth=True)
+                    outcome, refusal = await self.reset_outcome(one_page=one_page)
         # What was asked and what the page answered, without values: six confirmed resets a day for Textron, Lenovo and
         # Farmers (2026-10-29) brought no mail, and nothing recorded which fields the page offered or what it said.
         after = getattr(self, "reset_seen", None)
@@ -3846,8 +3917,8 @@ class Adapter:
         if forced and not configured and PASSWORD_HISTORY.search(obs.get("text", "")):
             # An explicit history rule makes reusing the account password inappropriate. Keep this value local until
             # the employer accepts the change, so a refused action never replaces the saved credential.
-            credentials = {**credentials, "password": self.accounts.store.generated(
-                max(12, min(min(maxima), 16)) if maxima else 16)}
+            credentials = {**credentials, "password": self.accounts.store.fallback(
+                obs.get("text", ""), tried=[credentials["password"]], maximum=min(maxima) if maxima else None)}
         for f in passwords:
             if not self.accounts.password_allowed(self.id, self.form.frames[f["id"]].url, self.job["url"]):
                 self.finish_mail("failed", "Reset form on an unexpected website")
@@ -3878,12 +3949,18 @@ class Adapter:
                 self.emit("auth", f"reset after {nudge}: {outcome}")
                 if outcome != "unknown":
                     break
+        tried = [credentials["password"]]
         if outcome in {"unknown", "password_rules"} and not configured:
             page = await self.form.scan()
-            if PASSWORD_HISTORY.search(" ".join(page.get("errors", [])) + " " + page.get("text", "")):
-                # A reset refuses a password the account used before; this employer gets its own new password.
-                credentials = {**credentials, "password": self.accounts.store.generated(
-                    max(12, min(min(maxima), 16)) if maxima else 16)}
+            said = " ".join(page.get("errors", [])) + " " + page.get("text", "")
+            if PASSWORD_HISTORY.search(said) or password_rules.refused(said):
+                # The main password is the first choice; a page that refuses it (rules not met, "different from your
+                # previous 3 passwords", too like the name) gets a random one that meets the rules it states, kept for
+                # this employer only and saved after the page accepts it (Lenovo, 2026-10-29).
+                credentials = {**credentials, "password": self.accounts.store.fallback(
+                    said, tried=tried, maximum=min(maxima) if maxima else None)}
+                self.emit("auth", "The employer refused the main password; using a random one that meets its rules",
+                          {"reason": "history" if PASSWORD_HISTORY.search(said) else "rules"})
                 fresh = [f for f in page["fields"] if f["type"] == "password"]
                 for f in fresh:
                     await self.type_password(self.form.locator(f["id"]), credentials["password"])

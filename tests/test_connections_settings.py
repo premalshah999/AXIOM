@@ -21,7 +21,7 @@ def test_a_value_outside_the_settings_limits_is_refused(service):
 
 
 def test_the_shared_employer_password_must_meet_common_rules(service):
-    with pytest.raises(ValueError, match="Shared employer password"):
+    with pytest.raises(ValueError, match="Main password"):
         save(service.config, {"application_password": "short"})
     config = save(service.config, {"application_password": "Strong-Passw0rd!x"})
     assert config.application_password == "Strong-Passw0rd!x"

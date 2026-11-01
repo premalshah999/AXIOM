@@ -165,6 +165,8 @@ export type AccountRow = {
   detail: string;
   attention: boolean;
   login_email: string;
+  /** Whose password the record holds: yours (typed here), the main one, a random one only this employer has, or none. */
+  password_kind: "yours" | "main" | "own" | "";
   updated_at: string;
   confirmed_at: string | null;
   owner_set_at: string | null;
