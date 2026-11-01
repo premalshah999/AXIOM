@@ -55,6 +55,17 @@ def fit_blocker(profile, board, title):
     return None
 
 
+def described(session, job_id):
+    """`"Title" at Company (link)` for the job an earlier application belongs to, so a wrong match can be seen: the owner
+    pasted a different role at an employer they had applied to and was told only "already applied" (2026-11-01)."""
+    row = session.execute(select(Job.title, Job.company, Job.url).where(Job.id == job_id)).first()
+    if row is None:
+        return "an earlier application"
+    title = " ".join((row.title or "").split()) or "untitled role"
+    company = " ".join((row.company or "").split())
+    return f'"{title[:120]}"' + (f" at {company[:60]}" if company else "") + f" ({row.url[:160]})"
+
+
 class QueueingMixin:
     @staticmethod
     def cooldown_key(job):
@@ -157,6 +168,8 @@ class QueueingMixin:
             if not job or job.demo or job.status in {"confirmed", "already_applied"}:
                 return
             reason = "This posting was already applied to through another link; no second application was made"
+            if detail.get("duplicate_of"):
+                reason = f"This posting was already applied to as {described(session, detail['duplicate_of'])}; no second application was made"
             run = Run(
                 job_id=job_id,
                 state="already_applied",
@@ -381,7 +394,7 @@ class QueueingMixin:
                 duplicate := next((x for x in previous if x.job_id != job.id and x.state in applied), None)
             ):
                 raise QueueBlocked(
-                    "The same posting was already applied to through another link.",
+                    f"The same posting was already applied to as {described(s, duplicate.job_id)}.",
                     outcome="protected",
                     code="duplicate_posting",
                     detail={"duplicate_of": duplicate.job_id, "resolved_url": final or job.url},
@@ -392,8 +405,15 @@ class QueueingMixin:
                 any(x.state == "submission_unknown" for x in previous)
                 and not unknown_resubmit_allowed(s, previous)
             ):
+                # Name the application that holds the guard, so a wrong match is visible (own job first).
+                holder = next(
+                    (x for x in sorted(previous, key=lambda r: r.job_id != job.id)
+                     if x.state in {"confirmed", "already_applied", "submission_unknown"}),
+                    None,
+                )
                 raise QueueBlocked(
-                    "This job is submitted or has an uncertain submission. Reconcile it first.",
+                    "This job is submitted or has an uncertain submission. Reconcile it first."
+                    + (f" Earlier application: {described(s, holder.job_id)}." if holder else ""),
                     outcome="protected",
                     code="submitted_or_uncertain",
                 )

@@ -444,6 +444,7 @@ def identity_variants(url: str):
         canonicalize(url)[1],
         canonicalize(url, keep_platform_hint=True)[1],
         canonicalize(url, requisition_ids=False)[1],
+        canonicalize(url, legacy_params=True)[1],  # Before an id-shaped ?ref= / ?source= was kept: older rows and guards.
     ]
     return tuple(dict.fromkeys(variants))
 
@@ -457,7 +458,28 @@ def url_identity(url: str) -> str:
     return canonicalize(url)[1]
 
 
-def canonicalize(url: str, *, keep_platform_hint=False, requisition_ids=True):
+# Parameters a link carries to say where the visitor came from ("?source=LinkedIn"). Some employers' sites name the
+# posting in one of them ("?ref=REQ4001"), and dropping it made two roles at one site the same job: the second was
+# answered "already applied" for the first (owner, 2026-11-01). A value shaped like an id (digits, with at most a short
+# letter prefix) names a posting and stays; a channel label ("LinkedIn", "CC3") is dropped as before.
+CHANNEL_PARAMS = frozenset({"source", "ref", "referrer"})  # sourceid and jr_id always name a channel or a click
+POSTING_ID_VALUE = re.compile(r"(?:[A-Za-z]{1,6}[-_]?)?\d{4,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+# Only where the path names no posting of its own: on /jobs/123 or /jobs/data-engineer a different ?ref= is a different
+# click on one job, and keeping it would make that job two and allow a second application.
+GENERIC_PAGE = re.compile(r"(?:careers?|jobs?|openings?|positions?|opportunit(?:y|ies)|apply|application|vacanc(?:y|ies)|index(?:\.\w+)?)?", re.I)
+
+
+def tracking_param(key, value, *, path="", legacy=False):
+    key = key.lower()
+    if key.startswith("utm_") or key in {"jr_id", "sourceid"}:
+        return True
+    if key not in CHANNEL_PARAMS:
+        return False
+    names_posting = POSTING_ID_VALUE.fullmatch(value.strip()) and GENERIC_PAGE.fullmatch(path.rstrip("/").rsplit("/", 1)[-1])
+    return legacy or not names_posting
+
+
+def canonicalize(url: str, *, keep_platform_hint=False, requisition_ids=True, legacy_params=False):
     p = urlsplit(url.strip())
     if p.scheme not in ("http", "https") or not p.hostname or p.username or p.password:
         raise ValueError("Provide an http(s) application URL without embedded credentials")
@@ -467,8 +489,7 @@ def canonicalize(url: str, *, keep_platform_hint=False, requisition_ids=True):
     query = [
         (k, v)
         for k, v in parse_qsl(p.query, keep_blank_values=True)
-        if not k.lower().startswith("utm_")
-        and k.lower() not in {"source", "ref", "referrer", "sourceid", "jr_id"}
+        if not tracking_param(k, v, path=p.path, legacy=legacy_params)
         and (keep_platform_hint or not platform_hint(k, v))
     ]
     path = p.path.rstrip("/")
