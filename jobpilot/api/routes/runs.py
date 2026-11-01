@@ -42,7 +42,7 @@ def router(service) -> APIRouter:
         from ...problems import recent
 
         with db.session() as s:
-            return recent(s, days, page, size, kind)
+            return recent(s, days, page, size, kind, runs_dir=config.data_dir / "runs")
 
     @r.get("/api/runs/{run_id}")
     def run_detail(run_id: str):

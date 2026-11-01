@@ -712,6 +712,7 @@ export type Problem = {
   next: { kind: "retry" | "you" | "stopped" | "done"; sentence: string; at: string };
   attempt: number;
   attempts: number;
+  screenshot: boolean;
 };
 export type ProblemPage = { rows: Problem[]; total: number; page: number; pages: number; size: number; days: number };
 export type QueueRetry = {

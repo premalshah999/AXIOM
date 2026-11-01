@@ -86,9 +86,11 @@ export function ProblemList() {
         width: "1%",
         cell: (r) => (
           <span className="ax-row-links" onClick={(e) => e.stopPropagation()}>
-            <a className="ax-quiet-link" href={`/api/runs/${r.run_id}/screenshot`} target="_blank" rel="noreferrer">
-              Screenshot
-            </a>
+            {r.screenshot && (
+              <a className="ax-quiet-link" href={`/api/runs/${r.run_id}/screenshot`} target="_blank" rel="noreferrer">
+                Screenshot
+              </a>
+            )}
             <button type="button" className="ax-quiet-link" onClick={() => openJob(r.job_id, r.run_id)}>
               Record
             </button>

@@ -49,6 +49,12 @@ def test_every_attempt_that_sent_nothing_is_listed_newest_first_with_what_happen
     assert rows["looped-2"]["next"]["kind"] == "stopped" and "stopped trying" in rows["looped-2"]["next"]["sentence"]
     assert rows["looped-0"]["next"]["kind"] == "done" and "newer row" in rows["looped-0"]["next"]["sentence"]
     assert rows["gone-0"]["next"]["kind"] == "done"
+    shot = service.config.data_dir / "runs" / "retrying-0"
+    shot.mkdir(parents=True)
+    (shot / "final.png").write_bytes(b"x")
+    with service.db.session() as s:
+        rows = rows_by_run(s, runs_dir=service.config.data_dir / "runs")
+    assert rows["retrying-0"]["screenshot"] and not rows["gone-0"]["screenshot"]
 
 
 def test_a_paused_app_says_it_waits_for_resume_and_kind_narrows_the_list(service):

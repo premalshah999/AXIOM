@@ -94,7 +94,7 @@ def _what_next(session, row, job_runs, word, scheduled, unanswered, paused, now)
     return {"kind": "done", "sentence": "Nothing. There is no application left to send.", "at": ""}
 
 
-def recent(session, days=7, page=1, size=50, kind="", now=None):
+def recent(session, days=7, page=1, size=50, kind="", now=None, runs_dir=None):
     """One page of the list. `kind` narrows it (retry, you, stopped, done) after what-next is known, so it reads the window and pages itself:
     a week is hundreds of attempts, read by the created_at index, and what-next reads only the jobs on the page unless a kind is asked for."""
     from .api.pipeline import words_of
@@ -122,6 +122,9 @@ def recent(session, days=7, page=1, size=50, kind="", now=None):
     number = max(1, min(int(page), pages))
     if kind:
         rows = rows[(number - 1) * size : number * size]
+    for row in rows:
+        # A stop can come before anything was on the screen: a link to nothing would read as a broken list.
+        row["screenshot"] = bool(runs_dir and (runs_dir / row["run_id"] / "final.png").exists())
     return {"rows": rows, "total": total, "page": number, "pages": pages, "size": size, "days": days}
 
 
