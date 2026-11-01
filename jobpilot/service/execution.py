@@ -179,7 +179,12 @@ class ExecutionMixin:
                         from ..application_budget import max_seconds
 
                         cap = max_seconds(s)
-                        deadline, remaining = require_allowance(s, row.job_id, exclude_run=row.id)
+                        # The queue and the mail release let a matched email through as the attempt that waited for it. This
+                        # third check counted it as a fourth start: Amcor's activation email arrived, and its run ended in the
+                        # same second as "already used its initial attempt and two retries" (2026-11-01).
+                        deadline, remaining = require_allowance(
+                            s, row.job_id, exclude_run=row.id, new_attempt=not row.packet.get("email_wait_resume")
+                        )
                         first_attempt = remaining is not None and remaining == cap
                         budget_checked = True
                     elif first_attempt:
