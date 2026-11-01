@@ -91,8 +91,8 @@ def test_every_trace_of_a_possible_submission_stays(service):
 
 
 def test_open_work_stays(service):
-    waiting = job(service, "a", status="closed")
-    run(service, waiting, "waiting_answer")
+    waiting = job(service, "a", status="waiting_answer")
+    run(service, waiting, "waiting_answer", days=1)
     browser = job(service, "b", status="waiting_browser")
     run(service, browser, "waiting_browser", files=["steps/1.json"])
     paused = job(service, "c")
@@ -107,6 +107,19 @@ def test_open_work_stays(service):
     for kept in (waiting, browser, paused, requested, recovering):
         assert has_job(service, kept)
     assert list((service.config.data_dir / "runs").rglob("1.json"))
+
+
+def test_a_question_left_unanswered_past_the_jobs_age_goes_with_the_job(service):
+    old = job(service, "a", status="waiting_answer")
+    run(service, old, "waiting_answer", days=20)
+    review = job(service, "b", status="needs_review")
+    run(service, review, "needs_review", days=20)
+    sent = job(service, "c", status="waiting_answer")
+    run(service, sent, "submission_unknown", days=25)
+    run(service, sent, "waiting_answer", days=20)
+    clean(service)
+    assert not has_job(service, old) and not has_job(service, review)
+    assert has_job(service, sent)  # Something may have reached the employer.
 
 
 def test_a_superseded_old_stop_does_not_keep_a_closed_job(service):
