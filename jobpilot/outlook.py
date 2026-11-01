@@ -14,18 +14,45 @@ rules.
 A retry that is only waiting for its time (a back-off, a busy worker or employer) is still coming, so it is "applying".
 """
 
-from sqlalchemy import select
+import time
+
+from sqlalchemy import func, select
 
 from .admission import QueueBlocked
 from .db import Job, Run, Setting, latest_runs
 from .vocabulary import RETRIED_STATES
 
 RESUMED = ("waiting_browser", "timed_out")
+# The whole-history answer is the expensive one (about ten queries per stopped job, 1-2 s with 60 of them, more under load) and
+# every Jobs page, chip count and Overview poll asks for it. It is kept this long unless the history changed (a run was
+# created, started or ended, or a setting was added), so a poll is one cheap signature read (2026-11-01, /api/jobs 5-20 s).
+GIVEN_UP_SECONDS = 60  # as long as startable.TTL; only the clock moves a deadline in that time
+_kept = {}
+
+
+def _signature(session):
+    runs = session.execute(
+        select(func.count(), func.max(Run.created_at), func.max(Run.started_at), func.max(Run.finished_at))
+    ).one()
+    return tuple(runs) + (session.scalar(select(func.count()).select_from(Setting)),)
 
 
 def given_up(session, only=None):
     """Ids of the jobs whose newest run stopped and no automatic retry is coming."""
-    from .application_budget import require_allowance
+    if only is not None or GIVEN_UP_SECONDS <= 0:
+        return _given_up(session, only)
+    key = str(session.get_bind().url)
+    signature = _signature(session)
+    kept = _kept.get(key)
+    if kept and kept[0] == signature and time.monotonic() - kept[1] < GIVEN_UP_SECONDS:
+        return set(kept[2])
+    found = _given_up(session, None)
+    _kept[key] = (signature, time.monotonic(), frozenset(found))
+    return found
+
+
+def _given_up(session, only):
+    from .application_budget import job_aliases, platform_pool, require_allowance
     from .autopilot import PERSIST_ATS, PERSIST_SKIP, SAME_STALL_RUNS, run_engines, same_stall_streak
     from .features.discovery.roles import role_fits
     from .recovery import repeats_unchanged
@@ -55,7 +82,7 @@ def given_up(session, only=None):
     ):
         history.setdefault(run.job_id, []).append(run)
     engines = run_engines(session, [run for runs in history.values() for run in runs])
-    gone = set()
+    gone, pools = set(), {}
     for row in stopped:
         runs = history[row.job_id]
         latest = runs[-1]
@@ -74,7 +101,9 @@ def given_up(session, only=None):
             )
         if coming:
             try:
-                require_allowance(session, row.job_id)
+                if row.ats not in pools:
+                    pools[row.ats] = platform_pool(session, row.ats)
+                require_allowance(session, row.job_id, aliases=job_aliases(session, row.job_id, pools[row.ats]))
             except QueueBlocked:
                 coming = False
         if not coming:

@@ -36,6 +36,13 @@ def isolated_settings_environment(monkeypatch):
             monkeypatch.delenv(name)
 
 
+@pytest.fixture(autouse=True)
+def given_up_is_read_afresh(monkeypatch):
+    """The production answer is kept for seconds (outlook.GIVEN_UP_SECONDS); a test that edits a setting and asks again must
+    see it. The test of the keeping sets it back."""
+    monkeypatch.setattr("jobpilot.outlook.GIVEN_UP_SECONDS", 0)
+
+
 @pytest.fixture
 def config(tmp_path):
     return Settings(

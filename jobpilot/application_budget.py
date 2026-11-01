@@ -121,17 +121,23 @@ def max_seconds(session):
     return None if value in (None, 0, "") else int(value)
 
 
-def job_aliases(session, job_id):
-    """The ids of every listing of the same posting on this platform (the job itself included)."""
+def platform_pool(session, ats):
+    """Every job on a platform, as job_aliases reads them. A caller asking about many jobs reads each platform once."""
+    return session.execute(select(Job.id, Job.url, Job.ats, Job.company).where(Job.ats == ats)).all()
+
+
+def job_aliases(session, job_id, pool=None):
+    """The ids of every listing of the same posting on this platform (the job itself included). `pool`: platform_pool
+    of the job's platform, when the caller already holds it (outlook.given_up asked once per stopped job: 58 reads of
+    the platform's thousands of rows for one Jobs page)."""
     from .ats import icims_requisition_alias, url_identity
 
     job = session.get(Job, job_id)
     # url_identity is canonicalize(url)[1], cached: the uncached parse of every posting on the platform cost
     # 23 ms of each Apply click with 7,600 jobs (2026-10-22).
     identity = url_identity(job.url)
-    return [row.id for row in session.execute(
-        select(Job.id, Job.url, Job.ats, Job.company).where(Job.ats == job.ats)
-    ) if url_identity(row.url) == identity or icims_requisition_alias(job, row)]
+    return [row.id for row in (platform_pool(session, job.ats) if pool is None else pool)
+            if url_identity(row.url) == identity or icims_requisition_alias(job, row)]
 
 
 def budget_reset_at(session, aliases):
