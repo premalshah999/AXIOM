@@ -62,3 +62,135 @@ def check_pdf(
         "keywords_missing": [k for k in keywords if k not in found],
         "text": text,
     }
+
+
+# ---------- Reading the compiled PDF back: the sizes it actually prints ----------
+def font_runs(pdf: bytes) -> list[dict]:
+    """Every run of text with its real size and font, read from the PDF's own drawing operators (what `pdffonts` can't tell you)."""
+    out = []
+    for number, page in enumerate(PdfReader(io.BytesIO(pdf)).pages):
+
+        def visit(text, cm, tm, font, size, number=number):
+            if text and text.strip():
+                out.append(
+                    {
+                        "page": number,
+                        "text": text.strip(),
+                        "size": round(size * abs(tm[3]) * abs(cm[3]), 2),
+                        "font": str((font or {}).get("/BaseFont", "")),
+                    }
+                )
+
+        page.extract_text(visitor_text=visit)
+    return out
+
+
+ITALIC = re.compile(r"ital|obli", re.I)
+SIZE_TOLERANCE = 0.06  # pdfTeX rounds a Tf operand; anything further off is a different size.
+
+
+def check_typography(pdf: bytes, doc) -> dict:
+    """The owner's type rules on the compiled file: name 16, section headings 10.5, sub-headings 10, bullets 9, dates in italics."""
+    from .editor import TAILORED_TYPE
+
+    runs = font_runs(pdf)
+    problems: list[str] = []
+    seen: dict[str, set] = {"name": set(), "section": set(), "sub": set(), "bullet": set(), "dates": set()}
+
+    def want(kind, run, size):
+        seen[kind].add(run["size"])
+        if abs(run["size"] - size) > SIZE_TOLERANCE:
+            problems.append(f'{kind} "{run["text"][:40]}" prints at {run["size"]} pt, not {size}')
+
+    name, titles, subs, dates, bullets = squash(doc.name), set(), [], set(), []
+    for s in doc.sections:
+        if not s.include:
+            continue
+        titles.add(squash(s.title))
+        for e in s.entries:
+            if not e.include:
+                continue
+            subs += [squash(x) for x in (e.heading, e.subheading) if x.strip()]
+            if e.dates.strip():
+                dates.add(squash(e.dates))
+            bullets += [squash(plain(b.text)) for b in e.bullets if b.include and b.text.strip()]
+    found_dates: set = set()
+    for run in runs:
+        t = squash(run["text"])
+        if not t:
+            continue
+        if t == name:
+            want("name", run, TAILORED_TYPE["name"])
+        elif t in titles:
+            want("section", run, TAILORED_TYPE["section"])
+        elif t in dates:
+            seen["dates"].add(run["size"])
+            found_dates.add(t)
+            if not ITALIC.search(run["font"]):
+                problems.append(f'dates "{run["text"][:30]}" are not in italics ({run["font"]})')
+        elif any(t == x or (len(t) > 3 and t in x) for x in subs) and not any(t in b for b in bullets):
+            want("sub", run, TAILORED_TYPE["sub"])
+        elif len(t) > 8 and any(t in b for b in bullets):
+            want("bullet", run, TAILORED_TYPE["bullet"])
+    for kind, needed in (("name", bool(name)), ("section", bool(titles)), ("sub", bool(subs)), ("bullet", bool(bullets))):
+        if needed and not seen[kind]:
+            problems.append(f"no {kind} text could be read from the PDF")
+    missing = dates - found_dates
+    if missing:
+        problems.append(f"{len(missing)} date(s) could not be read from the PDF")
+    return {"ok": not problems, "problems": problems[:12], "sizes": {k: sorted(v) for k, v in seen.items()}}
+
+
+# ---------- Reference Step 5b: a resume that compiles can still extract as garbage ----------
+EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
+PHONE = re.compile(r"\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}")
+
+
+def parse_check(pdf: bytes, doc) -> dict:
+    """What a parser gets: contact details first and in the body, each heading on its own line, bullets in reading order, real Unicode."""
+    reader = PdfReader(io.BytesIO(pdf))
+    text = "\n".join(p.extract_text() or "" for p in reader.pages)
+    flat = squash(text)
+    items = []
+
+    def item(label, ok, detail=""):
+        items.append({"label": label, "ok": bool(ok), "detail": detail})
+
+    head = text[:400]
+    item("Your name comes first", squash(doc.name)[:24] in squash(head[:200]) if doc.name else True)
+    contact = " ".join(doc.contact)
+    if EMAIL.search(contact):
+        item("Email in the first lines", EMAIL.search(head))
+    if PHONE.search(contact):
+        item("Phone in the first lines", PHONE.search(head))
+    lines = {squash(line) for line in text.splitlines()}
+    for s in doc.sections:
+        if s.include and (s.entries or s.text.strip()):
+            item(f'"{s.title}" reads as its own heading', squash(s.title) in lines)
+    positions, in_order = [], True
+    for s in doc.sections:
+        if not s.include:
+            continue
+        for e in s.entries:
+            if not e.include:
+                continue
+            for b in e.bullets:
+                if b.include and b.text.strip():
+                    at = flat.find(squash(plain(b.text))[:32])
+                    positions.append(at)
+    missing = sum(1 for p in positions if p < 0)
+    found = [p for p in positions if p >= 0]
+    in_order = found == sorted(found)
+    item("Bullets read top to bottom", in_order and not missing, f"{missing} bullet(s) not found" if missing else "")
+    dates = [e.dates for s in doc.sections if s.include for e in s.entries if e.include and e.dates.strip()]
+    item("Dates are intact", all(squash(d) in flat for d in dates))
+    no_unicode = set()
+    for page in reader.pages:
+        fonts = (page.get("/Resources") or {}).get("/Font") or {}
+        for ref in fonts.values():
+            font = ref.get_object()
+            if "/ToUnicode" not in font and font.get("/Subtype") != "/Type3":
+                no_unicode.add(str(font.get("/BaseFont")))
+    item("Every font maps to real characters", not no_unicode, ", ".join(sorted(no_unicode)))
+    item("No unreadable characters", "�" not in text)
+    return {"ok": all(i["ok"] for i in items), "items": items, "pages": len(reader.pages), "text": text}
