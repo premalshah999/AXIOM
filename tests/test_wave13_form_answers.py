@@ -75,3 +75,35 @@ def test_a_menus_na_answers_an_if_yes_after_a_no(service):
     answer = r.local(field("If yes, please enter visa type", ["H1B", "TN", "F1", "E2", "L1", "L2", "OTHER", "NA"], "combobox",
                            related_question={"label": "Will you now or in the future require sponsorship?", "value": "No", "options": ["Yes", "No"]}))
     assert answer and answer.value == "NA"
+
+
+MENU = """<label for="visa">If yes, please enter visa type</label>
+<div class="select__control"><input id="visa" role="combobox" class="select__input" aria-haspopup="true" aria-expanded="false"
+  onclick="openMenu()" onfocus="openMenu()"></div><div id="box"></div><p id="picked"></p>
+<script>
+let n=0;function openMenu(){ // Like a react-select: every opening builds new option elements.
+  const box=document.getElementById('box'); box.innerHTML='';n++;
+  const list=document.createElement('div');list.className='select__menu-list';list.setAttribute('role','listbox');
+  for(const t of ['H1B','F1','NA']){const o=document.createElement('div');o.className='select__option';o.setAttribute('role','option');o.textContent=t;o.dataset.open=n;
+    o.addEventListener('mousedown',e=>{e.preventDefault();document.getElementById('visa').value=t;document.getElementById('picked').textContent=t;box.innerHTML=''});list.append(o)}
+  box.append(list)}
+</script>"""
+
+
+async def test_an_option_read_before_the_menu_reopened_is_still_the_choice(page, service, tmp_path):
+    """ALTEN's menu (Greenhouse, 2026-11-01): the id the model read was gone when the menu opened again, with the same option on the screen."""
+    from jobpilot.forms import FormSession
+    from jobpilot.widgets import open_owned_picker
+
+    await page.set_content(MENU)
+    form = FormSession(page, resolver(service), tmp_path / "r.pdf", lambda *a: None)
+    obs = await form.scan()
+    field = next(f for f in obs["fields"] if "visa" in f["label"])
+    await open_owned_picker(page.main_frame, form.locator(field["id"]), field["type"])
+    read = await form.widget_observation(field)
+    wanted = next(o for o in read["options"] if o["text"] == "NA")
+    # Something closes the menu, and it opens again with new elements and new ids.
+    await page.evaluate("document.getElementById('box').innerHTML=''")
+    obs = await form.scan()
+    result = await form.control_action("choose", field["id"], obs["revision"], owner_id=form.owner_id, option_id=wanted["id"])
+    assert await page.inner_text("#picked") == "NA", result

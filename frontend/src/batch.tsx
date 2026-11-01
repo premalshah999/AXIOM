@@ -475,7 +475,7 @@ function Live({ work, checking }: { work: WorkingState; checking: boolean }) {
 
   // Only what is there, each opening its list. Questions have their own panel.
   const { waiting } = work;
-  const tally = (count: number, label: string, to?: { tab: string; filter?: string }): ReactNode =>
+  const tally = (count: number, label: string, to?: { view?: "ledger"; tab: string; filter?: string }): ReactNode =>
     count > 0 ? (
       to ? (
         <button type="button" className="ov-foot-link" onClick={() => go({ view: "jobs", ...to })}>
@@ -489,9 +489,10 @@ function Live({ work, checking }: { work: WorkingState; checking: boolean }) {
     ) : null;
   const foot = [
     tally(waiting.queued + waiting.starting, "queued", { tab: "pipeline", filter: "active" }),
-    tally(waiting.repairing, "being fixed", { tab: "pipeline", filter: "repair" }),
-    active ? tally(rt.blocked ?? 0, "blocked since you pressed Start", { tab: "pipeline", filter: "repair" }) : null,
-    active ? tally(rt.failed ?? 0, "not sent since you pressed Start", { tab: "pipeline", filter: "repair" }) : null,
+    // Every failure number opens the one list of what went wrong (Applications, What went wrong; jobpilot/problems.py).
+    tally(waiting.repairing, "being fixed", { view: "ledger", tab: "problems" }),
+    active ? tally(rt.blocked ?? 0, "blocked since you pressed Start", { view: "ledger", tab: "problems" }) : null,
+    active ? tally(rt.failed ?? 0, "not sent since you pressed Start", { view: "ledger", tab: "problems" }) : null,
   ].filter(Boolean);
   return (
     <LiveWork

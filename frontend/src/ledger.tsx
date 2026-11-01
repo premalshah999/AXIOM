@@ -8,6 +8,7 @@ import { Pagination, usePagination } from "./pagination";
 import type { Archived, Proof, Replies, Success } from "./types";
 import { ArchiveList } from "./archive";
 import { HistoryList } from "./history";
+import { ProblemList } from "./problems";
 import { TopActions } from "./shell/Shell";
 import { ago, jobWords, platformName, stamp } from "./format";
 import { Button, Empty, Listbox, RouteTabs, Table, Tooltip, type Column } from "./ui/index";
@@ -130,9 +131,10 @@ function Proof({ r }: { r: Success }) {
 // Only a web link opens from here; anything else a posting might hold is not a page to send the person to.
 const webLink = (url: string) => (/^https?:\/\//i.test(url) ? url : "");
 
-const TABS = ["confirmed", "failed", "not", "archive"];
+const TABS = ["confirmed", "problems", "failed", "not", "archive"];
 
-// Applications: what happened, one row per job. Applied is the ledger (proof on every row); Couldn't apply says why the app gave up;
+// Applications: what happened, one row per job. Applied is the ledger (proof on every row); What went wrong is every recent stopped attempt,
+// retried or not (problems.tsx); Couldn't apply says why the app gave up;
 // Not applying says why a job won't be applied to; Archive keeps earlier failures and removed jobs. Each number opens that many rows.
 export function LedgerView() {
   const { route, counts } = useWorkspace();
@@ -143,6 +145,7 @@ export function LedgerView() {
   const tabs = [
     // Applied: the employer has it. The same number as Overview and the Jobs page (jobpilot/api/pipeline.py confirmed_jobs).
     { id: "confirmed", label: "Applied", count: ledger.data?.applications.length },
+    { id: "problems", label: "What went wrong" },
     { id: "failed", label: "Couldn't apply", count: counts.words?.failed },
     { id: "not", label: "Not applying", count: counts.words?.not },
     { id: "archive", label: "Archive", count: archive.data?.applications.length },
@@ -151,6 +154,7 @@ export function LedgerView() {
     <div className="ax-page ax-page-fill">
       <RouteTabs view="ledger" tabs={tabs} label="Applications" current={tab} />
       {tab === "confirmed" && <Confirmed ledger={ledger} />}
+      {tab === "problems" && <ProblemList />}
       {(tab === "failed" || tab === "not") && <HistoryList key={tab} word={tab} />}
       {tab === "archive" && <ArchiveList archive={archive} />}
     </div>

@@ -87,6 +87,37 @@ _ENGINE = (
 )
 
 
+# The stop reasons the engine writes most, as a person would say them (counted over production, 2026-11-01). `{q}` is the question the
+# reason names, cut short: "failed 3 results in a row (Value not accepted: Location)" says nothing to someone who has not read the code.
+_STOPS = (
+    (re.compile(r"^'(?P<q>.+?)' failed \d+ results in a row\b", re.I | re.S), "AXIOM could not complete \u201c{q}\u201d on the form."),
+    (re.compile(r"^Value not accepted: (?P<q>[^;]+)", re.I), "The site would not take the answer to \u201c{q}\u201d."),
+    (re.compile(r"^Required field incomplete: (?P<q>[^;]+)", re.I), "\u201c{q}\u201d stayed empty on the form."),
+    (re.compile(r"^The menu of '(?P<q>.+?)' refused", re.I | re.S), "The menu for \u201c{q}\u201d would not take the choice."),
+    (re.compile(r"^The website did not accept known answers: (?P<q>.+)", re.I | re.S), "The site would not take the saved answer to \u201c{q}\u201d."),
+    (re.compile(r"^Required (?:profile information|application facts) (?:is|are) missing: (?P<q>.+)", re.I | re.S), "The form asks \u201c{q}\u201d and your profile has no answer."),
+    (re.compile(r"^No observed action advanced the application", re.I), "Nothing AXIOM tried moved the application forward."),
+    (re.compile(r"^Employer field errors stayed on the form", re.I), "The site showed errors on the form after Submit and did not accept it."),
+    (re.compile(r"^Only an observed dismiss control can close a dialog", re.I), "A pop-up covered the form and AXIOM could not close it."),
+    (re.compile(r"^Answer evidence did not match the question scope", re.I), "AXIOM could not back an answer with your saved facts, so it stopped before sending."),
+    (re.compile(r"^No final submit control is on this page", re.I), "AXIOM could not find the Submit button on this page."),
+    (re.compile(r"^Application already used its initial attempt and two retries", re.I), "It has used all three of its attempts."),
+    (re.compile(r"^Employer sign-in must complete", re.I), "The employer's sign-in did not finish."),
+    (re.compile(r"^(?:2Captcha|Captcha)\b.*unconfirmed", re.I | re.S), "The site's picture check could not be solved, so AXIOM can't tell whether it was sent."),
+    (re.compile(r"^Unrecognized page", re.I), "AXIOM did not recognise this page."),
+)
+_QUESTION_SHOWN = 90
+
+
+def _short_question(text):
+    text = " ".join(str(text).split()).rstrip(" ;:.")
+    # A question number and the employer's aside in brackets only make it longer.
+    text = re.sub(r"^\d+[.)]\s*", "", text)
+    if len(text) <= _QUESTION_SHOWN:
+        return text
+    return text[: _QUESTION_SHOWN - 1].rsplit(" ", 1)[0] + "\u2026"
+
+
 def plain_sentence(reason, limit=150):
     """One plain sentence from a stored reason: the first clause, cut at a colon-led detail, never over `limit`."""
     text = _LABEL.sub("", (reason or "").strip())
@@ -96,6 +127,10 @@ def plain_sentence(reason, limit=150):
     for engine, words in _ENGINE:
         if engine.search(text):
             return words
+    for stop, words in _STOPS:
+        if found := stop.search(text):
+            groups = found.groupdict()
+            return words.format(q=_short_question(groups["q"])) if "q" in groups else words
     text = re.split(r"(?<=[.!?])\s|;\s|\s\|\s", text, maxsplit=1)[0].strip()
     if not text:
         return ""

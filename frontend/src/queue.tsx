@@ -289,7 +289,7 @@ function NextTable({
 
 // ---------- trying again by itself ----------
 function Retrying({ rows }: { rows: QueueRetry[] }) {
-  const { openJob } = useWorkspace();
+  const { openJob, go } = useWorkspace();
   const now = useNow(60000);
   const columns: Column<QueueRetry>[] = [
     {
@@ -309,7 +309,12 @@ function Retrying({ rows }: { rows: QueueRetry[] }) {
         <h2 id="qu-again">
           Trying again by itself<span className="qu-count">{rows.length.toLocaleString()}</span>
         </h2>
-        <p>These stopped on a problem. The app retries each when it can; there is no fixed time. One it gives up on moves to Applications, Couldn't apply.</p>
+        <p>
+          These stopped on a problem and the app retries each by itself.{" "}
+          <button type="button" className="ax-quiet-link" onClick={() => go({ view: "ledger", tab: "problems" })}>
+            See what went wrong and when each tries again
+          </button>
+        </p>
       </header>
       <Table label="Trying again by itself" columns={columns} rows={rows} rowKey={(r) => r.job_id} onRowClick={(r) => openJob(r.job_id, r.run_id)} />
     </section>
