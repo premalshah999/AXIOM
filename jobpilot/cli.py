@@ -331,6 +331,10 @@ def main():
                 f"--user-data-dir={profile}",
                 "--no-first-run",
                 "--no-default-browser-check",
+                # Nobody is meant to touch this Chrome: see scripts/lib/chrome.sh.
+                "--hide-crash-restore-bubble",
+                "--noerrdialogs",
+                "--deny-permission-prompts",
                 "--disable-background-timer-throttling",
                 "--disable-renderer-backgrounding",
                 "--disable-backgrounding-occluded-windows",
@@ -365,6 +369,10 @@ def main():
                 "--no-startup-window",
                 "--no-first-run",
                 "--no-default-browser-check",
+                # Nobody is meant to touch this Chrome: see scripts/lib/chrome.sh.
+                "--hide-crash-restore-bubble",
+                "--noerrdialogs",
+                "--deny-permission-prompts",
                 "--disable-background-timer-throttling",
                 "--disable-renderer-backgrounding",
                 "--disable-backgrounding-occluded-windows",

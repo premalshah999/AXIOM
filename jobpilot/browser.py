@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -738,6 +739,40 @@ FORM_STRUCTURE_JS = r"""() => {
 }"""
 
 
+# What a person reads when the app's own Chrome could not open a page. It is the app's to restart, so this asks nothing of them.
+# application_budget.BROWSER_OUTAGE matches runs by this text.
+BROWSER_NOT_READY = "AXIOM's browser wasn't ready, so this application didn't start. Nothing was sent, and it will try again by itself."
+
+
+def throwaway_chrome(executable, profile, headless, platform=sys.platform):
+    """The command line of a Chrome with a temporary profile, used when no worker Chrome is configured."""
+    args = [
+        executable,
+        "--remote-debugging-port=0",
+        f"--user-data-dir={profile}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-dev-shm-usage",
+        "--disable-background-networking",
+        # This profile is thrown away, so nothing needs the macOS keychain, and asking for it can put a system dialog on the
+        # person's screen even from a headless Chrome: "A keychain cannot be found to store Chrome" (2026-11-01).
+        "--use-mock-keychain",
+        "--hide-crash-restore-bubble",
+        "--lang=en-US",
+        "--window-size=1366,900",
+    ]
+    if headless:
+        return [*args, "--no-sandbox", "--headless=new", f"--user-agent={user_agent(executable)}"]
+    # A window with this flag carries a yellow "unsupported command-line flag" banner, so only where a container needs it.
+    return args if platform == "darwin" else [*args, "--no-sandbox"]
+
+
+def renderer_crashed(exc):
+    """What Playwright raises from a page whose renderer died: a plain Error, not a TargetClosedError. It read "Browser control
+    failed" and spent a repair attempt, with an "Aw, Snap!" tab left on screen."""
+    return "crashed" in str(exc).split("\n", 1)[0].lower()
+
+
 class BrowserUnavailable(RuntimeError):
     """The worker's desktop browser is not running; nothing was opened or sent."""
 
@@ -1232,29 +1267,14 @@ class BrowserEngine:
                 executable = self.config.chromium_path or pw.chromium.executable_path
                 if not Path(executable).exists():
                     raise RuntimeError("Chromium missing. Run: playwright install chromium")
-                args = [
-                    executable,
-                    "--remote-debugging-port=0",
-                    f"--user-data-dir={temp}",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                    "--disable-dev-shm-usage",
-                    "--disable-background-networking",
-                    "--no-sandbox",
-                    "--lang=en-US",
-                    "--window-size=1366,900",
-                    # A throwaway profile has nothing to protect: asking the Keychain for its key can show the owner a
-                    # dialog, and with no login keychain (a clean HOME) every navigation waits on the answer forever.
-                    "--use-mock-keychain",
-                ]
-                if self.config.headless:
-                    args += ["--headless=new", f"--user-agent={user_agent(executable)}"]
                 # Chrome's first tab on a new profile is its own new-tab page, whose inner frame never answers a script: every
                 # run on this browser hung in prepare_page, with no timeout. Only a production that attaches to its worker Chrome
                 # never met it, and no test drove this path (2026-11-01).
-                args.append("about:blank")
                 process = await asyncio.create_subprocess_exec(
-                    *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                    *throwaway_chrome(executable, temp, self.config.headless),
+                    "about:blank",
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
                 )
                 portfile = Path(temp) / "DevToolsActivePort"
                 for _ in range(100):
@@ -1273,15 +1293,11 @@ class BrowserEngine:
 
                     browser, cdp_url = await connected_browser(cdp_url, discover=True)
                 except (httpx.HTTPError, OSError, KeyError, ValueError):
-                    raise BrowserUnavailable(
-                        "The local Chrome debugging endpoint could not be reached after a bounded retry. No employer form was opened."
-                    ) from None
+                    raise BrowserUnavailable(BROWSER_NOT_READY) from None
                 except (PlaywrightError, TimeoutError):
                     # No employer page has been owned yet. This is a shared
                     # browser outage, not an ATS repair attempt.
-                    raise BrowserUnavailable(
-                        "Open the ApplyPilot Chrome window: the browser is responding, but its automation connection is unavailable. No employer form was opened."
-                    ) from None
+                    raise BrowserUnavailable(BROWSER_NOT_READY) from None
             else:
                 browser = await pw.chromium.connect_over_cdp(cdp_url, timeout=15000)
             context = browser.contexts[0]
@@ -1885,6 +1901,7 @@ class BrowserEngine:
             if not self.armed and (
                 type(exc).__name__ in {"TargetClosedError", "BrowserTabClosed"}
                 or (page is not None and page.is_closed())
+                or renderer_crashed(exc)
             ):
                 # Several same-site tabs can die with one renderer: infrastructure, not this
                 # application. Retry without spending a repair attempt.
@@ -2000,7 +2017,7 @@ class BrowserEngine:
             if external and hasattr(self, "page"):
                 if self.retain_owned_draft():
                     await self.retain_desktop_draft()
-                    if self.releases_retained_tab():
+                    if self.releases_retained_tab() or getattr(self, "renderer_crashed", False):
                         # The saved route and checkpoint reopen this draft on its next run (the inactive-tab path).
                         # Every unfinished run kept its tab open: two Chrome profiles grew to 47 GB each on a 16 GB
                         # Mac and the machine ran out of memory (2026-10-26).
@@ -2502,12 +2519,18 @@ class BrowserEngine:
         page.on("requestfailed", self.commit_request_failed)
         page.on("response", self.submission_response)
         page.on("dialog", self.page_dialog)
+        page.on("crash", self.page_crash)
         await page.add_init_script(GUARD)
         await page.add_init_script(GREENHOUSE_RECEIPT)
         fixture = getattr(self.service, "fixture_router", None)
         if fixture and self.config.allow_private_urls:
             await page.route("**/*", fixture)  # Owned test fixtures only.
         await page.route("**/*", self.network_guard)
+
+    def page_crash(self, _page):
+        """An "Aw, Snap!" tab holds nothing to resume and never recovers, so cleanup closes it rather than keep it for the next run."""
+        self.renderer_crashed = True
+        self.emit("browser_recovery", "The browser tab crashed")
 
     def page_dialog(self, dialog):
         """Record a browser dialog's type and text, then dismiss it exactly as Playwright did with no handler (a
