@@ -53,7 +53,7 @@ async def run_request_code(page, tmp_path, monkeypatch):
     obs = await form.scan()
     value = Probe.__new__(Probe)
     value.e = SimpleNamespace(form=form, emit=lambda *a, **k: None)
-    value.page, value.config = page, CONFIG
+    value.config = CONFIG  # Adapter.page is read from the engine's form
     value.inbox = SimpleNamespace(configured=True, live=lambda _c: True)
     value.accounts = SimpleNamespace(email="alex@example.test", password_allowed=lambda *a: True)
     value.attempts = Counter()
@@ -81,7 +81,7 @@ async def test_a_step_that_never_draws_a_puzzle_still_goes_on_to_wait(page, tmp_
     obs = await form.scan()
     value = Probe.__new__(Probe)
     value.e = SimpleNamespace(form=form, emit=lambda *a, **k: None)
-    value.page, value.config = page, CONFIG
+    value.config = CONFIG  # Adapter.page is read from the engine's form
     value.inbox = SimpleNamespace(configured=True, live=lambda _c: True)
     value.accounts = SimpleNamespace(email="alex@example.test", password_allowed=lambda *a: True)
     value.attempts = Counter()
