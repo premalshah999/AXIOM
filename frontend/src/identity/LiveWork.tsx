@@ -8,6 +8,7 @@ import { RUNGS, type Progress } from "./stages";
 export type LiveRow = {
   id: string;
   company: string;
+  url?: string;
   role: string;
   platform: string;
   state: string;
@@ -49,7 +50,7 @@ function Row({ row, now }: { row: LiveRow; now: number }) {
   );
   return (
     <li className={"ov-row" + (row.parked ? " is-parked" : "")}>
-      <Monogram name={row.company} size="md" />
+      <Monogram name={row.company} url={row.url} size="md" />
       {row.open ? (
         <button type="button" className="ov-who" onClick={row.open}>
           {who}

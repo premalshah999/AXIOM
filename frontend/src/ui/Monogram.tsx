@@ -1,5 +1,8 @@
 // A small square with the employer's initial, so a list scans like a product. Deterministic: the same name always gets the same
-// letter and tone. Logos are never fetched: asking a third party for them would leak the job list.
+// letter and tone. Given the job's address it shows the company's icon when this computer can find one (GET /api/logo, kept on disk,
+// off in Settings); the letter stays underneath, so a miss, a slow network or the setting being off changes nothing.
+import { useState } from "react";
+
 const TONES = 8;
 
 function hash(text: string) {
@@ -20,11 +23,17 @@ function monogramOf(name: string | undefined) {
 }
 
 /** `size`: sm 24 (a row), md 32, lg 40 (a drawer's head). Hidden from screen readers: the name always stands beside it. */
-export function Monogram({ name, size = "sm" }: { name?: string; size?: "sm" | "md" | "lg" }) {
+export function Monogram({ name, size = "sm", url }: { name?: string; size?: "sm" | "md" | "lg"; url?: string }) {
   const { initial, tone } = monogramOf(name);
+  const logo = name && url ? `/api/logo?company=${encodeURIComponent(name)}&url=${encodeURIComponent(url)}` : "";
+  const [shown, setShown] = useState("");
+  const [missing, setMissing] = useState("");
   return (
-    <span className={"ax-mono" + (size === "sm" ? "" : " is-" + size)} data-tone={tone} aria-hidden="true">
+    <span className={"ax-mono" + (size === "sm" ? "" : " is-" + size) + (logo && shown === logo ? " has-logo" : "")} data-tone={tone} aria-hidden="true">
       {initial}
+      {logo && missing !== logo && (
+        <img src={logo} alt="" loading="lazy" decoding="async" onLoad={() => setShown(logo)} onError={() => setMissing(logo)} />
+      )}
     </span>
   );
 }

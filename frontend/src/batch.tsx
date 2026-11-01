@@ -25,6 +25,7 @@ type Working = {
   slot: number;
   runId?: string;
   company: string;
+  url?: string;
   role: string;
   platform: string;
   state: string;
@@ -97,6 +98,7 @@ function useWorking(mail: MailStatus | null, workers?: ApplicationWorkers) {
         slot,
         runId: assignment.run_id || undefined,
         company: job?.company || "Assigned application",
+        url: job?.url,
         role: job?.title || "Details loading",
         platform: assignment.ats,
         state: assignment.state || "running",
@@ -111,6 +113,7 @@ function useWorking(mail: MailStatus | null, workers?: ApplicationWorkers) {
       slot,
       runId: r.id,
       company: employerOf(row.job.company, row.job.url),
+      url: row.job.url,
       role: row.job.title || urlRole(row.job.url),
       platform: assignment?.ats || row.job.ats,
       state: row.state,
@@ -330,6 +333,7 @@ function Live({ work, checking }: { work: WorkingState; checking: boolean }) {
   const rows: LiveRow[] = work.busy.map((w) => ({
     id: w.key,
     company: w.company,
+    url: w.url,
     role: w.role,
     platform: w.platform,
     state: w.state,
@@ -367,6 +371,7 @@ function Live({ work, checking }: { work: WorkingState; checking: boolean }) {
     return {
       id: c.id,
       company: job ? employerOf(job.company, job.url) : "An application",
+      url: job?.url,
       role: job?.title || "",
       platform: job?.ats || "",
       state: "waiting_email",
@@ -500,7 +505,7 @@ function Recent({ applications }: { applications: Success[] | null }) {
             return (
             <li key={a.run_id}>
               <button type="button" className="ov-ok" onClick={() => openJob(a.job_id, a.run_id)}>
-                <Monogram name={company} />
+                <Monogram name={company} url={a.url} />
                 <span className="ov-ok-who">
                   <b title={company}>{company}</b>
                   <span title={title}>{title}</span>

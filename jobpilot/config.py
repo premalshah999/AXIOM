@@ -211,6 +211,8 @@ class Settings(BaseSettings):
     specialist_workers: int = Field(default=1, ge=0, le=MAX_SPECIALIST_WORKERS)
     # One worker for jobs on custom career sites (Topology.custom); off: those applications wait.
     custom_ats_worker: bool = True
+    # A company's icon beside its name, fetched once by web address and kept on this computer (jobpilot/logos.py).
+    company_logos: bool = True
     # Wall-clock time, model calls and the per-job token cap are this many times larger on a specialist.
     specialist_budget_multiplier: float = Field(default=1.5, ge=1, le=3)
     # Failures on ATS workers before a job moves to a specialist.
