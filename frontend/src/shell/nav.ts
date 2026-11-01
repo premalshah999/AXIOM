@@ -69,13 +69,14 @@ export const ALL_ITEMS: NavItem[] = [
 // Each page's tabs. The palette offers them as places to jump to; the pages render from these.
 export const PAGE_TABS: Partial<Record<View, TabItem[]>> = {
   jobs: [
-    { id: "pipeline", label: "Started" },
-    { id: "discovered", label: "Discovered" },
-    { id: "reserved", label: "Reserved" },
+    { id: "discovered", label: "To apply" },
+    { id: "applying", label: "Applying" },
+    { id: "needs", label: "Needs you" },
+    { id: "failed", label: "Couldn't apply" },
+    { id: "not", label: "Not applying" },
   ],
   ledger: [
-    { id: "confirmed", label: "Confirmed" },
-    { id: "unconfirmed", label: "Unconfirmed" },
+    { id: "confirmed", label: "Applied" },
     { id: "archive", label: "Archive" },
   ],
   profile: [

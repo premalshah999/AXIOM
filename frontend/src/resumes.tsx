@@ -887,7 +887,7 @@ function VersionPreview({ id, items, tailoringOff }: { id: string; items: Artifa
       open
       onClose={close}
       width={760}
-      lead={<Monogram name={company} size="lg" />}
+      lead={<Monogram name={company} size="lg" employer />}
       title={company}
       sub={a?.job?.title}
       footer={

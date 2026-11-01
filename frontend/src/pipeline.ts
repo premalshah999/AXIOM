@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
 import { usePoll } from "./hooks";
-import { rowFromServer, withMarks, type Group } from "./model";
+import { rowFromServer, withMarks, type Group, type Word } from "./model";
 import type { Paging } from "./pagination";
 import type { PipelinePage } from "./types";
 
@@ -13,7 +13,7 @@ import type { PipelinePage } from "./types";
 const SEARCH_DELAY = 250;
 
 export function usePipelinePage(
-  group: Group | "all",
+  group: Group | Word | "all",
   query: string,
   initialSize = 25,
 ) {

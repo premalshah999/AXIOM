@@ -31,9 +31,9 @@ FIELDS = {
     "telegram_user_id": ("Telegram", "Your Telegram user ID", False, "A number, from @userinfobot in Telegram."),
     "twocaptcha_api_key": ("Captcha", "2Captcha API key", True, "Optional, paid per solve. 2captcha.com > Dashboard."),
     "company_logos": ("Appearance", "Show company logos", False,
-                      "Finds a company's icon once and keeps it on this computer: from the company's own job page and web site first, "
-                      "then from Google, which sees only the company's web address, not you or the job. Off: letter tiles only, "
-                      "and nothing is fetched."),
+                      "Finds a company's icon once, in the background, and keeps a small copy on this computer: from the company's own "
+                      "job page and web site first, then from Google, which sees only the company's web address, not you, the job "
+                      "or the company's name. Off: letter tiles only, and nothing is fetched."),
     "serper_api_key": ("Discovery", "Serper API key", True, "Optional. Adds Google results to job discovery (serper.dev)."),
     # Everything else a new owner sets (owner 2026-10-28: "a user should be able to configure API keys, captcha keys,
     # gmail app password, everything through the web interface").

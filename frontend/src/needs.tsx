@@ -650,7 +650,7 @@ function Unblocks({ entry: e }: { entry: Entry }) {
           return (
             <li key={x.job?.id || i}>
               <button type="button" disabled={!x.job} onClick={() => x.job && openJob(x.job.id)}>
-                <Monogram name={name} />
+                <Monogram name={name} employer={!!words?.company} />
                 <strong title={name}>{name}</strong>
                 <span className="nd-reach-role" title={x.job?.title}>
                   {words && [words.role, x.job?.location].filter(Boolean).join(" · ")}
@@ -678,7 +678,7 @@ function NothingPane({ entry: e, onGone, onSkip }: { entry: Entry; onGone: () =>
   return (
     <div className="nd-card">
       <div className="nd-asking">
-        <Monogram name={e.who} size="md" />
+        <Monogram name={e.who} size="md" employer={e.names.length <= 1} />
         <span className="nd-asking-who">
           <strong>{e.who}</strong>
           <span>{e.title}</span>

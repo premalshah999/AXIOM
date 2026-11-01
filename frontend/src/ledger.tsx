@@ -134,26 +134,25 @@ function Proof({ r }: { r: Success }) {
 // Only a web link opens from here; anything else a posting might hold is not a page to send the person to.
 const webLink = (url: string) => (/^https?:\/\//i.test(url) ? url : "");
 
-const TABS = ["confirmed", "unconfirmed", "archive"];
+const TABS = ["confirmed", "archive"];
 
 // Applications: what was sent. Confirmed is the ledger (proof on every row); Unconfirmed holds submissions with no receipt, protected
 // from any retry; Archive keeps earlier failures. Discovered and the started list are under Jobs.
 export function LedgerView() {
-  const { route, counts } = useWorkspace();
+  const { route } = useWorkspace();
   const tab = TABS.includes(route.tab || "") ? route.tab! : "confirmed";
   // Read here so the tabs can say how many there are before they are opened.
   const ledger = usePoll<{ applications: Success[] }>((signal) => api("/successful-applications", "GET", undefined, signal), 60000);
   const archive = usePoll<{ applications: Archived[]; log_bytes: number }>((signal) => api("/archive", "GET", undefined, signal), 60000);
   const tabs = [
-    { id: "confirmed", label: "Confirmed", count: ledger.data?.applications.length },
-    { id: "unconfirmed", label: "Unconfirmed", count: counts.groups.unconfirmed },
-    { id: "archive", label: "Archive", count: archive.data?.applications.length },
+    // Applied: the employer has it. The same number as Overview and the Jobs page (jobpilot/api/pipeline.py confirmed_jobs).
+    { id: "confirmed", label: "Applied", count: ledger.data?.applications.length },
+    { id: "archive", label: "Archive" },
   ];
   return (
     <div className="ax-page ax-page-fill">
       <RouteTabs view="ledger" tabs={tabs} label="Applications" current={tab} />
       {tab === "confirmed" && <Confirmed ledger={ledger} />}
-      {tab === "unconfirmed" && <Unconfirmed />}
       {tab === "archive" && <ArchiveList archive={archive} />}
     </div>
   );
@@ -186,12 +185,11 @@ function Confirmed({ ledger }: { ledger: ReturnType<typeof usePoll<{ application
       evidence: EVIDENCE.map((value) => ({
         value,
         label: value === "all" ? "All" : PROOF[value],
-        count: byProof.filter((r) => hasProof(r, value)).length,
-      })).filter((o) => o.count > 0 || o.value === "all" || o.value === evidence),
-      period: PERIODS.map((o) => ({ ...o, count: all.filter((r) => passes(r, f, periodStart(o.value, now))).length })),
+      })).filter((o) => byProof.some((r) => hasProof(r, o.value)) || o.value === "all" || o.value === evidence),
+      period: PERIODS,
       platform: [
-        { value: "all", label: "All", count: byPlatform.length },
-        ...[...names].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([ats, count]) => ({ value: ats, label: platformName(ats), count })),
+        { value: "all", label: "All" },
+        ...[...names].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([ats]) => ({ value: ats, label: platformName(ats) })),
       ],
     };
   }, [all, q, evidence, period, platform, from, now]);
@@ -284,35 +282,10 @@ function Confirmed({ ledger }: { ledger: ReturnType<typeof usePoll<{ application
           </Button>
         )}
       </TopActions>
-      <TopLine>
-        {ledger.data ? (
-          <span className="ap-line">
-            <button type="button" className="ax-quiet-link" onClick={clear}>
-              <b>{all.length.toLocaleString()}</b> confirmed
-            </button>
-            <i aria-hidden="true">·</i>
-            <button type="button" className="ax-quiet-link" onClick={() => { clear(); setPeriod("today"); }}>
-              <b>{today.toLocaleString()}</b> today
-            </button>
-            {unconfirmed > 0 && (
-              <>
-                <i aria-hidden="true">·</i>
-                <button type="button" className="ax-quiet-link ap-flag" onClick={() => go({ view: "ledger", tab: "unconfirmed" })}>
-                  <b>{unconfirmed.toLocaleString()}</b> unconfirmed
-                </button>
-              </>
-            )}
-          </span>
-        ) : (
-          !ledger.error && <span className="ap-line is-wait">Counting confirmed applications…</span>
-        )}
-      </TopLine>
       <div className="ax-toolbar ap-toolbar">
         <SearchBox value={q} onChange={setQuery} label="Search confirmed applications" placeholder="Company, role or platform" />
         <div className="ap-filters">
-          <Listbox prefix="Proof" label="Proof" value={evidence} options={menus.evidence} onChange={setEvidence} />
           <Listbox prefix="Sent" label="Sent" value={period} options={menus.period} onChange={setPeriod} />
-          <Listbox prefix="Platform" label="Platform" value={platform} options={menus.platform} onChange={setPlatform} />
           {filtered && (
             <Button variant="ghost" size="sm" icon={<FilterX size={14} aria-hidden="true" />} onClick={clear}>
               Clear
@@ -361,73 +334,3 @@ function Confirmed({ ledger }: { ledger: ReturnType<typeof usePoll<{ application
   );
 }
 
-// Every unconfirmed submission, from the server (the browser only had the newest 1,000 jobs to look through).
-function Unconfirmed() {
-  const { openJob, go } = useWorkspace();
-  const now = useNow(30000);
-  const list = usePipelinePage("unconfirmed", "", 25);
-  const selection = useSelection(200);
-  const when = (r: JobRow) => (
-    <time dateTime={r.updated} title={stamp(r.updated)}>
-      {ago(r.updated, now)}
-    </time>
-  );
-  const columns: Column<JobRow>[] = [
-    {
-      key: "job",
-      header: "Job",
-      width: 440,
-      truncate: true,
-      cell: (r) => (
-        <JobCell
-          {...jobWords(r.job)}
-          onOpen={() => openJob(r.job.id, r.run?.id)}
-          meta={
-            <>
-              <StatusPill state={r.state} />
-              {when(r)}
-            </>
-          }
-        />
-      ),
-    },
-    { key: "status", header: "Status", hideBelow: 600, cell: (r) => <StatusPill state={r.state} /> },
-    { key: "detail", header: "Detail", hideBelow: 600, width: 300, truncate: true, cell: (r) => (r.run?.reason ? <Note>{r.run.reason}</Note> : null) },
-    { key: "updated", header: "Updated", hideBelow: 600, cell: when },
-    { key: "act", header: <span className="sr-only">Actions</span>, width: "1%", pin: true, cell: (r) => <RowActions row={r} promote="confirm" /> },
-  ];
-  return (
-    <>
-      <TopLine>Submitted, but no receipt was captured. They may have been sent, so they are never retried.</TopLine>
-      {list.error && list.loaded && <LoadError error={list.error} retry={list.refresh} />}
-      <Table
-        fill
-        label="Unconfirmed submissions"
-        columns={columns}
-        rows={list.rows}
-        rowKey={(r) => r.job.id}
-        onRowClick={(r) => openJob(r.job.id, r.run?.id)}
-        selected={selection.chosen}
-        onSelectedChange={selection.replace}
-        rowLabel={(r) => r.job.company || "job"}
-        loading={!list.loaded && !list.error}
-        error={list.error && !list.loaded ? <LoadError error={list.error} retry={list.refresh} /> : undefined}
-        busy={list.loaded && !list.current}
-        footer={list.paging.total > 0 ? <Pagination paging={list.paging} label="Unconfirmed pages" /> : undefined}
-        bulk={<PipelineBulk selection={selection} rows={list.rows} filter="unconfirmed" query="" total={list.paging.total} />}
-        empty={
-          <Empty
-            icon={ShieldCheck}
-            title="Nothing is waiting for a receipt"
-            hint="Every submission so far has a confirmation page or an email from the employer."
-            action={
-              <Button size="sm" onClick={() => go({ view: "ledger" })}>
-                See confirmed applications
-              </Button>
-            }
-          />
-        }
-      />
-    </>
-  );
-}
