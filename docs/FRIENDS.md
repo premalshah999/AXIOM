@@ -16,6 +16,30 @@ text file inside the disk image, beside the app and the Applications folder: `de
 > both; you pay OpenRouter directly, and $5 of credit usually covers a few hundred applications). If anything goes wrong, choose Help, Copy Diagnostics in AXIOM
 > and paste it to me. It has no passwords, keys or emails in it.
 
+## What a friend agrees to
+
+At setup, AXIOM asks whether to send applications for them. Choosing "Send them for me" shows this once, under the choice (the words are
+`CONSENT_LEAD`, `CONSENT_ITEMS` and `CONSENT_CLOSE` in `frontend/src/onboarding.tsx`; change both together):
+
+> By choosing this you allow AXIOM to:
+>
+> - create accounts at employers, in your name
+> - accept their terms and privacy notices in your name
+> - answer their questions from your profile
+> - use your own AI key and your own email to do it
+> - submit each application without asking you first
+>
+> It is on you to check that this is OK with you, and with each employer's rules. You can pause or stop sending at any time.
+
+Say it to a friend before they install, too: it is their name on every account and every application.
+
+## Deleting everything
+
+Settings, Your account, Delete everything stops all work and removes the database, saved pages, resumes, saved accounts and keys, the
+cached Chrome profile and the automatic backups from this Mac, after the friend types DELETE EVERYTHING. AXIOM then opens as if just
+installed. It cannot remove applications already sent (the employers have them) or accounts AXIOM created at employers (those are
+closed on the employers' sites). Copies the friend saved elsewhere by hand, and the log files in `~/Library/Logs/AXIOM`, stay.
+
 ## What was and was not checked
 
 - `spctl --assess` on the built app says `rejected` (ad-hoc signed): so Gatekeeper will stop it, as above. Checked on macOS 15.2.
