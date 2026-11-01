@@ -45,6 +45,11 @@ ROTATE_SECONDS = 30.0
 LOG_BYTES, LOG_KEEP = 10 * 1024 * 1024, 3  # compose.yaml's json-file limits.
 CHROME_GRACE, POSTGRES_GRACE, CHROME_WAIT = 10.0, 30.0, 30.0
 ACTIVE_RUNS = "select count(*) from runs where state in ('queued','running','submitting')"
+# A batch between applications still searches and ranks, and starts the next job when one appears.
+BATCH_RUNNING = (
+    "select count(*) from settings where key = 'job_board_autopilot' and value->>'state' = 'active' "
+    "and not exists (select 1 from settings c where c.key = 'control' and c.value->>'paused' = 'true')"
+)
 NOFILE = (65536, 10240)
 
 
@@ -629,7 +634,7 @@ class Supervisor:
             except (OSError, ValueError, subprocess.TimeoutExpired):
                 count = None
         self.active = count
-        if count:
+        if count or (count == 0 and self.batch_running()):
             self.last_active = now
         running = bool(self.caffeinate and self.caffeinate.poll() is None)
         if count is None:
@@ -640,12 +645,22 @@ class Supervisor:
             self.caffeinate = subprocess.Popen(
                 ["caffeinate", "-i", "-m", "-w", str(os.getpid())], stdin=subprocess.DEVNULL, start_new_session=True
             )
-            self.say(f"Preventing idle sleep: {count} application(s) active.")
+            self.say(f"Preventing idle sleep: {count} application(s) active." if count else "Preventing idle sleep: a batch is running.")
         elif running and not want:
             self.caffeinate.terminate()
             self.caffeinate.wait()
             self.caffeinate = None
             self.say("Nothing active for a while: idle sleep is allowed again.")
+
+    def batch_running(self):
+        """A running batch on mains keeps the Mac awake with nothing in flight: allowed to sleep at 02:28, it found and
+        applied to nothing until the owner opened the lid at 08:55 (2026-11-01). On battery the Mac may sleep as before."""
+        if self.power.get("battery"):
+            return False
+        try:
+            return int(pg.psql(self.pg_bin, self.cfg, BATCH_RUNNING, timeout=5, check=False) or 0) > 0
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            return False
 
     def tick_power(self):
         power = power_status()
