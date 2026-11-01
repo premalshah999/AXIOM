@@ -19,15 +19,20 @@ VENDORS = {
 VENDORS.update(
     {x.casefold(): x for x in "SQL API APIs UAT SDLC CI/CD ETL RAG LLM AWS NLP GAAP HIPAA".split()}
 )
+VENDORS.update({x.casefold(): x for x in ats.KNOWN if any(c.isupper() for c in x[1:])})
 
 
 def casing(value):
     return VENDORS.get(value.casefold(), gates.skill_case(value))
 
 
-def contains(text, token):
+def literal_match(text, token):
     pattern = re.escape(token).replace(r"\ ", r"[\s\-]+")
-    return bool(re.search(r"(?<!\w)" + pattern + r"(?!\w)", text, re.I))
+    return re.search(r"(?<!\w)" + pattern + r"(?!\w)", text, re.I)
+
+
+def contains(text, token):
+    return bool(literal_match(text, token))
 
 
 def coverage(text, keywords):

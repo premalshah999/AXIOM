@@ -244,10 +244,10 @@ def stub(initial=None, repair=None, revision=None, fixes=None, metered=False):
     return model
 
 
-def context(tmp_path, db=None, model=None, doc=None):
+def context(tmp_path, db=None, model=None, doc=None, profile=PROFILE, job=JOB):
     doc = doc or source_doc()
-    inv = evidence.build(PROFILE, doc_plain(doc))
-    terms = ats.terms(POSTING, JOB["title"], inv.skills)
+    inv = evidence.build(profile, doc_plain(doc))
+    terms = ats.terms(job["description"], job["title"], inv.skills)
     source = modes.SourceResume(
         id="source", sha="source-sha", text=doc_plain(doc), doc=doc, style=editor.Style()
     )
@@ -311,6 +311,110 @@ def test_proposals_obey_distinctness_repeat_metric_and_link_gates():
     assert any("unmeasured" in e for e in errors)
     assert any("links" in e for e in errors)
     assert any("last 15" in e for e in errors)
+
+
+def test_valid_rewrite_keeps_count_and_source_character_budget(tmp_path):
+    source, _ = context(tmp_path)
+    text = REAL1.replace(", then documented", "; documented")
+    rewritten, refused = quality.apply_revision(
+        source.doc, Revision(bullets=[Rewrite(id="p1", text=text)]), [], POSTING, []
+    )
+    assert not refused
+    assert check_rules(rewritten, source.doc)["ok"]
+    project = next(s for s in rewritten.sections if s.kind == "projects").entries[0]
+    assert len(project.bullets) == 2
+    assert project.bullets[0].text == text
+    assert 0.9 * len(REAL1) <= len(text) <= len(REAL1)
+
+
+@needs_tex
+def test_nonsoftware_field_uses_its_own_methods_and_profile(tmp_path):
+    doc = source_doc()
+    doc.name = "Jordan Example"
+    doc.sections[0].entries[0].heading = "Teacher"
+    doc.sections[0].entries[0].bullets = [
+        Bullet(
+            id="work1",
+            text="Designed lesson plans and documented classroom activities for repeatable weekly preparation",
+        )
+    ]
+    doc.sections[1].entries[0].subheading = "B.Ed., Education"
+    doc.sections[2].entries[0].heading = "Lesson Review Toolkit"
+    doc.sections[2].entries[0].bullets = [
+        Bullet(
+            id="p1",
+            text="Designed lesson plans using public library materials and classroom review notes, documenting changes for repeatable weekly preparation",
+        ),
+        Bullet(
+            id="p2",
+            text="Compared classroom activities with curriculum goals and kept a teaching checklist to explain each revision before the next lesson",
+        ),
+    ]
+    doc.sections[
+        3
+    ].text = (
+        "Teaching: Lesson Planning, Curriculum Development\nPractice: Classroom Management, Documentation"
+    )
+    job = {
+        **JOB,
+        "title": "Teacher",
+        "description": "Requirements\nLesson Planning, Curriculum Development, Classroom Management and Documentation.\nResponsibilities\nPrepare activities using public teaching materials.",
+    }
+    profile = {
+        "name": doc.name,
+        "skills": ["Lesson Planning", "Curriculum Development", "Classroom Management", "Documentation"],
+    }
+    drafts = proposals()
+    for p, name, public_input, tool, tradeoff in zip(
+        drafts,
+        ["Library Lesson Pack", "Public Resource Comparison", "Classroom Preparation Checklist"],
+        ["Library of Congress", "Smithsonian Learning Lab", "National Archives"],
+        ["Lesson Planning", "Curriculum Development", "Classroom Management"],
+        [
+            "Compare activity instructions with the learning goal before adding them to the pack, and explain how accessibility changes the choice.",
+            "Inspect the source lesson labels before grouping materials, documenting the curriculum mapping instead of assuming the categories agree.",
+            "Keep classroom preparation notes beside the original public activity and explain how a missing material changes the teaching checklist.",
+        ],
+        strict=True,
+    ):
+        p.title, p.data_source, p.tools = name, public_input, [tool]
+        p.bullets = [
+            f"Design a {tool} resource using {public_input} materials so a reader can inspect each activity alongside its public source.",
+            tradeoff,
+        ]
+        p.build_plan = ["Choose public teaching materials", "Write the activity and a review checklist"]
+
+    async def teacher_model(kind, system, user):
+        if kind is Brief:
+            return Brief(
+                product="Classroom teaching",
+                proof_points=[
+                    "Prepare activities",
+                    "Explain curriculum choices",
+                    "Document classroom review",
+                ],
+                real_stack=profile["skills"],
+                seniority="Classroom teacher",
+                hard_keywords=profile["skills"],
+            )
+        if kind is Plan:
+            return Plan(proposals=drafts)
+        if kind is Critique:
+            return Critique(
+                proof_points=["Prepare", "Explain", "Review"],
+                evidence=["Lesson pack", "Resource comparison", "Checklist"],
+                distinctness="Product, analysis, internal tool",
+                grade="B",
+                passed=True,
+            )
+        raise AssertionError(kind)
+
+    source, ctx = context(tmp_path, doc=doc, profile=profile, job=job, model=teacher_model)
+    result = asyncio.run(run(job, source, profile, ctx))
+    text = parse_check(result.pdf_path.read_bytes(), result.doc)["text"]
+    assert "Python" not in text and "SQL" not in text and "Data Analyst" not in text
+    assert "Jordan Example" in text and "Library of Congress" in text
+    assert result.report["preview_rules"]["ok"]
 
 
 @needs_tex
@@ -487,6 +591,19 @@ def test_real_shared_pipeline_accepts_approved_projects_and_pins_exact_pdf(servi
     assert artifact.validation["rules"]["ok"]
     assert not artifact.validation["drafts"]
     assert all(p.title in artifact.text for p in proposals())
+    from jobpilot.features.resumes.aggressive.guards import send_problem
+
+    with service.db.exclusive() as s:
+        assert send_problem(s, artifact) is None
+    # User-edited artifacts keep the Aggressive provenance under review-v1.
+    artifact.policy_version = "tailor-review-v1"
+    with service.db.exclusive() as s:
+        assert send_problem(s, artifact) is None
+    current = store.get(service.db, workspace["id"])
+    store.choose(service.db, current["id"], Choice(revision=current["revision"]))
+    with service.db.exclusive() as s:
+        assert send_problem(s, artifact)[0] == "tailoring_stale"
+    # The hook must be called by the shared send guard (see HANDOFF.md).
 
 
 @needs_tex

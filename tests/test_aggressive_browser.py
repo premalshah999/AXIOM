@@ -28,11 +28,14 @@ def serve(port, static_root, data_dir):
     from fastapi.responses import FileResponse
     from jobpilot.api import create_app
     from jobpilot.config import Settings
-    from jobpilot.db import Job, Resume
+    from jobpilot.db import Job, Resume, Run
     from jobpilot.execution_services import pin_resume
+    from jobpilot.schemas import Profile
     from jobpilot.features.resumes import choice
     from jobpilot.features.resumes.aggressive.pipeline import run
     from jobpilot.features.resumes.aggressive.router import router
+    from jobpilot.features.resumes.compiler import compile_pdf
+    from jobpilot.features.resumes.editor import render, tailored_style
     from test_aggressive_pipeline import JOB, PROFILE, add_job, context, stub
 
     config = Settings(
@@ -43,16 +46,68 @@ def serve(port, static_root, data_dir):
         enable_workers=False,
         telegram_enabled=False,
         allow_private_urls=True,
+        llm_provider="mimo",
+        mimo_api_key="aggressive-test-no-model",
+        mimo_base_url="http://127.0.0.1:9/v1",
+        repair_agent_enabled=False,
+        answer_quality_enabled=False,
+        browser_vision_recovery=False,
+        failure_reports_enabled=False,
+        trace_steps=False,
+        normal_workers=1,
+        specialist_workers=0,
     ).prepare()
     app = create_app(config)
     service = app.state.service
+    # A separate, public local employer: the real application worker needs no
+    # authentication to it. This thread inherits the server's empty CWD/env.
+    from email.parser import BytesParser
+    from email.policy import default
+    from gallery import site as site_module
+
+    parse_form = site_module.parse_form
+
+    def recorded_form(content_type, body):
+        fields = parse_form(content_type, body)
+        if "multipart/form-data" in (content_type or ""):
+            message = BytesParser(policy=default).parsebytes(
+                f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode() + body
+            )
+            for part in message.iter_parts():
+                if part.get_filename():
+                    fields[part.get_param("name", header="content-disposition") + "__sha256"] = (
+                        hashlib.sha256(part.get_payload(decode=True)).hexdigest()
+                    )
+        return fields
+
+    site_module.parse_form = recorded_form
+    employer = site_module.Site(
+        {
+            "/jobs/1": f'<html lang="en"><title>Reporting Analyst at ExampleWorks</title><body><h1>Reporting Analyst</h1><p>ExampleWorks · Remote</p><pre>{JOB["description"]}</pre><a href="/apply/1">Apply for this job</a></body></html>',
+            "/apply/1": '<html lang="en"><title>Apply: Reporting Analyst</title><body><h1>Apply: Reporting Analyst</h1><form method="post" action="/submit/1" enctype="multipart/form-data"><label for="first">First name</label><input id="first" name="first_name" required><label for="last">Last name</label><input id="last" name="last_name" required><label for="email">Email</label><input id="email" name="email" type="email" required><label for="resume">Resume</label><input id="resume" name="resume" type="file" accept=".pdf" required><button type="submit">Submit application</button></form></body></html>',
+            "/submit/1": '<html lang="en"><title>Application received</title><body><h1>Thank you for applying!</h1><p>Your application has been received. We will be in touch.</p></body></html>',
+        }
+    )
+    local_job = {**JOB, "url": employer.base + "/jobs/1"}
+    profile = Profile.model_validate(
+        {**PROFILE, "autonomous": True, "facts": {"first_name": "Alex", "last_name": "Example"}}
+    ).model_dump(mode="json")
     test_start = len(app.router.routes)
 
     @app.post("/api/aggressive-test/generate")
     async def generate():
         add_job(service)
-        source, ctx = context(Path(data_dir), db=service.db)
-        result = await run(JOB, source, PROFILE, ctx)
+        service.db.set_setting("profile", profile)
+        source, ctx = context(Path(data_dir), db=service.db, profile=profile, job=local_job)
+        master = await compile_pdf(render(source.doc, tailored_style(source.style)))
+        assert master.ok
+        source.sha = hashlib.sha256(master.pdf).hexdigest()
+        (config.data_dir / "resumes").mkdir(exist_ok=True)
+        (config.data_dir / "resumes/source.pdf").write_bytes(master.pdf)
+        with service.db.exclusive() as session:
+            session.get(Job, "ag-job").url = local_job["url"]
+            session.get(Resume, "source").sha256 = source.sha
+        result = await run(local_job, source, profile, ctx)
         return {"workspace_id": result.report["workspace_id"]}
 
     @app.post("/api/aggressive-test/artifact")
@@ -68,10 +123,29 @@ def serve(port, static_root, data_dir):
                 config,
                 session.get(Job, "ag-job"),
                 session.get(Resume, "source"),
-                PROFILE,
+                profile,
                 result["artifact_id"],
             )
         return {"state": "approved", **approved, "path": packet["resume_path"]}
+
+    @app.post("/api/aggressive-test/execute")
+    async def execute():
+        async def dispatch(_run_id):
+            pass
+
+        service.dispatch = dispatch
+        service.db.set_setting("control", {"paused": False, "auto_submit": True})
+        queued = await service.queue("ag-job", "submit", "source", owner_pick=True)
+        await asyncio.wait_for(service.execute(queued["id"]), 90)
+        with service.db.session() as session:
+            actual = session.get(Run, queued["id"])
+            result = {
+                "state": actual.state,
+                "reason": actual.reason,
+                "model_calls": actual.model_calls,
+                "packet_sha": actual.packet["resume_sha"],
+            }
+        return {**result, "applications": employer.applications()}
 
     @app.post("/api/aggressive-test/upload")
     async def upload(file: UploadFile = File()):
@@ -94,7 +168,10 @@ def serve(port, static_root, data_dir):
     app.mount("/aggressive-assets", StaticFiles(directory=Path(static_root)))
     asset_route = app.router.routes.pop()
     app.router.routes.insert(0, asset_route)
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning", access_log=False)
+    try:
+        uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning", access_log=False)
+    finally:
+        employer.close()
 
 
 def build_ui(tmp_path):
@@ -236,6 +313,14 @@ async def test_drafts_approval_original_switch_and_exact_upload(page, tmp_path):
             """async () => { const response = await fetch('/api/aggressive-test/upload', {method:'POST', headers:{Authorization:'Bearer aggressive-test-token'}, body:new FormData(document.querySelector('form'))}); return await response.json(); }"""
         )
         assert received["sha256"] == result["pdf_sha"]
+        executed = await page.request.post(url + "/api/aggressive-test/execute", data={}, timeout=120000)
+        assert executed.ok, await executed.text()
+        outcome = await executed.json()
+        assert outcome["state"] == "confirmed", outcome
+        assert outcome["model_calls"] == 0, outcome
+        assert len(outcome["applications"]) == 1, outcome
+        assert outcome["applications"][0]["resume__sha256"] == outcome["packet_sha"] == result["pdf_sha"]
+        assert outcome["applications"][0]["resume"] == "Alex_Example_Resume.pdf"
     finally:
         process.terminate()
         try:

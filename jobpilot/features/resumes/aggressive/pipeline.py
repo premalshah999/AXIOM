@@ -157,9 +157,18 @@ async def run(job, source, profile, ctx):
         {"job_description": job["description"], "hard_reqs_text": hard, "title": job.get("title", "")},
     )
     # The model cannot smuggle a culture keyword into the coverage denominator.
-    brief.hard_keywords = list(dict.fromkeys(k for k in brief.hard_keywords if quality.contains(hard, k)))[
-        :10
-    ]
+    keywords = []
+    for keyword in brief.hard_keywords:
+        match = quality.literal_match(hard, keyword)
+        if match and match.group(0).casefold() not in {k.casefold() for k in keywords}:
+            keywords.append(match.group(0))
+    for term in ctx.ats_terms:
+        if len(keywords) >= 5:
+            break
+        match = quality.literal_match(hard, term["term"])
+        if match and match.group(0).casefold() not in {k.casefold() for k in keywords}:
+            keywords.append(match.group(0))
+    brief.hard_keywords = keywords[:10]
     base, extra = quality.inventory(source.doc, profile, ctx.evidence)
     allowed = list(dict.fromkeys([*base, *extra]))
     history = store.recent(ctx.db, job)
@@ -242,7 +251,12 @@ async def run(job, source, profile, ctx):
         if regression:
             unresolved.append("Critique edits were reverted because PDF hard-keyword coverage regressed")
         else:
-            doc, result, fix_applied = candidate, after, True
+            fix_applied = candidate.model_dump() != doc.model_dump()
+            doc, result = candidate, after
+            if not fix_applied:
+                unresolved.append(
+                    "The critique requested changes, but no supported wording change passed the gates."
+                )
             if revised_workspace is not workspace:
                 workspace = store.revise(ctx.db, workspace, revised)
                 selected = revised_selected

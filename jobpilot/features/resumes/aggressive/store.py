@@ -85,6 +85,8 @@ def create(db, job, source, profile, proposals, brief):
     wid = new_id("ag-")
     drafts = [{"id": wid + f":p{i}", "confirmed": False, **p.model_dump()} for i, p in enumerate(proposals)]
     payload = {
+        "company": job.get("company", ""),
+        "role": job.get("title", ""),
         "brief": brief.model_dump(),
         "drafts": drafts,
         "selected_drafts": [d["id"] for d in drafts],
@@ -173,6 +175,12 @@ def confirmed(draft):
 
 def revise(db, workspace, proposals):
     """Critique can improve pending drafts; approved wording stays immutable."""
+    changed = any(
+        not confirmed(old) and Proposal.model_validate(old).model_dump() != new.model_dump()
+        for old, new in zip(workspace["drafts"], proposals, strict=True)
+    )
+    if not changed:
+        return workspace
 
     def mutate(payload):
         for old, new in zip(payload["drafts"], proposals, strict=True):
@@ -233,3 +241,7 @@ def save_report(db, workspace_id, revision, report):
         row = s.get(Workspace, workspace_id)
         if row is not None and row.revision == revision:
             row.payload = {**row.payload, "report": report}
+        else:
+            raise RuntimeError(
+                "drafts_changed: Project choices changed while tailoring. Rebuild this preview."
+            )
