@@ -2,17 +2,15 @@ import { useMemo, useState, type ReactNode } from "react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useDraft, useNow, usePoll } from "./hooks";
-import { DayChart, DotPatterns } from "./identity/DayChart";
 import { LiveWork, type LiveRow } from "./identity/LiveWork";
 import { MasterKey } from "./identity/MasterKey";
-import { MoreLink, Results } from "./identity/Results";
 import { confirmedToday, panelState, type PanelState } from "./identity/state";
 import { progressFrom, progressOf } from "./identity/stages";
 import "./identity/overview.css";
 import { appliedState, evidenceLabel, STATES, type JobRow } from "./model";
 import { OPEN_JOB_LINK } from "./jobintake";
-import { groupQuestions, QuestionCard, type QuestionGroup } from "./questions";
-import type { ApplicationWorkers, MailStatus, RuntimeHealth, Snapshot, Startable, Success } from "./types";
+import { countQuestions, groupQuestions, QuestionCard, type QuestionGroup } from "./questions";
+import type { ApplicationWorkers, MailStatus, RuntimeHealth, Snapshot, Startable, SuccessReport } from "./types";
 import { ago, day, employerOf, jobWords, plural, urlRole } from "./format";
 import { Button, Dialog, Empty, Monogram, MonogramStack, Panel, Skeleton } from "./ui/index";
 import { Notice } from "./worktools";
@@ -41,26 +39,18 @@ type Working = {
 // The home page, in the order someone reads it: how today is going and the one control; what is running now; then what needs them
 // and how the whole thing is doing. Every number opens the list behind it. Worker and host detail is in Settings › Advanced.
 export function BatchView() {
+  const { version } = useWorkspace();
   const health = usePoll<RuntimeHealth>((signal) => api("/runtime-health", "GET", undefined, signal), 30000);
   const mail = usePoll<MailStatus>((signal) => api("/mail", "GET", undefined, signal), 30000);
-  const ledger = usePoll<{ applications: Success[] }>((signal) => api("/successful-applications", "GET", undefined, signal), 60000);
-  const applications = ledger.data?.applications ?? null;
+  // Which Ready jobs can start, and why the rest cannot (jobpilot/startable.py): the same screening the dispatcher uses.
+  const ready = usePoll<Startable>((signal) => api("/startable", "GET", undefined, signal), 30000, [version]);
+  const success = usePoll<SuccessReport>((signal) => api("/success?days=7", "GET", undefined, signal), 60000);
   const work = useWorking(mail.data, health.data?.application_workers);
   return (
     <div className="ax-page ov-page">
-      <DotPatterns />
-      <Hero work={work} applications={applications} models={health.data?.models} />
+      <Hero work={work} models={health.data?.models} ready={ready.data} success={success.data} />
       <FirstRun mail={mail.data} />
       <Live work={work} checking={!health.data && !work.known} />
-      <div className="ov-columns">
-        <div className="ov-column">
-          <Questions />
-          <Recent applications={applications} />
-        </div>
-        <div className="ov-column">
-          <Results ledger={applications} />
-        </div>
-      </div>
     </div>
   );
 }
@@ -141,18 +131,16 @@ function useWorking(mail: MailStatus | null, workers?: ApplicationWorkers) {
 type WorkingState = ReturnType<typeof useWorking>;
 
 // ---------- the top: today's count, the state and progress, what waits on you, and the key ----------
-function Hero({ work, applications, models }: { work: WorkingState; applications: Success[] | null; models?: RuntimeHealth["models"] }) {
+function Hero({ work, models, ready, success }: { work: WorkingState; models?: RuntimeHealth["models"]; ready?: Startable | null; success?: SuccessReport | null }) {
   const { snapshot, counts, link, refresh, go } = useWorkspace();
   const { pending, run } = useAction();
   const now = useNow();
-  const today = useMemo(() => confirmedToday(applications || [], now), [applications, now]);
 
   const rt = snapshot.autopilot_runtime || {};
   const batch = snapshot.autopilot || {};
   const state = rt.state || batch.state || "idle";
   const active = state === "active";
   const target = rt.target || batch.target || 100;
-  const confirmed = rt.confirmed ?? 0;
   const [goal, setGoal] = useDraft("batch-target", counts.jobs || snapshot.jobs.length ? 100 : 25);
   const workers = snapshot.config.workers_enabled;
   const noResume = snapshot.resumes.length === 0;
@@ -164,14 +152,14 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
   const n = work.working;
 
   // The worst thing that is true right now, in plain words.
-  const said: Record<PanelState, ["info" | "bad", string, string?]> = {
-    lost: ["bad", "Connection lost", `Showing data from ${ago(link.updatedAt, now)}; retrying.`],
-    restart: ["bad", "Needs a restart", "Automation has stopped responding. Restart it to keep applying."],
-    paused: ["info", "Paused", "No new applications start. Progress is kept."],
-    complete: ["info", "Target reached"],
-    running: ["info", n ? `Applying to ${plural(n, "job")} right now` : "Applying, between jobs"],
-    held: ["info", "Held", (rt.intake_reason || "New applications are not starting").replace(/\.$/, "") + "."],
-    none: ["info", "No batch running", work.limit ? "Start one to apply until a target you choose." : undefined],
+  const said: Record<PanelState, ["info" | "bad", string, (string | undefined)?]> = {
+    lost: ["bad", "Connection lost.", `Showing what was there ${ago(link.updatedAt, now)}; retrying.`],
+    restart: ["bad", "Automation has stopped responding.", "Restart it to keep applying."],
+    paused: ["info", "Paused. Nothing new starts until you resume."],
+    complete: ["info", "Done. Your goal was reached."],
+    running: ["info", n ? "Applying right now." : idleSentence(ready), undefined],
+    held: ["info", (rt.intake_reason || "New applications are not starting").replace(/\.$/, "") + "."],
+    none: ["info", "Not applying. Press Start to begin.", undefined],
   };
   const [tone, sentence, sub] = said[panel];
 
@@ -212,7 +200,7 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
       <label className="ov-target">
         <span>Apply until</span>
         <input type="number" min={1} max={500} step={1} required value={goal} onChange={(e) => setGoal(Number(e.target.value))} aria-describedby="target-hint" />
-        <span>confirmed</span>
+        <span>applied</span>
       </label>
       <span id="target-hint" className="sr-only">
         Up to 500 confirmed applications.
@@ -237,76 +225,37 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
     </div>
   );
 
-  const questions = groupQuestions(snapshot.reviews, () => undefined).length;
-  const count = today.length.toLocaleString();
-  const showProgress = active || state === "complete";
-  const share = Math.min(100, target ? (confirmed / target) * 100 : 0);
+  const words = counts.words;
+  const needs = countQuestions(snapshot.reviews);
+  const rate = success?.overall?.final_pct;
+  const figures: { label: string; n: string; to: () => void }[] = [
+    { label: "Applied", n: (words?.applied ?? counts.confirmed ?? 0).toLocaleString(), to: () => go({ view: "ledger" }) },
+    { label: "Applying", n: (words?.applying ?? 0).toLocaleString(), to: () => go({ view: "jobs", tab: "applying" }) },
+    { label: "Needs you", n: needs.toLocaleString(), to: () => go({ view: "needs" }) },
+    { label: "Success", n: rate == null ? "–" : `${(Math.floor(rate * 10) / 10).toFixed(1)}%`, to: () => go({ view: "settings", tab: "details" }) },
+  ];
   return (
     <>
-      <section className="ax-panel ov-hero" aria-label="Today">
-        <a
-          className="ov-big"
-          href="?view=ledger"
-          onClick={(e) => {
-            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
-            e.preventDefault();
-            go({ view: "ledger" });
-          }}
-        >
-          <span className="ax-read" style={{ "--chars": count.length } as React.CSSProperties}>
-            {applications ? count : "–"}
-          </span>
-          <span className="ov-label">Confirmed today</span>
-        </a>
+      <section className="ax-panel ov-hero" aria-label="Now">
         <div className="ov-say">
           <div className="ov-state">
             <p className={"ov-sentence is-" + tone} aria-live="polite">
-              {sentence}
+              {panel === "running" && !n && ready ? <Idle said={ready} fallback={idleSentence(null)} go={go} /> : sentence}
             </p>
             {sub && <p className="ov-sub">{sub}</p>}
           </div>
-          {showProgress && (
-            <div className="ov-progress" title={rt.confirmed_by_owner ? `${rt.confirmed_by_batch ?? 0} by the batch, ${rt.confirmed_by_owner} you started` : undefined}>
-              <p>
-                <button type="button" className="ax-quiet-link" onClick={() => go({ view: "ledger" })}>
-                  <b className="mono">{confirmed.toLocaleString()}</b> of <span className="mono">{target.toLocaleString()}</span> confirmed
-                </button>
-                <span>
-                  {active && <span className="mono">{(rt.remaining ?? Math.max(0, target - confirmed)).toLocaleString()}</span>}
-                  {active && " to go"}
-                  {active && (rt.attempted_jobs ?? 0) > 0 && " · "}
-                  {(rt.attempted_jobs ?? 0) > 0 && (
-                    <button type="button" className="ax-quiet-link" onClick={() => go({ view: "jobs", tab: "pipeline" })}>
-                      <span className="mono">{(rt.attempted_jobs ?? 0).toLocaleString()}</span> tried
-                    </button>
-                  )}
-                  {batch.started_at && <span title={`Started ${day(batch.started_at)}`} />}
-                </span>
-              </p>
-              <span className="ov-bar" role="progressbar" aria-valuemin={0} aria-valuemax={target} aria-valuenow={Math.min(confirmed, target)} aria-label="Progress to target">
-                <i style={{ width: `${share}%` }} />
-              </span>
-            </div>
-          )}
-          <DayChart times={today} now={now} />
+          {key}
         </div>
-        <a
-          className="ov-wait"
-          href="?view=needs"
-          onClick={(e) => {
-            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
-            e.preventDefault();
-            go({ view: "needs" });
-          }}
-        >
-          <span className={"ax-window ov-lit" + (questions ? "" : " is-dark")}>
-            <span className="ax-read" style={{ "--chars": String(questions).length } as React.CSSProperties}>
-              {questions}
-            </span>
-          </span>
-          <span className="ov-label">{questions === 1 ? "Question waiting" : "Questions waiting"}</span>
-        </a>
-        {key}
+        <ul className="ov-figures">
+          {figures.map((f) => (
+            <li key={f.label}>
+              <button type="button" onClick={f.to}>
+                <span className="ov-fig">{f.n}</span>
+                <span className="ov-label">{f.label}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
       </section>
       {confirmStart !== null && (
         <Dialog
@@ -452,47 +401,13 @@ function Live({ work, checking }: { work: WorkingState; checking: boolean }) {
     };
   });
 
-  const empty: Record<PanelState, string> = {
-    lost: "Can't see what's running until the connection is back.",
-    restart: "Nothing new starts until automation restarts.",
-    paused: "Nothing is running. Resume to start the next application.",
-    complete: "Nothing is running. The batch reached its target.",
-    running: "Between applications.",
-    held: "Nothing is running while the batch is held.",
-    none: "Nothing is running. Applications appear here with the step they're on.",
-  };
+  // Only what is running; the sentence above says the rest.
+  if (rows.length + parked.length === 0) return null;
+  return <LiveWork rows={rows} parked={parked} busy={work.busy.length} limit={work.limit} checking={checking} empty={null} />;
+}
 
-  // Only what is there, each opening its list. Questions have their own panel.
-  const { waiting } = work;
-  const tally = (count: number, label: string, to?: { tab: string; filter?: string }): ReactNode =>
-    count > 0 ? (
-      to ? (
-        <button type="button" className="ov-foot-link" onClick={() => go({ view: "jobs", ...to })}>
-          <b>{count.toLocaleString()}</b> {label}
-        </button>
-      ) : (
-        <span>
-          <b>{count.toLocaleString()}</b> {label}
-        </span>
-      )
-    ) : null;
-  const foot = [
-    tally(waiting.queued + waiting.starting, "queued", { tab: "pipeline", filter: "active" }),
-    tally(waiting.repairing, "being fixed", { tab: "pipeline", filter: "repair" }),
-    active ? tally(rt.blocked ?? 0, "blocked in this batch", { tab: "pipeline", filter: "repair" }) : null,
-    active ? tally(rt.failed ?? 0, "not sent in this batch", { tab: "pipeline", filter: "repair" }) : null,
-  ].filter(Boolean);
-  return (
-    <LiveWork
-      rows={rows}
-      parked={parked}
-      busy={work.busy.length}
-      limit={work.limit}
-      checking={checking}
-      empty={panel === "running" ? <Idle said={ready.data} fallback={empty.running} go={go} /> : empty[panel]}
-      foot={foot.length ? foot.map((item, i) => <span key={i}>{item}</span>) : undefined}
-    />
-  );
+function idleSentence(said?: Startable | null) {
+  return said?.idle || "Between applications.";
 }
 
 /** Why nothing is running while a batch is on: how many Ready jobs can start, or what holds the rest, each number opening its list. */
@@ -538,107 +453,6 @@ function Idle({ said, fallback, go }: { said?: Startable | null; fallback: strin
         </>
       )}
     </>
-  );
-}
-
-// ---------- the top few questions, one click from answered ----------
-const names = (g: QuestionGroup) => [g.job, ...g.others].map((j) => employerOf(j?.company, j?.url));
-
-function Questions() {
-  const { snapshot, go } = useWorkspace();
-  const now = useNow(60000);
-  const [open, setOpen] = useState<QuestionGroup | null>(null);
-  const groups = useMemo(() => {
-    const runs = new Map(snapshot.runs.map((r) => [r.id, r.job_id]));
-    const jobs = new Map(snapshot.jobs.map((j) => [j.id, j]));
-    return groupQuestions(snapshot.reviews, (id) => jobs.get(runs.get(id) || ""));
-  }, [snapshot.reviews, snapshot.runs, snapshot.jobs]);
-  // The ones that free the most applications come first.
-  const top = useMemo(
-    () => [...groups].sort((a, b) => b.others.length - a.others.length || (a.review.created_at || "").localeCompare(b.review.created_at || "")).slice(0, 4),
-    [groups],
-  );
-  return (
-    <Panel
-      title="Questions waiting"
-      flush
-      actions={groups.length > top.length ? <MoreLink onClick={() => go({ view: "needs" })}>All {groups.length.toLocaleString()}</MoreLink> : undefined}
-    >
-      {top.length ? (
-        <ul className="ov-list">
-          {top.map((g) => {
-            const who = names(g);
-            return (
-              <li key={g.review.id} className="ov-q">
-                <MonogramStack names={who} max={2} />
-                <div className="ov-q-text">
-                  <p>{g.review.display_question || g.review.question}</p>
-                  <small>
-                    {who.length > 1 ? `${who[0]} and ${plural(who.length - 1, "other")}` : who[0]}
-                    {g.review.created_at && ` · ${ago(g.review.created_at, now)}`}
-                  </small>
-                </div>
-                <Button size="sm" onClick={() => setOpen(g)}>
-                  Answer
-                </Button>
-              </li>
-            );
-          })}
-        </ul>
-      ) : (
-        <Empty compact title="Nothing waiting on you" hint="When a form asks something only you know, the question appears here." />
-      )}
-      {open && (
-        <Dialog
-          open
-          onClose={() => setOpen(null)}
-          width={560}
-          title={names(open)[0] ?? "A question"}
-          sub={open.others.length ? `Answering this frees ${plural(open.others.length + 1, "application")}.` : "Answering this frees the application."}
-        >
-          <QuestionCard group={open} compact onSaved={() => setOpen(null)} />
-        </Dialog>
-      )}
-    </Panel>
-  );
-}
-
-// ---------- the newest proof ----------
-function Recent({ applications }: { applications: Success[] | null }) {
-  const { go, openJob } = useWorkspace();
-  const now = useNow(30000);
-  const rows = useMemo(() => [...(applications || [])].sort((a, b) => b.applied_at.localeCompare(a.applied_at)).slice(0, 5), [applications]);
-  return (
-    <Panel title="Recent confirmations" flush actions={applications?.length ? <MoreLink onClick={() => go({ view: "ledger" })}>All {applications.length.toLocaleString()}</MoreLink> : undefined}>
-      {!applications ? (
-        <div className="ov-pad">
-          <Skeleton rows={4} />
-        </div>
-      ) : rows.length ? (
-        <ul className="ov-list">
-          {rows.map((a) => {
-                        const { company, role: title } = jobWords(a);
-            return (
-            <li key={a.run_id}>
-              <button type="button" className="ov-ok" onClick={() => openJob(a.job_id, a.run_id)}>
-                <Monogram name={company} url={a.url} />
-                <span className="ov-ok-who">
-                  <b title={company}>{company}</b>
-                  <span title={title}>{title}</span>
-                </span>
-                <span className="ov-ok-proof">{evidenceLabel(a)}</span>
-                <time dateTime={a.applied_at} title={new Date(a.applied_at).toLocaleString()}>
-                  {ago(a.applied_at, now)}
-                </time>
-              </button>
-            </li>
-            );
-          })}
-        </ul>
-      ) : (
-        <Empty compact title="No confirmations yet" hint="Each application an employer confirms appears here, with its proof." />
-      )}
-    </Panel>
   );
 }
 
