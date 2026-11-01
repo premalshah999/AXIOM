@@ -68,3 +68,29 @@ def test_search_boxes_with_no_apply_button_decide_nothing_new():
 def test_the_scan_marking_a_search_box_counts():
     assert site_filter(field("Tagline", search_box=True))
     assert not site_filter(field("Tagline", search_box=True, required=True))
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        [field("Resume", "file")],
+        [field("Search by Location"), field("Write a reply...", "textarea"), field("Upload Video", "file")],
+        [field("Write a reply...", "textarea"), field("Upload Video", "file")],
+    ],
+)
+def test_a_posting_widget_beside_apply_is_the_job_page(fields):
+    """Eightfold's "match your resume" file input and SuccessFactors' comment box and video upload (2026-11-01) read as
+    the form on 10 live postings that each showed an Apply button."""
+    assert adapter().classify_page(page(fields)) == Step.JOB
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        [field("Resume", "file", required=True)],
+        [field("Resume", "file"), field("First Name")],
+        [field("Write a reply...", "textarea"), field("Upload Video", "file"), field("Phone", "tel")],
+    ],
+)
+def test_a_required_file_or_another_question_still_makes_it_the_form(fields):
+    assert adapter().classify_page(page(fields)) == Step.FORM
