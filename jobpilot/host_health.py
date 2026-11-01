@@ -120,6 +120,10 @@ def refused_commit_result(exc):
     """The run result for a refused `reserve_submission`. A stop is free; any other refusal keeps its old meaning."""
     if isinstance(exc, ServerDraining):
         return {"state": "waiting_browser", "reason": str(exc), "recovery_cause": "worker_interrupted"}
+    from .stop import Stopped, stopped_result
+
+    if isinstance(exc, Stopped):
+        return stopped_result()  # The owner's Stop reached this run at its commit: nothing was sent, back to the queue.
     return {"state": "waiting_browser", "reason": str(exc), "recovery_cause": "control_observation"}
 
 

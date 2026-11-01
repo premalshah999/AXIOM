@@ -11,8 +11,9 @@ def test_control_is_saved_and_echoed(client):
     assert client.get("/api/control").json() == {"paused": True, "auto_submit": True}
 
 
-def test_control_requires_both_switches(client):
-    assert client.put("/api/control", json={"paused": True}).status_code == 422
+def test_control_changes_only_what_is_sent(client):
+    client.put("/api/control", json={"auto_submit": True})
+    assert client.put("/api/control", json={"paused": True}).json() == {"paused": True, "auto_submit": True}
 
 
 def test_limits_round_trip_within_their_bounds(client):

@@ -125,7 +125,10 @@ async def start_autonomous(service, target=100, refresh_sources=True):
         raise ValueError("Choose a batch target from 1 to 500")
     db = service.db
     control = db.get_setting("control", {})
-    db.set_setting("control", {**control, "paused": False, "auto_submit": True})
+    if control.get("paused"):
+        # Starting a batch used to lift a stop by writing paused: false, without delivering what the stop held. Only Resume does.
+        raise ValueError("AXIOM is stopped. Press Resume first, then start a batch")
+    db.set_setting("control", {**control, "auto_submit": True})
     # A new unattended batch uses the integrated readiness/tailoring contract.
     db.set_setting("execution_services", {"enabled": True, "version": 1})
     cfg = settings(db).model_copy(update={"enabled": True, "auto_apply": True, "batch_target": target})
@@ -568,9 +571,11 @@ async def resubmit_unknown(service, slots):
 
     if slots <= 0:
         return 0
+    from .stop import stopped
+
     db, queued, searched = service.db, 0, 0
     for job_id, run_id in await asyncio.to_thread(unknown_candidates, db, False):
-        if queued >= slots or searched >= slots:
+        if queued >= slots or searched >= slots or await asyncio.to_thread(stopped, db):
             break
         try:
             page = await asyncio.to_thread((Path(service.config.data_dir) / "runs" / run_id / "final_outline.txt").read_text)
@@ -731,8 +736,10 @@ async def persist_stalled(service, slots, roles, batch):
         return 0
     candidates, busy, eightfold_busy = await asyncio.to_thread(stalled_candidates, db, roles)
     started = 0
+    from .stop import stopped
+
     for _, job_id, employer, ats in sorted(candidates):
-        if started >= slots:
+        if started >= slots or await asyncio.to_thread(stopped, db):
             break
         if employer in busy or (ats == "eightfold" and eightfold_busy):
             continue
@@ -1138,8 +1145,11 @@ async def tick(service):
             nonlocal queued_now
             from .pipeline_comparison import custom_site
 
+            from .stop import stopped
+
             for job in jobs:
-                if queued_now >= room:
+                # A tick already under way when Stop is pressed ends here, not after a thousand refusals.
+                if queued_now >= room or await asyncio.to_thread(stopped, db):
                     break
                 lane = "custom" if custom_site(job) else "normal"
                 if rooms[lane] <= 0:

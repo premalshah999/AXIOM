@@ -303,6 +303,11 @@ class QueueingMixin:
             from ..job_control import require_running
 
             require_running(s, job_id)
+            from ..stop import refuse
+
+            # Every path that starts an application comes through here, whoever asks: the batch, a retry, an answered
+            # question, a matched email, the repair agent, Telegram, an Apply click.
+            refuse(s)
             from ..reserved import require_approval
 
             # FAANG, MANGO and the Big Four wait for the owner's approval of this job, whichever path asks: the autopilot,

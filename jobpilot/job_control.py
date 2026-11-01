@@ -51,6 +51,10 @@ async def manage(service, job_id, action, *, controller_policy=None, reopen_clos
             raise ValueError("Pause is saving the draft; resume when its state is Paused")
         if action == "resume" and control and control.value.get("state") == "deleted":
             raise ValueError("This job was removed; its application history is preserved")
+        if action == "resume" and actor != "owner":
+            from .stop import refuse
+
+            refuse(s)  # Before anything below changes: a retry during a stop leaves the job exactly as it was.
         if action == "resume" and actor != "owner" and control and control.value.get("state") == "paused":
             # Only the owner lifts a pause. The stalled-run retry resumed Emory 40 s after it was paused
             # (2026-10-22) and spent another run on the failure the pause was for.
@@ -133,33 +137,50 @@ async def manage(service, job_id, action, *, controller_policy=None, reopen_clos
 
 
 def _run_and_control(db, run_id):
-    """Synchronous DB read; watch() runs it in a thread so the shared event loop never blocks on it."""
+    """Synchronous DB read; watch() runs it in a thread so the shared event loop never blocks on it. The owner's word is read
+    before the run's state, in that order: a reservation is refused once Stop or a removal has committed, so a run still
+    `running` after that read can no longer enter its commit. The other way round, a commit that began between the two
+    reads was cut as if it had not (2026-11-01)."""
+    from .stop import stopped_in
+
     with db.session() as s:
+        everything = stopped_in(s)
+        job_id = s.scalar(select(Run.job_id).where(Run.id == run_id))
+        if job_id is None:
+            return None, {}, False
+        control = (s.get(Setting, "job_control:" + job_id) or Setting(key="", value={})).value or {}
         # Columns only: the whole row decodes the run's packet (resume text, checkpoints) every second per run.
-        row = s.execute(select(Run.state, Run.job_id).where(Run.id == run_id)).first()
-        if not row:
-            return None, {}
-        return row.state, state(db, row.job_id)
+        return s.scalar(select(Run.state).where(Run.id == run_id)), control, everything
+
+
+# After this long a cancelled run that has not ended is cancelled again: cleanup normally takes a second or two.
+CANCEL_AGAIN_SECONDS = 20.0
 
 
 async def watch(service, engine, execution, run_id):
     """Release only this owner's slot, after its cleanup; never interrupt a commit."""
+    from .stop import stopped_result
+
     while not execution.done():
-        run_state, control = await asyncio.to_thread(_run_and_control, service.db, run_id)
-        interrupt = (
-            run_state == "running"
-            and not getattr(engine, "armed", False)
-            and control.get("state") in {"paused", "deleted"}
-        )
-        if interrupt:
+        run_state, control, everything = await asyncio.to_thread(_run_and_control, service.db, run_id)
+        interrupt = run_state == "running" and not getattr(engine, "armed", False)
+        if interrupt and control.get("state") in {"paused", "deleted"}:
             engine.result = {
                 "state": "paused" if control["state"] == "paused" else "cancelled",
                 "reason": "Owner " + control["state"] + " this application",
                 "writer_released": True,
             }
+        elif interrupt and everything:
+            engine.result = stopped_result()
+        else:
+            await asyncio.sleep(1.0)
+            continue
+        execution.cancel()
+        while True:
+            await asyncio.sleep(CANCEL_AGAIN_SECONDS)
+            if execution.done():
+                return
             execution.cancel()
-            return
-        await asyncio.sleep(1.0)
 
 
 def choices(service, reference=""):

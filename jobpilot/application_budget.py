@@ -46,6 +46,7 @@ NOTHING_SENT = (
     "The browser tab closed unexpectedly",
     "The selected model provider is unavailable",
     "Worker interrupted before submission",
+    "Stopped by you before anything was sent",  # stop.STOPPED
     "A platform bot check paused",  # bot_wall.PAUSED
     HOST_OVERLOADED,
     REGISTRATION_COOLDOWN,

@@ -460,7 +460,7 @@ def header_token_endpoint(parts):
 
 
 # Unfinished outcomes whose tab closes once its draft is saved; their next run reopens the saved route.
-RELEASED_TAB_STATES = {"waiting_browser", "timed_out", "needs_review", "waiting_answer"}
+RELEASED_TAB_STATES = {"waiting_browser", "timed_out", "needs_review", "waiting_answer", "stopped"}
 
 
 def request_shape(request):
@@ -1906,6 +1906,7 @@ class BrowserEngine:
             # Capture the failure before clearing secrets fires input/blur
             # validation and makes the screenshot depict a different problem.
             # The capture service masks values and binds the owned revision.
+            ending_now = (self.result or {}).get("state") in {"stopped", "cancelled"}
             if hasattr(self, "page") and hasattr(self, "form") and self.result:
                 from .diagnostics import capture_help
 
@@ -1933,7 +1934,8 @@ class BrowserEngine:
                 except Exception:
                     pass
                 self.email_verification.close()
-            if hasattr(self, "page"):
+            # The owner asked for it to end: a slow page's full-size screenshot (4 s) is not worth the wait, and it sent nothing.
+            if hasattr(self, "page") and not ending_now:
                 try:
                     if (
                         self.job.get("ats") == "workday"
@@ -1981,7 +1983,16 @@ class BrowserEngine:
                         # The saved route and checkpoint reopen this draft on its next run (the inactive-tab path).
                         # Every unfinished run kept its tab open: two Chrome profiles grew to 47 GB each on a 16 GB
                         # Mac and the machine ran out of memory (2026-10-26).
-                        for owned_page in {self.page, getattr(getattr(self, "form", None), "page", self.page)}:
+                        owned = {self.page, getattr(getattr(self, "form", None), "page", self.page)}
+                        if (self.result or {}).get("state") == "stopped":
+                            # "Closes its tabs" includes what this application opened.
+                            for candidate in list(self.context.pages):
+                                try:
+                                    if await candidate.opener() in owned:
+                                        owned.add(candidate)
+                                except PlaywrightError:
+                                    continue
+                        for owned_page in owned:
                             try:
                                 await asyncio.wait_for(owned_page.close(), timeout=4)
                             except Exception:
@@ -4653,6 +4664,7 @@ class BrowserEngine:
             "submission_unknown",
             "timed_out",
             "paused",
+            "stopped",
         }
 
     def successfactors_application_step(self, obs):
@@ -5147,7 +5159,14 @@ class BrowserEngine:
         clean_fills, advanced = set(), set()
         control_failures = ControlFailures()
         for step in range(30):
-            if self.result or self.db.get_setting("control", {}).get("paused"):
+            if self.result:
+                return
+            if self.db.get_setting("control", {}).get("paused"):
+                # Said as a stop. Returning with no result ended the run as "Agent ended without verified completion": a
+                # failure, a spent start and a repair for an application the owner had stopped.
+                from .stop import stopped_result
+
+                self.result = stopped_result()
                 return
             if await self.recover_workday_error():
                 continue

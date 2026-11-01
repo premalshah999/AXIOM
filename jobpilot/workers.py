@@ -539,7 +539,7 @@ async def enqueue_source(source_id):
 async def resume(service):
     await ensure_scheduler(service)
     with service.db.session() as s:
-        ids = list(s.scalars(select(Run.id).where(Run.state == "queued")))
+        ids = list(s.scalars(select(Run.id).where(Run.state == "queued").order_by(Run.created_at)))
     for run_id in ids:
         # A paused workflow may have completed without starting; use a new delivery ID,
         # while the application state's CAS prevents a second active browser.

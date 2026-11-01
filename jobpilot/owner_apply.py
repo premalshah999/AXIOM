@@ -34,7 +34,7 @@ def _later(not_before):
 # Refusals that end when a slot, a worker or a mail sender frees: tried again on the next autopilot tick (a few
 # seconds), not after a fixed wait. The 60-second not_before admission gives them made a freed slot idle until the
 # request's turn came round; with 140 requests waiting, 4 of 9 workers sat idle (2026-10-29).
-FREES_UP = frozenset({"worker_capacity", "employer_busy", "sender_busy"})
+FREES_UP = frozenset({"worker_capacity", "employer_busy", "sender_busy", "stopped"})
 # Admissions one pass tries: each takes the app lock, and a full pool refuses all the rest alike.
 TRIES = 12
 
@@ -142,7 +142,8 @@ async def start(service, job_id, mode="submit", **queue_options):
             "state": "waiting",
             "deferred": True,
             "code": exc.code,
-            "message": f"{str(exc).rstrip('.')}. It starts on its own as soon as it can.",
+            "message": f"{str(exc).rstrip('.')}." if exc.code == "stopped"
+            else f"{str(exc).rstrip('.')}. It starts on its own as soon as it can.",
         }
     await off_loop(_forget, service.db, job_id)
     return {"job_id": job_id, "run_id": run["id"], "state": "queued", "message": "Application queued."}
