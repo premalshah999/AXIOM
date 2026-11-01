@@ -203,6 +203,10 @@ def batch_snapshot(service):
     batch = db.get_setting("job_board_autopilot", {})
     control = db.get_setting("control", {})
     hold = db.get_setting("execution_v2_deployment_hold", {})
+    # Early-career-only hides postings that state no experience unless the profile accepts N years (jobboard.screen).
+    hides_unspecified = bool(cfg.early_career_only) and not int(
+        (db.get_setting("profile", {}) or {}).get("accept_experience_years") or 0
+    )
     at = datetime.now(UTC)
     with db.session() as s:
         # Each batch job's newest run and its confirmation, in SQL: every run of the installation was read and
@@ -269,7 +273,7 @@ def batch_snapshot(service):
             j
             for j in fresh
             if us_location(j.location, j.country)
-            and (not cfg.early_career_only or j.career_level != "Experience unspecified")
+            and (hides_unspecified is False or j.career_level != "Experience unspecified")
         ]
         considered = set(batch.get("considered_ids", []))
         deferred = batch.get("deferred", {})
