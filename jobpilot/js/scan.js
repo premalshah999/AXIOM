@@ -1429,7 +1429,9 @@
     }
     const req = isReq(el, question) || (select2Native?.matches('select') && isReq(select2Native, question)) || uploadRequired || questionRequired || radioCaptionRequired || (group && group.some(x => x.required || x.getAttribute('aria-required') === 'true'));
     push(el, { label: question, type, required: req, options, value, widget, date_format: dateFormat, list_caption: listCaption, list_items: listItems, parts:dateParts, members:['radio','radiogroup'].includes(type) ? group : [],
-      valid: (el.validity ? el.validity.valid : true) && el.getAttribute('aria-invalid') !== 'true' });
+      // A required input that a select widget keeps empty while its pick shows beside it is not missing anything: Paylocity's Country showed
+      // "United States" and read "Value not accepted" on five runs (Commence, 2026-11-01).
+      valid: (el.validity ? (el.validity.valid || (el.validity.valueMissing && !el.value && !!value)) : true) && el.getAttribute('aria-invalid') !== 'true' });
   }
 
   // Some portals create the native file input only after a visible upload

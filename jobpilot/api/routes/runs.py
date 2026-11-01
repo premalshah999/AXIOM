@@ -36,6 +36,14 @@ def router(service) -> APIRouter:
         with db.session() as s:
             return {"runs": runs_of(s, job_id)}
 
+    @r.get("/api/problems")
+    def problems(days: int = 7, page: int = 1, size: int = 50, kind: str = ""):
+        """What went wrong recently, newest first: every attempt that ended without a sent application, and what the app does next."""
+        from ...problems import recent
+
+        with db.session() as s:
+            return recent(s, days, page, size, kind, runs_dir=config.data_dir / "runs")
+
     @r.get("/api/runs/{run_id}")
     def run_detail(run_id: str):
         with db.session() as s:

@@ -113,3 +113,21 @@ tr:hover .ap-act .ax-lead {
   background: var(--active);
   color: var(--ink);
 }
+
+/* What went wrong (problems.tsx): on a phone the sentences the hidden columns hold move under the role, one above the other. */
+.pb-list .ax-job-meta {
+  flex-direction: column;
+  align-items: flex-start;
+  white-space: normal;
+}
+.ax-row-links {
+  display: inline-flex;
+  gap: 12px;
+  white-space: nowrap;
+}
+@container ax-table (max-width: 599px) {
+  .ax-row-links {
+    flex-direction: column;
+    gap: 8px;
+  }
+}

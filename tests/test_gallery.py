@@ -52,7 +52,7 @@ async def run_scenario(service, scenario, mode="submit"):
         resume_id = resume.id
     service.db.set_setting("profile", {"name": "Alex Example", "email": "alex@example.test", "autonomous": True,
                                        "accept_all_application_terms": scenario.terms,
-                                       "facts": {"first_name": "Alex", "last_name": "Example", **scenario.facts}})
+                                       "facts": {"first_name": "Alex", "last_name": "Example", **scenario.facts}, **scenario.profile})
     service.db.set_setting("control", {"paused": False, "auto_submit": True})
 
     async def dispatch(_run_id):
@@ -94,6 +94,8 @@ async def test_the_engine_gets_through_the_trap(service, scenario):
             assert received[-1].get(name) == value, f"{name}: {received[-1].get(name)!r}\n{why}"
         if "resume" in received[-1]:
             assert received[-1].get("resume__bytes"), "The resume arrived empty\n" + why
+        for name in scenario.uploaded:
+            assert received[-1].get(name + "__bytes"), f"{name} arrived empty\n{why}"
     for path in scenario.never:
         assert path not in site.hits, f"{path} must never be touched\n{why}"
     assert outcome["model_calls"] == 0, why

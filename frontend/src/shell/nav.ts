@@ -72,6 +72,7 @@ export const ALL_ITEMS: NavItem[] = [
 export const PAGE_TABS: Partial<Record<View, TabItem[]>> = {
   ledger: [
     { id: "confirmed", label: "Applied" },
+    { id: "problems", label: "What went wrong" },
     { id: "failed", label: "Couldn't apply" },
     { id: "not", label: "Not applying" },
     { id: "archive", label: "Archive" },

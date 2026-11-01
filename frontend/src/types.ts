@@ -699,6 +699,24 @@ export type QueueItem = {
   kind: "front" | "request" | "auto" | "retry";
   wait: string;
 };
+// GET /api/problems: what went wrong recently (jobpilot/problems.py).
+export type Problem = {
+  run_id: string;
+  job_id: string;
+  company: string;
+  title: string;
+  url: string;
+  ats: string;
+  location: string;
+  state: string;
+  at: string;
+  what: string;
+  next: { kind: "retry" | "you" | "stopped" | "done"; sentence: string; at: string };
+  attempt: number;
+  attempts: number;
+  screenshot: boolean;
+};
+export type ProblemPage = { rows: Problem[]; total: number; page: number; pages: number; size: number; days: number };
 export type QueueRetry = {
   job_id: string;
   run_id: string;

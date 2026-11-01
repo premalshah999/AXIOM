@@ -14,7 +14,7 @@ from ..knowledge import question_text
 from ..knowledge import topic
 from ..schemas import Answer
 from .consent import ACCOMMODATION
-from .consent import ACKNOWLEDGEMENT
+from .consent import ACKNOWLEDGEMENT, agreement_choice
 from .consent import CONSENT_REQUEST
 from .consent import DATA_CONSENT
 from .consent import ACKNOWLEDGING_ONLY
@@ -160,6 +160,37 @@ def applicant_age(facts, today=None):
     if isinstance(age, int) or (isinstance(age, str) and age.strip().isdigit()):
         return int(age), "fact:age"
     return None, None
+
+
+# A form's own arithmetic check ("What is 10 times 10?", Arize's Greenhouse, 2026-11-01): the question is the whole label, and the answer is
+# the sum, not a fact about the applicant. Asked to the applicant it would stop a run for nothing.
+_ARITHMETIC = re.compile(
+    r"\W*(?P<asks>(?:(?:please |kindly )?(?:solve|calculate|compute|answer)\W+)?(?:(?:what|how much)(?: is|'s| does)?\s+)?)"
+    r"(?:(?P<word>the sum of|the product of)\s+)?(?P<a>\d{1,4})\s*(?P<op>times|multiplied by|plus|minus|divided by|and|[x×*+\-–/÷])\s*(?P<b>\d{1,4})"
+    r"(?:\s+equal)?\s*(?P<equals>=\s*)?\??\W*",
+    re.I,
+)
+
+
+def arithmetic_answer(label):
+    """The answer to a label that is nothing but a small sum, as text, else None."""
+    found = _ARITHMETIC.fullmatch(str(label or "").strip())
+    if not found or not (found["asks"] or found["equals"]):  # "2024 - 2026" is a date range; only a question or a "=" asks for a sum.
+        return None
+    a, b, op, word = int(found["a"]), int(found["b"]), found["op"].casefold(), (found["word"] or "").casefold()
+    if op == "and":  # Only "the sum of 3 and 4": a bare "3 and 4" is not a sum.
+        op = {"the sum of": "+", "the product of": "*"}.get(word, "")
+    elif word:
+        return None
+    if op in {"times", "multiplied by", "x", "×", "*"}:
+        return str(a * b)
+    if op in {"plus", "+"}:
+        return str(a + b)
+    if op in {"minus", "-", "–"}:
+        return str(a - b)
+    if op in {"divided by", "/", "÷"} and b and a % b == 0:
+        return str(a // b)
+    return None
 
 
 class LocalRulesMixin:
@@ -354,6 +385,8 @@ class LocalRulesMixin:
             )
             if any(pattern.search(f["label"]) for pattern in patterns.values()):
                 return None  # Missing row data is not borrowed from a different entry or an ambiguous review.
+        if (sum_answer := arithmetic_answer(f["label"])) is not None and (answer := self._ans(f, sum_answer, ["policy:general_knowledge"], "The form's own arithmetic check")):
+            return answer
         related = f.get("related_question", {})
         # "If yes, ...", "(a) If the answer is Yes, ...", "If you answered yes to the question above, ..."
         condition = re.match(
@@ -383,7 +416,8 @@ class LocalRulesMixin:
                 )
                 if inactive:
                     asked = ["N/A"] if re.search(r"\b(?:list|enter|write|put) n a\b", label) else []
-                    for value in [*asked, "Not applicable", "N/A", "None"]:
+                    # "NA" is a menu's own spelling: ALTEN's "If yes, please enter visa type" offered H1B, TN, F1 ... OTHER, NA (2026-11-01).
+                    for value in [*asked, "Not applicable", "N/A", "NA", "None"]:
                         if answer := self._ans(f, value, parent.evidence_ids):
                             return answer
         if re.search(r"are you applying for (?:a |an )?(?:full.time|internship|co.op)", label):
@@ -501,6 +535,9 @@ class LocalRulesMixin:
                     None,
                 )
             if value and (answer := self._ans(f, value, ["policy:consent"])):
+                return answer
+        if p.accept_all_application_terms and not MARKETING.search(f["label"]) and (agreed := agreement_choice(f["label"], options)):
+            if answer := self._ans(f, agreed, ["policy:consent"], "The applicant accepts application terms; this choice only accepts them"):
                 return answer
         if (instructed := INSTRUCTED_OPTION.search(f["label"])) and p.accept_all_application_terms:
             wanted = normalize(instructed["option"])

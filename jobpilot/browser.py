@@ -384,6 +384,15 @@ async def avature_redirect_kind(url):
     return ""
 
 
+ASHBY_POSTING = re.compile(r"^(https://jobs\.ashbyhq\.com/[^/?#]+/[0-9a-f-]{36})(?:/application)?/?(?:[?#].*)?$", re.I)
+
+
+def ashby_embed_url(url):
+    """The address of the application form an employer's own site embeds, for an Ashby posting's address not already asking for it."""
+    found = ASHBY_POSTING.match(url or "")
+    return f"{found[1]}/application?embed=js" if found and "embed=" not in url else ""
+
+
 async def posting_gone(url, company=""):
     """Why a Greenhouse, Lever, Workable or SmartRecruiters posting is gone, from the platform's public jobs API (an
     Oracle posting, from its own link), or ''.
@@ -1515,6 +1524,14 @@ class BrowserEngine:
                         raise
                     self.emit("browser_retry", "Retrying the job page after a connection interruption")
                     await asyncio.sleep(1)
+            if landing_response is not None and landing_response.status == 404 and (embedded := ashby_embed_url(page.url)):
+                # An employer that turned off its Ashby board keeps its jobs on its own career site, in Ashby's embedded form: its board
+                # API lists the posting, the board's page answers 404, and ?embed=js is the form its site shows. Eleven runs at one employer
+                # read "No observed action advanced the application" on a "Page not found" (2026-11-01). A posting truly gone says
+                # "Job not found" there too, and closes.
+                landing_response = await self.open_application_route(page, embedded, saved_state)
+                entry_url = self.application_entry_url = embedded
+                self.emit("ats_handoff", "The employer's Ashby board is off; opened the form its own site embeds")
             if not reopened_route and (kind := unavailable_posting_response(landing_response)):
                 self.result = {"state": "closed", "reason": UNAVAILABLE_POSTING[kind]}
                 return self.result

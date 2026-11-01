@@ -649,7 +649,10 @@ ENTRY = re.compile(
 )
 # A sign-in or code field. "password" is a word: "Why 1Password?" (1Password's own question, Ashby 2026-10-27) was
 # taken for a sign-in field, never answered, and every run stopped as "Employer sign-in must complete".
-AUTH = re.compile(r"\bpasswords?\b|verification code|one.time|authentication code|security code", re.IGNORECASE)
+# A field that asks for a credential says so in a few words. "Are you a current employee? (If you are, you MUST apply using your username
+# and password via the Jobs Hub)" is a Yes/No question: read as a credential it was never answered, every write was refused as "missing", and
+# the required question stopped three runs (Brown University Health's Workday, 2026-11-01).
+AUTH = re.compile(r"^(?=.{0,120}$).*?(?:\bpasswords?\b|verification code|one.time|authentication code|security code)", re.IGNORECASE | re.DOTALL)
 BACK_STEP = re.compile(r"^(?:back|previous|go back)(?: step)?$", re.I)
 RESUME = re.compile(r"r[eé]sum[eé]|cv\b|curriculum", re.IGNORECASE)
 # What a last step says about itself. The page's own furniture ("Application FAQs", "Privacy Policy") says none of it.
@@ -722,6 +725,10 @@ GENERIC_UPLOAD = re.compile(
 PHOTO_UPLOAD = re.compile(r"photo|picture|profilbild|\bfoto|avatar|\bimage\b|\bbild\b", re.IGNORECASE)
 NOT_RESUME = re.compile(
     r"cover letter|transcript|portfolio|writing sample|certificat|reference", re.IGNORECASE
+)
+STREET_ADDRESS = re.compile(r"^\W*(?:street )?address(?: line)?(?: ?1| one)?\b|^\W*street\b", re.IGNORECASE)
+WORK_DOCUMENT = re.compile(
+    r"\bbest work\b|\bportfolio\b|\bwork samples?\b|\bsamples? of (?:your |my )?work\b|\bproject (?:samples?|examples?)\b", re.IGNORECASE
 )
 # Optional fields worth one model call; other optional unknowns are left blank.
 USEFUL_OPTIONAL = re.compile(
@@ -1350,6 +1357,26 @@ SURVEY_DONE = re.compile(
     r"your (?:wotc )?control number is",
     re.I,
 )
+# A finished questionnaire's own way out. Synergi's last page says thank you and shows one "Next": a link to the return address
+# that tells the application the survey is done. Closing the tab there left Workday asking "You must complete the assessment test"
+# after eight finished surveys (Smithfield 2026-10-31).
+SURVEY_ONWARD = re.compile(
+    r"\s*(?:next|continue|finish|done|proceed|ok(?:ay)?|return\b.{0,30}|(?:go )?back to\b.{0,30}|close(?: this)?(?: window| tab)?)\W*", re.I
+)
+RESUME_GATE_JS = r"""() => {
+  const shown = e => { const r = e.getBoundingClientRect(), c = getComputedStyle(e); return r.width > 0 && r.height > 0 && c.visibility !== 'hidden' && c.display !== 'none'; };
+  for (const d of document.querySelectorAll('[role=dialog],[aria-modal=true],.modal')) {
+    if (!shown(d)) continue;
+    const file = d.querySelector('input[type=file]');
+    if (!file) continue;
+    if ([...d.querySelectorAll('input,select,textarea')].some(i => i.type !== 'file' && i.type !== 'hidden' && shown(i))) continue;
+    const buttons = [...d.querySelectorAll('button,a,[role=button]')].filter(shown);
+    if (buttons.length === 1 && /\b(?:upload|select|attach|choose|add)\b.*\b(?:resume|r[eé]sum[eé]|cv)\b/i.test(buttons[0].textContent)) return file;
+  }
+  return null;
+}"""
+# How long a finished questionnaire gets to close or leave by itself: "you will be redirected in 5 seconds".
+SURVEY_LEAVE_SECONDS = 8
 LAUNCHER = (
     r"\s*(?:take|start|complete|begin)(?: the)? (?:(?:tax credit|wotc|work opportunity tax credit)"
     # Workday's step button says only "Take Assessment" (Tyson Foods' TaxCreditCo survey tab, 2026-10-24).
@@ -1700,6 +1727,60 @@ class FormSession:
         application = detect("https://" + origin + "/").id
         return custom_like(application) or detect(url).id != application
 
+    async def type_street_address(self, el, value):
+        """A street address box only suggests: Paylocity's Address Line 1 lists other streets and keeps what is typed (Commence, CleanSlate
+        2026-11-01, where "No matching option" stopped the page). A person types their address and carries on. True when the box kept it; a box
+        that empties unless a row is picked goes on to the normal search."""
+        from .ats import detect
+
+        # Oracle's and iCIMS's address searches fill the rest of the block from the row picked, and they work: they keep the normal search.
+        if detect(self.page.url).id in {"oracle", "icims"}:
+            return False
+        try:
+            if not await el.evaluate("e => ['INPUT','TEXTAREA'].includes(e.tagName) && !e.readOnly && !e.disabled"):
+                return False
+            await el.fill("")
+            await el.press_sequentially(str(value), delay=12, timeout=4000)
+            await el.press("Escape", timeout=1000)
+            await asyncio.sleep(0.2)
+            return normalize(await el.input_value(timeout=1000)) == normalize(str(value))
+        except (PlaywrightError, ValueError):
+            return False
+
+    async def resume_gate(self):
+        """A pop-up that blocks the form until a resume is given, with one Upload button and no way to close it: Paylocity's "Apply with
+        resume" over CleanSlate's form (2026-11-01). The button opens the computer's file picker, which a click cannot answer, so its click
+        "changed nothing" and four runs stopped on "Only an observed dismiss control can close a dialog". A person picks their resume."""
+        try:
+            handle = await self.page.evaluate_handle(RESUME_GATE_JS)
+            target = handle.as_element()
+            if not target or not Path(self.resume_path).exists():
+                return False
+            await target.set_input_files(str(self.resume_path))
+        except (PlaywrightError, TypeError):
+            return False
+        self.emit("resume_gate", "Gave the resume to the pop-up that asked for it")
+        await self.settle(timeout=8)
+        return True
+
+    async def survey_leaves(self, seconds=None):
+        """A finished questionnaire can still be telling the application: give it a moment to close or leave by itself."""
+        page, url = self.page, self.page.url
+        deadline = time.monotonic() + (SURVEY_LEAVE_SECONDS if seconds is None else seconds)
+        while time.monotonic() < deadline:
+            if page.is_closed() or page.url != url:
+                return True
+            await asyncio.sleep(0.25)
+        return False
+
+    def assessment_tab_returned(self):
+        """The launched survey's tab now shows the application's own host: its last link was the way back."""
+        origin = getattr(self, "assessment_origin", "")
+        try:
+            return bool(origin) and (urlsplit(self.page.url).hostname or "") == origin
+        except Exception:
+            return False
+
     async def return_from_questionnaire(self):
         """Back to the application once the questionnaire is finished: its tab, or the address it replaced."""
         if getattr(self, "openers", None):
@@ -1707,6 +1788,7 @@ class FormSession:
         url = getattr(self, "assessment_return", "")
         if not url or not self.on_questionnaire():
             return False
+        self.survey_finished = True
         await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
         self.emit("survey_returned", "Returned to the application after the tax-credit questionnaire")
         await self.settle(timeout=8)
@@ -1723,6 +1805,7 @@ class FormSession:
             return False
         survey = self.page
         self.page = openers.pop()
+        self.survey_finished = True
         if not survey.is_closed():
             try:
                 await survey.close()
@@ -1857,6 +1940,7 @@ class FormSession:
                     getattr(self, kind)[item["id"]] = item
             try:
                 frame_options = (await widgets.visible_options(frame))[:150]
+                self.remember_options(frame_options)
                 for option in frame_options:
                     if owner := option.get("owner_dom_id"):
                         owner_id = f"f{n}-{data['document_id']}-{owner}"
@@ -2115,6 +2199,7 @@ class FormSession:
             if current["type"] in {"select", "select-multiple"}
             else await widgets.wait_options(frame, await widgets._popup_scope(el), timeout=1, owner=el)
         )
+        self.remember_options(options)
         option_count = len(options)
         if query:
             options = [o for o in options if normalize(query) in normalize(o["text"])]
@@ -2138,6 +2223,17 @@ class FormSession:
             "more_options": more,
             "progress_fingerprint": obs["progress_fingerprint"],
         }
+
+    def remember_options(self, options):
+        """What each option id said when it was read. A react-select builds new elements each time its menu opens, so the id the model
+        read a moment ago is gone though the option is still there: "F1" was refused as stale three times with F1 on the screen (ALTEN's
+        Greenhouse form, 2026-11-01; 245 runs hit the same refusal on other menus)."""
+        words = self.__dict__.setdefault("option_words", {})
+        if len(words) > 4000:
+            words.clear()
+        for option in options:
+            if option.get("id") and option.get("text"):
+                words[option["id"]] = option["text"]
 
     async def native_options(self, field):
         """Native options need no popup; identities bind owner, index and content."""
@@ -2226,6 +2322,10 @@ class FormSession:
                         await widgets.open_owned_picker(frame, el, field["type"])
                         options = await widgets.visible_options(frame, await widgets._popup_scope(el))
                 option = next((o for o in options if o["id"] == option_id and not o["disabled"]), None)
+                if not option and (said := getattr(self, "option_words", {}).get(option_id)):
+                    # The same words in the menu this control has open now: the choice the model made, on a re-rendered menu.
+                    same = [o for o in options if o["text"] == said and not o["disabled"]]
+                    option = same[0] if len(same) == 1 else None
                 decided = None
                 # ADP's sdf-select lists its items in the host's own children and commits through its own driver
                 # (fill): the open pane read above is not its catalog, so a menu that closed or re-rendered left every
@@ -3124,6 +3224,14 @@ class FormSession:
                 # nothing on Lyft's Greenhouse form, and the refill cleared a choice already made (2026-10-25). The city
                 # is searched too, and the address picks its own state's result.
                 search_queries = [*search_queries, city]
+            country = getattr(getattr(getattr(self.resolver, "profile", None), "address", None), "country", "") or ""
+            if country and self.location_resolver(field) and normalize(country) != normalize(value):
+                # Some location boxes list countries only: "Location, Country you're currently residing in" answered "No results" for the
+                # city on three of ElevenLabs' Ashby forms and the value stayed unaccepted (2026-11-01). A person types the country.
+                # Its short name too ("United States" for "United States of America"): each search is one request to the employer.
+                whole = normalize(country)
+                short = sorted((a for a in widgets._alias_group(country) if a != whole and len(a) >= 4 and whole.startswith(a)), key=len, reverse=True)[:1]
+                search_queries = [*search_queries, *short, country]
             rules = getattr(self.resolver, "answer_rules", None)
             fallback = (getattr(rules, "major_fallback", "") or "").strip()
             major_pick = None
@@ -3160,8 +3268,9 @@ class FormSession:
                     def degree_pick(texts):
                         return first_matching(texts, DEGREE_FALLBACK[level])
             multiselect = field.get("widget") in {"spl-multiselect", "oracle-multiselect", "select2-multiselect"}
+            typed_address = STREET_ADDRESS.search(field["label"]) and not multiselect and await self.type_street_address(el, value)
             try:
-                committed = await (widgets.multi_combobox if multiselect else widgets.combobox)(
+                committed = str(value) if typed_address else await (widgets.multi_combobox if multiselect else widgets.combobox)(
                     frame,
                     el,
                     value,
@@ -3528,6 +3637,7 @@ class FormSession:
     def location_resolver(self, field):
         """For a location search box, pick the result matching the applicant's address."""
         from .answers import CONTACT, address_location_option
+        from .answers.contact import address_country_option
 
         if not self.resolver or normalize(field.get("label", "")) not in CONTACT["location"] | {
             "city",
@@ -3535,7 +3645,7 @@ class FormSession:
         }:
             return None
         address = self.resolver.profile.address
-        return lambda texts: address_location_option(texts, address)
+        return lambda texts: address_location_option(texts, address) or address_country_option(texts, address)
 
     async def discover_options(self, field):
         """Open custom selects once to read their real choices before the resolver decides."""
@@ -3757,6 +3867,7 @@ class FormSession:
             self.document_uploads[self.field_key(field)] = photo.name
             attached = True
             self.emit("document_upload", "Attached the profile photo", {"field": field["label"]})
+        resume_input = {f["id"] for f in self.resume_fields()}
         for field in list(self.fields.values()):
             if (
                 field["type"] != "file"
@@ -3764,10 +3875,16 @@ class FormSession:
                 or not field["required"]
                 or field["value"]
                 or self.field_key(field) in self.document_uploads
-                or (RESUME.search(field["label"]) and not NOT_RESUME.search(field["label"]))
+                or field["id"] in resume_input
+                or (RESUME.search(field["label"]) and not NOT_RESUME.search(field["label"]) and not WORK_DOCUMENT.search(field["label"]))
             ):
                 continue
             path = document_for(resolver.db, resolver.config.data_dir, field["label"], resolver.employer)
+            if path is None and WORK_DOCUMENT.search(field["label"]) and Path(self.resume_path).exists():
+                # A required upload for the applicant's work, beside the resume: "Upload a link to your best work" (Powertown's Ashby form, eight
+                # runs, 2026-11-01) and "Portfolio - File upload" (Fab2). The resume is what a person without a separate portfolio sends, and it
+                # states nothing that isn't so; a click on its button only opens a file picker no one can answer.
+                path = Path(self.resume_path)
             if path is None:
                 continue
             try:
@@ -6105,6 +6222,7 @@ class FormSession:
         ):
             raise ValueError("This may submit the application; use submit_application")
         opener = self.page
+        on_survey = self.on_questionnaire()
         opened = []
 
         def on_popup(page):
@@ -6239,7 +6357,16 @@ class FormSession:
             getattr(self, "openers", None)
             and not after["fields"]
             and SURVEY_DONE.search(after.get("text", ""))
+            and not any(SURVEY_ONWARD.fullmatch(b["label"]) for b in after["controls"])
         ):
+            # Its thank-you page with no way on: it closes or leaves by itself, or a person closes it.
+            await self.survey_leaves()
+            if getattr(self, "openers", None):
+                await self.return_to_opener()
+            await self.settle(timeout=8)
+            after = await self.scan()
+        elif on_survey and getattr(self, "openers", None) and not self.page.is_closed() and self.assessment_tab_returned():
+            # Its last link led back to the application inside the survey's own tab: the opener is the application.
             await self.return_to_opener()
             await self.settle(timeout=8)
             after = await self.scan()
@@ -6250,6 +6377,7 @@ class FormSession:
             and not any(re.search(r"\b(?:take|start|begin|next|continue)\b", b["label"], re.I) for b in after["controls"])
         ):
             # The questionnaire replaced the application page and ended on its own thank-you page.
+            await self.survey_leaves()
             await self.return_from_questionnaire()
             after = await self.scan()
         education_saved(education_context, after)

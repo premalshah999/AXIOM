@@ -227,12 +227,17 @@ def placeholder_option(value):
 CATALOG_FALLBACK = re.compile(r"^\W*(?:other|none of the above)\b|\bnot (?:listed|in (?:the |this )?list)\b", re.I)
 
 
+# A saved menu's way of saying nothing. "Not Answered", chosen once from a county's menu labelled "Other", was typed into Workday's optional
+# "Other" website box and refused as an invalid URL on three runs (Memorial Sloan Kettering, 2026-11-01). A person leaves that box empty.
+NO_ANSWER = re.compile(r"not answered|unanswered|no response|no answer|not provided|not specified|not selected|none selected")
+
+
 def foreign_fallback(answer, saved_options, options):
     """A fallback chosen from a saved catalog, asked by a field whose options do not include it (or that has none)."""
     return (
         bool(saved_options)
         and isinstance(answer, str)
-        and bool(CATALOG_FALLBACK.search(answer))
+        and bool(CATALOG_FALLBACK.search(answer) or NO_ANSWER.fullmatch(norm(answer)))
         and not any(norm(o) == norm(answer) for o in options or [])
     )
 
@@ -347,6 +352,9 @@ def month_span(label):
     return None
 
 
+NOT_APPLICABLE = {"not applicable", "n a", "na", "does not apply"}
+
+
 def best_option(options, value):
     """Choose one observed option for a desired value. Ambiguity returns None, never a guess."""
     options = [o for o in options if not placeholder_option(o["text"] if isinstance(o, dict) else o)]
@@ -361,6 +369,9 @@ def best_option(options, value):
         return options[exact[0]]
     if visa := visa_option(value, options):
         return visa
+    # "Not applicable", "N/A" and "NA" are one answer in a menu's own spelling (ALTEN's "If yes, please enter visa type", 2026-11-01).
+    if want in NOT_APPLICABLE and (spelled := [i for i, x in enumerate(labels) if norm(x) in NOT_APPLICABLE]):
+        return options[spelled[0]] if len(spelled) == 1 else None
     # A month number in a menu of month names: Oracle's Start Date Month grid offers "January" ... "December", and an
     # education start of 2024-08 asked for "8" four times without a match (2026-10-25).
     if re.fullmatch(r"0?[1-9]|1[0-2]", want) and sum(norm(x) in MONTH_NUMBERS for x in labels) >= 6:
@@ -3342,6 +3353,9 @@ async def combobox(
             const chosen=root?.querySelectorAll('[class*=__single-value]');
             if(root?.querySelectorAll('[role=combobox]').length===1 && chosen?.length===1
                 && chosen[0].getClientRects().length)return chosen[0].textContent.trim();
+            // Paylocity's select shows its pick in a box beside its input, which it empties (Commence, 2026-11-01): the pick read as not taken.
+            const shown=e.closest('[aria-haspopup=listbox]')?.querySelectorAll('[class*=input-select-input-single-value]');
+            if(shown?.length===1 && shown[0].textContent.trim() && !e.value)return shown[0].textContent.trim();
             return e.value || '';
         }""")
             if editable
