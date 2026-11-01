@@ -184,7 +184,7 @@ def test_pipeline_search_and_a_page_past_the_end(client, service):
     seed_history(service)
     found = client.get("/api/jobs", params={"q": "engineer 1103"}).json()
     assert [row["job"]["id"] for row in found["rows"]] == ["job01103"]
-    late = client.get("/api/jobs", params={"group": "needs", "page": 40}).json()
+    late = client.get("/api/jobs", params={"group": "paused", "page": 40}).json()
     assert late["page"] == 1 and late["total"] == 1 and len(late["rows"]) == 1
     assert client.get("/api/jobs", params={"group": "everything"}).status_code == 422
 
@@ -218,7 +218,7 @@ def test_the_server_groups_states_as_the_dashboard_does():
     expected = {s: g for s, g in ts_groups().items() if not s.startswith("pending:")}
     # "reserved" is the owner's hold over any unstarted state of a reserved employer's job (pipeline.classified).
     run_states = {
-        s: g for s, g in expected.items() if not s.startswith("job:") and s not in {"pausing", "resumed", "reserved"}
+        s: g for s, g in expected.items() if not s.startswith("job:") and s not in {"pausing", "resumed", "reserved", "gave_up"}
     }
     assert expected["reserved"] == "reserved"
     server = {state: group for group, states in pipeline.RUN_GROUPS.items() for state in states}

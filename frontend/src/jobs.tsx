@@ -1,77 +1,75 @@
 import { Briefcase, Plus, SearchX } from "lucide-react";
 import { useEffect, useMemo } from "react";
+import { api } from "./api";
 import { useWorkspace } from "./context";
-import { useDraft, useNow } from "./hooks";
+import { useDraft, useNow, usePoll } from "./hooks";
 import { useSelection } from "./bulk";
 import { DiscoveredJobs } from "./jobboard";
 import { OPEN_JOB_LINK } from "./jobintake";
 import { RowActions } from "./jobactions";
-import { GROUPS, type Group, type JobRow } from "./model";
+import { type Group, type JobRow, type Word } from "./model";
 import { PipelineBulk } from "./pipelinebulk";
 import { Pagination } from "./pagination";
 import { usePipelinePage } from "./pipeline";
-import { ReservedJobs } from "./reserved";
 import { PAGE_TABS } from "./shell/nav";
 import { TopActions, TopLine } from "./shell/Shell";
+import type { Startable } from "./types";
 import { ago, jobWords } from "./format";
-import { Button, Empty, RouteTabs, Table, Tooltip, type Column } from "./ui/index";
-import { Chips, JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
+import { Button, Empty, RouteTabs, Table, type Column } from "./ui/index";
+import { JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
 
-// Three named views of one question, "what is happening with this job?": Started (everything AXIOM has started or queued),
-// Discovered (found, not applied to yet) and Reserved (employers that wait for your approval). The tab ids stay as they were, so
-// every old address still works; "pipeline" is engineer's language and no one sees it.
+// One page, five words. Each tab is one word of the vocabulary (jobpilot/vocabulary.py) and its number opens exactly that many rows:
+// To apply (found, and the batch can start it), Applying (running, queued, or stopped and the app retries it itself), Needs you,
+// Couldn't apply (the app gave up) and Not applying (closed, removed, not eligible, applied elsewhere, paused, or waiting for your
+// approval). Applied is Applications. Old tab ids still open: "pipeline" is Applying, "reserved" is Not applying.
+const WORD_OF_TAB: Record<string, string> = { pipeline: "applying", applying: "applying", needs: "needs", failed: "failed", not: "not", reserved: "not" };
+
 export function JobsView() {
-  const { route, counts: all } = useWorkspace();
+  const { route, counts: all, version } = useWorkspace();
   const tabs = PAGE_TABS.jobs!;
-  const tab = tabs.some((t) => t.id === route.tab) ? route.tab! : "pipeline";
+  const tab = route.tab && (tabs.some((t) => t.id === route.tab) || WORD_OF_TAB[route.tab]) ? route.tab : "discovered";
+  const shown = tab === "pipeline" ? "applying" : tab === "reserved" ? "not" : tab;
+  // How many Ready jobs can start: the same number Overview's sentence and the To apply list name (jobpilot/startable.py).
+  const ready = usePoll<Startable>((signal) => api("/startable", "GET", undefined, signal), 30000, [version]);
+  const words = all.words;
   const counted = tabs.map((t) => ({
     ...t,
-    // Server counts over every job. Discovered is the jobs not applied to yet, the same number its page shows.
-    count: t.id === "pipeline" ? all.pipeline : t.id === "discovered" ? all.discovered : all.groups.reserved,
+    count: t.id === "discovered" ? ready.data?.startable : t.id === "needs" ? undefined : words?.[t.id as keyof NonNullable<typeof words>],
   }));
   return (
     <div className="ax-page ax-page-fill">
       <TopActions>
-        <Button variant={tab === "pipeline" ? "primary" : "secondary"} icon={<Plus size={15} aria-hidden="true" />} onClick={() => window.dispatchEvent(new Event(OPEN_JOB_LINK))}>
+        <Button variant="secondary" icon={<Plus size={15} aria-hidden="true" />} onClick={() => window.dispatchEvent(new Event(OPEN_JOB_LINK))}>
           Add job
         </Button>
       </TopActions>
-      <RouteTabs view="jobs" tabs={counted} label="Job lists" current={tab} />
-      {tab === "pipeline" && <Started />}
-      {tab === "discovered" && <DiscoveredJobs />}
-      {tab === "reserved" && <ReservedJobs />}
+      <RouteTabs view="jobs" tabs={counted} label="Jobs" current={shown} />
+      {shown === "discovered" ? <DiscoveredJobs /> : <WordList word={WORD_OF_TAB[shown] ?? "applying"} />}
     </div>
   );
 }
 
-// Jobs › Started: applications that have started or will start (the queue, applying, needs you, repairing, done, stopped). Jobs
-// found but never applied to are in Discovered, which is where they are selected and applied to (owner, 2026-10-23: "so confusing
-// for the job pipeline part, like the pipeline and the discovery").
-function Started() {
-  const { route, go, counts: all, openJob } = useWorkspace();
+const SAYS: Record<string, { line: string; empty: string; hint: string }> = {
+  applying: { line: "Running now, waiting for a worker, or stopped on a problem the app will retry by itself.", empty: "Nothing is being applied to", hint: "Applications appear here as they start." },
+  needs: { line: "Only you can answer these. Answer them one by one on the Needs you page.", empty: "Nothing needs you", hint: "When a form asks something only you know, the job appears here." },
+  failed: { line: "The app has given up on these. Each says why.", empty: "Nothing has failed", hint: "A job the app will retry itself is under Applying, not here." },
+  not: { line: "Closed, removed, not eligible, already applied elsewhere, paused, or waiting for your approval.", empty: "Nothing here", hint: "Jobs that will not be applied to appear here, each with the reason." },
+};
+
+function WordList({ word }: { word: string }) {
+  const { route, go, openJob } = useWorkspace();
   const [query, setQuery] = useDraft("pipeline-query", "");
-  // A number elsewhere can open this list already searched (Overview's platforms).
   useEffect(() => {
     if (route.q) setQuery(route.q);
   }, [route.q, setQuery]);
-  const filter = (route.filter || "all") as Group | "all";
-  const list = usePipelinePage(filter, query);
-  // Exact group counts read together with the rows on screen, so a filter and its list always agree.
-  const counts = list.counts?.groups || all.groups;
+  const list = usePipelinePage(word as Word, query);
   const q = query.trim();
-  const label = GROUPS.find((g) => g.id === filter)?.label || "All";
-  // Tick rows, a page or every match, then act on them together (owner 2026-10-28: "no checkboxes for select all").
+  const say = SAYS[word] ?? SAYS.applying!;
   const selection = useSelection(200);
-  useEffect(() => selection.clear(), [filter, query]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => selection.clear(), [word, query]); // eslint-disable-line react-hooks/exhaustive-deps
   const now = useNow(30000);
-  const chips = GROUPS.filter((c) => c.id === "all" || counts[c.id] || filter === c.id).map((c) => ({
-    id: c.id,
-    label: c.label,
-    count: counts[c.id] || 0,
-  }));
 
   const columns: Column<JobRow>[] = useMemo(() => {
-    const why = (r: JobRow) => (r.state === "pending:waiting" && r.request?.reason ? r.request.reason : r.state !== "confirmed" ? r.run?.reason : "") || "";
     const when = (r: JobRow) => (
       <time dateTime={r.updated} title={new Date(r.updated).toLocaleString()}>
         {ago(r.updated, now)}
@@ -90,44 +88,38 @@ function Started() {
             meta={
               <>
                 <StatusPill state={r.state} />
-                {when(r)}
+                {r.sentence && <span>{r.sentence}</span>}
               </>
             }
           />
         ),
       },
-      { key: "where", header: "Location", hideBelow: 860, width: 170, truncate: true, cell: (r) => <Note>{r.job.location}</Note> },
-      {
-        key: "status",
-        header: "Status",
-        hideBelow: 600,
-        cell: (r) => (
-          <Tooltip label={why(r)}>
-            <StatusPill state={r.state} />
-          </Tooltip>
-        ),
-      },
-      { key: "updated", header: "Updated", hideBelow: 600, cell: when },
+      { key: "why", header: "What is happening", hideBelow: 600, truncate: true, width: 380, cell: (r) => <Note title={r.sentence}>{r.sentence}</Note> },
+      { key: "updated", header: "Updated", hideBelow: 860, cell: when },
       { key: "act", header: <span className="sr-only">Actions</span>, width: "1%", pin: true, cell: (r) => <RowActions row={r} /> },
     ];
   }, [now, openJob]);
 
   return (
     <>
-      <TopLine>Every job AXIOM has started or queued.</TopLine>
+      <TopLine>
+        {say.line}
+        {word === "needs" && (
+          <>
+            {" "}
+            <button type="button" className="ax-link" onClick={() => go({ view: "needs" })}>
+              Open Needs you
+            </button>
+          </>
+        )}
+      </TopLine>
       <div className="ax-toolbar">
-        <SearchBox value={query} onChange={setQuery} label="Search jobs" placeholder="Company, role or location" />
-        <Chips
-          items={chips}
-          value={filter}
-          label="Filter by status"
-          onChange={(id) => go({ view: "jobs", tab: "pipeline", filter: id === "all" ? undefined : id })}
-        />
+        <SearchBox value={query} onChange={setQuery} label="Search jobs" placeholder="Company or role" />
       </div>
       {list.error && list.loaded && <LoadError error={list.error} retry={list.refresh} />}
       <Table
         fill
-        label="Started jobs"
+        label="Jobs"
         columns={columns}
         rows={list.rows}
         rowKey={(r) => r.job.id}
@@ -139,35 +131,16 @@ function Started() {
         error={list.error && !list.loaded ? <LoadError error={list.error} retry={list.refresh} /> : undefined}
         busy={list.loaded && !list.current}
         footer={list.paging.total > 0 ? <Pagination paging={list.paging} label="Job list pages" /> : undefined}
-        bulk={<PipelineBulk selection={selection} rows={list.rows} filter={filter} query={q} total={list.paging.total} />}
+        bulk={<PipelineBulk selection={selection} rows={list.rows} filter={word as Group} query={q} total={list.paging.total} />}
         empty={
           <Empty
             icon={q ? SearchX : Briefcase}
-            title={q ? "No jobs match this search" : filter === "all" ? "No jobs started yet" : `Nothing in “${label}” right now`}
-            hint={
-              q
-                ? "Try a company name, or clear the search."
-                : filter === "all"
-                  ? "Applications appear here as soon as they start: add a job link, pick from Discovered, or start a batch on Overview."
-                  : filter === "needs"
-                    ? "When a form asks something only you know, the job appears here."
-                    : "Jobs appear here as they reach this status."
-            }
-            action={
-              q ? (
-                <Button size="sm" onClick={() => setQuery("")}>
-                  Clear the search
-                </Button>
-              ) : filter === "all" ? (
-                <Button size="sm" onClick={() => go({ view: "jobs", tab: "discovered" })}>
-                  Open Discovered
-                </Button>
-              ) : undefined
-            }
+            title={q ? "No jobs match this search" : say.empty}
+            hint={q ? "Try a company name, or clear the search." : say.hint}
+            action={q ? <Button size="sm" onClick={() => setQuery("")}>Clear the search</Button> : undefined}
           />
         }
       />
     </>
   );
 }
-
