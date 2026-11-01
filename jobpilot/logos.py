@@ -285,20 +285,71 @@ async def _from_google(client, domain):
     return (got[0], ext) if ext else None
 
 
+PARKED = re.compile(r"for sale|buy this domain|domain (?:is )?(?:parked|available)|parked (?:domain|free)|godaddy|sedo\.com|hugedomains|dan\.com", re.I)
+
+
+def addresses(company, urls, descriptions=()):
+    """[(domain, guessed)]: the company's web addresses its postings vouch for. An ATS tenant name plus ".com" is a guess (a
+    parked domain shows its registrar's icon: "alarmcom.com" gave GoDaddy's heart on 2026-11-01); an address a posting lives on,
+    or names in its text, is not."""
+    found = {}
+    for url in urls:
+        if domain := domain_for(company, url):
+            host = (urlsplit(str(url)).hostname or "").lower()
+            found.setdefault(domain, bool(TENANT_IN_HOST.search(host) or TENANT_IN_PATH.search(host)))
+    for text in descriptions if not found else ():
+        if domain := domain_in(company, text):
+            found.setdefault(domain, False)
+    return sorted(found.items(), key=lambda item: item[1])  # Addresses a posting lives on first.
+
+
+async def _verified(client, domain, company):
+    """A guessed address is the company's only when its home page names the company in its title and is not a parked page."""
+    got = await _get(client, f"https://{domain}/", MAX_PAGE_BYTES, page=True)
+    if not got:
+        return False
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(got[0][:MAX_PAGE_BYTES], "html.parser")
+    names = [soup.title.get_text(" ") if soup.title else ""] + [
+        m.get("content", "") for m in soup.find_all("meta") if (m.get("property") or m.get("name")) in ("og:site_name", "og:title", "application-name")
+    ]
+    name = _squash(LEGAL.sub(" ", company))
+    # The domain's own spelling is not evidence: a for-sale page is titled with it.
+    titled = any(name in _squash(t.lower().replace(domain, "")) for t in names) if len(name) >= 3 else False
+    return titled and not PARKED.search(got[0][:20_000].decode("utf-8", "replace"))
+
+
 async def find(company, urls, descriptions=(), third_party=True):
     """(bytes, extension) for the company, or None. `urls` are the addresses of its postings, `descriptions` their texts.
-    Raises httpx errors when offline."""
-    domains = list(dict.fromkeys(d for u in urls if (d := domain_for(company, u))))
-    if not domains:
-        domains = list(dict.fromkeys(d for t in descriptions if (d := domain_in(company, t))))
+    Raises the network error when every source failed: being offline is not a verdict on the company."""
+    failure, answered = None, 0
     async with httpx.AsyncClient(timeout=6, follow_redirects=False, trust_env=False) as client:
+
+        async def attempt(step, *args):
+            nonlocal failure, answered
+            try:
+                result = await step(client, *args)
+                answered += 1
+                return result
+            except httpx.HTTPError as exc:
+                failure = exc
+
         for url in urls[:3]:  # A posting that has closed answers 404 or 410: the next one may still be open.
-            if found := await _from_page(client, url):
+            if found := await attempt(_from_page, url):
                 return found
-        for domain in domains[:2]:
-            if found := await _from_site(client, domain):
+        owned = []
+        for domain, guessed in addresses(company, urls, descriptions)[:3]:
+            if not guessed or await attempt(_verified, domain, company):
+                owned.append(domain)
+        for domain in owned[:2]:
+            if found := await attempt(_from_site, domain):
                 return found
-        return await _from_google(client, domains[0]) if domains and third_party else None
+        if owned and third_party and (found := await attempt(_from_google, owned[0])):
+            return found
+    if failure and not answered:
+        raise failure
+    return None
 
 
 def saved(data_dir, key):

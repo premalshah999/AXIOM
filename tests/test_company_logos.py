@@ -141,6 +141,7 @@ def net(monkeypatch):
 
 
 LOGO = "https://acme.wd5.myworkdayjobs.com/careers/assets/logo"
+HOME = b"<html><head><title>Acme | Careers</title></head><body>Hello</body></html>"
 POSTING = "https://acme.wd5.myworkdayjobs.com/careers/job/1"
 OG = f'<meta property="og:image" content="{LOGO}">'.encode()
 
@@ -153,18 +154,18 @@ async def test_the_employers_own_page_is_asked_first_and_nothing_else_when_it_ha
 
 async def test_a_wordmark_on_the_page_falls_back_to_the_companys_own_icon_then_to_google(net):
     own = "https://acme.com/apple-touch-icon.png"
-    n = net({POSTING: OG, LOGO: png(308, 100), "https://acme.com/": b"<html></html>", own: png(180, 180)})
+    n = net({POSTING: OG, LOGO: png(308, 100), "https://acme.com/": HOME, own: png(180, 180)})
     assert await logos.find("Acme", [POSTING]) == (png(180, 180), "png")
     assert not any("google.com" in url for url in n.asked)
-    n = net({POSTING: OG, LOGO: png(308, 100), logos.GOOGLE.format("acme.com"): png(64, 64)})
+    n = net({POSTING: OG, LOGO: png(308, 100), "https://acme.com/": HOME, logos.GOOGLE.format("acme.com"): png(64, 64)})
     assert await logos.find("Acme", [POSTING]) == (png(64, 64), "png")
 
 
 async def test_google_is_not_asked_when_the_setting_forbids_third_parties_and_a_small_google_icon_is_passed_over(net):
-    n = net({logos.GOOGLE.format("acme.com"): png(64, 64)})
+    n = net({"https://acme.com/": HOME, logos.GOOGLE.format("acme.com"): png(64, 64)})
     assert await logos.find("Acme", [POSTING], third_party=False) is None
     assert not any("google.com" in url for url in n.asked)
-    net({logos.GOOGLE.format("acme.com"): png(16, 16)})
+    net({"https://acme.com/": HOME, logos.GOOGLE.format("acme.com"): png(16, 16)})
     assert await logos.find("Acme", [POSTING]) is None
 
 
@@ -172,6 +173,35 @@ async def test_a_company_no_address_vouches_for_is_asked_nothing_but_its_own_pos
     n = net({"https://jobs.board.test/x": b"<html></html>"})
     assert await logos.find("Acme", ["https://jobs.board.test/x"]) is None
     assert n.asked == ["https://jobs.board.test/x"]
+
+
+@pytest.mark.parametrize(
+    "home",
+    [
+        b"<html><head><title>acme.com is for sale</title></head></html>",  # titled with the domain's own spelling only
+        b"<html><head><title>Acme</title></head><body>This domain is parked free, courtesy of GoDaddy</body></html>",
+        b"<html><head><title>Welcome</title></head></html>",  # does not name the company
+        None,  # does not answer
+    ],
+)
+async def test_a_guessed_address_that_is_parked_or_not_the_company_gets_no_icon_from_anyone(net, home):
+    # "alarmcom.com" is only the tenant name plus .com: GoDaddy's icon is not the company's (2026-11-01).
+    n = net({"https://acme.com/": home, logos.GOOGLE.format("acme.com"): png(64, 64), "https://acme.com/apple-touch-icon.png": png(180, 180)})
+    assert await logos.find("Acme", [POSTING]) is None
+    assert not any("google.com" in url or "apple-touch" in url for url in n.asked)
+
+
+async def test_an_address_a_posting_lives_on_needs_no_guess_checked(net):
+    n = net({"https://careers.acme.com/job/1": b"<html></html>", "https://acme.com/": b"", logos.GOOGLE.format("acme.com"): png(64, 64)})
+    assert await logos.find("Acme", ["https://careers.acme.com/job/1"]) == (png(64, 64), "png")
+
+
+async def test_every_source_failing_to_connect_is_an_error_but_one_answering_no_is_a_verdict(net):
+    net({POSTING: httpx.ConnectError("offline"), "https://acme.com/": httpx.ConnectError("offline")})
+    with pytest.raises(httpx.ConnectError):
+        await logos.find("Acme", [POSTING])
+    net({POSTING: httpx.ConnectError("slow page"), "https://acme.com/": HOME})
+    assert await logos.find("Acme", [POSTING]) is None
 
 
 async def test_a_closed_posting_leaves_the_next_one_to_answer(net):
@@ -209,7 +239,7 @@ async def test_a_company_with_no_logo_is_not_asked_again_soon(tmp_path, net):
 
 
 async def test_being_offline_is_remembered_as_nothing(tmp_path, net):
-    net({POSTING: httpx.ConnectError("offline")})
+    net({POSTING: httpx.ConnectError("offline"), "https://acme.com/": httpx.ConnectError("offline")})
     assert await logo(tmp_path, "Acme", [POSTING]) is None
     assert not (tmp_path / "logos" / "acme.none").exists()
     net({POSTING: OG, LOGO: PNG})
