@@ -170,6 +170,34 @@ PERSONAL_TEST = re.compile(
     r"\b(?:coding|technical|skills?) (?:test|assessment|challenge)\b",
     re.I,
 )
+# Where those words are not a test: a hiring process's stage list, a status label, a privacy notice naming the tests it may keep
+# (replayed over every saved page: "Stage 2: Technical Assessment", "Skills Assessment Sent": "Submitted", "psychometric tests that
+# you undertake ... applicable law"). The step is a test when the words sit in an instruction to the applicant, or it is a short page.
+NOT_A_TEST_CONTEXT = re.compile(
+    r"privacy|personal (?:information|data)|applicable law|\bconsent\b|\bstage \d|hiring process|interview process|"
+    r"recruitment process|\bfollow[- ]up|\bsent\b|under consideration|\bsubmitted\b|\bstatus(?:es)?\b|\bnotes? to\b",
+    re.I,
+)
+TEST_DIRECTIVE = re.compile(
+    r"\b(?:you (?:will|must|need to|are (?:required|asked|invited) to|have been (?:asked|invited))|please|take|complete|start|"
+    r"begin|minutes?|timed|instructions?)\b",
+    re.I,
+)
+SHORT_STEP = 3000
+
+
+def personal_test(text):
+    """Whether this step's text is itself a test of the applicant (and not a tax-credit questionnaire), not just a mention of one."""
+    text = text or ""
+    if TAX_CREDIT.search(text):
+        return False
+    for found in PERSONAL_TEST.finditer(text):
+        around = text[max(0, found.start() - 160) : found.end() + 160]
+        if not NOT_A_TEST_CONTEXT.search(around) and (TEST_DIRECTIVE.search(around) or len(text) <= SHORT_STEP):
+            return True
+    return False
+
+
 PERSONAL_TEST_REASON = "The employer requires a personal test (personality, aptitude or skills) that only you can take, so nothing was sent"
 ASSESSMENT_EXIT = re.compile(r"\blater\b|\bexit\b|\bcancel\b|\bquit\b|\bclose\b|\bwithout\b|\bdecline\b|\bdisagree\b", re.I)
 
@@ -1005,7 +1033,7 @@ class Adapter:
             if control.get("automation_id") == "inlineAssessmentButton":
                 # A step that names a test of the applicant themself (a coding or skills assessment) is left to them.
                 text = obs.get("text", "")
-                return None if PERSONAL_TEST.search(text) and not TAX_CREDIT.search(text) else control
+                return None if personal_test(text) else control
             if (
                 control.get("partner")  # Oracle's inline partner button, named by its block when it has no text
                 or re.fullmatch(LAUNCHER, label, re.I)
@@ -1056,7 +1084,7 @@ class Adapter:
                 "recovery_cause": "control_observation",
             }
         before = await self.form.scan()
-        if PERSONAL_TEST.search(before.get("text", "")) and not TAX_CREDIT.search(before.get("text", "")):
+        if personal_test(before.get("text", "")):
             return {"state": "closed", "reason": PERSONAL_TEST_REASON, "blocker_type": "personal_test"}
         # A survey that asks for a Social Security number closes under the owner's rule before anything on it is answered or asked of a model.
         from ..sensitive_ids import sensitive_matches, stop_if_sensitive
@@ -1892,7 +1920,7 @@ class Adapter:
             if ASSESSMENT_DEMAND.search(" ".join(str(e) for e in after.get("errors", []))):
                 if await self.launch_assessment(after, again=True):
                     return None
-                if PERSONAL_TEST.search(after.get("text", "")) and not TAX_CREDIT.search(after.get("text", "")):
+                if personal_test(after.get("text", "")):
                     return {"state": "closed", "reason": PERSONAL_TEST_REASON, "blocker_type": "personal_test"}
             # Server-side validation: answer what it flagged, then try once more.
             if after["errors"] or any(f["error"] for f in after["fields"]):
