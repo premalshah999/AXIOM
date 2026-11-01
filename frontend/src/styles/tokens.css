@@ -83,6 +83,8 @@
   --dot-plate: #3b3b36;
   --dot-lit: #ece9df;
   /* Employer monograms: quiet, one step off the panel, told apart by a muted hue. */
+  /* Company icons are drawn for a white page, in both themes. */
+  --logo-plate: #fff;
   --mono-ink: #ece9df;
   --mono-0: #3d4238;
   --mono-1: #46392f;

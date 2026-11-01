@@ -1442,7 +1442,7 @@ body:has(.ax-savebar) .ax-toasts {
   height: 100%;
   padding: 12%;
   object-fit: contain;
-  background: #fff;
+  background: var(--logo-plate);
   opacity: 0;
 }
 .ax-mono.has-logo > img {
