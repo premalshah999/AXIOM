@@ -19,6 +19,9 @@ from .tenants import sf_company
 # How long an employer's emailed temporary password is tried: Avature's expires ("Temporary password has expired" was
 # EA's login page on the run after the mail, 2026-10-29), and a stale one only refuses the sign-in.
 TEMPORARY_PASSWORD_SECONDS = 2700
+# How long a sign-in the employer refused is not typed again: a refused password stays refused, but the day's end
+# forgives a refusal that was the site's error.
+REJECTED_SECONDS = 24 * 3600
 
 
 class AccountStore:
@@ -148,6 +151,52 @@ class AccountStore:
             s.add(Setting(key=key, value={"credentials": self.service.mail.vault.seal(value)}))
             return value
 
+    def shared_peek(self):
+        """The stored shared password if one exists (the main password wins), never creating one."""
+        configured = self.service.config.application_password
+        if configured:
+            return configured
+        row = self.service.db.get_setting("application_credentials:" + hashlib.sha256(self.email.encode()).hexdigest())
+        try:
+            return self.service.mail.vault.open(row["credentials"]).get("password", "") if row else ""
+        except Exception:
+            return ""
+
+    def fallback(self, text, *, tried=(), maximum=None):
+        """A random password for an employer that refused the main one: it meets the rules the page states (`text`),
+        carries nothing of the applicant's name or address, and differs from every password in `tried`."""
+        from . import password_rules
+
+        local = self.email.split("@")[0]
+        rules = password_rules.read(text, avoid=[p for p in re.split(r"[^a-z]+", local.lower()) if len(p) >= 4],
+                                    fallback_maximum=maximum)
+        length = max(rules.minimum, min(rules.maximum, 16))
+        if length >= 12 and not rules.specials and rules.special:
+            # The app's own generated password shape, when it already meets what the page states.
+            candidate = self.generated(length)
+            if password_rules.meets(candidate, rules):  # random each time: it cannot be one already tried
+                return candidate
+        for _ in range(20):
+            password = password_rules.generate(rules)
+            if password not in tried:
+                return password
+        return password
+
+    def rejected(self, url):
+        """Fingerprints of passwords this employer refused at sign-in within the last day: [(fingerprint, epoch)]."""
+        out = []
+        for item in self.record(url).get("rejected_fingerprints") or []:
+            try:
+                if time.time() - float(item[1]) < REJECTED_SECONDS:
+                    out.append((item[0], float(item[1])))
+            except (TypeError, ValueError, IndexError):
+                continue
+        return out
+
+    @staticmethod
+    def fingerprint(credentials):
+        return hashlib.sha256((credentials["email"] + "\0" + credentials["password"]).encode()).hexdigest()
+
     @staticmethod
     def generated(length):
         if length < 12:
@@ -250,6 +299,11 @@ class AccountStore:
         current = dict(self.record(url))
         if state in CONFIRMED_ACCOUNT:
             current.pop("previous_credentials", None)  # The employer settled which login is current.
+        if state in {"authenticated", "password_reset"}:
+            # A login the employer accepted settles every earlier refusal: the passwords it refused are history, and the
+            # failed-sign-in count that guards a lockout starts over.
+            for name in [n for n in current if n.startswith("rejected_") or n == "sign_in_failures"]:
+                current.pop(name)
         # Proof that the account exists outlives later states: AMETEK's and Westinghouse's records said "signing_in"
         # after a failed retry, and the next pass created a second account (2026-10-16..18).
         # "password_unknown" is an inference from a reset that went unanswered, not proof: stamped as confirmed it
@@ -286,7 +340,7 @@ class AccountStore:
 
 # Markers of a refused login or an unanswered reset. A password the owner saved settles them, so the next run signs
 # in with it instead of requesting another reset. Markers the engine adds under these prefixes are cleared too.
-OWNER_SETTLED = ("error", "previous_credentials")
+OWNER_SETTLED = ("error", "previous_credentials", "sign_in_failures")
 OWNER_SETTLED_PREFIXES = ("reset_requested", "reset_submitted", "reset_unconfirmed", "rejected_", "password_unknown",
                           "unanswered", "temporary_password", "identity_conflict")
 

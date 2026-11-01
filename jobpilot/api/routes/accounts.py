@@ -46,6 +46,19 @@ def router(service) -> APIRouter:
             raise HTTPException(404, "This account record no longer exists")
         return {"ok": True, "account": one(service, account_id)}
 
+    @r.post("/api/accounts/{account_id}/reveal")
+    def account_reveal(account_id: str):
+        """Show or copy the login AXIOM keeps for one employer. Sent only when the owner asks, for one record, and never
+        written to a log or an event; the list above carries no password."""
+        record = db.get_setting(account_id) if account_id.startswith("employer_account:") else None
+        if not record or not record.get("credentials"):
+            raise HTTPException(404, "AXIOM keeps no password for this employer")
+        try:
+            login = service.mail.vault.open(record["credentials"])
+        except Exception:
+            raise HTTPException(409, "This password can't be read. Set it yourself, or forget the account.") from None
+        return {"email": login.get("email", ""), "password": login.get("password", "")}
+
     @r.post("/api/accounts/{account_id}/verify")
     async def account_verify(account_id: str):
         """Restart the paused application that is waiting on this employer's verification email."""
