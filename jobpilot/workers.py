@@ -503,6 +503,13 @@ async def start(service):
     except Exception:
         pass  # The next start looks again; nothing else depends on it.
     try:
+        from .discovery import read_blank_titles
+
+        task = asyncio.create_task(read_blank_titles(service.db, service.config))  # Links saved before the role was read at adding.
+        service._title_task = task  # kept so it is not collected while it runs
+    except Exception:
+        pass
+    try:
         # Open questions the owner has meanwhile answered for another job, worded the same (no model call).
         await service.settle_open_questions()
     except Exception:

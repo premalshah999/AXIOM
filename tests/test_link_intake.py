@@ -122,7 +122,7 @@ def test_the_pasted_box_unwraps_and_refuses_with_a_sentence_and_still_queues_the
         raise RuntimeError("blocked")
 
     monkeypatch.setattr("jobpilot.api.routes.queue.apply", fake_apply)
-    monkeypatch.setattr("jobpilot.api.routes.queue.posting_api_text", nothing)
+    monkeypatch.setattr("jobpilot.api.routes.queue.read_added_posting", nothing)
     monkeypatch.setattr("jobpilot.network.fetch", board)
     results = client.post(
         "/api/queue/links",
@@ -217,7 +217,7 @@ def test_pasting_a_removed_jobs_link_again_brings_it_back_unless_the_rule_remove
         return None
 
     monkeypatch.setattr("jobpilot.api.routes.queue.apply", fake_apply)
-    monkeypatch.setattr("jobpilot.api.routes.queue.posting_api_text", nothing)
+    monkeypatch.setattr("jobpilot.api.routes.queue.read_added_posting", nothing)
     urls = ["https://boards.example.test/acme/jobs/31", "https://boards.example.test/acme/jobs/32"]
     first = client.post("/api/queue/links", json={"urls": urls}).json()["results"]
     with service.db.exclusive() as s:
