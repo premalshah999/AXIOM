@@ -229,13 +229,19 @@ class Settings(BaseSettings):
     recovery_max_attempts: int = Field(default=2, ge=0, le=3)
     recovery_delay_seconds: int = Field(default=120, ge=30, le=1800)
     discovery_workers: int = Field(default=3, ge=1, le=12)
+    # What every confirmed application ran under was set in one .env, so these defaults had never run. Of 3,179 confirmed
+    # (2026-11-01): 19% of Greenhouse and 20% of SmartRecruiters forms took longer than the old 180 s; 14% of Workday
+    # wizards longer than the old 480 s, 8% longer than 600 s.
     # Single-page forms (Greenhouse, Lever, Ashby...).
-    application_timeout: int = Field(default=180, ge=30, le=900)
+    application_timeout: int = Field(default=600, ge=30, le=900)
     # Multi-page wizards with accounts and email verification (Workday, Oracle, iCIMS, Taleo...).
-    multipage_timeout: int = Field(default=480, ge=60, le=1200)
+    multipage_timeout: int = Field(default=900, ge=60, le=1200)
     daily_application_limit: int = Field(default=100, ge=1, le=500)
     daily_budget_usd: float = Field(default=5, gt=0)
-    max_model_calls: int = Field(default=18, ge=1, le=300)
+    # The most any of 3,179 confirmed applications needed is 58 (2026-11-01). The old default of 18 stopped 157 of them (5%;
+    # 15% of SuccessFactors, 21% of Dayforce). A call cost 0.09 cents on the default provider's rates, so a run that uses all
+    # of them stays inside the 5-6 cent ceiling; DAILY_BUDGET_USD still bounds a day.
+    max_model_calls: int = Field(default=60, ge=1, le=300)
     # IANA zone for the daily limit, the daily budget, schedules and "today" on forms. scripts/setup.sh writes the computer's.
     timezone: str = "UTC"
     # Dashboard snapshot: polls older than this are answered from the last result while it refreshes in

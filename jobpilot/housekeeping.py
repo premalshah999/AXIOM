@@ -233,11 +233,13 @@ def sweep(db, data_dir, *, job_days=7, ready_days=14, log_days=7, apply=False, s
     removed = set(stale)
     with db.session() as s:
         held = _protected(s)
+    # Recovery reads a job's latest run. Everything older goes on schedule, also when the job is open or held: 554 runs from
+    # 10-07 onward kept their steps, and 46,000 of their detail events stayed, because a later attempt was waiting (2026-11-01).
     aged = [
         run
         for job, history in runs.items()
-        if job not in removed and job not in held and history[-1][1] not in OPEN
-        for run in history
+        if job not in removed
+        for run in (history[:-1] if job in held or history[-1][1] in OPEN else history)
         if run[2] < cutoff
     ]
     for start in range(0, len(aged), BATCH):

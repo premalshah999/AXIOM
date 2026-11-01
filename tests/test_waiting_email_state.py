@@ -123,3 +123,46 @@ async def test_a_matched_email_resumes_its_run_even_when_the_job_used_its_retrie
         recovery = s.get(Setting, "draft_recovery:spent")
         assert recovery and recovery.value.get("cause") == "email_matched"
         assert recovery.value.get("status") != "application_retry_limit"
+
+
+def spent_job_queued_run(service, name, packet):
+    run_id = seed(service, name, state="queued")
+    with service.db.exclusive() as s:
+        for n in range(3):
+            s.add(Run(id=f"{name}-old{n}", job_id=name, mode="submit", state="waiting_browser",
+                      reason="The page did not advance", started_at=f"2026-10-2{n}T10:00:00+00:00",
+                      created_at=f"2026-10-2{n}T10:00:00+00:00", packet={}))
+        run = s.get(Run, run_id)
+        run.packet = {**run.packet, **packet}
+    service.db.set_setting("control", {"paused": False, "auto_submit": True})
+    return run_id
+
+
+async def test_the_worker_starts_a_run_released_by_its_email_on_a_job_that_used_its_retries(service, monkeypatch):
+    """The worker's own start check was the third, and the only one still counting the email's continuation as a retry."""
+    from jobpilot import host_health
+
+    class PastTheCheck(Exception):
+        """The run went on towards a browser; the start check is all this test reads."""
+
+    def past_the_check(*args, **kwargs):
+        raise PastTheCheck
+
+    run_id = spent_job_queued_run(service, "released", {"email_wait_resume": {"source_run_id": "x", "challenge_id": "c1"}})
+    monkeypatch.setattr(host_health, "draining", lambda: False)
+    monkeypatch.setattr(host_health, "check", lambda *a, **k: None)
+    monkeypatch.setattr("jobpilot.service.execution.employer_partition", past_the_check)
+    with pytest.raises(PastTheCheck):
+        await service._execute_owned(run_id)
+
+
+async def test_the_worker_still_stops_a_fourth_start_of_its_own(service, monkeypatch):
+    from jobpilot import host_health
+
+    run_id = spent_job_queued_run(service, "fourth", {})
+    monkeypatch.setattr(host_health, "draining", lambda: False)
+    monkeypatch.setattr(host_health, "check", lambda *a, **k: None)
+    await service._execute_owned(run_id)
+    with service.db.session() as s:
+        run = s.get(Run, run_id)
+        assert run.state == "timed_out" and "two retries" in run.reason

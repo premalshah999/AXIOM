@@ -17,10 +17,11 @@ starts them until the owner approves them in Jobs › Reserved.
 How a row reads mirrors `frontend/src/model.ts` (`displayState`, `STATES[...].group`); a test keeps the two in step.
 """
 
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import and_, case, false as sa_false, func, or_, select
 from sqlalchemy.orm import aliased
 
 from ..application_budget import NOTHING_SENT
+from ..vocabulary import WORDS
 from ..db import Job, Review, Run, Setting, bytewise, latest_runs
 
 CONTROL = "job_control:"
@@ -90,9 +91,9 @@ def requested_jobs():
     return select(func.substr(Setting.key, len(REQUEST) + 1)).where(Setting.key.startswith(REQUEST, autoescape=True))
 
 
-def classified(*where, reserved=()):
+def classified(*where, reserved=(), gave_up=()):
     """Every non-demo, non-archived job with its latest run and display group, as a subquery. `reserved`: the ids of
-    jobs held for the owner's approval (reserved.held)."""
+    jobs held for the owner's approval (reserved.held); `gave_up`: stopped jobs no retry is coming for (outlook.given_up)."""
     latest = latest_runs()
     held = Job.id.in_(held_jobs())
     state = latest.c.state
@@ -140,7 +141,7 @@ def classified(*where, reserved=()):
         else_="new",
     )
     updated = func.coalesce(latest.c.finished_at, latest.c.started_at, latest.c.created_at, Job.created_at)
-    return (
+    inner = (
         select(
             Job.id.label("job_id"),
             latest.c.id.label("run_id"),
@@ -155,8 +156,28 @@ def classified(*where, reserved=()):
         .outerjoin(last, last.id == latest.c.id)
         # The ledger keeps an archived job's confirmation, so the Confirmed chip does too.
         .where(Job.demo.is_(False), or_(Job.status != "archived", succeeded), *where)
-        .subquery("classified")
+        .subquery("grouped")
     )
+    # The five words (vocabulary.py) over the group: the only place a stopped job becomes "Applying" or "Couldn't apply".
+    given = inner.c.job_id.in_(list(gave_up)) if gave_up else sa_false()
+    word = case(
+        (inner.c.grp == "done", "applied"),
+        (and_(inner.c.grp == "repair", given), "failed"),
+        (inner.c.grp.in_(("active", "repair")), "applying"),
+        (inner.c.grp.in_(("needs", "unconfirmed")), "needs"),
+        # Found, not started: the To apply list (Discovered), not one of the five words.
+        (inner.c.grp == "new", "to_apply"),
+        else_="not",
+    )
+    return select(inner, word.label("word")).subquery("classified")
+
+
+def rows_of(session, *where):
+    """`classified` with the reserved employers and the jobs the app has given up on filled in."""
+    from ..outlook import given_up
+    from ..reserved import held as awaiting
+
+    return classified(*where, reserved=awaiting(session), gave_up=given_up(session))
 
 
 def in_pipeline(rows):
@@ -167,17 +188,18 @@ def in_pipeline(rows):
 
 def counts(session):
     """Exact counts for the Jobs tab, the Pipeline chips and the Batch page, over every job."""
-    from ..reserved import held as awaiting
-
-    rows = classified(reserved=awaiting(session))
-    columns = (rows.c.grp, rows.c.state, rows.c.held, rows.c.waiting, rows.c.run_id.is_not(None))
+    rows = rows_of(session)
+    columns = (rows.c.grp, rows.c.word, rows.c.state, rows.c.held, rows.c.waiting, rows.c.run_id.is_not(None))
     grouped = session.execute(
         select(*columns, func.count()).where(in_pipeline(rows)).group_by(*columns)
     ).all()
     groups = dict.fromkeys(GROUPS, 0)
+    words = dict.fromkeys(WORDS, 0)
     states = {}
-    for group, state, held, waiting, has_run, n in grouped:
+    for group, word, state, held, waiting, has_run, n in grouped:
         groups[group] += n
+        if word in words:
+            words[word] += n
         # A run's own state, unless the owner's pause or a waiting Apply overrides how it reads (model.ts
         # displayState).
         shown = (
@@ -201,6 +223,8 @@ def counts(session):
         "pipeline": pipeline,
         "jobs": jobs or 0,
         "confirmed": confirmed or 0,
+        # The five words (vocabulary.py): Applied equals `confirmed`, and every number opens that many rows (GET /api/jobs?group=<word>).
+        "words": words,
     }
 
 
@@ -235,10 +259,10 @@ def _search(q):
 
 def page(session, group="all", q="", page=1, size=25):
     """One page of Pipeline rows: "all" is every started or paused job, attention first; a group lists only its own."""
-    from ..reserved import held as awaiting
-
-    rows = classified(*_search(q), reserved=awaiting(session))
-    scope = [in_pipeline(rows), rows.c.grp.not_in(OUTSIDE) if group == "all" else rows.c.grp == group]
+    rows = rows_of(session, *_search(q))
+    # A word (applied, applying, needs, failed, not) lists exactly what its count says; the older group names still open.
+    by = rows.c.word if group in WORDS else rows.c.grp
+    scope = [in_pipeline(rows), rows.c.grp.not_in(OUTSIDE) if group == "all" else by == group]
     size = max(1, min(100, int(size)))
     priority = case(*[(rows.c.grp == name, rank) for name, rank in PRIORITY.items()], else_=len(PRIORITY))
 
@@ -279,6 +303,16 @@ JOB_COLUMNS = tuple(column for column in Job.__table__.columns if column.name !=
 # No packet keys: PostgreSQL parses a run's whole ~320 KB json packet for each key read. Worker slots come with the
 # snapshot's application_workers.
 RUN_COLUMNS = tuple(column for column in Run.__table__.columns if column.name != "packet")
+
+
+def words_of(session, job_ids):
+    """{job id: word} for these jobs, by the same classification the counts use."""
+    from ..outlook import given_up
+    from ..reserved import held as awaiting
+
+    ids = list(job_ids)
+    rows = classified(Job.id.in_(ids), reserved=awaiting(session), gave_up=given_up(session, only=ids))
+    return {row.job_id: row.word for row in session.execute(select(rows.c.job_id, rows.c.word))}
 
 
 def rows_for(session, picked):
@@ -341,9 +375,27 @@ def rows_for(session, picked):
                     for k in ("id", "run_id", "question", "options", "key", "reason", "created_at")
                 }
             )
+    words = words_of(session, job_ids)
+    from ..vocabulary import describe
+
+    def sentence(job_id, run):
+        state = (run or {}).get("state", "")
+        control = (controls.get(job_id) or {}).get("state")
+        wait = job_id in requests and (not run or run["state"] not in STARTED)
+        return describe(
+            words.get(job_id, "not"),
+            "pending:waiting" if wait else state,
+            (run or {}).get("reason", ""),
+            request_reason=(requests.get(job_id) or {}).get("reason", ""),
+            reserved=bool((reserved.get(job_id) or {}) and not reserved[job_id]["approved"] and (not run or run["state"] not in STARTED)),
+            paused=control == "paused" and (not run or run["state"] not in COMMITTED),
+        )
+
     return [
         {
             "job": jobs[job_id],
+            "word": words.get(job_id, "not"),
+            "sentence": sentence(job_id, runs.get(run_id) if run_id else None),
             "run": runs.get(run_id) if run_id else None,
             "attempts": tries.get(job_id, 0),
             "control": controls.get(job_id) or None,

@@ -234,6 +234,9 @@ async def enqueue_feed_if_due(service):
     board = service.db.get_setting("job_board_settings", {})
     if service.db.get_setting("control", {}).get("paused") or not board.get("enabled", True):
         return False
+    # A profile with no roles matches nothing: a sweep before the guide is finished would only start the two-hour wait.
+    if not (service.db.get_setting("profile", {}) or {}).get("target_roles"):
+        return False
     at = datetime.now(ZoneInfo(service.config.timezone))
     latest = service.db.get_setting(SWEEP_KEY, {})
     delivery = service.db.get_setting("discovery_feed_delivery", {})

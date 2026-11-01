@@ -29,7 +29,7 @@ import sys
 import time
 from urllib.parse import urlsplit
 
-from . import pg, release, services
+from . import backups, pg, release, services
 from .env import NativeError, load, prepare, system_chrome
 from ..storage import mode as database_mode
 
@@ -42,11 +42,17 @@ SLEEP_RELEASE_SECONDS = 300.0
 POWER_SECONDS = 60.0
 OWNER_SECONDS = 5.0
 ROTATE_SECONDS = 30.0
+BACKUP_CHECK_SECONDS = 300.0
 LOG_BYTES, LOG_KEEP = 10 * 1024 * 1024, 3  # compose.yaml's json-file limits.
 CHROME_GRACE, POSTGRES_GRACE, CHROME_WAIT = 10.0, 30.0, 30.0
 ACTIVE_RUNS = "select count(*) from runs where state in ('queued','running','submitting')"
 # What a stop could cut. A run still queued holds no browser and waits out a hold, so counting it would never reach zero.
 IN_FLIGHT_RUNS = "select count(*) from runs where state in ('running','submitting')"
+# A batch between applications still searches and ranks, and starts the next job when one appears.
+BATCH_RUNNING = (
+    "select count(*) from settings where key = 'job_board_autopilot' and value->>'state' = 'active' "
+    "and not exists (select 1 from settings c where c.key = 'control' and c.value->>'paused' = 'true')"
+)
 NOFILE = (65536, 10240)
 
 
@@ -254,6 +260,7 @@ class Supervisor:
         self.lstart = process_start(os.getpid())
         self.database = None  # (choice, revision) this installation was planned for: storage/mode.py
         self.reexec = False
+        self.backup = None  # The daily copy of the database while it runs (backups.py).
 
     # ---- what runs ---------------------------------------------------------------------------------------------------
 
@@ -481,6 +488,8 @@ class Supervisor:
             self.tick_owner()
         if self.due("rotate", now, ROTATE_SECONDS):
             self.rotate_logs()
+        if self.due("backup", now, BACKUP_CHECK_SECONDS):
+            self.tick_backup()
         self.write_state()
 
     def tick_database(self):
@@ -501,6 +510,32 @@ class Supervisor:
         else:
             self.say(f"The {found[0]} database settings changed: restarting the services.")
             self.database, self.restart_requested = found, True
+
+    def tick_backup(self):
+        """A copy of the database once a day (backups.py), in its own low-priority process so this loop keeps watching."""
+        if self.backup is not None and self.backup.poll() is None:
+            return
+        self.backup = None
+        if (
+            self.stop_reason
+            or database_mode.current(self.cfg.values, self.cfg.data_dir) != "local"
+            or not all(c.state == "up" for c in self.children if c.name == "postgres")
+            or not backups.due(self.cfg)
+        ):
+            return
+        try:
+            log = os.open(self.cfg.logs / "backup.log", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            try:
+                self.backup = subprocess.Popen(
+                    ["/usr/bin/nice", "-n", "15", sys.executable, "-m", "jobpilot.native", "backup", "--auto"],
+                    env=self.cfg.app_environment(release.current(self.cfg)),
+                    stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+                )
+            finally:
+                os.close(log)
+        except OSError as exc:
+            self.say(f"The daily backup could not start: {exc}")
+            backups.record(self.cfg, error=str(exc)[:200])
 
     def due(self, name, now, every):
         if now < self.next_tick.get(name, 0.0):
@@ -631,7 +666,7 @@ class Supervisor:
             except (OSError, ValueError, subprocess.TimeoutExpired):
                 count = None
         self.active = count
-        if count:
+        if count or (count == 0 and self.batch_running()):
             self.last_active = now
         running = bool(self.caffeinate and self.caffeinate.poll() is None)
         if count is None:
@@ -642,12 +677,22 @@ class Supervisor:
             self.caffeinate = subprocess.Popen(
                 ["caffeinate", "-i", "-m", "-w", str(os.getpid())], stdin=subprocess.DEVNULL, start_new_session=True
             )
-            self.say(f"Preventing idle sleep: {count} application(s) active.")
+            self.say(f"Preventing idle sleep: {count} application(s) active." if count else "Preventing idle sleep: a batch is running.")
         elif running and not want:
             self.caffeinate.terminate()
             self.caffeinate.wait()
             self.caffeinate = None
             self.say("Nothing active for a while: idle sleep is allowed again.")
+
+    def batch_running(self):
+        """A running batch on mains keeps the Mac awake with nothing in flight: allowed to sleep at 02:28, it found and
+        applied to nothing until the owner opened the lid at 08:55 (2026-11-01). On battery the Mac may sleep as before."""
+        if self.power.get("battery"):
+            return False
+        try:
+            return int(pg.psql(self.pg_bin, self.cfg, BATCH_RUNNING, timeout=5, check=False) or 0) > 0
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            return False
 
     def tick_power(self):
         power = power_status()

@@ -138,17 +138,22 @@ def router(service, cache: SnapshotCache) -> APIRouter:
         return {"applications": confirmed()}
 
     @r.get("/api/successful-applications.csv")
-    def export(evidence: str = "", ats: str = "", since: str = "", q: str = ""):
+    def export(evidence: str = "", ats: str = "", since: str = "", q: str = "", replies: bool = False):
         """The ledger as a spreadsheet, for the Applications page's Export. A download the app serves itself (the page
         links here), so it saves the same way in a browser tab and in the native window, where a script-made file may not.
         The filters are the page's own: proof (`evidence`), platform, a start time (applications AXIOM sent, so the employer's
-        "you already applied" notices fall away) and a search (a job saved without a company or title is found by its link)."""
+        "you already applied" notices fall away), a search (a job saved without a company or title is found by its link) and
+        only the applications an employer has answered (`replies`)."""
+        from ...replies import summary
+
+        answered = set(summary(service.db)["job_ids"]) if replies else None
         start = _instant(since)
         needle = q.strip().lower()
         rows = [
             row
             for row in confirmed()
             if _has_proof(row, evidence)
+            and (answered is None or row["job_id"] in answered)
             and (not ats or row["ats"] == ats)
             and (start is None or (not row["existing_application"] and (_instant(row["applied_at"]) or start) >= start))
             and (not needle or needle in f"{row['company'] or row['url']} {row['title'] or row['url']} {row['ats']}".lower())

@@ -168,12 +168,18 @@ def test_old_logs_go_but_a_sent_applications_record_stays(service):
         assert s.get(Run, failed) is not None  # Its row stays: the job's history, and the failed run's reason.
 
 
-def test_an_open_jobs_files_stay_for_its_recovery(service):
+def test_an_open_job_keeps_its_latest_runs_files_and_older_logs_go(service):
+    # Recovery reads the latest run. Owner 2026-10-31: no logs older than a week, and 554 older runs had kept theirs.
     open_job = job(service, "a", status="waiting_browser", days=30)
     older = run(service, open_job, "failed", days=20, files=["steps/1.html"], events=["agent_step"])
-    run(service, open_job, "waiting_browser", days=10, files=["steps/2.html"])
+    latest = run(service, open_job, "waiting_browser", days=10, files=["steps/2.html"], events=["agent_step"])
     clean(service)
-    assert (service.config.data_dir / "runs" / older / "steps" / "1.html").exists()
+    root = service.config.data_dir / "runs"
+    assert not (root / older).exists()
+    assert (root / latest / "steps" / "2.html").exists()
+    with service.db.session() as s:
+        assert not s.scalars(select(Event).where(Event.run_id == older)).all()
+        assert s.scalars(select(Event).where(Event.run_id == latest)).all()
 
 
 def test_only_old_run_folders_with_no_run_are_orphans(service):

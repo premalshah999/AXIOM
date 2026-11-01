@@ -101,7 +101,7 @@ def test_an_ordinary_run_records_only_its_pool():
 
 
 def test_the_optional_audit_keeps_two_calls_of_the_runs_own_cap():
-    config = Settings(_env_file=None)  # 18 calls, 27 for a specialist
+    config = Settings(_env_file=None, max_model_calls=18)  # 18 calls, 27 for a specialist
     ordinary = SimpleNamespace(model_calls=16, packet={})
     specialist = SimpleNamespace(model_calls=16, packet={"worker_pool": "specialist"})
     assert advice_budget(config, ordinary) is False  # 16 of 18 leaves exactly the two for the owner agents

@@ -35,22 +35,13 @@ function whyNot(r: NonNullable<Listing["rejection"]>) {
   return `${label}: ${text.charAt(0).toLowerCase()}${text.slice(1)}`;
 }
 
-const LEVELS = [
-  { value: "all", label: "All levels" },
-  { value: "New grad", label: "New grad" },
-  { value: "Early career", label: "Early career" },
-  { value: "Experience unspecified", label: "Experience unspecified" },
-];
-
 // "Ready" is a job the batch can start now and "Held" one it will not, each with its reason (jobpilot/startable.py): the same two
-// numbers Overview's idle runners line quotes. A job that is only ranked fit is neither until the batch has looked at it.
+// numbers Overview's sentence quotes. "Everything found" adds jobs below your fit and ones not ranked yet. No counts on the chips:
+// the tab says how many are ready, and a count that changes meaning is worse than none.
 const FITS = [
-  ["all", "Any fit"],
   ["ready", "Ready"],
   ["held", "Held"],
-  ["uncertain", "Uncertain"],
-  ["unranked", "Not ranked"],
-  ["below", "Below fit"],
+  ["all", "Everything found"],
 ] as const;
 
 // Jobs › Discovered pages, filters and counts come from the server (GET /api/job-board?page=): the dashboard used to
@@ -62,13 +53,13 @@ export function DiscoveredJobs() {
   const { pending, run } = useAction();
   const now = useNow(30000);
   const [query, setQuery] = useDraft("board-query", "");
-  const [ats, setAts] = useDraft("board-ats", "all");
-  const [level, setLevel] = useDraft("board-level", "all");
+  const ats = "all";
+  const level = "all";
   const [q, setQ] = useState(query.trim());
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(25);
   // "held:internship" is the Held list narrowed to one reason.
-  const [fit, hold = ""] = (route.filter || "all").split(":") as [string, string?];
+  const [fit, hold = ""] = (route.filter || "ready").split(":") as [string, string?];
   useEffect(() => {
     const timer = window.setTimeout(() => setQ(query.trim()), 250);
     return () => window.clearTimeout(timer);
@@ -145,16 +136,23 @@ export function DiscoveredJobs() {
         `Searching ${plural(r.queued_sources, "employer board")} and the new-grad lists. New jobs appear here as they arrive.`,
     );
 
-  const read = board.data?.fits?.ready !== undefined; // the server has sorted the Ready jobs into can-start and held
-  const phrases = new Map((board.data?.holds || []).map((h) => [h.code, h.phrase]));
+  // What is happening to a found job, in one sentence: why it is held, why it is ruled out, or that it starts by itself.
+  const sentenceOf = (j: Listing) =>
+    j.hold
+      ? j.hold.reason
+      : j.status === "skipped" || j.status === "closed"
+        ? plainReason(j.reason) || "Below your minimum fit."
+        : j.status === "ready"
+          ? "Ready. Starts by itself."
+          : j.status === "new"
+            ? "Being checked against your profile."
+            : plainReason(j.reason);
+  // The pill is the vocabulary word: nothing on a Ready row (the list is "To apply"), "Not applying" for a held or ruled-out one.
   const statusOf = (j: Listing) => {
-    if (j.status === "ready" && j.hold) return <StatusPill state="job:ready" label="Held" tone="hold" />;
-    // A restriction the posting states about the applicant: ruled out, not a low score.
-    if (j.status === "skipped" && /hiring restriction/i.test(j.reason || "")) return <StatusPill state="job:skipped" label="Not eligible" />;
-    if (j.status === "ready" && read) return <StatusPill state="job:ready" label="Ready" />;
+    if (j.hold || j.status === "skipped" || j.status === "closed") return <StatusPill state="job:skipped" />;
+    if (fit === "ready") return null;
     return <StatusPill state={RUN_STATES.has(j.status) || j.status.startsWith("pending:") ? j.status : "job:" + j.status} />;
   };
-  const heldWhy = (j: Listing) => (j.hold ? phrases.get(j.hold.code) || j.hold.reason : "");
   const columns: Column<Listing>[] = [
     {
       key: "job",
@@ -164,12 +162,12 @@ export function DiscoveredJobs() {
       cell: (j) => (
         <JobCell
           {...jobWords(j)}
-          title={j.hold ? `${j.hold.reason} ${j.hold.next}` : j.rejection && j.status === "ready" ? whyNot(j.rejection) : undefined}
+          title={j.hold ? `${j.hold.reason} ${j.hold.next}` : undefined}
           onOpen={() => openJob(j.id)}
           meta={
             <>
               {statusOf(j)}
-              {j.hold && <span>{heldWhy(j)}</span>}
+              <span>{sentenceOf(j)}</span>
               {shownFit(j) != null && <span className="mono">Fit {shownFit(j)}</span>}
             </>
           }
@@ -203,14 +201,11 @@ export function DiscoveredJobs() {
     },
     {
       key: "status",
-      header: "Status",
+      header: "What is happening",
       hideBelow: 600,
-      cell: (j) => (
-        <Tooltip label={j.hold ? `${j.hold.reason} ${j.hold.next}` : j.rejection && j.status === "ready" ? `${whyNot(j.rejection)} (${stamp(j.rejection.at)})` : undefined}>
-          {statusOf(j)}
-          {j.hold && <Note>&nbsp;· {heldWhy(j)}</Note>}
-        </Tooltip>
-      ),
+      width: 330,
+      truncate: true,
+      cell: (j) => <Note title={j.hold ? `${j.hold.reason} ${j.hold.next}` : undefined}>{sentenceOf(j)}</Note>,
     },
     {
       key: "act",
@@ -229,12 +224,7 @@ export function DiscoveredJobs() {
   const b = board.data;
   const fresh = b ? (b.fresh_total ?? b.jobs.length) : 0;
   const span = b?.max_age_hours === 720 ? "30 days" : b?.max_age_hours === 168 ? "7 days" : "48 hours";
-  const platforms = b?.platforms || [...new Set((b?.jobs || []).map((j) => j.ats))].sort();
-  const chips = FITS.filter(([id]) => id === "all" || b?.fits?.[id] !== 0 || fit === id).map(([id, label]) => ({
-    id,
-    label,
-    count: b?.fits?.[id],
-  }));
+  const chips = FITS.map(([id, label]) => ({ id, label }));
   const current = !!b && b.key === key;
   return (
     <>
@@ -251,11 +241,8 @@ export function DiscoveredJobs() {
       {b && (fit === "ready" || fit === "held") && (
         <TopLine>
           {fit === "ready"
-            ? "Ready jobs the batch can start now."
-            : "Ready jobs the batch will not start, and why. Apply starts one yourself where the reason allows it."}{" "}
-          <button type="button" className="ax-link" onClick={() => go({ view: "jobs", tab: "discovered" })}>
-            All discovered
-          </button>
+            ? "Jobs AXIOM can apply to now. A running batch starts them by itself."
+            : "Jobs AXIOM will not apply to by itself, and why. Apply starts one yourself where the reason allows it."}
         </TopLine>
       )}
       {b && fit !== "ready" && fit !== "held" && (
@@ -282,26 +269,19 @@ export function DiscoveredJobs() {
       {!canApply && <Notice tone="warn">Applying from this list is unavailable: {blockers.join("; ")}.</Notice>}
       <div className="ax-toolbar">
         <SearchBox value={query} onChange={setQuery} label="Search discovered jobs" placeholder="Role, company or city" />
-        <Listbox
-          label="Platform"
-          value={ats}
-          onChange={setAts}
-          options={[{ value: "all", label: "All platforms" }, ...platforms.map((a) => ({ value: a, label: platformName(a) }))]}
-        />
-        <Listbox label="Career level" value={level} onChange={setLevel} options={LEVELS} />
         <Chips
           items={chips}
           value={fit}
-          label="Filter by fit"
-          onChange={(id) => go({ view: "jobs", tab: "discovered", filter: id === "all" ? undefined : id })}
+          label="Show"
+          onChange={(id) => go({ view: "jobs", tab: "discovered", filter: id === "ready" ? undefined : id })}
         />
       </div>
       {fit === "held" && b?.holds && b.holds.length > 1 && (
         <div className="ax-toolbar">
           <Chips
             items={[
-              { id: "held", label: "Any reason", count: b.fits?.held },
-              ...b.holds.map((h) => ({ id: `held:${h.code}`, label: h.phrase.charAt(0).toUpperCase() + h.phrase.slice(1), count: h.count })),
+              { id: "held", label: "Any reason" },
+              ...b.holds.map((h) => ({ id: `held:${h.code}`, label: h.phrase.charAt(0).toUpperCase() + h.phrase.slice(1) })),
             ]}
             value={hold ? `held:${hold}` : "held"}
             label="Filter by reason"
@@ -354,7 +334,7 @@ export function DiscoveredJobs() {
                 ? "Clear a filter to see more."
                 : searching
                   ? "Employer boards and new-grad lists are being checked. Jobs appear as they arrive."
-                  : `Jobs you applied to are under Started. Only US roles posted in the last ${span} with a known date are listed; the next scheduled search checks again.`
+                  : `Jobs you applied to are under Applied. Only US roles posted in the last ${span} with a known date are listed; the next scheduled search checks again.`
             }
           />
         }

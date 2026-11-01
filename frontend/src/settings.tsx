@@ -1,6 +1,7 @@
 // Settings: one page, a list of sections beside the one that is open. Each section is what a person recognises (a service, the
 // mailbox, how it applies, their account), and the engine's own switches are last, under Advanced. Old addresses resolve in
 // context.ts; the section is the route's `tab` (nav.ts lists them).
+import "./identity/overview.css";
 import { Fragment, useEffect, useRef, type ComponentType } from "react";
 import { routeUrl, useWorkspace } from "./context";
 import { AccountSettings } from "./accounts";

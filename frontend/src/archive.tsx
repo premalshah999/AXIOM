@@ -15,7 +15,7 @@ import { ConfirmButton, JobCell, LoadError, Note, SearchBox, StatusPill } from "
 // What a row ended as. Nothing archived needs you, whatever state it ended in, so no lamp is lit here.
 function Outcome({ a }: { a: Archived }) {
   return a.uncertain_submission ? (
-    <StatusPill state="submission_unknown" label="Unconfirmed · protected" />
+    <StatusPill state="submission_unknown" label="Needs you · protected" />
   ) : (
     <StatusPill state="cancelled" label={a.owner_removed ? "Removed by you" : stateInfo(a.state).label} />
   );

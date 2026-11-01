@@ -16,6 +16,9 @@ from .states import ACTIVE, RETRYABLE, TERMINAL
 class Service(QueueingMixin, ExecutionMixin, CompletionMixin, ReviewsMixin, MigrationsMixin):
     def __init__(self, db, config):
         self.db, self.config = db, config
+        from ..host_health import disk
+
+        disk.watch(config.data_dir)
         self.dispatch = None
         self.notification_tasks = set()
         from ..inbox import Inbox

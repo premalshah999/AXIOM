@@ -23,6 +23,13 @@ def router(service) -> APIRouter:
     def status():
         return mail.summary()
 
+    @r.get("/api/replies")
+    def replies():
+        """How many applications an employer has answered, read from the connected mailbox (jobpilot/replies.py)."""
+        from ...replies import summary
+
+        return summary(service.db)
+
     @r.post("/api/mail/connect")
     async def connect():
         url, binding = mail.begin_oauth()

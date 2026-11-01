@@ -8,7 +8,7 @@ import { evidenceLabel, PROOF } from "./model";
 import type { JobRow } from "./model";
 import { usePipelinePage } from "./pipeline";
 import { Pagination, usePagination } from "./pagination";
-import type { Archived, Proof, Success } from "./types";
+import type { Archived, Proof, Replies, Success } from "./types";
 import { ArchiveList } from "./archive";
 import { useSelection } from "./bulk";
 import { RowActions } from "./jobactions";
@@ -25,7 +25,7 @@ import "./styles/applications.css";
 
 type Evidence = "all" | Exclude<Proof, "both">;
 type Period = "all" | "today" | "week" | "month";
-type Filters = { q: string; evidence: Evidence; period: Period; platform: string };
+type Filters = { q: string; evidence: Evidence; period: Period; platform: string; answered: Set<string> | null };
 
 const PERIODS: { value: Period; label: string; days: number }[] = [
   { value: "all", label: "Any time", days: 0 },
@@ -81,6 +81,7 @@ function periodStart(period: Period, now: number) {
 // A filter that skips one field, so each menu counts what choosing its options would show. The search reads what the row shows: a
 // job saved without a company or title is found by its link, as the employer's name is taken from it.
 function passes(r: Success, f: Filters, from: number, skip?: keyof Filters) {
+  if (skip !== "answered" && f.answered && !f.answered.has(r.job_id)) return false;
   if (skip !== "evidence" && !hasProof(r, f.evidence)) return false;
   if (skip !== "platform" && f.platform !== "all" && r.ats !== f.platform) return false;
   // "Sent" counts what AXIOM sent: the employer's own "you already applied" notice is not that.
@@ -134,26 +135,25 @@ function Proof({ r }: { r: Success }) {
 // Only a web link opens from here; anything else a posting might hold is not a page to send the person to.
 const webLink = (url: string) => (/^https?:\/\//i.test(url) ? url : "");
 
-const TABS = ["confirmed", "unconfirmed", "archive"];
+const TABS = ["confirmed", "archive"];
 
 // Applications: what was sent. Confirmed is the ledger (proof on every row); Unconfirmed holds submissions with no receipt, protected
 // from any retry; Archive keeps earlier failures. Discovered and the started list are under Jobs.
 export function LedgerView() {
-  const { route, counts } = useWorkspace();
+  const { route } = useWorkspace();
   const tab = TABS.includes(route.tab || "") ? route.tab! : "confirmed";
   // Read here so the tabs can say how many there are before they are opened.
   const ledger = usePoll<{ applications: Success[] }>((signal) => api("/successful-applications", "GET", undefined, signal), 60000);
   const archive = usePoll<{ applications: Archived[]; log_bytes: number }>((signal) => api("/archive", "GET", undefined, signal), 60000);
   const tabs = [
-    { id: "confirmed", label: "Confirmed", count: ledger.data?.applications.length },
-    { id: "unconfirmed", label: "Unconfirmed", count: counts.groups.unconfirmed },
-    { id: "archive", label: "Archive", count: archive.data?.applications.length },
+    // Applied: the employer has it. The same number as Overview and the Jobs page (jobpilot/api/pipeline.py confirmed_jobs).
+    { id: "confirmed", label: "Applied", count: ledger.data?.applications.length },
+    { id: "archive", label: "Archive" },
   ];
   return (
     <div className="ax-page ax-page-fill">
       <RouteTabs view="ledger" tabs={tabs} label="Applications" current={tab} />
       {tab === "confirmed" && <Confirmed ledger={ledger} />}
-      {tab === "unconfirmed" && <Unconfirmed />}
       {tab === "archive" && <ArchiveList archive={archive} />}
     </div>
   );
@@ -166,16 +166,20 @@ function Confirmed({ ledger }: { ledger: ReturnType<typeof usePoll<{ application
   const [evidence, setEvidence] = useDraft<Evidence>("ledger-evidence", "all");
   const [period, setPeriod] = useDraft<Period>("ledger-period", "all");
   const [platform, setPlatform] = useDraft("ledger-platform", "all");
+  const [onlyReplies, setOnlyReplies] = useDraft("ledger-replies", false);
+  // How many applications an employer has answered, read from the connected mailbox (jobpilot/replies.py).
+  const replies = usePoll<Replies>((signal) => api("/replies", "GET", undefined, signal), 60000);
+  const answered = useMemo(() => (onlyReplies && replies.data ? new Set(replies.data.job_ids) : null), [onlyReplies, replies.data]);
   // A number elsewhere can open this list already searched.
   useEffect(() => {
     if (route.q) setQuery(route.q);
   }, [route.q, setQuery]);
   const all = useMemo(() => ledger.data?.applications || [], [ledger.data]);
   const from = periodStart(period, now);
-  const shown = useMemo(() => all.filter((r) => passes(r, { q, evidence, period, platform }, from)), [all, q, evidence, period, platform, from]);
+  const shown = useMemo(() => all.filter((r) => passes(r, { q, evidence, period, platform, answered }, from)), [all, q, evidence, period, platform, answered, from]);
   // What each menu would show if its option were chosen (every other filter kept).
   const menus = useMemo(() => {
-    const f = { q, evidence, period, platform };
+    const f = { q, evidence, period, platform, answered };
     const rest = (skip: keyof Filters) => all.filter((r) => passes(r, f, from, skip));
     const byProof = rest("evidence");
     const byPlatform = rest("platform");
@@ -186,23 +190,23 @@ function Confirmed({ ledger }: { ledger: ReturnType<typeof usePoll<{ application
       evidence: EVIDENCE.map((value) => ({
         value,
         label: value === "all" ? "All" : PROOF[value],
-        count: byProof.filter((r) => hasProof(r, value)).length,
-      })).filter((o) => o.count > 0 || o.value === "all" || o.value === evidence),
-      period: PERIODS.map((o) => ({ ...o, count: all.filter((r) => passes(r, f, periodStart(o.value, now))).length })),
+      })).filter((o) => byProof.some((r) => hasProof(r, o.value)) || o.value === "all" || o.value === evidence),
+      period: PERIODS,
       platform: [
-        { value: "all", label: "All", count: byPlatform.length },
-        ...[...names].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([ats, count]) => ({ value: ats, label: platformName(ats), count })),
+        { value: "all", label: "All" },
+        ...[...names].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([ats]) => ({ value: ats, label: platformName(ats) })),
       ],
     };
-  }, [all, q, evidence, period, platform, from, now]);
-  const filtered = evidence !== "all" || period !== "all" || platform !== "all" || q.trim() !== "";
+  }, [all, q, evidence, period, platform, answered, from, now]);
+  const filtered = evidence !== "all" || period !== "all" || platform !== "all" || q.trim() !== "" || onlyReplies;
   const clear = () => {
+    setOnlyReplies(false);
     setQuery("");
     setEvidence("all");
     setPeriod("all");
     setPlatform("all");
   };
-  const paging = usePagination(shown, [q, evidence, period, platform].join("|"), 25);
+  const paging = usePagination(shown, [q, evidence, period, platform, onlyReplies].join("|"), 25);
   const today = confirmedToday(all, now).length;
   const unconfirmed = counts.groups.unconfirmed || 0;
 
@@ -265,6 +269,7 @@ function Confirmed({ ledger }: { ledger: ReturnType<typeof usePoll<{ application
     if (platform !== "all") p.set("ats", platform);
     if (from) p.set("since", new Date(from).toISOString());
     if (q.trim()) p.set("q", q.trim());
+    if (onlyReplies) p.set("replies", "true");
     const query = p.toString();
     return "/api/successful-applications.csv" + (query ? "?" + query : "");
   })();
@@ -284,35 +289,24 @@ function Confirmed({ ledger }: { ledger: ReturnType<typeof usePoll<{ application
           </Button>
         )}
       </TopActions>
-      <TopLine>
-        {ledger.data ? (
-          <span className="ap-line">
-            <button type="button" className="ax-quiet-link" onClick={clear}>
-              <b>{all.length.toLocaleString()}</b> confirmed
-            </button>
-            <i aria-hidden="true">·</i>
-            <button type="button" className="ax-quiet-link" onClick={() => { clear(); setPeriod("today"); }}>
-              <b>{today.toLocaleString()}</b> today
-            </button>
-            {unconfirmed > 0 && (
-              <>
-                <i aria-hidden="true">·</i>
-                <button type="button" className="ax-quiet-link ap-flag" onClick={() => go({ view: "ledger", tab: "unconfirmed" })}>
-                  <b>{unconfirmed.toLocaleString()}</b> unconfirmed
-                </button>
-              </>
-            )}
-          </span>
-        ) : (
-          !ledger.error && <span className="ap-line is-wait">Counting confirmed applications…</span>
-        )}
-      </TopLine>
       <div className="ax-toolbar ap-toolbar">
         <SearchBox value={q} onChange={setQuery} label="Search confirmed applications" placeholder="Company, role or platform" />
         <div className="ap-filters">
-          <Listbox prefix="Proof" label="Proof" value={evidence} options={menus.evidence} onChange={setEvidence} />
           <Listbox prefix="Sent" label="Sent" value={period} options={menus.period} onChange={setPeriod} />
-          <Listbox prefix="Platform" label="Platform" value={platform} options={menus.platform} onChange={setPlatform} />
+          {replies.data?.connected && (
+            // One figure, and it opens what it counts.
+            <Tooltip
+              label={
+                replies.data.complete
+                  ? "Applications an employer has answered with a decline, an interview request or an assessment, from your email. A receipt doesn't count."
+                  : "Applications an employer has answered, from your email. Still reading back to your first application, so this can grow."
+              }
+            >
+              <Button className="ap-replies" aria-pressed={onlyReplies} disabled={!replies.data.replies && !onlyReplies} onClick={() => setOnlyReplies(!onlyReplies)}>
+                Replies <strong>{replies.data.replies.toLocaleString()}</strong>
+              </Button>
+            </Tooltip>
+          )}
           {filtered && (
             <Button variant="ghost" size="sm" icon={<FilterX size={14} aria-hidden="true" />} onClick={clear}>
               Clear
@@ -361,73 +355,3 @@ function Confirmed({ ledger }: { ledger: ReturnType<typeof usePoll<{ application
   );
 }
 
-// Every unconfirmed submission, from the server (the browser only had the newest 1,000 jobs to look through).
-function Unconfirmed() {
-  const { openJob, go } = useWorkspace();
-  const now = useNow(30000);
-  const list = usePipelinePage("unconfirmed", "", 25);
-  const selection = useSelection(200);
-  const when = (r: JobRow) => (
-    <time dateTime={r.updated} title={stamp(r.updated)}>
-      {ago(r.updated, now)}
-    </time>
-  );
-  const columns: Column<JobRow>[] = [
-    {
-      key: "job",
-      header: "Job",
-      width: 440,
-      truncate: true,
-      cell: (r) => (
-        <JobCell
-          {...jobWords(r.job)}
-          onOpen={() => openJob(r.job.id, r.run?.id)}
-          meta={
-            <>
-              <StatusPill state={r.state} />
-              {when(r)}
-            </>
-          }
-        />
-      ),
-    },
-    { key: "status", header: "Status", hideBelow: 600, cell: (r) => <StatusPill state={r.state} /> },
-    { key: "detail", header: "Detail", hideBelow: 600, width: 300, truncate: true, cell: (r) => (r.run?.reason ? <Note>{r.run.reason}</Note> : null) },
-    { key: "updated", header: "Updated", hideBelow: 600, cell: when },
-    { key: "act", header: <span className="sr-only">Actions</span>, width: "1%", pin: true, cell: (r) => <RowActions row={r} promote="confirm" /> },
-  ];
-  return (
-    <>
-      <TopLine>Submitted, but no receipt was captured. They may have been sent, so they are never retried.</TopLine>
-      {list.error && list.loaded && <LoadError error={list.error} retry={list.refresh} />}
-      <Table
-        fill
-        label="Unconfirmed submissions"
-        columns={columns}
-        rows={list.rows}
-        rowKey={(r) => r.job.id}
-        onRowClick={(r) => openJob(r.job.id, r.run?.id)}
-        selected={selection.chosen}
-        onSelectedChange={selection.replace}
-        rowLabel={(r) => r.job.company || "job"}
-        loading={!list.loaded && !list.error}
-        error={list.error && !list.loaded ? <LoadError error={list.error} retry={list.refresh} /> : undefined}
-        busy={list.loaded && !list.current}
-        footer={list.paging.total > 0 ? <Pagination paging={list.paging} label="Unconfirmed pages" /> : undefined}
-        bulk={<PipelineBulk selection={selection} rows={list.rows} filter="unconfirmed" query="" total={list.paging.total} />}
-        empty={
-          <Empty
-            icon={ShieldCheck}
-            title="Nothing is waiting for a receipt"
-            hint="Every submission so far has a confirmation page or an email from the employer."
-            action={
-              <Button size="sm" onClick={() => go({ view: "ledger" })}>
-                See confirmed applications
-              </Button>
-            }
-          />
-        }
-      />
-    </>
-  );
-}

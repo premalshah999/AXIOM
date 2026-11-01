@@ -123,7 +123,7 @@ class DemographicRulesMixin:
                 saved.append((item.value, "knowledge:" + item.fact_id))
         preference = (self._facts() or {}).get("race_preference") if name == "race" else None
         if isinstance(preference, list):
-            # Owner decision (2026-10-13): when no decline is offered, Asian, else South Asian.
+            # When no decline is offered: the profile's own preference, in its order (owner decision 2026-10-13).
             for want in preference:
                 hit = next(
                     (

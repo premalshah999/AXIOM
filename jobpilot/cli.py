@@ -210,7 +210,7 @@ def reset_password(config, ask=None, say=print) -> int:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="ApplyPilot Studio")
+    parser = argparse.ArgumentParser(description="AXIOM")
     sub = parser.add_subparsers(dest="command", required=True)
     server = sub.add_parser("serve")
     server.add_argument("--host", default="127.0.0.1")

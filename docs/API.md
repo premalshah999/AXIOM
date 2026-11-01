@@ -181,6 +181,7 @@ exercised through the HTTP test client; every router now has an HTTP test module
 | Method | Path | Purpose | Request | Response | UI |
 |---|---|---|---|---|---|
 | GET | `/api/mail` | Mailboxes, rules, open challenges | – | summary | ✔ |
+| GET | `/api/replies` | Applications an employer has answered, read from the connected mailbox (`jobpilot/replies.py`) | – | `{connected, complete, replies, declined, assessment, interview, job_ids}` | ✔ |
 | POST | `/api/mail/connect` | Start Google OAuth | – | `{authorization_url}` + binding cookie | ✔ |
 | GET | `/oauth/gmail/callback` | OAuth return; redirects to `/?gmail=connected\|connection_failed` | `state, code` | 303 | browser |
 | POST | `/api/mail/imap` | Connect Gmail with an app password (verified first, sealed in the vault) | `{email, app_password}` | mailbox | ✔ |

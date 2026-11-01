@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 from ..storage.mode import current as database_choice
-from . import migrate, pg, release, services, supervisor
+from . import backups, migrate, pg, release, services, supervisor
 from .env import NativeError, load, prepare, system_chrome
 from .supervisor import read_state, same_process, stop_leftovers, supervisor_alive
 
@@ -118,6 +118,8 @@ def _print_warnings(cfg, power, state):
     if cfg.data_dir.exists():
         free = shutil.disk_usage(cfg.data_dir).free
         print(f"  disk        {free / migrate.GIB:.1f} GB free")
+    if database_choice(cfg.values, cfg.data_dir) == "local":
+        print(f"  backup      {backups.summary(cfg)}")
         if free < 3 * migrate.GIB:
             print("  WARNING     Under 3 GB free: runs save pages and screenshots, and the database needs room to write.")
 
@@ -268,9 +270,28 @@ def cmd_psql(cfg, args):
 def cmd_backup(cfg, args):
     """A copy of the database outside the data folder: `axiom backup [file]`. pg_dump reads one consistent snapshot, so the
     app keeps running. The file is written beside its name and renamed once pg_restore has read it back."""
+    auto = getattr(args, "auto", False)
+    if auto and (problem := backups.room_for_one()):
+        backups.record(cfg, skipped=problem)
+        print("Skipped the automatic backup: " + problem)
+        return 0
+    try:
+        target = dump_database(cfg, Path(args.file).expanduser() if args.file else None, auto=auto)
+    except NativeError as exc:
+        if auto:
+            backups.record(cfg, error=str(exc)[-300:])
+        raise
+    if auto:
+        backups.record(cfg, file=target.name)
+        backups.prune()
+    return 0
+
+
+def dump_database(cfg, target=None, *, auto=False, label="axiom-"):
+    """One readable copy of the database at `target`, or a new file in ~/axiom-backups; returns its path."""
     bin_dir = pg.find_bin(cfg)
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    target = Path(args.file).expanduser() if args.file else Path.home() / "axiom-backups" / f"axiom-{stamp}.dump"
+    target = target or backups.folder() / (backups.next_name() if auto else f"{label}{stamp}.dump")
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     partial = target.with_name(target.name + ".partial")
     remote = pg.remote(cfg)
@@ -293,6 +314,42 @@ def cmd_backup(cfg, args):
     finally:
         partial.unlink(missing_ok=True)
     print(f"{target}  {target.stat().st_size / 1e9:.2f} GB, {tables} tables")
+    return target
+
+
+def cmd_restore(cfg, args):
+    """Put a backup back: `axiom restore <file>`. AXIOM must be stopped. What the database holds now is copied first, so a
+    wrong choice of file can itself be undone. pg_restore's own --clean replaces each object; run once on a scratch cluster
+    (2026-11-01), it brought back every row, with the workflow tables, through a full stop and start of PostgreSQL."""
+    source = Path(args.file).expanduser()
+    if not source.is_file():
+        raise NativeError(f"No backup at {source}.")
+    if database_choice(cfg.values, cfg.data_dir) != "local":
+        raise NativeError("Only the database on this computer can be restored here. Set DATABASE_MODE=local first.")
+    if not cfg.password:
+        raise NativeError("POSTGRES_PASSWORD is not set in .env, so the database cannot be opened.")
+    if not args.yes:
+        answer = input(f"Replace everything in the database with {source.name}? Type yes: ") if sys.stdin.isatty() else ""
+        if answer.strip().casefold() != "yes":
+            print("Nothing was changed. To skip this question: axiom restore --yes <file>")
+            return 1
+    with MigrationServer(cfg) as server:
+        env = pg._client_env(cfg)
+        listed = subprocess.run(
+            [str(server.bin_dir / "pg_restore"), "-l", str(source)], capture_output=True, text=True, env=env, check=False
+        )
+        if listed.returncode or " TABLE DATA " not in listed.stdout:
+            raise NativeError(f"{source.name} is not a readable database backup: " + listed.stderr.strip()[-300:])
+        before = dump_database(cfg, label="axiom-before-restore-")
+        print(f"What the database held before this is kept at {before}.")
+        done = subprocess.run(
+            [str(server.bin_dir / "pg_restore"), *pg.connection(cfg), "--clean", "--if-exists", "--no-owner", "--no-privileges",
+             "--single-transaction", "--exit-on-error", str(source)],
+            capture_output=True, text=True, env=env, check=False,
+        )
+        if done.returncode:
+            raise NativeError(f"The restore failed and changed nothing: {done.stderr.strip()[-400:]}")
+    print("Restored. Start AXIOM again.")
     return 0
 
 
@@ -490,6 +547,10 @@ def parser():
     sub.add_parser("psql", help="Open psql on the native database")
     backup = sub.add_parser("backup", help="Copy the database to a file; the app keeps running")
     backup.add_argument("file", nargs="?", help="Default: ~/axiom-backups/axiom-<date>.dump")
+    backup.add_argument("--auto", action="store_true", help=argparse.SUPPRESS)
+    restore = sub.add_parser("restore", help="Put a backup back, once AXIOM is stopped; today's database is copied first")
+    restore.add_argument("file")
+    restore.add_argument("--yes", action="store_true", help="Do not ask first")
     sub.add_parser("jobpilot", help="Run an app command here, for example: axiom jobpilot token")
     smoke_check = sub.add_parser("smoke", help="Prove this installation works: services, API, database, schema, assets, a dry fill")
     smoke_check.add_argument("--no-fill", action="store_true", help="Only the checks of the running app")
@@ -521,6 +582,7 @@ COMMANDS = {
     "logs": cmd_logs,
     "psql": cmd_psql,
     "backup": cmd_backup,
+    "restore": cmd_restore,
     "jobpilot": cmd_jobpilot,
     "hold": cmd_hold,
     "smoke": cmd_smoke,
