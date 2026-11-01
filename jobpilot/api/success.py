@@ -27,7 +27,15 @@ TARGET = 90  # percent, per platform with volume and overall (the owner's goal)
 VOLUME = 8  # a platform with fewer tried jobs says too little to hold to the target
 CLOSED = {"closed", "cancelled"}
 # Things only the owner can make; the engine can never answer them, so they're not an engine failure.
-OWNER_ONLY = re.compile(r"supervisor|reference|video|writing sample|work sample|portfolio|publication", re.I)
+# iCIMS packet forms carry no caption text, so a run's reason names the page's own field ids: "SupName; SupTitle" for the
+# supervisor of each work row and "Ref1LastName; Ref Name2" for references (a manufacturer's application, a trucking
+# company's, 2026-10-27). They are the same supervisor/reference facts answers/people_rules.py sends to the owner, so they
+# count the same: those two jobs read as engine failures, 2 of the 10 iCIMS jobs short of the target that week.
+OWNER_ONLY = re.compile(
+    r"supervisor|reference|\bsup(?:name|title|phone|email|contact)\b|\bref ?(?:name|\d)|"
+    r"video|writing sample|work sample|portfolio|publication",
+    re.I,
+)
 
 
 def pct(part, whole):

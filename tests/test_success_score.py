@@ -146,3 +146,19 @@ def test_the_route_is_read_only_and_bounds_the_window(client):
     assert client.get("/api/success", params={"days": 0}).status_code == 422
     assert client.get("/api/success", params={"days": 91}).status_code == 422
     assert client.post("/api/success", json={}).status_code == 405
+
+
+def test_supervisor_and_reference_boxes_named_by_their_field_ids_are_the_owners(service):
+    # iCIMS packet forms have no caption text, so the reason carries the page's own ids; they ask for the same supervisor and
+    # reference facts as "Supervisor Name" does, and an engine cannot invent them.
+    seed(service, {
+        "sup": ("icims", [("waiting_answer", "Required application facts are missing: SupName; SupTitle; SupName", 1)], False),
+        "refs": ("icims", [("waiting_answer", "Required application facts are missing: Ref1LastName; Ref1Company; EmpContact", 1)], False),
+        "named": ("icims", [("waiting_answer", "Required application facts are missing: Ref Name2", 1)], False),
+        "phone": ("icims", [("waiting_answer", "The account form needs an answer: Employer Phone Number", 1)], False),
+        "ok": ("icims", [("confirmed", "", 1)], False),
+    })
+    with service.db.session() as s:
+        row_ = next(p for p in success(s, 7, now=NOW)["platforms"] if p["ats"] == "icims")
+    # The employer's phone is a third party's number too, but nothing here says the owner cannot find it: it stays counted.
+    assert row_["owner_only"] == 3 and row_["eligible"] == 2 and row_["confirmed"] == 1
