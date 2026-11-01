@@ -46,7 +46,10 @@ INTENTS = [
     (
         re.compile(
             r"(?:previously|ever|formerly|currently) (?:been )?(?:employed|worked|work) (?:by|for|at|with)|"
-            r"former employee|current or former|worked (?:for|at) .{0,40} before|previous(?:ly)? (?:work|employ)|"
+            # "permission to contact any previous employer(s)" and "my previous employment" (a certification Dallas County asks
+            # to affirm, answered No 212 times, 2026-10) speak of the applicant's other employers, not this one.
+            r"former employee|current or former|worked (?:for|at) .{0,40} before|previously (?:work|employ)|previous work(?:ed)?\b|"
+            r"previous (?:employee|employment (?:with|at|by|in))|"
             r"(?:have|had) you (?:ever )?(?:been )?(?:employed|worked|interned|contracted) (?:by|for|at|with)(?! any (?:time|point))|"
             # ADP 2026-10-31: "Are you a current employee of Midco?"
             r"\b(?:are|were) you (?:a |an )?(?:current|former|previous|past)(?: or (?:current|former|previous|past))? "

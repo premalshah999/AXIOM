@@ -32,7 +32,13 @@ VISIBLE_OPTIONS = r"""(args) => {
   const scope = args.scope && roots.map(r => r.querySelector('#' + CSS.escape(args.scope))).find(Boolean);
   if (args.scope && !scope) return []; // A stale owner reference must never expose another menu.
   const inside = e => { for(let n=e; n; n=n.assignedSlot || n.parentElement || n.getRootNode()?.host) if(n===scope) return true; return false; };
-  const elements = roots.flatMap(r => [...r.querySelectorAll(args.selector)]).filter(e => !scope || inside(e));
+  // A select widget's own list may be plain rows: Paylocity's Country and State open a role=list portal that the wrapper
+  // names with aria-owns, whose rows are role=listitem, so 18 fills a run read "no offered choices" (Commence, 2026-11-01).
+  // A list on the page is not a menu: only the one a widget names as its popup counts.
+  const named = roots.flatMap(r => [...r.querySelectorAll('[aria-haspopup]:not([aria-haspopup=false])[aria-owns],[aria-haspopup]:not([aria-haspopup=false])[aria-controls]')])
+    .map(w => w.getRootNode().getElementById?.(w.getAttribute('aria-owns') || w.getAttribute('aria-controls'))).filter(Boolean);
+  const rows = args.named ? named.flatMap(list => [...list.querySelectorAll('[role=listitem]')]) : [];
+  const elements = [...roots.flatMap(r => [...r.querySelectorAll(args.selector)]), ...rows].filter(e => !scope || inside(e));
   const controls = roots.flatMap(r => [...r.querySelectorAll('[data-jp-id]')]);
   const owners = new Map();
   const content = n => {
@@ -699,7 +705,7 @@ async def wait_react_hydrated(page, seconds=12):
 
 async def visible_options(frame, scope=None, selector=OPTION_SELECTOR):
     try:
-        return await frame.evaluate(VISIBLE_OPTIONS, {"scope": scope, "selector": selector})
+        return await frame.evaluate(VISIBLE_OPTIONS, {"scope": scope, "selector": selector, "named": selector == OPTION_SELECTOR})
     except Exception:
         return []
 
@@ -832,8 +838,10 @@ async def _popup_scope(el):
             """e => {
               // BambooHR's Fabric toggles name their portal menu only by data-menu-id (Asure, 2026-10-28: State and
               // Highest Education read "no offered choices" on every run).
+              const wrapper = e.closest('[aria-haspopup]:not([aria-haspopup=false])');  // The wrapper names it, not the input.
               const reference = e.getAttribute('aria-controls') || e.getAttribute('aria-owns') || e.getAttribute('data-menu-id') ||
-                e.querySelector('[aria-controls]')?.getAttribute('aria-controls');
+                e.querySelector('[aria-controls]')?.getAttribute('aria-controls') ||
+                wrapper?.getAttribute('aria-owns') || wrapper?.getAttribute('aria-controls');
               const referenced = reference && (e.getRootNode().getElementById?.(reference) || document.getElementById(reference));
               if (referenced && referenced.getClientRects().length && getComputedStyle(referenced).visibility !== 'hidden') return reference;
               // iCIMS links the sibling container to its listbox, while the

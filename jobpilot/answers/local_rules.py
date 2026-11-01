@@ -33,6 +33,8 @@ from .contact import address_region_option
 from .demographics import DECLINE
 from .eligibility import NO_OPTION
 from .demographics import DEMOGRAPHIC
+from .demographics import NOT_ASKED
+from .demographics import declines
 from .eligibility import NOT_AVAILABILITY
 from .eligibility import NOT_DESIRED
 from .eligibility import OTHER_COUNTRY
@@ -877,6 +879,9 @@ class LocalRulesMixin:
             bool(
                 DEMOGRAPHIC.search(label)
                 or (generic_disclosure_label and any(DEMOGRAPHIC.search(o) for o in options))
+                # A label that is only the employer's equal-opportunity statement ("... on the basis of race, religion ...")
+                # over a list of races or genders: the choices are the question.
+                or (NOT_ASKED.search(label) and any(declines(o) or DEMOGRAPHIC.search(o) or re.fullmatch(r"\s*(?:male|female|man|woman)\s*", str(o), re.I) for o in options))
             )
             and not bool(
                 re.search(

@@ -393,8 +393,15 @@ class WorkdayAuth:
     async def enter(self, field, value):
         # Live Workday click filters depend on keyboard-driven validation. fill()
         # updates the visible value but can leave the auth action inert.
-        await field.fill("")
-        await field.press_sequentially(value, delay=10)
+        # A page still rendering takes the field away after the first key, and the rest of the keys go nowhere with no error:
+        # Vera Bradley's sign-in was pressed with "s" for an email, and the run ended "returned to sign-in without an error
+        # message" under a page saying "Please enter a valid email" (2026-10-31). What is in the box is read back.
+        for attempt in range(3):
+            await field.fill("")
+            await field.press_sequentially(value, delay=10)
+            if await field.input_value() == value:
+                break
+            await asyncio.sleep(0.5)
         await field.press("Tab")
 
     def watch_responses(self):
@@ -595,6 +602,12 @@ class WorkdayAuth:
             self.save_credentials(self.credentials() or self.shared_credentials(), "activated")
             e.emit("account", "Workday account activated")
         except MailPending:
+            if self.account_state == "created_locally":
+                # The account was asked for; the next try signs in, and Workday's "not verified" page offers Resend. Left as
+                # created_locally the next try pressed Create again, and Workday sends nothing for an account it already holds:
+                # Fresenius, ServiceTitan, Vera Bradley and Barclays each waited 40 minutes for a mail that came 8-29 seconds
+                # after Resend was finally pressed (2026-10-29/31).
+                self.save_credentials(self.credentials() or self.shared_credentials(), "verification_pending")
             if e.email_verification:
                 e.email_verification.challenge_id = cid
                 e.email_verification.deferred = True

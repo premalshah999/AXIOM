@@ -943,6 +943,17 @@ def model_controls(controls, limit=80, per_label=3):
     return shown[:limit]
 
 
+def model_fields(fields, limit=100):
+    """The fields a decision sees. The cap must not hide what blocks the page: on a long form (iCIMS and Paylocity history rows,
+    50 runs with 100+ fields, 2026-10-25..11-01) the empty or refused field past the cap was never shown to the model that had
+    to fix it. Empty required and invalid fields come first into the cap; document order is kept."""
+    if len(fields) <= limit:
+        return fields
+    blocking = lambda f: bool(f.get("error") or f.get("valid") is False or (f.get("required") and not f.get("value")))  # noqa: E731
+    kept = {id(f) for f in sorted(fields, key=lambda f: not blocking(f))[:limit]}  # Stable: earlier fields win ties.
+    return [f for f in fields if id(f) in kept]
+
+
 def navigation_observation(obs):
     """Navigation needs page structure, not duplicated profile/answer context."""
 
@@ -988,7 +999,7 @@ def navigation_observation(obs):
                 "options": [brief(o, 100) for o in f.get("options", [])[:8]],
                 "option_count": len(f.get("options", [])),
             }
-            for f in obs["fields"][:100]
+            for f in model_fields(obs["fields"])
         ],
         "controls": [
             {

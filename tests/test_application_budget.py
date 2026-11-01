@@ -151,3 +151,27 @@ def test_starts_on_an_older_engine_build_do_not_count(service):
                       started_at=(AT - timedelta(seconds=300 - i)).isoformat()))
     with service.db.session() as s:
         assert require_allowance(s, "budget", at=AT)
+
+
+async def test_a_matched_email_is_no_new_start(service, monkeypatch):
+    """Amcor (Workday, 2026-11-01): its activation link arrived, the queue admitted the continuation, and the worker's own
+    check refused it as a fourth start: the job ended "already used its initial attempt and two retries"."""
+    import asyncio
+
+    from jobpilot import application_pacing
+
+    monkeypatch.setattr(application_pacing, "may_start", lambda *a, **k: False)  # Admitted, then held: no browser in a test.
+    service.db.set_setting("application_budget", {"max_seconds": None})
+    seed(service, [100, 70, 30])
+    with service.db.exclusive() as s:
+        for run in s.query(Run).where(Run.job_id == "budget"):
+            run.started_at = datetime.now(UTC).isoformat()
+        s.add(Run(id="retry", job_id="budget", state="queued", mode="submit", packet=dict(CURRENT)))
+        s.add(Run(id="mail", job_id="budget", state="queued", mode="submit",
+                  packet={**CURRENT, "recovery_continuation_cause": "email_matched"}))
+    await service._execute_owned("retry")
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(service._execute_owned("mail"), timeout=1.5)
+    with service.db.session() as s:
+        assert s.get(Run, "retry").state == "timed_out"
+        assert s.get(Run, "mail").state == "queued"

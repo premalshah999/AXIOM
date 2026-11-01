@@ -511,7 +511,10 @@ static NSString *const SignedOutScript =
   [self signInThen:^{
     self.mode = ModeDashboard;
     self.splashLoaded = NO;
-    [self.web loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:base]]];
+    // Never a stored page: it names the assets of an older build, so an install would not show until a reload.
+    [self.web loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:base]
+                                           cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
+                                       timeoutInterval:60]];
   }];
 }
 

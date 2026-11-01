@@ -34,6 +34,18 @@ EITHER_PERIOD = re.compile(
     r"\bannual(?:ized|ly)?\b|\bper year\b|\byearly\b",
     re.I,
 )
+# Holding a license does not answer these. "Has your driver's license ever been denied, limited, suspended or revoked?" took
+# "Yes" from the valid-license fact (Energy Transfer, 2026-10-29..31), and so did "Do you have a Commercial Driver's License?"
+# and "... a current and valid California Driver's License?" for an applicant licensed elsewhere.
+LICENSE_RECORD = re.compile(r"\b(?:denied|limited|suspended|revoked|restricted|cancell?ed|withdrawn)\b|\bcommercial\b|\bcdl\b", re.I)
+US_STATE_LICENSE = re.compile(
+    r"\b(alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|"
+    r"iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|"
+    r"nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|"
+    r"rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming)"
+    r"(?: state)? driver.s licen[sc]e",
+    re.I,
+)
 
 
 ASKS_FOR_EMPLOYER = re.compile(
@@ -58,6 +70,17 @@ def pay_in_period(label, amount):
 
 
 class IntentRulesMixin:
+    def not_the_applicants_license(self, label):
+        if LICENSE_RECORD.search(label):
+            return True
+        named = US_STATE_LICENSE.search(label)
+        if not named:
+            return False
+        facts = self._facts() or {}
+        address = self.profile.address
+        home = [facts.get("state_of_residence"), facts.get("state"), getattr(address, "state", None)]
+        return named[1].casefold() not in {str(state).strip().casefold() for state in home if state}
+
     def _intent_answer(self, f, label):
         if f.get("type") != "checkbox" and status_defined_answer(f["label"], self._facts()):
             # The question's own definition decides, never the stored sponsorship flag.
@@ -120,6 +143,8 @@ class IntentRulesMixin:
                     and no_fact(facts.get("has_relatives_at_employer"))
                 ):
                     return None  # The applicant's employment history does not answer a relative's history.
+            if "valid_drivers_license" in keys and self.not_the_applicants_license(f["label"]):
+                return None
             if "has_non_compete" in keys and re.search(
                 r"solicit|contact\w*.{0,30}(?:customers|clients)", f["label"], re.I
             ):
@@ -138,6 +163,12 @@ class IntentRulesMixin:
                 # and "No" was sent as the employer's name (Stripe 2026-11-01, Headway 10-24, Klaviyo 10-22).
                 current = next((w for w in p.work if w.current), p.work[0] if p.work else None)
                 return self._ans(f, current.company, ["profile:work.current.company"]) if current and current.company else None
+            if "previously_employed_here" in keys and re.search(
+                r"\b(?:may|can|could|do we have permission to) (?:we|the company)? ?contact\b|\bcontact your\b", f["label"], re.I
+            ):
+                # "May we contact your present and previous employer(s)?" is permission, not "have you worked here": its "No"
+                # opened a required "If no, when?" (JPL, Workday, 2026-11-01). The owner's reviewed answer decides it.
+                continue
             if "previously_employed_here" in keys and self.names_recorded_employer(f["label"]):
                 return None  # A recorded employer is named: the owner's "No" policy cannot apply.
             if "previously_employed_here" in keys and re.search(
