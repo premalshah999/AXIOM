@@ -25,6 +25,7 @@ from .answers.text import FROM_RECORD, strip_catalog_code
 from .knowledge import topic
 from .browser_contracts import ActionResult, action_result, field_identity, fingerprint
 from .models import AnswerModelUnavailable
+from .page_clock import PageClock, timed
 from .playwright_fast import install as install_playwright_fast
 from .privacy import dismiss_cookies
 
@@ -1118,6 +1119,28 @@ class NetworkMonitor:
 # `quiet` seconds and shows no loading indicator, or `budget` seconds pass; it answers whether the frame is still busy.
 # Polling from Python cost one call per frame every 0.1 s, and each call waits for a busy renderer on the shared worker
 # Chrome. The timers run in the page, which the host Chrome keeps unthrottled (--disable-background-timer-throttling).
+
+# One call per frame: a mutation counter (the observer is installed on first use), and a checksum of every control's value, which
+# a script can change without a mutation. The scan's own tagging of controls counts as mutations; it is read after the scan.
+EPOCH_MAX_AGE = 5.0
+EPOCH_JS = """() => {
+  let s = window.__jpEpoch;
+  if (!s) {
+    s = window.__jpEpoch = {id: Math.random().toString(36).slice(2), n: 0};
+    new MutationObserver(r => { s.n += r.length; }).observe(document.documentElement,
+      {subtree: true, childList: true, attributes: true, characterData: true});
+  }
+  let h = 0;
+  const els = document.querySelectorAll('input,select,textarea');
+  for (const e of els) {
+    const v = e.type === 'checkbox' || e.type === 'radio' ? (e.checked ? '1' : '0') : String(e.value || '');
+    for (let i = 0; i < v.length; i++) h = (h * 31 + v.charCodeAt(i)) | 0;
+    h = (h * 31 + 7) | 0;
+  }
+  const a = document.activeElement;
+  return s.id + ':' + s.n + ':' + els.length + ':' + h + ':' + (a ? (a.id || a.name || a.tagName) : '') + ':' + document.readyState;
+}"""
+
 SETTLE_JS = """async ({quiet, budget}) => {
   if (!window.__jpRenderQuiet) {
     const state = {changed: performance.now()};
@@ -1387,6 +1410,7 @@ LAUNCHER = (
 class FormSession:
     def __init__(self, page, resolver, resume_path, emit):
         self.page, self.resolver, self.resume_path, self.emit = page, resolver, resume_path, emit
+        self.clock = PageClock()
         self.retyped_phones = set()
         # Greenhouse phones typed (and read back) in this run: the site's "too short" from an
         # earlier submit stays on the field until the next submit re-validates it.
@@ -1822,7 +1846,50 @@ class FormSession:
             pass  # The owned navigator observes and repairs anything still incomplete.
         return True
 
-    async def scan(self):
+    @timed("scan")
+    async def scan(self, force=False):
+        """The application page's fields and controls. A page that has not changed since the last scan is not read again:
+        the adapter scanned the same page five times between filling it and pressing Next (SCAN is the heaviest call a
+        page makes, and every one is a round trip per frame). `force` reads it regardless."""
+        if not force and (cached := await self.unchanged_observation()):
+            self.clock.add("scan_skipped", 0.0)
+            return cached
+        obs = await self._scan()
+        await self.remember_epoch(obs)
+        return obs
+
+    async def page_epoch(self):
+        """What a change to the page would alter: per frame, its document, a count of every DOM mutation, and a checksum
+        of every control's value. None when any frame cannot be read; the caller then reads the page for real."""
+        if self.page.is_closed():
+            return None
+        try:
+            frames = [f for f in self.page.frames if not f.is_detached()]
+            marks = await asyncio.wait_for(asyncio.gather(*(f.evaluate(EPOCH_JS) for f in frames)), timeout=2)
+        except Exception:
+            return None
+        if not all(isinstance(m, str) for m in marks):
+            return None
+        return (id(self.page), self.page.url, tuple((f.url, m) for f, m in zip(frames, marks)))
+
+    async def remember_epoch(self, obs):
+        self._scan_epoch = None
+        if obs.get("scan_success") and not obs.get("observation_failure"):
+            epoch = await self.page_epoch()
+            if epoch is not None:
+                self._scan_epoch = (epoch, time.monotonic(), obs)
+
+    async def unchanged_observation(self):
+        seen = getattr(self, "_scan_epoch", None)
+        if not seen or time.monotonic() - seen[1] > EPOCH_MAX_AGE:
+            return None
+        if self.page.is_closed() or self.last_observation is not seen[2]:
+            return None
+        if await self.page_epoch() != seen[0]:
+            return None
+        return seen[2]
+
+    async def _scan(self):
         if self.page.is_closed() and getattr(self, "openers", None):
             await self.return_to_opener()
         await widgets.open_collapsed_sections(self.page)
@@ -2580,6 +2647,7 @@ class FormSession:
             return False
         finally:
             elapsed = time.monotonic() - started
+            self.clock.add("settle", elapsed)
             if elapsed >= 1 and hasattr(self, "emit"):
                 busy = bool(self.network and not self.network.quiet(quiet))
                 details = {"seconds": round(elapsed, 2), "settled": settled, "network_busy": busy}
@@ -2923,6 +2991,7 @@ class FormSession:
             error = type(exc).__name__
             raise
         finally:
+            self.clock.field(field.get("label", ""), field.get("type", ""), field.get("widget", ""), time.monotonic() - started, error)
             seconds = round(time.monotonic() - started, 1)
             if seconds >= 3:
                 self.emit(
@@ -3647,6 +3716,7 @@ class FormSession:
         address = self.resolver.profile.address
         return lambda texts: address_location_option(texts, address) or address_country_option(texts, address)
 
+    @timed("discover")
     async def discover_options(self, field):
         """Open custom selects once to read their real choices before the resolver decides."""
         try:
@@ -3913,6 +3983,7 @@ class FormSession:
             and re.search(r"replace resume|select your resume", text or "", re.I)
         )
 
+    @timed("upload_wait")
     async def wait_upload(self):
         """Wait for the website's own upload acknowledgement, not a fixed delay."""
         try:
@@ -4261,8 +4332,8 @@ class FormSession:
             return not other_party_email(field) and not same_mailbox(value, own)
         return False
 
-    async def rematch(self, field):
-        await self.scan()
+    async def rematch(self, field, force=False):
+        await self.scan(force=force)
         return self.matching_field(field)
 
     async def resume_widgets(self):
@@ -4385,6 +4456,19 @@ class FormSession:
         }
 
     async def fill_current(self, accept_prefilled=None):
+        self.clock.reset()
+        try:
+            return await self._fill_current(accept_prefilled)
+        finally:
+            # One event per page: where its seconds went (page_clock.py). Never allowed to alter the run.
+            try:
+                summary = self.clock.take()
+                if summary["wall_s"] >= 0.5:
+                    self.emit("page_timing", "Where this page's time went", summary)
+            except Exception:
+                pass
+
+    async def _fill_current(self, accept_prefilled=None):
         from .ats import oracle_job_catalog
 
         if oracle_job_catalog(self.page.url):
@@ -4677,7 +4761,13 @@ class FormSession:
                 answers = [a for _, a in known]
             else:
                 selected = ask
-                answers = [a for _, a in known] if known else await self.resolver.resolve(ask) if ask else []
+                if known:
+                    answers = [a for _, a in known]
+                elif ask:
+                    with self.clock.span("answers"):
+                        answers = await self.resolver.resolve(ask)
+                else:
+                    answers = []
             handled.update({x["id"]: self.question_shape(x) for x in selected})
             original_fields = {x["id"]: deepcopy(x) for x in selected}
             changed = False
@@ -4878,7 +4968,7 @@ class FormSession:
                 verified = False
                 if field["type"] in {"prompt", "combobox", "dropdown"}:
                     try:
-                        observed = await self.rematch(field)
+                        observed = await self.rematch(field, force=True)
                         verified = (
                             observed["valid"]
                             and not observed.get("error")
@@ -5614,15 +5704,16 @@ class FormSession:
                 {"field": field["label"], "type": field["type"], "structure": structure},
             )
 
+    @timed("verify")
     async def verify(self):
-        obs = await self.scan()
+        obs = await self.scan(force=True)  # The read-back is a fresh read of the page, never a remembered one.
         from .ats import oracle_job_catalog
 
         if oracle_job_catalog(self.page.url):
             return self.catalog_report()
         if await self.cancel_reupload_dialog():
             # The overwrite confirmation sits over the form and blocks finish; Cancel keeps the prefilled data.
-            obs = await self.scan()
+            obs = await self.scan(force=True)
         if obs.get("observation_failure"):
             return {
                 "ok": False,
