@@ -827,8 +827,11 @@ async def wait_options(
                     return []
             else:
                 empty_since = None
+        first_look = bool(opts) and not last and query is None and changed_from is None and stable_for is None
         last = opts
-        await asyncio.sleep(settle)
+        # A menu opened to read its whole list renders in one commit: the confirming read follows quickly. Searches, and
+        # lists compared with an earlier one, keep the full interval.
+        await asyncio.sleep(min(settle, 0.05) if first_look else settle)
     return [] if require_query_match and query and not matches_query else last
 
 
@@ -2021,18 +2024,37 @@ async def _rcm_committed(el, targets, owned=False):
     """The input shows the picked entry and keeps it when it loses focus: RCM's _onBlur reverts typed text that
     was never selected from the list. Typed text equal to the label proves nothing while the list stays open, so
     a selection must also close the owned list and fill the field's hidden value."""
-    await asyncio.sleep(0.4)
+    # The pick commits as soon as the list closes and the hidden value is filled; wait for that, up to the 0.4 s this used
+    # to sleep unconditionally (a SuccessFactors page with four picklists spent 3.6 s asleep).
     if owned:
-        state = await el.evaluate(RCM_STATE)
-        if state["open"] or state["hidden"] is False:
-            return False
+        deadline = time.monotonic() + 0.4
+        while True:
+            state = await el.evaluate(RCM_STATE)
+            if not (state["open"] or state["hidden"] is False):
+                break
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(0.05)
+    else:
+        await asyncio.sleep(0.4)
     try:
         await el.evaluate("e => e.blur()")
     except Exception:
         return False
-    await asyncio.sleep(0.5)
-    actual = norm(await el.evaluate("e => e.value || ''"))
-    return bool(actual) and any(actual == norm(t) for t in targets)
+
+    async def kept():
+        actual = norm(await el.evaluate("e => e.value || ''"))
+        return bool(actual) and any(actual == norm(t) for t in targets)
+
+    # RCM's blur handler reverts text that was never selected, within a tick of the blur. The pick counts as kept when the
+    # text is still the pick on two reads 0.13 s apart, 0.26 s after the blur; a revert on either read ends the wait with
+    # the answer the full 0.5 s wait would have read.
+    for n in range(2):
+        await asyncio.sleep(0.13)
+        if not await kept():
+            await asyncio.sleep(0.5 - 0.13 * (n + 1))
+            return await kept()
+    return True
 
 
 async def _rcm_enter(el, option_id):

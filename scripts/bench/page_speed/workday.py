@@ -81,7 +81,7 @@ $('next').onclick = async () => {
 };
 $('back').onclick = () => { if (step > 1) go(step - 1); };
 function bind(root) {
-  root.querySelectorAll('button.dd').forEach(b => { b.onclick = () => { if (owner === b && !list.hidden) { list.hidden = true; return; } owner = b;
+  root.querySelectorAll('button.dd').forEach(b => { b.onclick = () => { if (owner === b && !list.hidden) { closeList(); return; } closeList(); owner = b;
     const items = JSON.parse(b.dataset.dd); const r = b.getBoundingClientRect(); list.style.top = (window.scrollY + r.bottom) + 'px'; list.style.left = r.left + 'px';
     list.innerHTML = items.map(t => '<li role="option" data-automation-id="menuItem">' + t + '</li>').join(''); list.hidden = false; b.setAttribute('aria-expanded', 'true');
     list.querySelectorAll('li').forEach(li => li.onclick = () => { b.textContent = li.textContent; b.setAttribute('aria-label', b.closest('div[data-automation-id]').querySelector('label').textContent + ' ' + li.textContent); list.hidden = true; b.setAttribute('aria-expanded', 'false'); }); }; });
@@ -100,8 +100,9 @@ function bind(root) {
   const f = root.querySelector('#resumeFile');
   if (f) f.addEventListener('change', e => { const file = e.target.files[0]; if (!file) return; setTimeout(() => { $('uploaded').innerHTML = '<div data-automation-id="file-upload-successful"><p>' + file.name + '</p><p>Successfully Uploaded!</p></div>'; }, 700); });
 }
-document.addEventListener('keydown', e => { if (e.key === 'Escape') list.hidden = true; });
-document.addEventListener('click', e => { if (!e.target.closest('.prompt')) document.querySelectorAll('.popup').forEach(p => p.hidden = true); if (!e.target.closest('button.dd,#ddlist')) list.hidden = true; });
+function closeList() { list.hidden = true; document.querySelectorAll('button.dd[aria-expanded=true]').forEach(b => b.setAttribute('aria-expanded', 'false')); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeList(); });
+document.addEventListener('click', e => { if (!e.target.closest('.prompt')) document.querySelectorAll('.popup').forEach(p => p.hidden = true); if (!e.target.closest('button.dd,#ddlist')) closeList(); });
 show(1);
 </script></body></html>"""
 

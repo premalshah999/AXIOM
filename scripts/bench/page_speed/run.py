@@ -23,7 +23,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent.parent.parent))
+sys.path.insert(0, os.environ.get('CODE_ROOT') or str(HERE.parent.parent.parent))  # CODE_ROOT: an older checkout's jobpilot, for a before/after pair
 sys.path.insert(0, str(HERE.parent))
 
 SITE, DATA = sys.argv[1], Path(sys.argv[2])
