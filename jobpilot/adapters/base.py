@@ -384,8 +384,8 @@ RESET_RETRY_SECONDS = 6 * 3600
 RESET_CODE_INLINE_WAIT = 150
 RESET_WINDOW_SECONDS = 24 * 3600
 PASSWORD_UNKNOWN = (
-    "This employer has an account for your email but refuses the saved password, and its password reset email never "
-    "arrives. Reset the password in your own browser, then save it under Settings > Accounts"
+    "This employer refuses the saved password, its password reset email never arrives, and signing up did not open a new "
+    "account. Reset the password in your own browser, then save it under Settings > Accounts"
 )
 ALIAS_REFUSED = (
     "This employer's sign-up form refuses the plus-address that was to replace its unusable account for your email. "
@@ -3101,10 +3101,6 @@ class Adapter:
                 state="waiting_browser",
                 blocker_type="account",
             )
-        if resets_unanswered(record) >= RESET_UNANSWERED_CAP:
-            # Two confirmed resets, no mail: a third would only repeat the silence (Textron 9 waits, Lenovo 8, Bain and
-            # Intuit 7 each). The job stops here, with the reason, until a password is saved under Settings > Accounts.
-            return self.defer(PASSWORD_UNKNOWN, manual, state="waiting_browser", blocker_type="account")
         if (self.alias_unregistered(record) or not account_evidenced(record)) and not self.attempts["create_first"]:
             # An address the employer has no account for gets no mail from a reset. A replacement address was never
             # registered; any other account that nothing shows exists is tried at the sign-up route once first (it answers
@@ -3121,6 +3117,11 @@ class Adapter:
                 self.emit("account", "The employer's sign-up link did not open; resetting the password instead")
             if self.alias_unregistered(record):
                 return self.defer(ALIAS_UNREGISTERED, manual, state="waiting_browser", blocker_type="account")
+        if resets_unanswered(record) >= RESET_UNANSWERED_CAP:
+            # Two confirmed resets, no mail: a third would only repeat the silence (Textron 9 waits, Lenovo 8, Bain and
+            # Intuit 7 each). Silence can mean no account exists, so the sign-up route above comes first. The job stops
+            # here, with the reason, until a password is saved under Settings > Accounts.
+            return self.defer(PASSWORD_UNKNOWN, manual, state="waiting_browser", blocker_type="account")
         self.attempts["reset"] += 1
         obs = await self.form.scan()
         forgot = [b for b in obs["controls"] if FORGOT.search(b["label"])]

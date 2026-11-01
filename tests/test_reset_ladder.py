@@ -196,3 +196,14 @@ async def test_a_sign_up_page_with_no_way_back_returns_to_the_sign_in_page_for_i
     assert await Adapter.recover(value, registration, "already exists") == {"state": "waiting_email"}
     assert goto.await_args.args[0] == value.sign_in_page
     value.request_reset.assert_awaited_once()
+
+
+async def test_silence_from_an_employer_with_no_proven_account_tries_sign_up_before_stopping(service):
+    value, obs = recovering(service, resets_unanswered=RESET_UNANSWERED_CAP, resets_unanswered_at=stamp(60))
+    assert await Adapter.recover(value, obs, "Invalid email or password") is None
+    value.switch.assert_awaited_once()
+    value.switch = AsyncMock(return_value=False)
+    value.accounts.mark(URL, "credentials_rejected", LOGIN, resets_unanswered=RESET_UNANSWERED_CAP, resets_unanswered_at=stamp(60))
+    result = await Adapter.recover(value, obs, "Invalid email or password")
+    assert result["reason"] == PASSWORD_UNKNOWN
+    value.request_reset.assert_not_awaited()
