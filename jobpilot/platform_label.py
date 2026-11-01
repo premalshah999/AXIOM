@@ -14,6 +14,7 @@ moves, and no second account or resend can follow from a label change. Only a be
 
 import re
 import time
+from urllib.parse import urlsplit
 
 from sqlalchemy import select
 
@@ -28,7 +29,8 @@ from .ats import (
     unsettled,
     url_platform,
 )
-from .db import Event, Job, Run
+from .db import Event, Job, Run, Setting
+from .shortlinks import is_shortlink
 
 # A job in one of these has a run in flight, an application that may still be reconciled, or an archived draft: its label
 # is not touched from outside the run. A confirmed or already-applied job may be relabelled (nothing runs for it again), so
@@ -126,8 +128,39 @@ def label_jobs_from_history(db):
             for job_id, message, _ in events:
                 if (m := HANDOFF.search(message or "")) and m[1] in drivers:
                     seen[job_id] = m[1]  # the latest hand-off wins
+    targets = short_link_targets(db)
+    found = {job_id: seen.get(job_id) or url_platform(url) or target_platform(targets.get(url)) for job_id, url in rows}
+    # A career site runs on one platform: a job there proven on it speaks for the others, whose addresses say nothing
+    # (careers.example.org/jobs/60384 beside .../jobs/60116?icims=1). A host showing two platforms says nothing.
+    hosts = {}
     for job_id, url in rows:
-        target = seen.get(job_id) or url_platform(url)
+        if found[job_id] and not is_shortlink(url):
+            hosts.setdefault(host_of(url), set()).add(found[job_id])
+    for job_id, url in rows:
+        proven = hosts.get(host_of(url), ())
+        target = found[job_id] or (next(iter(proven)) if len(proven) == 1 and not is_shortlink(url) else None)
         if target and record_observed_platform(db, job_id, target, outside_run=True):
             changed += 1
     return changed
+
+
+def host_of(url):
+    return (urlsplit(url or "").hostname or "").lower().removeprefix("www.")
+
+
+def short_link_targets(db):
+    """{short link: the address it was seen to lead to}: nearly half of the jobs labelled custom were short links to a
+    platform's own posting, labelled by the shortener's host (214 of 450, 2026-11-01)."""
+    from .shortlinks import CACHE_PREFIX
+
+    with db.session() as s:
+        values = [row.value or {} for row in s.scalars(select(Setting).where(Setting.key.startswith(CACHE_PREFIX, autoescape=True)))]
+    return {value["url"]: value["final"] for value in values if value.get("url") and value.get("final")}
+
+
+def target_platform(final):
+    """The platform a link's target names by its host or its own parameter, or None."""
+    if not final:
+        return None
+    landed = detect(final).id
+    return landed if not unsettled(landed) else url_platform(final)

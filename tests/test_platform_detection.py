@@ -255,3 +255,40 @@ async def test_a_relabelled_job_still_blocks_a_second_application_to_its_address
     with pytest.raises(QueueBlocked) as blocked:
         await service.queue("later", "submit")
     assert blocked.value.code == "duplicate_posting"
+
+
+def test_a_short_link_takes_the_platform_of_the_posting_it_leads_to(service):
+    from jobpilot.admission import SHARED_LINK_HOSTS
+    from jobpilot.db import Setting
+    from jobpilot.shortlinks import cache_key
+
+    short_host = sorted(SHARED_LINK_HOSTS)[0]
+    leads = {
+        f"https://{short_host}/a": "https://job-boards.greenhouse.io/examplecorp/jobs/11",
+        f"https://{short_host}/b": "https://careers.example.test/roles/data-engineer",
+    }
+    with service.db.session() as session:
+        for job_id, (short, final) in zip(("one", "two"), leads.items()):
+            session.add(Job(id=job_id, url=short, identity=job_id, ats="custom", company="Example", title="Engineer",
+                            status="ready", location="", description="x", demo=False))
+            session.add(Setting(key=cache_key(short), value={"url": short, "final": final}))
+        session.commit()
+    assert label_jobs_from_history(service.db) == 1
+    with service.db.session() as session:
+        assert session.get(Job, "one").ats == "greenhouse"
+        assert session.get(Job, "two").ats == "custom"  # An employer's own page proves nothing by its address.
+
+
+def test_a_career_site_proven_on_one_platform_speaks_for_its_other_jobs(service):
+    site = "https://careers.example.test/jobs/"
+    mixed = "https://jobs.example.test/roles/"
+    rows = {"a": site + "11?icims=1", "b": site + "22", "c": mixed + "1?icims=1", "d": mixed + "2?gh_jid=2", "e": mixed + "3"}
+    with service.db.session() as session:
+        for job_id, url in rows.items():
+            session.add(Job(id=job_id, url=url, identity=job_id, ats="custom", company="Example", title="Engineer",
+                            status="ready", location="", description="x", demo=False))
+        session.commit()
+    label_jobs_from_history(service.db)
+    with service.db.session() as session:
+        assert session.get(Job, "b").ats == "icims"
+        assert session.get(Job, "e").ats == "custom"  # This host shows two platforms.
