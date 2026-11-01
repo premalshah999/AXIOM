@@ -133,12 +133,14 @@ async def test_tracking_calls_alone_do_not_make_a_blocked_click_uncertain(page, 
 
 async def test_a_click_delivered_before_a_slow_handler_timed_out_stays_uncertain(page, service, tmp_path):
     """The dangerous direction: Playwright reports the same timeout, and the click is real."""
-    await serve(page, HITS + """<button id="go" type="button" onclick="const t=Date.now();while(Date.now()-t<1500);">
+    # The handler outlasts a timeout long enough for the input to be dispatched on a busy machine: at 300 ms the timeout sometimes
+    # won and no click happened at all, which the engine rightly called undelivered (14 of 14 verdicts matched, 2026-11-01).
+    await serve(page, HITS + """<button id="go" type="button" onclick="const t=Date.now();while(Date.now()-t<3500);">
         Submit application</button>""")
     form = await session(page, service, tmp_path)
     engine, control = engine_on(page, form), only_control(form)
     watch = await engine.watch_commit_click(control["id"])
-    await timed_out_click(form, control, timeout=300)
+    await timed_out_click(form, control, timeout=1500)
     assert await engine.commit_click_undelivered(watch) is False
     assert "click" in await page.evaluate("window.hits")
 
