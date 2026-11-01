@@ -7,6 +7,7 @@ import { useSelection } from "./bulk";
 import { DiscoveredJobs } from "./jobboard";
 import { OPEN_JOB_LINK } from "./jobintake";
 import { RowActions } from "./jobactions";
+import { OverLimitJobs } from "./overlimit";
 import { type Group, type JobRow, type Word } from "./model";
 import { PipelineBulk } from "./pipelinebulk";
 import { Pagination } from "./pagination";
@@ -24,10 +25,12 @@ import { JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
 // approval). Applied is Applications. Old tab ids still open: "pipeline" is Applying, "reserved" is Not applying.
 const WORD_OF_TAB: Record<string, string> = { pipeline: "applying", applying: "applying", needs: "needs", failed: "failed", not: "not", reserved: "not" };
 
+const OVER = "overlimit";
+
 export function JobsView() {
   const { route, counts: all, version } = useWorkspace();
   const tabs = PAGE_TABS.jobs!;
-  const tab = route.tab && (tabs.some((t) => t.id === route.tab) || WORD_OF_TAB[route.tab]) ? route.tab : "discovered";
+  const tab = route.tab && (tabs.some((t) => t.id === route.tab) || WORD_OF_TAB[route.tab] || route.tab === OVER) ? route.tab : "discovered";
   const shown = tab === "pipeline" ? "applying" : tab === "reserved" ? "not" : tab;
   // How many Ready jobs can start: the same number Overview's sentence and the To apply list name (jobpilot/startable.py).
   const ready = usePoll<Startable>((signal) => api("/startable", "GET", undefined, signal), 30000, [version]);
@@ -36,6 +39,10 @@ export function JobsView() {
     ...t,
     count: t.id === "discovered" ? ready.data?.startable : t.id === "needs" ? undefined : words?.[t.id as keyof NonNullable<typeof words>],
   }));
+  // Jobs held only because their employer reached the user's limit wait for approval in their own tab, shown only while it has
+  // jobs (or is open): the number is the reading's count of them, the same the list opens.
+  const over = ready.data?.held.find((h) => h.code === "employer_limit")?.count ?? 0;
+  if (over > 0 || tab === OVER) counted.splice(counted.findIndex((t) => t.id === "needs") + 1, 0, { id: OVER, label: "Over employer limit", count: over });
   return (
     <div className="ax-page ax-page-fill">
       <TopActions>
@@ -44,7 +51,7 @@ export function JobsView() {
         </Button>
       </TopActions>
       <RouteTabs view="jobs" tabs={counted} label="Jobs" current={shown} />
-      {shown === "discovered" ? <DiscoveredJobs /> : <WordList word={WORD_OF_TAB[shown] ?? "applying"} />}
+      {shown === "discovered" ? <DiscoveredJobs /> : shown === OVER ? <OverLimitJobs /> : <WordList word={WORD_OF_TAB[shown] ?? "applying"} />}
     </div>
   );
 }

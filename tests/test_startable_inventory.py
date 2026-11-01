@@ -67,7 +67,7 @@ def test_a_job_at_the_employer_limit_is_held_with_the_dispatchers_own_message(se
     capped = ready(service, 7, company="Capped Example", url="https://boards.example.test/capped/jobs/77")
     open_ = ready(service, 8)
     got = startable.read(service)
-    assert got["jobs"][capped]["code"] == "employer_limit" and "limit 2" in got["jobs"][capped]["reason"]
+    assert got["jobs"][capped]["code"] == "employer_limit" and got["jobs"][capped]["reason"] == "Capped Example already has 2 applications; your limit is 2."
     assert open_ not in got["jobs"] and got["startable"] == 1
 
 
