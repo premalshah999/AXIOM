@@ -164,7 +164,7 @@ class Profile(BaseModel):
 # Career-portal page titles are not employer names: iCIMS portals call themselves "Job Listings at PepsiCo", and 669
 # jobs carried that as their company (2026-10-23), which no receipt email names and no employer cap groups.
 PORTAL_TITLE = re.compile(
-    r"^\s*(?:job listings|jobs|careers|career opportunities|current (?:job )?openings|job openings|open positions) at\s+",
+    r"^\s*(?:job listings|jobs|careers|career opportunities|current (?:job )?(?:openings|opportunities)|job openings|open positions) at\s+",
     re.I,
 )
 
@@ -172,7 +172,7 @@ PORTAL_TITLE = re.compile(
 # iCIMS lists each posting as <a><span class="sr-only field-label">Requisition Title</span><h3>Lead Data Scientist</h3></a>;
 # a listing crawl that took the link's text titled 26 jobs "Requisition Title Lead Data Scientist" (2026-10-30). The label
 # is screen-reader text for the field, not part of the title.
-FIELD_LABEL = re.compile(r"^\s*Requisition\s+Title\b[\s:\-\u2013]*", re.I)
+FIELD_LABEL = re.compile(r"^\s*(?:Requisition|Job\s+Posting)\s+Title\b[\s:\-\u2013]*", re.I)
 
 
 def job_title(title):

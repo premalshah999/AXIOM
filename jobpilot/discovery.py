@@ -475,9 +475,14 @@ async def enrich(db, config, job_id):
     for el in soup.select("script,style,nav,footer,header"):
         el.decompose()
     if not details:
+        # The page's <title> only when it names a role: "Job Details" or "Jobs - Employer" would stay on the job as its title
+        # for good, since a real value is never replaced (posting_identity).
+        from .posting_identity import placeholder_title
+
+        page_title = job_title(soup.title.get_text(strip=True)) if soup.title else ""
         details = {
             "description": soup.get_text(" ", strip=True)[:40000],
-            "title": job_title(soup.title.get_text(strip=True)) if soup.title else "",
+            "title": "" if placeholder_title(page_title) else page_title,
         }
     with db.session() as s:
         item = s.get(Job, job_id)

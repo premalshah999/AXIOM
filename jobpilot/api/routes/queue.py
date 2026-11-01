@@ -17,8 +17,9 @@ from sqlalchemy import select
 from ...admission import QueueBlocked
 from ...db import Job, Run, Setting
 from ...discovery import add_job, posting_api_text
+from ...link_intake import prepare
 from ...network import public_url
-from ...owner_apply import KEY, apply
+from ...owner_apply import KEY, apply, restore
 from ...schemas import JobInput
 
 MAX_LINKS = 25
@@ -95,12 +96,24 @@ def router(service) -> APIRouter:
         for url in data.urls:
             try:
                 await public_url(url, config.allow_private_urls)
-                row, created = await asyncio.to_thread(add_job, db, JobInput(url=url), origin="manual")
+                # A wrapper (LinkedIn's outbound page, a search redirect) is the employer's link inside it; a board page
+                # that gives none, or a list of jobs, stops here with what to do (link_intake).
+                link, problem = await prepare(url, config.allow_private_urls)
+                if problem:
+                    results.append({"url": url, "state": "refused", "message": problem})
+                    continue
+                if link != url:
+                    await public_url(link, config.allow_private_urls)
+                row, created = await asyncio.to_thread(add_job, db, JobInput(url=link), origin="manual")
                 if created:
                     # The posting's text arrives in the background; queueing does not wait for it.
                     asyncio.create_task(posting_api_text(db, row["id"], row["url"]))
+                if row["status"] == "archived":
+                    # Pasting the link again is the owner asking for it again. A removed job comes back unless an
+                    # application may have reached the employer or it asked for an identifier (restore says which).
+                    await asyncio.to_thread(restore, service, row["id"])
                 outcome = await apply(service, row["id"])
-                results.append({"url": url, "job_id": row["id"], "created": created, **outcome})
+                results.append({"url": url, "job_id": row["id"], "created": created, **outcome, **({"resolved_url": link} if link != url else {})})
             except QueueBlocked as exc:
                 results.append({"url": url, "state": "refused", "message": str(exc)})
             except (ValueError, HTTPException) as exc:

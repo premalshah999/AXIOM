@@ -1945,7 +1945,8 @@ async def _handle_update(service, update):
         else:
             reply = "That browser step is no longer waiting. Send status to see the latest result."
     elif cmd == "/apply":
-        from .discovery import add_job, rank
+        from .admission import QueueBlocked
+        from .discovery import add_job, posting_api_text
         from .schemas import JobInput
         from .network import public_url
 
@@ -1956,43 +1957,41 @@ async def _handle_update(service, update):
                     c, "sendMessage", {"chat_id": c.telegram_user_id, "text": reply, "reply_markup": MENU}
                 )
                 return reply
-            await public_url(rest.strip(), c.allow_private_urls)
-            job, _ = add_job(service.db, JobInput(url=rest.strip()), origin="manual")
-            if job["status"] in {
-                "confirmed",
-                "submission_unknown",
-                "already_applied",
-                "queued",
-                "running",
-                "submitting",
-            }:
-                reply = "This job is already active or submitted, or needs receipt reconciliation. I haven’t queued it again."
-            else:
-                await rank(service.db, c, job["id"])
-                with service.db.session() as s:
-                    job = s.get(Job, job["id"])
-                    jid, title, company, state, reason = (
-                        job.id,
-                        job.title,
-                        job.company,
-                        job.status,
-                        job.reason,
-                    )
-                if state != "ready":
-                    from .failure_reports import clean
+            from .link_intake import prepare
+            from .owner_apply import apply as owner_apply
 
-                    reply = f"🔎 {company} · {title}\n\nNot queued: {clean(reason) or 'This job needs classification in the app.'}"
+            await public_url(rest.strip(), c.allow_private_urls)
+            link, problem = await prepare(rest.strip(), c.allow_private_urls)
+            if problem:
+                reply = problem
+            else:
+                job, created = add_job(service.db, JobInput(url=link), origin="manual")
+                if created:
+                    await posting_api_text(service.db, job["id"], job["url"])  # The queue's eligibility check reads it.
+                if job["status"] in {
+                    "confirmed",
+                    "submission_unknown",
+                    "already_applied",
+                    "queued",
+                    "running",
+                    "submitting",
+                }:
+                    reply = "This job is already active or submitted, or needs receipt reconciliation. I haven’t queued it again."
                 else:
-                    control = service.db.get_setting("control", {})
-                    run = await service.queue(jid, "submit" if control.get("auto_submit") else "dry_run")
-                    reply = (
-                        f"✈️ {company} · {title}\n\nQueued {'to apply' if run['mode'] == 'submit' else 'for a preview; automatic submission is off'}."
-                        + (
-                            " Workers are paused; it will start when you resume."
-                            if control.get("paused")
-                            else " I’ll handle it using your saved answers."
-                        )
-                    )
+                    # A link the owner sends is their own pick, as in the app's Add a job box: the fit ranking and the
+                    # autopilot's filters do not decide it.
+                    # Duplicate guards, eligibility (citizenship, clearance) and pacing still apply at the queue.
+                    try:
+                        answer = await owner_apply(service, job["id"])
+                    except (QueueBlocked, ValueError) as exc:
+                        answer = {"message": str(exc)[:300], "state": "refused"}
+                    with service.db.session() as s:
+                        row = s.get(Job, job["id"])
+                        label = " · ".join(x for x in (row.company, row.title) if x) or link
+                    if answer.get("state") == "refused":
+                        reply = f"🔎 {label}\n\nNot queued: {answer['message']}"
+                    else:
+                        reply = f"✈️ {label}\n\n{answer.get('message', 'Queued.')}"
         except Exception as exc:
             reply = "I couldn’t add that job. " + owner_error(
                 exc, "Check that the link opens one job posting, then send it again."

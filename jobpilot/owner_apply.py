@@ -222,6 +222,10 @@ def restore(service, job_id):
         )
         if sent:
             raise ValueError("An application for this job may already have reached the employer, so it stays removed")
+        # The owner rule: an application asking for a government or bank identifier is removed for good. Restoring it
+        # would send the next run to the same question (completion.py and sensitive_ids.py leave this text in the reason).
+        if s.scalar(select(Run.id).where(Run.job_id == job_id, Run.reason.contains("removed under the owner rule")).limit(1)):
+            raise ValueError("This application asks for a government or bank identifier, so the job stays removed")
         job.status = "ready"
         for key in ("archived_application:", "job_control:"):
             saved = s.get(Setting, key + job_id)

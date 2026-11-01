@@ -63,6 +63,14 @@ def router(service) -> APIRouter:
     @r.post("/api/jobs")
     async def import_job(data: JobInput):
         await public_url(data.url, config.allow_private_urls)
+        from ...link_intake import prepare
+
+        link, problem = await prepare(data.url, config.allow_private_urls)
+        if problem:
+            raise ValueError(problem)
+        if link != data.url:
+            await public_url(link, config.allow_private_urls)
+            data = data.model_copy(update={"url": link})
         # The insert, the profile read and ranking stay off the event loop the browser owners share.
         row, created = await asyncio.to_thread(add_job, db, data, origin="manual")
         result = {"job": row, "created": created}
@@ -70,13 +78,20 @@ def router(service) -> APIRouter:
         control = await asyncio.to_thread(db.get_setting, "control", {})
         if created and profile.get("autonomous") and control.get("auto_submit"):
             try:
-                await asyncio.to_thread(rank_in_thread, db, config, row["id"])
+                # A link the owner imports is their own pick, as in the Add a job box: not ranked against the autopilot's
+                # fit filters first (14 days: 39 manual jobs skipped and 33 left Ready with no run).
+                from ...owner_apply import apply
+
+                outcome = await apply(service, row["id"])
+                result["queued"] = outcome
+                if outcome.get("run_id"):
+                    result["run"] = {"id": outcome["run_id"]}
                 result["job"] = await asyncio.to_thread(saved_job, row["id"])
-                if result["job"]["status"] == "ready":
-                    result["run"] = await service.queue(row["id"], "submit")
             except QueueBlocked as exc:
                 result["notice"] = "Job saved. " + str(exc)
                 result["preparation"] = exc.as_dict()
+            except ValueError as exc:
+                result["notice"] = "Job saved. " + str(exc)
             except Exception:
                 # Import already committed. A downstream employer/provider outage
                 # must not turn a saved job into a failed import or expose a URL,
