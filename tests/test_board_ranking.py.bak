@@ -1,0 +1,69 @@
+"""A new install ranked nothing until Start was pressed: every posting stayed "Checking fit" (clean-install run, 2026-11-01).
+Ranking for the board runs whichever mode is on, on the person's key, best candidates first and in a bounded amount."""
+
+import hashlib
+
+from jobpilot import board_ranking
+from jobpilot.db import Resume
+from jobpilot.features.discovery.tables import DcClassification
+
+
+def job(i, title, posted="2026-10-30T00:00:00+00:00", **kw):
+    return {"id": f"j{i}", "title": title, "status": "new", "score": None, "attempted": False, "posted_at": posted, "url": f"https://jobs.example.test/{i}", **kw}
+
+
+def ready(service, roles=("Data Analyst",)):
+    setattr(service.config, service.config.llm_provider + "_api_key", "sk-or-test")
+    service.db.set_setting("profile", {"target_roles": list(roles)})
+    service.db.set_setting("control", {"paused": False, "auto_submit": False})
+    with service.db.exclusive() as s:
+        s.add(Resume(name="r", filename="r.pdf", sha256=hashlib.sha256(b"r").hexdigest(), text="x"))
+
+
+def test_nothing_is_ranked_without_a_key_a_resume_or_roles(service):
+    setattr(service.config, service.config.llm_provider + "_api_key", "")
+    assert board_ranking.ranking_ready(service.db, service.config) == "no key"
+    setattr(service.config, service.config.llm_provider + "_api_key", "sk-or-test")
+    assert board_ranking.ranking_ready(service.db, service.config) == "no roles"
+    service.db.set_setting("profile", {"target_roles": ["Data Analyst"]})
+    assert board_ranking.ranking_ready(service.db, service.config) == "no resume"
+    ready(service)
+    assert board_ranking.ranking_ready(service.db, service.config) == ""
+
+
+def test_stopped_means_nothing_is_ranked(service):
+    ready(service)
+    service.db.set_setting("control", {"paused": True, "auto_submit": False})
+    assert board_ranking.ranking_ready(service.db, service.config) == "stopped"
+
+
+def test_the_persons_own_roles_come_first_then_the_newest(service):
+    jobs = [
+        job(1, "Warehouse Associate", "2026-10-31T00:00:00+00:00"),
+        job(2, "Data Analyst II", "2026-10-01T00:00:00+00:00"),
+        job(3, "Data Analyst", "2026-10-20T00:00:00+00:00"),
+    ]
+    order = [j["id"] for j in board_ranking.best_first(jobs, {"target_roles": ["Data Analyst"]})]
+    assert order[:2] == ["j3", "j2"] or order[:2] == ["j2", "j3"]
+    assert order[-1] == "j1"
+
+
+def test_a_batch_is_bounded_and_skips_what_is_already_classified(service):
+    ready(service)
+    jobs = [job(i, "Data Analyst") for i in range(40)]
+    with service.db.exclusive() as s:
+        s.add(DcClassification(id="x", job_id="j0", status="rejected", result={"gate": "g"}))
+    first = board_ranking.due_ids(service.db, service.config, jobs)
+    assert len(first) == board_ranking.PER_TICK <= 24
+    # The total is capped: with the limit already spent, nothing more is asked of a new person's key.
+    with service.db.exclusive() as s:
+        for i in range(board_ranking.BOARD_RANK_LIMIT):
+            s.add(DcClassification(id=f"ok{i}", job_id=f"o{i}", status="ok", result={}))
+    assert board_ranking.due_ids(service.db, service.config, jobs) == []
+
+
+def test_the_autopilot_ranks_for_itself_once_started(service):
+    ready(service)
+    service.db.set_setting("control", {"paused": False, "auto_submit": True})
+    service.db.set_setting("job_board_settings", {"enabled": True, "auto_apply": True})
+    assert board_ranking.due_ids(service.db, service.config, [job(1, "Data Analyst")]) == []

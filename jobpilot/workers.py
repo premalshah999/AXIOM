@@ -202,6 +202,39 @@ async def classification_workflow(job_ids: list[str]):
         await enqueue_matching()
 
 
+@DBOS.workflow(max_recovery_attempts=1)
+async def board_rank_workflow(job_ids: list[str]):
+    """Fit scores for the Job board while the autopilot is off (board_ranking): one bounded batch, never any tailoring."""
+    from .features.discovery import classify, existing_rank_adapter, policy_for
+
+    if SERVICE.db.get_setting("control", {}).get("paused"):
+        return
+    with SERVICE.db.session() as s:
+        jobs = classification_inputs(s, job_ids)
+    if jobs:
+        await classify(
+            SERVICE.db, jobs, existing_rank_adapter(SERVICE.db, SERVICE.config), policy_for(SERVICE.db),
+            SERVICE.db.get_setting("profile", {}),
+        )
+
+
+async def enqueue_board_ranking(service):
+    """Once a minute from the scheduler: rank the next few board postings for a person who has not started the autopilot."""
+    from .board_ranking import due_ids
+    from .jobboard import board_snapshot
+
+    jobs = (await asyncio.to_thread(board_snapshot, service.db, limit=None, jobs_only=True))["jobs"]
+    ids = await asyncio.to_thread(due_ids, service.db, service.config, jobs)
+    if not ids:
+        return False
+    try:
+        with SetEnqueueOptions(deduplication_id="board-ranking"):
+            await DBOS.enqueue_workflow_async("classification", board_rank_workflow, ids)
+        return True
+    except DBOSQueueDeduplicatedError:
+        return False
+
+
 async def enqueue_classification(job_ids):
     if not job_ids:
         return False
@@ -314,6 +347,11 @@ async def scheduled_tick(scheduled_time: datetime, context: dict):
                 await request_scan(SERVICE.db, enqueue_source)
         except Exception:
             pass  # The next tick asks again; a search that cannot start must not stop the tick.
+    if not paused:
+        try:
+            await enqueue_board_ranking(SERVICE)
+        except Exception:
+            pass  # The next tick asks again.
     # Refill applications before processing thousands of discovery deliveries.
     # Neither a failed feed nor a deferred application controls the other queue.
     await enqueue_matching()
