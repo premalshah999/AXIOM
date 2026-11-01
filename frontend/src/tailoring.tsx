@@ -710,7 +710,7 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
                 <section key={s.id} className="tl-sec">
                   <h3>
                     {s.title}
-                    {isSummary && newSummary && <Pill tone="info">New</Pill>}
+                    {isSummary && newSummary && <Pill>New</Pill>}
                   </h3>
                   {editable ? (
                     <MarkedArea value={s.text} keywords={onResume} label={s.title} invalid={!!problemAt(s.id)} onChange={(t) => setText(si, t)} />
