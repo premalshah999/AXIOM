@@ -480,7 +480,7 @@ resume_modal = Scenario(
       <button type="button" class="button" onclick="document.getElementById('force').click()"><span>Upload Resume</span></button></div></div>""" + form(NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD, SUBMIT_BUTTON))},
 )
 
-_ADDRESS = {"address": {"street": "1 Example Way", "city": "Exampleton", "state": "MD", "postal_code": "20000", "country": "United States of America"}, "location": "Exampleton, MD"}
+_ADDRESS = {"address": {"line1": "1 Example Way", "city": "Exampleton", "state": "MD", "postal_code": "20000", "country": "United States of America"}, "location": "Exampleton, MD"}
 country_location = Scenario(
     "a_location_box_that_lists_countries",
     "\"Location, Country you're currently residing in\" answered \"No results\" for the city on three runs (ElevenLabs on Ashby, 2026-11-01). A person types the country.",
@@ -513,6 +513,70 @@ long_question_with_password = Scenario(
     profile={"reviewed_answers": [{"id": "r2", "question": "10. " + _MENTIONS_PASSWORD, "answer": "No", "options": ["Yes", "No"], "employer": "", "scope": "personal", "layer": "fact"}]},
 )
 
+work_upload = Scenario(
+    "a_required_upload_for_your_work_takes_the_resume",
+    "\"Upload a link to your best work\" beside the resume, a required file input whose button opens the file picker: eight runs ended on \"Your form needs corrections\" (Powertown 2026-11-01).",
+    {**simple_apply, "/apply/1": page("Apply", "<h1>Apply: Software Engineer</h1>" + form(
+        NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD,
+        '<label for="w">Upload a link to your best work</label><input id="w" name="work" type="file" required accept=".pdf" style="display:none"><button type="button" onclick="document.getElementById(\'w\').click()">Upload File</button>',
+        SUBMIT_BUTTON))},
+    uploaded=("work",),
+)
+
+
+def pcty_select(name, label, rows, shown=""):
+    """Paylocity's select: the wrapper names a role=list portal with aria-owns; a virtual list of plain rows opens on a click; while it is open the input holds
+    the shown value, and typing filters on the input's whole text. Its label wraps the widget, so the shown value is part of the label's text."""
+    return f"""<div data-automation-id="{name}-wrapper" type="dropdown-wrapper"><label for="{name}"><span>{label}</span>
+    <div><div class="pcty-input-select-full-container" aria-expanded="false" aria-haspopup="listbox" aria-owns="{name}-dropdown-list-container" required="" id="{name}-select-wrapper">
+      <div class="pcty-input-select-input-container"><div><div class="input-select-input-single-value" id="{name}-shown">{shown}</div>
+      <div class="pcty-input-select__input"><input aria-autocomplete="list" autocapitalize="none" autocorrect="off" id="{name}" maxlength="250" required="" spellcheck="false" tabindex="0" type="text" placeholder="{'' if shown else 'Select a ' + label.lower()}"></div></div></div></div></div></label>
+    <input type="hidden" name="{name}" id="h-{name}" value="{shown}">
+    <script>(function(){{const w=document.getElementById('{name}-select-wrapper'),i=document.getElementById({name!r}),s=document.getElementById('{name}-shown'),h=document.getElementById('h-{name}'),all={rows!r};
+      let list=null;
+      function close(){{if(list){{list.remove();list=null}};w.setAttribute('aria-expanded','false');i.value=''}}
+      function draw(q){{if(!list){{list=document.createElement('div');list.id='{name}-dropdown-list-container';list.setAttribute('role','list');list.style.cssText='position:absolute;background:#fff;border:1px solid #888;z-index:9999;width:370px';document.body.append(list);
+          const r=w.getBoundingClientRect();list.style.left=r.left+'px';list.style.top=(r.bottom+scrollY)+'px'}}
+        list.innerHTML='';const hit=all.filter(t=>t.toLowerCase().includes(q.toLowerCase()));
+        if(!hit.length){{const n=document.createElement('div');n.className='ListItemEven';n.textContent='No Results Found';list.append(n)}}
+        hit.forEach((t,k)=>{{const o=document.createElement('div');o.className=k%2?'ListItemOdd':'ListItemEven';o.setAttribute('role','listitem');o.textContent=t;
+          o.addEventListener('mousedown',e=>{{e.preventDefault();s.textContent=t;h.value=t;close()}});list.append(o)}});w.setAttribute('aria-expanded','true')}}
+      w.addEventListener('click',e=>{{if(!list){{i.value=s.textContent;draw('');i.focus();i.select()}}}});
+      i.addEventListener('input',()=>draw(i.value));
+      i.addEventListener('blur',()=>setTimeout(close,120));
+      i.addEventListener('keydown',e=>{{if(e.key==='Escape')close()}});
+      document.addEventListener('mousedown',e=>{{if(list&&!w.contains(e.target)&&!list.contains(e.target))close()}});
+    }})();</script></div>"""
+
+
+_ADDRESS_SUGGEST = """<label for="line1">Address Line 1</label>
+<input id="line1" name="line1" role="combobox" aria-expanded="false" aria-controls="line1-list" required autocomplete="off">
+<script>(function(){const i=document.getElementById('line1');let l=null;
+  function close(){if(l){l.remove();l=null}i.setAttribute('aria-expanded','false')}
+  i.addEventListener('input',()=>{close();if(!i.value)return;l=document.createElement('div');l.id='line1-list';l.setAttribute('role','listbox');i.after(l);
+    for(const t of ['1 Adams St NW, Washington, DC 20001','1 Aviation Cir, Washington, DC 20001']){const o=document.createElement('div');o.setAttribute('role','option');o.textContent=t;
+    o.addEventListener('mousedown',e=>{e.preventDefault();i.value=t;close()});l.append(o)}i.setAttribute('aria-expanded','true')});
+  i.addEventListener('keydown',e=>{if(e.key==='Escape')close()});
+  i.addEventListener('blur',()=>setTimeout(close,100));})();</script>"""
+
+paylocity_address = Scenario(
+    "a_paylocity_address_block_behind_its_resume_popup",
+    "Commence (Paylocity, 2026-11-01): the resume pop-up, a Country select already showing United States whose list opens on the wrapper, a State select, and an Address Line 1 that "
+    "suggests other streets but takes what is typed. Country stayed unaccepted on five runs.",
+    {**simple_apply, "/apply/1": page("Apply", """<h1>Engineer</h1><div class="modal in" role="dialog" aria-labelledby="pt" id="gate" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:505"><div class="modal-dialog" style="background:#fff;width:420px;margin:120px auto;padding:20px">
+      <h4 id="pt">Apply with resume</h4><p>Upload your resume and we'll automatically fill out your application</p><input accept=".doc,.docx,.pdf" id="force" type="file" style="display:none" onchange="document.getElementById('gate').remove()">
+      <button type="button" class="button" onclick="document.getElementById('force').click()"><span>Upload Resume</span></button></div></div>""" + form(
+        NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD,
+        pcty_select("country", "Country", ["Canada", "India", "United Kingdom", "United States"], shown="United States"),
+        _ADDRESS_SUGGEST,
+        '<label for="city">City</label><input id="city" name="city" required>',
+        pcty_select("state", "State", ["California", "Maryland", "Virginia"]),
+        '<label for="zip">Zip Code</label><input id="zip" name="zip" required>',
+        SUBMIT_BUTTON).replace("<form ", "<form novalidate "))},  # The page checks its own fields; the selects' inputs stay empty.
+    expect={"country": "United States", "state": "Maryland", "line1": "1 Example Way", "city": "Exampleton", "zip": "20000"},
+    profile={"address": {"line1": "1 Example Way", "city": "Exampleton", "state": "MD", "postal_code": "20000", "country": "United States of America"}, "location": "Exampleton, MD"},
+)
+
 SCENARIOS = [
     plain,
     search_box,
@@ -539,4 +603,6 @@ SCENARIOS = [
     country_location,
     no_answer_saved,
     long_question_with_password,
+    work_upload,
+    paylocity_address,
 ]

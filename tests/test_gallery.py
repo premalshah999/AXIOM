@@ -94,6 +94,8 @@ async def test_the_engine_gets_through_the_trap(service, scenario):
             assert received[-1].get(name) == value, f"{name}: {received[-1].get(name)!r}\n{why}"
         if "resume" in received[-1]:
             assert received[-1].get("resume__bytes"), "The resume arrived empty\n" + why
+        for name in scenario.uploaded:
+            assert received[-1].get(name + "__bytes"), f"{name} arrived empty\n{why}"
     for path in scenario.never:
         assert path not in site.hits, f"{path} must never be touched\n{why}"
     assert outcome["model_calls"] == 0, why

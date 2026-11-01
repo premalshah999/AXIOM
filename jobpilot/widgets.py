@@ -3332,6 +3332,9 @@ async def combobox(
             const chosen=root?.querySelectorAll('[class*=__single-value]');
             if(root?.querySelectorAll('[role=combobox]').length===1 && chosen?.length===1
                 && chosen[0].getClientRects().length)return chosen[0].textContent.trim();
+            // Paylocity's select shows its pick in a box beside its input, which it empties (Commence, 2026-11-01): the pick read as not taken.
+            const shown=e.closest('[aria-haspopup=listbox]')?.querySelectorAll('[class*=input-select-input-single-value]');
+            if(shown?.length===1 && shown[0].textContent.trim() && !e.value)return shown[0].textContent.trim();
             return e.value || '';
         }""")
             if editable

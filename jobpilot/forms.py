@@ -719,6 +719,10 @@ PHOTO_UPLOAD = re.compile(r"photo|picture|profilbild|\bfoto|avatar|\bimage\b|\bb
 NOT_RESUME = re.compile(
     r"cover letter|transcript|portfolio|writing sample|certificat|reference", re.IGNORECASE
 )
+STREET_ADDRESS = re.compile(r"^\W*(?:street )?address(?: line)?(?: ?1| one)?\b|^\W*street\b", re.IGNORECASE)
+WORK_DOCUMENT = re.compile(
+    r"\bbest work\b|\bportfolio\b|\bwork samples?\b|\bsamples? of (?:your |my )?work\b|\bproject (?:samples?|examples?)\b", re.IGNORECASE
+)
 # Optional fields worth one model call; other optional unknowns are left blank.
 USEFUL_OPTIONAL = re.compile(
     r"linkedin|github|portfolio|website|salary|compensation|start date|notice|hear about|how did you|referr",
@@ -1710,6 +1714,21 @@ class FormSession:
             return False
         application = detect("https://" + origin + "/").id
         return custom_like(application) or detect(url).id != application
+
+    async def type_street_address(self, el, value):
+        """A street address box only suggests: Paylocity's Address Line 1 lists other streets and keeps what is typed (Commence, CleanSlate
+        2026-11-01, where "No matching option" stopped the page). A person types their address and carries on. True when the box kept it; a box
+        that empties unless a row is picked goes on to the normal search."""
+        try:
+            if not await el.evaluate("e => ['INPUT','TEXTAREA'].includes(e.tagName) && !e.readOnly && !e.disabled"):
+                return False
+            await el.fill("")
+            await el.press_sequentially(str(value), delay=12, timeout=4000)
+            await el.press("Escape", timeout=1000)
+            await asyncio.sleep(0.2)
+            return normalize(await el.input_value(timeout=1000)) == normalize(str(value))
+        except (PlaywrightError, ValueError):
+            return False
 
     async def resume_gate(self):
         """A pop-up that blocks the form until a resume is given, with one Upload button and no way to close it: Paylocity's "Apply with
@@ -3232,8 +3251,9 @@ class FormSession:
                     def degree_pick(texts):
                         return first_matching(texts, DEGREE_FALLBACK[level])
             multiselect = field.get("widget") in {"spl-multiselect", "oracle-multiselect", "select2-multiselect"}
+            typed_address = STREET_ADDRESS.search(field["label"]) and not multiselect and await self.type_street_address(el, value)
             try:
-                committed = await (widgets.multi_combobox if multiselect else widgets.combobox)(
+                committed = str(value) if typed_address else await (widgets.multi_combobox if multiselect else widgets.combobox)(
                     frame,
                     el,
                     value,
@@ -3830,6 +3850,7 @@ class FormSession:
             self.document_uploads[self.field_key(field)] = photo.name
             attached = True
             self.emit("document_upload", "Attached the profile photo", {"field": field["label"]})
+        resume_input = {f["id"] for f in self.resume_fields()}
         for field in list(self.fields.values()):
             if (
                 field["type"] != "file"
@@ -3837,10 +3858,16 @@ class FormSession:
                 or not field["required"]
                 or field["value"]
                 or self.field_key(field) in self.document_uploads
-                or (RESUME.search(field["label"]) and not NOT_RESUME.search(field["label"]))
+                or field["id"] in resume_input
+                or (RESUME.search(field["label"]) and not NOT_RESUME.search(field["label"]) and not WORK_DOCUMENT.search(field["label"]))
             ):
                 continue
             path = document_for(resolver.db, resolver.config.data_dir, field["label"], resolver.employer)
+            if path is None and WORK_DOCUMENT.search(field["label"]) and Path(self.resume_path).exists():
+                # A required upload for the applicant's work, beside the resume: "Upload a link to your best work" (Powertown's Ashby form, eight
+                # runs, 2026-11-01) and "Portfolio - File upload" (Fab2). The resume is what a person without a separate portfolio sends, and it
+                # states nothing that isn't so; a click on its button only opens a file picker no one can answer.
+                path = Path(self.resume_path)
             if path is None:
                 continue
             try:
