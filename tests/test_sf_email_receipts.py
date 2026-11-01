@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 
 from jobpilot.adapters.base import CODE_LABEL, code_label
-from jobpilot.db import Job, Mailbox, Run
+from jobpilot.db import Event, Job, Mailbox, Run, Setting
 from jobpilot.email_browser import CODE_LABEL as BROWSER_CODE_LABEL
 from jobpilot.mail import extract_message
 from jobpilot.receipts import _DRAFT_COMPARED, observed_words, reconcile_recent_drafts, title_in, trusted_sender
@@ -64,7 +64,7 @@ def test_passcode_labelled_account_mail_yields_its_code_despite_footer_numbers()
     assert result == {"kind": "code", "value": "4829153"}
 
 
-def unproven_run(service, *, state="waiting_browser", title="Engineer"):
+def unproven_run(service, *, state="waiting_browser", title="Engineer", reached_form=True):
     start = datetime.now(UTC) - timedelta(hours=1)
     with service.db.session() as s:
         if not s.scalar(select(Mailbox)):
@@ -89,6 +89,8 @@ def unproven_run(service, *, state="waiting_browser", title="Engineer"):
         )
         s.add(run)
         s.flush()
+        if reached_form:
+            s.add(Event(run_id=run.id, kind="form_page", message="Filling the current application page", data={}))
         return run.id, job.id, start
 
 
@@ -167,3 +169,86 @@ def test_a_successfactors_reset_mail_links_saps_career_host_and_its_reset_link_i
     }
     # Another platform's challenge never accepts SAP's hosts.
     assert (extract_message(message(SF_RESET, html=True), rule, reset_challenge("workday")) or {}).get("kind") != "link"
+
+
+def sent_sibling(service, title, *, company="Example", url="https://owned.test/job/2"):
+    with service.db.session() as s:
+        job = Job(identity=f"sent-{title}", url=url, demo=False, company=company, title=title, status="confirmed")
+        s.add(job)
+        s.flush()
+        return job.id
+
+
+async def test_a_job_that_never_reached_its_form_takes_no_receipt(service, monkeypatch):
+    # The browser stopped at a CAPTCHA or a navigation timeout: no form was filled, so no mail can be this job's.
+    _DRAFT_COMPARED.clear()
+    rid, jid, start = unproven_run(service, reached_form=False)
+    mailbox(monkeypatch, service, [ack("ack", start + timedelta(minutes=5), "Thank you for applying to Example and the Engineer role.")])
+    assert (await reconcile_recent_drafts(service.mail))["emails_confirmed"] == 0
+    with service.db.session() as s:
+        assert s.get(Run, rid).state == "waiting_browser" and s.get(Job, jid).status == "waiting_browser"
+
+
+async def test_a_sent_posting_with_the_same_title_keeps_its_own_receipt(service, monkeypatch):
+    # Two postings, one title: the mail belongs to the one that was sent, not to the draft still unproven.
+    _DRAFT_COMPARED.clear()
+    rid, jid, start = unproven_run(service, title="Engineer, Red Team")
+    sent_sibling(service, "Engineer, Red Team")
+    mailbox(monkeypatch, service, [ack("ack", start + timedelta(minutes=5), "Thank you for applying to Example for the Engineer, Red Team role.")])
+    result = await reconcile_recent_drafts(service.mail)
+    assert result["emails_confirmed"] == 0 and result["ambiguous_job_ids"] == [jid]
+    with service.db.session() as s:
+        assert s.get(Run, rid).state == "waiting_browser"
+
+
+async def test_a_general_title_does_not_take_a_sent_specialised_postings_receipt(service, monkeypatch):
+    _DRAFT_COMPARED.clear()
+    rid, _, start = unproven_run(service, title="Data Scientist")
+    sent_sibling(service, "Data Scientist, Algorithms")
+    mailbox(monkeypatch, service, [ack("ack", start + timedelta(minutes=5), "Thank you for applying to Example for the Data Scientist, Algorithms role.")])
+    assert (await reconcile_recent_drafts(service.mail))["emails_confirmed"] == 0
+    with service.db.session() as s:
+        assert s.get(Run, rid).state == "waiting_browser"
+
+
+async def test_the_longer_title_named_in_full_still_takes_its_receipt(service, monkeypatch):
+    # A sent "Data Scientist" is not a rival for a mail naming "Data Scientist, Algorithms" in full.
+    _DRAFT_COMPARED.clear()
+    rid, _, start = unproven_run(service, title="Data Scientist, Algorithms")
+    sent_sibling(service, "Data Scientist")
+    mailbox(monkeypatch, service, [ack("ack", start + timedelta(minutes=5), "Thank you for applying to Example for the Data Scientist, Algorithms role.")])
+    assert (await reconcile_recent_drafts(service.mail))["emails_confirmed"] == 1
+    with service.db.session() as s:
+        assert s.get(Run, rid).state == "confirmed"
+
+
+async def test_another_employers_posting_is_no_rival(service, monkeypatch):
+    _DRAFT_COMPARED.clear()
+    rid, _, start = unproven_run(service)
+    sent_sibling(service, "Engineer", company="Unrelated Co", url="https://unrelated.test/job/3")
+    mailbox(monkeypatch, service, [ack("ack", start + timedelta(minutes=5), "Thank you for applying to Example and the Engineer role.")])
+    assert (await reconcile_recent_drafts(service.mail))["emails_confirmed"] == 1
+    with service.db.session() as s:
+        assert s.get(Run, rid).state == "confirmed"
+
+
+async def test_a_job_the_owner_deleted_stays_deleted_when_a_mail_arrives(service, monkeypatch):
+    _DRAFT_COMPARED.clear()
+    rid, jid, start = unproven_run(service)
+    with service.db.session() as s:
+        s.add(Setting(key="job_control:" + jid, value={"state": "deleted"}))
+        s.get(Job, jid).status = "archived"
+    mailbox(monkeypatch, service, [ack("ack", start + timedelta(minutes=5), "Thank you for applying to Example and the Engineer role.")])
+    assert (await reconcile_recent_drafts(service.mail))["emails_confirmed"] == 0
+    with service.db.session() as s:
+        assert s.get(Job, jid).status == "archived" and s.get(Run, rid).state == "waiting_browser"
+
+
+async def test_an_identity_check_mail_is_not_a_receipt(service, monkeypatch):
+    # Oracle's identity step names the role and comes before anything is sent.
+    _DRAFT_COMPARED.clear()
+    rid, _, start = unproven_run(service)
+    mailbox(monkeypatch, service, [ack("ack", start + timedelta(minutes=5), "Confirm your identity for job Engineer. Thank you for applying to Example.")])
+    assert (await reconcile_recent_drafts(service.mail))["emails_confirmed"] == 0
+    with service.db.session() as s:
+        assert s.get(Run, rid).state == "waiting_browser"
