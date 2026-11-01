@@ -712,7 +712,15 @@
     // ADP's pick list names itself only "Add response." (an ARIA prompt, Midco 2026-10-31): the question is the text printed
     // just above it ("Please indicate which type of device you are using to apply.").
     if (/^(?:add|enter|provide) (?:a )?(?:response|answer)\.?$|^unlabelled field$/i.test(q)) {
-      q = precedingText(host, new Set(items.map(itemText))) || q;
+      const shown = new Set(items.map(itemText));
+      // The question the pick list prints itself (its label property, or its own shadow root) comes before any text
+      // above it: with a first question answered just over it (Midco 2026-10-31), the text above was that question,
+      // and the device question was answered "No" (a radio's option) 5 runs in a row.
+      const own = [host.label, host.getAttribute('label'),
+        ...[...(host.shadowRoot?.querySelectorAll('label,legend,[class*=label],[part*=label]') || [])].map(e => e.textContent)]
+        .map(v => clean(typeof v === 'string' ? v : '')).find(v => /[a-z]{3}/i.test(v) && v.length <= 300 && !shown.has(v)
+          && !/^(?:select|add (?:a )?(?:response|answer)\.?|close)$/i.test(v));
+      q = own || precedingText(host, shown) || q;
     }
     const req = isReq(host, q) || host.hasAttribute('required');
     consumed.add(host);

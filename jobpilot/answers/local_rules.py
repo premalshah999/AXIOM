@@ -56,7 +56,7 @@ from .text import first_matching
 from .text import answer_key
 from .text import normalize
 from .text import option_value
-from ..widgets import foreign_fallback
+from ..widgets import foreign_fallback, money_range, range_midpoint
 from .text import yes_no
 from .third_party import other_party_email
 
@@ -370,10 +370,22 @@ class LocalRulesMixin:
             and not NOT_DESIRED.search(f["label"])
             and not p.salary_expectation
             and not p.facts.get("desired_salary")
-            and f.get("type") in {"text", "textarea"}
+            and f.get("type") in {"text", "textarea", "number"}
             and not options
         ):
-            return self._ans(f, self.answer_rules.salary_stance.strip(), ["policy:compensation_choice"])
+            stance = self.answer_rules.salary_stance.strip()
+            hint = f"{label} {f.get('hint') or ''}"
+            bounds = money_range(stance)
+            if bounds and bounds[1] != float("inf") and f.get("type") in {"text", "number"}:
+                # A box asking for one amount takes the middle of the saved range. Prose boxes, boxes that say
+                # "range"/"ranges are welcomed", and the "From"/"To" halves of a two-box range keep the range.
+                if edge := re.search(r"\b(from|to)\s*:?\s*$", label):
+                    stance = str(int(bounds[0] if edge[1] == "from" else bounds[1]))
+                elif f.get("type") == "number" or not re.search(r"\branges?\b", hint):
+                    stance = range_midpoint(stance)
+            elif f.get("type") == "number":
+                return None  # A number input cannot hold free text such as "Negotiable".
+            return self._ans(f, stance, ["policy:compensation_choice"])
         if (
             re.search(r"\b(?:full |complete )?legal (?:full )?name\b", label)
             and not re.search(

@@ -261,6 +261,18 @@ def money_range(text):
     return None
 
 
+def range_midpoint(text):
+    """The whole-dollar midpoint of a closed money range ("$90,000 - $120,000" -> "105000"); None when the text is not one.
+
+    A pay box that takes one amount (a number input, or a text box whose mask keeps digits only: Workable's "Salary
+    Range" read back "90,000,120,000" and refused the run, 2026-11-01) is answered from the middle of the applicant's
+    own saved range, never from a figure of ours."""
+    bounds = money_range(text)
+    if not bounds or bounds[1] == float("inf") or bounds[0] > bounds[1]:
+        return None
+    return str(int(round((bounds[0] + bounds[1]) / 2)))
+
+
 # "january" / "jan" / "sept" -> 1..12, for month menus that offer names.
 MONTH_NUMBERS = {
     **{name.lower(): i for i, name in enumerate(calendar.month_name) if name},
