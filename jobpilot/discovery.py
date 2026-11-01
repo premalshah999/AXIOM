@@ -10,7 +10,7 @@ from typing import Literal
 from bs4 import BeautifulSoup
 from httpx import HTTPError, HTTPStatusError
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from .ats import canonicalize, detect, url_identity
 from .db import Job, Resume, Setting, record
@@ -328,7 +328,11 @@ def add_job(db, data: JobInput, demo=False, origin="unknown"):
             earlier = next(
                 (
                     row.id
-                    for row in s.execute(select(Job.id, Job.url).where(Job.ats == detect(url).id))
+                    for row in s.execute(
+                        select(Job.id, Job.url).where(
+                            or_(Job.ats == detect(url).id, Job.url.icontains(urlsplit(url).hostname or url, autoescape=True))
+                        )
+                    )
                     if url_identity(row.url) == identity
                 ),
                 None,

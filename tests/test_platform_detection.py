@@ -6,6 +6,11 @@ platforms' own drivers: 60-68%), 4.2 runs per job (1.5), all of them in the sing
 also written when a job is added (the page `enrich` fetches, the address's own platform parameter) and once at startup
 from the hand-offs earlier runs recorded. These use synthetic pages and addresses."""
 
+from jobpilot.admission import QueueBlocked
+from jobpilot.ats import canonicalize
+from jobpilot.discovery import add_job
+from jobpilot.schemas import JobInput
+
 import pytest
 
 from jobpilot.ats import classify_embedded, entries_from_html, marketing_host, url_platform
@@ -230,3 +235,23 @@ def test_a_relabelled_job_leaves_the_custom_lane_and_its_run_still_starts_as_the
     e = BrowserEngine.__new__(BrowserEngine)
     e.db = service.db
     assert e.starting_label({"id": "job1", "url": SITE, "ats": "greenhouse"}) == "custom"
+
+
+async def test_a_relabelled_job_still_blocks_a_second_application_to_its_address(service):
+    """The job moved from "custom" to the platform it runs on, and its stored identity is an older one, so neither the label
+    nor the identity column finds it. Its address and its confirmed run still must."""
+    url = "https://careers.example.test/roles/data-engineer"
+    with service.db.session() as session:
+        session.add(Job(id="earlier", url=url, identity="older-hash", ats="greenhouse", company="Example", title="Data Engineer",
+                        status="confirmed", location="", description="x", demo=False))
+        session.add(Run(id="sent", job_id="earlier", state="confirmed", mode="submit", packet={}))
+        session.commit()
+    row, created = add_job(service.db, JobInput(url=url), origin="manual")
+    assert row["id"] == "earlier" and not created
+    with service.db.session() as session:
+        session.add(Job(id="later", url=url + "?utm_source=x", identity=canonicalize(url)[1], ats="custom", company="Example",
+                        title="Data Engineer", status="ready", location="", description="x", demo=False))
+        session.commit()
+    with pytest.raises(QueueBlocked) as blocked:
+        await service.queue("later", "submit")
+    assert blocked.value.code == "duplicate_posting"
