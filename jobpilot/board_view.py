@@ -9,6 +9,7 @@ company, a closed or aged-out posting, a general careers page, one already appli
 """
 
 import re
+import logging
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -219,17 +220,15 @@ def collect(service):
             )
         )
         # The boards of the latest search: how far through them it is. Every board of one search shares its start time.
+        # Every board of one search was queued at its request time; a board that has run carries its own, later, start time.
         read = total = 0
-        if started and scanning:
-            counts = dict(
-                s.execute(
-                    select(Setting.value["state"].as_string(), func.count())
-                    .where(Setting.key.startswith("job_board_scan:", autoescape=True), Setting.value["started_at"].as_string() == started)
-                    .group_by(Setting.value["state"].as_string())
-                ).all()
-            )
-            total = sum(counts.values())
-            read = counts.get("complete", 0) + counts.get("error", 0)
+        wanted = (db.get_setting("job_board_requested", {}) or {}).get("at") or started
+        if wanted and scanning:
+            ours = (Setting.key.startswith("job_board_scan:", autoescape=True), Setting.value["started_at"].as_string() >= wanted)
+            total = s.scalar(select(func.count()).select_from(Setting).where(*ours)) or 0
+            read = s.scalar(
+                select(func.count()).select_from(Setting).where(*ours, Setting.value["state"].as_string().in_(("complete", "error")))
+            ) or 0
     requested = db.get_setting("job_board_requested", {}).get("at")
     return {
         "rows": rows,
@@ -255,6 +254,8 @@ class Board:
         try:
             self.value, self.at = collect(service), time.monotonic()
         except Exception:
+            # Said, not swallowed: a read that always failed left a fresh install on a loading screen for good (2026-11-01).
+            logging.getLogger(__name__).exception("The job board could not be read")
             self.at = time.monotonic() - TTL / 2  # try again shortly; keep serving the last board
         finally:
             self.busy.release()

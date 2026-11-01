@@ -104,3 +104,14 @@ def test_places_read_to_states_and_remote():
     assert board_view.places_of("Remote - Seattle, Washington") == ["Remote", "WA"]
     assert board_view.places_of("San Francisco") == ["CA"]
     assert board_view.places_of("Headquarters") == []
+
+
+def test_the_board_says_how_many_boards_of_the_search_are_read(service):
+    at = datetime.now(UTC).isoformat()
+    service.db.set_setting("job_board_requested", {"at": at})
+    for i, state in enumerate(["complete", "error", "queued", "running"]):
+        # A board that has run carries its own start time, after the request.
+        service.db.set_setting(f"job_board_scan:s{i}", {"state": state, "started_at": at if state in {"queued"} else datetime.now(UTC).isoformat()})
+    service.db.set_setting("job_board_scan:old", {"state": "complete", "started_at": "2026-01-01T00:00:00+00:00"})
+    got = rows(service)
+    assert (got["scanning"], got["scan_read"], got["scan_total"]) == (2, 2, 4)
