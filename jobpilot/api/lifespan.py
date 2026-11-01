@@ -50,7 +50,13 @@ async def lifespan(app):
         from ..housekeeping import watch as watch_housekeeping
 
         housekeeping_task = asyncio.create_task(watch_housekeeping(service))
+    identity_task = None
+    if config.enable_workers:
+        identity_task = asyncio.create_task(fill_board_identity(db))
     yield
+    if identity_task:
+        identity_task.cancel()
+        await asyncio.gather(identity_task, return_exceptions=True)
     if retention_task:
         retention_task.cancel()
         await asyncio.gather(retention_task, return_exceptions=True)
@@ -110,3 +116,24 @@ async def keep_telegram(service, interval=15):
         if task:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+async def fill_board_identity(db, delay=90, every=1800):
+    """After a start: the posting's own public API names the title, employer and places a stored job lacks; then, every half
+    hour, listings a scan re-opened (a duplicate link, a closed posting, an ended internship) are retired again and
+    new rows are tidied (jobpilot.board_data)."""
+    import logging
+
+    from ..board_data import identify_online, name_from_board_slugs, retire_listings, tidy_rows
+
+    log = logging.getLogger("jobpilot.board_data")
+    await asyncio.sleep(delay)
+    while True:
+        try:
+            await identify_online(db)
+            await asyncio.to_thread(name_from_board_slugs, db)
+            await asyncio.to_thread(tidy_rows, db)
+            await asyncio.to_thread(retire_listings, db)
+        except Exception:
+            log.warning("Board data upkeep failed", exc_info=True)
+        await asyncio.sleep(every)
