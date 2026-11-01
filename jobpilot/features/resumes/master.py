@@ -114,14 +114,15 @@ def source_pdf(db, config, resume_id: str | None = None):
     """(resume row values, pdf bytes) for the master source resume."""
     from ...db import Resume
 
-    from ...execution_services import resume_policy
-
-    policy = resume_policy(db)
+    policy = db.get_setting("application_resume_policy", {}) or {}
     with db.session() as s:
         # The policy names the resume it sends as resume_id (readiness and the queue read that): with two resumes uploaded, this took
         # the first it found, so the page named and Import transcribed a PDF that wasn't the one being sent.
         rid = resume_id or policy.get("resume_id") or policy.get("source_resume_id")
-        row = s.get(Resume, rid) if rid else s.scalar(select(Resume).where(Resume.demo.is_(False)))
+        # The same resume a policy naming none sends (execution_services.default_resume).
+        row = s.get(Resume, rid) if rid else s.scalar(
+            select(Resume).where(Resume.demo.is_(False)).order_by(Resume.created_at.desc()).limit(1)
+        )
         if not row:
             return None, None
         info = {

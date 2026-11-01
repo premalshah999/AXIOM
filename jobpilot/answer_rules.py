@@ -36,7 +36,10 @@ class DemographicRule(BaseModel):
 
     decline_first: bool = True  # Choose "prefer not to say" whenever it is offered.
     answer: str = ""  # The applicant's own answer; empty uses answers saved in Knowledge.
-    when_missing: DemographicFallback = "ask"  # The answer is not among the options.
+    # The answer is not among the options. The clearly closest offered option is the same answer in the form's words (Female
+    # and Woman): asking stopped such forms for anyone who had not set this by hand (2026-11-01). closest_option refuses
+    # anything ambiguous, and that still asks.
+    when_missing: DemographicFallback = "closest"
 
 
 class AnswerRules(BaseModel):

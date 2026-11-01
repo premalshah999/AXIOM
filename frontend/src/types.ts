@@ -214,6 +214,8 @@ export type Profile = {
   accept_all_application_terms: boolean;
   accept_required_marketing?: boolean;
   autonomous: boolean;
+  admit_by_title?: boolean;
+  accept_experience_years?: number;
   answer_rules?: Partial<AnswerRules>;
 };
 export type EducationStep = "closest" | "pick3" | "other" | "ask";
@@ -230,6 +232,7 @@ export type AnswerRules = {
   salary_stance: string;
   travel_willingness: string;
   employment_type_sought: string;
+  history_day?: "" | "first";
   join_talent_communities: boolean;
   demographics: Record<string, DemographicRule>;
   guest_apply_first: boolean;
@@ -567,6 +570,8 @@ export type Success = {
   proof: Proof;
 };
 /** One platform's (or everything's) success over the window: GET /api/success, defined as the 90% push's score (jobpilot/api/success.py). */
+export type Replies = { connected: boolean; complete: boolean; replies: number; job_ids: string[] };
+
 export type SuccessRow = {
   tried: number;
   closed: number;

@@ -11,6 +11,12 @@ from jobpilot.application_budget import require_allowance
 from jobpilot.db import Job, Run
 
 
+@pytest.fixture(autouse=True)
+def capped(service):
+    """The lifetime cap is an installation's choice now: without the setting there is none (test_uncapped_production)."""
+    service.db.set_setting("application_budget", {"max_seconds": 480})
+
+
 def seed(service):
     old = (datetime.now(UTC) - timedelta(hours=18)).isoformat()
     with service.db.exclusive() as s:

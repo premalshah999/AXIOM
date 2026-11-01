@@ -242,6 +242,8 @@ NOT_DESIRED = re.compile(
 
 NOT_AVAILABILITY = re.compile(
     r"\b(?:current|previous|last|most recent|prior|past) (?:job|role|position|employer|company)|"
-    r"start date (?:at|with|of|for) (?:your|the|this)? ?(?:current|previous|last|prior)",
+    r"start date (?:at|with|of|for) (?:your|the|this)? ?(?:current|previous|last|prior)|"
+    # The date a course of study or a past job began: "Education Start Date Month" (iCIMS, 2026-11-01).
+    r"\b(?:education|school|college|university|degree|program|course|employment|internship) (?:start|begin|from) date\b",
     re.I,
 )

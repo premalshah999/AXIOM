@@ -11,7 +11,7 @@ from reportlab.pdfgen import canvas
 from jobpilot import connections, link_intake
 from jobpilot.config import Settings
 from jobpilot.db import Job, Resume
-from jobpilot.execution_services import master_policy
+from jobpilot.execution_services import default_resume
 from jobpilot.owner_apply import _approve
 
 
@@ -40,23 +40,6 @@ def add_resume(service, name, created_at):
         s.add(Resume(id=name, name=name, filename=name + ".pdf", sha256=name, roles=[], text="x" * 40, created_at=created_at))
 
 
-def test_a_new_install_sends_the_newest_resume_rather_than_waiting_for_an_approved_copy(service):
-    # A fresh database has no policy. The old default was "tailored": every job waited for a version nothing would ever build.
-    assert master_policy(service.db) is None  # no resume, nothing to send
-    add_resume(service, "older", "2026-10-01T00:00:00+00:00")
-    add_resume(service, "newer", "2026-10-02T00:00:00+00:00")
-    assert master_policy(service.db)["resume_id"] == "newer"
-
-
-def test_a_choice_the_person_made_stands(service):
-    add_resume(service, "older", "2026-10-01T00:00:00+00:00")
-    add_resume(service, "newer", "2026-10-02T00:00:00+00:00")
-    service.db.set_setting("application_resume_policy", {"mode": "master", "resume_id": "older"})
-    assert master_policy(service.db)["resume_id"] == "older"
-    service.db.set_setting("application_resume_policy", {"mode": "tailored"})
-    assert master_policy(service.db) is None
-
-
 def test_a_pasted_job_takes_the_newest_resume_not_the_first_one_ever_uploaded(service):
     add_resume(service, "mistake", "2026-10-01T00:00:00+00:00")
     add_resume(service, "right", "2026-10-02T00:00:00+00:00")
@@ -71,7 +54,8 @@ def test_the_guide_can_prefer_an_older_resume(client, service):
     add_resume(service, "older", "2026-10-01T00:00:00+00:00")
     add_resume(service, "newer", "2026-10-02T00:00:00+00:00")
     assert client.post("/api/resumes/older/prefer", json={}).status_code == 200
-    assert master_policy(service.db)["resume_id"] == "older"
+    with service.db.session() as s:
+        assert default_resume(s).id == "older"
     assert client.post("/api/resumes/none/prefer", json={}).status_code == 404
 
 

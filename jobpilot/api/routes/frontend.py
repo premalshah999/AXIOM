@@ -25,7 +25,7 @@ def router() -> APIRouter:
         if index.exists():
             return FileResponse(index)
         return HTMLResponse(
-            "<h1>ApplyPilot Studio</h1><p>Build the dashboard: cd frontend &amp;&amp; npm ci &amp;&amp; npm run build</p>",
+            "<h1>AXIOM</h1><p>Build the dashboard: cd frontend &amp;&amp; npm ci &amp;&amp; npm run build</p>",
             status_code=503,
         )
 

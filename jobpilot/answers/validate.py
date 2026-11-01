@@ -25,7 +25,7 @@ from .text import normalize
 from .text import option_value
 
 # A history row's date part ("Start Date Month", "To Date Year"), and the availability facts it must never take.
-HISTORY_DATE_PART = re.compile(r"\s*(?:start|end|from|to) date (?:month|year|day)\s*", re.I)
+HISTORY_DATE_PART = re.compile(r"\s*(?:education |employment )?(?:start|end|from|to) date (?:month|year|day)\s*", re.I)
 AVAILABILITY_FACTS = {"fact:availability", "fact:notice_period", "fact:start_date"}
 # A bare history date label ("End Date", "From Date", "Start Date Year") belongs to one work or education row. A
 # saved answer to the bare label answered every row on every form: "End Date: 05/13/2003", given once on an ASSA ABLOY

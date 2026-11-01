@@ -46,7 +46,7 @@ def create_app(config: Settings | None = None):
     cache = SnapshotCache(service)
 
     app = FastAPI(
-        title="ApplyPilot Studio",
+        title="AXIOM",
         version="1.0.0",
         lifespan=lifespan,
         docs_url=None,

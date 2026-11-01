@@ -103,3 +103,13 @@ tr:hover .ap-act .ax-lead {
     display: none;
   }
 }
+
+/* Replies: the one figure for what came back, pressed while the list shows only those applications. */
+.ap-replies strong {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.ap-replies[aria-pressed="true"] {
+  background: var(--active);
+  color: var(--ink);
+}

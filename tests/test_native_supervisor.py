@@ -308,6 +308,40 @@ def test_sleep_is_prevented_only_while_applications_run_and_released_after_a_qui
     assert sup.caffeinate is None, "unknown keeps what we had"
 
 
+def test_a_running_batch_on_mains_keeps_the_mac_awake_between_applications(cfg, monkeypatch):
+    started = []
+
+    class Fake:
+        def __init__(self, argv, **kwargs):
+            started.append(argv)
+            self.running = True
+
+        def poll(self):
+            return None if self.running else 0
+
+        def terminate(self):
+            self.running = False
+
+        def wait(self):
+            return 0
+
+    sup = supervised(cfg, child("postgres", "sleep 1"))
+    sup.children[0].state = "up"
+    monkeypatch.setattr(supervisor.subprocess, "Popen", Fake)
+    monkeypatch.setattr(supervisor.shutil, "which", lambda name: "/usr/bin/" + name)
+    batch = {"on": "1"}
+    monkeypatch.setattr(pg, "psql", lambda _bin, _cfg, sql, **k: batch["on"] if sql == supervisor.BATCH_RUNNING else "0")
+    sup.power = {"battery": True}
+    sup.tick_sleep(100.0)
+    assert not started, "on battery the Mac may sleep as before"
+    sup.power = {"battery": False}
+    sup.tick_sleep(200.0)
+    assert started, "a batch between applications still searches and starts the next job"
+    batch["on"] = "0"
+    sup.tick_sleep(200.0 + supervisor.SLEEP_RELEASE_SECONDS + 1)
+    assert sup.caffeinate is None, "no batch, nothing active: the Mac may sleep"
+
+
 def test_battery_is_read_from_pmset(monkeypatch):
     out = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t32%; discharging; 0:50 remaining present: true\n"
     monkeypatch.setattr(supervisor.shutil, "which", lambda name: "/usr/bin/pmset")

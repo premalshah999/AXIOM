@@ -75,6 +75,10 @@ without a session `/api/snapshot` answers 401. If the dashboard reports that its
 
 **Sleep and battery.** The supervisor's `caffeinate` holds idle sleep while applications run and for five minutes after. Nothing holds a closed lid or an empty battery, so the app warns once when it is applying on battery, and the Status menu says so for as long as it lasts.
 
+**Backups.** The supervisor copies the database once a day to `~/axiom-backups/axiom-auto-<date>.dump`, private to the user, and keeps the newest seven; it skips a copy rather than fill the disk, and a copy made by hand is never removed. `axiom status` shows the newest. To put one back: `axiom stop`, then `axiom restore <file>`, which first copies what the database holds now. Only the database is in these files: the data folder's `mail-key` seals the saved passwords inside it, so a restore onto a new Mac needs that file too.
+
+**Removing it.** Quit AXIOM and delete `/Applications/AXIOM.app`, then `~/Library/Application Support/AXIOM` (the database, saved pages, sessions and keys), `~/Library/Logs/AXIOM`, `~/Library/LaunchAgents/app.axiom.desktop.plist` and `~/axiom-backups`. Employer accounts and your API keys live on those sites: they stay until you close or revoke them there.
+
 **Start at login** is one LaunchAgent file, `~/Library/LaunchAgents/app.axiom.desktop.plist`. It needs no signature, follows the app if it moves, and is turned off by deleting it. macOS shows its usual "background item added" notice.
 
 ## Chrome

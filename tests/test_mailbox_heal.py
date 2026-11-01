@@ -55,3 +55,22 @@ async def test_a_mailbox_marked_for_reconnect_heals_when_gmail_accepts_again(ser
     # Checked at most every five minutes.
     monkeypatch.setattr(gmail_imap, "login_ok", lambda address, password: pytest.fail("checked again too soon"))
     assert await service.mail.heal_mailbox() is False
+
+
+async def test_a_mailbox_connected_in_the_app_heals_like_the_one_in_env(service, monkeypatch):
+    from jobpilot import gmail_imap
+    from jobpilot.db import Mailbox
+
+    mail = service.mail
+    with service.db.exclusive() as s:
+        s.add(Mailbox(email="alex@gmail.example", state="reconnect_required", error="Gmail login failed",
+                      credentials=mail.vault.seal({"provider": "gmail_imap", "address": "alex@gmail.example", "app_password": "abcd efgh ijkl mnop"})))
+        s.add(Mailbox(email="oauth@gmail.example", state="reconnect_required", error="token",
+                      credentials=mail.vault.seal({"provider": "gmail_oauth", "refresh_token": "x"})))
+    tried = []
+    monkeypatch.setattr(gmail_imap, "login_ok", lambda address, password: tried.append((address, password)) or True)
+    assert await mail.heal_mailbox() is True
+    assert tried == [("alex@gmail.example", "abcdefghijklmnop")]  # A Google sign-in has no password to try.
+    with service.db.session() as s:
+        states = {b.email: b.state for b in s.scalars(__import__("sqlalchemy").select(Mailbox))}
+    assert states == {"alex@gmail.example": "connected", "oauth@gmail.example": "reconnect_required"}

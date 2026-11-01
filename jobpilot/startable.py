@@ -28,6 +28,7 @@ HOLDS = {
     "internship": ("internships", "Internships are skipped. Turn on internships in your profile to allow them."),
     "reserved": ("waiting for your approval", "It starts after you approve it in Jobs › Reserved."),
     "role": ("outside your target roles", "It starts if you add the role to your profile's target roles."),
+    "location": ("outside your target locations", "It starts if you add the place to your target locations, or Apply to it yourself."),
     "fit": ("below your minimum fit", "It starts if you lower the minimum fit, or Apply to it yourself."),
     "seniority": ("too senior for your early-career setting", "It stays held while early-career roles only is on."),
     "focus": ("on a platform you set aside", "It starts when you take the platform out of your platform focus."),
@@ -52,6 +53,8 @@ def classify(message):
     if text.startswith("Outside the profile's target roles"):
         title = text.split(": ", 1)[1].strip() if ": " in text else ""
         return "role", f"Outside your target roles ({title})." if title else "Outside your target roles."
+    if text.startswith("Outside your target locations"):
+        return "location", text + "."
     if "below the unattended threshold" in text:
         return "fit", text.replace("Resume fit", "Fit").replace("the unattended threshold", "your minimum for automatic applications")
     if text.startswith("Posting aged out"):
@@ -146,6 +149,10 @@ def read(service):
         jobs[r.id] = {"code": code, "reason": sentence, "next": HOLDS.get(code, HOLDS["excluded"])[1]}
         tally[code] = tally.get(code, 0) + 1
     held = [{"code": c, "count": tally[c], "phrase": HOLDS[c][0]} for c in HOLDS if tally.get(c)]
+    # What stops every application at once comes first: a job that "can start" cannot while the model is unreachable.
+    stopped = everything_stopped(service)
+    if not stopped and not startable and (outside := outside_search_area(profile)):
+        stopped = outside
     return {
         "at": datetime.now(UTC).isoformat(),
         "ready": len(jobs) + startable,
@@ -154,7 +161,8 @@ def read(service):
         "held": held,
         "jobs": jobs,
         "ids": can,
-        "idle": idle_line(startable, held),
+        "idle": stopped or idle_line(startable, held),
+        "stopped": stopped,
     }
 
 
@@ -185,6 +193,31 @@ def rows(db, value, which="", hold=""):
             item["hold"] = hold_
         out.append(item)
     return out
+
+
+def everything_stopped(service):
+    """The sentence for what no job can get past right now, or None: no model key, a refused key, an account out of credit, a
+    nearly full disk, a browser that will not open."""
+    from .agent_settings import for_role, missing_key_message
+    from .provider_health import dispatch_gate
+
+    for role in ("answers", "navigator"):
+        config = for_role(service.db, service.config, role)
+        if not config.llm_api_key:
+            return missing_key_message(config.llm_provider)
+    gate = dispatch_gate(service.db, service.config)
+    return (gate.reason + ".") if not gate.limit and gate.reason else None
+
+
+def outside_search_area(profile):
+    """Discovery finds jobs in the United States only (discovery policy `us_only`). Someone living elsewhere saw "discovery is
+    still finding and ranking jobs" for ever (2026-11-01)."""
+    from .jobboard import US
+
+    country = " ".join(str(profile.address.country or "").split())
+    if not country or country.casefold() in US:
+        return None
+    return f"AXIOM finds jobs in the United States only so far, so none will appear here for {country}. Links you paste still work."
 
 
 def idle_line(startable, held):

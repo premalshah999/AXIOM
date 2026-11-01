@@ -17,7 +17,6 @@ from sqlalchemy.orm import aliased
 
 from ..ats import catalog
 from ..db import Budget, Job, Resume, Review, Run, Setting, Source, record
-from ..execution_services import resume_policy
 from ..schemas import Profile
 from .pipeline import counts as pipeline_counts, live_rows
 
@@ -176,7 +175,7 @@ def build_snapshot(service, include_sources: bool):
         # leaving them out keeps the 6-second poll light (up to ~250 KB, 2026-10-15).
         "profile": profile.model_dump(exclude={"reviewed_answers", "approved_answers", "forgotten_answers"}),
         "control": db.get_setting("control"),
-        "application_resume_policy": resume_policy(db) or {"mode": "tailored"},
+        "application_resume_policy": __import__("jobpilot.execution_services", fromlist=["resume_policy"]).resume_policy(db),
         "telegram_health": db.get_setting("telegram_health", {}),
         "telegram_workers": __import__("jobpilot.telegram_workers", fromlist=["worker_status"]).worker_status(
             service

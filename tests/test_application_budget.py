@@ -7,6 +7,13 @@ from jobpilot.runtime import engine_version
 
 CURRENT = {"engine_version": engine_version()}
 
+
+@pytest.fixture(autouse=True)
+def capped(service):
+    """The lifetime cap is an installation's choice now: without the setting there is none (test_uncapped_production)."""
+    service.db.set_setting("application_budget", {"max_seconds": 480})
+
+
 AT = datetime(2026, 10, 17, 7, tzinfo=UTC)
 
 
