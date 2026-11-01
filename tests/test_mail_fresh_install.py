@@ -288,3 +288,17 @@ async def test_a_link_window_whose_page_asks_for_a_code_accepts_the_code(client,
     time.sleep(1.1)
     code = deliver(imap, "workday", "code")
     assert (await service.inbox.wait(challenge, max_wait_seconds=4))["value"] == code
+
+
+async def test_a_window_that_ends_empty_on_another_address_says_which_two_addresses(client, service, imap):
+    onboard(client)
+    spec = PLATFORMS["greenhouse"]
+    job, run = start_run(service, spec["url"], spec["ats"], spec["company"], email="alex@school.example")
+    challenge = await service.inbox.arm(run["id"], job, "alex@school.example", "link")
+    with service.db.exclusive() as s:
+        row = s.get(Run, run["id"])
+        row.state = "waiting_email"
+        row.packet = {**row.packet, "waiting_kind": "email", "wait_handle": {"challenge_id": challenge["id"]}}
+        s.get(MailChallenge, challenge["id"]).state = "expired"
+        service.mail.end_dead_email_waits(s)
+        assert "alex@school.example" in row.reason and ME in row.reason
