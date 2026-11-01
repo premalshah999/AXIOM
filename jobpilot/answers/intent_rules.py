@@ -72,9 +72,20 @@ CONDITIONAL_CUE = re.compile(
 )
 
 
+# A "how did you hear" question (even one that adds "if by an employee, enter their name") asks for the source, which the
+# source rule answers: it is not a referrer's name box (NYT, Stoke Space, Crown Innovations answered N/A, 2026-10-29).
+SOURCE_QUESTION = re.compile(
+    r"^\W*(?:\d+[.)]?\s*)?(?:please (?:indicate|tell us|state|let us know|specify) )?(?:how|where) (?:did |do |have )?you "
+    r"(?:hear|heard|learn|learned|find|found|come)\b|\b(?:social media|job board|recruiting agency)\b",
+    re.I,
+)
+
+
 def detail_followup(label):
     """"where", "conditional", "open" or "": what a free-text box with a Yes/No fact behind it really asks for."""
     text = str(label or "")
+    if SOURCE_QUESTION.search(text):
+        return ""
     ask = DETAIL_ASK.search(text)
     if not ask:
         return ""

@@ -94,8 +94,11 @@ def other_person_detail(f):
     "What's their name or email address?" and Tax Relief Advocates' "...what is the current employee's name" both took the
     applicant's own name (2026-10-29, 10-25)."""
     label = str(f.get("label") or "")
+    from .intent_rules import SOURCE_QUESTION
+
     return (
         f.get("type") in {"text", "textarea", "email", "tel"}
+        and not SOURCE_QUESTION.search(label)
         and len(label) < 200
         and bool(OTHER_PERSON_CUE.search(label))
         and bool(ASKS_PERSON_DETAIL.search(label))

@@ -402,10 +402,15 @@ class HistoryRulesMixin:
         # Education" group took the degree, Hyundai's School box (that aside) took "MASTER'S BARBER & STYLING COLLEGE",
         # Emory's institution and City of San Francisco's area-of-study boxes took the degree (2026-10-27..29).
         own = normalize(re.sub(r"\([^)]*\)", " ", str(f.get("own_label") or f.get("label") or "")))
-        if p.education and re.search(
-            r"highest (?:level of )?(?:education|(?:academic )?degree)|education level|level of education",
-            own,
-        ):
+        highest = re.compile(r"highest (?:level of )?(?:education|(?:academic )?degree)|education level|level of education")
+        if p.education and (highest.search(own) or highest.search(label)):
+            # What the box asks is what comes before the phrase naming the degree: "name of the institution where you
+            # completed your highest level" is a school box, "highest level of education ... at an accredited
+            # institution" is a degree box (National Louis, Fresenius Kabi: the school named in its qualifier took the
+            # school's name), and "to date" is no date box (M3 USA).
+            named = highest.search(own)
+            before = own[: named.start()] if named else own
+            own = re.sub(r"\b(?:to|so|thus) far\b|\bto date\b", " ", own)
             ranks = ["doctor", "master", "bachelor", "associate", "high school"]
             order = lambda e: next((i for i, r in enumerate(ranks) if r in normalize(e.degree)), len(ranks))  # noqa: E731
             best = sorted(p.education, key=order)[0]
@@ -424,9 +429,9 @@ class HistoryRulesMixin:
                     reason="This asks for someone else's education, which the profile does not record",
                     blocker_type="missing_fact",
                 )
-            if re.search(r"\b(?:institution|school|university|college)\b", own):
+            if re.search(r"\b(?:institution|school|university|college)\b", before):
                 return self.school_answer(f, best.school, [f"profile:education.{index}.school"])
-            if re.search(r"\b(?:area|field|subject|discipline|specialization|major)\b", own):
+            if re.search(r"\b(?:area|field|subject|discipline|specialization|major)\b", before):
                 evidence = [f"profile:education.{index}.field_of_study"]
                 return (
                     self._ans(f, best.field_of_study, evidence)
@@ -560,6 +565,13 @@ class HistoryRulesMixin:
             # Michigan, United States; "Pune, India" -> India, no state), never from the home address.
             value = history_region(getattr(entry, "location", "") or "", region[1].startswith("country"))
             evidence = [f"profile:{kind}.{index}.location"]
+
+            def names_the_row(answer):
+                # A State box whose only listed choice is the school's own name (a stale list of the School box) matched the
+                # state inside that name and took it whole: WTW's education State read "University of Maryland, College Park".
+                row = {normalize(getattr(entry, k, "") or "") for k in ("school", "company")} - {""}
+                return normalize(answer.value) in row
+
             stated = list(getattr(self.answer_rules, "employment_countries", []) or [])
             if kind == "work" and region[1].startswith("country") and index < len(stated) and stated[index].strip():
                 value, evidence = stated[index].strip(), ["fact:employment_countries"]  # The applicant's own list.
@@ -582,9 +594,11 @@ class HistoryRulesMixin:
                         value = "United States"
                     else:
                         answer = self._ans(f, US_STATES[code], evidence) or self._ans(f, code, evidence)
-                        if answer:
+                        if answer and not names_the_row(answer):
                             return answer
             answer = self._ans(f, value, evidence) if value else None
+            if answer and names_the_row(answer):
+                answer = None
             return answer or Answer(
                 field_id=f["id"],
                 disposition="review" if f.get("required") else "skip",

@@ -112,3 +112,59 @@ def test_another_persons_name_is_not_the_applicants(service):
 
 def test_the_applicants_own_name_box_is_still_answered(service):
     assert local(service, profile(), field("Full name")).value == "Alex Example"
+
+
+# The full old-against-new replay over every saved field (20,992 distinct) found these regressions in the shape rules above.
+@pytest.mark.parametrize(
+    "label,kind,options",
+    [
+        ("What is the highest level of education that you completed at an accredited institution of higher education?",
+         "select", ["High School Diploma", "Associate's", "Bachelor's", "Master's", "Doctorate"]),
+        ("What is your highest degree completed from an accredited school?", "text", []),
+        ("What is the highest level of education you have obtained to date?", "combobox", ["Bachelors Degree", "Masters Degree"]),
+        ("What is your highest level of education? If you are currently in school what are you graduating from?",
+         "dropdown", ["Bachelors Degree", "Masters Degree"]),
+        ("What degree are you working towards? (Or if not currently working towards a degree, what is your highest degree obtained?)",
+         "dropdown", ["Bachelors degree", "Masters degree", "Doctoral degree"]),
+    ],
+)
+def test_a_highest_degree_question_with_a_school_or_date_word_after_it_is_still_the_degree(service, label, kind, options):
+    answer = local(service, profile(), field(label, kind, options))
+    assert answer is not None and answer.disposition == "answer"
+    assert "University" not in answer.value and answer.value != "Other"
+    assert "Master" in answer.value
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "How did you hear about this position (If by employee please enter their name)",
+        "Please indicate how you heard about this position. If you were referred, please write the employee's name here.",
+        "If you chose 'referred by an employee', 'Social Media', 'Job Board' or 'Other', please specify here:",
+    ],
+)
+def test_a_how_did_you_hear_box_is_not_a_referrers_name_box(service, label):
+    answer = local(service, profile(), field(label))
+    assert answer is None or answer.value != "N/A"
+
+
+def test_a_state_box_listing_only_the_school_is_not_answered_with_the_school(service):
+    """WTW (Oracle) 2026-10-25: the education State's list was the School box's, one entry, and "Maryland" inside
+    "University of Maryland, College Park" matched it."""
+    school = "Example University of Maryland"
+    prof = Profile(name="Alex Example", education=[{"school": school, "degree": "Master of Science", "field_of_study": "Data Science",
+                                                    "start": "2024-08", "end": "2026-05"}])
+    f = field("State", "combobox", [school], group="Education at " + school)
+    answer = local(service, prof, f)
+    assert answer is None or answer.value != school
+    good = local(service, prof, field("State", "combobox", ["AK", "MD", "VA"], group="Education at " + school))
+    assert good is not None and good.value == "MD"
+
+
+def test_a_referrers_name_box_that_quotes_the_source_question_is_still_a_name_box(service):
+    """iCapital: 'If "Employee Referral" was selected for "How did you hear about this job?" please type the full name of the
+    referring employee. If not, please type in N/A' asks for a name; the source answer ("LinkedIn") is not a name."""
+    label = ('If "Employee Referral" was selected for "How did you hear about this job?" please type the full name of the '
+             'referring employee. If not, please type in N/A')
+    answer = local(service, profile(), field(label))
+    assert answer is not None and answer.value == "N/A"
