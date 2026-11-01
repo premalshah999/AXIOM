@@ -10,7 +10,7 @@ import { RowActions } from "./jobactions";
 import type { Group, JobRow, Word } from "./model";
 import { Pagination } from "./pagination";
 import { usePipelinePage } from "./pipeline";
-import { PipelineBulk } from "./pipelinebulk";
+import { PipelineBulk, useSelectMatching } from "./pipelinebulk";
 import { TopLine } from "./shell/Shell";
 import { Button, Empty, Table, type Column } from "./ui/index";
 import { JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
@@ -31,7 +31,8 @@ export function HistoryList({ word, inline }: { word: Word | "unconfirmed"; inli
   const list = usePipelinePage(word as Word, query);
   const q = query.trim();
   const say = SAYS[word] ?? SAYS.failed!;
-  const selection = useSelection(200);
+  const selection = useSelection(5000);
+  const matching = useSelectMatching(selection, list.rows, word as Group, q, list.paging.total);
   useEffect(() => selection.clear(), [word, query]); // eslint-disable-line react-hooks/exhaustive-deps
   const now = useNow(30000);
 
@@ -92,7 +93,8 @@ export function HistoryList({ word, inline }: { word: Word | "unconfirmed"; inli
         error={list.error && !list.loaded ? <LoadError error={list.error} retry={list.refresh} /> : undefined}
         busy={list.loaded && !list.current}
         footer={list.paging.total > 0 ? <Pagination paging={list.paging} label="Job list pages" /> : undefined}
-        bulk={<PipelineBulk selection={selection} rows={list.rows} filter={word as Group} query={q} total={list.paging.total} />}
+        selectAll={list.paging.total ? { count: list.paging.total, run: matching.selectAll, busy: matching.selecting } : undefined}
+        bulk={<PipelineBulk selection={selection} rows={list.rows} filter={word as Group} known={matching.known} />}
         empty={
           <Empty
             icon={q ? SearchX : Briefcase}

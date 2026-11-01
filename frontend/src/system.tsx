@@ -50,7 +50,7 @@ export function ApplyingSettings() {
         <Panel>
           <SwitchRow
             label="Send applications"
-            note="Off: nothing goes to an employer, and jobs you add wait. Turn it on and they start."
+            note="Off: nothing goes to an employer, and jobs you queue wait. Turn it on and they start."
             checked={!!control.auto_submit}
             disabled={pending !== null}
             onChange={() => toggle(control.auto_submit ? "AXIOM will stop before sending." : "AXIOM will send applications.")}
@@ -60,8 +60,8 @@ export function ApplyingSettings() {
       <section className="st-group" aria-labelledby="st-auto">
         <div className="st-head">
           <div>
-            <h2 id="st-auto">Automatic applications</h2>
-            <p>What AXIOM applies to without asking you first.</p>
+            <h2 id="st-auto">How jobs get queued</h2>
+            <p>Whichever you choose, you can still queue any job yourself with one click.</p>
           </div>
         </div>
         <AutoApplySettings />

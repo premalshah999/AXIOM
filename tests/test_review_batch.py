@@ -107,6 +107,26 @@ def test_accepting_a_batch_of_25_with_3_unticked_puts_exactly_22_in_line(service
     assert sorted(line(service)) == sorted(ticked)
 
 
+def test_the_dispatcher_starts_exactly_what_was_accepted(service, client, monkeypatch):
+    setup(service)
+    for i in range(8):
+        ready(service, f"d{i}")
+    fresh(service)
+    batch = client.get("/api/review-batch").json()
+    assert len(batch["rows"]) == 8
+    ticked = [r["id"] for r in batch["rows"]][3:]
+    client.post("/api/review-batch/accept", json={"batch_id": batch["id"], "job_ids": ticked})
+    started = []
+
+    async def queue(job_id, mode="submit", owner_pick=False, **kw):
+        started.append(job_id)
+        return {"id": "run-" + job_id}
+
+    monkeypatch.setattr(service, "queue", queue)
+    assert asyncio.run(owner_apply.due(service, 100)) == 5
+    assert sorted(started) == sorted(ticked) and requests(service) == []
+
+
 def test_a_batch_stays_the_same_batch_until_it_is_decided_and_takes_a_few_from_one_employer(service, client):
     setup(service)
     for i in range(12):

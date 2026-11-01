@@ -172,7 +172,7 @@ function Technical({ jobId }: { jobId: string }) {
 }
 
 // What happens to this job next, in one sentence, from where it stands. Every row's panel says it the same way.
-function nextStep(state: string, paused: boolean, place?: QueuePlace | null, hold?: Hold | null) {
+function nextStep(state: string, paused: boolean, place?: QueuePlace | null, hold?: Hold | null, mode?: string) {
   if (hold) return hold.next;
   const when = paused ? "Applying is paused, so it starts after you resume." : "It starts by itself when a worker is free.";
   if (place) return `Number ${place.position} of ${place.total} in the queue. ${when}${place.wait ? " " + place.wait : ""}`;
@@ -183,7 +183,7 @@ function nextStep(state: string, paused: boolean, place?: QueuePlace | null, hol
   if (state === "gave_up") return "The app won't try again by itself. Add it to the queue for one fresh try.";
   if (state === "reserved") return "It starts after you approve it.";
   if (state === "job:new") return "When the check is done, it joins the queue if it fits.";
-  if (state === "job:ready") return "It joins the queue on the next check of what can start.";
+  if (state === "job:ready") return mode === "auto" ? "It joins the queue on the next check of what can start." : "It won't start until you queue it: here, on the Job board, or in a review batch.";
   if (state === "job:review" || state === "job:skipped") return "It won't start by itself. Adding it to the queue applies anyway, unless the posting rules you out.";
   if (state === "job:paused" || state === "paused" || state === "resumed") return "It stays out of the queue until you put it back.";
   const group = stateInfo(state).group;
@@ -206,7 +206,7 @@ function StatusBlock({ state, reason, earlier, hold, place, children }: { state:
       </p>
       {(hold ? hold.reason : info.explain) && <p className="dr-status-why">{hold ? hold.reason : info.explain}</p>}
       {!hold && reason && <p className="dr-status-reason">{reason}</p>}
-      {!earlier && <p className="dr-next">{nextStep(state, snapshot.control.paused, place, hold)}</p>}
+      {!earlier && <p className="dr-next">{nextStep(state, snapshot.control.paused, place, hold, snapshot.config.apply_mode)}</p>}
       {children}
     </section>
   );

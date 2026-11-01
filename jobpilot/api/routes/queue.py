@@ -19,7 +19,7 @@ from ...db import Job, Run, Setting
 from ...discovery import add_job, posting_api_text
 from ...link_intake import URL_REFUSALS, prepare
 from ...network import public_url
-from ...owner_apply import KEY, apply, restore
+from ...owner_apply import KEY, REFUSED_HOLDS, apply, restore
 from ...schemas import JobInput
 
 MAX_LINKS = 25
@@ -163,6 +163,7 @@ def router(service) -> APIRouter:
         return {
             "rows": [{k: item.get(k) for k in keep} for item in items[(page - 1) * size : page * size]],
             "total": len(items), "page": page, "pages": pages, "size": size, "held": value.get("held", []),
+            "selectable": sum(1 for item in items if item["hold"]["code"] not in REFUSED_HOLDS and item["hold"]["code"] != "reserved"),
         }
 
     def changed(*job_ids):
@@ -202,11 +203,11 @@ def router(service) -> APIRouter:
         if out["added"]:
             changed(*out["added"])
         added, already, refused = len(out["added"]), len(out["already"]), len(out["refused"])
-        parts = [f"{added:,} {'job' if added == 1 else 'jobs'} {'moved to the front of' if front else 'added to'} the queue."]
+        parts = [f"{added:,} {'job' if added == 1 else 'jobs'} {'moved to the front of' if front else 'added to'} the queue."] if added or not refused else []
         if already:
             parts.append(f"{already:,} already running or applied.")
         if refused:
-            parts.append(f"{refused:,} couldn't be queued.")
+            parts.append(f"{refused:,} couldn't be queued. Each says why.")
         return {"added": added, "already": already, "refused": out["refused"], "message": " ".join(parts)}
 
     @r.post("/api/queue/add-many")
@@ -230,7 +231,8 @@ def router(service) -> APIRouter:
         """Every job held back for this reason: what Select all on Held back selects."""
         from ...startable import reading as read_held, rows as ready_rows
 
-        return {"ids": [item["id"] for item in ready_rows(db, read_held(service).get(service), "held", code[:40])]}
+        items = ready_rows(db, read_held(service).get(service), "held", code[:40])
+        return {"ids": [item["id"] for item in items if item["hold"]["code"] not in REFUSED_HOLDS and item["hold"]["code"] != "reserved"]}
 
     @r.get("/api/review-batch")
     def review_batch():

@@ -96,34 +96,39 @@ def _approve(service, job_id):
         job = s.get(Job, job_id)
         if job is None:
             raise ValueError("Job not found")
-        if job.status in {"queued", "running", "submitting"}:
-            return {"job_id": job_id, "state": job.status, "message": "This application is already running."}
-        if job.status in {"confirmed", "submission_unknown", "already_applied"}:
-            return {"job_id": job_id, "state": job.status,
-                    "message": f'This job is already applied: "{" ".join((job.title or "").split())[:120] or "untitled role"}" at {job.company or "this employer"}.'}
-        if job.status == "archived":
-            raise ValueError("This job was removed; restore it before applying")
-        if job.status != "ready":
-            # The newest: the file the person gave AXIOM last, never an older or mistaken upload (a first run, 2026-11-01).
-            job.resume_id = job.resume_id or s.scalar(
-                select(Resume.id).where(Resume.demo.is_(False)).order_by(Resume.created_at.desc()).limit(1)
-            )
-            if not job.resume_id:
-                raise ValueError("Upload a resume before applying")
-            job.status = "ready"
-            if not (job.reason or "").startswith(OWNER_APPROVED):
-                job.reason = OWNER_APPROVED + (job.reason or "")
-        from .application_budget import MAX_STARTS, allowance, job_ceiling_block, repeat_stop_block
+        return _approve_row(s, job)
 
-        if allowance(s, job_id)[2] >= MAX_STARTS or repeat_stop_block(s, job_id) or job_ceiling_block(s, job_id):
-            # The owner's click is the approval a fresh try needs (owner, 2026-10-18: "give them fresh tries").
-            # Jobs that may already be submitted returned above, so this never repeats a submission.
-            key = "application_budget_reset:" + job_id
-            value = {"at": now(), "reason": "Owner clicked Apply"}
-            if row := s.get(Setting, key):
-                row.value = value
-            else:
-                s.add(Setting(key=key, value=value))
+
+def _approve_row(s, job):
+    job_id = job.id
+    if job.status in {"queued", "running", "submitting"}:
+        return {"job_id": job_id, "state": job.status, "message": "This application is already running."}
+    if job.status in {"confirmed", "submission_unknown", "already_applied"}:
+        return {"job_id": job_id, "state": job.status,
+                "message": f'This job is already applied: "{" ".join((job.title or "").split())[:120] or "untitled role"}" at {job.company or "this employer"}.'}
+    if job.status == "archived":
+        raise ValueError("This job was removed; restore it before applying")
+    if job.status != "ready":
+        # The newest: the file the person gave AXIOM last, never an older or mistaken upload (a first run, 2026-11-01).
+        job.resume_id = job.resume_id or s.scalar(
+            select(Resume.id).where(Resume.demo.is_(False)).order_by(Resume.created_at.desc()).limit(1)
+        )
+        if not job.resume_id:
+            raise ValueError("Upload a resume before applying")
+        job.status = "ready"
+        if not (job.reason or "").startswith(OWNER_APPROVED):
+            job.reason = OWNER_APPROVED + (job.reason or "")
+    from .application_budget import MAX_STARTS, allowance, job_ceiling_block, repeat_stop_block
+
+    if allowance(s, job_id)[2] >= MAX_STARTS or repeat_stop_block(s, job_id) or job_ceiling_block(s, job_id):
+        # The owner's click is the approval a fresh try needs (owner, 2026-10-18: "give them fresh tries").
+        # Jobs that may already be submitted returned above, so this never repeats a submission.
+        key = "application_budget_reset:" + job_id
+        value = {"at": now(), "reason": "Owner clicked Apply"}
+        if row := s.get(Setting, key):
+            row.value = value
+        else:
+            s.add(Setting(key=key, value=value))
     return None
 
 
@@ -198,24 +203,38 @@ def enqueue(service, job_id, front=False, hold=None):
     click here can never run past a Stop or a pause. `front`: ahead of everything else waiting (the latest click goes first).
     What will never start is refused here, in words, not accepted and dropped later (`refusal`); a job already asked for has had
     that say. The job's other guards decide when its turn comes, as they do any Apply. Runs on a worker thread."""
-    with service.db.session() as s:
+    with service.db.exclusive() as s:
         job = s.get(Job, job_id)
         if job is None:
             raise ValueError("This job is no longer in AXIOM.")
-        if s.get(Setting, KEY + job_id) is None and job.status not in {*ALREADY, "queued"}:
-            refusal(s, job, hold)
-    _lift_pause(service, job_id)
-    if answered := _approve(service, job_id):
+        return _enqueue_row(s, job, front, hold)
+
+
+def _enqueue_row(s, job, front, hold):
+    known = s.get(Setting, KEY + job.id)
+    if job.status in {*ALREADY, "queued"}:
+        return _approve_row(s, job)
+    if known is None:
+        refusal(s, job, hold)
+    # Asking for a job you took out of the line puts it back: the pause would otherwise refuse it when its turn came, and the request
+    # would be dropped without a word.
+    control = s.get(Setting, "job_control:" + job.id)
+    if control is not None and (control.value or {}).get("state") == "paused":
+        if job.status == "paused":
+            job.status = (control.value or {}).get("previous_status") or "ready"
+        s.delete(control)
+    if answered := _approve_row(s, job):
         return answered
-    with service.db.session() as s:
-        known = s.get(Setting, KEY + job_id)
     value = dict(known.value or {}) if known else {"at": now()}
     value.update(code=value.get("code") or "queue", reason=value.get("reason") or "", not_before=now())
     if front:
         value["front"] = now()
-    service.db.set_setting(KEY + job_id, value)
+    if known:
+        known.value = value
+    else:
+        s.add(Setting(key=KEY + job.id, value=value))
     return {
-        "job_id": job_id,
+        "job_id": job.id,
         "state": "waiting",
         "deferred": True,
         "code": "queue",
@@ -223,41 +242,43 @@ def enqueue(service, job_id, front=False, hold=None):
     }
 
 
-def _lift_pause(service, job_id):
-    """Asking for a job you took out of the line puts it back: the pause would otherwise refuse it when its turn came, and the request
-    would be dropped without a word."""
-    with service.db.exclusive() as s:
-        control = s.get(Setting, "job_control:" + job_id)
-        if control is not None and (control.value or {}).get("state") == "paused":
-            job = s.get(Job, job_id)
-            if job is not None and job.status == "paused":
-                job.status = (control.value or {}).get("previous_status") or "ready"
-            s.delete(control)
+# Jobs one transaction decides. Each takes the application lock for its length: one job's commit each cost hundreds of writes in a row,
+# and the whole list in one would hold every worker's admission behind a Select all.
+MANY_CHUNK = 25
 
 
 def enqueue_many(service, job_ids, front=False):
-    """Ticked jobs, or a whole Select all: each decided as its own click, with one reading of what holds what, so hundreds cost no more
-    than the writes. Returns what happened to each: `added`, `already` (running, queued or applied, so nothing was done), and `refused`
-    with the sentence. An employer limit counts what this same request has just put in line, and what was waiting: ten ticked jobs
-    at an employer with room for two are two jobs, or a select-all walks past the approval the limit asks for."""
+    """Ticked jobs, or a whole Select all: each decided as its own click, with one reading of what holds what. Returns what happened to
+    each: `added`, `already` (running, queued or applied, so nothing was done), and `refused` with the sentence. An employer limit
+    counts what this same request has just put in line, and what was waiting: ten ticked jobs at an employer with room for two are two
+    jobs, or a select-all walks past the approval the limit asks for."""
+    from sqlalchemy.orm import defer
+
     from .startable import reading
 
     wanted = list(dict.fromkeys(job_ids))
     holds = reading(service).get(service).get("jobs", {})
     room = _Room(service, wanted)
     added, already, refused = [], [], []
-    with service.db.session() as s:
-        names = {row.id: row for row in s.execute(select(Job.id, Job.company, Job.title).where(Job.id.in_(wanted)))}
-
-    for job_id in wanted:
-        try:
-            room.take(job_id)
-            result = enqueue(service, job_id, front=front, hold=holds.get(job_id, {}))
-        except ValueError as exc:  # QueueBlocked is one
-            row = names.get(job_id)
-            refused.append({"job_id": job_id, "company": row.company if row else "", "title": row.title if row else "", "reason": str(exc)[:300]})
-            continue
-        (added if result["state"] == "waiting" else already).append(job_id)
+    for start in range(0, len(wanted), MANY_CHUNK):
+        chunk = wanted[start : start + MANY_CHUNK]
+        with service.db.exclusive() as s:
+            jobs = {job.id: job for job in s.scalars(select(Job).options(defer(Job.description)).where(Job.id.in_(chunk)))}
+            for job_id in chunk:
+                job = jobs.get(job_id)
+                try:
+                    if job is None:
+                        raise ValueError("This job is no longer in AXIOM.")
+                    room.check(job_id)
+                    result = _enqueue_row(s, job, front, holds.get(job_id, {}))
+                except ValueError as exc:  # QueueBlocked is one
+                    refused.append({"job_id": job_id, "company": job.company if job else "", "title": job.title if job else "", "reason": str(exc)[:300]})
+                    continue
+                if result["state"] == "waiting":
+                    added.append(job_id)
+                    room.took(job_id)
+                else:
+                    already.append(job_id)
     return {"added": added, "already": already, "refused": refused}
 
 
@@ -288,16 +309,18 @@ class _Room:
                     self.left[employer] = {"have": have, "limit": count[1]}
             self.names = {job_id: row.company for job_id, row in rows.items()}
 
-    def take(self, job_id):
+    def check(self, job_id):
         state = self.left.get(self.of.get(job_id))
-        if not state or job_id in self.waiting:
-            return
-        if state["have"] >= state["limit"]:
+        if state and job_id not in self.waiting and state["have"] >= state["limit"]:
             from .startable import limit_sentence
 
             said = limit_sentence(self.names.get(job_id), state["have"], state["limit"])
             raise QueueBlocked(f"{said} {REFUSED_HOLDS['employer_limit']}", code="employer_limit")
-        state["have"] += 1
+
+    def took(self, job_id):
+        state = self.left.get(self.of.get(job_id))
+        if state and job_id not in self.waiting:
+            state["have"] += 1
 
 
 def back_in_line(service, job_id):

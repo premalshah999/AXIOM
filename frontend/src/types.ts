@@ -345,6 +345,7 @@ export type Snapshot = {
     email_receipts_today?: number;
   };
   config: {
+    apply_mode?: "review" | "auto";
     workers: number;
     timeout: number;
     daily_limit: number;
@@ -489,6 +490,8 @@ export type BoardSettings = {
   web_search: boolean;
   auto_apply: boolean;
   batch_target: number;
+  /** How many jobs a review batch gathers (jobpilot/review_batch.py). */
+  review_size: number;
   minimum_auto_fit: number;
   max_age_hours: 48 | 168 | 720;
   // Public board APIs list only live postings; null follows max_age_hours (60 days when that is 30 days).
@@ -737,6 +740,8 @@ export type QueuePage = {
   paused: boolean;
   auto_submit: boolean;
   auto_apply: boolean;
+  /** The dispatcher starts Ready jobs by itself. Off, only what was asked for starts. */
+  dispatching?: boolean;
   stopped: string | null;
   workers: { normal: number; specialist: number; custom: number; free: number };
   decides: string;
@@ -752,7 +757,7 @@ export type QueuePage = {
   held_total: number;
 };
 export type HeldRow = { id: string; title: string; company: string; url: string; ats: string; location: string; score: number | null; hold: Hold };
-export type HeldPage = { rows: HeldRow[]; total: number; page: number; pages: number; size: number; held: Startable["held"] };
+export type HeldPage = { rows: HeldRow[]; total: number; page: number; pages: number; size: number; held: Startable["held"]; selectable?: number };
 
 // GET /api/board: one page of the Job board, and each filter's choices with exact counts (jobpilot/board_view.py).
 export type BoardRow = {
@@ -778,10 +783,25 @@ export type BoardRow = {
   more: number;
 };
 export type BoardFacet = { value: string; label: string; count: number };
+// GET /api/review-batch (jobpilot/review_batch.py): the open batch, and what the empty screen needs to say.
+export type ReviewRow = { id: string; title: string; company: string; location: string; url: string; ats: string; posted_at: string; dated: boolean; source: string; score: number; line: string; level: string };
+export type ReviewBatch = {
+  mode: "review" | "auto";
+  planning?: boolean;
+  id: string;
+  size: number;
+  rows: ReviewRow[];
+  more: number;
+  checking: number;
+  searching: boolean;
+};
+
 export type BoardPage = {
   planning?: boolean;
   rows: BoardRow[];
   total: number;
+  /** What Select all takes: every row these filters show that can join the line, on any page. */
+  selectable: number;
   page: number;
   pages: number;
   size: number;

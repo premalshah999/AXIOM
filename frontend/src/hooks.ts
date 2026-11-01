@@ -178,6 +178,34 @@ export function useAction() {
   return { pending, run };
 }
 
+/** A row's own action: its button alone waits, so the next row can be pressed at once. useAction holds one key, which froze the whole list. */
+export function useRowActions() {
+  const notify = useNotify();
+  const [busy, setBusy] = useState<ReadonlySet<string>>(() => new Set());
+  const act = useCallback(
+    async <T,>(id: string, fn: () => Promise<T>, success?: (result: T) => string | undefined): Promise<T | undefined> => {
+      setBusy((b) => new Set(b).add(id));
+      try {
+        const result = await fn();
+        const text = success?.(result);
+        if (text) notify("ok", text);
+        return result;
+      } catch (e) {
+        if ((e as Error).name !== "AbortError") notify("error", (e as Error).message);
+        return undefined;
+      } finally {
+        setBusy((b) => {
+          const next = new Set(b);
+          next.delete(id);
+          return next;
+        });
+      }
+    },
+    [notify],
+  );
+  return { busy, act };
+}
+
 export function useNow(interval = 15000) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {

@@ -16,6 +16,7 @@ import { groupQuestions, QuestionCard, type QuestionGroup } from "./questions";
 import type { ApplicationWorkers, MailStatus, RuntimeHealth, Snapshot, Startable, Success } from "./types";
 import { ago, day, employerOf, jobWords, plural, urlRole } from "./format";
 import { Button, Dialog, Empty, Monogram, MonogramStack, Panel, Skeleton } from "./ui/index";
+import { BestMatches } from "./bestmatches";
 import { Notice } from "./worktools";
 import { pressResume, pressStop } from "./shell/StopControl";
 import "./styles/work.css";
@@ -64,6 +65,7 @@ export function BatchView() {
           <Results ledger={applications} />
         </div>
       </div>
+      <BestMatches />
     </div>
   );
 }
@@ -166,6 +168,7 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
   const ready = usePoll<Startable>((signal) => api("/startable", "GET", undefined, signal), 30000, [version]);
   const stopped = paused || (!rt.intake_enabled && rt.intake_reason === "Paused");
   const n = work.working;
+  const reviewing = snapshot.config.apply_mode !== "auto";
 
   // The worst thing that is true right now, in plain words.
   const said: Record<PanelState, ["info" | "bad", string, string?]> = {
@@ -175,7 +178,9 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
     complete: ["info", "Target reached"],
     running: ["info", n ? `Applying to ${plural(n, "job")} right now` : ready.data?.startable === 0 ? "Nothing to run right now" : "Applying, between jobs"],
     held: ["info", "Waiting to start", (rt.intake_reason || "New applications are not starting").replace(/\.$/, "") + "."],
-    none: ["info", "Not applying", work.limit ? "Press Start to apply until a target you choose." : undefined],
+    none: n
+      ? ["info", `Applying to ${plural(n, "job")} right now`]
+      : ["info", "Not applying", work.limit ? (reviewing ? "Review a batch to choose what goes next, or press Start to let AXIOM choose." : "Press Start to apply until a target you choose.") : undefined],
   };
   const [tone, sentence, sub] = said[panel];
 
@@ -215,7 +220,7 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
         e.preventDefault();
         const value = Math.max(1, Math.min(500, Math.round(goal || 25)));
         // A batch sends on its own, which turns "Let me review first" off. Said before it happens, not found out afterwards.
-        if (!snapshot.control.auto_submit) setConfirmStart(value);
+        if (!snapshot.control.auto_submit || reviewing) setConfirmStart(value);
         else begin(value);
       }}
     >
@@ -342,8 +347,8 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
             </>
           }
         >
-          You chose not to send yet. Starting this turns sending on: AXIOM will find jobs and send each application once every required answer is
-          checked, without asking you first. To keep control, press Not yet and pick jobs yourself on the Jobs page.
+          {reviewing ? "You review each batch before anything is queued. Starting this switches to applying automatically" : "You chose not to send yet. Starting this turns sending on"}: AXIOM will find jobs and send each application once
+          every required answer is checked, without asking you first. To keep control, press Not yet{reviewing ? " and review a batch." : " and pick jobs yourself on the Job board."}
         </Dialog>
       )}
       {workers && noKey && !active && (
@@ -719,7 +724,7 @@ function FirstRun({ mail }: { mail: MailStatus | null }) {
     {
       done: false,
       title: "First application",
-      detail: "Add a job link, pick jobs in Discovered, or press Start above.",
+      detail: "Review a batch of your best matches, add a job link, or press Start above.",
       action: "Add a job",
       onClick: () => window.dispatchEvent(new Event(OPEN_JOB_LINK)),
     },
