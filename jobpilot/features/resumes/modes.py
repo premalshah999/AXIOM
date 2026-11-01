@@ -31,6 +31,7 @@ log = logging.getLogger(__name__)
 POLICY_PREFIX = "tailor-"
 REVIEW_POLICY = "tailor-review-v1"  # The applicant's own edit of a tailored resume, saved from the review screen.
 AUTOLOAD = ("aggressive",)
+KNOWN_POLICIES = ("tailor-normal-v1", "tailor-aggressive-v1", REVIEW_POLICY)
 PLANNED = {
     "aggressive": {
         "label": "Aggressive",
@@ -98,6 +99,7 @@ class ModeSpec:
     run: ModeFn
     # (prompt tokens, completion tokens) before the resume's own size, for the estimate shown before tailoring.
     estimate_tokens: Callable[[int, int], tuple[int, int]] | None = None
+    timeout_seconds: float = 180
 
 
 _REGISTRY: dict[str, ModeSpec] = {}

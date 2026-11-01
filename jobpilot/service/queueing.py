@@ -599,6 +599,11 @@ class QueueingMixin:
             path = self.config.data_dir / "resumes" / chosen.filename
             from ..execution_services import pin_resume
 
+            # This job's own choice, over the account's policy: Apply with a tailored resume waits here until that resume may be sent.
+            if not job.demo and not (continuation and continuation.packet.get("resume_artifact_id")):
+                from ..features.resumes.choice import artifact_for_queue
+
+                resume_artifact_id = artifact_for_queue(s, job, mode) or resume_artifact_id
             if (
                 not job.demo
                 and not master
@@ -636,7 +641,8 @@ class QueueingMixin:
                         )
                     resume_artifact_id = artifact.id if artifact else None
 
-            if master:
+            keeps_variant = bool(continuation and continuation.packet.get("resume_artifact_id"))
+            if master and not resume_artifact_id and not keeps_variant:
                 artifact_packet = {"resume_policy": "master"}
             else:
                 artifact_packet, packet_profile = pin_resume(

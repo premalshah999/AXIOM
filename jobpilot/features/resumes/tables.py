@@ -59,3 +59,25 @@ class RsMaster(FeatureBase):
     model_calls: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[str] = mapped_column(String, default=now)
     approved_at: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class RsTailorChoice(FeatureBase):
+    """A job the applicant chose "Apply with tailored resume" for. No row is plain Apply, the default.
+
+    Approval lives here and not on the artifact, which is immutable once ready: it names the exact artifact and the hash of its PDF, so the
+    file that's uploaded is the file that was approved.
+    """
+
+    __tablename__ = "rs_tailor_choices"
+    job_id: Mapped[str] = mapped_column(String, primary_key=True)
+    mode: Mapped[str] = mapped_column(String)
+    state: Mapped[str] = mapped_column(String, default="preparing")  # preparing | review | approved | failed
+    artifact_id: Mapped[str | None] = mapped_column(String, nullable=True)  # The current version, newest edit included.
+    approved_artifact_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    approved_sha: Mapped[str | None] = mapped_column(String, nullable=True)
+    approved_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    approved_how: Mapped[str | None] = mapped_column(String, nullable=True)  # reviewed | setting_off
+    error: Mapped[dict] = mapped_column(JSON, default=dict)
+    lease_until: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, default=now)
+    updated_at: Mapped[str] = mapped_column(String, default=now)

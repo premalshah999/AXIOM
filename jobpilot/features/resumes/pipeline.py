@@ -15,12 +15,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from .._store import digest, new_id, now, sha256_bytes
-from . import evidence
+from . import evidence, modes
 from .compiler import compile_pdf
 from .tables import RsArtifact
 
 log = logging.getLogger(__name__)
-POLICY_VERSION = "tailor-master-v2"  # v1 (rebuilt from profile fields) is retired
+POLICY_VERSION = modes.policy_for("normal")  # tailor-master-v2 broke the owner's rules of 2026-11-01 (it could drop a project and grow a bullet).
 
 
 class TailorPolicy(BaseModel):
@@ -147,83 +147,124 @@ def model_drafter(db, config) -> Drafter | None:
     return draft
 
 
-async def _build_master(db, job, resume, profile, master, model, compile_fn) -> dict:
-    """Run the master-preserving pipeline and package its outcome."""
+async def source_document(db, config, model, resume: dict, profile: dict) -> tuple | None:
+    """(doc, style, origin): what a tailored resume starts from. The approved master; else a draft or fresh import that matches the
+    uploaded PDF word for word, so a new user needn't approve a master first; else the history in their profile. All of it is their own."""
+    from .editor import Style, from_inventory
+    from .master import current_master, import_master, master_doc
+
+    approved = master_doc(db)
+    if approved:
+        return approved[0], approved[1], "master"
+    from .editor import ResumeDoc
+
+    def verified(row):
+        return (row.verification or {}).get("faithful") and (row.verification or {}).get("render_fill", {}).get("pages", 1) <= 1
+
+    draft = current_master(db)
+    if draft is not None and verified(draft) and draft.source_resume_sha == resume["sha"]:
+        return ResumeDoc.model_validate(draft.doc), Style.model_validate(draft.style), "import"
+    if model is not None:
+        try:
+            imported = await import_master(db, config, model, resume["id"])
+        except Exception as exc:  # A transcription that fails or is cut off isn't the end: the profile holds the same history.
+            log.info("master import failed: %s", type(exc).__name__)
+            imported = None
+        if imported and (imported.get("verification") or {}).get("faithful"):
+            return ResumeDoc.model_validate(imported["doc"]), Style.model_validate(imported["style"]), "import"
+    doc = from_inventory(evidence.build(profile, resume["text"]))
+    if not any(s.entries or s.text.strip() for s in doc.sections):
+        return None
+    return doc, Style(), "profile"
+
+
+async def _build_mode(db, config, job, resume, profile, source_tuple, spec, model, compile_fn) -> dict:
+    """Run one mode through the one contract, then the checks no mode can skip."""
     import io
+    import tempfile
+    from pathlib import Path
 
     from pypdf import PdfReader
 
-    from ..knowledge.writing import role_brief
-    from . import tailor2
-    from .master import measure_fill
-    from .select import keywords
+    from . import ats
+    from .rules import check_rules, doc_plain
+    from .select import supported_terms
+    from .validate import parse_check
 
-    doc, style, mrow = master
-    brief = await role_brief(db, model, job)
-    keys = keywords(evidence.build(profile, resume["text"]), job["description"]).all
-
-    def text_of(pdf: bytes) -> str:
-        return "\n".join(p.extract_text() or "" for p in PdfReader(io.BytesIO(pdf)).pages)
-
-    try:
-        result = await tailor2.tailor(
-            model=model,
-            master=doc,
-            style=style,
-            profile=profile,
-            job=job,
-            brief=brief,
-            keywords=keys,
-            compile_fn=compile_fn,
-            check_fn=text_of,
-            fill_fn=measure_fill,
+    doc, style, origin = source_tuple
+    inv = evidence.build(profile, resume["text"])
+    terms = ats.terms(job["description"], job["title"], supported_terms(inv))
+    evidence_text = " ".join([doc_plain(doc), resume["text"] or "", inv.vocabulary or ""])
+    ats_source = ats.score(terms, doc_plain(doc), evidence_text)
+    source = modes.SourceResume(id=resume["id"], sha=resume["sha"], text=resume["text"], doc=doc, style=style, origin=origin)
+    with tempfile.TemporaryDirectory(prefix="ax-tailor-") as work:
+        ctx = modes.ModeContext(
+            db=db, config=config, model=model, compile_fn=compile_fn, work_dir=Path(work), evidence=inv, ats_terms=terms, ats_source=ats_source
         )
-    except RuntimeError as exc:
-        code = str(exc).split(":", 1)[0]
-        raise _Fail(
-            code if code in {"master_compile", "tailored_compile"} else "tailoring_error", False, str(exc)
-        ) from None
-    report = result["report"]
+        try:
+            result = await spec.run(job, source, profile, ctx)
+        except RuntimeError as exc:
+            code = str(exc).split(":", 1)[0]
+            known = {"compile_error", "compile_timeout", "compiler_missing", "output_too_large"}
+            raise _Fail(code if code in known else "tailoring_error", code == "compile_timeout", str(exc)) from None
+        pdf = Path(result.pdf_path).read_bytes()
+    if result.doc is None:
+        raise _Fail("tailoring_error", False, f"Mode {spec.id} returned no document, so its rules can't be checked")
+    drafts = [d.model_dump() for d in result.drafts]
+    rules = check_rules(
+        result.doc,
+        doc,
+        pdf=pdf,
+        allowed_skills=[*inv.skills, *result.allowed_skills],
+        added_projects=result.added_projects,
+        unconfirmed=drafts,
+        vocabulary=evidence_text,
+    )
+    parsed = parse_check(pdf, result.doc)
+    text = parsed["text"]
+    ats_now = ats.score(terms, doc_plain(result.doc), evidence_text)
+    ats_pdf = ats.score(terms, text, evidence_text)
+    from . import gates
+
     validation = {
-        "kept_master": result["kept_master"],
-        "master_id": mrow.id,
-        "report": report,
-        "pages": (report.get("fill") or report.get("master_fill") or {}).get("pages"),
-        "fill": (report.get("fill") or {}).get("fill"),
-        "master_fill": (report.get("master_fill") or {}).get("fill"),
-        "repairs": report.get("repairs", []),
-        "editor": {"doc": result["doc"].model_dump(), "style": style.model_dump()},
+        "mode": spec.id,
+        "origin": origin,
+        "source_doc": doc.model_dump(),
+        "editor": {"doc": result.doc.model_dump(), "style": (result.style or style).model_dump()},
+        "rules": rules,
+        "parse": {k: v for k, v in parsed.items() if k != "text"},
+        "quality": gates.quality(result.doc),
+        "ats": {"score": ats_now["score"], "pdf_score": ats_pdf["score"], "source_score": ats_source["score"], "tiers": ats_now["tiers"]},
+        "ats_terms": terms,
+        "allowed_skills": sorted({*inv.skills, *result.allowed_skills}),
+        "added_projects": [e.model_dump() for e in result.added_projects],
+        "drafts": drafts,
+        "report": result.report,
+        "pages": parsed["pages"],
+        "latex": result.latex,
     }
-    tailored = result["doc"]
-    selection = [
-        {
-            "unit_id": b.id,
-            "kind": sec.kind,
-            "source_row": e.id,
-            "text": b.text,
-            "source_text": b.source_text or b.text,
-        }
-        for sec in tailored.sections
-        if sec.include
-        for e in sec.entries
-        if e.include
-        for b in e.bullets
-        if b.include and b.text.strip()
-    ]
+    if not rules["ok"]:
+        raise _Fail("rules", False, "; ".join(p["message"] for p in rules["problems"][:3]), validation)
     return {
-        "kept_master": result["kept_master"],
-        "pdf": result["pdf"],
-        "text": text_of(result["pdf"]),
-        "selection": selection,
+        "pdf": pdf,
+        "text": text or "\n".join(p.extract_text() or "" for p in PdfReader(io.BytesIO(pdf)).pages),
+        "selection": _selection(result.doc),
         "validation": validation,
-        "calls": report.get("calls", 0) + 1,
+        "calls": result.model_calls,
     }
+
+
+def _selection(doc) -> list[dict]:
+    from .editor import selection_of
+
+    return selection_of(doc)
 
 
 class _Fail(Exception):
-    def __init__(self, code, retryable, detail=""):
+    def __init__(self, code, retryable, detail="", validation=None):
         super().__init__(detail)
         self.error = TailoringError(code=code, retryable=retryable, detail=detail[:500])
+        self.validation = validation or {}
 
 
 def _finish(db, row_id, **fields):
@@ -246,16 +287,23 @@ async def prepare_resume(
     drafter: Drafter | None = None,
     compile_fn=compile_pdf,
     model=None,
+    mode: str | None = None,
+    fresh: bool = False,
 ) -> TailoringResult:
-    """Tailor an approved master for one job, or say to use the master as is.
+    """One job's tailored resume, in one mode.
 
-    status: ready (a tailored PDF), use_master (no approved master, no model, or
-    the tailored version was not at least as strong), building, failed.
+    mode None is the account-wide "tailored" policy: it runs Normal and only from an approved master, else use_master. A mode the applicant chose
+    for this job starts from whatever source_document finds, and it fails plainly rather than sending something else. fresh: build anew.
+    status: ready (a tailored PDF), use_master, building, failed.
     """
     from ...db import Job, Resume
+    from ...models import COST_METER
     from .master import master_doc
 
     policy = policy or TailorPolicy()
+    spec = modes.get(mode or "normal")
+    if spec is None:
+        return TailoringResult(status="failed", error=TailoringError(code="unknown_mode", retryable=False, detail=f"{mode} isn't available yet"))
     profile = db.get_setting("profile", {}) or {}
     with db.session() as s:
         job_row = s.get(Job, job_id)
@@ -268,8 +316,11 @@ async def prepare_resume(
             "location": job_row.location,
             "description": job_row.description or "",
         }
-        rid = source_resume_id or job_row.resume_id
-        resume_row = s.get(Resume, rid) if rid else s.scalar(select(Resume).where(Resume.demo.is_(False)))
+        # The same resume queue admission will send (service/queueing.py), so a built artifact is never refused for its source.
+        wanted = (db.get_setting("application_resume_policy", {}) or {}).get("resume_id")
+        rid = source_resume_id or wanted or job_row.resume_id
+        resume_row = s.get(Resume, rid) if rid else None
+        resume_row = resume_row or s.scalar(select(Resume).where(Resume.demo.is_(False)).order_by(Resume.created_at.desc()).limit(1))
         resume = resume_row and {"id": resume_row.id, "sha": resume_row.sha256, "text": resume_row.text or ""}
     if not job["description"].strip():
         return TailoringResult(
@@ -282,8 +333,8 @@ async def prepare_resume(
         return TailoringResult(
             status="failed", error=TailoringError(code="no_source_resume", retryable=False)
         )
-    master = master_doc(db)
-    if master is None:
+    no_master = mode is None and master_doc(db) is None
+    if no_master:
         return TailoringResult(
             status="use_master",
             error=TailoringError(
@@ -297,18 +348,38 @@ async def prepare_resume(
 
         model = configured_model(db, config)
     if model is None:
+        if mode:
+            return TailoringResult(
+                status="failed",
+                error=TailoringError(code="no_model", retryable=True, detail="Tailoring needs your AI key. Add it in Settings, under Connections."),
+            )
         return TailoringResult(
             status="use_master",
             error=TailoringError(code="no_model", retryable=True, detail="No language model is configured"),
         )
+    meter: list = []
+    meter_token = COST_METER.set(meter)
+    try:
+        source_tuple = await source_document(db, config, model, resume, profile)
+    finally:
+        COST_METER.reset(meter_token)
+    if source_tuple is None:
+        return TailoringResult(
+            status="failed",
+            error=TailoringError(code="no_source", retryable=False, detail="Your resume has no work history to tailor yet. Add it in your Profile."),
+        )
     identity = job_identity(job["url"])
     pdigest = evidence.profile_digest(profile)
     dsha = digest(job["description"])[:20]
-    master_key = digest([master[2].id, master[0].model_dump(), master[1].model_dump()])[:16]
-    key = digest([resume["sha"], pdigest, identity, dsha, POLICY_VERSION, master_key])
+    policy_version = modes.policy_for(spec.id)
+    master_key = digest([source_tuple[0].model_dump(), source_tuple[1].model_dump()])[:16]
+    key = digest([resume["sha"], pdigest, identity, dsha, policy_version, master_key])
     at = datetime.now(UTC)
     with db.exclusive() as s:
         row = s.scalar(select(RsArtifact).where(RsArtifact.cache_key == key))
+        if row and fresh and row.status != "building":
+            row.cache_key = row.cache_key + ":superseded:" + row.id  # Immutable, and a run may have pinned it: set aside, not rewritten.
+            row = None
         if row and row.status == "ready":
             if file_intact(config.data_dir, row):
                 return TailoringResult(status="ready", cached=True, artifact=record(row))
@@ -345,28 +416,25 @@ async def prepare_resume(
                 job_id=job_id,
                 employer_id=employer_id,
                 description_sha=dsha,
-                policy_version=POLICY_VERSION,
+                policy_version=policy_version,
             )
             s.add(row)
         row.status, row.error, row.attempts = "building", {}, (row.attempts or 0) + 1
         row.lease_until = (at + timedelta(seconds=policy.lease_seconds)).isoformat()
         row_id = row.id
     _RUNNING[row_id] = asyncio.current_task()
+    meter_token = COST_METER.set(meter)
     try:
-        async with asyncio.timeout(policy.timeout_seconds):
-            outcome = await _build_master(db, job, resume, profile, master, model, compile_fn)
-        if outcome["kept_master"]:
-            artifact = _finish(
-                db,
-                row_id,
-                status="kept_master",
-                validation=outcome["validation"],
-                selection=[],
-                model_calls=outcome["calls"],
-            )
-            return TailoringResult(status="use_master", artifact=artifact)
+        async with asyncio.timeout(max(policy.timeout_seconds, spec.timeout_seconds)):
+            outcome = await _build_mode(db, config, job, resume, profile, source_tuple, spec, model, compile_fn)
         pdf, text = outcome["pdf"], outcome["text"]
         selection, validation, calls = outcome["selection"], outcome["validation"], outcome["calls"]
+        validation["cost"] = {
+            "usd": round(sum(m["usd"] for m in meter), 6),
+            "calls": len(meter),
+            "prompt_tokens": sum(m["prompt_tokens"] or 0 for m in meter),
+            "completion_tokens": sum(m["completion_tokens"] or 0 for m in meter),
+        }
         folder = os.path.join(str(config.data_dir), "tailored")
         os.makedirs(folder, mode=0o700, exist_ok=True)
         rel = os.path.join("tailored", row_id + ".pdf")  # service-generated name only
@@ -384,10 +452,11 @@ async def prepare_resume(
             selection=selection,
             validation=validation,
             model_calls=calls,
+            cost=validation["cost"]["usd"],
         )
         return TailoringResult(status="ready", artifact=artifact)
     except _Fail as fail:
-        artifact = _finish(db, row_id, status="failed", error=fail.error.model_dump())
+        artifact = _finish(db, row_id, status="failed", error=fail.error.model_dump(), validation=fail.validation)
         return TailoringResult(status="failed", artifact=artifact, error=fail.error)
     except TimeoutError:
         error = TailoringError(code="timeout", retryable=True, detail="Tailoring exceeded its time limit")
@@ -402,6 +471,7 @@ async def prepare_resume(
         )
         raise
     finally:
+        COST_METER.reset(meter_token)
         _RUNNING.pop(row_id, None)
 
 
@@ -440,7 +510,7 @@ def current_identity(db, job_id: str):
         }
 
 
-CURRENT_POLICIES = (POLICY_VERSION, "editor-v1")  # retired v1 variants are never current
+CURRENT_POLICIES = (*modes.KNOWN_POLICIES, "editor-v1")  # Earlier variants are never current.
 
 
 def current_artifact(db, job_id: str, data_dir=None) -> TailoredResume | None:
