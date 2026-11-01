@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlsplit
 from bs4 import BeautifulSoup
 from sqlalchemy import and_, case, func, or_, select
 
-from .db import Event, Job, Mailbox, MailChallenge, Run, record
+from .db import Event, Job, Mailbox, MailChallenge, Run, Setting, record
 from .mail import authenticated_sender, digest
 from .mail_errors import MailCursorUpgrade, MailMessageError, MailOperationError, MailTransportError
 
@@ -209,7 +209,10 @@ CHALLENGE = re.compile(
     r"security code|verification code|email verification|email confirmation|verify your email|confirm your email|"
     r"resubmit your application|(?:activate|verify|confirm) (?:your )?(?:account|profile)|"
     r"reset (?:your )?password|password reset|one[ -]?time (?:password|passcode|code)|"
-    r"(?:login|sign[ -]?in|authentication) (?:code|link)|(?:your|the) (?:code|pin) is|\botp\b"
+    r"(?:login|sign[ -]?in|authentication) (?:code|link)|(?:your|the) (?:code|pin) is|\botp\b|"
+    # Oracle sends "Confirm your identity for job <title>" before the form: it names the role and says nothing was sent
+    # (two applications were booked as confirmed on it, 2026-10-23 and 10-27).
+    r"(?:confirm|verify) your identity"
 )
 
 
@@ -1049,6 +1052,52 @@ UNPROVEN_STATES = [
 ]
 
 
+# What a run records once the employer's form is in front of it. A job with none of these was never filled in.
+REACHED_FORM = ("form_page", "form_post", "verification", "answer_quality", "submitting")
+# A sent or sending posting, whose own acknowledgement a sibling posting must not take.
+SENT_JOB_STATES = ("confirmed", "submission_unknown", "submitting", "running")
+
+
+def sent_siblings(session, job):
+    """(title, url) of this employer's other postings that were sent or are being sent."""
+    words = (job.company or "").split()
+    if not words:
+        return []
+    key = receipt_employer_key(session, {"company": job.company, "url": job.url})
+    rows = session.execute(
+        select(Job.company, Job.title, Job.url).where(
+            Job.id != job.id,
+            Job.demo.is_(False),
+            Job.status.in_(SENT_JOB_STATES),
+            func.lower(Job.company).startswith(words[0].lower(), autoescape=True),
+        )
+    ).all()
+    return [
+        (title, url)
+        for company, title, url in rows
+        if title and receipt_employer_key(session, {"company": company, "url": url}) == key
+    ]
+
+
+def names_a_sibling(message, job, siblings):
+    """The mail fits a posting already sent at least as well as this one: it does not prove this one.
+
+    A draft sweep compares a mail only with jobs still unproven, so the posting that really earned it is out of the
+    room and the next one that shares its words looks like the only match. RVO Health's two "Software Engineer, Red
+    Platform" postings: one was sent, and the other, whose browser never reached the form, was booked as confirmed from
+    the first one's mail (2026-10-31). Lyft's "Data Scientist" took "Data Scientist, Algorithms - Pricing" (2026-10-25). A
+    sibling with fewer words than this job's title is not a rival: the mail names the longer title in full."""
+    facts = message_facts(message)
+    if facts is None:
+        return False
+    length = len(_words(job["title"]).split())
+    return any(
+        (url and url.rstrip("/") in facts["links"])
+        or (len(_words(title).split()) >= length and title_in(title, facts["observed"]))
+        for title, url in siblings
+    )
+
+
 async def reconcile_recent_drafts(mail, days=2):
     """An employer's receipt confirms an application whose confirmation page the browser missed.
 
@@ -1093,6 +1142,8 @@ async def reconcile_approved_drafts(mail, job_ids, max_pages=8):
     approved attempt window, require an exact role, and never reuse a receipt
     belonging to another job. No LLM receives message bodies or credentials.
     """
+    siblings = {}
+
     def load():
         candidates = []
         with mail.db.session() as s:
@@ -1114,6 +1165,19 @@ async def reconcile_approved_drafts(mail, job_ids, max_pages=8):
                     not runs
                     or any(r.state == "confirmed" for r in runs)
                     or runs[0].state in {"queued", "running", "submitting"}
+                ):
+                    continue
+                # The owner deleted this job: a mail never brings it back. One no-source posting deleted on request came back
+                # as confirmed the same night on a mail from its employer (2026-10-31).
+                control = s.get(Setting, "job_control:" + jid)
+                if control and (control.value or {}).get("state") == "deleted":
+                    continue
+                # Nobody can have completed a form the job never reached. Hive's posting stopped at its CAPTCHA and RVO
+                # Health's at a navigation timeout, and each was booked as confirmed from a sibling's mail (2026-10-29, 10-31).
+                if not s.scalar(
+                    select(Event.id)
+                    .where(Event.run_id.in_([r.id for r in runs]), Event.kind.in_(REACHED_FORM))
+                    .limit(1)
                 ):
                     continue
                 facts = packet_facts(s, [r.id for r in runs])
@@ -1145,6 +1209,7 @@ async def reconcile_approved_drafts(mail, job_ids, max_pages=8):
                         runs[0].created_at,
                         (datetime.fromisoformat(window_start) - SUBMIT_GRACE).isoformat(),
                     )
+                siblings[jid] = sent_siblings(s, job)
                 candidates.append((record(job), latest, window_start))
         return candidates, boxes
 
@@ -1201,6 +1266,12 @@ async def reconcile_approved_drafts(mail, job_ids, max_pages=8):
                     _DRAFT_COMPARED[item["id"]] = compared | owned_jobs
                     continue
                 job, source, receipt = matches[0]
+                if receipt["attribution_basis"] != "job_url" and names_a_sibling(msg, job, siblings.get(job["id"], [])):
+                    ambiguous.add(job["id"])
+                    if len(_DRAFT_COMPARED) >= _DRAFT_COMPARED_LIMIT:
+                        _DRAFT_COMPARED.pop(next(iter(_DRAFT_COMPARED)))
+                    _DRAFT_COMPARED[item["id"]] = compared | owned_jobs
+                    continue
                 with mail.db.exclusive() as s:
                     if receipt_claimed(s, msg, receipt):
                         continue

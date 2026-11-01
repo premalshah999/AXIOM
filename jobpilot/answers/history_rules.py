@@ -425,6 +425,11 @@ class HistoryRulesMixin:
             group,
             re.I,
         )
+        if not m and re.match(r"\s*education\b.*\bdate\b", f.get("label") or "", re.I):
+            # iCIMS groups "Education Start Date Month" under "Start Date" and numbers the row only in its section,
+            # "Education (2) Start Date". Unread, it took today's date from availability, and a finished degree was sent
+            # as starting this month (Johns Hopkins, Medpace, National Louis, 2026-10-28..11-01).
+            m = re.search(r"(education)\s*\((\d+)\)", group, re.I)
         # An unnumbered repeated row is placed by its occurrence (forms.mark_history_rows).
         row = f.get("history_row") or {}
         named = None if m else re.fullmatch(

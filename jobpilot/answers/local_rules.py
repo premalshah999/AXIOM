@@ -43,6 +43,8 @@ CURRENCY = re.compile(
     r"usd|eur|gbp|inr|cad|aud|sgd|jpy|chf|aed)\b",
     re.I,
 )
+# The question asks which currency, by name: "Salary Expectation - Currency", "Currency:", not "amount and currency".
+CURRENCY_MENU = re.compile(r"(?:^|[\s\-–—:*(])currency\b(?!\s*\w)", re.I)
 from .history import EDUCATION
 from .history import WORK
 from .intents import INTENTS
@@ -167,6 +169,24 @@ class LocalRulesMixin:
         label = normalize(f["label"])
         options = [o for o in f.get("options", []) if not placeholder_option(o)]
         p = self.profile
+        if (
+            f.get("type") in {"select", "combobox", "dropdown", "prompt"}
+            and not options
+            and CURRENCY_MENU.search(f["label"])
+            and not re.search(r"\bin (?:local|your(?: local)?|the local) currency\b", f["label"], re.I)
+        ):
+            # A menu of currencies whose rows load on opening ("Salary Expectation - Currency", Avature 2026-11-01): its
+            # label reads as a salary question, the saved amount went into its search, found nothing, and recovery picked
+            # the first row. The posting's own location decides, the applicant's residence when it names none.
+            where = str((getattr(self, "job", None) or {}).get("location") or "").strip()
+            country = str(getattr(getattr(p, "address", None), "country", "") or "")
+            if (
+                re.search(r"united states|\busa?\b", where, re.I) or re.search(r", [A-Z]{2}\b", where)
+                if where
+                else re.search(r"united states|\busa?\b", country, re.I)
+            ):
+                return self._ans(f, "US Dollar", ["profile:address.country"])
+            return None
         if f.get("type") == "checkbox" and re.search(
             r"\bif you (?:are|reside) (?:a |an )?(?:resident (?:of|in) )?(?:the )?"
             r"(?:european union|eu|eea|european economic area|united kingdom|uk)\b",
@@ -310,13 +330,17 @@ class LocalRulesMixin:
         # Bare remembered labels cannot override a specific history row.
         row = (f.get("group") or "") + " " + (f.get("section") or "")
         history_row = f.get("history_row") or {}
-        if history_row or re.search(r"(?:work experience|experience|employment|education)\s*\d+", row, re.I):
+        if (
+            history_row
+            or re.search(r"(?:work experience|experience|employment|education)\s*\d+", row, re.I)
+            or (re.match(r"\s*education\b.*\bdate\b", f["label"], re.I) and re.search(r"education\s*\(\d+\)", row, re.I))
+        ):
             entry = self._entry_answer(f, label)
             if entry is not None:
                 return entry
             patterns = (
                 EDUCATION
-                if history_row.get("kind") == "education" or re.search(r"education\s*\d+", row, re.I)
+                if history_row.get("kind") == "education" or re.search(r"education\s*\(?\d+", row, re.I)
                 else WORK
             )
             if any(pattern.search(f["label"]) for pattern in patterns.values()):
@@ -382,7 +406,9 @@ class LocalRulesMixin:
                 if edge := re.search(r"\b(from|to)\s*:?\s*$", label):
                     stance = str(int(bounds[0] if edge[1] == "from" else bounds[1]))
                 elif f.get("type") == "number" or not re.search(r"\branges?\b", hint):
-                    stance = range_midpoint(stance)
+                    from .intent_rules import pay_in_period
+
+                    stance = pay_in_period(f["label"], range_midpoint(stance))
             elif f.get("type") == "number":
                 return None  # A number input cannot hold free text such as "Negotiable".
             return self._ans(f, stance, ["policy:compensation_choice"])

@@ -109,7 +109,13 @@ CONFIRM_TEXT = re.compile(
 ALREADY = re.compile(
     r"we(?:['’]ve| have) already received your application for this (?:job|position|role)\b|"
     r"you already applied (?:for|to) this (?:job|position)(?:[.!]|$)|"
-    r"you(?:'ve| have) already applied|you have previously applied|already submitted an application|"
+    # An instruction is not a notice. PageUp's sign-in page says "If you have previously applied for a position with us, please
+    # use the same email address": Columbia was booked as already applied with nothing ever sent (2026-11-01). Nor does an
+    # application to some other position say anything about this one.
+    r"(?<!\bif )(?<!\bwhen )(?<!\bonce )(?<!\bunless )(?<!\bwhether )(?<!\bcase )you(?:'ve| have) already applied"
+    r"(?! (?:to|for) (?:a|an|another|other|any|one|some)\b)|"
+    r"(?<!\bif )(?<!\bwhen )(?<!\bonce )(?<!\bunless )(?<!\bwhether )(?<!\bcase )you have previously applied (?:for|to) this (?:job|position|role)\b|"
+    r"already submitted an application|"
     r"application for this (?:job|position|role) (?:has )?already been submitted|"
     # Workday posting page after an application (HPE 2026-10-15): "You applied for this job on October 15, 2026."
     r"you applied for this (?:job|position|role) on\b|"
