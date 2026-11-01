@@ -192,6 +192,7 @@ async def test_phone_is_refilled_after_country_picker_clears_it(page):
     from types import SimpleNamespace
 
     from jobpilot.forms import FormSession
+    from jobpilot.page_clock import PageClock
 
     await page.set_content("""<select id=country onchange="typed=false;p.value=''">
       <option>United States +1</option><option>United Kingdom +44</option></select>
@@ -202,6 +203,7 @@ async def test_phone_is_refilled_after_country_picker_clears_it(page):
         else document.getElementById('err').textContent='';});</script>""")
     field = {"id": "phone", "dom_id": "ph", "label": "Phone", "type": "tel", "valid": True, "required": True}
     form = FormSession.__new__(FormSession)
+    form.clock = PageClock()  # __init__ is skipped; fill() times every write on it
     form.page = page
     form.resolver = SimpleNamespace(profile=SimpleNamespace(autonomous=False, phone_country_code=""))
     form.fields, form.buttons = {"phone": field}, {}

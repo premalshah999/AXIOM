@@ -1,10 +1,12 @@
 """Readiness follows form changes rather than unrelated page activity."""
 import time
 from jobpilot.forms import FormSession
+from jobpilot.page_clock import PageClock
 
 
 def form_for(page):
     form = object.__new__(FormSession)
+    form.clock = PageClock()  # __init__ is skipped; settle is timed on it
     form.network = None
     async def frames():
         return [page.main_frame]

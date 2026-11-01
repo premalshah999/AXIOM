@@ -1124,10 +1124,13 @@ class NetworkMonitor:
 # a script can change without a mutation. The scan's own tagging of controls counts as mutations; it is read after the scan.
 EPOCH_MAX_AGE = 5.0
 EPOCH_JS = """() => {
-  let s = window.__jpEpoch;
+  // Kept on the root element, not the window: document.open()/write() (and some single-page shells) replace the root and keep the
+  // window, which left the observer watching a dead tree and the count frozen while the new page changed.
+  const root = document.documentElement;
+  let s = root.__jpEpoch;
   if (!s) {
-    s = window.__jpEpoch = {id: Math.random().toString(36).slice(2), n: 0};
-    new MutationObserver(r => { s.n += r.length; }).observe(document.documentElement,
+    s = root.__jpEpoch = {id: Math.random().toString(36).slice(2), n: 0};
+    new MutationObserver(r => { s.n += r.length; }).observe(root,
       {subtree: true, childList: true, attributes: true, characterData: true});
   }
   let h = 0;
@@ -7154,7 +7157,7 @@ class FormSession:
             if re.search(r"answered all questions|highlighted errors|answer all required questions", phrase):
                 return {"type": "explicit_rejection_page", "url": self.page.url, "category": "validation",
                         "evidence": text[max(0, match.start() - 20) : match.end() + 200],
-                        "missing_fields": self.inline_field_errors(await self.scan())[:10]}
+                        "missing_fields": self.inline_field_errors(await self.scan(force=True))[:10]}
             if "problem saving answers" in phrase or (
                 "cannot submit" in phrase and re.match(r"[^\n]{0,10}due to validation issues", tail, re.I)
             ):
