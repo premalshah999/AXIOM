@@ -79,11 +79,50 @@ def current_row(profile, f):
     return rows[0] if len(rows) == 1 else None
 
 
+# A box that asks for someone else's name or contact: the employee who referred the applicant, a relative at the employer.
+OTHER_PERSON_CUE = re.compile(
+    r"\b(?:their|his or her|his/her|(?:employee|referrer|referral|relative|friend|colleague|recruiter)(?:'s|’s|s')?\b"
+    r"(?:\s+who\b)?)",
+    re.I,
+)
+ASKS_PERSON_DETAIL = re.compile(r"\b(?:name|e-?mail|phone|contact|first and last)\b", re.I)
+OWN_IDENTITY = re.compile(r"\b(?:your|my|you)\b.{0,20}\b(?:name|e-?mail|phone)\b|\bcandidate\b|\bapplicant\b", re.I)
+
+
+def other_person_detail(f):
+    """True for a name/email/phone box that belongs to someone the applicant names (a referrer, a relative): UCAR's
+    "What's their name or email address?" and Tax Relief Advocates' "...what is the current employee's name" both took the
+    applicant's own name (2026-10-29, 10-25)."""
+    label = str(f.get("label") or "")
+    return (
+        f.get("type") in {"text", "textarea", "email", "tel"}
+        and len(label) < 200
+        and bool(OTHER_PERSON_CUE.search(label))
+        and bool(ASKS_PERSON_DETAIL.search(label))
+        and not OWN_IDENTITY.search(label)
+        and not NUMBERED_ROW.search(f"{f.get('group') or ''} {f.get('section') or ''}")
+    )
+
+
 def guard(resolver, f):
     """An Answer for a contact field that is someone else's, else None (the field is the applicant's own).
 
     A location part (city, state, country) of the current employer comes from its work row; every other part is blank when
     optional and a complete question when required. The applicant's own address and phone are never used."""
+    if other_person_detail(f):
+        facts = resolver.profile.facts or {}
+        none_named = all(facts.get(k) is False for k in ("referred_by_employee", "knows_employee_at_company") if k in facts) and any(
+            k in facts for k in ("referred_by_employee", "knows_employee_at_company")
+        )
+        if f.get("required") and none_named and f.get("type") in {"text", "textarea"}:
+            return resolver._ans(f, "N/A", ["fact:referred_by_employee"], "No one referred the applicant or is known there")
+        return Answer(
+            field_id=f["id"],
+            disposition="review" if f.get("required") else "skip",
+            evidence_ids=[HISTORY_UNKNOWN],
+            reason="This asks for another person's name or contact, which the profile does not record; the applicant's own is never used",
+            blocker_type="missing_fact",
+        )
     who = third_party(f)
     if not who or f.get("type") in {"file", "checkbox", "password"}:
         return None

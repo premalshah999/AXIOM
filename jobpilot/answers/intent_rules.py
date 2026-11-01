@@ -57,6 +57,38 @@ ASKS_FOR_EMPLOYER = re.compile(
 ASKS_FOR_A_NAME = re.compile(r"\s*(?:who|whom)\b|\s*(?:what|which) (?:company|employer|organi[sz]ation|firm)\b", re.I)
 
 
+# A follow-up box that asks for a name, a place or details, as opposed to a question answered Yes or No.
+DETAIL_ASK = re.compile(
+    r"\b(?:enter|provide|list|specify|describe|explain|state|give|identify|indicate|elaborate)\b|"
+    r"^\W*(?:\d+[.)]?\s*)?(?:who|whom|where|which|what|when|how)\b|\bif (?:so|yes|applicable)\b.{0,40}\b(?:who|where|which|what|when)\b|"
+    r"[,?;]\s*(?:what|which|where|who|when|how)\b|^\W*in (?:what|which)\b|"
+    r"\b(?:referred by|name|names|relationship|dates?|level|agency)\W*$",
+    re.I,
+)
+AUXILIARY_QUESTION = re.compile(r"^\W*(?:\d+[.)]?\s*)?(?:are|do|did|have|has|will|would|can|could|is|was|were|does|should|may|am)\b", re.I)
+# ... and the ones that hang on an earlier answer.
+CONDITIONAL_CUE = re.compile(
+    r"\bif\b|\bapplicable\b|\bn/?a\b|^\W*referred by\b|\breferr\w*\b.{0,30}\bname\b|\brelative\b|\bprevious(?:ly)? employed\b", re.I
+)
+
+
+def detail_followup(label):
+    """"where", "conditional", "open" or "": what a free-text box with a Yes/No fact behind it really asks for."""
+    text = str(label or "")
+    ask = DETAIL_ASK.search(text)
+    if not ask:
+        return ""
+    # "Were you referred by an employee? If yes, please enter their name" is yes/no-shaped but its box wants the name.
+    asks_after_condition = re.search(
+        r"\bif\b.{0,60}\b(?:enter|provide|list|specify|describe|name|who|where|which|what)\b|[,;]\s*(?:what|which|where|who|when)\b", text, re.I
+    )
+    if AUXILIARY_QUESTION.match(text) and not asks_after_condition:
+        return ""
+    if re.search(r"\bwhere\b.{0,40}\b(?:relocat|move)|\b(?:relocat|move)\w*\b.{0,40}\bwhere\b", text, re.I):
+        return "where"
+    return "conditional" if CONDITIONAL_CUE.search(text) else "open"
+
+
 def pay_in_period(label, amount):
     """The saved annual amount in the one period this box asks for, or the amount as it is."""
     text = str(amount).strip().replace(",", "")
@@ -278,6 +310,17 @@ class IntentRulesMixin:
                 return None  # Retrieve and interpret the requested detail separately from its parent fact.
             if boolean and not options and ASKS_FOR_A_NAME.match(f["label"]):
                 return None  # "Who were you referred by?" is not answered with "No" (2026-10-29).
+            if boolean and not options and f.get("type") in {"text", "textarea"} and (kind := detail_followup(f["label"])):
+                # A box that asks for a name, a place or details is not a yes/no box: "If employee referral, provide name"
+                # got "No" (71 confirmed applications, Hyundai, Cintas, Super Micro, Cargill, 2026-10-16..29), "If so, where
+                # would you be open to relocating" got "Yes" (AHEAD, 17). Where the box hangs on a condition the saved fact
+                # denies, the truthful entry is "N/A"; where the fact holds, the place or detail is not the fact itself.
+                if kind == "where" and key == "willing_to_relocate" and yes_no(value) == "Yes":
+                    if places := str(facts.get("relocation_locations") or "").strip():
+                        return self._ans(f, places, ["fact:relocation_locations", "fact:" + key])
+                if kind == "conditional" and yes_no(value) == "No" and not re.search(r"\bif (?:not|no)\b|\bunless\b|\botherwise\b", f["label"], re.I):
+                    return self._ans(f, "N/A", ["fact:" + key], "The condition this box depends on does not apply")
+                return None
             if boolean and f.get("type") == "text" and len(f["label"]) > 120:
                 return None  # A long free-text prompt is not a yes/no screening question.
             if (
