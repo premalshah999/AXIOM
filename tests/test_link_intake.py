@@ -229,3 +229,24 @@ def test_pasting_a_removed_jobs_link_again_brings_it_back_unless_the_rule_remove
     again = client.post("/api/queue/links", json={"urls": urls}).json()["results"]
     assert [r["state"] for r in again] == ["queued", "refused"]
     assert seen[-1] == "ready" and "government or bank identifier" in again[1]["message"]
+
+
+def test_an_imported_link_is_the_owners_pick_and_is_not_ranked_first(client, service, monkeypatch):
+    service.dispatch = True
+    service.db.set_setting("profile", {"autonomous": True})
+    service.db.set_setting("control", {"auto_submit": True})
+    asked = []
+
+    async def fake_apply(svc, job_id):
+        asked.append(job_id)
+        return {"job_id": job_id, "state": "queued", "run_id": "r1", "message": "Application queued."}
+
+    def forbidden(*a, **k):
+        raise AssertionError("an imported link is not ranked against the fit filters first")
+
+    monkeypatch.setattr("jobpilot.owner_apply.apply", fake_apply)
+    monkeypatch.setattr("jobpilot.api.routes.jobs.rank_in_thread", forbidden)
+    answer = client.post("/api/jobs", json={"url": "https://boards.example.test/acme/jobs/51", "title": "Data Science Intern"})
+    assert answer.status_code == 200 and answer.json()["run"] == {"id": "r1"} and len(asked) == 1
+    refused = client.post("/api/jobs", json={"url": "https://jobs.lever.co/acme"})
+    assert refused.status_code == 400 and "list of jobs" in refused.text
