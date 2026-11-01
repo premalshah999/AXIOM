@@ -1,7 +1,6 @@
 // Settings: one page, a list of sections beside the one that is open. Each section is what a person recognises (a service, the
 // mailbox, how it applies, their account), and the engine's own switches are last, under Advanced. Old addresses resolve in
 // context.ts; the section is the route's `tab` (nav.ts lists them).
-import { Details } from "./identity/Results";
 import "./identity/overview.css";
 import { Fragment, useEffect, useRef, type ComponentType } from "react";
 import { routeUrl, useWorkspace } from "./context";
@@ -39,7 +38,6 @@ const SECTIONS: Record<string, ComponentType> = {
   account: SignInSettings,
   database: DatabaseSection,
   system: AdvancedSettings,
-  details: Details,
 };
 
 // Where a rule falls between the sections that are about the work and the ones about the installation.

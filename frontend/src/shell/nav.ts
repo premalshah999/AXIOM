@@ -93,7 +93,6 @@ export const PAGE_TABS: Partial<Record<View, TabItem[]>> = {
     { id: "account", label: "Your account" },
     { id: "database", label: "Database" },
     { id: "system", label: "Advanced" },
-    { id: "details", label: "Details" },
   ],
 };
 
