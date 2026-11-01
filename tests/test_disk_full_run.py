@@ -60,3 +60,20 @@ def test_the_cause_chain_counts_and_other_errors_still_fail(service, monkeypatch
     assert not host_health.disk_full(PermissionError(errno.EACCES, "denied"))
     run = _run_with_engine_error(service, monkeypatch, "queued", PermissionError(errno.EACCES, "denied"))
     assert run.state == "failed"
+
+
+def test_a_small_runs_volume_is_judged_by_a_tenth_of_its_size_not_the_two_gigabyte_floor(tmp_path, monkeypatch):
+    """A runs folder linked to a 64 MB quota kept the gate shut for good in the soak: its free space was never over 2 GB."""
+    usage = {"data": (50 * 1024**3, 500 * 1024**3), "runs": (60 * 1024**2, 64 * 1024**2)}
+
+    def disk_usage(path):
+        free, total = usage["runs" if str(path).endswith("runs") else "data"]
+        return type("U", (), {"free": free, "total": total})()
+
+    monkeypatch.setattr(host_health.shutil, "disk_usage", disk_usage)
+    watch = host_health.DiskWatch()
+    watch.watch(tmp_path)
+    assert watch.low() is None
+    usage["runs"] = (2 * 1024**2, 64 * 1024**2)  # the quota filled
+    watch.watch(tmp_path)
+    assert watch.low() == 2 * 1024**2

@@ -81,36 +81,40 @@ DISK_CHECK_SECONDS = 30.0
 class DiskWatch:
     """Free space where runs and the database are kept, read at most every half minute: every gate check asks.
 
-    The data folder's `runs` can be a link to another disk or volume (a quota, an external drive): that disk is read too,
-    and the lower figure counts. A write that failed for want of space (`note_full`) holds new starts for the same half
-    minute without waiting for the next reading."""
+    The data folder's `runs` can be a link to another disk or volume (a quota, an external drive): that one is read too, and
+    the tighter of the two counts. A small volume's floor is a tenth of its size, so a 2 GB floor never shuts a 1 GB volume
+    for good. A write that failed for want of space (`note_full`) holds new starts for the same half minute without waiting
+    for the next reading."""
 
     def __init__(self):
-        self.path, self.free, self.at = None, None, 0.0
+        self.path, self.free, self.floor, self.at = None, None, DISK_MIN_FREE, 0.0
 
     def watch(self, path):
-        self.path, self.free, self.at = path, None, 0.0
+        self.path, self.free, self.floor, self.at = path, None, DISK_MIN_FREE, 0.0
 
     def note_full(self):
         self.free, self.at = 0, time.monotonic()
 
     def read(self):
+        """(free bytes, floor) of the volume with the least room above its floor, or (None, floor) when none can be read."""
         found = []
         for where in (self.path, Path(self.path) / "runs"):
             try:
-                found.append(shutil.disk_usage(where).free)
+                usage = shutil.disk_usage(where)
             except OSError:
-                pass  # Unreadable says nothing about the disk.
-        return min(found) if found else None
+                continue  # Unreadable says nothing about the disk.
+            total = getattr(usage, "total", None)
+            found.append((usage.free, min(DISK_MIN_FREE, total // 10) if total else DISK_MIN_FREE))
+        return min(found, key=lambda one: one[0] - one[1]) if found else (None, DISK_MIN_FREE)
 
     def low(self):
         if self.path is None:
             return None
         current = time.monotonic()
         if self.free is None or current - self.at >= DISK_CHECK_SECONDS:
-            self.free = self.read()
+            self.free, self.floor = self.read()
             self.at = current
-        return self.free if self.free is not None and self.free < DISK_MIN_FREE else None
+        return self.free if self.free is not None and self.free < self.floor else None
 
 
 disk = DiskWatch()
