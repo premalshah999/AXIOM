@@ -100,3 +100,17 @@ def test_a_job_that_was_not_removed_is_left_as_it_is(service):
         s.flush()
         job_id = job.id
     assert restore(service, job_id)["message"] == "This job was not removed."
+
+
+def test_restoring_clears_the_deletion_so_the_job_can_run_but_keeps_a_pause(service):
+    job_id = removed(service, "a", "waiting_browser")
+    other = removed(service, "b", "waiting_browser")
+    with service.db.session() as s:
+        s.add(Setting(key="job_control:" + job_id, value={"state": "deleted"}))
+        s.add(Setting(key="job_control:" + other, value={"state": "paused"}))
+    restore(service, job_id)
+    restore(service, other)
+    with service.db.session() as s:
+        assert s.get(Setting, "job_control:" + job_id) is None
+        assert s.get(Setting, "job_control:" + other).value["state"] == "paused"
+

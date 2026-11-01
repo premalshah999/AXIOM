@@ -37,6 +37,23 @@ NEXT = re.compile(
     r"(?:\s*[>›→»])?$",
     re.I,
 )
+# What a career site's own search and filter boxes are called. A required field is never one of them.
+SITE_FILTER = re.compile(
+    r"\bsearch\b|\bkeywords?\b|\blooking for\b|\bfind (?:a )?jobs?\b|^(?:what|where)\W*$|"
+    r"^(?:all )?(?:locations?|countr(?:y|ies)|categor(?:y|ies)|departments?|teams?|languages?|english|español|français|deutsch)\W*$|"
+    r"^job (?:category|type|function|family|field|level|location|title)\W*$|^(?:studio|business unit|career area|work type)\b|"
+    r"^(?:skip to|settingsselector|choose (?:a )?language|select (?:a )?language|video progress|volume)\b",
+    re.I,
+)
+
+
+def site_filter(field):
+    """A job page's own search box or filter, not a question of the application."""
+    if field.get("required") or field.get("type") == "file":
+        return False
+    return bool(field.get("search_box")) or bool(SITE_FILTER.search(" ".join(str(field.get("label") or "").split())))
+
+
 def confirmation_wording(text, committed):
     """Confirmation phrases on the page. Before this run submitted, a posting's "thank you for your interest" courtesy
     line is none: Rice's Oracle postings end "Thank you for your interest in employment with Rice University" above an
@@ -995,6 +1012,11 @@ class Adapter:
             and (self.find_next(obs) or self.buttons(obs, AUTH_BUTTON))
         ):
             return Step.EMAIL_ENTRY
+        if meaningful and self.find_apply(obs) and all(site_filter(f) for f in meaningful):
+            # Fields beside an Apply button are the job page's own search and filters: "Search for jobs by title or keyword"
+            # (70 runs), "I am looking for" and "Where" (36), "Find Jobs" (17), a language picker. Read as the form, these
+            # postings were never applied to, and 8.5% of such runs confirmed (2026-10-25..31).
+            return Step.JOB
         if meaningful or any(f["type"] == "file" for f in fields):
             return Step.FORM
         if self.find_final(obs) and not self.find_apply(obs):

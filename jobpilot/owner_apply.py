@@ -222,8 +222,10 @@ def restore(service, job_id):
         if sent:
             raise ValueError("An application for this job may already have reached the employer, so it stays removed")
         job.status = "ready"
-        saved = s.get(Setting, "archived_application:" + job_id)
-        if saved:
-            s.delete(saved)
+        for key in ("archived_application:", "job_control:"):
+            saved = s.get(Setting, key + job_id)
+            # A pause the owner set is a different decision from removing the job: it stays.
+            if saved and not (key == "job_control:" and (saved.value or {}).get("state") == "paused"):
+                s.delete(saved)
     return {"job_id": job_id, "state": "ready", "message": "Restored. It can be applied to again."}
 
