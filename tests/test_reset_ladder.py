@@ -46,6 +46,7 @@ def recovering(service, state="credentials_rejected", **record):
     value.earlier_reset_mail = AsyncMock(return_value=None)
     value.form.scan = AsyncMock(return_value=obs)
     value.switch = AsyncMock(return_value=True)
+    value.form_changed = AsyncMock(return_value=True)
     value.open_reset_step = AsyncMock(return_value=obs)
     value.request_reset = AsyncMock(return_value={"state": "waiting_email"})
     value.e.run_id = "run1"
@@ -163,3 +164,35 @@ async def test_central_signs_a_replacement_address_up_instead_of_resetting_it(se
     assert stopped["reason"] == ALIAS_UNREGISTERED and stopped["state"] == "waiting_browser"
     value.on_create_account.assert_not_awaited()
     value.request_reset.assert_not_awaited()
+
+
+async def test_a_sign_up_link_that_opens_nothing_goes_to_the_reset_not_another_refused_login(service):
+    value, obs = recovering(service)
+    value.form_changed = AsyncMock(return_value=False)
+    assert await Adapter.recover(value, obs, "Invalid email or password") == {"state": "waiting_email"}
+    value.request_reset.assert_awaited_once()
+    assert value.accounts.record(URL)["state"] != "no_account"
+
+
+async def test_a_slow_sign_up_link_is_waited_for_and_an_unchanged_form_is_reported():
+    login = {"fields": [{"label": "Password", "type": "password"}], "controls": []}
+    signup = {"fields": [{"label": "Choose password", "type": "password"}], "controls": []}
+    value = Adapter.__new__(Adapter)
+    value.e = SimpleNamespace(form=SimpleNamespace(scan=AsyncMock(side_effect=[login, RuntimeError("navigating"), signup])))
+    assert await Adapter.form_changed(value, login, wait=5)
+    value.e.form.scan = AsyncMock(return_value=login)
+    assert not await Adapter.form_changed(value, login, wait=0)
+
+
+async def test_a_sign_up_page_with_no_way_back_returns_to_the_sign_in_page_for_its_reset(service):
+    """Register and Cancel only: the "already exists" refusal stopped the run with "no password reset was offered"."""
+    value, login = recovering(service, state="exists")
+    registration = {**login, "controls": [{"id": "r", "label": "Register", "aria_label": "", "automation_id": "", "type": "button"}]}
+    value.form.scan = AsyncMock(side_effect=[registration, login, login, login])
+    value.switch = AsyncMock(return_value=False)
+    value.sign_in_page = "https://careers-acme.icims.com/login?lang=en"
+    goto = AsyncMock()
+    value.e.page = value.form.page = SimpleNamespace(goto=goto, url=value.sign_in_page)
+    assert await Adapter.recover(value, registration, "already exists") == {"state": "waiting_email"}
+    assert goto.await_args.args[0] == value.sign_in_page
+    value.request_reset.assert_awaited_once()
