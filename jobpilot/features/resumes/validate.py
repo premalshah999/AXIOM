@@ -89,55 +89,70 @@ ITALIC = re.compile(r"ital|obli", re.I)
 SIZE_TOLERANCE = 0.06  # pdfTeX rounds a Tf operand; anything further off is a different size.
 
 
-def check_typography(pdf: bytes, doc) -> dict:
-    """The owner's type rules on the compiled file: name 16, section headings 10.5, sub-headings 10, bullets 9, dates in italics."""
-    from .editor import TAILORED_TYPE
-
-    runs = font_runs(pdf)
-    problems: list[str] = []
-    seen: dict[str, set] = {"name": set(), "section": set(), "sub": set(), "bullet": set(), "dates": set()}
-
-    def want(kind, run, size):
-        seen[kind].add(run["size"])
-        if abs(run["size"] - size) > SIZE_TOLERANCE:
-            problems.append(f'{kind} "{run["text"][:40]}" prints at {run["size"]} pt, not {size}')
-
-    name, titles, subs, dates, bullets = squash(doc.name), set(), [], set(), []
+def _in_order(doc) -> list[tuple[str, str]]:
+    """(kind, squashed text) for everything on the page, top to bottom: the order a one-column PDF draws it."""
+    seq = [("name", squash(doc.name)), ("body", squash(" ".join(doc.contact)))]
     for s in doc.sections:
         if not s.include:
             continue
-        titles.add(squash(s.title))
-        for e in s.entries:
-            if not e.include:
-                continue
-            subs += [squash(x) for x in (e.heading, e.subheading) if x.strip()]
+        entries = [e for e in s.entries if e.include]
+        if s.kind in {"skills", "text"} and not s.text.strip():
+            continue
+        if s.kind not in {"skills", "text"} and not entries:
+            continue
+        seq.append(("section", squash(s.title)))
+        if s.kind in {"skills", "text"}:
+            seq.append(("body", squash(plain(s.text))))
+        for e in entries:
+            seq += [("sub", squash(x)) for x in (e.heading, e.subheading) if x.strip()]
             if e.dates.strip():
-                dates.add(squash(e.dates))
-            bullets += [squash(plain(b.text)) for b in e.bullets if b.include and b.text.strip()]
-    found_dates: set = set()
-    for run in runs:
+                seq.append(("dates", squash(e.dates)))
+            if e.location.strip():
+                seq.append(("body", squash(e.location)))
+            seq += [("bullet", squash(plain(b.text))) for b in e.bullets if b.include and b.text.strip()]
+    return [x for x in seq if x[1]]
+
+
+def check_typography(pdf: bytes, doc) -> dict:
+    """The owner's type rules on the compiled file: name 16, section headings 10.5, sub-headings 10, bullets 9, dates in italics.
+
+    Each run of text is matched at the exact spot the document says comes next, so a summary line that says "Data Analyst" isn't taken for the job title below it."""
+    from .editor import TAILORED_TYPE
+
+    sizes = {"name": TAILORED_TYPE["name"], "section": TAILORED_TYPE["section"], "sub": TAILORED_TYPE["sub"], "bullet": TAILORED_TYPE["bullet"]}
+    problems: list[str] = []
+    seen: dict[str, set] = {"name": set(), "section": set(), "sub": set(), "bullet": set(), "dates": set()}
+    seq = _in_order(doc)
+    at, used = 0, 0
+    found_dates = 0
+    for run in font_runs(pdf):
         t = squash(run["text"])
         if not t:
             continue
-        if t == name:
-            want("name", run, TAILORED_TYPE["name"])
-        elif t in titles:
-            want("section", run, TAILORED_TYPE["section"])
-        elif t in dates:
-            seen["dates"].add(run["size"])
-            found_dates.add(t)
-            if not ITALIC.search(run["font"]):
-                problems.append(f'dates "{run["text"][:30]}" are not in italics ({run["font"]})')
-        elif any(t == x or (len(t) > 3 and t in x) for x in subs) and not any(t in b for b in bullets):
-            want("sub", run, TAILORED_TYPE["sub"])
-        elif len(t) > 8 and any(t in b for b in bullets):
-            want("bullet", run, TAILORED_TYPE["bullet"])
-    for kind, needed in (("name", bool(name)), ("section", bool(titles)), ("sub", bool(subs)), ("bullet", bool(bullets))):
-        if needed and not seen[kind]:
+        for j in range(at, min(at + 8, len(seq))):
+            kind, text = seq[j]
+            start = used if j == at else 0
+            if text.startswith(t, start):
+                at, used = j, start + len(t)
+                if kind == "dates":
+                    seen["dates"].add(run["size"])
+                    found_dates += 1
+                    if not ITALIC.search(run["font"]):
+                        problems.append(f'dates "{run["text"][:30]}" are not in italics ({run["font"]})')
+                elif kind != "body":
+                    seen[kind].add(run["size"])
+                    if abs(run["size"] - sizes[kind]) > SIZE_TOLERANCE:
+                        problems.append(f'{kind} "{run["text"][:40]}" prints at {run["size"]} pt, not {sizes[kind]}')
+                elif abs(run["size"] - sizes["bullet"]) > SIZE_TOLERANCE:
+                    problems.append(f'"{run["text"][:40]}" prints at {run["size"]} pt, not {sizes["bullet"]}')
+                break
+    kinds = {k for k, _ in seq}
+    for kind in ("name", "section", "sub", "bullet"):
+        if kind in kinds and not seen[kind]:
             problems.append(f"no {kind} text could be read from the PDF")
-    missing = dates - found_dates
-    if missing:
-        problems.append(f"{len(missing)} date(s) could not be read from the PDF")
+    wanted = sum(1 for k, _ in seq if k == "dates")
+    if found_dates < wanted:
+        problems.append(f"{wanted - found_dates} date(s) could not be read from the PDF")
     return {"ok": not problems, "problems": problems[:12], "sizes": {k: sorted(v) for k, v in seen.items()}}
 
 
@@ -167,7 +182,8 @@ def parse_check(pdf: bytes, doc) -> dict:
     for s in doc.sections:
         if s.include and (s.entries or s.text.strip()):
             item(f'"{s.title}" reads as its own heading', squash(s.title) in lines)
-    positions, in_order = [], True
+    # Each bullet is looked for after the one before it. From the start of the text, two bullets that open the same way both land on the first.
+    at, missing, in_order = 0, 0, True
     for s in doc.sections:
         if not s.include:
             continue
@@ -175,12 +191,16 @@ def parse_check(pdf: bytes, doc) -> dict:
             if not e.include:
                 continue
             for b in e.bullets:
-                if b.include and b.text.strip():
-                    at = flat.find(squash(plain(b.text))[:32])
-                    positions.append(at)
-    missing = sum(1 for p in positions if p < 0)
-    found = [p for p in positions if p >= 0]
-    in_order = found == sorted(found)
+                if not (b.include and b.text.strip()):
+                    continue
+                needle = squash(plain(b.text))[:32]
+                found = flat.find(needle, at)
+                if found >= 0:
+                    at = found + len(needle)
+                elif needle in flat:
+                    in_order = False
+                else:
+                    missing += 1
     item("Bullets read top to bottom", in_order and not missing, f"{missing} bullet(s) not found" if missing else "")
     dates = [e.dates for s in doc.sections if s.include for e in s.entries if e.include and e.dates.strip()]
     item("Dates are intact", all(squash(d) in flat for d in dates))

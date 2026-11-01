@@ -28,6 +28,7 @@ LINK = re.compile(r"https?://\S+", re.I)
 
 class QueueLinks(BaseModel):
     urls: list[str] = Field(min_length=1, max_length=MAX_LINKS)
+    tailor_mode: str | None = Field(default=None, max_length=40)  # Apply with a tailored resume, in this mode. None is plain Apply, the default.
 
     @field_validator("urls")
     @classmethod
@@ -82,6 +83,11 @@ def router(service) -> APIRouter:
         page = max(1, min(int(page), pages))
         drop = {"employer", "lane", "details", "status", "tailoring", "not_before", "front"}
         reading = value["reading"]
+        from ...features.resumes.choice import waiting_words
+
+        shown = items[(page - 1) * size : page * size]
+        tailoring = waiting_words(db, [item["id"] for item in shown])
+        shown = [{**item, "wait": tailoring[item["id"]]} if item["id"] in tailoring else item for item in shown]
         return {
             "at": value["at"],
             "paused": bool(control.get("paused")),
@@ -92,7 +98,7 @@ def router(service) -> APIRouter:
             "decides": value["decides"],
             "exact": value["exact"],
             "running": running,
-            "next": [{k: v for k, v in item.items() if k not in drop} for item in items[(page - 1) * size : page * size]],
+            "next": [{k: v for k, v in item.items() if k not in drop} for item in shown],
             "total": len(items),
             "page": page,
             "pages": pages,
@@ -236,6 +242,12 @@ def router(service) -> APIRouter:
                 if created:
                     # The posting's text arrives in the background; queueing does not wait for it.
                     asyncio.create_task(posting_api_text(db, row["id"], row["url"]))
+                if data.tailor_mode and data.tailor_mode != "off":
+                    # Before it's queued, or a free worker would send the uploaded resume first.
+                    from ...features.resumes import choice as tailor_choice
+
+                    if await asyncio.to_thread(tailor_choice.choose, db, row["id"], data.tailor_mode):
+                        tailor_choice.start(db, config, row["id"])
                 if row["status"] == "archived":
                     # Pasting the link again is the owner asking for it again. A removed job comes back unless an
                     # application may have reached the employer or it asked for an identifier (restore says which).
@@ -244,6 +256,8 @@ def router(service) -> APIRouter:
                 results.append({"url": url, "job_id": row["id"], "created": created, **outcome, **({"resolved_url": link} if link != url else {})})
             except QueueBlocked as exc:
                 results.append({"url": url, "state": "refused", "message": str(exc)})
+            except LookupError as exc:  # The mode isn't available, or this job has already started.
+                results.append({"url": url, "state": "refused", "message": str(exc)[:300]})
             except (ValueError, HTTPException) as exc:
                 detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
                 results.append({"url": url, "state": "refused", "message": URL_REFUSALS.get(str(detail), str(detail))[:300]})

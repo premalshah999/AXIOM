@@ -1,7 +1,8 @@
 """Apply, or Apply with a tailored resume: the per-job choice, the approval that guards it, and what queue admission asks.
 
 Off by default: no row means the job applies with the uploaded resume, as it always has. A tailored resume waits for the applicant's review, unless
-they've turned approval off in Settings. While approval is on, nothing tailored is sent unapproved, and approval names the exact file by hash.
+they've turned approval off in Settings. While approval is on, nothing tailored is sent unapproved, and approval names the exact file by hash. It's the same for every mode.
+It's checked twice in code, when a run is queued (pin_resume) and when the run takes the PDF (run_problem), so a later edit needs approving again even for a run already waiting.
 """
 
 import asyncio
@@ -24,6 +25,7 @@ FAILED = "tailoring_failed"
 STALE = "tailoring_stale"
 BROKEN = "tailoring_rules"
 UNCONFIRMED = "tailoring_unconfirmed"
+STARTED = frozenset({"queued", "running", "submitting", "waiting_browser", "confirmed", "submission_unknown", "already_applied"})
 _TASKS: dict[str, asyncio.Task] = {}
 
 
@@ -68,9 +70,13 @@ def choose(db, job_id: str, mode: str | None) -> dict | None:
     from ...db import Job
 
     with db.exclusive() as s:
-        if s.get(Job, job_id) is None:
+        job = s.get(Job, job_id)
+        if job is None:
             raise ValueError("Job not found")
         row = s.get(RsTailorChoice, job_id)
+        if job.status in STARTED:
+            # The resume is already chosen: a run has it, or it was sent. Saying otherwise here would be a lie about what the employer got.
+            raise LookupError("This application has already started, so its resume can't change now.")
         if mode in (None, "", "off"):
             if row is not None:
                 s.delete(row)
@@ -94,6 +100,7 @@ async def run(db, config, job_id: str, *, model=None, compile_fn=None, fresh=Fal
         return {"state": "off"}
     kwargs = {"compile_fn": compile_fn} if compile_fn else {}
     try:
+        await read_posting(db, config, job_id)
         result = await pipeline.prepare_resume(db, config, job_id, mode=row.mode, model=model, fresh=fresh, **kwargs)
     except asyncio.CancelledError:
         raise
@@ -124,6 +131,22 @@ async def run(db, config, job_id: str, *, model=None, compile_fn=None, fresh=Fal
     error = result.error.model_dump() if result.error else {"code": "tailoring_error", "retryable": True, "detail": ""}
     _record(db, job_id, state="failed", error=error)
     return {"state": "failed", "error": error}
+
+
+async def read_posting(db, config, job_id: str) -> None:
+    """A job added by link has no text until a run reads it, and there's nothing to tailor to without it. Read it now, through the ordinary loader."""
+    from ...db import Job
+    from ...discovery import enrich
+    from ..discovery.policy import unfetched
+
+    with db.session() as s:
+        job = s.get(Job, job_id)
+        missing = job is not None and unfetched(job.description)
+    if missing:
+        try:
+            await enrich(db, config, job_id)
+        except Exception as exc:  # A site that won't load says so below, as the missing posting text it is.
+            log.info("posting read failed for %s: %s", job_id, type(exc).__name__)
 
 
 def _record(db, job_id, **fields) -> None:
@@ -193,6 +216,19 @@ def send_problem(session, row: RsArtifact) -> tuple[str, str] | None:
     return None
 
 
+def run_problem(db, packet: dict) -> str | None:
+    """Asked when a run takes its PDF. An edit or a withdrawn approval since it was queued stops it here, so it can't send what's no longer approved."""
+    artifact_id = (packet or {}).get("resume_artifact_id")
+    if not artifact_id:
+        return None
+    with db.session() as s:
+        row = s.get(RsArtifact, artifact_id)
+        if row is None:
+            return "This tailored resume is no longer on file"
+        problem = send_problem(s, row)
+    return problem[1] if problem else None
+
+
 def artifact_for_queue(session, job, mode: str) -> str | None:
     """What a queue request for this job sends: None for no choice, else the artifact. Raises QueueBlocked while it must wait, and says why."""
     from ...admission import QueueBlocked, temporary_time
@@ -250,6 +286,22 @@ def approve(db, config, job_id: str, artifact_id: str) -> dict:
         result = {"artifact_id": artifact.id, "pdf_sha": artifact.pdf_sha, "approved_at": choice.approved_at}
     wake(db, job_id)
     return result
+
+
+WAITING_WORDS = {
+    "preparing": "Preparing the tailored resume.",
+    "review": "Waiting for you to review the tailored resume.",
+    "failed": "The tailored resume couldn't be made. Open the job to try again.",
+}
+
+
+def waiting_words(db, job_ids: list[str]) -> dict:
+    """What each of these jobs is really waiting on, where that's its tailored resume. Queue's "Waiting on" column says this, and the switch being off means nothing's awaited."""
+    if not job_ids:
+        return {}
+    with db.session() as s:
+        rows = s.execute(select(RsTailorChoice.job_id, RsTailorChoice.state).where(RsTailorChoice.job_id.in_(job_ids), RsTailorChoice.state.in_(list(WAITING_WORDS)))).all()
+    return {job_id: WAITING_WORDS[state] for job_id, state in rows}
 
 
 def many(db, job_ids: list[str]) -> dict:

@@ -47,6 +47,7 @@ const ProfileView = lazy(() => import("./profile").then((m) => ({ default: m.Pro
 const ResumesView = lazy(() => import("./resumes").then((m) => ({ default: m.ResumesView })));
 const SettingsView = lazy(() => import("./settings").then((m) => ({ default: m.SettingsView })));
 const ResumeEditor = lazy(() => import("./editor").then((m) => ({ default: m.ResumeEditor })));
+const TailorView = lazy(() => import("./tailoring").then((m) => ({ default: m.TailorView })));
 const AuthScreen = lazy(() => import("./account").then((m) => ({ default: m.AuthScreen })));
 const Onboarding = lazy(() => import("./onboarding").then((m) => ({ default: m.Onboarding })));
 
@@ -344,6 +345,7 @@ function App() {
             {route.view === "resumes" && <ResumesView />}
             {route.view === "settings" && <SettingsView />}
             {route.view === "editor" && <ResumeEditor />}
+            {route.view === "tailor" && <TailorView />}
           </Suspense>
         </Shell>
         {route.job && (
