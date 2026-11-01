@@ -214,7 +214,8 @@ CONSENT_REQUEST = re.compile(
 # A required agreement whose two choices say what they mean. Voya's Workday (2026-11-01) asked its arbitration agreement with "I confirm that
 # I have read, understand and agree to the written terms ..." or "I do not agree ...": the words "the plans' sponsors" in the agreement read
 # as a sponsorship question, the model's answer was refused as out of scope on eight runs, and no one could have answered it otherwise.
-AGREE_OPTION = re.compile(r"^\s*(?:yes\b.{0,20}|i\b.{0,60}?\b)(?:read|understand|agree|accept|acknowledge|consent)\b", re.I)
+# Only an option that says it read or is bound by the terms: "I agree to receive text messages" is a choice the applicant's permission does not make.
+AGREE_OPTION = re.compile(r"^\s*(?:yes\b.{0,20}|i\b.{0,60}?\b)(?:read\b.{0,60}\b(?:agree|understand|accept)|read,? (?:and )?understand|agree to be bound|agree to the (?:written )?terms)\b", re.I)
 REFUSE_OPTION = re.compile(r"\b(?:do not|don.?t|did not|decline|disagree|refuse|cannot|can.?t|not (?:agree|accept|consent))\b|^\s*no\b", re.I)
 # Transamerica's Workday (2026-11-01): three paragraphs of state law on polygraphs, then "Have you read and understood these statements?". Its
 # only question is the last sentence; "polygraph" in the law it quotes read as a background-check disclosure and stopped three runs.
@@ -233,7 +234,7 @@ def agreement_choice(label, options):
     if READ_QUESTION.search(str(label).strip()):
         yes = [o for o in offered if o.strip().casefold() == "yes"]
         return yes[0] if yes and any(o.strip().casefold() == "no" for o in offered) else None
-    agree = [o for o in offered if AGREE_OPTION.search(o) and not REFUSE_OPTION.search(o) and not EMBEDDED_DISCLOSURE.search(o)]
+    agree = [o for o in offered if AGREE_OPTION.search(o) and not REFUSE_OPTION.search(o) and not EMBEDDED_DISCLOSURE.search(o) and not CONTACT_CONSENT.search(o)]
     refuse = [o for o in offered if REFUSE_OPTION.search(o)]
     return agree[0] if len(agree) == 1 and len(refuse) == 1 else None
 

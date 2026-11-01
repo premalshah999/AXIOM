@@ -1719,6 +1719,11 @@ class FormSession:
         """A street address box only suggests: Paylocity's Address Line 1 lists other streets and keeps what is typed (Commence, CleanSlate
         2026-11-01, where "No matching option" stopped the page). A person types their address and carries on. True when the box kept it; a box
         that empties unless a row is picked goes on to the normal search."""
+        from .ats import detect
+
+        # Oracle's and iCIMS's address searches fill the rest of the block from the row picked, and they work: they keep the normal search.
+        if detect(self.page.url).id in {"oracle", "icims"}:
+            return False
         try:
             if not await el.evaluate("e => ['INPUT','TEXTAREA'].includes(e.tagName) && !e.readOnly && !e.disabled"):
                 return False
