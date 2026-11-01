@@ -166,7 +166,7 @@ class MailboxesMixin:
             await asyncio.to_thread(request, email, password, "/profile")
         except MailAuthenticationError:
             raise ValueError(
-                "Gmail rejected this app password. Check it, and that 2-Step Verification and IMAP are on."
+                "Gmail didn't accept this. Check the address, then make a new app password with the steps above and paste it here."
             ) from None
         except Exception as exc:
             raise ValueError(
