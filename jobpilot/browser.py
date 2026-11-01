@@ -1229,9 +1229,16 @@ class BrowserEngine:
                     "--no-sandbox",
                     "--lang=en-US",
                     "--window-size=1366,900",
+                    # A throwaway profile has nothing to protect: asking the Keychain for its key can show the owner a
+                    # dialog, and with no login keychain (a clean HOME) every navigation waits on the answer forever.
+                    "--use-mock-keychain",
                 ]
                 if self.config.headless:
                     args += ["--headless=new", f"--user-agent={user_agent(executable)}"]
+                # Chrome's first tab on a new profile is its own new-tab page, whose inner frame never answers a script: every
+                # run on this browser hung in prepare_page, with no timeout. Only a production that attaches to its worker Chrome
+                # never met it, and no test drove this path (2026-11-01).
+                args.append("about:blank")
                 process = await asyncio.create_subprocess_exec(
                     *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
                 )
