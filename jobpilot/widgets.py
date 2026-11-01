@@ -1424,11 +1424,28 @@ async def open_combobox(el):
     except Exception:
         # Slotted multiselect search inputs can be covered by their host trigger, and a react-select's few-pixel
         # input by its own placeholder (Pinpoint's Country, Kenway 2026-10-27): its control opens the menu instead.
+        # A select widget that names no control class (Paylocity's Country/State, 2026-11-01: a value element lies over
+        # the input inside a wrapper marked aria-haspopup) is opened by the element that covers the input, when that
+        # element is part of the same widget. A modal or chat bubble is outside the widget and stays "covered".
         handle = await el.evaluate_handle(
             """e=>e.closest('.c-spl-multiselect-autocomplete-trigger') || (() => {
               for (let n=e.parentElement, i=0; n && i<5; n=n.parentElement, i++)
                 if ([...n.classList].some(c=>/__control$|^css-\\w+-control$/.test(c))) return n;
               return null;
+            })() || (() => {
+              const r=e.getBoundingClientRect();
+              if(!r.width || !r.height) return null;
+              const hit=e.ownerDocument.elementFromPoint(r.x+r.width/2, r.y+r.height/2);
+              if(!hit || hit===e) return null;
+              let widget=null;
+              for (let n=e.parentElement, i=0; n && i<6; n=n.parentElement, i++)
+                if (n.matches('[aria-haspopup]:not([aria-haspopup=false]),[role=combobox]')) { widget=n; break; }
+              if(!widget || !widget.contains(hit) || widget===hit) return null;
+              // The widget's own clear or remove control is not its opener.
+              if(hit.closest('button,a[href],[role=button]') || [hit, ...hit.querySelectorAll('[aria-label],[title]')]
+                .some(n=>/clear|delete|remove|close/i.test((n.getAttribute('aria-label')||'')+' '+(n.getAttribute('title')||''))))
+                return null;
+              return hit;
             })()"""
         )
         trigger = handle.as_element()

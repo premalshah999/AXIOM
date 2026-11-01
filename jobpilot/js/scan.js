@@ -1506,6 +1506,16 @@
     f.related_question = {label: prior.field.label, value: prior.field.value, options: prior.field.options};
     f.label = clean(prior.field.label).replace(/\s*[*✱]+\s*$/, '') + ' (Other, please specify)';
   }
+  // A bare label on a field whose own name says what it asks (EXL's Oracle disability form, 2026-10-29: "Category" named
+  // US-STANDARD-ORA_DISABILITY_CATEGORY-STANDARD) takes that word, so the self-identification rules see the question and
+  // answer it from the applicant's own fact. Only a short label with no such wording of its own is extended.
+  for (const f of fields) {
+    // A pick list only: the form's signature name and date boxes carry the same word and stay what they are.
+    if (!['combobox', 'select', 'dropdown'].includes(f.type)) continue;
+    const bare = clean(f.label).replace(/\s*[*✱]+\s*$/, '');
+    if (!bare || bare.split(' ').length > 3 || /disab/i.test(bare) || !/(?:^|[^a-z])disability(?:[^a-z]|$)/i.test(f.name || '')) continue;
+    f.label = 'Disability ' + bare.charAt(0).toLowerCase() + bare.slice(1);
+  }
   const fieldIds = new Set(fields.map(f => f.id));
   const historyEditor = el => el.matches('[data-profile-item-tile="true"][tabindex]')
     && ['group','button'].includes(el.getAttribute('role')) && el.tabIndex >= 0

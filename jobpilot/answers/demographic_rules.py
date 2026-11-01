@@ -223,6 +223,10 @@ class DemographicRulesMixin:
                 matches = [o for o in options if semantic_text(o) == semantic_text(value)]
             else:
                 continue
+            if len(matches) > 1 and name == "disability" and value is False:
+                # "Not applicable" and "None" both say no (Oracle's disability Category, EXL 2026-10-29): the plain
+                # "None" is the one that states the applicant's own fact.
+                matches = [o for o in matches if normalize(o) in {"no", "none"}] or matches
             if len(matches) != 1:
                 continue
             chosen.add(matches[0])

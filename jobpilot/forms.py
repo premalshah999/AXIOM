@@ -5863,6 +5863,37 @@ class FormSession:
         )
         return bool(account_form or consent_dialog)
 
+    async def identity_gate_form(self, control_id):
+        """True when the button's own form asks only who the applicant is: name and email (phone, consent boxes) and no
+        upload, question or choice. Submitting it opens the application; it is not the application."""
+        try:
+            members = await self.locator(control_id).evaluate(
+                """e => e.form ? [...e.form.elements].filter(x => x.matches('input,select,textarea')
+                    && !['hidden','submit','button','reset','image'].includes(x.type)
+                    && x.getClientRects().length && getComputedStyle(x).visibility !== 'hidden')
+                  .map(x => ({tag: x.tagName, type: x.type, text: [x.name, x.id, x.autocomplete,
+                    x.getAttribute('aria-label'), x.placeholder, x.labels?.[0]?.innerText].join(' ')})) : []""",
+                timeout=3000,
+            )
+        except PlaywrightError:
+            return False
+        texts = [m for m in members if m["type"] not in {"checkbox"}]
+        return bool(
+            texts
+            and any(m["type"] == "email" or re.search(r"e-?mail", m["text"], re.I) for m in texts)
+            and all(
+                m["tag"] == "INPUT"
+                and m["type"] in {"text", "email", "tel"}
+                and re.search(r"first|last|full|given|family|sur ?name|e-?mail|phone|mobile|\bname\b", m["text"], re.I)
+                and not re.search(
+                    r"company|employer|school|universit|college|degree|title|salary|address|linkedin|website|portfolio|cover|why|how",
+                    m["text"],
+                    re.I,
+                )
+                for m in texts
+            )
+        )
+
     def not_a_button(self, field):
         """The refusal for a click on a field's id, and the action that can work instead. "Use fill" is wrong once fill
         already failed on this control: Humana's Degree (2026-10-30) was refused a click with "use fill", fill was then
@@ -5995,6 +6026,10 @@ class FormSession:
             and not re.search(r"search|keyword|location", f["label"], re.I)
             for f in self.fields.values()
         )
+        # Columbia's posting (PageUp, 2026-11-01): "Apply" is a submit button of a form holding only First name, Last
+        # name and Email. It starts the application, as an entry link does, but the page's other fields (a job-alert
+        # widget) hid that from the page-wide check above, so the click was refused as a final submit in 3 runs.
+        entry = entry or (bool(ENTRY.fullmatch(button["label"])) and await self.identity_gate_form(control_id))
         # Never let a generic navigation action activate a bare HTML submit control.
         if (
             not allowed
@@ -6005,7 +6040,7 @@ class FormSession:
             # guard above as an account form, then this guard refused its type=submit "Submit".
             and not account_form
             and button["type"] == "submit"
-            and not re.search(r"next|continue|save|review|sign in|log in", button["label"], re.IGNORECASE)
+            and not re.search(r"next|continue|save|review|sign ?in|log ?in", button["label"], re.IGNORECASE)
             # Repair controls are HTML submit buttons too (SAIC Oracle "Edit" after a refused submit).
             and not re.fullmatch(
                 r"\s*(?:edit|back|previous|add(?: another)?|remove|delete|cancel|upload|attach|"
