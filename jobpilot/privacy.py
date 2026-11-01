@@ -98,6 +98,61 @@ async def acknowledge_privacy_notice(page, *, authorized):
             return True
         except PlaywrightError:
             return False
+    return await acknowledge_gated_agreement(page)
+
+
+# A required agreement box that stays disabled until its statement was opened and acknowledged: SAP Customer Data Cloud's
+# registration ("Read and acknowledge the data privacy statement.", Atlas Copco, 2026-10-31/11-01) has no #dataPrivacyId
+# link and no receipt field. The inert Submit that followed was counted as a registration and one run used up the day.
+GATED_AGREEMENT_JS = """(() => {
+  const marketing = /newsletter|notification|alert|opportunit|marketing|promot|offers|updates/i;
+  for (const box of document.querySelectorAll('input[type=checkbox]')) {
+    if (!box.disabled || box.checked || !box.offsetParent) continue;
+    let node = box, host = null;
+    for (let i = 0; i < 4 && node.parentElement; i++) {
+      node = node.parentElement;
+      if (node.querySelector('a, button, [role=button]')) { host = node; break; }
+    }
+    const text = ((host || box.parentElement || box).innerText || '').replace(/\\s+/g, ' ');
+    if (!/privacy|terms|data protection|agreement/i.test(text) || (marketing.test(text) && !/privacy|terms/i.test(text))) continue;
+    const opener = [...host.querySelectorAll('a, button, [role=button]')].find(
+      x => x.offsetParent && /acknowledge|accept|read|privacy|terms|statement|agreement/i.test(x.innerText || x.textContent || ''));
+    if (!opener) continue;
+    box.setAttribute('data-jp-gated', '1');
+    opener.setAttribute('data-jp-gated-opener', '1');
+    return true;
+  }
+  return false;
+})()"""
+
+
+async def acknowledge_gated_agreement(page):
+    """Open the statement a disabled agreement box waits for, acknowledge it, and report whether the box is now ticked."""
+    for frame in page.frames[:12]:
+        try:
+            if not await frame.evaluate(GATED_AGREEMENT_JS):
+                continue
+            await frame.locator("[data-jp-gated-opener]").first.click(timeout=5000)
+            dialog = frame.locator("[role=dialog]:visible, .fd-dialog--active, [class*=dialog]:visible, [class*=modal]:visible")
+            action = dialog.locator("button, a, [role=button], input[type=button]").filter(has_text=PRIVACY_NOTICE_ACTION)
+            await action.first.click(timeout=8000)
+            box = frame.locator("[data-jp-gated]")
+            await frame.wait_for_function(
+                "() => { const b = document.querySelector('[data-jp-gated]'); return !!b && !b.disabled; }", timeout=8000
+            )
+            if not await box.first.is_checked():
+                await box.first.check(timeout=4000)
+            return await box.first.is_checked()
+        except (PlaywrightError, TimeoutError):
+            return False
+        finally:
+            try:
+                await frame.evaluate(
+                    "() => document.querySelectorAll('[data-jp-gated],[data-jp-gated-opener]').forEach("
+                    "e => { e.removeAttribute('data-jp-gated'); e.removeAttribute('data-jp-gated-opener'); })"
+                )
+            except PlaywrightError:
+                pass
     return False
 
 

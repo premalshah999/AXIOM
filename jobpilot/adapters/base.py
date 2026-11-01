@@ -51,6 +51,7 @@ SITE_FILTER = re.compile(
 GUEST_EMAIL_EXISTS = re.compile(
     r"e-?mail(?: address)?[^\n]{0,80}?\balready (?:exists|registered|in use)\b[^.\n]{0,80}\bguest\b", re.I
 )
+SEND_LINK = re.compile(r"send e-?mail", re.I)
 # A posting's own comment box and video upload (SuccessFactors: "Write a reply..." and "Upload Video" beside Apply now).
 POSTING_WIDGET = re.compile(r"^(?:write|leave|add|post) an? (?:reply|comment)\b|^(?:upload )?(?:a )?video\W*$", re.I)
 
@@ -569,11 +570,13 @@ def create_allowed(record, run_id=""):
     """Whether this run may send another registration for an account the employer never confirmed."""
     if (record or {}).get("confirmed_at"):
         return True  # a confirmed account signs in; a registration page for it is something else (a profile form)
-    recent = [
-        entry for entry in (record or {}).get("create_sent") or []
+    # Registrations of DIFFERENT runs: a run that pressed Create twice (Atlas Copco 2026-10-31: an inert Submit, pressed 14 s
+    # apart by one run) counts once, not twice, or one run alone used up the day's allowance and the next was refused.
+    recent = {
+        entry[1] for entry in (record or {}).get("create_sent") or []
         if isinstance(entry, (list, tuple)) and len(entry) == 2 and entry[1] != run_id
         and time.time() - float(entry[0]) < CREATE_SENT_WINDOW
-    ]
+    }
     return len(recent) < CREATE_SENT_LIMIT
 
 
@@ -582,6 +585,7 @@ def create_stamp(record, run_id=""):
     kept = [
         list(entry) for entry in (record or {}).get("create_sent") or []
         if isinstance(entry, (list, tuple)) and len(entry) == 2 and time.time() - float(entry[0]) < CREATE_SENT_WINDOW
+        and not (run_id and entry[1] == run_id)  # one stamp a run: its later press replaces its earlier one
     ]
     return [*kept, [time.time(), run_id]][-4:]
 
@@ -2004,10 +2008,51 @@ class Adapter:
             # took 30 decisions through the site's job search. The employer holds this email: the guest route is spent
             # (attempts["guest"]) and Cancel returns to its sign-in, where the account steps take over.
             self.attempts["guest"] += 1
+            send = [b for b in obs["controls"] if SEND_LINK.fullmatch(b["label"].strip())]
+            if len(send) == 1 and (result := await self.guest_account_link(obs, send[0])) is not False:
+                return result
             self.emit("account", "The employer already holds this email, so its guest application is closed; back to its sign-in")
             await self.click(cancel[0], auth=True)
             return None
         return {"fallback": True, "reason": "Unrecognized page"}
+
+    async def guest_account_link(self, obs, send):
+        """The employer holds this email as a guest record with no user name, and its page says "Please click Send Email to
+        receive a link and instructions. The new username and password will be added to your existing record." That mail is
+        the way in: Textron's Taleo (2026-10-28..11-01) had a record like that, its "Forgot your password?" reset mails
+        never came (there is no user name to reset) and the Send Email button in plain sight was never pressed. One
+        request a RESET_RETRY_SECONDS; its link opens a "Create a User Name and Password" form (set_new_password). False
+        when this run cannot use the route (no mailbox rule), so the caller takes the sign-in path."""
+        config, inbox = getattr(self, "config", None), getattr(self, "inbox", None)
+        if not config or not config.account_password_reset or not inbox or not inbox.configured:
+            return False
+        if not await self.inbox.rule(self.mail_job("password_reset"), self.accounts.email):
+            return False
+        url = self.auth_url(obs)
+        record = self.accounts.record(url)
+        asked = float(record.get("guest_link_at") or 0)
+        if asked and time.time() - asked < RESET_RETRY_SECONDS:
+            if (late := await self.earlier_reset_mail(url, {**record, "reset_requested_at": asked})) is not None:
+                return late
+            return self.defer(
+                "A link to create this employer's user name was requested recently; no additional email will be requested "
+                "during the cooldown",
+                state="waiting_browser", blocker_type="email_wait",
+            ) | {"recovery_cause": "reset_cooldown"}
+        if not await self.arm_mail("password_reset"):
+            return self.lease_busy()
+        if not self.challenge:
+            return False
+        previous = self.accounts.saved(url)
+        self.accounts.mark(url, record.get("state") or "reset_requested", previous, guest_link_at=time.time(),
+                           reset_requested_at=time.time(), reset_submitted_at=now())
+        self.reset_in_progress = True
+        self.emit("account", "The employer holds this email as a guest record; asking it to email a link to create a user name")
+        await self.click(send, auth=True)
+        if challenge := await self.after_auth_click():
+            return challenge
+        await self.form.settle(timeout=6)
+        return await self.complete_password_reset(url)
 
     # ----- actions ------------------------------------------------------------------------------
     def is_final_control(self, button):
@@ -3770,6 +3815,10 @@ class Adapter:
                 self.finish_mail("failed", "Reset form on an unexpected website")
                 return self.defer("The reset page is on an unexpected website; not entering the password")
             await self.type_password(self.form.locator(f["id"]), credentials["password"])
+        for f in obs["fields"]:
+            # A "Create a User Name and Password" form (Taleo's guest-record link) asks for the login beside the password.
+            if self.is_login_field(f) and not f.get("value") and f["type"] != "password":
+                await self.form.locator(f["id"]).fill(self.login_value(f, credentials), timeout=4000)
         if forced:
             # Disabled Next is omitted by the scanner until both fields satisfy the page's checks.
             obs = await self.form.scan()
