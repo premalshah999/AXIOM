@@ -142,7 +142,7 @@ type WorkingState = ReturnType<typeof useWorking>;
 
 // ---------- the top: today's count, the state and progress, what waits on you, and the key ----------
 function Hero({ work, applications, models }: { work: WorkingState; applications: Success[] | null; models?: RuntimeHealth["models"] }) {
-  const { snapshot, counts, link, refresh, go } = useWorkspace();
+  const { snapshot, counts, link, refresh, go, version } = useWorkspace();
   const { pending, run } = useAction();
   const now = useNow();
   const today = useMemo(() => confirmedToday(applications || [], now), [applications, now]);
@@ -160,6 +160,7 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
   const [confirmStart, setConfirmStart] = useState<number | null>(null);
   const paused = snapshot.control.paused;
   const panel = panelState(snapshot, link.lost);
+  const ready = usePoll<Startable>((signal) => api("/startable", "GET", undefined, signal), 30000, [version]);
   const stopped = paused || (!rt.intake_enabled && rt.intake_reason === "Paused");
   const n = work.working;
 
@@ -169,7 +170,7 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
     restart: ["bad", "Needs a restart", "Automation has stopped responding. Restart it to keep applying."],
     paused: ["info", "Paused", "No new applications start. Progress is kept."],
     complete: ["info", "Target reached"],
-    running: ["info", n ? `Applying to ${plural(n, "job")} right now` : "Applying, between jobs"],
+    running: ["info", n ? `Applying to ${plural(n, "job")} right now` : ready.data?.startable === 0 ? "Nothing to run right now" : "Applying, between jobs"],
     held: ["info", "Held", (rt.intake_reason || "New applications are not starting").replace(/\.$/, "") + "."],
     none: ["info", "No batch running", work.limit ? "Start one to apply until a target you choose." : undefined],
   };

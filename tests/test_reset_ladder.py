@@ -170,6 +170,7 @@ async def test_a_sign_up_link_that_opens_nothing_goes_to_the_reset_not_another_r
     value, obs = recovering(service)
     value.form_changed = AsyncMock(return_value=False)
     assert await Adapter.recover(value, obs, "Invalid email or password") == {"state": "waiting_email"}
+    assert value.switch.await_count >= 2  # Pressed twice before giving up on it.
     value.request_reset.assert_awaited_once()
     assert value.accounts.record(URL)["state"] != "no_account"
 
@@ -206,4 +207,12 @@ async def test_silence_from_an_employer_with_no_proven_account_tries_sign_up_bef
     value.accounts.mark(URL, "credentials_rejected", LOGIN, resets_unanswered=RESET_UNANSWERED_CAP, resets_unanswered_at=stamp(60))
     result = await Adapter.recover(value, obs, "Invalid email or password")
     assert result["reason"] == PASSWORD_UNKNOWN
+    value.request_reset.assert_not_awaited()
+
+
+async def test_a_second_press_opens_a_sign_up_link_the_first_only_moved(service):
+    value, obs = recovering(service)
+    value.form_changed = AsyncMock(side_effect=[False, True])
+    assert await Adapter.recover(value, obs, "Invalid email or password") is None
+    assert value.accounts.record(URL)["state"] == "no_account"
     value.request_reset.assert_not_awaited()
