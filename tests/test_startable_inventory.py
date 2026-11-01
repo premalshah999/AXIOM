@@ -90,3 +90,26 @@ def test_a_held_job_carries_its_reason_on_the_discovered_list(client, service):
     assert client.get("/api/startable").json()["startable"] == 0  # reads once, then the list can use it
     rows = {j["id"]: j for j in client.get("/api/job-board?include_sources=false").json()["jobs"]}
     assert rows[intern]["hold"]["code"] == "internship"
+
+
+def test_ready_and_held_open_exactly_the_jobs_their_numbers_count(client, service):
+    """The idle runners' line says "2 internships": clicking it opens two rows; Ready opens the one that can start."""
+    profile(service)
+    start = ready(service, 1)
+    held = [ready(service, n, title="Software Engineer Intern") for n in (2, 3)]
+    old = ready(service, 4, listed=False)  # a job no board lists still counts, and still opens
+    with service.db.exclusive() as s:
+        s.get(Job, old).created_at = (datetime.now(UTC) - timedelta(days=90)).isoformat()
+    said = client.get("/api/startable").json()
+    assert said["startable"] == 1 and said["ready"] == 4
+    base = "/api/job-board?include_sources=false&page=1&size=50"
+    ready_page = client.get(base + "&fit=ready").json()
+    assert [j["id"] for j in ready_page["jobs"]] == [start] == ready_page["selectable_ids"] and ready_page["total"] == 1
+    held_page = client.get(base + "&fit=held").json()
+    assert held_page["total"] == 3 and {j["id"] for j in held_page["jobs"]} == {*held, old}
+    assert all(j["hold"]["reason"] for j in held_page["jobs"])
+    internships = client.get(base + "&fit=held&hold=internship").json()
+    assert {j["id"] for j in internships["jobs"]} == set(held) and internships["total"] == 2
+    # The chips on the same answer carry the same numbers.
+    assert held_page["fits"]["ready"] == 1 and held_page["fits"]["held"] == 3
+    assert {h["code"]: h["count"] for h in held_page["holds"]} == {"internship": 2, "aged": 1}

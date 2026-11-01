@@ -100,7 +100,7 @@ def read(service):
     rejections = db.get_setting("job_board_autopilot", {}).get("rejections") or {}
     board_settings = db.get_setting("job_board_settings", {}) or {}
     data_dir = service.config.data_dir
-    jobs, tally = {}, {}
+    jobs, tally, can = {}, {}, []
     startable = waiting = 0
     from .application_pacing import require_company_limit
 
@@ -140,6 +140,7 @@ def read(service):
             verdict = ("protected" if why["outcome"] == "protected" else "excluded", str(why.get("reason", ""))[:240])
         if verdict is None:
             startable += 1
+            can.append(r.id)
             continue
         code, sentence = verdict
         jobs[r.id] = {"code": code, "reason": sentence, "next": HOLDS.get(code, HOLDS["excluded"])[1]}
@@ -152,8 +153,38 @@ def read(service):
         "waiting": waiting,
         "held": held,
         "jobs": jobs,
+        "ids": can,
         "idle": idle_line(startable, held),
     }
+
+
+LISTING = ("id", "identity", "url", "title", "company", "location", "ats", "status", "score", "reason", "created_at")
+
+
+def rows(db, value, which="", hold=""):
+    """The Ready jobs of one reading as Discovered rows: "ready" (can start), "held" (optionally one reason), or all of them.
+    The same jobs the counts name, so a number opens exactly that many rows."""
+    wanted = [] if which == "held" else list(value.get("ids", []))
+    if which != "ready":
+        wanted += [jid for jid, h in value.get("jobs", {}).items() if not hold or h["code"] == hold]
+    if not wanted:
+        return []
+    with db.session() as s:
+        found = {row.id: row for row in s.execute(select(*(getattr(Job, c) for c in LISTING)).where(Job.id.in_(wanted)))}
+    out = []
+    for jid in wanted:
+        row = found.get(jid)
+        if row is None:
+            continue
+        item = {c: getattr(row, c) for c in LISTING}
+        item.update(
+            job_id=jid, posted_at=row.created_at or "", date_basis="added", country="", career_level="", match_reason="",
+            attempted=False, requested=False, reserved=value.get("jobs", {}).get(jid, {}).get("code") == "reserved",
+        )
+        if hold_ := value.get("jobs", {}).get(jid):
+            item["hold"] = hold_
+        out.append(item)
+    return out
 
 
 def idle_line(startable, held):

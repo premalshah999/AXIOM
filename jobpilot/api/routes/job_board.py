@@ -16,8 +16,9 @@ from ...schemas import SourceInput
 from ..snapshot import BATCH_BOOKKEEPING
 
 
-Fit = Literal["all", "eligible", "unranked", "below", "uncertain"]
+Fit = Literal["all", "eligible", "unranked", "below", "uncertain", "ready", "held"]
 SELECTABLE = 500
+READY_FITS = ("ready", "held")
 
 
 def unapplied(job):
@@ -111,7 +112,7 @@ def router(service) -> APIRouter:
         from ...startable import reading
 
         value = reading(service).get(service)
-        return {key: item for key, item in value.items() if key != "jobs"}
+        return {key: item for key, item in value.items() if key not in {"jobs", "ids"}}
 
     @r.get("/api/job-board")
     def snapshot(
@@ -122,6 +123,7 @@ def router(service) -> APIRouter:
         ats: str = "all",
         level: str = "all",
         fit: Fit = "all",
+        hold: str = "",
     ):
         """With `page`, one page of the fresh listings matching the filters and exact totals; without it, the newest
         500 as before."""
@@ -140,19 +142,31 @@ def router(service) -> APIRouter:
             job["reserved"] = job["id"] in held
             if (why := rejections.get(job["id"])) and unapplied(job):
                 job["rejection"] = why
-            if (hold := holds.get(job["id"])) and job["status"] == "ready":
-                job["hold"] = hold
+            if (why_held := holds.get(job["id"])) and job["status"] == "ready":
+                job["hold"] = why_held
         board["source_count"] = len(board["sources"])
         board["source_health"] = source_health(db, board["sources"])
         if not include_sources:
             board["sources"] = []
         board["autopilot"] = {k: v for k, v in board["autopilot"].items() if k not in BATCH_BOOKKEEPING}
         if page:
-            board.update(
-                listing_page(
-                    board["jobs"], board["settings"]["minimum_auto_fit"], q, ats, level, fit, page, size
-                )
-            )
+            minimum = board["settings"]["minimum_auto_fit"]
+            board.update(listing_page(board["jobs"], minimum, q, ats, level, "all" if fit in READY_FITS else fit, page, size))
+            value = reading(service).get(service) if fit in READY_FITS else reading(service).peek()
+            if value is not None:
+                # "Ready" and "Held" read the startable reading (startable.py), which also holds the jobs no board lists:
+                # the numbers on the idle runners' line open exactly that many rows.
+                from ...startable import rows as ready_rows
+
+                def pick(which, code=""):
+                    return listing_page(ready_rows(db, value, which, code), minimum, q, ats, level, "all", page, size)
+
+                board["fits"] = {**board["fits"], "ready": pick("ready")["total"], "held": pick("held")["total"]}
+                if fit in READY_FITS:
+                    shown = pick(fit, hold)
+                    board.update({k: shown[k] for k in ("jobs", "total", "page", "pages", "selectable_ids", "selectable_total")})
+                board["holds"] = value["held"]
+
         return {
             **board,
             "search": {
