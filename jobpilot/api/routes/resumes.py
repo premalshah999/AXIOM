@@ -38,13 +38,21 @@ def router(service) -> APIRouter:
             raise ValueError("This file isn't really a PDF. Open your resume and choose File, then Save As or Export, then PDF, and add that file.")
         if not name.strip() or len(name) > 120 or len(roles) > 2000:
             raise ValueError("Give this resume a short name and role tags")
+        refusal = ""
         try:
             reader = PdfReader(io.BytesIO(content))
-            if reader.is_encrypted or len(reader.pages) > 20:
-                raise ValueError()
-            text = "\n".join(page.extract_text() or "" for page in reader.pages)[:40000]
+            # Most "locked" resumes are only restricted (no editing or copying) and open without a password: Word's and Preview's
+            # protected exports, resume builders, a print-to-PDF with an owner password. Only a PDF that wants a password is locked.
+            if reader.is_encrypted and not reader.decrypt(""):
+                refusal = "This PDF asks for a password to open. Open it, then choose File, then Export or Print, then Save as PDF, and add that copy."
+            elif len(reader.pages) > 20:
+                refusal = "This PDF is longer than 20 pages. A resume is one or two pages: add the resume itself."
+            else:
+                text = "\n".join(page.extract_text() or "" for page in reader.pages)[:40000]
         except Exception:
-            raise ValueError("This PDF is locked, damaged, or longer than 20 pages. Save your resume as a new PDF and add that.") from None
+            refusal = "This PDF is damaged or locked in a way AXIOM can't read. Save your resume as a new PDF and add that."
+        if refusal:
+            raise ValueError(refusal)
         if len(text.strip()) < 30:
             raise ValueError(
                 "This PDF is a picture of your resume, so AXIOM can't read the words. Open the original in Word, Pages or "

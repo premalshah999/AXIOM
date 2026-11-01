@@ -306,6 +306,14 @@ async def scheduled_tick(scheduled_time: datetime, context: dict):
             if datetime.fromisoformat(row.next_run) <= current:
                 due.append(row.id)
                 row.next_run = croniter(row.cron, current).get_next(datetime).isoformat()
+    if discovery_enabled and not paused:
+        from .jobboard import first_search_due, request_scan
+
+        try:
+            if await asyncio.to_thread(first_search_due, SERVICE.db):
+                await request_scan(SERVICE.db, enqueue_source)
+        except Exception:
+            pass  # The next tick asks again; a search that cannot start must not stop the tick.
     # Refill applications before processing thousands of discovery deliveries.
     # Neither a failed feed nor a deferred application controls the other queue.
     await enqueue_matching()

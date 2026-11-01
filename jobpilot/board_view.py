@@ -218,12 +218,26 @@ def collect(service):
                 Setting.value["started_at"].as_string() >= (at - timedelta(hours=6)).isoformat(),
             )
         )
+        # The boards of the latest search: how far through them it is. Every board of one search shares its start time.
+        read = total = 0
+        if started and scanning:
+            counts = dict(
+                s.execute(
+                    select(Setting.value["state"].as_string(), func.count())
+                    .where(Setting.key.startswith("job_board_scan:", autoescape=True), Setting.value["started_at"].as_string() == started)
+                    .group_by(Setting.value["state"].as_string())
+                ).all()
+            )
+            total = sum(counts.values())
+            read = counts.get("complete", 0) + counts.get("error", 0)
     requested = db.get_setting("job_board_requested", {}).get("at")
     return {
         "rows": rows,
         "hidden": hidden,
         "searched_at": max(filter(None, (started, requested)), default=None),
         "scanning": scanning or 0,
+        "scan_read": read,
+        "scan_total": total,
         "enabled": cfg.enabled,
         "window": cfg.max_age_hours,
         "live_window": cfg.window_hours("greenhouse"),
@@ -267,7 +281,7 @@ def page(service, q="", role="all", company="all", place="all", posted="all", pl
     data = board(service).ready(service)
     if data is None:
         return {
-            "planning": True, "rows": [], "total": 0, "page": 1, "pages": 1, "size": size, "all": 0, "hidden": {}, "searched_at": None, "scanning": 0,
+            "planning": True, "rows": [], "total": 0, "page": 1, "pages": 1, "size": size, "all": 0, "hidden": {}, "searched_at": None, "scanning": 0, "scan_read": 0, "scan_total": 0,
             "enabled": True, "window": 720, "facets": dict.fromkeys(("fit", "role", "company", "place", "platform", "posted"), []),
         }
     rows = data["rows"]
@@ -321,6 +335,8 @@ def page(service, q="", role="all", company="all", place="all", posted="all", pl
         "hidden": data["hidden"],
         "searched_at": data["searched_at"],
         "scanning": data["scanning"],
+        "scan_read": data["scan_read"],
+        "scan_total": data["scan_total"],
         "enabled": data["enabled"],
         "window": data["window"],
         "facets": {

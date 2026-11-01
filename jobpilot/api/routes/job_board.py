@@ -239,40 +239,10 @@ def router(service) -> APIRouter:
             raise HTTPException(409, "Start application workers before scraping")
         if not settings(db).enabled:
             raise HTTPException(409, "Enable job discovery first")
+        from ...jobboard import request_scan
         from ...workers import enqueue_source
 
-        started = now()
-
-        def claim_scans():
-            # Every source's scan flag is a read and a locked write; hundreds of boards ran them one by one on the
-            # event loop (2026-10-29). One thread does them all.
-            setup_sources(db)
-            with db.session() as s:
-                wanted = Source.id.in_(managed_ids(db))
-                ids = list(s.scalars(select(Source.id).where(wanted, Source.enabled.is_(True))))
-            claimed = []
-            for sid in ids:
-                scan = db.get_setting("job_board_scan:" + sid, {})
-                if scan.get("state") in {"queued", "running"} and datetime.now(UTC) - datetime.fromisoformat(
-                    scan.get("started_at", started)
-                ) < timedelta(hours=6):
-                    continue
-                db.set_setting("job_board_scan:" + sid, {"state": "queued", "started_at": started})
-                claimed.append(sid)
-            return ids, claimed
-
-        ids, claimed = await asyncio.to_thread(claim_scans)
-        queued = 0
-        for sid in claimed:
-            try:
-                queued += bool(await enqueue_source(sid))
-            except Exception:
-                await asyncio.to_thread(
-                    db.set_setting,
-                    "job_board_scan:" + sid,
-                    {"state": "error", "started_at": started, "error": "Could not queue this source"},
-                )
-        await asyncio.to_thread(db.set_setting, "job_board_requested", {"at": started})
+        ids, queued = await request_scan(db, enqueue_source)
         return {"queued_sources": queued, "total_sources": len(ids)}
 
     return r
