@@ -43,3 +43,12 @@ async def test_behind_a_dialog_and_off_its_box_stay_hidden(page, tmp_path):
     html = MODAL.replace('<div aria-hidden="true">{form}</div>', f'<div aria-hidden="true" style="opacity:0"><input aria-label="Faded slide"></div>')
     fields, _ = await scan(page, tmp_path, html)
     assert not fields
+
+
+async def test_a_wrapped_checkbox_pair_reads_once(page, tmp_path):
+    """Rippling (2026-10-31): each Yes/No box sits in a role=checkbox row; the rows came back as extra "Unlabelled field" boxes."""
+    html = """<p>Are you legally authorized to work in the United States?</p><div role=group>
+    <div role=checkbox aria-checked=false tabindex=0><input type=checkbox name=q value=Yes aria-label=Yes><span>Yes</span></div>
+    <div role=checkbox aria-checked=false tabindex=0><input type=checkbox name=q value=No aria-label=No><span>No</span></div></div>"""
+    fields, _ = await scan(page, tmp_path, html)
+    assert len(fields) == 1 and "authorized" in fields[0]

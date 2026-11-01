@@ -881,7 +881,8 @@
     // owner was asked an empty label. Only the boxes on the page are one question; a single one is a lone checkbox.
     if (shown.length < 2) continue;
     const group = shown;
-    group.forEach(c => consumed.add(c));
+    group.forEach(c => { consumed.add(c); const wrap = c.closest('[role=checkbox]'); if (wrap) consumed.add(wrap); });
+    // Rippling wraps each box in a role=checkbox row: read again on its own, each answer also listed an "Unlabelled field".
     const parent = group[0].closest('.application-question,fieldset,[role=group]');
     // Without a legend the question is the plain text just before the boxes; the first box's own caption ("Yes, I
     // certify") is an answer, not the question (Adzuna 2026-10-28: the page's "Please choose at least one option for
