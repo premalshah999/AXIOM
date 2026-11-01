@@ -273,7 +273,7 @@ async def start_chrome(temp, port):
     )
     portfile = os.path.join(temp, "DevToolsActivePort")
     for _ in range(100):
-        if os.path.exists(portfile):
+        if os.path.exists(portfile) and os.path.getsize(portfile):
             break
         await asyncio.sleep(0.1)
     with open(portfile) as f:
@@ -434,7 +434,12 @@ async def test_two_employers_on_one_shared_sender_in_two_real_runs_each_type_the
             await apply(service, job_id)
         deadline = time.monotonic() + RUN_SECONDS
         while time.monotonic() < deadline and not ("code" in first.used and "code" in second.used):
-            await asyncio.sleep(1)
+            await asyncio.sleep(3)
+            # A platform that runs one application at a time defers the second: the autopilot starts it when its turn comes.
+            with service.db.session() as s:
+                waiting = [j for j in jobs if not s.scalar(select(Run.id).where(Run.job_id == j).limit(1))]
+            for job_id in waiting:
+                await apply(service, job_id)
     finally:
         service.outbox_running = False
         for task in (poller, outbox, *tasks):
