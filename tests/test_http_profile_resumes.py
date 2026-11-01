@@ -66,7 +66,7 @@ def test_the_same_resume_is_not_uploaded_twice(client, resume_pdf):
     again = client.post(
         "/api/resumes", data={"name": "B"}, files={"file": ("again.pdf", resume_pdf, "application/pdf")}
     )
-    assert again.status_code == 400 and "already uploaded" in again.json()["detail"]
+    assert again.status_code == 400 and "already added" in again.json()["detail"]
 
 
 def test_a_file_that_is_not_a_pdf_is_refused(client):

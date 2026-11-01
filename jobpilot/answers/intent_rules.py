@@ -82,6 +82,13 @@ class IntentRulesMixin:
         return named[1].casefold() not in {str(state).strip().casefold() for state in home if state}
 
     def _intent_answer(self, f, label):
+        if ASKS_FOR_EMPLOYER.match(f["label"]) and not f.get("options") and not re.search(
+            r"\b(?:supervisor|manager|reference|contact|recruiter|referr\w*|address|phone)\b", f["label"], re.I
+        ):
+            # A name is asked for. "former employee"-style wording took it as a yes-or-no, and "No" was sent as the employer's
+            # name (Stripe 2026-11-01, Headway 10-24, Klaviyo 10-22).
+            current = next((w for w in self.profile.work if w.current), self.profile.work[0] if self.profile.work else None)
+            return self._ans(f, current.company, ["profile:work.current.company"]) if current and current.company else None
         if f.get("type") != "checkbox" and status_defined_answer(f["label"], self._facts()):
             # The question's own definition decides, never the stored sponsorship flag.
             return self.status_answer(f)
@@ -158,11 +165,6 @@ class IntentRulesMixin:
                 and not RECORD_STATEMENT.search(f["label"])
             ):
                 return None  # Willingness to undergo a check is consent, not the applicant's record.
-            if "previously_employed_here" in keys and ASKS_FOR_EMPLOYER.match(f["label"]) and not f.get("options"):
-                # "Who is your current or previous employer?" asks for a name. "former employee"-style wording matched it
-                # and "No" was sent as the employer's name (Stripe 2026-11-01, Headway 10-24, Klaviyo 10-22).
-                current = next((w for w in p.work if w.current), p.work[0] if p.work else None)
-                return self._ans(f, current.company, ["profile:work.current.company"]) if current and current.company else None
             if "previously_employed_here" in keys and re.search(
                 r"\b(?:may|can|could|do we have permission to) (?:we|the company)? ?contact\b|\bcontact your\b", f["label"], re.I
             ):

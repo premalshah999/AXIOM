@@ -53,7 +53,7 @@ def stopped(db):
 def stopped_in(session):
     """Inside a transaction: `stopped` as the app lock orders it."""
     row = session.get(Setting, "control")
-    return bool(row and (row.value or {}).get("paused"))
+    return bool(row and (getattr(row, "value", None) or {}).get("paused"))
 
 
 def refuse(session):

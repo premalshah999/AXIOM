@@ -108,10 +108,13 @@ def claim(db, kinds=None):
     current = time.time()
     from .stop import stopped
 
+    # An idle poll stays one read on a remote database: the stop is only read when something is due.
+    if getattr(db, "remote", False) and not anything_due(db, kinds, current, ()):
+        return None
     held = HELD_BY_STOP if stopped(db) else ()
     if kinds and set(kinds) <= set(held):
         return None
-    if getattr(db, "remote", False) and not anything_due(db, kinds, current, held):
+    if getattr(db, "remote", False) and held and not anything_due(db, kinds, current, held):
         return None
     with db.exclusive() as s:
         query = (

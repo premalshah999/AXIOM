@@ -573,7 +573,7 @@ def cannot_automate(question, options=(), context=None, reason=""):
         return (
             "This application needs a video recording of you. The app can't record one: send a link only if you "
             "already have one, or drop this job.",
-            True,
+            False,
         )
     if kind(question, options, context, reason) == "upload" and SAMPLE_ASK.search(text):
         return (

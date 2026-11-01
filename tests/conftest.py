@@ -246,3 +246,16 @@ def pytest_collection_modifyitems(items):
             item.add_marker(pytest.mark.regression)
         if asyncio.iscoroutinefunction(item.function) and uses_session_loop(item):
             item.add_marker(pytest.mark.asyncio(loop_scope="session"), append=False)
+
+
+@pytest.fixture(autouse=True)
+def links_are_not_read_online(request, monkeypatch):
+    """Tests use made-up hosts, so a pasted link's own check (does its page exist?) would refuse all of them. The tests of that
+    check are the ones that exercise it."""
+    if request.node.fspath.basename != "test_first_run_journey.py":
+        from jobpilot import link_intake
+
+        async def opens(_link, _allow_private=False):
+            return ""
+
+        monkeypatch.setattr(link_intake, "opens", opens)

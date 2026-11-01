@@ -369,7 +369,7 @@
 }
 .ax-stop:hover:not(:disabled) {
   background: var(--bad);
-  color: var(--paper, #fff);
+  color: var(--paper);
 }
 .ax-stop.is-resume {
   border-color: var(--brand);

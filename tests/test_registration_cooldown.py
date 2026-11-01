@@ -19,7 +19,8 @@ URL = "https://career5.successfactors.eu/career?company=ExampleCorp&lang=en_US"
 
 
 def sent(*ages, run="other"):
-    return {"create_sent": [[time.time() - age, run] for age in ages]}
+    # Each entry another run's, unless a test names the run: one run's repeats count once.
+    return {"create_sent": [[time.time() - age, f"{run}-{n}" if run == "other" else run] for n, age in enumerate(ages)]}
 
 
 def test_two_registrations_from_other_runs_in_a_day_stop_a_third():

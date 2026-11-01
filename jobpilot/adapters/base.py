@@ -572,7 +572,10 @@ class SiteWrites:
             self.seen = True  # Unreadable counts as sent: the registration limit stays on the safe side.
 
     def __enter__(self):
-        self.page.on("request", self.note)
+        try:
+            self.page.on("request", self.note)
+        except AttributeError:
+            self.seen = True  # Nothing to watch counts as sent, as an unreadable request does.
         return self
 
     def __exit__(self, *_):

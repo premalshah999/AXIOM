@@ -51,7 +51,7 @@ def test_wrong_or_malformed_app_password_saves_nothing(client, service, monkeypa
     rejected = client.post(
         "/api/mail/imap", json={"email": "ada@example.com", "app_password": "zzzz zzzz zzzz zzzz"}
     )
-    assert rejected.status_code == 400 and "rejected" in rejected.json()["detail"]
+    assert rejected.status_code == 400 and "didn't accept" in rejected.json()["detail"]
     normal = client.post(
         "/api/mail/imap", json={"email": "ada@example.com", "app_password": "MyNormalPassword1!"}
     )

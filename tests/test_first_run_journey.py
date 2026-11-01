@@ -210,10 +210,10 @@ def test_the_failure_report_says_nothing_when_it_knows_nothing_more(service):
 @pytest.mark.parametrize(
     "reason, words",
     [
-        ("Browser control failed at browser.py:441; application tab retained for recovery", "got stuck"),
+        ("Browser control failed at browser.py:441; application tab retained for recovery", "stopped responding"),
         ("Worker interrupted before submission; draft recovery scheduled", "interrupted before anything was sent"),
         ("Worker error: KeyError", "problem of its own"),
-        ("Open the ApplyPilot Chrome window: the browser is responding, but its automation connection is unavailable.", "use its browser"),
+        ("Open the ApplyPilot Chrome window: the browser is responding, but its automation connection is unavailable.", "wasn't ready"),
         ("Chromium did not expose a debugging endpoint", "use its browser"),
     ],
 )

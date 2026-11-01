@@ -82,9 +82,6 @@ def test_a_consent_group_beside_a_phone_box_is_not_named_phone_number():
 def test_what_no_answer_completes_is_marked(question, kind_, hard):
     context = {"type": "file"} if kind_ == "upload" else {}
     reason, is_hard = oq.cannot_automate(question, [], context, "")
-    if question == "Apex Video URL":
-        assert reason == ""
-        return
     assert reason and is_hard is hard
     shown = oq.present({"id": "r1", "question": question, "options": [], "context": context, "reason": ""})
     assert shown["cannot_automate"] == reason
