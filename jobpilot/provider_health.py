@@ -13,6 +13,12 @@ COOLDOWN_SECONDS = 300
 # An account out of credit stays out until someone tops it up: each 5-minute recovery start was a real application that
 # failed at its first model question and spent one of its attempts (2026-10-25).
 QUOTA_COOLDOWN_SECONDS = 1800
+# A connection that failed outright (no route, DNS, reset: a Mac waking from sleep or switching networks) says nothing
+# about the provider. The five-minute cooldown it opened stopped runs that had made no call at all: 3 of 17 runs that
+# ended "model provider is unavailable" on 2026-10-31 sent nothing, and one had seen a single refused connection. The
+# window is short and open to everyone afterwards: no one-request-at-a-time recovery lease, which sent the runs that
+# had waited through it to "unavailable" anyway.
+TRANSPORT_COOLDOWN_SECONDS = 20
 
 
 # Replies with HTTP 200 that are not readable completions (Sail Research's own service_tier, 2026-10-28) leave no mark on
@@ -40,7 +46,11 @@ def acquire(db, config, timeout):
         generation = value.get("generation", 0)
         if not value.get("retry_at"):
             return generation, None
-        if value["retry_at"] > at or value.get("lease_until", 0) > at:
+        if value["retry_at"] > at:
+            return None
+        if value.get("last_error") == "transport_error":
+            return generation, None
+        if value.get("lease_until", 0) > at:
             return None
         lease = uuid4().hex
         row.value = {**value, "lease": lease, "lease_until": at + timeout + 10}
@@ -74,6 +84,8 @@ def finish(db, config, ticket, *, failure=None, retry_after=None):
                 if failure == "rate_limited"
                 else QUOTA_COOLDOWN_SECONDS
                 if failure == "quota_exhausted"
+                else TRANSPORT_COOLDOWN_SECONDS
+                if failure == "transport_error"
                 else COOLDOWN_SECONDS
             )
             value.update(generation=generation + 1, retry_at=time.time() + seconds)
