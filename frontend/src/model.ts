@@ -308,7 +308,8 @@ export function rowFromServer(r: PipelineRow): JobRow {
     job: r.job,
     run,
     attempts: r.attempts,
-    state: displayState(r.job, run, control, r.request, r.reserved),
+    // A confirmed job reads Confirmed unless another attempt is running now (the Jobs "Confirmed" chip lists it).
+    state: r.confirmed && !(run && ACTIVE.has(run.state)) ? "confirmed" : displayState(r.job, run, control, r.request, r.reserved),
     control,
     request: r.request,
     reserved: r.reserved,

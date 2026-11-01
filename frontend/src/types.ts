@@ -381,6 +381,8 @@ export type JobRequest = { at?: string; code?: string; reason?: string; not_befo
 export type Reserved = { section: string; label: string; employer: string; approved: boolean };
 export type PipelineRow = {
   job: Job;
+  // A settled confirmed run exists (the ledger): the row reads Confirmed whatever its latest attempt says.
+  confirmed?: boolean;
   run: Run | null;
   attempts: number;
   control: JobControl | null;
@@ -487,6 +489,18 @@ export type Listing = Job & {
   match_reason: string;
   // Why the batch has not started this job (autopilot.remember_rejection); absent once anything is done to it.
   rejection?: { reason: string; code?: string; outcome?: string; at?: string };
+  // A Ready job the batch will not start: the plain reason and what happens next (jobpilot/startable.py).
+  hold?: Hold;
+};
+export type Hold = { code: string; reason: string; next: string };
+// GET /api/startable: Ready jobs that can start, and the rest by reason; `idle` says why runners wait when none can.
+export type Startable = {
+  at: string;
+  ready: number;
+  startable: number;
+  waiting: number;
+  held: { code: string; count: number; phrase: string }[];
+  idle: string | null;
 };
 type SourceHealth = {
   failures: number;
@@ -525,7 +539,9 @@ export type Board = {
   selectable_ids?: string[];
   selectable_total?: number;
   // Matching jobs per fit filter, under the other filters.
-  fits?: Record<"all" | "eligible" | "unranked" | "below" | "uncertain", number>;
+  fits?: Record<"all" | "eligible" | "unranked" | "below" | "uncertain" | "ready" | "held", number>;
+  // Why jobs are held, with counts (Ready and Held read the startable reading).
+  holds?: Startable["held"];
 };
 
 export type Proof = "page" | "both" | "email" | "existing" | "platform" | "final_page" | "dashboard" | "applicant" | "none";

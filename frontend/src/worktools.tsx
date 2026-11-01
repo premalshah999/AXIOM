@@ -17,10 +17,10 @@ const TONE: Record<Tone, PillTone> = {
   idle: "neutral",
 };
 
-export function StatusPill({ state, label, title }: { state: string; label?: string; title?: string }) {
+export function StatusPill({ state, label, title, tone }: { state: string; label?: string; title?: string; tone?: Tone }) {
   const info = stateInfo(state);
   return (
-    <Pill tone={TONE[info.tone]} dot title={title}>
+    <Pill tone={TONE[tone || info.tone]} dot title={title}>
       {label || info.label}
     </Pill>
   );

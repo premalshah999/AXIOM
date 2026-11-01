@@ -6,8 +6,8 @@ import { useWorkspace } from "./context";
 import { useAction, useDraft, useNow, usePoll } from "./hooks";
 import { Pagination, type Paging } from "./pagination";
 import { TopActions, TopLine } from "./shell/Shell";
-import type { Board, Listing } from "./types";
-import { ago, jobWords, platformName, plural, stamp } from "./format";
+import type { Board, Listing, Startable } from "./types";
+import { ago, jobWords, listedWhen, plainReason, platformName, plural, shownFit, stamp } from "./format";
 import { Button, Empty, Listbox, Table, Tooltip, type Column } from "./ui/index";
 import { Chips, JobCell, LoadError, Notice, Note, SearchBox, StatusPill } from "./worktools";
 
@@ -21,6 +21,7 @@ const LOCKED = new Set([
   "submission_unknown",
   "already_applied",
   "archived",
+  "closed",
 ]);
 // A listing in one of these states is already owned or protected; "pending:" is an Apply just made.
 const locked = (status: string) => LOCKED.has(status) || status.startsWith("pending:");
@@ -41,9 +42,12 @@ const LEVELS = [
   { value: "Experience unspecified", label: "Experience unspecified" },
 ];
 
+// "Ready" is a job the batch can start now and "Held" one it will not, each with its reason (jobpilot/startable.py): the same two
+// numbers Overview's idle runners line quotes. A job that is only ranked fit is neither until the batch has looked at it.
 const FITS = [
   ["all", "Any fit"],
-  ["eligible", "Eligible"],
+  ["ready", "Ready"],
+  ["held", "Held"],
   ["uncertain", "Uncertain"],
   ["unranked", "Not ranked"],
   ["below", "Below fit"],
@@ -63,18 +67,20 @@ export function DiscoveredJobs() {
   const [q, setQ] = useState(query.trim());
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(25);
-  const fit = route.filter || "all";
+  // "held:internship" is the Held list narrowed to one reason.
+  const [fit, hold = ""] = (route.filter || "all").split(":") as [string, string?];
   useEffect(() => {
     const timer = window.setTimeout(() => setQ(query.trim()), 250);
     return () => window.clearTimeout(timer);
   }, [query]);
-  useEffect(() => setPage(1), [q, ats, level, fit, size]);
+  useEffect(() => setPage(1), [q, ats, level, fit, hold, size]);
   const key = new URLSearchParams({
     include_sources: "false",
     q,
     ats,
     level,
     fit,
+    hold,
     page: String(page),
     size: String(size),
   }).toString();
@@ -86,6 +92,8 @@ export function DiscoveredJobs() {
   const selection = useSelection();
   const bulk = useApplyMany();
   const settings = board.data?.settings;
+  // Keeps the server's reading of which Ready jobs can start warm, so rows and the Ready and Held counts have it.
+  usePoll<Startable>((signal) => api("/startable", "GET", undefined, signal), 30000, [version]);
   const jobs = useMemo(
     () =>
       (board.data?.jobs || []).map((j) => {
@@ -137,7 +145,16 @@ export function DiscoveredJobs() {
         `Searching ${plural(r.queued_sources, "employer board")} and the new-grad lists. New jobs appear here as they arrive.`,
     );
 
-  const statusOf = (j: Listing) => <StatusPill state={RUN_STATES.has(j.status) || j.status.startsWith("pending:") ? j.status : "job:" + j.status} />;
+  const read = board.data?.fits?.ready !== undefined; // the server has sorted the Ready jobs into can-start and held
+  const phrases = new Map((board.data?.holds || []).map((h) => [h.code, h.phrase]));
+  const statusOf = (j: Listing) => {
+    if (j.status === "ready" && j.hold) return <StatusPill state="job:ready" label="Held" tone="hold" />;
+    // A restriction the posting states about the applicant: ruled out, not a low score.
+    if (j.status === "skipped" && /hiring restriction/i.test(j.reason || "")) return <StatusPill state="job:skipped" label="Not eligible" />;
+    if (j.status === "ready" && read) return <StatusPill state="job:ready" label="Ready" />;
+    return <StatusPill state={RUN_STATES.has(j.status) || j.status.startsWith("pending:") ? j.status : "job:" + j.status} />;
+  };
+  const heldWhy = (j: Listing) => (j.hold ? phrases.get(j.hold.code) || j.hold.reason : "");
   const columns: Column<Listing>[] = [
     {
       key: "job",
@@ -147,12 +164,13 @@ export function DiscoveredJobs() {
       cell: (j) => (
         <JobCell
           {...jobWords(j)}
-          title={j.rejection && j.status === "ready" ? whyNot(j.rejection) : undefined}
+          title={j.hold ? `${j.hold.reason} ${j.hold.next}` : j.rejection && j.status === "ready" ? whyNot(j.rejection) : undefined}
           onOpen={() => openJob(j.id)}
           meta={
             <>
               {statusOf(j)}
-              {j.score != null && <span className="mono">Fit {j.score}</span>}
+              {j.hold && <span>{heldWhy(j)}</span>}
+              {shownFit(j) != null && <span className="mono">Fit {shownFit(j)}</span>}
             </>
           }
         />
@@ -163,11 +181,14 @@ export function DiscoveredJobs() {
       key: "posted",
       header: "Posted",
       hideBelow: 600,
-      cell: (j) => (
-        <time dateTime={j.posted_at} title={`${j.date_basis || "posted"} ${stamp(j.posted_at)}`}>
-          {ago(j.posted_at, now)}
-        </time>
-      ),
+      cell: (j) => {
+        const when = listedWhen(j, now);
+        return (
+          <time dateTime={j.posted_at} title={when.title}>
+            {when.text}
+          </time>
+        );
+      },
     },
     {
       key: "fit",
@@ -175,8 +196,8 @@ export function DiscoveredJobs() {
       num: true,
       hideBelow: 600,
       cell: (j) => (
-        <Tooltip label={j.reason || j.match_reason}>
-          <span>{j.score == null ? "—" : j.score}</span>
+        <Tooltip label={plainReason(j.reason) || j.match_reason}>
+          <span>{shownFit(j) == null ? "—" : shownFit(j)}</span>
         </Tooltip>
       ),
     },
@@ -185,9 +206,9 @@ export function DiscoveredJobs() {
       header: "Status",
       hideBelow: 600,
       cell: (j) => (
-        <Tooltip label={j.rejection && j.status === "ready" ? `${whyNot(j.rejection)} (${stamp(j.rejection.at)})` : undefined}>
+        <Tooltip label={j.hold ? `${j.hold.reason} ${j.hold.next}` : j.rejection && j.status === "ready" ? `${whyNot(j.rejection)} (${stamp(j.rejection.at)})` : undefined}>
           {statusOf(j)}
-          {j.rejection && j.status === "ready" && <Note>&nbsp;· held</Note>}
+          {j.hold && <Note>&nbsp;· {heldWhy(j)}</Note>}
         </Tooltip>
       ),
     },
@@ -227,7 +248,17 @@ export function DiscoveredJobs() {
           {searching ? "Searching…" : "Search now"}
         </Button>
       </TopActions>
-      {b && (
+      {b && (fit === "ready" || fit === "held") && (
+        <TopLine>
+          {fit === "ready"
+            ? "Ready jobs the batch can start now."
+            : "Ready jobs the batch will not start, and why. Apply starts one yourself where the reason allows it."}{" "}
+          <button type="button" className="ax-link" onClick={() => go({ view: "jobs", tab: "discovered" })}>
+            All discovered
+          </button>
+        </TopLine>
+      )}
+      {b && fit !== "ready" && fit !== "held" && (
         <TopLine>
           Found and not applied to yet: US roles posted in the last {span}
           {searching ? ", searching now" : b.last_requested_at ? `, last searched ${ago(b.last_requested_at, now)}` : ""}.{!settings?.auto_apply && " Automatic applications are off."}{" "}
@@ -265,6 +296,19 @@ export function DiscoveredJobs() {
           onChange={(id) => go({ view: "jobs", tab: "discovered", filter: id === "all" ? undefined : id })}
         />
       </div>
+      {fit === "held" && b?.holds && b.holds.length > 1 && (
+        <div className="ax-toolbar">
+          <Chips
+            items={[
+              { id: "held", label: "Any reason", count: b.fits?.held },
+              ...b.holds.map((h) => ({ id: `held:${h.code}`, label: h.phrase.charAt(0).toUpperCase() + h.phrase.slice(1), count: h.count })),
+            ]}
+            value={hold ? `held:${hold}` : "held"}
+            label="Filter by reason"
+            onChange={(id) => go({ view: "jobs", tab: "discovered", filter: id })}
+          />
+        </div>
+      )}
       {bulk.last && <ApplyOutcomes result={bulk.last} onClose={bulk.dismiss} />}
       <Table
         fill

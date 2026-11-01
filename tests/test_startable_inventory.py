@@ -113,3 +113,14 @@ def test_ready_and_held_open_exactly_the_jobs_their_numbers_count(client, servic
     # The chips on the same answer carry the same numbers.
     assert held_page["fits"]["ready"] == 1 and held_page["fits"]["held"] == 3
     assert {h["code"]: h["count"] for h in held_page["holds"]} == {"internship": 2, "aged": 1}
+
+
+def test_a_closed_posting_is_not_found_and_waiting_to_be_applied_to(client, service):
+    """Discovered listed jobs whose status was "closed" (a restriction or a gone posting) with an Apply button."""
+    profile(service)
+    open_ = ready(service, 1)
+    closed = ready(service, 2)
+    with service.db.exclusive() as s:
+        s.get(Job, closed).status = "closed"
+    page = client.get("/api/job-board?include_sources=false&page=1&size=50").json()
+    assert [j["id"] for j in page["jobs"]] == [open_] and page["total"] == 1

@@ -194,8 +194,7 @@ def idle_line(startable, held):
     if not held:
         return "Nothing is ready to apply to yet. Discovery is still finding and ranking jobs."
     parts = [f"{h['count']:,} {h['phrase']}" for h in held[:4]]
-    more = sum(h["count"] for h in held[4:])
-    return "Nothing to run: " + ", ".join(parts) + (f", {more:,} for other reasons" if more else "") + "."
+    return "Nothing to run: " + ", ".join(parts) + "." + (f" {sum(h['count'] for h in held):,} held in all." if len(held) > 4 else "")
 
 
 class Reading:

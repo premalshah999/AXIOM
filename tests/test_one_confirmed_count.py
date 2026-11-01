@@ -66,3 +66,12 @@ def test_the_group_counts_add_up_to_the_pipeline(service):
         counts = pipeline.counts(s)
     inside = sum(n for g, n in counts["groups"].items() if g not in {*pipeline.OUTSIDE, "all"})
     assert counts["pipeline"] == inside == counts["groups"]["all"]
+
+
+def test_a_confirmed_job_whose_later_attempt_failed_is_flagged_confirmed_in_its_row(client, service):
+    """Listed under the Confirmed chip, the row must not read "Not submitted" because a follow-up attempt failed."""
+    seed(service)
+    rows = {r["job"]["id"]: r for r in client.get("/api/jobs?group=done&size=50").json()["rows"]}
+    assert rows["job00002"]["run"]["state"] == "waiting_browser" and rows["job00002"]["confirmed"] is True
+    stopped = client.get("/api/jobs?group=stopped&size=50").json()["rows"]
+    assert [r["confirmed"] for r in stopped] == [False]

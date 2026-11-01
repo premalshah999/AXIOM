@@ -326,6 +326,8 @@ def rows_for(session, picked):
         for job_id, job in jobs.items()
         if not job["demo"] and (found := rules(job["company"], job["url"]))
     }
+    # CONFIRMED jobs read as confirmed whatever their latest attempt says (the Jobs "Confirmed" chip lists them).
+    confirmed = set(session.scalars(confirmed_jobs().where(Run.job_id.in_(job_ids))))
     questions = {}
     if run_ids:
         for review in session.scalars(
@@ -348,6 +350,7 @@ def rows_for(session, picked):
             "request": requests.get(job_id),
             "reviews": questions.get(run_id, []) if run_id else [],
             "reserved": reserved.get(job_id),
+            "confirmed": job_id in confirmed,
         }
         for job_id, run_id in picked
         if job_id in jobs
