@@ -26,7 +26,7 @@ RESUMED = ("waiting_browser", "timed_out")
 # The whole-history answer is the expensive one (about ten queries per stopped job, 1-2 s with 60 of them, more under load) and
 # every Jobs page, chip count and Overview poll asks for it. It is kept this long unless the history changed (a run was
 # created, started or ended, or a setting was added), so a poll is one cheap signature read (2026-11-01, /api/jobs 5-20 s).
-GIVEN_UP_SECONDS = 10
+GIVEN_UP_SECONDS = 60  # as long as startable.TTL; only the clock moves a deadline in that time
 _kept = {}
 
 

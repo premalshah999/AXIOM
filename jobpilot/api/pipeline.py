@@ -259,7 +259,13 @@ def _search(q):
 
 def page(session, group="all", q="", page=1, size=25):
     """One page of Pipeline rows: "all" is every started or paused job, attention first; a group lists only its own."""
-    rows = rows_of(session, *_search(q))
+    found = _search(q)
+    if found:
+        # The search is read first, as a list of ids: written into the one big query, the planner takes the filter for one row
+        # and joins every job to the whole run history one at a time (a search page was 6 s, an unsearched one 1.5 s; 2026-11-01).
+        ids = session.scalars(select(Job.id).where(*found)).all()
+        found = (Job.id.in_(ids),) if ids else (sa_false(),)
+    rows = rows_of(session, *found)
     # A word (applied, applying, needs, failed, not) lists exactly what its count says; the older group names still open.
     by = rows.c.word if group in WORDS else rows.c.grp
     scope = [in_pipeline(rows), rows.c.grp.not_in(OUTSIDE) if group == "all" else by == group]
