@@ -131,3 +131,23 @@ async def test_a_registration_within_the_limit_is_stamped_before_it_is_sent(serv
     assert form.clicked == ["create"]
     stamps = flow.store.record(URL)["create_sent"]
     assert len(stamps) == 2 and stamps[-1][1] == "run-now"
+
+
+async def test_a_press_that_sends_nothing_is_told_from_one_that_sends(page):
+    """Atlas Copco (SuccessFactors, 2026-11-01): an inert Submit was counted as a registration sent, and a day's wait followed."""
+    from jobpilot.adapters.base import SiteWrites
+
+    async def answer(route):
+        await route.fulfill(content_type="text/html", body="""<button id=inert>Submit</button>
+        <button id=sends onclick="fetch('/register',{method:'POST'})">Submit</button>""" if route.request.method == "GET" else "ok")
+
+    await page.route("https://careers.example.test/**", answer)
+    await page.goto("https://careers.example.test/join")
+    with SiteWrites(page) as writes:
+        await page.click("#inert")
+        await page.wait_for_timeout(100)
+    assert not writes.seen
+    with SiteWrites(page) as writes:
+        await page.click("#sends")
+        await page.wait_for_timeout(100)
+    assert writes.seen

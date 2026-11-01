@@ -35,12 +35,12 @@ SELECT_ALL = re.compile(r"\s*(?:select|check|accept|agree to) all\b", re.I)
 # Authorization Act", "Authentication, Authorization" (a security skill), "authorized to prescribe", "government ID",
 # "Citizens" (a bank), "agenda" and "referred to as" are not disclosures (2026-10-18/19 production refusals).
 CRITICAL = re.compile(
-    IMMIGRATION_VISA + r"|sponsor(?!ed\b)|sponsored\s+(?:visa|immigration|work)|"
+    IMMIGRATION_VISA + r"|sponsor(?!ed\b)(?!ing\s+organi[sz]ation)|sponsored\s+(?:visa|immigration|work)|"
     r"(?:employer|company)[- ]sponsored\s+(?:visa|immigration|work|h-?1b|employment|status|permit|green card)|"
     r"authori[sz](?:ed|ation)\b.{0,40}\b(?:work|be employed|employment)\b|"
     r"(?:work|employment)\s+authori[sz]|\bauthori[sz]e\b|\bcitizen(?:ship)?\b|\bcitizens of\b|convict|criminal|"
     + GOVERNMENT
-    + r"|\bnda\b|non.?disclosure|corrupt|restrictive|non[\s-]?(?:compet|solicit)|\breferr\w*\b(?!\s+to\s+as\b)|consent|"
+    + r"|\bnda\b|non.?disclosure|\bcorrupt(?!ed\b)|restrictive|non[\s-]?(?:compet|solicit)|\breferr\w*\b(?!\s+to\s+(?:as|in|above|below|herein|on)\b)|consent|"
     r"(?<!dis)agree\b|certify|export.?control|sanction|embargo|security clearance|clearance level|\bfired\b|"
     r"involuntarily discharged|asked to resign",
     re.IGNORECASE,

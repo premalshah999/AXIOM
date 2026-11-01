@@ -513,8 +513,23 @@
   let modalOpen;
   const anyModalOpen = () => modalOpen ??= all.some(d => d.matches('[aria-modal=true],dialog[open],[data-sdf-modal]')
     && visible(d) && d.getBoundingClientRect().width > 120);
+  // aria-hidden says nothing about the screen. Paycom's sign-up modal (GSI Environmental, 2026-11-01) wraps every control of
+  // its form in aria-hidden="true" inside the open aria-modal dialog: a person sees and fills a whole form, the scan found
+  // none of it, read the page as clean and pressed Continue on empty required fields four runs running. Behind an open
+  // dialog aria-hidden does mean hidden; inside it, a rendered focusable control on the dialog's own box is on screen.
+  const OPEN_DIALOG = '[role=dialog],[role=alertdialog],[aria-modal=true],dialog[open]';
+  const shownInDialog = (h, el) => {
+    if (h === el || h.matches('[inert]')) return false;  // A control's own aria-hidden is a mirror behind its proxy.
+    // A focus guard takes no focus; a radiogroup takes it through its radios.
+    if (el.tabIndex < 0 && !el.querySelector('input:not([tabindex="-1"]),select,textarea,button:not([tabindex="-1"])')) return false;
+    const dialog = h.parentElement?.closest(OPEN_DIALOG);
+    if (!dialog || !visible(dialog) || !visible(h) || !visible(el) || Number(style(h).opacity) === 0) return false;
+    const r = el.getBoundingClientRect(), box = dialog.getBoundingClientRect(), middle = r.left + r.width / 2;
+    return r.width >= 10 && r.height >= 10 && middle >= box.left && middle <= box.right;
+  };
   const hiddenBy = el => {
     for (let h = el.closest('[inert],[aria-hidden="true"]'); h; h = h.parentElement?.closest('[inert],[aria-hidden="true"]')) {
+      if (shownInDialog(h, el)) continue;
       if (h.matches('[inert]') || !h.matches(MODAL_HIDE) || anyModalOpen()) return h;
     }
     return null;
@@ -866,7 +881,8 @@
     // owner was asked an empty label. Only the boxes on the page are one question; a single one is a lone checkbox.
     if (shown.length < 2) continue;
     const group = shown;
-    group.forEach(c => consumed.add(c));
+    group.forEach(c => { consumed.add(c); const wrap = c.closest('[role=checkbox]'); if (wrap) consumed.add(wrap); });
+    // Rippling wraps each box in a role=checkbox row: read again on its own, each answer also listed an "Unlabelled field".
     const parent = group[0].closest('.application-question,fieldset,[role=group]');
     // Without a legend the question is the plain text just before the boxes; the first box's own caption ("Yes, I
     // certify") is an answer, not the question (Adzuna 2026-10-28: the page's "Please choose at least one option for

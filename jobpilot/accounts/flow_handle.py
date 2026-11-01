@@ -9,6 +9,7 @@ from .dayforce import dayforce_id_page
 from .dayforce import dayforce_id_password_ok
 from .errors import AccountActionError
 from .pages import ACCOUNT_EXISTS
+from .pages import CONFIRM_EMAIL
 from .pages import PASSWORD_MAXIMUM
 from .pages import REQUIRED_INPUT
 from .pages import login_identifier
@@ -354,7 +355,7 @@ class FlowHandleMixin:
             value = None
             if f["type"] == "password":
                 value = creds["password"]
-            elif login_identifier(f):
+            elif login_identifier(f) or (creating and CONFIRM_EMAIL.search(f["label"])):
                 username = getattr(getattr(e, "profile", None), "account_username", "")
                 value = (
                     username

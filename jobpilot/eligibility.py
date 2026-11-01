@@ -19,7 +19,8 @@ from .db import Run
 
 
 STATUS_KEYS = {"visa_status", "current_immigration_status_us", "current_visa_status_us"}
-VISA = re.compile(r"\bf[ -]?1\b|\bj[ -]?1\b|\b(?:stem[ -]?)?opt\b|\bcpt\b|\bh[ -]?1b\b", re.I)
+# "may opt out" and "opt-in" are 371 saved postings' ordinary words; a lowercase "opt" followed by them is no visa.
+VISA = re.compile(r"\bf[ -]?1\b|\bj[ -]?1\b|\b(?:stem[ -]?)?opt\b(?![ -](?:out|in|into)\b)|\bcpt\b|\bh[ -]?1b\b", re.I)
 INELIGIBLE = re.compile(
     r"\b(?:not eligible|ineligible|not accepted|not permitted|excluded|not open to|not available to|not accepting)\b|"
     r"\b(?:cannot|will not|do not|does not|unable to|not able to)\s+(?:hire|consider|accept)\b",

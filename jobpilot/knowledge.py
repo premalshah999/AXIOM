@@ -81,7 +81,14 @@ GOVERNMENT = (
     r"department of defense|\bdod\b|federal (?:agency|employee)|public official"
 )
 # "If your work is under NDA, describe what you built" is an instruction, not a question about an agreement.
-NDA_INSTRUCTION = re.compile(r"\bif\b[^.?;]{0,60}\bunder (?:an? )?(?:nda|non.?disclosure)\b", re.I)
+# Nor is a form that reports to a government asking about government service: "A valid social security number is required
+# for reporting wages to state and federal governments" made an I-9 acknowledgement a scoped disclosure, and "I Acknowledge"
+# was refused every time (Pennant, Workday, 2026-11-01).
+NDA_INSTRUCTION = re.compile(
+    r"\bif\b[^.?;]{0,60}\bunder (?:an? )?(?:nda|non.?disclosure)\b|"
+    r"\b(?:report\w*|remit\w*|fil(?:e|es|ing))\b[^.?;]{0,60}\bto (?:the )?(?:[a-z]+,? (?:and |or )?){0,3}governments?\b",
+    re.I,
+)
 
 
 def _topic(text):
@@ -123,13 +130,17 @@ def _topic(text):
         ),
         (
             "clearance",
-            r"security clearance|clearance level|active clearance|sponsored (?:the |your )?clearance",
+            # "What level of DOD clearance do you have?", "... obtain clearance(s) with multiple government customers?"
+            r"security clearance|clearance level|active clearance|sponsored (?:the |your )?clearance|"
+            r"\b(?:dod|government|federal)\b.{0,20}\bclearance|level of .{0,12}\bclearance\b|"
+            r"\bclearance(?:s|\(s\))?\b.{0,40}\b(?:government|dod|federal)\b",
         ),
         (
             # "Any related persons currently employed with us?" asks about relatives,
             # not the applicant's own employment.
             "referral",
-            r"\b(?:relatives?|related (?:to|persons?|individuals?|parties)|family members?|spouse|domestic partner|"
+            # "other matters related to my suitability for employment" (a background-check notice) is no relative.
+            r"\b(?:relatives?|related (?:to(?! (?:my|your|our|the|this|these|those|such|its|their|job|employment|work)\b)|persons?|individuals?|parties)|family members?|spouse|domestic partner|"
             r"close personal relationship)\W{0,3}s?\b.{0,120}(?:employ|work|colleague|coworker|co-worker|staff)",
         ),
         (
@@ -159,7 +170,8 @@ def _topic(text):
         (
             "sponsorship",
             # "company sponsored happy hour" (Interco's conduct quiz, 2026-10-30) is no immigration question.
-            r"\bsponsor(?:ship|s|ing)?\b|\bsponsored\s+(?:visa|immigration|work)|visa[- ]sponsored|"
+            # A certification's "Sponsoring Organization" sponsors no visa.
+            r"\bsponsor(?:ship|s|ing)?\b(?!\s+organi[sz]ation)|\bsponsored\s+(?:visa|immigration|work)|visa[- ]sponsored|"
             r"(?:employer|company)[- ]sponsored\s+(?:visa|immigration|work|h-?1b|employment|status|permit|green card)|"
             + IMMIGRATION_VISA,
         ),
@@ -180,13 +192,17 @@ def _topic(text):
             r"background (?:check|screen|investigation)|drug (?:screen|test)|pre-?employment screen",
         ),
         ("termination", r"\bfired\b|involuntarily discharged|asked to resign"),
-        ("corruption", r"corrupt|bribery|bribe"),
+        # "eliminate corrupted records" (a quiz's option) is not corruption.
+        ("corruption", r"\bcorrupt(?!ed\b)|bribery|bribe"),
         ("government", GOVERNMENT),
         # "Citizens" (a bank) is an employer, not citizenship.
         ("citizenship", r"\bcitizen(?:ship)?\b|\bcitizens of\b|nationality"),
         (
             "restriction",
-            r"\bnda\b|non.?disclosure|\brestrict(?:ive|ions?)?\b|"
+            # "Second job policy restriction" and "restrictions on your professional license" are no agreement with an employer.
+            r"\bnda\b|non.?disclosure|\brestrict(?:ive)?\b|"
+            r"(?<!policy )(?<!without any )\brestrictions?\b.{0,60}\b(?:agreements?|contracts?|employers?|your ability|employment)\b|"
+            r"\b(?:employment|contractual|legal|post-employment)\s+restrictions?\b|\bother (?:potential )?restrictions?\b|"
             r"(?:agreements?|covenants?)\b.{0,160}\b(?:engage in competition|compete with|not to compete|solicit\w*|"
             r"contact (?:customers|clients))|"
             r"\bnon[\s-]?(?:compet(?:e|ition)|solicit(?:ation)?)\b|employment agreements|"
@@ -196,7 +212,8 @@ def _topic(text):
         # "related to any professional license" is a disciplinary question, not a referral.
         (
             "referral",
-            r"\breferr\w*\b(?!\s+to\s+as\b)|\brelatives?\b|"
+            # "the communications referred to in this application" (BYU's waiver, 2026-10-31) refers to no person.
+            r"\breferr\w*\b(?!\s+to\s+(?:as|in|above|below|herein|on)\b)|\brelatives?\b|"
             r"\brelated (?:to )?(?:(?:an?|any|the|our) )?(?:employees?|persons?|individuals?|people|anyone|someone)\b",
         ),
         (
@@ -231,6 +248,12 @@ def topic(text):
     )
     head = questions[-1] if questions else text.split("?", 1)[0]
     if not questions:
+        # "a. If NO, please indicate your country of citizenship ... This information will be used to determine whether it
+        # would be possible to obtain any required license from the U.S. government." The request is the question; "India"
+        # was refused for not being a fact about government service (Apptronik, 2026-10-31).
+        request = re.match(r"\s*(?:\w{1,3}[.)]\s+)?(?:if\b[^.?]{0,40},\s*)?please (?:indicate|provide|list|enter|specify|state)\b[^.?]*[.?]", text, re.I)
+        if request and _topic(request[0]):
+            return _topic(request[0])
         acknowledgement = re.search(r"\bI (?:have )?read and (?:agree|accept)\b[^.!?]*[.!?]?\s*$", text, re.I)
         if acknowledgement:
             head = acknowledgement[0]
@@ -336,7 +359,7 @@ def relevant_fact(label, key):
         r"previously_employed_at_applying_company|\bworked_at_\w+",
         "client_relationship": r"company_relationships|client_relationships|company_connections",
         "corruption": r"corrupt|brib",
-        "government": r"government|public_employ|official|politically_exposed|corrupt|brib",
+        "government": r"government|public_employ|official|politically_exposed|corrupt|brib|debar",
         "citizenship": r"citizen|nationality",
         "restriction": r"nda|non.?disclosure|restrict|non[\s_-]?(?:compet|solicit)",
         "referral": r"referr|relat",
