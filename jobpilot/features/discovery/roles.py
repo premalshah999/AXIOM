@@ -113,6 +113,14 @@ def related_role(title, roles):
     return None
 
 
+def role_fits(title, roles):
+    """Whether a title is one of the profile's roles or a specialisation of its family: the one question every stage asks.
+    Discovery admitted "Cloud Engineer" through related_role, the ranker scored it 64-68 Ready, and the autopilot's and the
+    queue's own check (matching_role alone) refused it: 7 Ready jobs, 6 never tried, sat as "outside the target roles"
+    (2026-11-01)."""
+    return bool(matching_role(title, roles) or related_role(title, roles))
+
+
 def search_terms(roles, limit=6):
     """Search phrases for the profile's roles: each role plus its most common alternate title."""
     terms = []

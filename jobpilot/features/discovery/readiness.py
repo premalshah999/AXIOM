@@ -203,13 +203,13 @@ def gated(job, policy):
 
 
 def _eligible(db, jobs, profile, policy):
-    from .roles import matching_role
+    from .roles import role_fits
 
     # Backpressure must count jobs dispatch can actually use. Old high scores
     # cannot make off-role, senior or otherwise gated jobs block new ranking.
     roles = profile.get("target_roles") or []
     jobs = [j for j in jobs if not gated(j, policy)
-            and (not roles or matching_role(j["title"], roles))]
+            and (not roles or role_fits(j["title"], roles))]
     mine = classified_eligible(db, jobs, profile, policy)
     # Jobs the application's ranker already marked ready count as eligible too,
     # unless the posting's stated graduation window excludes every recorded degree.

@@ -553,7 +553,7 @@ def ingest(db, postings: list[Posting], source_id="feed:new-grad") -> dict:
     from .policy import protected, register
 
     from ...schemas import Profile
-    from .roles import matching_role, related_role
+    from .roles import role_fits
 
     from ... import shortlinks
 
@@ -562,7 +562,7 @@ def ingest(db, postings: list[Posting], source_id="feed:new-grad") -> dict:
     roles = Profile.model_validate(db.get_setting("profile", {}) or {}).target_roles
     lookups = MAX_SHORTLINK_LOOKUPS
     for p in postings:
-        if roles and not (matching_role(p.title, roles) or related_role(p.title, roles)):
+        if roles and not role_fits(p.title, roles):
             counts["off_role"] += 1
             continue
         # A feed's short link (go.vansh.nyc/XO) is stored as the posting it points to, so the job is the employer's own

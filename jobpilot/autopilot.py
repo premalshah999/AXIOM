@@ -630,7 +630,7 @@ def stalled_candidates(db, roles):
     """persist_stalled's reads, for a worker thread: every run of the last 14 days and every reserved employer's job were
     read on the loop that drives the browsers. (created_at, job id, employer, ATS) oldest first, and who is busy."""
     from .db import Review
-    from .features.discovery.roles import matching_role
+    from .features.discovery.roles import role_fits
 
     exclude = set((db.get_setting("ats_focus", {}) or {}).get("exclude", []))
     current = datetime.now(UTC)
@@ -702,7 +702,7 @@ def stalled_candidates(db, roles):
                 or job.ats not in PERSIST_ATS
                 or job.ats in exclude
                 or job.status in {"archived", "closed", "confirmed", "already_applied", "skipped"}
-                or (roles and not matching_role(job.title, roles))
+                or (roles and not role_fits(job.title, roles))
             ):
                 continue
             from .application_budget import require_allowance
@@ -1061,9 +1061,9 @@ async def tick(service):
                 # Owner focus: platforms set aside for now are not dispatched.
                 if current.ats in set(db.get_setting("ats_focus", {}).get("exclude", [])):
                     return "focus", None, None
-                from .features.discovery.roles import matching_role
+                from .features.discovery.roles import role_fits
 
-                if target_roles and not matching_role(current.title, target_roles):
+                if target_roles and not role_fits(current.title, target_roles):
                     # Ranked before the profile's roles changed (2026-10-17); its search filters apply here too.
                     raise ValueError("Outside the profile's target roles: " + current.title[:120])
                 employer = employer_partition(current)
