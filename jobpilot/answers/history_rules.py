@@ -34,6 +34,12 @@ def same_degree_kind(field, value, pick):
         return False
     return not (DISTINCT_DEGREE.search(normalize(pick)) and not DISTINCT_DEGREE.search(normalize(value)))
 
+# A highest-education question about someone else: a caregiver's, a parent's or a spouse's schooling.
+OTHER_PERSON_EDUCATION = re.compile(
+    r"\b(?:care.?givers?|parents?|guardians?|mother|father|spouse|partner|sibling|family|household)\b", re.I
+)
+
+
 class HistoryRulesMixin:
     def reason_for_leaving(self, f):
         """(answer, evidence) for the role a reason-for-leaving question is about: its work row, else the latest."""
@@ -98,6 +104,22 @@ class HistoryRulesMixin:
                     blocker_type="missing_fact",
                 )
         return None
+
+    def level_menu_option(self, f, degree):
+        """The one offered level that holds this degree when the menu names levels, not degrees ("High School/GED",
+        "College/University", "Graduate School", "Other"): a master's is "Graduate School", not "Other" (Church & Dwight,
+        2026-10-29). None when no single option, or one that merely sounds alike, qualifies."""
+        level = degree_level(degree)
+        if level != "master":
+            return None
+        options = [o for o in f.get("options") or [] if str(o).strip()]
+        hits = [
+            o
+            for o in options
+            if re.search(r"\b(?:master|masters|graduate|post.?graduate|advanced degree)\b", str(o), re.I)
+            and not re.search(r"\bunder.?graduate\b|\bdoctor|\bphd\b", str(o), re.I)
+        ]
+        return hits[0] if len(hits) == 1 else None
 
     def graduation_parts(self, f, end, unit):
         """({"year", "month", "day"}, evidence) for a graduation date asked in parts, or None when the date cannot be
@@ -375,23 +397,59 @@ class HistoryRulesMixin:
                         value = f"{entry.end}-01"
                         evidence = [*evidence, "fact:history_date_day_policy"]
                 return self._ans(f, value, evidence)
+        # The box's own words, without a parenthetical: the group around a "City" box, or an aside such as "(If you select
+        # 'GED' in Education Level, choose Others)", is not what the box asks. Snap-on's City under a "Highest Level of
+        # Education" group took the degree, Hyundai's School box (that aside) took "MASTER'S BARBER & STYLING COLLEGE",
+        # Emory's institution and City of San Francisco's area-of-study boxes took the degree (2026-10-27..29).
+        own = normalize(re.sub(r"\([^)]*\)", " ", str(f.get("own_label") or f.get("label") or "")))
         if p.education and re.search(
             r"highest (?:level of )?(?:education|(?:academic )?degree)|education level|level of education",
-            label,
+            own,
         ):
             ranks = ["doctor", "master", "bachelor", "associate", "high school"]
             order = lambda e: next((i for i, r in enumerate(ranks) if r in normalize(e.degree)), len(ranks))  # noqa: E731
             best = sorted(p.education, key=order)[0]
+            index = p.education.index(best)
+            if OTHER_PERSON_EDUCATION.search(own):
+                # Uber's "Highest Education Level of Caregiver/Parent" took the applicant's own degree (2026-10-25). The
+                # profile records no one else's schooling: decline where the menu allows it, else leave it blank/ask.
+                from .demographics import DECLINE
+
+                declines = [o for o in f.get("options") or [] if DECLINE.search(str(o)) or re.search(r"don.?t know|unknown|not applicable", str(o), re.I)]
+                if len(declines) == 1 and (a := self._ans(f, declines[0], ["policy:demographics"], "Someone else's schooling is not recorded")):
+                    return a
+                return Answer(
+                    field_id=f["id"],
+                    disposition="review" if f.get("required") else "skip",
+                    reason="This asks for someone else's education, which the profile does not record",
+                    blocker_type="missing_fact",
+                )
+            if re.search(r"\b(?:institution|school|university|college)\b", own):
+                return self.school_answer(f, best.school, [f"profile:education.{index}.school"])
+            if re.search(r"\b(?:area|field|subject|discipline|specialization|major)\b", own):
+                evidence = [f"profile:education.{index}.field_of_study"]
+                return (
+                    self._ans(f, best.field_of_study, evidence)
+                    or self._policy_ans(f, evidence)
+                    or self.education_fallback(f, best.field_of_study, evidence)
+                )
+            if re.search(r"\b(?:date|year|month|when|gpa|city|state|country|location|address)\b", own):
+                return None  # Another part of the same record, answered by its own rule or the model.
             from ..widgets import _alias_group
 
             for alias in [best.degree, *sorted(_alias_group(best.degree), key=len, reverse=True)]:
                 if a := self._ans(f, alias, ["profile:education.highest"]):
                     return a
+            if picked := self.level_menu_option(f, best.degree):
+                return self._ans(f, picked, ["profile:education.highest"], f"The menu's level for {best.degree}")
             return self._policy_ans(f, ["profile:education.highest"]) or self.education_fallback(
                 f, best.degree, ["profile:education.highest"]
             )
         if len(label.split()) > 6:
-            return None
+            if own and len(own.split()) <= 6:
+                label = own  # An aside in parentheses is not part of the question (Hyundai's School box, 2026-10-27).
+            else:
+                return None
         if p.education and re.search(
             r"^(?:school|university|college|institution|school name|university name)$", label
         ):
