@@ -431,7 +431,7 @@ function Workbench({
     <div className="ax-ed">
       <header className="ax-ed-bar">
         <IconButton label="Back to Resumes" size="md" icon={<ArrowLeft size={16} aria-hidden="true" />} onClick={back} />
-        {job && !master && <Monogram name={job.company} />}
+        {job && !master && <Monogram name={job.company} employer />}
         <div className="ax-ed-name">
           <h1 title={title}>{title}</h1>
           {subtitle && <span title={subtitle}>{subtitle}</span>}

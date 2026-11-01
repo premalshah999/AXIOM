@@ -90,7 +90,7 @@ export function JobPanel({
   const company = words?.company ?? "Application record";
   const actions = row && (!selectedRun || latest) ? <DrawerActions row={row} started={!!selectedRun} asking={!!row.reviews.length} /> : null;
   return (
-    <Drawer open onClose={close} title={company} sub={words ? (words.unread ? [words.role, words.hint].filter(Boolean).join(" · ") : words.role) : undefined} lead={job ? <Monogram name={company} size="lg" /> : undefined} width={640}>
+    <Drawer open onClose={close} title={company} sub={words ? (words.unread ? [words.role, words.hint].filter(Boolean).join(" · ") : words.role) : undefined} lead={job ? <Monogram name={company} size="lg" employer /> : undefined} width={640}>
       <div className="ax-stack">
         {job ? (
           <JobSummary row={row!} />
