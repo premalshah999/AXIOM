@@ -102,14 +102,12 @@ async def _new_worker_page(browser, context, *, visible=False):
     commands = await browser.new_browser_cdp_session()
     known = set(context.pages)
     target = None
-    stage = "create_target"
     try:
         result = await asyncio.wait_for(
             # Background even when visible: a foreground target brings Chrome in front of the owner's work.
             commands.send("Target.createTarget", {"url": "about:blank", "background": True}), 6
         )
         target = result["targetId"]
-        stage = "attach_target"
         async with asyncio.timeout(10):
             while True:
                 for page in context.pages:
@@ -138,12 +136,9 @@ async def _new_worker_page(browser, context, *, visible=False):
             except (PlaywrightError, TimeoutError):
                 pass
         if isinstance(exc, (PlaywrightError, TimeoutError)):
-            from .browser import BrowserUnavailable
+            from .browser import BROWSER_NOT_READY, BrowserUnavailable
 
-            raise BrowserUnavailable(
-                f"Chrome worker tab initialization failed at {stage} ({type(exc).__name__}). "
-                "No employer form was opened."
-            ) from None
+            raise BrowserUnavailable(BROWSER_NOT_READY) from None
         raise
     finally:
         try:

@@ -204,7 +204,7 @@ function RunSection({
   const jobs = new Map(snapshot.jobs.map((j) => [j.id, j]));
   return (
     <>
-      <StatusBlock state={state} reason={run?.reason && state !== "confirmed" ? run.reason : undefined} earlier={run && !latest ? stamp(run.created_at) : undefined}>
+      <StatusBlock state={state} reason={run?.reason && state !== "confirmed" ? plainReason(run.reason) : undefined} earlier={run && !latest ? stamp(run.created_at) : undefined}>
         {questions.length > 0 &&
           groupQuestions(questions, (id) => jobs.get(snapshot.runs.find((r) => r.id === id)?.job_id || "")).map((g) => (
             <div key={g.review.id} className="dr-question">

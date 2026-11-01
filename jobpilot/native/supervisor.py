@@ -20,6 +20,7 @@ import fcntl
 import http.client
 import json
 import os
+import plistlib
 import re
 import resource
 import shutil
@@ -43,6 +44,7 @@ POWER_SECONDS = 60.0
 OWNER_SECONDS = 5.0
 ROTATE_SECONDS = 30.0
 BACKUP_CHECK_SECONDS = 300.0
+CHROME_UPDATE_SECONDS = 300.0
 LOG_BYTES, LOG_KEEP = 10 * 1024 * 1024, 3  # compose.yaml's json-file limits.
 CHROME_GRACE, POSTGRES_GRACE, CHROME_WAIT = 10.0, 30.0, 30.0
 ACTIVE_RUNS = "select count(*) from runs where state in ('queued','running','submitting')"
@@ -52,6 +54,15 @@ BATCH_RUNNING = (
     "and not exists (select 1 from settings c where c.key = 'control' and c.value->>'paused' = 'true')"
 )
 NOFILE = (65536, 10240)
+# What Chrome would otherwise ask in a window nobody is meant to touch: "Save password?", "Save address?", "Translate this
+# page?", "Sign In to Chrome?". Each is a preference of the browser's own interface, and none of it reaches a page.
+QUIET_PREFERENCES = {
+    "credentials_enable_service": False,
+    "profile": {"password_manager_enabled": False},
+    "autofill": {"profile_enabled": False, "credit_card_enabled": False},
+    "translate": {"enabled": False},
+    "signin": {"allowed": False},
+}
 
 
 def http_ok(url, timeout=3.0):
@@ -135,7 +146,58 @@ def chrome_argv(cfg, script, port_var, profile_var, url, profile, extra=""):
         return None  # "already running": it does nothing when the port answers.
     profile_dir = next(line.split("=", 1)[1] for line in lines if line.startswith("--user-data-dir="))
     os.makedirs(profile_dir, mode=0o700, exist_ok=True)
+    quiet_profile(profile_dir)
     return [lines[0], *extra.split(), *lines[1:]]
+
+
+def quiet_profile(profile):
+    """Write QUIET_PREFERENCES into a profile before its Chrome opens it. Chrome owns this file while it runs, and rewrites it
+    from memory, so this is only ever done with no Chrome on the profile. Everything else in the file stays. A file that is not
+    JSON is set aside (Chrome starts from defaults, and --noerrdialogs keeps that silent): cookies and sign-ins live elsewhere."""
+    if chrome_holding(profile):
+        return
+    path = os.path.join(profile, "Default", "Preferences")
+    try:
+        with open(path, encoding="utf-8") as file:
+            preferences = json.load(file)
+        if not isinstance(preferences, dict):
+            raise ValueError("not an object")
+    except FileNotFoundError:
+        preferences = {}
+    except (OSError, ValueError):
+        try:
+            os.replace(path, path + ".corrupt")
+        except OSError:
+            return
+        preferences = {}
+    merged = _merged(preferences, QUIET_PREFERENCES)
+    if merged == preferences and preferences:
+        return
+    try:
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        temporary = path + ".axiom-tmp"
+        with open(temporary, "w", encoding="utf-8") as file:
+            json.dump(merged, file)
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    except OSError:
+        pass  # Prompts are a nuisance, and a full disk must not also stop Chrome from starting.
+
+
+def _merged(base, over):
+    merged = dict(base)
+    for key, value in over.items():
+        merged[key] = _merged(merged[key] if isinstance(merged.get(key), dict) else {}, value) if isinstance(value, dict) else value
+    return merged
+
+
+def chrome_version(binary):
+    """The version of the Chrome on disk, or "" where there is no app bundle to read it from."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.dirname(str(binary))), "Info.plist"), "rb") as file:
+            return str(plistlib.load(file).get("CFBundleShortVersionString") or "")
+    except (OSError, ValueError, plistlib.InvalidFileException):
+        return ""
 
 
 class Child:
@@ -159,6 +221,7 @@ class Child:
         self.stopping = False
         self.kill_at = None
         self.lstart = ""
+        self.binary, self.version = "", ""  # The Chrome this child runs, and its version when it started.
 
     @property
     def pid(self):
@@ -186,6 +249,8 @@ class Child:
                 os.close(out)
         self.started = time.monotonic()
         self.lstart = process_start(self.proc.pid)
+        if self.profile:
+            self.binary, self.version = argv[0], chrome_version(argv[0])
         self.state, self.message = "starting", ""
 
     def signal(self, sig):
@@ -488,6 +553,8 @@ class Supervisor:
             self.rotate_logs()
         if self.due("backup", now, BACKUP_CHECK_SECONDS):
             self.tick_backup()
+        if self.due("chrome_update", now, CHROME_UPDATE_SECONDS):
+            self.tick_chrome_update(now)
         self.write_state()
 
     def tick_database(self):
@@ -508,6 +575,20 @@ class Supervisor:
         else:
             self.say(f"The {found[0]} database settings changed: restarting the services.")
             self.database, self.restart_requested = found, True
+
+    def tick_chrome_update(self, now):
+        """Chrome's updater replaces the app under a running Chrome, which carries on with the old version and shows an "Update"
+        button nobody here will press. So it restarts on the new one at the first moment no application is running: the app
+        reconnects by itself on its next application. While applications run it waits, because an old Chrome costs nothing and
+        a restart costs them their tabs. An unknown count (`active` None) is not a quiet moment."""
+        if self.active != 0 or self.stop_reason:
+            return
+        for child in self.children:
+            if child.state == "up" and child.proc and not child.stopping and child.version:
+                found = chrome_version(child.binary)
+                if found and found != child.version:
+                    self.say(f"Chrome was updated to {found}: restarting the {child.name} Chrome on it, with nothing running.")
+                    child.request_stop(now=now)
 
     def tick_backup(self):
         """A copy of the database once a day (backups.py), in its own low-priority process so this loop keeps watching."""

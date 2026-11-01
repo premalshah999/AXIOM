@@ -170,6 +170,9 @@ export function plainReason(text?: string | null) {
   if (!s) return "";
   const check = s.match(/Eligibility check:\s*(\w+)/);
   if (/^Explicit hiring restriction/i.test(s) && check) return RESTRICTIONS[check[1]!] || "The posting has a hiring restriction you do not meet.";
+  // The engine's notes about its own browser name source files and internal steps (vocabulary.py says the same).
+  if (/^(Browser control failed|Browser observation stopped)/i.test(s)) return "The browser stopped responding on this page.";
+  if (/^(Open the ApplyPilot Chrome|The local Chrome debugging|Chrome worker tab)/i.test(s)) return "AXIOM's browser wasn't ready, so this application didn't start.";
   s = s.replace(/^Owner approved:\s*/i, "").replace(/^Applicant approved:[^:]*:\s*/i, "");
   s = s.replace(/^Admitted by title \(admit_by_title setting\):\s*/i, "");
   if (/^An explicit hiring restriction conflicts with confirmed applicant fact/i.test(s)) return "The posting has a hiring restriction you do not meet.";

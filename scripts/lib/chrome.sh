@@ -25,18 +25,40 @@ launch_chrome() {
   chrome=$(find_chrome) || { echo "error: Google Chrome was not found. Install it, or set CHROME_BIN." >&2; return 1; }
   mkdir -p "$PROFILE"
   chmod 700 "$PROFILE" 2>/dev/null || true
+  # Chrome asks macOS for its "Chrome Safe Storage" key, and that request can put a system dialog on the person's screen, in
+  # front of everything, that outlives this Chrome: "A keychain cannot be found to store "Chrome"" with Cancel and Reset To
+  # Defaults. Someone clicked that away 42 times on 2026-11-01. Nothing here needs the macOS keychain, so:
+  # a profile Chrome has never opened has nothing encrypted with the real key, and stays off the keychain for good (the
+  # marker: a later start has to read what this one wrote); and a HOME with no login keychain cannot use the real key anyway.
+  # A profile already on the real key keeps it, because switching would make Chrome discard its saved sign-ins.
+  [ -e "$PROFILE/Local State" ] || : >"$PROFILE/.no-keychain"
+  keychain=""
+  if [ -e "$PROFILE/.no-keychain" ]; then
+    keychain="--use-mock-keychain"
+  elif [ "$(uname -s)" = "Darwin" ] && [ ! -e "$HOME/Library/Keychains/login.keychain-db" ] && [ ! -e "$HOME/Library/Keychains/login.keychain" ]; then
+    keychain="--use-mock-keychain"
+  fi
   # These flags mirror `jobpilot browser` / `jobpilot twin-browser` in jobpilot/cli.py. The debugging port is bound to
   # this computer only (127.0.0.1); Docker reaches it as host.docker.internal.
+  # Nobody is meant to touch this Chrome, so nothing in it may wait for a person, and none of these three reach a page:
+  # --hide-crash-restore-bubble: "Restore pages? Chrome didn't shut down correctly" after a hard kill or a power cut.
+  # --noerrdialogs: "Your preferences file is corrupt" and "Something went wrong when opening your profile", which block
+  #   Chrome, debugging port included, until someone presses OK. Chrome carries on without the damaged file.
+  # --deny-permission-prompts: a site's notification or camera request gets a no instead of a bubble nobody answers.
   set -- "$chrome" \
     "--remote-debugging-port=$PORT" \
     "--remote-debugging-address=127.0.0.1" \
     "--user-data-dir=$PROFILE" \
     --no-first-run \
     --no-default-browser-check \
+    --hide-crash-restore-bubble \
+    --noerrdialogs \
+    --deny-permission-prompts \
     --disable-background-timer-throttling \
     --disable-renderer-backgrounding \
     --disable-backgrounding-occluded-windows \
     --renderer-process-limit="${RENDERER_LIMIT:-8}" \
+    ${keychain} \
     ${EXTRA_FLAGS}
   if [ "${DRY_RUN:-0}" = "1" ]; then
     printf '%s\n' "$@"

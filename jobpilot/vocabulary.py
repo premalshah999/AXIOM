@@ -72,9 +72,19 @@ SENTENCES = {
 _LABEL = re.compile(r"^(?:Recovery stopped|Not submitted|Owner approved|Applicant approved[^:]*):\s*", re.I)
 
 
+# The engine's notes about its own browser, which name source files and internal steps. Runs keep them; a person reads these.
+_BROWSER_TROUBLE = (
+    (re.compile(r"^(?:Browser control failed|Browser observation stopped)", re.I), "The browser stopped responding on this page."),
+    (re.compile(r"^(?:Open the ApplyPilot Chrome|The local Chrome debugging|Chrome worker tab)", re.I), "AXIOM's browser wasn't ready, so this application didn't start."),
+)
+
+
 def plain_sentence(reason, limit=150):
     """One plain sentence from a stored reason: the first clause, cut at a colon-led detail, never over `limit`."""
     text = _LABEL.sub("", (reason or "").strip())
+    for note, sentence in _BROWSER_TROUBLE:
+        if note.search(text):
+            return sentence
     text = re.split(r"(?<=[.!?])\s|;\s|\s\|\s", text, maxsplit=1)[0].strip()
     if not text:
         return ""

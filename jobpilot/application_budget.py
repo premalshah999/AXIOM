@@ -31,6 +31,7 @@ NOTHING_SENT_STATES = {"timed_out", "waiting_browser"}
 # The worker Chrome could not open a page (browser.BrowserUnavailable). Three runs ended "The local Chrome debugging
 # endpoint could not be reached" (2026-10-11) and were counted as starts because only the other two texts were listed.
 BROWSER_OUTAGE = (
+    "AXIOM's browser wasn't ready",  # browser.BROWSER_NOT_READY; the three below are what runs before 2026-11-01 stored.
     "Open the ApplyPilot Chrome window",
     "The local Chrome debugging endpoint could not be reached",
     # "... at attach_target (TimeoutError). No employer form was opened." (Michelin, HeyGen 2026-10-19)
