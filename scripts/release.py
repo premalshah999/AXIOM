@@ -396,8 +396,9 @@ class Release:
         if back:
             self.restore_hold(self.app)
         check = self.app.command("smoke", "--no-fill", timeout=120) if back else None
-        self.say(f"previous build restored ({'healthy' if check and check.returncode == 0 else 'NOT HEALTHY: look at it now'}); "
-                 f"the failed build is at {self.failed_copy}")
+        # Status 2 is argparse's: a previous build older than `axiom smoke` came up, and cannot say more.
+        word = "healthy" if check and check.returncode == 0 else "up, too old to check itself" if check and check.returncode == 2 else "NOT HEALTHY: look at it now"
+        self.say(f"previous build restored ({word}); the failed build is at {self.failed_copy}")
 
     def report_runs(self):
         """What the release did to applications, from the database's own record."""
