@@ -38,7 +38,11 @@ async def test_a_picker_whose_format_has_a_day_is_typed_as_a_full_date_and_submi
     await page.route("https://jobs.example.test/apply", accept)
     await page.set_content(PAGE)
     profile = Profile.model_validate(
-        {"education": [{"school": "State University", "degree": "Master of Science", "end": "2026-05"}]}
+        {
+            "education": [{"school": "State University", "degree": "Master of Science", "end": "2026-05"}],
+            # The owner's rule for a month-only history date on a form that needs a day (without it the question is asked).
+            "answer_rules": {"history_day": "first"},
+        }
     )
     resolver = Resolver(profile, service.db, service.config, job={"ats": "jazzhr", "url": "https://example.test/job"})
     form = FormSession(page, resolver, tmp_path / "unused.pdf", lambda *a: None)
