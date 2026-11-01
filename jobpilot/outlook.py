@@ -14,6 +14,7 @@ rules.
 A retry that is only waiting for its time (a back-off, a busy worker or employer) is still coming, so it is "applying".
 """
 
+import threading
 import time
 
 from sqlalchemy import func, select
@@ -28,6 +29,7 @@ RESUMED = ("waiting_browser", "timed_out")
 # created, started or ended, or a setting was added), so a poll is one cheap signature read (2026-11-01, /api/jobs 5-20 s).
 GIVEN_UP_SECONDS = 60  # as long as startable.TTL; only the clock moves a deadline in that time
 _kept = {}
+_computing = threading.Lock()
 
 
 def _signature(session):
@@ -43,12 +45,19 @@ def given_up(session, only=None):
         return _given_up(session, only)
     key = str(session.get_bind().url)
     signature = _signature(session)
-    kept = _kept.get(key)
-    if kept and kept[0] == signature and time.monotonic() - kept[1] < GIVEN_UP_SECONDS:
-        return set(kept[2])
-    found = _given_up(session, None)
-    _kept[key] = (signature, time.monotonic(), frozenset(found))
-    return found
+
+    def fresh():
+        kept = _kept.get(key)
+        return set(kept[2]) if kept and kept[0] == signature and time.monotonic() - kept[1] < GIVEN_UP_SECONDS else None
+
+    if (found := fresh()) is not None:
+        return found
+    with _computing:  # Eight requests arriving together compute it once, not eight times (8 at a time: p95 4.7 s)
+        if (found := fresh()) is not None:
+            return found
+        found = _given_up(session, None)
+        _kept[key] = (signature, time.monotonic(), frozenset(found))
+        return found
 
 
 def _given_up(session, only):
