@@ -55,6 +55,6 @@ def test_the_oauth_callback_is_public_because_the_browser_returns_from_google_wi
     assert answer.status_code == 303 and answer.headers["location"].endswith("/?gmail=connection_failed")
 
 
-def test_the_inbox_check_needs_the_env_mailbox(client):
+def test_the_inbox_check_needs_a_connected_mailbox(client):
     answer = client.post("/api/inbox/check", json={})
-    assert answer.status_code == 400 and "GMAIL_ADDRESS" in answer.json()["detail"]
+    assert answer.status_code == 400 and "Connect your Gmail" in answer.json()["detail"]
