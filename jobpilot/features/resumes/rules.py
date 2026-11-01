@@ -71,7 +71,10 @@ def doc_plain(doc: ResumeDoc) -> str:
 
 
 def draft_leaks(text: str, drafts: Iterable) -> list[str]:
-    """Titles of unconfirmed drafts whose title or any bullet appears in this text. A draft is {"title", "bullets", "confirmed"} or the same as attributes."""
+    """THE GUARD: no draft a mode marked unconfirmed may be in a resume that's approved or sent. Every check calls this one function (check_rules, choice.send_problem, choice.approve).
+
+    Returns the titles of unconfirmed drafts whose title or any bullet appears in this text. A draft is {"title", "bullets", "confirmed"} or the same as attributes.
+    """
     flat = squash(text)
     leaks = []
     for d in drafts or []:
