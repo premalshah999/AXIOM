@@ -991,6 +991,16 @@ async def click_option(frame, option, owner=None):
         selected = next((o for o in matches if o["id"] == option["id"]), None)
         if selected is None and len(matches) == 1:
             selected = matches[0]
+        if selected is None and owner is not None and not attempt and not current:
+            # The menu closed between reading its options and clicking one (ALTEN's react-select closes on blur, 2026-11-01): the
+            # same words are offered when it opens again, with new elements. Open it once more and look for the same choice.
+            try:
+                if not await owned_picker_open(owner) and await owner.evaluate("e => e.getAttribute('role') === 'combobox'"):
+                    await open_combobox(owner)
+                    await asyncio.sleep(0.15)
+                    continue
+            except Exception:
+                pass  # An owner that cannot be reopened is the stale choice it was.
         if selected is None:
             raise ValueError("The observed option is no longer uniquely available")
         try:

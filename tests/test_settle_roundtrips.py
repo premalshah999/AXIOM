@@ -13,11 +13,13 @@ import time
 from types import SimpleNamespace
 
 from jobpilot.forms import FormSession
+from jobpilot.page_clock import PageClock
 from support_roundtrips import roundtrips
 
 
 def form_for(page, network=None):
     form = object.__new__(FormSession)
+    form.clock = PageClock()  # __init__ is skipped; settle is timed on it
     form.network = network
 
     async def frames():
