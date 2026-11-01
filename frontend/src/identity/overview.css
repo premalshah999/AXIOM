@@ -546,6 +546,9 @@ button.ov-who:hover b {
 .ov-q-text small {
   color: var(--ink-3);
 }
+.ov-held .ov-q-text p {
+  display: block;
+}
 .ov-ok {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr) auto 56px;

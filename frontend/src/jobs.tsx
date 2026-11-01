@@ -1,3 +1,4 @@
+import { HeldEmployers } from "./heldemployers";
 import { Briefcase, Plus, SearchX } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { api } from "./api";
@@ -51,6 +52,7 @@ export function JobsView() {
         </Button>
       </TopActions>
       <RouteTabs view="jobs" tabs={counted} label="Jobs" current={shown} />
+      {shown === "discovered" && <HeldEmployers />}
       {shown === "discovered" ? <DiscoveredJobs /> : shown === OVER ? <OverLimitJobs /> : <WordList word={WORD_OF_TAB[shown] ?? "applying"} />}
     </div>
   );

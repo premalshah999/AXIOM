@@ -10,6 +10,7 @@ import { confirmedToday, panelState, type PanelState } from "./identity/state";
 import { progressFrom, progressOf } from "./identity/stages";
 import "./identity/overview.css";
 import { appliedState, evidenceLabel, STATES, type JobRow } from "./model";
+import { HeldEmployers } from "./heldemployers";
 import { OPEN_JOB_LINK } from "./jobintake";
 import { groupQuestions, QuestionCard, type QuestionGroup } from "./questions";
 import type { ApplicationWorkers, MailStatus, RuntimeHealth, Snapshot, Startable, Success } from "./types";
@@ -54,6 +55,7 @@ export function BatchView() {
       <Live work={work} checking={!health.data && !work.known} />
       <div className="ov-columns">
         <div className="ov-column">
+          <HeldEmployers />
           <Questions />
           <Recent applications={applications} />
         </div>
