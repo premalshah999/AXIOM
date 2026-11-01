@@ -2661,6 +2661,7 @@ class Adapter:
         ]
         if others:
             answers = await self.form.resolver.resolve(others)
+            missing = []
             for a in answers:
                 f = self.form.fields.get(a.field_id)
                 if not f:
@@ -2671,7 +2672,19 @@ class Adapter:
                     except Exception:
                         pass
                 elif f["required"]:
-                    return self.defer("The account form needs an answer", [self.review_for(f, a.reason)])
+                    missing.append((f, a.reason))
+            if missing:
+                # Every unanswered required field goes to the owner at once, each with its type, its history row and
+                # its section: the first alone sent City National's owner one bare "Employer Phone Number" per run,
+                # five times, with no row named (2026-10-31). The same pending shape as the form's own questions.
+                first = len(self.form.pending)
+                for f, why in missing:
+                    self.form._pending(f, why)
+                try:
+                    await self.form.enrich_pending()
+                except Exception:
+                    pass  # The questions go with what the field itself says.
+                return self.defer("The account form needs an answer", list(self.form.pending[first:]))
         for f in obs["fields"]:
             if self.is_login_field(f):
                 await self.form.locator(f["id"]).fill(self.login_value(f, credentials), timeout=4000)

@@ -190,11 +190,12 @@ class ReviewsMixin:
                 raise ValueError("That question is already answered.")
             context = review.context or {}
             question_kind = oq.kind(review.question, review.options, context, review.reason)
-            offered = [text for _, text in oq.choices(review.options)]
+            shown = oq.tick_options(review.options, context)
+            offered = [text for _, text in oq.choices(shown)]
             if (
                 question_kind == "choice"
                 and answer not in offered
-                and answer not in review.options
+                and answer not in shown
                 and not oq.free_text_allowed(review.options, context)
             ):
                 raise ValueError("Choose one of the offered answers")
@@ -279,7 +280,9 @@ class ReviewsMixin:
                             # that row's date (4fe4eac6, run 6d2635b1, 2026-10). An answer with no row names no row, and
                             # a bare date caption is never carried to another form's field.
                             continue
-                        fits = answer in other.options or oq.free_text_allowed(other.options, other.context)
+                        fits = answer in oq.tick_options(other.options, other.context) or oq.free_text_allowed(
+                    other.options, other.context
+                )
                         if fits and (
                             scope == "personal" or employer.company.casefold() == job.company.casefold()
                         ):
@@ -497,12 +500,12 @@ class ReviewsMixin:
                     "id": rid,
                     "label": oq.tidy(question),
                     "type": context.get("type") or ("select" if oq.choices(options) else "text"),
-                    "options": options,
+                    "options": oq.tick_options(options, context),
                     "required": True,
                     "section": context.get("section", ""),
                     "group": context.get("group", ""),
                     "hint": context.get("hint", ""),
-                    "widget": context.get("widget", ""),
+                    "widget": context.get("widget", "") or ("date-text" if oq.DATE_IN_TEXT.search(question) else ""),
                     "date_format": context.get("date_format", ""),
                     "slot": context.get("slot", 0),
                     "value": "",
