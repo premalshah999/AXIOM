@@ -160,14 +160,14 @@ async def test_a_click_whose_form_post_has_not_answered_stays_uncertain(page, se
 
 
 async def test_a_click_that_landed_in_a_control_inside_an_iframe_stays_uncertain(page, service, tmp_path):
-    inner = (HITS + '<button id="go" type="button" onclick="const t=Date.now();while(Date.now()-t<1500);">'
+    inner = (HITS + '<button id="go" type="button" onclick="const t=Date.now();while(Date.now()-t<3500);">'
              "Submit application</button>").replace('"', "&quot;")
     await serve(page, f'<iframe srcdoc="{inner}" style="width:600px;height:300px"></iframe>')
     await page.wait_for_timeout(100)
     form = await session(page, service, tmp_path)
     engine, control = engine_on(page, form), only_control(form)
     watch = await engine.watch_commit_click(control["id"])
-    await timed_out_click(form, control, timeout=300)
+    await timed_out_click(form, control, timeout=1500)
     assert await engine.commit_click_undelivered(watch) is False
 
 
