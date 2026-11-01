@@ -35,7 +35,7 @@ from mail_formats import KINDS, ME, PLATFORMS, deliver, fresh_code
 from test_mail_fresh_install import link_for, onboard
 
 pytestmark = [pytest.mark.browser, pytest.mark.integration]
-RUN_SECONDS = 120
+RUN_SECONDS = float(os.environ.get("MAILFRESH_RUN_SECONDS", "120"))
 # A real employer's mail takes seconds: longer than the three seconds a run waits in the browser for a link, so the run parks,
 # the mail matches, and the run comes back. That is the path real link and reset mail takes.
 DELAY = float(os.environ.get("MAILFRESH_DELAY", "8"))

@@ -181,7 +181,9 @@ class RulesMixin:
                 return None
             mailbox_id = box.id
         url = urlsplit(job["url"])
-        prefix = "/" + url.path.strip("/").split("/")[0] if job["ats"] == "greenhouse" else "/"
+        # One host, every employer, the first path segment names which: each gets its own rule, so one employer's open window
+        # does not read as this employer's own sender being busy (challenges.shared_sender_free).
+        prefix = "/" + url.path.strip("/").split("/")[0] if job["ats"] in {"greenhouse", "lever", "ashby", "workable"} else "/"
         # An employer's own career site mails from its own domain. Intuit (2026-10-26) refused the saved password, and
         # with no sender rule its reset was never requested ("Connect Gmail and an email rule for this employer").
         from ..accounts.tenants import registrable
