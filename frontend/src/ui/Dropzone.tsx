@@ -27,6 +27,7 @@ export function Dropzone({
   label,
   disabled,
   autoFocus,
+  refusal,
 }: {
   file: File | null;
   onFile: (file: File | null) => void;
@@ -39,6 +40,8 @@ export function Dropzone({
   label: string;
   disabled?: boolean;
   autoFocus?: boolean;
+  /** What to say about a file of the wrong kind, in place of the general sentence. */
+  refusal?: (file: File) => string;
 }) {
   const [over, setOver] = useState(false);
   const [refused, setRefused] = useState("");
@@ -46,7 +49,7 @@ export function Dropzone({
   const take = (f: File | null | undefined) => {
     if (!f) return;
     if (!accepted(f, accept)) {
-      setRefused(`${f.name} isn't a file this can take.`);
+      setRefused(refusal ? refusal(f) : `${f.name} isn't a file this can take.`);
       return;
     }
     setRefused("");

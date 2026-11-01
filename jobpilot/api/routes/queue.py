@@ -17,7 +17,7 @@ from sqlalchemy import select
 from ...admission import QueueBlocked
 from ...db import Job, Run, Setting
 from ...discovery import add_job, posting_api_text
-from ...link_intake import prepare
+from ...link_intake import URL_REFUSALS, prepare
 from ...network import public_url
 from ...owner_apply import KEY, apply, restore
 from ...schemas import JobInput
@@ -118,7 +118,7 @@ def router(service) -> APIRouter:
                 results.append({"url": url, "state": "refused", "message": str(exc)})
             except (ValueError, HTTPException) as exc:
                 detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
-                results.append({"url": url, "state": "refused", "message": str(detail)[:300]})
+                results.append({"url": url, "state": "refused", "message": URL_REFUSALS.get(str(detail), str(detail))[:300]})
         return {"results": results}
 
     @r.delete("/api/queue/{job_id}")

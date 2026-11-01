@@ -555,6 +555,13 @@ static NSString *const SignedOutScript =
 }
 
 - (void)userContentController:(WKUserContentController *)controller didReceiveScriptMessage:(WKScriptMessage *)message {
+  // The Dock shows how many questions wait: with the window closed and no Telegram, nothing else says one has arrived.
+  if (message.frameInfo.isMainFrame && [message.body isKindOfClass:NSString.class] && [message.body hasPrefix:@"needs:"] &&
+      [self sameOrigin:message.frameInfo.request.URL]) {
+    NSInteger waiting = [[message.body substringFromIndex:6] integerValue];
+    NSApp.dockTile.badgeLabel = waiting > 0 ? [NSString stringWithFormat:@"%ld", (long)waiting] : nil;
+    return;
+  }
   if (!message.frameInfo.isMainFrame || ![message.body isEqual:@"signed-out"] || !self.base) return;
   if (![self sameOrigin:message.frameInfo.request.URL]) return;
   if (self.signingIn || (self.lastSignIn && -self.lastSignIn.timeIntervalSinceNow < 10)) return;  // Never a reload loop.

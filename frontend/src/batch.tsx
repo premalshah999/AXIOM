@@ -173,8 +173,8 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
     paused: ["info", "Paused", "No new applications start. Progress is kept."],
     complete: ["info", "Target reached"],
     running: ["info", n ? `Applying to ${plural(n, "job")} right now` : ready.data?.startable === 0 ? "Nothing to run right now" : "Applying, between jobs"],
-    held: ["info", "Held", (rt.intake_reason || "New applications are not starting").replace(/\.$/, "") + "."],
-    none: ["info", "No batch running", work.limit ? "Start one to apply until a target you choose." : undefined],
+    held: ["info", "Waiting to start", (rt.intake_reason || "New applications are not starting").replace(/\.$/, "") + "."],
+    none: ["info", "Not applying", work.limit ? "Press Start to apply until a target you choose." : undefined],
   };
   const [tone, sentence, sub] = said[panel];
 
@@ -186,7 +186,7 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
         await refresh();
         return result;
       },
-      active ? "Batch resumed. Existing progress is kept." : "Batch started. Discovery, ranking and applications continue without this page open.",
+      active ? "Applying resumed. Your progress is kept." : "Applying started. Finding jobs and applying continue without this page open.",
     );
   const pause = () =>
     run(
@@ -269,7 +269,7 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
             {sub && <p className="ov-sub">{sub}</p>}
           </div>
           {showProgress && (
-            <div className="ov-progress" title={rt.confirmed_by_owner ? `${rt.confirmed_by_batch ?? 0} by the batch, ${rt.confirmed_by_owner} you started` : undefined}>
+            <div className="ov-progress" title={rt.confirmed_by_owner ? `${rt.confirmed_by_batch ?? 0} on their own, ${rt.confirmed_by_owner} you started` : undefined}>
               <p>
                 <button type="button" className="ax-quiet-link" onClick={() => go({ view: "ledger" })}>
                   <b className="mono">{confirmed.toLocaleString()}</b> of <span className="mono">{target.toLocaleString()}</span> confirmed
@@ -334,8 +334,8 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
             </>
           }
         >
-          You chose to review each application first. Starting this turns that off: AXIOM will find jobs and send applications once every required
-          answer is verified, without asking. To keep reviewing, press Not yet and pick jobs yourself on the Jobs page.
+          You chose not to send yet. Starting this turns sending on: AXIOM will find jobs and send each application once every required answer is
+          checked, without asking you first. To keep control, press Not yet and pick jobs yourself on the Jobs page.
         </Dialog>
       )}
       {workers && noKey && !active && (
@@ -352,7 +352,7 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
       )}
       <ProviderNotice models={models} go={go} />
       {!workers && (
-        <Notice tone="warn">Applying is disabled in this installation's configuration, so a batch can't run. Enable workers on the server and restart.</Notice>
+        <Notice tone="warn">Applying is disabled in this installation's configuration, so applying can't run. Enable workers on the server and restart.</Notice>
       )}
       {!active && noResume && workers && (
         <Notice
@@ -459,9 +459,9 @@ function Live({ work, checking }: { work: WorkingState; checking: boolean }) {
     lost: "Can't see what's running until the connection is back.",
     restart: "Nothing new starts until automation restarts.",
     paused: "Nothing is running. Resume to start the next application.",
-    complete: "Nothing is running. The batch reached its target.",
+    complete: "Nothing is running. AXIOM reached your target.",
     running: "Between applications.",
-    held: "Nothing is running while the batch is held.",
+    held: "Nothing is running. New applications are waiting to start.",
     none: "Nothing is running. Applications appear here with the step they're on.",
   };
 
@@ -482,8 +482,8 @@ function Live({ work, checking }: { work: WorkingState; checking: boolean }) {
   const foot = [
     tally(waiting.queued + waiting.starting, "queued", { tab: "pipeline", filter: "active" }),
     tally(waiting.repairing, "being fixed", { tab: "pipeline", filter: "repair" }),
-    active ? tally(rt.blocked ?? 0, "blocked in this batch", { tab: "pipeline", filter: "repair" }) : null,
-    active ? tally(rt.failed ?? 0, "not sent in this batch", { tab: "pipeline", filter: "repair" }) : null,
+    active ? tally(rt.blocked ?? 0, "blocked since you pressed Start", { tab: "pipeline", filter: "repair" }) : null,
+    active ? tally(rt.failed ?? 0, "not sent since you pressed Start", { tab: "pipeline", filter: "repair" }) : null,
   ].filter(Boolean);
   return (
     <LiveWork
@@ -498,7 +498,7 @@ function Live({ work, checking }: { work: WorkingState; checking: boolean }) {
   );
 }
 
-/** Why nothing is running while a batch is on: how many Ready jobs can start, or what holds the rest, each number opening its list. */
+/** Why nothing is running while applying is on: how many Ready jobs can start, or what holds the rest, each number opening its list. */
 function Idle({ said, fallback, go }: { said?: Startable | null; fallback: string; go: (route: { view: "jobs"; tab: string; filter: string }) => void }) {
   if (!said) return <>{fallback}</>;
   const open = (filter: string) => go({ view: "jobs", tab: "discovered", filter });
@@ -511,7 +511,7 @@ function Idle({ said, fallback, go }: { said?: Startable | null; fallback: strin
         </button>
         {said.held.length > 0 && (
           <>
-            , <button type="button" className="ov-foot-link" onClick={() => open("held")}>{(said.ready - said.startable).toLocaleString()} held</button>
+            , <button type="button" className="ov-foot-link" onClick={() => open("held")}>{(said.ready - said.startable).toLocaleString()} waiting</button>
           </>
         )}
         .
@@ -536,7 +536,7 @@ function Idle({ said, fallback, go }: { said?: Startable | null; fallback: strin
         <>
           {" "}
           <button type="button" className="ov-foot-link" onClick={() => open("held")}>
-            All {(said.ready - said.startable).toLocaleString()} held
+            All {(said.ready - said.startable).toLocaleString()} waiting
           </button>
         </>
       )}
@@ -672,14 +672,14 @@ function FirstRun({ mail }: { mail: MailStatus | null }) {
     {
       done: snapshot.config.mimo,
       title: "AI key",
-      detail: snapshot.config.mimo ? `${snapshot.config.model_provider ?? "The model provider"} key found` : "Reads job pages and writes answers. Paste your key in Settings › Connections.",
+      detail: snapshot.config.mimo ? `${snapshot.config.model_provider ?? "The model provider"} key is saved` : "Reads job pages and writes answers. Paste your key in Settings › Connections.",
       action: "Open settings",
       onClick: () => go({ view: "settings", tab: "connections" }),
     },
     {
       done: email,
       title: "Email for verification codes",
-      detail: email ? "Codes and confirmation emails are read automatically." : "Workday, Oracle and iCIMS email a code before you can apply. Connect the inbox you apply with.",
+      detail: email ? "Codes and confirmation emails are read automatically." : "Many employers email a code before you can apply. Connect the inbox you apply with.",
       action: email ? "Settings" : "Connect email",
       onClick: () => go({ view: "settings", tab: "email" }),
     },
@@ -692,8 +692,8 @@ function FirstRun({ mail }: { mail: MailStatus | null }) {
     },
     {
       done: submitting,
-      title: "Automatic submission",
-      detail: submitting ? "Applications send once every required answer is checked." : "Off: applications fill every page and stop before the final send.",
+      title: "Send applications automatically",
+      detail: submitting ? "Applications send once every required answer is checked." : "Off: nothing is sent to employers until you turn this on.",
       action: submitting ? "Settings" : pending === "submit-on" ? "Turning on…" : "Turn on",
       onClick: submitting
         ? () => go({ view: "settings", tab: "system" })
@@ -712,7 +712,7 @@ function FirstRun({ mail }: { mail: MailStatus | null }) {
     {
       done: false,
       title: "First application",
-      detail: "Add a job link, pick jobs in Discovered, or start a batch above.",
+      detail: "Add a job link, pick jobs in Discovered, or press Start above.",
       action: "Add a job",
       onClick: () => window.dispatchEvent(new Event(OPEN_JOB_LINK)),
     },

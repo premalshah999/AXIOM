@@ -1,5 +1,10 @@
 // Plain formatting helpers shared by every page: no markup, no styles.
 export const words = (s: string) => s.replaceAll("_", " ");
+/** What to do with a file a resume box can't take: most people's resume is a Word file, and "wrong file type" helps nobody. */
+export const resumeFileRefusal = (file: File) =>
+  /\.(docx?|pages|odt|rtf|txt)$/i.test(file.name)
+    ? `AXIOM needs a PDF of your resume. Open ${file.name} and choose File, then Save As or Export, then PDF, and add that file.`
+    : `${file.name} isn't a PDF. Add your resume as a PDF.`;
 export const shortId = (id: string) => id.slice(0, 8);
 export const plural = (n: number, one: string, many = one + "s") =>
   `${n.toLocaleString()} ${n === 1 ? one : many}`;
@@ -172,6 +177,11 @@ export function plainReason(text?: string | null) {
   if (/^Explicit hiring restriction/i.test(s) && check) return RESTRICTIONS[check[1]!] || "The posting has a hiring restriction you do not meet.";
   s = s.replace(/^Owner approved:\s*/i, "").replace(/^Applicant approved:[^:]*:\s*/i, "");
   s = s.replace(/^Admitted by title \(admit_by_title setting\):\s*/i, "");
+  // The engine's own words for its own trouble: jobpilot/vocabulary.py _ENGINE says the same.
+  if (/\.py:\d+/.test(s)) return "AXIOM got stuck on this site's pages.";
+  if (/^Worker interrupted/i.test(s)) return "This attempt was interrupted before anything was sent.";
+  if (/^Worker error\b/i.test(s)) return "AXIOM hit a problem of its own.";
+  if (/debugging endpoint|automation connection|Chromium (?:missing|did not|exited)/i.test(s)) return "AXIOM couldn't use its browser.";
   if (/^An explicit hiring restriction conflicts with confirmed applicant fact/i.test(s)) return "The posting has a hiring restriction you do not meet.";
   return s.charAt(0).toUpperCase() + s.slice(1);
 }

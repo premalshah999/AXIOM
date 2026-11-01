@@ -2,7 +2,8 @@
 .nd {
   --surface: var(--raised);
   display: grid;
-  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  /* The question gets the room: at the smallest window the list took 380 of 590 px and the answer box fell below the fold. */
+  grid-template-columns: minmax(220px, min(38%, 380px)) minmax(0, 1fr);
   flex: 1;
   min-height: 0;
   overflow: hidden;

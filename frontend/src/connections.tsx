@@ -471,7 +471,7 @@ function ServiceCard({ c, s }: { c: Conn; s: Service }) {
           key={n}
           c={c}
           name={n}
-          hint={n === "account_email" ? "Empty: the email on your profile." : n === "telegram_user_id" ? "A number, from @userinfobot in Telegram." : undefined}
+          hint={n === "account_email" ? "Empty: the email on your profile." : n === "telegram_user_id" ? "A number. Message @userinfobot in Telegram and it replies with yours." : undefined}
         />
       ))}
       <SecretField c={c} name={s.key} />

@@ -119,18 +119,17 @@ async def create_report(service, run_id, diagnostics=None):
         }
     explanation = Explanation(
         summary=evidence["reason"],
-        likely_cause="The recorded evidence does not establish a more specific cause.",
-        next_steps=["Check the listed fields and browser trace before retrying."],
+        # Nothing more is known than the reason itself: say nothing, rather than a sentence that reads like a finding.
+        likely_cause="",
+        next_steps=[],
     )
     if evidence["state"] == "submission_unknown":
-        explanation.next_steps = ["Reconcile the employer portal and confirmation email before any retry."]
+        explanation.next_steps = ["Look in your email for the employer's confirmation. If it's there, press Confirm as submitted."]
     elif evidence["recovery_cause"] == "provider_unavailable":
-        explanation.likely_cause = "The selected answer provider could not complete a required request."
-        explanation.next_steps = ["Check the selected model's availability before resuming the saved draft."]
+        explanation.likely_cause = "The AI service didn't answer."
+        explanation.next_steps = ["AXIOM tries again by itself. If this keeps happening, check your credit with the AI service."]
     elif evidence["automatic_recovery"].get("status") == "scheduled":
-        explanation.next_steps = [
-            "The app will retry this saved draft automatically after its backoff; other jobs continue."
-        ]
+        explanation.next_steps = ["AXIOM tries this again by itself. Nothing is needed from you, and other jobs carry on."]
     with db.session() as s:
         updated = s.get(Run, run_id)
         report_cost = max(0, updated.cost - evidence["application_cost_usd"]) if updated else 0

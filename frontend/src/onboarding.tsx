@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, Check as Tick, FileText, Mail, SlidersHorizontal
 import { api, ApiError } from "./api";
 import { routeUrl } from "./context";
 import { Wordmark } from "./shell/Brand";
+import { resumeFileRefusal } from "./format";
 import { SwitchRow } from "./setup-kit";
 import { YesNo } from "./qform";
 import { Button, Dropzone, ErrorLine, External, Input, Loading, Monogram, Pill, Segmented, Select } from "./ui/index";
@@ -37,7 +38,7 @@ const STEPS: Step[] = [
     id: "connections",
     name: "Connect",
     title: "Connect AI and Gmail",
-    lead: "AXIOM needs an AI key to read job pages and write answers, and your Gmail to read the codes employers email. Both stay on this Mac.",
+    lead: "AXIOM needs an AI key to read job pages and write answers, and your Gmail to read the codes employers email. Both stay on this Mac. This is the hardest step, and you only do it once.",
     // The AI key comes before the resume because reading the resume is the first thing that uses it. It shares the welcome's saved
     // step, so a guide closed here reopens at the resume.
     server: "resume",
@@ -73,7 +74,7 @@ const STEPS: Step[] = [
     id: "preferences",
     name: "Search",
     title: "What you're looking for",
-    lead: "Discovery searches for these. You can change them any time.",
+    lead: "AXIOM looks for these jobs. You can change them any time.",
     server: "preferences",
     minutes: 1,
   },
@@ -81,7 +82,7 @@ const STEPS: Step[] = [
     id: "automation",
     name: "Automation",
     title: "How AXIOM works for you",
-    lead: "What it may do without asking. Each of these can be changed later in Settings.",
+    lead: "What it may do without asking. You can change any of this later in Settings.",
     server: "permissions",
     minutes: 0.5,
   },
@@ -89,7 +90,7 @@ const STEPS: Step[] = [
     id: "ready",
     name: "Ready",
     title: "AXIOM is ready",
-    lead: "Your profile is saved. Open AXIOM to see your overview and start applying.",
+    lead: "Your profile is saved. Press Start on the next screen. AXIOM looks for jobs first, which can take a while, then applies one at a time. You can close this window while it works.",
     server: "review",
     minutes: 0,
   },
@@ -394,14 +395,17 @@ function stepProblem(step: StepId, d: Draft): string {
       !d.phone.trim() && "phone",
     ].filter(Boolean);
     if (missing.length) return `Add your ${missing.join(", ")}. Nearly every application requires ${missing.length > 1 ? "them" : "it"}.`;
+    // These go onto every application exactly as written, and the employer's reply goes to that address.
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email.trim())) return "That email doesn't look right. Employers send their replies there, so check it.";
+    if (d.phone.replace(/\D/g, "").length < 7) return "That phone number doesn't look right. Check it, with the area code.";
   }
-  if (step === "preferences" && !d.target_roles.length) return "Add at least one role so discovery knows what to search for.";
+  if (step === "preferences" && !d.target_roles.length) return "Add at least one role so AXIOM knows what to look for.";
   return "";
 }
 
 function mergeExtract(draft: Draft, x: Partial<Draft>): Draft {
   const next = { ...draft };
-  for (const key of ["first_name", "last_name", "phone", "location", "linkedin", "github", "website"] as const)
+  for (const key of ["first_name", "last_name", "email", "phone", "location", "linkedin", "github", "website"] as const)
     if (!String(next[key] || "").trim() && x[key]) next[key] = x[key] as string;
   if (!next.work.length && x.work?.length) next.work = x.work as WorkEntry[];
   if (!next.education.length && x.education?.length) next.education = x.education as EducationEntry[];
@@ -430,7 +434,7 @@ type Summary = { id: string; title: string; answered: number; total: number }[];
 
 /** "About 4 min left": the minutes of every step from this one to the last. */
 function timeLeft(at: number): string {
-  if (at <= 0) return "About " + Math.round(WORK.reduce((n, s) => n + s.minutes, 0)) + " minutes";
+  if (at <= 0) return "About " + Math.ceil(WORK.reduce((n, s) => n + s.minutes, 0)) + " minutes";
   const left = STEPS.slice(at, -1).reduce((n, s) => n + s.minutes, 0);
   return left <= 0.5 ? "Almost done" : `About ${Math.ceil(left)} min left`;
 }
@@ -480,6 +484,12 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
       .catch((e) => setError((e as Error).message));
     refreshLinked();
   }, [refreshLinked]);
+
+  // The Gmail connected on the first step is the likeliest contact email: don't make anyone type it twice. It stays editable.
+  const connectedEmail = linked.mailboxes?.[0]?.email;
+  useEffect(() => {
+    if (connectedEmail) setDraft((d) => (d && !d.email.trim() ? { ...d, email: connectedEmail } : d));
+  }, [connectedEmail]);
 
   const go = useCallback((index: number) => {
     setError("");
@@ -590,7 +600,7 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
   const lines = last ? readyLines(draft, submit?.value ?? null, linked) : [];
   const unfinished = lines.filter((l) => !l.ok && !l.optional).length;
   const title = current.id === "welcome" && hello ? `Welcome, ${hello}` : last && unfinished ? "Almost ready" : current.title;
-  const lead = last && unfinished ? "Your profile is saved. A few things are still open: finish them here, or any time later." : current.lead;
+  const lead = last && unfinished ? "Your profile is saved. You can finish the rest here, or any time later, then press Start on the next screen." : current.lead;
   const stepNo = at - FIRST_WORK + 1;
   // The resume step moves on once something was read from a resume; "I'll type it instead" is the way past it without one.
   const waiting = current.id === "resume" && !draft.work.length && !draft.education.length && !draft.skills.length;
@@ -605,8 +615,9 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
           <Button
             variant="ghost"
             size="sm"
-            onClick={onExit}
-            title="Steps you saved are kept. Continue any time from the banner or Settings › Your account."
+            // What is typed on this step is kept too: a dozen fields lost to "Finish later" is a reason to leave for good.
+            onClick={() => (first ? onExit() : persist(at, false, onExit))}
+            title="What you've entered is kept. Continue any time from the banner or Settings › Your account."
           >
             Finish later
           </Button>
@@ -787,6 +798,8 @@ function ResumeStep({
     setState("reading");
     setMessage("Reading your resume…");
     try {
+      // Applications attach the newest resume unless a job chose another; picking one here makes it that one.
+      await api(`/resumes/${encodeURIComponent(resumeId)}/prefer`, "POST").catch(() => null);
       const extracted = await api<Partial<Draft>>("/profile/extract?resume_id=" + encodeURIComponent(resumeId), "POST");
       setDraft((d) => mergeExtract(d, extracted));
       setState("done");
@@ -817,8 +830,9 @@ function ResumeStep({
     form.append("name", chosen.name.replace(/\.pdf$/i, "").slice(0, 100) || "Resume");
     form.append("roles", "");
     try {
-      const row = await api<{ id: string; name: string }>("/resumes", "POST", form);
-      setResumes((list) => [row, ...(list || [])]);
+      // ?reuse: the same file again (after a failed read, or a guide closed half way) is that resume, not a mistake.
+      const row = await api<{ id: string; name: string }>("/resumes?reuse=1", "POST", form);
+      setResumes((list) => [row, ...(list || []).filter((r) => r.id !== row.id)]);
       await read(row.id);
     } catch (e) {
       setState("error");
@@ -842,7 +856,8 @@ function ResumeStep({
         }}
         accept="application/pdf,.pdf"
         title="Add your resume"
-        hint="Drop a text-based PDF here, or click to choose. Up to 5 MB. It is attached to applications exactly as uploaded."
+        hint="Drop your resume PDF here, or click to choose. It is attached to applications exactly as uploaded."
+        refusal={resumeFileRefusal}
         label="Resume PDF"
         disabled={busy}
       />
@@ -1069,7 +1084,8 @@ function PreferencesStep({ draft, setTop, setFact }: StepProps & { setTop: SetTo
   const fromResume = draft.work
     .map((w) => (w.title || "").trim())
     .filter((t) => t && !/\b(?:intern|internship|assistant|student|volunteer|fellow)\b/i.test(t));
-  const roleSuggestions = Array.from(new Set([...fromResume, ...ROLE_SUGGESTIONS]));
+  // A marketer's resume should not be answered with "Machine Learning Engineer": the generic list is only for a resume that gave none.
+  const roleSuggestions = Array.from(new Set(fromResume.length ? fromResume : ROLE_SUGGESTIONS));
   return (
     <>
       <Section title="Roles" hint="Type a role and press Enter, or pick a suggestion.">
@@ -1317,6 +1333,17 @@ function IdentityStep({ draft, setTop, setFact }: StepProps & { setTop: SetTop; 
 // ---------- Automation: what AXIOM may do without asking ----------
 const SOURCES = ["LinkedIn", "Company website", "Indeed", "Handshake", "Glassdoor"];
 
+// What "Send them for me" allows, in the words the owner reads once, at the choice. The same words are in docs/FRIENDS.md: keep them together.
+export const CONSENT_LEAD = "By choosing this you allow AXIOM to:";
+export const CONSENT_ITEMS = [
+  "create accounts at employers, in your name",
+  "accept their terms and privacy notices in your name",
+  "answer their questions from your profile",
+  "use your own AI key and your own email to do it",
+  "submit each application without asking you first",
+];
+export const CONSENT_CLOSE = "It is on you to check that this is OK with you, and with each employer's rules. You can pause or stop sending at any time.";
+
 function AutomationStep({
   draft,
   setTop,
@@ -1327,18 +1354,18 @@ function AutomationStep({
   return (
     <>
       {submit !== null && (
-        <Section title="When an application is ready">
-          <div className="ax-ob-choices" role="radiogroup" aria-label="When an application is ready">
+        <Section title="Sending applications">
+          <div className="ax-ob-choices" role="radiogroup" aria-label="Sending applications">
             {[
               {
                 on: true,
-                title: "Send it for me",
-                line: "Applications go out once every required answer is verified.",
+                title: "Send them for me",
+                line: "AXIOM sends each application once every required answer is checked. You can pause it any time.",
               },
               {
                 on: false,
-                title: "Let me review first",
-                line: "AXIOM fills each application and stops before the final submit.",
+                title: "Don't send anything yet",
+                line: "Nothing goes to an employer. Jobs you add wait until you turn sending on in Settings.",
               },
             ].map((c) => (
               <button
@@ -1347,7 +1374,16 @@ function AutomationStep({
                 role="radio"
                 aria-checked={submit === c.on}
                 className={"ax-ob-choice" + (submit === c.on ? " is-on" : "")}
-                onClick={() => setSubmit(c.on)}
+                onClick={() => {
+                  setSubmit(c.on);
+                  // Choosing to have them sent is the consent these two switches ask for: with either off, most applications stop
+                  // half way and the choice would not do what it says. They turn on in plain sight and can be turned off here.
+                  if (c.on) {
+                    setTop("allow_account_creation", true);
+                    setTop("accept_all_application_terms", true);
+                    setTop("allow_application_consents", true);
+                  }
+                }}
               >
                 <span className="ax-ob-choice-main">
                   <strong>{c.title}</strong>
@@ -1359,19 +1395,30 @@ function AutomationStep({
               </button>
             ))}
           </div>
+          {submit === true && (
+            <div className="ax-ob-consent" role="note">
+              <p>{CONSENT_LEAD}</p>
+              <ul>
+                {CONSENT_ITEMS.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+              <p>{CONSENT_CLOSE}</p>
+            </div>
+          )}
         </Section>
       )}
       <Section title="On employer sites">
         <div className="ax-ob-switches">
           <SwitchRow
             label="Create employer accounts for me"
-            note="Recommended. Workday, Oracle and similar portals need an account per employer. AXIOM makes a strong password for each and stores it encrypted. Off: those applications stop at sign-in."
+            note="Many employers make you create an account before you can apply. AXIOM makes a strong password for each and keeps it encrypted on this Mac. Off: those applications can't go through."
             checked={draft.allow_account_creation}
             onChange={() => setTop("allow_account_creation", !draft.allow_account_creation)}
           />
           <SwitchRow
             label="Accept application terms and privacy notices"
-            note="Recommended. Most forms require it before they submit, and sign required attestations with your legal name. Off: those applications stop for you."
+            note="Most forms won't send without this. Where a form asks you to sign that your answers are true, AXIOM types your legal name. Off: those applications stop and ask you."
             checked={draft.accept_all_application_terms}
             onChange={() => {
               const v = !draft.accept_all_application_terms;
@@ -1380,7 +1427,7 @@ function AutomationStep({
             }}
           />
           <SwitchRow
-            label="Decline marketing and talent-community opt-ins"
+            label="Say no to newsletters and job alerts"
             note="Newsletters, job alerts and sharing your data for other roles are declined whenever the form allows it."
             checked={!draft.accept_required_marketing}
             onChange={() => setTop("accept_required_marketing", !draft.accept_required_marketing)}
@@ -1401,8 +1448,8 @@ function AutomationStep({
       <Section title="Finding jobs">
         <div className="ax-ob-switches">
           <SwitchRow
-            label="Apply automatically to strong matches"
-            note="AXIOM discovers jobs, ranks them against your profile, and applies without asking each time."
+            label="Look for jobs and apply on its own"
+            note="AXIOM looks for jobs that match you and applies without asking each time."
             checked={draft.autonomous}
             onChange={() => setTop("autonomous", !draft.autonomous)}
           />
@@ -1415,8 +1462,8 @@ function AutomationStep({
         </div>
         {draft.autonomous && (
           <Input
-            label={`Minimum match score: ${draft.minimum_fit}`}
-            hint="Jobs below this score are skipped."
+            label={`How close a match: ${draft.minimum_fit} out of 100`}
+            hint="Jobs that match you less than this are skipped."
             type="range"
             min={40}
             max={90}
@@ -1522,7 +1569,7 @@ function ConnectionsStep({ linked, email, refresh }: { linked: Linked; email: st
           </span>
           <span className="ax-ob-conn-main">
             <h2>AI</h2>
-            <p className="ax-hint">Reads job pages and writes your answers. It is stored encrypted on this Mac and never shown again.</p>
+            <p className="ax-hint">Reads job pages and writes your answers. Your key is kept encrypted on this Mac and never shown again.</p>
           </span>
           {model && <Pill tone={model.model_ready ? "ok" : "warn"} dot>{model.model_ready ? "Ready" : "Not connected"}</Pill>}
         </header>
@@ -1530,7 +1577,7 @@ function ConnectionsStep({ linked, email, refresh }: { linked: Linked; email: st
           <>
             <ol className="ax-ob-gmail-steps">
               <li>
-                Create a free account at <External href="https://openrouter.ai/">OpenRouter</External> and <External href="https://openrouter.ai/settings/credits">add a little credit</External>. You pay OpenRouter directly for what AXIOM uses.
+                Create a free account at <External href="https://openrouter.ai/">OpenRouter</External> and <External href="https://openrouter.ai/settings/credits">add $5 of credit</External>. That usually covers a few hundred applications. You pay OpenRouter directly, never AXIOM.
               </li>
               <li>
                 Open <External href="https://openrouter.ai/settings/keys">your keys page</External>, press Create, and copy the key.
@@ -1626,7 +1673,7 @@ function ConnectionsStep({ linked, email, refresh }: { linked: Linked; email: st
             type="email"
             autoComplete="off"
             placeholder={email || "you@gmail.com"}
-            hint="Empty: the email in your profile."
+            hint={email ? "Empty: the email in your profile." : undefined}
             value={box.email}
             onChange={(e) => setBox({ ...box, email: e.target.value })}
           />
@@ -1638,10 +1685,10 @@ function ConnectionsStep({ linked, email, refresh }: { linked: Linked; email: st
             placeholder="xxxx xxxx xxxx xxxx"
             value={box.app_password}
             onChange={(e) => setBox({ ...box, app_password: e.target.value })}
-            onKeyDown={enter(connectMail, !!box.app_password.trim())}
+            onKeyDown={enter(connectMail, !!box.app_password.trim() && !!(box.email || email).trim())}
           />
           <div>
-            <Button size="sm" loading={busy === "mail"} disabled={!box.app_password.trim()} onClick={connectMail}>
+            <Button size="sm" loading={busy === "mail"} disabled={!box.app_password.trim() || !(box.email || email).trim()} onClick={connectMail}>
               Connect Gmail
             </Button>
           </div>
@@ -1699,8 +1746,8 @@ function readyLines(draft: Draft, submit: boolean | null, linked: Linked): Line[
         submit === null
           ? "Choose in Settings."
           : submit
-            ? "Applications are sent once every required answer is verified."
-            : "AXIOM stops before the final submit so you can review each application.",
+            ? "Applications are sent once every required answer is checked."
+            : "Off. Nothing goes to an employer until you turn it on.",
       ok: true,
     },
     {
@@ -1713,8 +1760,8 @@ function readyLines(draft: Draft, submit: boolean | null, linked: Linked): Line[
     {
       id: "inbox",
       step: "connections",
-      label: "Inbox",
-      detail: linked.mailboxes?.length ? linked.mailboxes.map((b) => b.email).join(", ") : "Not connected. Verification codes can't be read yet.",
+      label: "Gmail",
+      detail: linked.mailboxes?.length ? linked.mailboxes.map((b) => b.email).join(", ") : "Not connected. Applications that email you a code will stop until it is.",
       ok: !!linked.mailboxes?.length,
       optional: true,
     },

@@ -72,9 +72,22 @@ SENTENCES = {
 _LABEL = re.compile(r"^(?:Recovery stopped|Not submitted|Owner approved|Applicant approved[^:]*):\s*", re.I)
 
 
+# The engine's own words for its own trouble. "Browser control failed at browser.py:441" reached the first-time user's screen as
+# the reason; so did "Worker error: KeyError" (read over every production reason, 2026-11-01: only these match).
+_ENGINE = (
+    (re.compile(r"\.py:\d+"), "AXIOM got stuck on this site's pages."),
+    (re.compile(r"^Worker interrupted", re.I), "This attempt was interrupted before anything was sent."),
+    (re.compile(r"^Worker error\b", re.I), "AXIOM hit a problem of its own."),
+    (re.compile(r"debugging endpoint|automation connection|Chromium (?:missing|did not|exited)", re.I), "AXIOM couldn't use its browser."),
+)
+
+
 def plain_sentence(reason, limit=150):
     """One plain sentence from a stored reason: the first clause, cut at a colon-led detail, never over `limit`."""
     text = _LABEL.sub("", (reason or "").strip())
+    for engine, words in _ENGINE:
+        if engine.search(text):
+            return words
     text = re.split(r"(?<=[.!?])\s|;\s|\s\|\s", text, maxsplit=1)[0].strip()
     if not text:
         return ""

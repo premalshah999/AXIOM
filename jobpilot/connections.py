@@ -27,8 +27,8 @@ FIELDS = {
     "openrouter_api_key": ("Model", "OpenRouter API key", True,
                            "openrouter.ai > Keys. DeepSeek V4.1 Flash 1017 served by Relace, reasoning off."),
     "typesafe_api_key": ("Model", "TypeSafe Jev key", True, "Optional. Answers multiple-choice questions first."),
-    "telegram_bot_token": ("Telegram", "Telegram bot token", True, "From @BotFather in Telegram: /newbot."),
-    "telegram_user_id": ("Telegram", "Your Telegram user ID", False, "A number, from @userinfobot in Telegram."),
+    "telegram_bot_token": ("Telegram", "Telegram bot token", True, "In Telegram, message @BotFather and send /newbot. Paste the token it gives you, then open your new bot and press Start, or it can't message you."),
+    "telegram_user_id": ("Telegram", "Your Telegram user ID", False, "A number. Message @userinfobot in Telegram and it replies with yours."),
     "twocaptcha_api_key": ("Captcha", "2Captcha API key", True, "Optional, paid per solve. 2captcha.com > Dashboard."),
     "company_logos": ("Appearance", "Show company logos", False,
                       "Finds a company's icon once, in the background, and keeps a small copy on this computer: from the company's own "
@@ -219,8 +219,22 @@ def status(config):
     return {"fields": fields, "provider": provider, "model_ready": bool(getattr(config, provider + "_api_key", ""))}
 
 
+# Who a refused key is refused by: "the service" gave someone new to this nothing to look for.
+SERVICE_NAMES = {
+    "openrouter_api_key": "OpenRouter",
+    "deepseek_api_key": "DeepSeek",
+    "mimo_api_key": "Xiaomi MiMo",
+    "openai_api_key": "OpenAI",
+    "haiku_api_key": "Anthropic",
+    "telegram_bot_token": "Telegram",
+    "vision_api_key": "The screenshot model",
+    "serper_api_key": "Serper",
+}
+
+
 async def test(config, name):
     """Check one connection against its service with the stored key: {'ok': bool, 'message': str}."""
+    service = SERVICE_NAMES.get(name, "The service")
     key = str(getattr(config, name, "") or "")
     if not key:
         return {"ok": False, "message": "Nothing is saved for this yet."}
@@ -263,7 +277,7 @@ async def test(config, name):
             else:
                 return {"ok": True, "message": "Saved."}
     except httpx.HTTPError as exc:
-        return {"ok": False, "message": f"Could not reach the service ({type(exc).__name__})."}
+        return {"ok": False, "message": f"Couldn't reach {service}. Check your internet connection and try again."}
     if response.status_code == 200 and name == "openrouter_api_key":
         # /key answers 200 for a key whose account has nothing left to spend, and the first application then fails at its first
         # model question. Said now, in words, where it can be fixed (a friend's first run: out of credit looked like "no jobs").
@@ -276,7 +290,7 @@ async def test(config, name):
     if response.status_code == 200:
         return {"ok": True, "message": "Connected."}
     if response.status_code in {401, 403}:
-        return {"ok": False, "message": "The service refused this key. Copy it again from the service's website."}
+        return {"ok": False, "message": f"{service} didn't accept this key. Copy it again from their website, all of it."}
     if response.status_code == 402:
-        return {"ok": False, "message": "The key works but the account has no credit. Top it up on the service's website."}
-    return {"ok": False, "message": f"The service answered HTTP {response.status_code}."}
+        return {"ok": False, "message": f"The key is right, but this {service} account is out of credit. Add credit on their website, then try again."}
+    return {"ok": False, "message": f"{service} isn't answering properly right now (error {response.status_code}). Try again in a minute."}

@@ -780,7 +780,7 @@ export function JobResume({
                 : a
                   ? "Try again"
                   : masterOnly
-                    ? "Draft one for review"
+                    ? "Make a version for this job"
                     : "Prepare now"}
             </Button>
           </div>

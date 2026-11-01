@@ -588,7 +588,8 @@ async def rank(db, config, job_id):
         if row.status in PROTECTED:
             raise ValueError("Cannot classify an active or submitted job")
         job = record(row)
-        resumes = [record(x) for x in s.scalars(select(Resume).where(Resume.demo.is_(False)))]
+        # Newest first: a title-admitted job takes the first one, which must be the file the person gave AXIOM last.
+        resumes = [record(x) for x in s.scalars(select(Resume).where(Resume.demo.is_(False)).order_by(Resume.created_at.desc()))]
     if not resumes:
         raise ValueError("Upload at least one resume before classifying jobs")
     from .features.discovery.postings import MIN_TEXT
@@ -710,7 +711,7 @@ def readmit_by_title(db, live_ids):
     readmitted = 0
     with db.exclusive() as s:
         attempted = set(s.scalars(select(Run.job_id).distinct()))
-        resume = s.scalar(select(Resume.id).where(Resume.demo.is_(False)).limit(1))
+        resume = s.scalar(select(Resume.id).where(Resume.demo.is_(False)).order_by(Resume.created_at.desc()).limit(1))
         for job in s.scalars(select(Job).where(Job.status == "skipped", Job.demo.is_(False), Job.id.in_(list(live_ids)))):
             if job.id in attempted or not title_admits(profile, job.title, job.reason):
                 continue

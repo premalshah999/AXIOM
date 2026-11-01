@@ -30,6 +30,7 @@ import time
 from urllib.parse import urlsplit
 
 from . import backups, pg, release, services
+from .. import erase
 from .env import NativeError, load, prepare, system_chrome
 from ..storage import mode as database_mode
 
@@ -518,6 +519,7 @@ class Supervisor:
         self.backup = None
         if (
             self.stop_reason
+            or erase.running(self.cfg.data_dir)
             or database_mode.current(self.cfg.values, self.cfg.data_dir) != "local"
             or not all(c.state == "up" for c in self.children if c.name == "postgres")
             or not backups.due(self.cfg)
@@ -561,7 +563,11 @@ class Supervisor:
             if not http_ok(child.url + "/json/version"):
                 self.say(f"The {child.name} Chrome we did not start has gone; starting our own.")
                 child.state, child.next_start = "down", now
-        if child.state == "down" and now >= child.next_start and self.ready_for(child, now):
+        # Settings > Delete everything: its eraser empties the data folder while the app and the Chromes are down, and nothing may
+        # start and write into it meanwhile. PostgreSQL stays up, because the eraser empties the database through it.
+        if child.state == "down" and now >= child.next_start and self.ready_for(child, now) and not (
+            child.name != "postgres" and erase.running(self.cfg.data_dir)
+        ):
             try:
                 child.spawn()
             except (NativeError, OSError) as exc:

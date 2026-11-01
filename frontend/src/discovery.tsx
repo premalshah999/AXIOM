@@ -121,7 +121,7 @@ export function DiscoverySettings() {
                 <div className="st-head">
                   <div>
                     <h2 id="st-look">What AXIOM looks for</h2>
-                    <p>It checks employer boards and searches the web on a schedule, then ranks what it finds against your profile.</p>
+                    <p>It checks employers' job pages and searches the web on a schedule, then scores what it finds against your profile.</p>
                   </div>
                 </div>
                 <Panel>
@@ -218,14 +218,14 @@ export function AutoApplySettings() {
               <Panel>
                 <SwitchRow
                   label="Apply to good matches automatically"
-                  note="Saving with this on starts a batch if none is running. A running batch is never restarted."
+                  note="When you save with this on, AXIOM starts looking and applying, if it isn't already."
                   checked={!!form!.auto_apply}
                   onChange={() => f.set("auto_apply", !form!.auto_apply)}
                 />
                 <div className="st-fields" style={{ marginTop: "var(--space-4)" }}>
                   <Input
-                    label="Minimum fit"
-                    hint="0 to 100. A job ranked below this is never applied to on its own."
+                    label="How close a match"
+                    hint="0 to 100. AXIOM won't apply on its own to a job that scores lower."
                     error={fitError}
                     type="number"
                     min={0}
@@ -234,8 +234,8 @@ export function AutoApplySettings() {
                     onChange={(e) => f.set("minimum_auto_fit", Number(e.target.value))}
                   />
                   <Input
-                    label="Applications per batch"
-                    hint="How many confirmed applications a new batch aims for. 1 to 500."
+                    label="Applications to aim for"
+                    hint="AXIOM stops once this many have gone through, 1 to 500."
                     error={targetError}
                     type="number"
                     min={1}

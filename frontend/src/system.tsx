@@ -50,10 +50,10 @@ export function ApplyingSettings() {
         <Panel>
           <SwitchRow
             label="Send applications"
-            note="Off: AXIOM fills in each application and stops before sending. Practice runs never send either way."
+            note="Off: nothing goes to an employer, and jobs you add wait. Turn it on and they start."
             checked={!!control.auto_submit}
             disabled={pending !== null}
-            onChange={() => toggle("auto_submit", control.auto_submit ? "AXIOM will stop before sending." : "AXIOM will send applications.")}
+            onChange={() => toggle("auto_submit", control.auto_submit ? "Sending is off. Nothing goes to an employer." : "Sending is on.")}
           />
           <SwitchRow
             label="Pause new applications"
@@ -130,7 +130,7 @@ function Limits() {
                     c={c}
                     name="daily_application_limit"
                     label="Applications per day"
-                    hint={`${stats.submissions_reserved ?? 0} used today. The batch stops starting new ones at this number.`}
+                    hint={`${stats.submissions_reserved ?? 0} used today. AXIOM stops starting new ones at this number.`}
                   />
                   <FieldInput
                     c={c}
@@ -145,23 +145,31 @@ function Limits() {
                     max={25}
                     value={Number.isFinite(company) ? company : ""}
                     error={companyError}
-                    hint="Confirmed or in-progress applications allowed at one employer."
+                    hint="How many applications AXIOM may send to one employer."
                     onChange={(e) => setDraft({ ...value, company_limit: Number(e.target.value) })}
                   />
-                  <Input
-                    label="AI budget per job"
-                    type="number"
-                    min={50000}
-                    max={50000000}
-                    step={50000}
-                    value={Number.isFinite(tokens) ? tokens : ""}
-                    error={tokenError}
-                    hint={`${tokens.toLocaleString()} tokens per job in any 24 hours. Harder sites need more; more costs more.`}
-                    onChange={(e) => setDraft({ ...value, job_token_cap: Number(e.target.value) })}
-                  />
-                  <FieldInput c={c} name="max_model_calls" label="AI calls per application" hint="An application that needs more stops and is repaired later." />
                   <FieldInput c={c} name="timezone" label="Time zone" hint="For dates on forms and for the daily limits, such as America/New_York." />
                 </div>
+              )}
+              {value && (
+                // The engine's own dials: out of the way of someone setting a daily limit.
+                <details className="ax-fold" open={!!tokenError}>
+                  <summary>How much AI one application may use</summary>
+                  <div className="st-fields">
+                    <Input
+                      label="AI budget per job"
+                      type="number"
+                      min={50000}
+                      max={50000000}
+                      step={50000}
+                      value={Number.isFinite(tokens) ? tokens : ""}
+                      error={tokenError}
+                      hint={`${tokens.toLocaleString()} tokens per job in any 24 hours. Harder sites need more; more costs more.`}
+                      onChange={(e) => setDraft({ ...value, job_token_cap: Number(e.target.value) })}
+                    />
+                    <FieldInput c={c} name="max_model_calls" label="AI calls per application" hint="An application that needs more stops, and AXIOM tries it again later." />
+                  </div>
+                </details>
               )}
             </Panel>
             <SaveBar

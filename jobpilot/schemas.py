@@ -298,6 +298,7 @@ class ProfileExtract(BaseModel):
 
     first_name: str = ""
     last_name: str = ""
+    email: str = ""
     phone: str = ""
     location: str = ""
     linkedin: str = ""

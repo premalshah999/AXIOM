@@ -17,7 +17,7 @@ import {
   type MasterView,
   type Page,
 } from "./features";
-import { ago, day, plural } from "./format";
+import { ago, day, plural, resumeFileRefusal } from "./format";
 import { useAction, useDraft, usePoll } from "./hooks";
 import { Pagination, type Paging } from "./pagination";
 import { downloadPdf, PdfPages, PdfThumb, usePdf } from "./pdfpages";
@@ -134,27 +134,26 @@ function Sending({
   const master = data?.master ?? null;
   const showPath = !!data && !on && (asked || !!master);
   const say = !anyResume
-    ? { line: "Add your resume and AXIOM can start applying.", sub: "Ranking and applications need at least one." }
-    : !data || off
+    ? { line: "Add your resume and AXIOM can start applying.", sub: "Applications can't start without one." }
+    : !data || off || !on
       ? {
           line: (
             <>
               Employers get <b>{name}</b>, exactly as you uploaded it.
             </>
           ),
-          sub: data
-            ? `Tailoring has been off${data.policy.changed_at ? " since " + day(data.policy.changed_at) : ""}, so every application sends this same PDF.`
-            : "",
+          // No approved copy means nothing can be reworded (features/resumes prepare_resume: use_master), whatever the policy says:
+          // a first-run "Tailoring is on, but..." read as something broken that had to be fixed before applying.
+          sub: !data
+            ? ""
+            : off && data.policy.changed_at
+              ? `Rewording for each job has been off since ${day(data.policy.changed_at)}, so every application sends this same PDF.`
+              : "Every application sends this same PDF. AXIOM can also reword it for each job, if you'd like. That's optional.",
         }
-      : on
-        ? {
-            line: "Employers get a version of your approved resume, reworded for each job.",
-            sub: "Tailoring is on. It uses only what's in your approved copy, and the application waits until that job's version is ready.",
-          }
-        : {
-            line: "Tailoring is on, but it has no approved resume to start from.",
-            sub: "Finish the steps below so each job gets its own version.",
-          };
+      : {
+          line: "Employers get a version of your approved resume, reworded for each job.",
+          sub: "It uses only what's in your approved copy, and the application waits until that job's version is ready.",
+        };
   return (
     <section className="ax-panel rs-state" aria-label="What employers get">
       <div className="rs-state-main">
@@ -182,7 +181,7 @@ function Sending({
         <div className="rs-state-control">
           {on ? (
             <SwitchRow
-              label="Tailoring"
+              label="Reword for each job"
               note="On"
               checked
               disabled={pending !== null}
@@ -193,7 +192,7 @@ function Sending({
                     await api("/v2/resumes/policy", "PUT", { mode: "master" });
                     await refresh();
                   },
-                  `Tailoring is off. Employers get ${name || "your uploaded resume"} as uploaded.`,
+                  `Rewording is off. Employers get ${name || "your uploaded resume"} as uploaded.`,
                 )
               }
             />
@@ -206,8 +205,8 @@ function Sending({
                 Hide steps
               </Button>
             ) : (
-              <Button variant="primary" onClick={() => setAsked(true)}>
-                Set up tailoring
+              <Button onClick={() => setAsked(true)}>
+                Reword for each job
               </Button>
             ))
           )}
@@ -263,8 +262,8 @@ function SetupPath({ data, name, refresh }: { data: MasterStatus; name?: string;
   return (
     <div className="rs-path">
       <div className="rs-path-head">
-        <h2>Set up tailoring</h2>
-        <p>Rewords your resume for each job, using only what's already in it. Employers get your PDF until you finish the last step.</p>
+        <h2>Reword your resume for each job</h2>
+        <p>Using only what's already in it. Employers get your PDF until you finish the last step.</p>
       </div>
       <ol className="rs-steps">
         <li className={"rs-step is-" + state(0)}>
@@ -325,7 +324,7 @@ function SetupPath({ data, name, refresh }: { data: MasterStatus; name?: string;
               ? `Approved ${ago(master?.approved_at)}.`
               : master && data.approved_id
                 ? "Your earlier approved copy stays in use until you approve this one."
-                : "Only an approved copy can be tailored."}
+                : "Only an approved copy can be reworded."}
           </p>
           {master && !isApproved && (
             <Button size="sm" variant={now === 2 ? "primary" : "secondary"} disabled={now < 2} onClick={() => setApproving(true)}>
@@ -340,7 +339,7 @@ function SetupPath({ data, name, refresh }: { data: MasterStatus; name?: string;
           <p>Each job then gets its own version, and employers receive that instead of your PDF.</p>
           {isApproved && (
             <Button size="sm" variant="primary" onClick={() => setTurningOn(true)}>
-              Turn on tailoring
+              Turn on rewording
             </Button>
           )}
         </li>
@@ -349,7 +348,7 @@ function SetupPath({ data, name, refresh }: { data: MasterStatus; name?: string;
       <Dialog
         open={turningOn}
         onClose={() => setTurningOn(false)}
-        title="Turn on tailoring?"
+        title="Turn on rewording?"
         sub="This changes what employers receive."
         footer={
           <>
@@ -367,11 +366,11 @@ function SetupPath({ data, name, refresh }: { data: MasterStatus; name?: string;
                     await refresh();
                     setTurningOn(false);
                   },
-                  "Tailoring is on. New applications wait for their own version.",
+                  "Rewording is on. New applications wait for their own version.",
                 )
               }
             >
-              Turn on tailoring
+              Turn on rewording
             </Button>
           </>
         }
@@ -426,7 +425,7 @@ export function ApproveMaster({
       open={open}
       onClose={onClose}
       title="Approve this copy?"
-      sub="Tailoring starts from it. Employers keep getting your PDF until you turn tailoring on."
+      sub="Rewording starts from it. Employers keep getting your PDF until you turn rewording on."
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
@@ -444,7 +443,7 @@ export function ApproveMaster({
                   await onDone();
                   onClose();
                 },
-                "Approved. Tailoring can start from this copy.",
+                "Approved. Rewording can start from this copy.",
               )
             }
           >
@@ -569,7 +568,8 @@ function Library({
           <Dropzone
             label="Add a resume"
             title="Drop a resume, or click to choose"
-            hint="Text-based PDF, up to 5 MB and 20 pages."
+            hint="A PDF, up to 5 MB and 20 pages."
+            refusal={resumeFileRefusal}
             accept="application/pdf,.pdf"
             file={null}
             onFile={setFile}
@@ -682,7 +682,7 @@ function sentWords(a: Artifact, tailoringOff: boolean): { word: string; tone: "o
   return { word: "Never sent", tone: "neutral", tip: "No application used this version." };
 }
 
-const companyOf = (a: Artifact) => a.job?.company || (a.employer_id ? employerLabel(a.employer_id) : "Tailored version");
+const companyOf = (a: Artifact) => a.job?.company || (a.employer_id ? employerLabel(a.employer_id) : "Version for a job");
 const reworded = (a: Artifact) => (a.selection || []).filter((x) => x.text !== x.source_text).length;
 
 function Versions({ tailoringOff, open, master }: { tailoringOff: boolean; open?: string; master: MasterView | null }) {
@@ -713,7 +713,7 @@ function Versions({ tailoringOff, open, master }: { tailoringOff: boolean; open?
   // Say how old they are only when it's one day's batch, which is what makes them read as old drafts rather than recent work.
   const days = [...new Set(items.map((a) => day(a.created_at)))];
   const line = tailoringOff
-    ? `${days.length === 1 && !status ? `Drafts from ${days[0]}. ` : "Drafts. "}New applications don't use them while tailoring is off.`
+    ? `${days.length === 1 && !status ? `Drafts from ${days[0]}. ` : "Drafts. "}New applications don't use them while rewording is off.`
     : "Made for each job before its application starts.";
   const columns: Column<Artifact>[] = [
     {
@@ -766,7 +766,7 @@ function Versions({ tailoringOff, open, master }: { tailoringOff: boolean; open?
         className="rs-versions"
         title={
           <>
-            Tailored versions{list.data ? <span className="rs-count mono"> {total}</span> : null}
+            Versions for each job{list.data ? <span className="rs-count mono"> {total}</span> : null}
           </>
         }
         flush
@@ -811,22 +811,22 @@ function Versions({ tailoringOff, open, master }: { tailoringOff: boolean; open?
           </div>
         ) : (
           <Table
-            label="Tailored versions"
+            label="Versions for each job"
             rows={items}
             rowKey={(a) => a.artifact_id}
             columns={columns}
             onRowClick={openVersion}
-            footer={total > size ? <Pagination paging={paging} label="Tailored version pages" sizes={false} /> : undefined}
+            footer={total > size ? <Pagination paging={paging} label="Version pages" sizes={false} /> : undefined}
             empty={
               <Empty
                 compact
                 icon={FileText}
-                title={status ? "No versions with this status" : "No tailored versions yet"}
+                title={status ? "No versions with this status" : "No versions yet"}
                 hint={
                   status
                     ? "Choose another status to see the others."
                     : tailoringOff
-                      ? "Each job gets one here once tailoring is on. Until then every application sends the resume above."
+                      ? "Each job gets one here once rewording is on. Until then every application sends the resume above."
                       : "Each job gets one here before its application starts."
                 }
                 action={
@@ -867,7 +867,7 @@ function VersionPreview({ id, items, tailoringOff }: { id: string; items: Artifa
     const next = items[at + by];
     if (next) go({ view: "resumes", artifact: next.artifact_id });
   };
-  const company = a ? companyOf(a) : "Tailored version";
+  const company = a ? companyOf(a) : "Version for a job";
   const s = a ? sentWords(a, tailoringOff) : null;
   const changed = a ? reworded(a) : 0;
   const notFound = one.error instanceof ApiError || (one.data && !a);
@@ -940,11 +940,11 @@ function VersionPreview({ id, items, tailoringOff }: { id: string; items: Artifa
                       : a.status === "failed"
                         ? a.error?.detail || (a.error?.code || "").replaceAll("_", " ") || "It couldn't be built."
                         : a.status === "kept_master"
-                          ? "The tailored draft didn't read better than your master, so the master was kept."
+                          ? "The reworded version didn't read better than your resume, so your resume was kept."
                           : tailoringOff
                             ? a.sent === undefined
-                              ? "Nothing new uses this draft while tailoring is off."
-                              : "No application used this draft, and nothing new will while tailoring is off."
+                              ? "Nothing new uses this version while rewording is off."
+                              : "No application used this version, and nothing new will while rewording is off."
                             : "Used for this job's application while it still matches the posting and your profile."}
                 </p>
                 {(a.selection || []).length > 0 && (
@@ -1010,7 +1010,7 @@ function Material() {
   return (
     <details className="ax-panel ax-fold rs-material">
       <summary>
-        <strong>What tailoring can draw on</strong>
+        <strong>What rewording can draw on</strong>
         <span className="ax-hint">
           {[
             roles.length && plural(roles.length, "role"),
@@ -1024,7 +1024,7 @@ function Material() {
       </summary>
       <div className="ax-panel-body">
         <div className="ax-stack">
-          <p className="ax-hint">Tailoring never adds a metric, tool or project that isn't in your approved copy or here.</p>
+          <p className="ax-hint">Rewording never adds a metric, tool or project that isn't in your approved copy or here.</p>
           {roles.map((r) => (
             <div key={r.row}>
               <h3>

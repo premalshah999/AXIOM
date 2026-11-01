@@ -103,7 +103,10 @@ def _approve(service, job_id):
         if job.status == "archived":
             raise ValueError("This job was removed; restore it before applying")
         if job.status != "ready":
-            job.resume_id = job.resume_id or s.scalar(select(Resume.id).where(Resume.demo.is_(False)).limit(1))
+            # The newest: the file the person gave AXIOM last, never an older or mistaken upload (a first run, 2026-11-01).
+            job.resume_id = job.resume_id or s.scalar(
+                select(Resume.id).where(Resume.demo.is_(False)).order_by(Resume.created_at.desc()).limit(1)
+            )
             if not job.resume_id:
                 raise ValueError("Upload a resume before applying")
             job.status = "ready"

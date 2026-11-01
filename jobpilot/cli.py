@@ -249,6 +249,9 @@ def main():
         "--recheck", help="Verify an existing manifest after restart; creates no applications"
     )
     verify.add_argument("--timeout", type=int, default=420, help="Total queue wait budget in seconds")
+    erase = sub.add_parser("erase", help="Delete everything: database, files, keys, Chrome profiles and backups (Settings > Delete everything)")
+    erase.add_argument("--after-pid", type=int, default=0, help="Wait for this process (the application) to exit first")
+    erase.add_argument("--yes", action="store_true", help="Required when run by hand: there is no undo")
     login = sub.add_parser("login", help="Capture an employer session using your own local browser")
     login.add_argument("url")
     from .storage.cli import add_parser as add_database_parser
@@ -281,6 +284,12 @@ def main():
         if args.command == "compact-runs":
             raise SystemExit(compact_runs(config.prepare(), args.apply))
         raise SystemExit(prune_workflows(config.prepare(), args.days, args.apply))
+    elif args.command == "erase":
+        from .erase import main as erase_everything
+
+        if not (args.yes or args.after_pid):
+            raise SystemExit("This deletes everything this installation holds, with no undo. Add --yes to do it.")
+        raise SystemExit(erase_everything(config, args.after_pid))
     elif args.command == "serve":
         import uvicorn
 
