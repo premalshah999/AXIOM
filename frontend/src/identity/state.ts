@@ -21,8 +21,8 @@ export function statusLine(snapshot: Snapshot, state: PanelState): { text: strin
   if (state === "paused") return { text: "Paused", lamp: "off" };
   if (state === "complete") return { text: "Target reached", lamp: "ok" };
   if (state === "running") return { text: `Applying · ${busy} of ${limit} busy`, lamp: "live" };
-  if (state === "held") return { text: "Held", lamp: "off" };
-  return busy ? { text: `${busy} applying`, lamp: "live" } : { text: "No batch running", lamp: "off" };
+  if (state === "held") return { text: "Waiting to start", lamp: "off" };
+  return busy ? { text: `${busy} applying`, lamp: "live" } : { text: "Not applying", lamp: "off" };
 }
 
 /**
