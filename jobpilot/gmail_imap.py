@@ -205,7 +205,9 @@ def _folders(client):
             continue
         match = re.fullmatch(rb'\(([^)]*)\) (?:"(?:[^"\\]|\\.)*"|NIL) (.+)', item)
         if not match:
-            raise MailOperationError("Invalid Gmail folder metadata")
+            # One label this cannot read (imaplib's trailing piece of a literal, an odd name) is not a reason to stop reading
+            # the mailbox: it failed every search of that person's Gmail. Only the system folders are used, and they parse.
+            continue
         flags = match[1].lower().split()
         # The app never deletes mail, so Trash holds nothing it waits for.
         if b"\\noselect" in flags or b"\\trash" in flags or not {b"\\all", b"\\junk", b"\\spam"}.intersection(flags):
@@ -213,10 +215,10 @@ def _folders(client):
         try:
             name = match[2].decode("ascii")
         except UnicodeError:
-            raise MailOperationError("Invalid Gmail folder name") from None
+            continue
         if name.startswith('"'):
             if not re.fullmatch(r'"(?:[^"\\]|\\["\\])*"', name):
-                raise MailOperationError("Invalid Gmail folder name")
+                continue
             name = re.sub(r'\\(["\\])', r"\1", name[1:-1])
         folders.append(_quoted(name))
     folders = list(dict.fromkeys(folders))

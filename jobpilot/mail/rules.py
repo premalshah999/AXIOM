@@ -18,15 +18,21 @@ from .helpers import origin
 from .models import RuleInput
 from .senders import KNOWN_SENDERS
 from .senders import employer_label
+from .senders import seeded_senders
 from .senders import tenant_tokens
 
 
 def connected_mailbox(session, recipient):
-    """The connected mailbox that receives this address, a dotted or tagged alias included (email_alias.mailbox_key)."""
+    """The connected mailbox that receives this address, a dotted or tagged alias included (email_alias.mailbox_key). A person
+    applying as a school or work address that forwards to the one Gmail they connected has mail there under the address they
+    applied with, and no rule, no window and no search existed for them on any platform (2026-11-01). With one mailbox
+    connected it is the place to look; extract_message still takes only mail addressed to the applicant. Several mailboxes
+    and none of them this address: nothing says which, so none."""
     from ..email_alias import same_mailbox
 
-    boxes = session.scalars(select(Mailbox).where(Mailbox.state == "connected"))
-    return next((box for box in boxes if same_mailbox(box.email, recipient)), None)
+    boxes = list(session.scalars(select(Mailbox).where(Mailbox.state == "connected")))
+    exact = next((box for box in boxes if same_mailbox(box.email, recipient)), None)
+    return exact or (boxes[0] if len(boxes) == 1 else None)
 
 
 class RulesMixin:
@@ -175,12 +181,15 @@ class RulesMixin:
                 return None
             mailbox_id = box.id
         url = urlsplit(job["url"])
-        prefix = "/" + url.path.strip("/").split("/")[0] if job["ats"] == "greenhouse" else "/"
+        # One host, every employer, the first path segment names which: each gets its own rule, so one employer's open window
+        # does not read as this employer's own sender being busy (challenges.shared_sender_free).
+        prefix = "/" + url.path.strip("/").split("/")[0] if job["ats"] in {"greenhouse", "lever", "ashby", "workable"} else "/"
         # An employer's own career site mails from its own domain. Intuit (2026-10-26) refused the saved password, and
         # with no sender rule its reset was never requested ("Connect Gmail and an email rule for this employer").
         from ..accounts.tenants import registrable
 
         senders = known.get(job["ats"]) or [registrable(own_site)]
+        senders = [*senders, *(d for d in seeded_senders(url.hostname) if d not in senders)]
         return await self.save_rule(
             RuleInput(mailbox_id=mailbox_id, employer_origin=origin(job["url"]) + prefix, sender_domains=senders)
         )
@@ -251,5 +260,7 @@ class RulesMixin:
             owner = session.get(Run, run_id)
             if not row or row.run_id != run_id or not owner or owner.state not in {"running", "submitting"}:
                 raise ValueError("Verification request does not belong to this active application")
-            if row.kind == "auto" and row.state == "pending":
+            # A window armed for an activation link before Create Account (Workday) and a page that then asks for an emailed code:
+            # the mail is a code. Left as a link window, it refused the code it was waiting for until it ran out.
+            if row.state == "pending" and (row.kind == "auto" or (row.kind == "link" and kind == "code")):
                 row.kind = kind

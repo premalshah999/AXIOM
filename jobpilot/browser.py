@@ -1841,6 +1841,8 @@ class BrowserEngine:
                                     "Unrecognized page; continuing with the guided flow",
                                     {"reason": reason},
                                 )
+                    if not self.result and not adapters:
+                        self.result = await self.continue_parked_reset(ats)
                     if not self.result:
                         await self.handle_email()
                     if not self.result and not recovery_needed:
@@ -3274,6 +3276,23 @@ class BrowserEngine:
                     self.emit("email_verification", "Chose email delivery for the verification code")
                 return True
         return False
+
+    async def continue_parked_reset(self, ats):
+        """A run released by its matched reset mail, on a platform the guided flow drives. The adapter asks for the reset
+        (accounts.recover_sign_in) and parks like any other; only adapter-driven platforms picked the mail up again, so here the
+        run signed in over it and the reset stayed in the mailbox (found on an empty database, 2026-11-01)."""
+        from .adapters import for_ats
+
+        adapter = getattr(self, "fallback_mail_adapter", None)
+        if adapter is None:
+            adapter = self.fallback_mail_adapter = for_ats(ats, self)
+        if not adapter.reset_mail_continuation():
+            return None
+        if not await adapter.arm_mail("password_reset"):
+            return adapter.lease_busy()
+        if not adapter.challenge:
+            return None
+        return await adapter.complete_password_reset(adapter.accounts.store.canonical(self.job["url"]))
 
     async def handle_email(self):
         try:

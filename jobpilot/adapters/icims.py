@@ -866,6 +866,13 @@ class ICIMS(Adapter):
                 return self.lease_busy()
             if result := await self.complete_password_reset("https://login.icims.com/"):
                 return result
+        elif self.reset_mail_continuation():
+            # A reset asked for on the employer's own iCIMS sign-in page, not Central: the parked run's mail matched and the
+            # next run read "requested recently" over it, leaving the reset in the mailbox (found on an empty database, 2026-11-01).
+            if not await self.arm_mail("password_reset"):
+                return self.lease_busy()
+            if result := await self.complete_password_reset(self.accounts.store.canonical(self.job["url"])):
+                return result
         return await super()._drive()
 
     def reset_pending(self):

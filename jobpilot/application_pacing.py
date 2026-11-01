@@ -113,7 +113,10 @@ def _get(row, name, default=None):
 
 
 def _exempt(job, run):
-    return _get(job, "demo", False) or bool((_get(run, "packet", {}) or {}).get("verification_only"))
+    # A run its employer's mail released holds that mail and has not started anything new. Spaced as a new application, Ashby's
+    # 150 s and Workable's 600 s gaps kept a matched reset waiting, and a matched code can expire in that time (2026-11-01).
+    packet = _get(run, "packet", {}) or {}
+    return _get(job, "demo", False) or bool(packet.get("verification_only") or packet.get("email_wait_resume"))
 
 
 def _stamp(at):
@@ -174,12 +177,12 @@ def require_ats_focus(session, job, run=None):
         raise QueueBlocked("This ATS is excluded by the saved platform focus", code="ats_focus")
 
 
-def require_ats_admission(session, job, run_id=None, owner_pick=False):
+def require_ats_admission(session, job, run_id=None, owner_pick=False, email_continuation=False):
     """Defer additional Ashby/Workable jobs before they occupy DBOS application tasks. The owner's own pick skips the focus."""
     current = session.get(Run, run_id) if run_id else None
-    if not owner_pick:
+    if not owner_pick and not email_continuation:
         require_ats_focus(session, job, current)
-    if _exempt(job, current):
+    if email_continuation or _exempt(job, current):
         return
     limit = ats_limit(session, _get(job, "ats"))
     if limit is not None and _ats_active(session, _get(job, "ats"), run_id, ["queued", "running", "submitting"]) >= limit:

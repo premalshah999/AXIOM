@@ -18,6 +18,7 @@ from ..db import Run
 from ..db import Setting
 from ..db import record
 from ..ats import custom_like
+from ..email_alias import same_mailbox
 from .constants import LIVE
 from .extraction import UNBRANDED_MAX_CANDIDATES
 from .extraction import UNBRANDED_SEARCH_TERMS
@@ -81,6 +82,13 @@ class PollingMixin:
             what = str(handle.get("kind") or "verification").replace("_", " ")
             run.state = "waiting_browser"
             run.reason = f"The employer's {what} email did not arrive in time; the draft is kept for recovery"
+            box = s.get(Mailbox, challenge.mailbox_id) if challenge else None
+            if box and challenge.recipient and not same_mailbox(box.email, challenge.recipient):
+                # Nothing else tells someone why: they read their Gmail, and the employer was given another address.
+                run.reason = (
+                    f"The employer's {what} email did not reach {box.email}: this application used {challenge.recipient}. "
+                    "Forward that address to your Gmail, or use your Gmail address in your profile"
+                )
             job = s.get(Job, run.job_id)
             if job and job.status == "waiting_email":
                 job.status = run.state
