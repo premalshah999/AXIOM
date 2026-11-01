@@ -3674,9 +3674,10 @@ class Adapter:
             # The new password went in with the request and the page refused it: the main password is tried first, then a
             # random one that meets the rules the page states (nothing was sent, so this is the same request again).
             page = await self.form.scan()
+            page = page if isinstance(page, dict) else {"fields": []}
             said = refusal + " " + " ".join(map(str, page.get("errors", []))) + " " + str(page.get("text", ""))
             again = self.dialog_view(page) or page
-            boxes = [f for f in again["fields"] if f["type"] == "password"]
+            boxes = [f for f in again.get("fields", []) if f["type"] == "password"]
             if boxes and (PASSWORD_HISTORY.search(said) or password_rules.refused(said)):
                 self.attempts["own_reset_password"] += 1
                 maxima = [f.get("maxlength", -1) for f in boxes if f.get("maxlength", -1) > 0]
