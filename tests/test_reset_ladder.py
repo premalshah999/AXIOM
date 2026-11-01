@@ -179,10 +179,23 @@ async def test_a_slow_sign_up_link_is_waited_for_and_an_unchanged_form_is_report
     login = {"fields": [{"label": "Password", "type": "password"}], "controls": []}
     signup = {"fields": [{"label": "Choose password", "type": "password"}], "controls": []}
     value = Adapter.__new__(Adapter)
-    value.e = SimpleNamespace(form=SimpleNamespace(scan=AsyncMock(side_effect=[login, RuntimeError("navigating"), signup])))
+    value.e = SimpleNamespace(form=SimpleNamespace(scan=AsyncMock(side_effect=[login, RuntimeError("navigating"), signup, signup])))
     assert await Adapter.form_changed(value, login, wait=5)
     value.e.form.scan = AsyncMock(return_value=login)
     assert not await Adapter.form_changed(value, login, wait=0)
+
+
+async def test_a_page_in_transit_is_no_change():
+    """Farmers (2026-11-01): a scan mid-navigation read as "the sign-up form opened", and the refused password was typed again."""
+    login = {"url": "https://x.test/a", "fields": [{"label": "Password", "type": "password"}], "controls": []}
+    empty = {"url": "https://x.test/a", "fields": [], "controls": []}
+    half = {"url": "https://x.test/a", "fields": [{"label": "Email", "type": "text"}], "controls": []}
+    value = Adapter.__new__(Adapter)
+    value.e = SimpleNamespace(form=SimpleNamespace(scan=AsyncMock(side_effect=[empty, empty, half, login, empty, login])))
+    assert not await Adapter.form_changed(value, login, wait=2.6)
+    moved = {"url": "https://x.test/thanks", "fields": [], "controls": []}
+    value.e.form.scan = AsyncMock(return_value=moved)
+    assert await Adapter.form_changed(value, login, wait=2)
 
 
 async def test_a_sign_up_page_with_no_way_back_returns_to_the_sign_in_page_for_its_reset(service):

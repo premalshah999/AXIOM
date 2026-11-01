@@ -534,6 +534,31 @@ def create_spent(record):
 CREATE_SENT_LIMIT, CREATE_SENT_WINDOW = 2, 24 * 3600
 
 
+class SiteWrites:
+    """Whether the page sent anything to its own site while a control was pressed."""
+
+    def __init__(self, page):
+        self.page, self.seen = page, False
+
+    def note(self, request):
+        try:
+            own = (urlsplit(request.url).hostname or "").split(".")[-2:] == (urlsplit(self.page.url).hostname or "").split(".")[-2:]
+            if own and request.method in {"POST", "PUT", "PATCH"} and request.resource_type in {"document", "xhr", "fetch"}:
+                self.seen = True
+        except Exception:
+            self.seen = True  # Unreadable counts as sent: the registration limit stays on the safe side.
+
+    def __enter__(self):
+        self.page.on("request", self.note)
+        return self
+
+    def __exit__(self, *_):
+        try:
+            self.page.remove_listener("request", self.note)
+        except Exception:
+            pass  # The tab has gone.
+
+
 def create_allowed(record, run_id=""):
     """Whether this run may send another registration for an account the employer never confirmed."""
     if (record or {}).get("confirmed_at"):
@@ -2658,11 +2683,16 @@ class Adapter:
             # Saved before the click: the same shared login, so a crash cannot lose it.
             self.accounts.mark(url, "created_locally", credentials, create_sent=create_stamp(record, self.e.run_id))
         temporary = bool(mode == "sign_in" and not using_alternate and self.accounts.store.temporary(url))
-        await self.click(button, auth=True)
-        if challenge := await self.after_auth_click():
-            return challenge
-        outcome, detail = await self.auth_outcome(forced_ok=temporary)
+        with SiteWrites(self.page) as writes:
+            await self.click(button, auth=True)
+            if challenge := await self.after_auth_click():
+                return challenge
+            outcome, detail = await self.auth_outcome(forced_ok=temporary)
         self.emit("auth", f"{mode.replace('_', ' ')}: {outcome}")
+        if mode == "create" and outcome == "unknown" and not writes.seen:
+            # Pressed, and the page sent nothing: no registration went out. Counted as sent, a Submit that stayed inert
+            # became "A registration was already sent twice" and a day's wait (Atlas Copco, SuccessFactors, 2026-11-01).
+            self.accounts.mark(url, "created_locally", credentials, create_sent=(record or {}).get("create_sent") or [])
         if mode == "create" and outcome not in {"ok", "verify", "new_password"}:
             from ..email_alias import alias_refusal
 
@@ -3045,12 +3075,22 @@ class Adapter:
         act on the page it is leaving; False after `wait` means the click opened nothing."""
         shape = lambda obs: sorted((f.get("label"), f.get("type")) for f in obs["fields"])  # noqa: E731
         deadline = time.monotonic() + wait
+        seen = None
         while True:
             try:
-                if shape(await self.form.scan()) != shape(before):
-                    return True
+                # A page in transit scans empty or half rendered, and any such read looked like a change: the run went on to
+                # the page it was still on and typed the refused password again (Farmers, 2026-11-01). Two reads must agree,
+                # and an empty page counts only at another address.
+                obs = await self.form.scan()
+                current = shape(obs)
+                if current != shape(before) and (current or obs.get("url") != before.get("url")):
+                    if current == seen:
+                        return True
+                    seen = current
+                else:
+                    seen = None
             except Exception:
-                pass  # The page is navigating.
+                seen = None  # The page is navigating.
             if time.monotonic() >= deadline:
                 return False
             await asyncio.sleep(0.5)
