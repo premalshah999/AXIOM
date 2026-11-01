@@ -253,7 +253,9 @@ async def enqueue_feed_if_due(service):
         return False
     try:
         with SetEnqueueOptions(deduplication_id="new-grad-feed-sweep"):
-            await DBOS.enqueue_workflow_async("discovery", feed_workflow)
+            # Its own queue: one sweep reads thousands of boards for minutes, and in the discovery queue it held the only slot
+            # of a 16 GB Mac while all 680 board scans waited behind it (a fresh install, 2026-11-01: no job for five minutes).
+            await DBOS.enqueue_workflow_async("feeds", feed_workflow)
     except DBOSQueueDeduplicatedError:
         return False
     service.db.set_setting("discovery_feed_delivery", {"state": "queued", "enqueued_at": now()})
@@ -412,6 +414,7 @@ async def start(service):
         global_concurrency=service.config.discovery_workers,
         **polling,
     )
+    await DBOS.register_queue_async("feeds", worker_concurrency=1, global_concurrency=1, **polling)
     await DBOS.register_queue_async("matching", worker_concurrency=1, global_concurrency=1, **polling)
     await DBOS.register_queue_async("classification", worker_concurrency=1, global_concurrency=1, **polling)
     await DBOS.register_queue_async("tailoring", worker_concurrency=2, global_concurrency=2, **polling)
@@ -477,6 +480,7 @@ async def retire_obsolete_deliveries(service):
             queue_name=[
                 "matching",
                 "discovery",
+                "feeds",
                 "applications",
                 "applications_oct04",
                 "applications_experimental",
