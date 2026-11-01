@@ -8,7 +8,7 @@ import { evidenceLabel, PROOF } from "./model";
 import type { JobRow } from "./model";
 import { usePipelinePage } from "./pipeline";
 import { Pagination, usePagination } from "./pagination";
-import type { Archived, Proof, Success } from "./types";
+import type { Archived, Proof, Replies, Success } from "./types";
 import { ArchiveList } from "./archive";
 import { useSelection } from "./bulk";
 import { RowActions } from "./jobactions";
@@ -25,7 +25,7 @@ import "./styles/applications.css";
 
 type Evidence = "all" | Exclude<Proof, "both">;
 type Period = "all" | "today" | "week" | "month";
-type Filters = { q: string; evidence: Evidence; period: Period; platform: string };
+type Filters = { q: string; evidence: Evidence; period: Period; platform: string; answered: Set<string> | null };
 
 const PERIODS: { value: Period; label: string; days: number }[] = [
   { value: "all", label: "Any time", days: 0 },
@@ -81,6 +81,7 @@ function periodStart(period: Period, now: number) {
 // A filter that skips one field, so each menu counts what choosing its options would show. The search reads what the row shows: a
 // job saved without a company or title is found by its link, as the employer's name is taken from it.
 function passes(r: Success, f: Filters, from: number, skip?: keyof Filters) {
+  if (skip !== "answered" && f.answered && !f.answered.has(r.job_id)) return false;
   if (skip !== "evidence" && !hasProof(r, f.evidence)) return false;
   if (skip !== "platform" && f.platform !== "all" && r.ats !== f.platform) return false;
   // "Sent" counts what AXIOM sent: the employer's own "you already applied" notice is not that.
@@ -165,16 +166,20 @@ function Confirmed({ ledger }: { ledger: ReturnType<typeof usePoll<{ application
   const [evidence, setEvidence] = useDraft<Evidence>("ledger-evidence", "all");
   const [period, setPeriod] = useDraft<Period>("ledger-period", "all");
   const [platform, setPlatform] = useDraft("ledger-platform", "all");
+  const [onlyReplies, setOnlyReplies] = useDraft("ledger-replies", false);
+  // How many applications an employer has answered, read from the connected mailbox (jobpilot/replies.py).
+  const replies = usePoll<Replies>((signal) => api("/replies", "GET", undefined, signal), 60000);
+  const answered = useMemo(() => (onlyReplies && replies.data ? new Set(replies.data.job_ids) : null), [onlyReplies, replies.data]);
   // A number elsewhere can open this list already searched.
   useEffect(() => {
     if (route.q) setQuery(route.q);
   }, [route.q, setQuery]);
   const all = useMemo(() => ledger.data?.applications || [], [ledger.data]);
   const from = periodStart(period, now);
-  const shown = useMemo(() => all.filter((r) => passes(r, { q, evidence, period, platform }, from)), [all, q, evidence, period, platform, from]);
+  const shown = useMemo(() => all.filter((r) => passes(r, { q, evidence, period, platform, answered }, from)), [all, q, evidence, period, platform, answered, from]);
   // What each menu would show if its option were chosen (every other filter kept).
   const menus = useMemo(() => {
-    const f = { q, evidence, period, platform };
+    const f = { q, evidence, period, platform, answered };
     const rest = (skip: keyof Filters) => all.filter((r) => passes(r, f, from, skip));
     const byProof = rest("evidence");
     const byPlatform = rest("platform");
@@ -192,15 +197,16 @@ function Confirmed({ ledger }: { ledger: ReturnType<typeof usePoll<{ application
         ...[...names].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([ats]) => ({ value: ats, label: platformName(ats) })),
       ],
     };
-  }, [all, q, evidence, period, platform, from, now]);
-  const filtered = evidence !== "all" || period !== "all" || platform !== "all" || q.trim() !== "";
+  }, [all, q, evidence, period, platform, answered, from, now]);
+  const filtered = evidence !== "all" || period !== "all" || platform !== "all" || q.trim() !== "" || onlyReplies;
   const clear = () => {
+    setOnlyReplies(false);
     setQuery("");
     setEvidence("all");
     setPeriod("all");
     setPlatform("all");
   };
-  const paging = usePagination(shown, [q, evidence, period, platform].join("|"), 25);
+  const paging = usePagination(shown, [q, evidence, period, platform, onlyReplies].join("|"), 25);
   const today = confirmedToday(all, now).length;
   const unconfirmed = counts.groups.unconfirmed || 0;
 
@@ -263,6 +269,7 @@ function Confirmed({ ledger }: { ledger: ReturnType<typeof usePoll<{ application
     if (platform !== "all") p.set("ats", platform);
     if (from) p.set("since", new Date(from).toISOString());
     if (q.trim()) p.set("q", q.trim());
+    if (onlyReplies) p.set("replies", "true");
     const query = p.toString();
     return "/api/successful-applications.csv" + (query ? "?" + query : "");
   })();
@@ -286,6 +293,20 @@ function Confirmed({ ledger }: { ledger: ReturnType<typeof usePoll<{ application
         <SearchBox value={q} onChange={setQuery} label="Search confirmed applications" placeholder="Company, role or platform" />
         <div className="ap-filters">
           <Listbox prefix="Sent" label="Sent" value={period} options={menus.period} onChange={setPeriod} />
+          {replies.data?.connected && (
+            // One figure, and it opens what it counts.
+            <Tooltip
+              label={
+                replies.data.complete
+                  ? "Applications an employer has answered with a decline, an interview request or an assessment, from your email. A receipt doesn't count."
+                  : "Applications an employer has answered, from your email. Still reading back to your first application, so this can grow."
+              }
+            >
+              <Button className="ap-replies" aria-pressed={onlyReplies} disabled={!replies.data.replies && !onlyReplies} onClick={() => setOnlyReplies(!onlyReplies)}>
+                Replies <strong>{replies.data.replies.toLocaleString()}</strong>
+              </Button>
+            </Tooltip>
+          )}
           {filtered && (
             <Button variant="ghost" size="sm" icon={<FilterX size={14} aria-hidden="true" />} onClick={clear}>
               Clear

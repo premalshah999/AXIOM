@@ -567,6 +567,8 @@ export type Success = {
   proof: Proof;
 };
 /** One platform's (or everything's) success over the window: GET /api/success, defined as the 90% push's score (jobpilot/api/success.py). */
+export type Replies = { connected: boolean; complete: boolean; replies: number; job_ids: string[] };
+
 export type SuccessRow = {
   tried: number;
   closed: number;
