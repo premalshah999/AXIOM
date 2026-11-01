@@ -166,7 +166,7 @@ def ranking_description(value):
 
 
 def validate_classification(result, job, profile, eligibility=None):
-    """A boolean approval cannot override conflicting or unsupported findings."""
+    """A boolean approval cannot override conflicting findings; one the posting cannot support decides nothing."""
     from .answer_context import boolean
 
     eligibility = eligibility or check_eligibility(
@@ -216,7 +216,15 @@ def validate_classification(result, job, profile, eligibility=None):
         quote = normalize(finding.posting_quote)
         cited = {reference.strip().casefold() for reference in finding.fact_ids}
         if not quote or quote not in description or not cited <= fact_ids:
-            invalid.append("Unsupported qualification evidence")
+            # The model reworded the posting or named a fact that does not exist, so this finding cannot be checked and
+            # decides nothing: a strong fit with one loose quote was skipped outright, and on a posting with no saved text
+            # every quote fails (2026-11-01). The rules above and below still decide real blockers; a claimed miss still blocks.
+            if finding.verdict == "unmet":
+                invalid.append("Unsupported qualification evidence")
+            else:
+                unchecked = f'Could not check requirement: "{finding.posting_quote}"'
+                if unchecked not in result.uncertainties:
+                    result.uncertainties.append(unchecked)
         elif finding.verdict == "unmet":
             if not finding.fact_ids:
                 invalid.append("Unmet qualification lacks supporting facts")
