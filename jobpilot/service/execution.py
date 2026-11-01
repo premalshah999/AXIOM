@@ -375,6 +375,7 @@ class ExecutionMixin:
             }
         except Exception as exc:
             from ..agent_settings import AgentDisabled
+            from ..host_health import disk_full, disk_full_result
 
             # Keep provider payloads and secrets out of the event stream.
             known = isinstance(exc, (ValueError, RuntimeError)) and "api_key" not in str(exc).lower()
@@ -382,6 +383,10 @@ class ExecutionMixin:
                 "state": "waiting_browser" if isinstance(exc, AgentDisabled) else "failed",
                 "reason": str(exc)[:400] if known else f"Worker error: {type(exc).__name__}",
             }
+            if disk_full(exc):
+                with self.db.session() as s:
+                    current = s.get(Run, run_id)
+                    result = disk_full_result(bool(current and current.state == "submitting"))
             if isinstance(exc, AgentDisabled):
                 result.update(blocker_type="agent_disabled", recovery_cause="agent_disabled", retryable=False)
             import traceback
