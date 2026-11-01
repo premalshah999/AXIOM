@@ -304,6 +304,12 @@ def cmd_jobpilot(cfg, args):
     os.execve(sys.executable, [sys.executable, "-m", "jobpilot.cli", *args.rest], env)
 
 
+def cmd_smoke(cfg, args):
+    from . import smoke
+
+    return smoke.run(cfg, args)
+
+
 def cmd_hold(cfg, args):
     bin_dir = pg.find_bin(cfg)
     if args.state == "on":
@@ -326,7 +332,7 @@ def cmd_deploy(cfg, args):
     migrate.set_hold(bin_dir, cfg, "draining", f"deploy {new.name}")
     try:
         waited = 0
-        while (active := pg.psql(bin_dir, cfg, supervisor.ACTIVE_RUNS)) != "0":
+        while (active := pg.psql(bin_dir, cfg, supervisor.IN_FLIGHT_RUNS)) != "0":
             if not args.wait or waited >= ACTIVE_WAIT_SECONDS:
                 print(f"deploy: {active} application(s) still active; not deploying (use --wait to wait)", file=sys.stderr)
                 return 1
@@ -485,6 +491,11 @@ def parser():
     backup = sub.add_parser("backup", help="Copy the database to a file; the app keeps running")
     backup.add_argument("file", nargs="?", help="Default: ~/axiom-backups/axiom-<date>.dump")
     sub.add_parser("jobpilot", help="Run an app command here, for example: axiom jobpilot token")
+    smoke_check = sub.add_parser("smoke", help="Prove this installation works: services, API, database, schema, assets, a dry fill")
+    smoke_check.add_argument("--no-fill", action="store_true", help="Only the checks of the running app")
+    smoke_check.add_argument("--engine", help="The engine version the running app must have started")
+    smoke_check.add_argument("--since", help="The ISO time it must have started after")
+    smoke_check.add_argument("--hold-expected", action="store_true", help="A release holds new work during this check")
     hold = sub.add_parser("hold", help="Stop or allow new applications (execution_v2_deployment_hold)")
     hold.add_argument("state", choices=["on", "off"])
     deploy = sub.add_parser("deploy", help="Snapshot the checkout and restart on it, once nothing is active")
@@ -512,6 +523,7 @@ COMMANDS = {
     "backup": cmd_backup,
     "jobpilot": cmd_jobpilot,
     "hold": cmd_hold,
+    "smoke": cmd_smoke,
     "deploy": cmd_deploy,
     "migrate": cmd_migrate,
 }
