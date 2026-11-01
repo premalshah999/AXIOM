@@ -8,7 +8,7 @@ applied to, and no point of keeping older logs than a week").
   final page and what it answered, which are the application's record and not its log. One that did not keeps nothing.
 
 What never goes is what duplicate protection and open work read: a job with any confirmed, uncertain or attempted
-submission (the "submitting" event precedes the click), a job whose latest run waits on someone, one the owner paused,
+submission (the "submitting" event precedes the click), a job whose latest run is at work, one the owner paused,
 requested or holds as reserved, and one with a recovery scheduled. A commit that cannot be ruled out counts as sent.
 """
 
@@ -32,11 +32,14 @@ INTERVAL_SECONDS = 86_400
 BATCH = 100
 PAUSE = 0.05
 
-REMOVABLE = {"new", "skipped", "ready", "closed", "archived", "cancelled", "failed"}
+REMOVABLE = {"new", "skipped", "ready", "closed", "archived", "cancelled", "failed", "waiting_answer", "needs_review"}
 # A run in one of these, or one that logged the commit step, may have reached the employer.
 SENT = {"confirmed", "already_applied", "submission_unknown", "submitting"}
 # A job whose latest run is here is open work, whatever its status says.
 OPEN = {"queued", "running", "submitting", "waiting_email", "waiting_answer", "waiting_browser", "needs_review", "paused"}
+# Open work that only the owner can move. A question left unanswered past the job's age is not coming back ("no point of
+# keeping information about older jobs that we never applied to"): nothing was sent, so the job goes like any other.
+UNANSWERED = {"waiting_answer", "needs_review"}
 # Read for old runs by receipts, recovery, admission and the iCIMS driver.
 KEPT_EVENTS = ("submitting", "finished", "form_post", "browser")
 RECORD_FILES = {"final.png", "answers.json", "final_outline.txt"}
@@ -154,7 +157,7 @@ def stale_jobs(session, runs, committed, job_cutoff, ready_cutoff, listing_cutof
         history = runs.get(job_id, [])
         if job_id in protected or job_id in listed or any(_sent(run, committed) for run in history):
             continue
-        if history and history[-1][1] in OPEN:
+        if history and history[-1][1] in OPEN and not (history[-1][1] in UNANSWERED and history[-1][2] < job_cutoff):
             continue
         stale.append(job_id)
     return stale
@@ -166,7 +169,7 @@ def _delete_jobs(db, job_ids, keys, tables, committed):
         rows = list(s.execute(select(Run.id, Run.job_id, Run.state).where(Run.job_id.in_(job_ids)).order_by(Run.created_at)))
         latest = {job: state for _, job, state in rows}
         busy = {job for run, job, state in rows if state in SENT or run in committed}
-        busy |= {job for job, state in latest.items() if state in OPEN}
+        busy |= {job for job, state in latest.items() if state in OPEN - UNANSWERED}
         jobs = [job for job in job_ids if job not in busy]
         runs = [run for run, job, _ in rows if job not in busy]
         if runs:
