@@ -16,6 +16,7 @@ import type { ApplicationWorkers, MailStatus, RuntimeHealth, Snapshot, Startable
 import { ago, day, employerOf, jobWords, plural, urlRole } from "./format";
 import { Button, Dialog, Empty, Monogram, MonogramStack, Panel, Skeleton } from "./ui/index";
 import { Notice } from "./worktools";
+import { pressResume, pressStop } from "./shell/StopControl";
 import "./styles/work.css";
 
 const LIVE_MAIL = new Set(["pending", "matched", "consumed"]);
@@ -168,7 +169,7 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
   const said: Record<PanelState, ["info" | "bad", string, string?]> = {
     lost: ["bad", "Connection lost", `Showing data from ${ago(link.updatedAt, now)}; retrying.`],
     restart: ["bad", "Needs a restart", "Automation has stopped responding. Restart it to keep applying."],
-    paused: ["info", "Paused", "No new applications start. Progress is kept."],
+    paused: ["info", "Stopped", "Nothing starts until you press Resume. Progress is kept."],
     complete: ["info", "Target reached"],
     running: ["info", n ? `Applying to ${plural(n, "job")} right now` : ready.data?.startable === 0 ? "Nothing to run right now" : "Applying, between jobs"],
     held: ["info", "Held", (rt.intake_reason || "New applications are not starting").replace(/\.$/, "") + "."],
@@ -190,12 +191,19 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
     run(
       "pause",
       async () => {
-        // Read the current control values right before writing them back.
-        const fresh = await api<Snapshot["control"]>("/control");
-        await api("/control", "PUT", { ...fresh, paused: true });
+        await pressStop();
         await refresh();
       },
-      "New applications paused. Progress is kept, and you can still manage each job.",
+      "Stopped. Progress is kept, and you can still manage each job.",
+    );
+  const resume = () =>
+    run(
+      "start",
+      async () => {
+        await pressResume();
+        await refresh();
+      },
+      "Resumed. Existing progress is kept.",
     );
 
   const key = !workers ? null : !active ? (
@@ -221,20 +229,20 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
     </form>
   ) : stopped ? (
     <div className="ov-key">
-      <MasterKey word="Resume" icon="start" aria-label="Resume applying" busy={pending === "start"} disabled={pending !== null} onClick={() => begin(target)} />
+      <MasterKey word="Resume" icon="start" aria-label="Resume applying" busy={pending === "start"} disabled={pending !== null} onClick={paused ? resume : () => begin(target)} />
       <p className="ov-key-note">Picks up where it left off.</p>
     </div>
   ) : panel === "restart" ? (
     <div className="ov-key">
       <MasterKey word="Restart" icon="start" aria-label="Restart automation" busy={pending === "start"} disabled={pending !== null} onClick={() => begin(target)} />
       <Button size="sm" variant="ghost" loading={pending === "pause"} disabled={pending !== null} onClick={pause}>
-        Pause instead
+        Stop instead
       </Button>
     </div>
   ) : (
     <div className="ov-key">
-      <MasterKey word="Pause" icon="pause" aria-label="Pause applying" busy={pending === "pause"} disabled={pending !== null} onClick={pause} />
-      <p className="ov-key-note">Holds each application before it sends.</p>
+      <MasterKey word="Stop" icon="pause" aria-label="Stop applying" busy={pending === "pause"} disabled={pending !== null} onClick={pause} />
+      <p className="ov-key-note">Stops now. One already sending finishes.</p>
     </div>
   );
 
@@ -699,9 +707,7 @@ function FirstRun({ mail }: { mail: MailStatus | null }) {
             run(
               "submit-on",
               async () => {
-                // Read the current controls right before writing them back.
-                const fresh = await api<Snapshot["control"]>("/control");
-                await api("/control", "PUT", { ...fresh, auto_submit: true });
+                await api("/control", "PUT", { auto_submit: true });
                 await refresh();
               },
               "Automatic submission turned on.",

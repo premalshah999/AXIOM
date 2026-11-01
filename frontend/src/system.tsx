@@ -27,13 +27,13 @@ export function ApplyingSettings() {
   const { snapshot, refresh } = useWorkspace();
   const { pending, run } = useAction();
   const control = snapshot.control || { paused: false, auto_submit: false };
-  const toggle = (key: "auto_submit" | "paused", label: string) =>
+  const toggle = (label: string) =>
     run(
-      key,
+      "auto_submit",
       async () => {
-        // Read current values right before writing both back.
+        // Only what changes: writing `paused` back from a read is how a stop gets lifted by accident.
         const fresh = await api<Snapshot["control"]>("/control");
-        await api("/control", "PUT", { ...fresh, [key]: !fresh[key] });
+        await api("/control", "PUT", { auto_submit: !fresh.auto_submit });
         await refresh();
       },
       label,
@@ -53,14 +53,7 @@ export function ApplyingSettings() {
             note="Off: AXIOM fills in each application and stops before sending. Practice runs never send either way."
             checked={!!control.auto_submit}
             disabled={pending !== null}
-            onChange={() => toggle("auto_submit", control.auto_submit ? "AXIOM will stop before sending." : "AXIOM will send applications.")}
-          />
-          <SwitchRow
-            label="Pause new applications"
-            note="Running ones stop before their final send. One that is already sending finishes."
-            checked={!!control.paused}
-            disabled={pending !== null}
-            onChange={() => toggle("paused", control.paused ? "New applications resumed." : "New applications paused.")}
+            onChange={() => toggle(control.auto_submit ? "AXIOM will stop before sending." : "AXIOM will send applications.")}
           />
         </Panel>
       </section>
@@ -190,7 +183,7 @@ function automation(rt: AutopilotRuntime, paused: boolean, sched: SchedulerHealt
   const goal = rt.target ?? 100;
   const progress = done > goal ? `${done} confirmed, target ${goal}` : `${done} of ${goal} confirmed`;
   if (sched.degraded) return { tone: "bad" as const, text: "Needs a restart", note: "Automation is degraded." };
-  if (paused) return { tone: "warn" as const, text: "Paused", note: "New applications are paused." };
+  if (paused) return { tone: "warn" as const, text: "Stopped", note: "Nothing starts until you press Resume applications." };
   if (rt.state === "complete") return { tone: "neutral" as const, text: "Target reached", note: progress };
   if (rt.intake_enabled)
     return { tone: "ok" as const, text: "Running", note: workers ? `${progress}, ${plural(workers, "worker")}` : progress };

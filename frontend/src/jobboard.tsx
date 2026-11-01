@@ -106,7 +106,7 @@ export function DiscoveredJobs() {
   const blockers = [
     !snapshot.config.workers_enabled && "application workers are disabled",
     !snapshot.control.auto_submit && "automatic submission is off (Settings › Applying)",
-    snapshot.control.paused && "new applications are paused (resume them on Overview)",
+    snapshot.control.paused && "AXIOM is stopped (press Resume applications at the top)",
   ].filter(Boolean) as string[];
   const canApply = blockers.length === 0;
 

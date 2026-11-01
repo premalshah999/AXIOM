@@ -6,6 +6,7 @@ import { PageBoundary } from "./ErrorBoundary";
 import { titleFor } from "./nav";
 import { useMedia } from "./prefs";
 import { PhoneBar, PhoneTabs, Sidebar, type Status } from "./Sidebar";
+import { StopButton, StopLine, useStopControl } from "./StopControl";
 
 const SlotContext = createContext<{ actions: HTMLElement | null; line: HTMLElement | null }>({ actions: null, line: null });
 
@@ -55,6 +56,7 @@ export function Shell({
   const phone = useMedia("(max-width: 899px)");
   const [actions, setActions] = useState<HTMLElement | null>(null);
   const [line, setLine] = useState<HTMLElement | null>(null);
+  const stop = useStopControl();
   const scroll = useRef<HTMLDivElement>(null);
 
   // Leaving a page starts the next one at its top. Profile's and Settings' tabs are whole pages, so they reset too; the lists under
@@ -82,7 +84,9 @@ export function Shell({
               <div className="ax-head-line" ref={setLine} />
             </div>
             <div className="ax-top-actions" ref={setActions} />
+            <StopButton control={stop} />
           </header>
+          <StopLine control={stop} />
           {banners}
           <div className={"ax-scroll" + (route.view === "editor" ? " is-fixed" : "")} ref={scroll}>
             <main id="main" className={"main view-" + route.view} tabIndex={-1}>
