@@ -40,3 +40,20 @@ class MigrationsMixin:
             for source in s.scalars(select(Source).where(titled(Source.name))):
                 if PORTAL_TITLE.match(source.name):
                     source.name = employer_from_title(source.name)
+
+    def tidy_board_data(self):
+        """The board's data, tidied through the app's own code on every start (jobpilot.board_data): employers spelled one way,
+        no career-site host as an employer, readable places, closed / expired / duplicate-link listings not live, and the
+        thousands of `new` jobs that no screen could ever show gone. A job with any run behind it is never deleted."""
+        import logging
+
+        from ..board_data import backfill
+
+        try:
+            report = backfill(self.db)
+        except Exception:
+            logging.getLogger("jobpilot.board_data").warning("Board data tidy failed", exc_info=True)
+            return {}
+        if any(report.values()):
+            logging.getLogger("jobpilot.board_data").info("Board data tidied: %s", report)
+        return report

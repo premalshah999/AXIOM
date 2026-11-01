@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from .db import Job, JobListing, Run, Setting, Source, now
+from .board_data import clean_location, expired_internship
 from .network import fetch
 from .schemas import JobInput, Profile
 from .widgets import US_STATES
@@ -688,7 +689,9 @@ async def read_feed(source, profile, cfg, at, known=None):
             try:
                 detail = await slot(get(root + path))
                 info = detail.get("jobPostingInfo", {})
-                loc = info.get("location", j.get("locationsText", ""))
+                # The list's "2 Locations" is a count; the posting's own page names the places (board_data).
+                places = [info.get("location") or ""] + [p for p in info.get("additionalLocations") or [] if isinstance(p, str)]
+                loc = clean_location(" / ".join(dict.fromkeys(p for p in places if p)) or j.get("locationsText", ""))
                 # The hiring organization's HQ country is not the job's country.
                 country = info.get("country", "")
                 if isinstance(country, dict):
@@ -766,7 +769,10 @@ async def read_feed(source, profile, cfg, at, known=None):
                 detail_errors += 1
 
         await asyncio.gather(*(read_document(link) for link in await unseen(links)))
-    return posts, seen, complete and not detail_errors, detail_errors
+    # Greenhouse, Ashby and Lever list every open posting before any detail is read, so a failed detail read says nothing
+    # about what is still listed (a posting the board no longer lists is closed whatever happened to its neighbours' details).
+    whole_list = kind in {"greenhouse", "ashby", "lever"}
+    return posts, seen, complete and (whole_list or not detail_errors), detail_errors
 
 
 REJECTED = "job_board_rejected:"
@@ -836,7 +842,8 @@ def persist_scan(db, source, posts, seen, complete, cfg, profile, at, report):
             rejected.add(post.url)
             continue
         match, _ = screen(post, profile, cfg)
-        if not match:
+        if not match or expired_internship(post.title, at):
+            # An internship whose named term has ended ("Summer 2026" read in November) is not an opening (board_data).
             report["excluded"] += 1
             rejected.add(post.url)
             continue
@@ -862,7 +869,9 @@ def persist_scan(db, source, posts, seen, complete, cfg, profile, at, report):
             if entry:
                 # Republishing cannot make an already old stored listing fresh again.
                 date = min(entry.posted_at, date)
-                entry.posted_at, entry.last_seen, entry.active = date, at.isoformat(), True
+                # A job closed after a run found its posting gone stays off the board even where a stale board still links it.
+                entry.posted_at, entry.last_seen = date, at.isoformat()
+                entry.active = entry.active or row["status"] != "closed"
                 entry.location, entry.career_level, entry.match_reason = post.location, match[0], match[1]
             else:
                 s.add(
@@ -888,8 +897,13 @@ def persist_scan(db, source, posts, seen, complete, cfg, profile, at, report):
         ids = list(still.values())
         with db.exclusive() as s:
             for i in range(0, len(ids), LOOKUP_CHUNK):
-                for entry in s.scalars(select(JobListing).where(JobListing.job_id.in_(ids[i : i + LOOKUP_CHUNK]))):
-                    entry.last_seen, entry.active = at.isoformat(), True
+                for entry, status in s.execute(
+                    select(JobListing, Job.status)
+                    .join(Job, Job.id == JobListing.job_id)
+                    .where(JobListing.job_id.in_(ids[i : i + LOOKUP_CHUNK]))
+                ):
+                    entry.last_seen = at.isoformat()
+                    entry.active = entry.active or status != "closed"
         report["known"] = len(still)
         report["matched"] += len(still)
     if complete:

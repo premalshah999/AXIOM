@@ -194,7 +194,16 @@ class JobInput(BaseModel):
     @field_validator("company")
     @classmethod
     def employer_name(cls, value):
-        return employer_from_title(value)
+        from .board_data import clean_company
+
+        return clean_company(employer_from_title(value))
+
+    @field_validator("location")
+    @classmethod
+    def place(cls, value):
+        from .board_data import clean_location
+
+        return clean_location(value)
 
     @field_validator("title")
     @classmethod

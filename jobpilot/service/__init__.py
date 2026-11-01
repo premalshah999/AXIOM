@@ -35,6 +35,7 @@ class Service(QueueingMixin, ExecutionMixin, CompletionMixin, ReviewsMixin, Migr
         self.relabel_custom_ats()
         self.label_platforms_from_history()
         self.employer_names_from_titles()
+        self.tidy_board_data()
         from ..features._store import create_tables
 
         create_tables(db.engine)
