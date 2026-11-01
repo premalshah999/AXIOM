@@ -173,7 +173,7 @@ def test_a_reason_that_says_the_posting_is_gone_is_recognised(reason):
     "The browser tab closed unexpectedly; the application will be retried",
     "Recovery stopped: Required field incomplete: Country; draft saved.",
     "All required fields have been filled but Submit is covered",
-    "This employer has an account for your email but refuses the saved password",
+    "This employer refuses the saved password, its password reset email never arrives",
 ])
 def test_a_form_stall_is_not_a_closed_posting(reason):
     assert not CLOSED_POSTING.search(reason)
