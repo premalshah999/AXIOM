@@ -77,7 +77,8 @@ static NSString *const SplashHTML =
      // `kind` picks the links: a failure offers a retry, a plain stop only offers to open AXIOM again, and a copy that stopped
      // part way can only be fixed by copying it again.
      "<script>var K={fail:[['Try again','retry'],['Copy diagnostics','diagnostics'],['Open logs','logs']],"
-     "stopped:[['Open AXIOM again','retry']],damaged:[['Show in Finder','reveal'],['Copy diagnostics','diagnostics']]};"
+     "stopped:[['Open AXIOM again','retry']],damaged:[['Show in Finder','reveal'],['Copy diagnostics','diagnostics']],"
+     "waiting:[['Quit now','quit-now']]};"
      "function show(t,m,p,f){document.getElementById('t').textContent=t;document.getElementById('m').textContent=m;"
      "var b=document.getElementById('bar');b.style.visibility=p==null?'hidden':'visible';"
      "if(p!=null)document.getElementById('fill').style.width=p+'%';"
@@ -329,6 +330,25 @@ static NSString *const SignedOutScript =
   return YES;
 }
 
+// What Quit is waiting on, in one sentence, from what the supervisor reads out of the database while it drains: the owner quit,
+// watched "Finishing 1 application safely" and could not tell what it was or stop it (2026-11-01).
+- (NSString *)quitLine:(NSDictionary *)state {
+  NSArray *finishing = [state[@"finishing"] isKindOfClass:NSArray.class] ? state[@"finishing"] : @[];
+  if (!finishing.count) return @"Closing the browser tabs and saving your work. AXIOM closes by itself.";
+  NSMutableArray *names = [NSMutableArray array];
+  NSInteger left = 0;
+  for (NSDictionary *row in finishing) {
+    if (![row isKindOfClass:NSDictionary.class]) continue;
+    NSString *name = [row[@"company"] isKindOfClass:NSString.class] && [row[@"company"] length] ? row[@"company"] : @"an employer";
+    if (![names containsObject:name] && names.count < 3) [names addObject:name];
+    left = MAX(left, IntOr(row[@"seconds_left"], 0));
+  }
+  NSString *when = left > 0 ? [NSString stringWithFormat:@"up to %ld:%02ld more", (long)(left / 60), (long)(left % 60)] : @"taking longer than usual";
+  return [NSString stringWithFormat:@"Waiting for %ld application%@ in the final submit step (%@), %@. Cutting it off leaves its result "
+                                    @"unknown; AXIOM then checks it the next time you open it, and never sends it twice.",
+                                    (long)finishing.count, finishing.count == 1 ? @"" : @"s", [names componentsJoinedByString:@", "], when];
+}
+
 - (void)tick {
   if (self.damaged) return;  // An incomplete copy has nothing to start: the screen says so, and Quit still works.
   NSDictionary *state = ReadJSON(Native(@"state.json"));
@@ -336,19 +356,13 @@ static NSString *const SignedOutScript =
   BOOL alive = [self supervisorAlive:state];
   [self watchPower:state alive:alive];
   if (self.mode == ModeQuitting) {
-    NSInteger active = IntOr(state[@"active"], 0);
     if (!alive || [NSDate.date compare:self.quitDeadline] == NSOrderedDescending) {
       // Past the deadline the supervisor is still finishing, and will: it does not need this window to do it.
       Log(alive ? @"Quit: closing the window while the supervisor finishes." : @"Quit: everything has stopped.");
       [NSApp replyToApplicationShouldTerminate:YES];
     } else {
-      [self showSplash:@"Finishing up"
-               message:active > 0 ? [NSString stringWithFormat:@"Finishing %ld application%@ safely. This can take up to three minutes, "
-                                                               @"and AXIOM closes by itself.",
-                                                               (long)active, active == 1 ? @"" : @"s"]
-                                  : @"Saving your work. AXIOM closes by itself."
-               percent:nil
-                kind:nil];
+      NSArray *finishing = [state[@"finishing"] isKindOfClass:NSArray.class] ? state[@"finishing"] : @[];
+      [self showSplash:@"Finishing up" message:[self quitLine:state] percent:nil kind:finishing.count ? @"waiting" : nil];
     }
     return;
   }
@@ -594,6 +608,10 @@ static NSString *const SignedOutScript =
       [self copyDiagnostics:nil];
     } else if ([url.host isEqual:@"reveal"]) {
       [NSWorkspace.sharedWorkspace activateFileViewerSelectingURLs:@[ NSBundle.mainBundle.bundleURL ]];
+    } else if ([url.host isEqual:@"quit-now"] && self.mode == ModeQuitting) {
+      // The owner's choice, said plainly on the screen: the supervisor stops waiting for the commit.
+      Log(@"Quit: asked not to wait for the final submit step.");
+      kill((pid_t)IntOr(self.state[@"pid"], 0), SIGUSR1);
     }
     return;
   }
@@ -801,6 +819,31 @@ static NSString *const SignedOutScript =
 
 // ---- Quit: the same drain as `axiom stop` ------------------------------------------------------------------------------
 
+// The same POST /api/stop as the button in the dashboard, before the app starts to drain and stops answering. Waits a few seconds
+// on purpose: "stays stopped" is the promise, and the Quit must not go ahead of it. Under the token, as `signInThen` is.
+- (BOOL)pressStop {
+  NSDictionary *info = ReadJSON(Native(@"window.json"));
+  NSString *base = info[@"base_url"], *token = info[@"token"];
+  if (![base isKindOfClass:NSString.class] || ![token isKindOfClass:NSString.class]) return NO;
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[base stringByAppendingString:@"/api/stop"]]];
+  request.HTTPMethod = @"POST";
+  request.timeoutInterval = 6;
+  [request setValue:[@"Bearer " stringByAppendingString:token] forHTTPHeaderField:@"Authorization"];
+  [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+  NSURLSessionConfiguration *config = NSURLSessionConfiguration.ephemeralSessionConfiguration;
+  config.connectionProxyDictionary = @{};  // Loopback must never go through a proxy someone has configured.
+  dispatch_semaphore_t done = dispatch_semaphore_create(0);
+  __block BOOL recorded = NO;
+  [[[NSURLSession sessionWithConfiguration:config] dataTaskWithRequest:request
+                                                     completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                                                       recorded = !error && ((NSHTTPURLResponse *)response).statusCode == 200;
+                                                       dispatch_semaphore_signal(done);
+                                                     }] resume];
+  dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 7 * NSEC_PER_SEC));
+  Log(recorded ? @"Quit: Stop recorded first." : @"Quit: could not record Stop.");
+  return recorded;
+}
+
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)app {
   if (self.mode == ModeQuitting) return NSTerminateLater;
   if (!self.window) return NSTerminateNow;  // refuseWhereItIs: nothing was started.
@@ -817,15 +860,44 @@ static NSString *const SignedOutScript =
   if (active > 0 && !self.quietQuit) {
     // Quit can arrive while another app is in front (a script, the Dock): the question must be seen, or the quit waits for it.
     [NSApp activateIgnoringOtherApps:YES];
+    NSDictionary *work = [state[@"work"] isKindOfClass:NSDictionary.class] ? state[@"work"] : @{};
+    BOOL stopped = [work[@"stopped"] boolValue];
+    NSInteger applying = IntOr(work[@"running"], 0) + IntOr(work[@"submitting"], 0), queued = IntOr(work[@"queued"], 0);
     NSAlert *alert = [NSAlert new];
-    alert.messageText = [NSString stringWithFormat:@"%ld application%@ in progress", (long)active, active == 1 ? @" is" : @"s are"];
-    alert.informativeText = @"Quitting finishes whatever is being submitted, then stops. Nothing is sent twice, and anything "
-                            @"unfinished carries on the next time you open AXIOM. This can take up to three minutes.";
-    [alert addButtonWithTitle:@"Quit"];
-    [alert addButtonWithTitle:@"Keep Running"];
-    if ([alert runModal] != NSAlertFirstButtonReturn) {
-      Log(@"Quit: kept running, as asked.");
-      return NSTerminateCancel;
+    if (stopped) {
+      alert.messageText = [NSString stringWithFormat:@"%ld application%@ still ending", (long)active, active == 1 ? @" is" : @"s are"];
+      alert.informativeText = @"AXIOM is stopped and stays stopped after you quit. Whatever is in its final submit step finishes first. "
+                              @"Everything else waits for Resume.";
+      [alert addButtonWithTitle:@"Quit"];
+      [alert addButtonWithTitle:@"Keep Open"];
+      [self driveAnswer:alert kind:@"quit"];
+      if ([alert runModal] != NSAlertFirstButtonReturn) return NSTerminateCancel;
+    } else {
+      alert.messageText = work.count
+                              ? [NSString stringWithFormat:@"%ld applying now, %ld queued", (long)applying, (long)queued]
+                              : [NSString stringWithFormat:@"%ld application%@ in progress", (long)active, active == 1 ? @" is" : @"s are"];
+      // The owner quit to stop applications, reopened, and they carried on (2026-11-01). Which of the two this is, is their choice.
+      alert.informativeText = @"Stop and Quit stops them now and closes their tabs, and they stay stopped until you press Resume, even "
+                              @"after you open AXIOM again. Quit alone closes AXIOM, but they carry on by themselves the next time you "
+                              @"open it. Either way, one in its final submit step finishes first, and nothing is sent twice.";
+      [alert addButtonWithTitle:@"Stop and Quit"];
+      [alert addButtonWithTitle:@"Quit"];
+      [alert addButtonWithTitle:@"Keep Running"];
+      [self driveAnswer:alert kind:@"quit"];
+      NSModalResponse answer = [alert runModal];
+      if (answer == NSAlertThirdButtonReturn) {
+        Log(@"Quit: kept running, as asked.");
+        return NSTerminateCancel;
+      }
+      if (answer == NSAlertFirstButtonReturn && ![self pressStop]) {
+        NSAlert *failed = [NSAlert new];
+        failed.messageText = @"AXIOM could not record the stop";
+        failed.informativeText = @"The app did not answer, so applications may carry on the next time you open AXIOM. Quit anyway?";
+        [failed addButtonWithTitle:@"Quit Anyway"];
+        [failed addButtonWithTitle:@"Keep Running"];
+        [self driveAnswer:failed kind:@"quit-failed"];
+        if ([failed runModal] != NSAlertFirstButtonReturn) return NSTerminateCancel;
+      }
     }
   }
   // As long as a whole stop can take (supervisor.stop_budget), plus time to notice.
@@ -842,7 +914,7 @@ static NSString *const SignedOutScript =
   self.base = nil;
   self.splashLoaded = NO;
   self.splashKey = nil;
-  [self showSplash:@"Finishing up" message:@"Saving your work. AXIOM closes by itself." percent:nil kind:nil];
+  [self showSplash:@"Finishing up" message:[self quitLine:state] percent:nil kind:nil];
   if (!getenv("AXIOM_SHELL_BACKGROUND")) [self showWindow:nil];
   [self tick];
   return NSTerminateLater;

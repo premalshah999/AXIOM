@@ -80,7 +80,11 @@ class CompletionMixin:
             from ..job_control import require_running
 
             require_running(s, run.job_id)
-            if control.get("paused") or (not s.get(Job, run.job_id).demo and not control.get("auto_submit")):
+            if control.get("paused"):
+                from ..stop import Stopped
+
+                raise Stopped()  # A repaired resubmit is a new commit, and a stop lets none begin.
+            if not s.get(Job, run.job_id).demo and not control.get("auto_submit"):
                 raise ValueError("Application submission is paused or disabled")
             key = "validation_retry:" + run_id
             from ..application_budget import require_allowance
@@ -349,12 +353,12 @@ class CompletionMixin:
             other_confirmed = s.scalar(
                 select(Run.id).where(Run.job_id == run.job_id, Run.id != run.id, Run.state == "confirmed")
             )
+            removed = (
+                (s.get(Setting, "job_control:" + run.job_id) or Setting(key="", value={})).value or {}
+            ).get("state") == "deleted"
             s.get(Job, run.job_id).status = (
                 "archived"
-                if (
-                    (s.get(Setting, "job_control:" + run.job_id) or Setting(key="", value={})).value or {}
-                ).get("state")
-                == "deleted"
+                if removed
                 else "confirmed"
                 if other_confirmed
                 else ("ready" if state == "dry_run_passed" and run.packet.get("match_approved") else state)
@@ -366,7 +370,8 @@ class CompletionMixin:
             from ..application_slots import release_slot
 
             release_slot(s, run)
-            schedule_recovery(s, self.config, run, result)
+            if not removed:  # A job the owner removed is never scheduled again, whatever ended its last run.
+                schedule_recovery(s, self.config, run, result)
             from ..recovery import open_blocked_site_circuit
 
             open_blocked_site_circuit(s, run, state)
@@ -431,7 +436,7 @@ class CompletionMixin:
                 "submission_unknown",
                 "failed",
                 "timed_out",
-            }:
+            } and (not removed or state == "submission_unknown"):  # It may still read what an uncertain commit sent.
                 # The repair agent reads this run's evidence and applies a guarded fix (repair_agent.py).
                 enqueue(s, "repair", run_id, run_id=run_id)
             if self.dispatch and self.config.enable_workers:

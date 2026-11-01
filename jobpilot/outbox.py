@@ -17,6 +17,10 @@ from .db import Job, Outbox, Review, Run, Setting, now, record
 # (notify, before the per-run cap in telegram.record_notification_error).
 MAX_ATTEMPTS = {"notify": 12, "report": 12, "refill": 12, "repair": 6}
 DEFAULT_MAX_ATTEMPTS = 288
+# While the owner's Stop holds, these stay unclaimed: each leads to a start or a model call. Unclaimed, a matched email or an
+# answered question spends no attempt, so a stop of any length loses none of them (288 retries are about a day, then "dead").
+# A message about what just finished still goes out.
+HELD_BY_STOP = ("mail_resume", "fact_resume", "dispatch", "refill", "tailor", "repair", "report")
 
 
 def enqueue(session, kind, key, payload=None, run_id=""):
@@ -84,7 +88,7 @@ def sweep_answered_drafts(service, limit=200):
     return added
 
 
-def anything_due(db, kinds, current):
+def anything_due(db, kinds, current, held=()):
     """One unlocked read: is there a row the claim below could take? Over a network the claim is five round trips and four
     pollers ask every second, which was three quarters of what ran on the event loop (30 ms link, 2026-10-31). The claim still
     re-selects under the lock, so a row taken in between is never claimed twice."""
@@ -95,12 +99,19 @@ def anything_due(db, kinds, current):
         )
         if kinds:
             query = query.where(Outbox.kind.in_(kinds))
+        if held:
+            query = query.where(Outbox.kind.not_in(held))
         return s.scalar(query.limit(1)) is not None
 
 
 def claim(db, kinds=None):
     current = time.time()
-    if getattr(db, "remote", False) and not anything_due(db, kinds, current):
+    from .stop import stopped
+
+    held = HELD_BY_STOP if stopped(db) else ()
+    if kinds and set(kinds) <= set(held):
+        return None
+    if getattr(db, "remote", False) and not anything_due(db, kinds, current, held):
         return None
     with db.exclusive() as s:
         query = (
@@ -124,6 +135,8 @@ def claim(db, kinds=None):
         )
         if kinds:
             query = query.where(Outbox.kind.in_(kinds))
+        if held:
+            query = query.where(Outbox.kind.not_in(held))
         row = s.scalar(query)
         if row is None:
             return None

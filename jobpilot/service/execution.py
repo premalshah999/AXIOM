@@ -24,7 +24,10 @@ class ExecutionMixin:
             require_allowance(s, run.job_id, new_attempt=False)
             control = s.get(Setting, "control").value
             if control.get("paused"):
-                raise ValueError("Workers were paused before submission")
+                # The last gate: from the moment Stop commits, no run can enter its commit. One that had is `submitting`.
+                from ..stop import Stopped
+
+                raise Stopped()
             from ..host_health import ServerDraining, draining
 
             if draining():
@@ -110,6 +113,31 @@ class ExecutionMixin:
         task = asyncio.create_task(process_one(self))
         self.notification_tasks.add(task)
         task.add_done_callback(self.notification_tasks.discard)
+
+    def return_to_queue(self, run_id, result, elapsed):
+        """An application the owner's Stop interrupted before its commit is queued work again, the way it was before it
+        started: no finished state, so no failure, no repair, no report, no message, no spent start and nothing on the
+        score. Its checkpoint rides along, and Resume delivers it like any queued run. The reservation guards are what they
+        were: its next commit asks for a new one. False when it cannot be returned, for `complete` to record what it is
+        (a job the owner removed meanwhile, or a commit that had begun, which is never treated as unsent)."""
+        with self.db.exclusive() as s:
+            run = s.get(Run, run_id)
+            job = s.get(Job, run.job_id) if run else None
+            if not run or not job or run.state != "running":
+                return False
+            from ..job_control import state as job_state
+
+            if job.status == "archived" or job_state(self.db, run.job_id).get("state") == "deleted":
+                return False
+            run.state, run.started_at, run.finished_at, run.reason = "queued", None, None, ""
+            checkpoint = result.get("browser_checkpoint")
+            run.packet = {**run.packet, **({"browser_checkpoint": checkpoint} if checkpoint else {})}
+            job.status = "queued"
+            from ..application_slots import release_slot
+
+            release_slot(s, run)
+        self.db.event(run_id, "owner_stop", result.get("reason", ""), {"elapsed": round(elapsed, 2)})
+        return True
 
     async def execute(self, run_id):
         import asyncio
@@ -320,7 +348,7 @@ class ExecutionMixin:
                 try:
                     result = await execution
                 except asyncio.CancelledError:
-                    if engine.result and engine.result.get("state") in {"paused", "cancelled"}:
+                    if engine.result and engine.result.get("state") in {"paused", "cancelled", "stopped"}:
                         result = engine.result
                     else:
                         raise
@@ -365,6 +393,7 @@ class ExecutionMixin:
                 "locations": [f"{Path(f.filename).name}:{f.lineno}:{f.name}" for f in frames[-5:]],
             }
             self._trace_failure(run_id, result["diagnostics"])
-        self.complete(run_id, result, time.monotonic() - started)
+        if result.get("state") != "stopped" or not self.return_to_queue(run_id, result, time.monotonic() - started):
+            self.complete(run_id, result, time.monotonic() - started)
 
         self.kick_outbox()

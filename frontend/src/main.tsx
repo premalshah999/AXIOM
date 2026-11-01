@@ -25,6 +25,7 @@ import { ago } from "./format";
 import { NeedsView } from "./needs";
 import { countQuestions } from "./questions";
 import { Shell } from "./shell/Shell";
+import { StopFloating } from "./shell/StopControl";
 import { isLive, panelState, statusLine } from "./identity/state";
 import { Wordmark } from "./shell/Brand";
 import { CommandPalette } from "./shell/CommandPalette";
@@ -240,6 +241,8 @@ function App() {
     return (
       <LegalGate>
       <div className="ax-screen">
+        {/* A guide reopened while a batch runs: Stop is on this screen too. */}
+        <StopFloating />
         <Suspense fallback={<Loading label="Opening the setup guide…" />}>
           <Onboarding
             onDone={() => {

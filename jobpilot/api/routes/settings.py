@@ -6,11 +6,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ...agent_settings import AgentSettings
+from ...db import Setting
 
 
 class Control(BaseModel):
-    paused: bool
-    auto_submit: bool
+    """Only what the caller means to change: a screen that sends both from a stale read must not lift a stop."""
+
+    paused: bool | None = None
+    auto_submit: bool | None = None
 
 
 class Limits(BaseModel):
@@ -245,11 +248,45 @@ def router(service) -> APIRouter:
 
     @r.put("/api/control")
     async def control(data: Control):
-        await asyncio.to_thread(db.set_setting, "control", data.model_dump())
-        if not data.paused and service.dispatch:
-            from ...workers import resume
+        from ... import stop
 
-            await resume(service)
-        return data
+        if data.auto_submit is not None:
+
+            def write():
+                with db.exclusive() as s:
+                    row = s.get(Setting, "control")
+                    if row:
+                        row.value = {**(row.value or {}), "auto_submit": data.auto_submit}
+                    else:
+                        s.add(Setting(key="control", value={"paused": False, "auto_submit": data.auto_submit}))
+
+            await asyncio.to_thread(write)
+        if data.paused is True:
+            await asyncio.to_thread(stop.press, db)
+        elif data.paused is False:
+            await stop.resume(service)
+        value = await asyncio.to_thread(db.get_setting, "control", {})
+        return {"paused": bool(value.get("paused")), "auto_submit": bool(value.get("auto_submit"))}
+
+    @r.get("/api/stop")
+    def stop_status():
+        """What the Stop control shows, on every screen: the sentence, what is finishing and its countdown."""
+        from ... import stop
+
+        return stop.status(db)
+
+    @r.post("/api/stop")
+    def stop_everything():
+        """Stop: nothing new starts from any path, running applications close, and it holds until `POST /api/resume`."""
+        from ... import stop
+
+        stop.press(db)
+        return stop.status(db)
+
+    @r.post("/api/resume")
+    async def resume_everything():
+        from ... import stop
+
+        return await stop.resume(service)
 
     return r

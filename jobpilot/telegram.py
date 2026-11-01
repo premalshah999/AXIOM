@@ -1819,19 +1819,15 @@ async def _handle_update(service, update):
             if scoped
             else await chat(service, rest.strip() or "What can you help me with?")
         )
-    elif cmd in {"/pause", "/resume"}:
-        control = service.db.get_setting("control", {})
-        control["paused"] = cmd == "/pause"
-        service.db.set_setting("control", control)
-        if cmd == "/resume" and service.dispatch:
-            from .workers import resume
+    elif cmd in {"/pause", "/stop", "/resume"}:
+        from .stop import press, resume as resume_all, status as stop_status
 
-            await resume(service)
-        reply = (
-            "⏸ New applications paused. An application already submitting is allowed to finish safely."
-            if cmd == "/pause"
-            else "▶️ Workers resumed. I'll keep you posted on confirmations and blockers."
-        )
+        if cmd == "/resume":
+            await resume_all(service, by="telegram")
+            reply = "▶️ Resumed. I'll keep you posted on confirmations and blockers."
+        else:
+            press(service.db, by="telegram")
+            reply = "⏹ " + stop_status(service.db)["sentence"]
     elif cmd == "/answer":
         review_id, _, answer = rest.partition(" ")
         try:
