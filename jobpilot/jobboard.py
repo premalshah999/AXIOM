@@ -1011,6 +1011,24 @@ def within_window(cfg, at):
     )
 
 
+def backed_off(db, ids, at):
+    """The boards whose last scan failed permanently (not found, refused: workers.source_failed) and whose next try is still a day or
+    more away. Search now and a first search used to ask every one of them again: 287 of 680 default boards on a new install."""
+    with db.session() as s:
+        rows = s.execute(select(Source.id, Source.next_run, Source.error).where(Source.id.in_(list(ids))))
+        later = (at + timedelta(hours=12)).isoformat()
+        out = set()
+        for sid, next_run, error in rows:
+            try:
+                due = datetime.fromisoformat(next_run)
+            except (TypeError, ValueError):
+                continue
+            due = due if due.tzinfo else due.replace(tzinfo=UTC)
+            if (error or "").startswith("Source failed") and due.isoformat() > later:
+                out.add(sid)
+    return out
+
+
 async def request_scan(db, enqueue):
     """Queue a scan of every managed board now: the Search now button, and the first search of a new install.
     Returns (ids of all boards, how many were queued). A board already queued or running is left alone."""
@@ -1024,7 +1042,10 @@ async def request_scan(db, enqueue):
             wanted = Source.id.in_(managed_ids(db))
             ids = list(s.scalars(select(Source.id).where(wanted, Source.enabled.is_(True))))
         claimed = []
+        dead = backed_off(db, ids, datetime.now(UTC))
         for sid in ids:
+            if sid in dead:
+                continue  # Gone or refusing us: its own back-off (one day, up to two weeks) decides when it is asked again.
             scan = db.get_setting("job_board_scan:" + sid, {})
             if scan.get("state") in {"queued", "running"} and datetime.now(UTC) - datetime.fromisoformat(
                 scan.get("started_at", started)
