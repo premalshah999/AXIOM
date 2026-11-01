@@ -611,6 +611,16 @@ def schedule_recovery(session, config, run, result):
         circuit = session.get(Setting, key)
         until = (datetime.now(UTC) + timedelta(seconds=cooldown or 600)).isoformat()
         data = {"until": until, "source_run_id": run.id, "failure_signature": signature}
+        if cooldown:
+            # A wait the site itself imposed (a sign-in lockout, "try again in 30 minutes") holds whatever the build: a deploy
+            # cannot lift it. The admission check holds a circuit only when it carries the running build or no build, and
+            # this one carried a different word for it, so every other job at the employer started inside the lock
+            # (Amazon 2026-10-27: fourteen more sign-ins after "you can't log in right now").
+            data["reason"] = (result.get("reason") or "")[:200] or "This employer's site asked for a wait before another attempt."
+        else:
+            from .runtime import engine_version
+
+            data["engine"] = engine_version()  # a recurring failure: a deploy may have fixed it
         if circuit:
             circuit.value = data
         else:
