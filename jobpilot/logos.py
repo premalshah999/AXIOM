@@ -296,7 +296,10 @@ def addresses(company, urls, descriptions=()):
     for url in urls:
         if domain := domain_for(company, url):
             host = (urlsplit(str(url)).hostname or "").lower()
-            found.setdefault(domain, bool(TENANT_IN_HOST.search(host) or TENANT_IN_PATH.search(host)))
+            guess = bool(TENANT_IN_HOST.search(host) or TENANT_IN_PATH.search(host))
+            # The posting's own text naming the same address is a second, independent witness: not a guess.
+            named = re.compile(r"(?:^|[\s/@.(<\"'])" + re.escape(domain) + r"(?![a-z0-9-])")
+            found.setdefault(domain, guess and not any(named.search(str(t).lower()) for t in descriptions))
     for text in descriptions if not found else ():
         if domain := domain_in(company, text):
             found.setdefault(domain, False)

@@ -282,3 +282,10 @@ def test_the_endpoint_only_looks_up_a_company_at_the_address_of_one_of_its_jobs(
     assert client.get("/api/logo", params={"company": "Acme", "url": "https://evil.test/"}).status_code == 404
     assert client.get("/api/logo", params={"company": "Nobody", "url": POSTING}).status_code == 404
     assert n.asked == []
+
+
+def test_a_guessed_address_the_posting_text_also_names_is_not_a_guess():
+    assert logos.addresses("Acme", [POSTING]) == [("acme.com", True)]
+    assert logos.addresses("Acme", [POSTING], ["Learn more at https://www.acme.com/careers."]) == [("acme.com", False)]
+    assert logos.addresses("Acme", [POSTING], ["Acme is not related to notacme.com"]) == [("acme.com", True)]
+    assert logos.addresses("Acme", ["https://careers.acme.com/1"]) == [("acme.com", False)]
