@@ -104,3 +104,8 @@ async def test_an_uncertain_earlier_submission_of_the_same_role_still_blocks_and
         await service.queue("old", "submit", owner_pick=True)
     assert err.value.code == "submitted_or_uncertain"
     assert "Data Analyst, Risk" in str(err.value)
+
+
+@pytest.mark.parametrize("page", ["https://careers.example.test/jobs/4471", "https://careers.example.test/jobs/data-engineer"])
+def test_a_page_that_names_its_own_posting_stays_one_job_whatever_its_ref(page):
+    assert identity(f"{page}?ref=11112") == identity(f"{page}?ref=22223") == identity(page)

@@ -464,13 +464,19 @@ def url_identity(url: str) -> str:
 # letter prefix) names a posting and stays; a channel label ("LinkedIn", "CC3") is dropped as before.
 CHANNEL_PARAMS = frozenset({"source", "ref", "referrer"})  # sourceid and jr_id always name a channel or a click
 POSTING_ID_VALUE = re.compile(r"(?:[A-Za-z]{1,6}[-_]?)?\d{4,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+# Only where the path names no posting of its own: on /jobs/123 or /jobs/data-engineer a different ?ref= is a different
+# click on one job, and keeping it would make that job two and allow a second application.
+GENERIC_PAGE = re.compile(r"(?:careers?|jobs?|openings?|positions?|opportunit(?:y|ies)|apply|application|vacanc(?:y|ies)|index(?:\.\w+)?)?", re.I)
 
 
-def tracking_param(key, value, *, legacy=False):
+def tracking_param(key, value, *, path="", legacy=False):
     key = key.lower()
     if key.startswith("utm_") or key in {"jr_id", "sourceid"}:
         return True
-    return key in CHANNEL_PARAMS and (legacy or not POSTING_ID_VALUE.fullmatch(value.strip()))
+    if key not in CHANNEL_PARAMS:
+        return False
+    names_posting = POSTING_ID_VALUE.fullmatch(value.strip()) and GENERIC_PAGE.fullmatch(path.rstrip("/").rsplit("/", 1)[-1])
+    return legacy or not names_posting
 
 
 def canonicalize(url: str, *, keep_platform_hint=False, requisition_ids=True, legacy_params=False):
@@ -483,7 +489,7 @@ def canonicalize(url: str, *, keep_platform_hint=False, requisition_ids=True, le
     query = [
         (k, v)
         for k, v in parse_qsl(p.query, keep_blank_values=True)
-        if not tracking_param(k, v, legacy=legacy_params)
+        if not tracking_param(k, v, path=p.path, legacy=legacy_params)
         and (keep_platform_hint or not platform_hint(k, v))
     ]
     path = p.path.rstrip("/")
