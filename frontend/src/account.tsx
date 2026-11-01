@@ -879,6 +879,7 @@ export function SignInSettings() {
           <ul className="st-rows">
             <SignedInAccount status={status} reload={load} />
             <GuideRow />
+            <DeleteDataRow />
           </ul>
         </Panel>
       ) : (
@@ -889,6 +890,7 @@ export function SignInSettings() {
           <Panel flush>
             <ul className="st-rows">
               <GuideRow />
+              <DeleteDataRow />
             </ul>
           </Panel>
         </>
@@ -1176,6 +1178,24 @@ function AddSignIn({ onAdded }: { onAdded: () => void }) {
         </Button>
       </div>
     </form>
+  );
+}
+
+/** The data is only ever on this Mac, so deleting it is deleting two folders. Said here so nobody has to ask how to leave. */
+function DeleteDataRow() {
+  return (
+    <SettingRow
+      title="Delete my data"
+      note={
+        <>
+          Everything AXIOM keeps about you is on this Mac. Quit AXIOM, then in Finder choose Go, then Go to Folder, paste{" "}
+          <code>~/Library/Application Support/AXIOM</code> and move that folder to the Bin. Do the same for <code>~/Library/Logs/AXIOM</code>, and drag
+          AXIOM from Applications to the Bin. Applications already sent, and accounts made at employers, stay with those employers.
+        </>
+      }
+    >
+      {null}
+    </SettingRow>
   );
 }
 

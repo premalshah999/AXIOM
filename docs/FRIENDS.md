@@ -10,10 +10,10 @@ text file inside the disk image, beside the app and the Applications folder: `de
 >
 > The first time you open it, the Mac says "Apple could not verify AXIOM". That is normal: I haven't paid Apple to approve it.
 > Click Done. Then open the Apple menu, System Settings, Privacy & Security, scroll down to Security, and click Open Anyway next to
-> "AXIOM was blocked". Enter your Mac password, then open AXIOM again and click Open if it asks. You only do this once.
+> "AXIOM was blocked". Enter your Mac password, then open AXIOM again and click Open or Open Anyway if it asks. You only do this once.
 >
 > You need a Mac with Apple silicon on macOS 15 or newer, a Gmail account, and an AI key from openrouter.ai (AXIOM walks you through
-> both; you pay OpenRouter directly, a few dollars goes a long way). If anything goes wrong, choose Help, Copy Diagnostics in AXIOM
+> both; you pay OpenRouter directly, and $5 of credit usually covers a few hundred applications). If anything goes wrong, choose Help, Copy Diagnostics in AXIOM
 > and paste it to me. It has no passwords, keys or emails in it.
 
 ## What was and was not checked
