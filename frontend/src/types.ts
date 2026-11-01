@@ -800,7 +800,7 @@ export type BoardPage = {
   planning?: boolean;
   rows: BoardRow[];
   total: number;
-  /** What Select all takes: every row these filters show that can join the line, on any page. */
+  /** What Select all takes: every row these filters show that can be queued or moved up the line, on any page. */
   selectable: number;
   page: number;
   pages: number;

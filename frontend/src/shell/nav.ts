@@ -1,4 +1,4 @@
-// Where everything lives (DESIGN.md, Navigation). Eight pages, then the coming-soon group. Each item maps onto the route table in
+// Where everything lives (DESIGN.md, Navigation). Nine pages, then the coming-soon group. Each item maps onto the route table in
 // context.ts, which is where old URLs are resolved.
 import {
   Briefcase,

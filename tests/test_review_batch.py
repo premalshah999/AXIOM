@@ -266,6 +266,14 @@ def test_select_all_counts_the_rows_on_every_page_and_only_those_that_can_join(s
     many = client.post("/api/queue/add-many", json={"job_ids": ids}).json()
     assert many["added"] == 60 and many["refused"] == []
     assert sorted(line(service)) == sorted(ids)
+    # Asked twice is one request, and said so.
+    twice = client.post("/api/queue/add-many", json={"job_ids": ids[:5]}).json()
+    assert twice["added"] == 0 and twice["already"] == 5
+    fresh(service)
+    # What is already in line can still be selected, and moved up: an automatic board has nothing else on its first page.
+    assert client.get("/api/board?size=25&want=ids").json()["ids"] and reserved not in client.get("/api/board?size=25&want=ids").json()["ids"]
+    moved = client.post("/api/queue/front-many", json={"job_ids": [ids[-1]]}).json()
+    assert moved["added"] == 1 and line(service)[0] == ids[-1]
     assert sorted(client.get("/api/queue/ids").json()["ids"]) == sorted(ids)
     removed = client.post("/api/queue/remove-many", json={"job_ids": ids[:10]}).json()
     assert removed == {"removed": 10, "not_in_line": 0}

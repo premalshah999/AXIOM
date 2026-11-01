@@ -3,7 +3,7 @@
 // Queue is made from, so In queue 4 here is number 4 there. Closed, stale and duplicate rows never reach it.
 import { ExternalLink, FilterX, ListChecks, Plus, Radar, RefreshCw, SearchX, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { addManyToQueue, addToQueue, api, moveToFront, type QueueMany } from "./api";
+import { addManyToQueue, addToQueue, api, frontManyInQueue, moveToFront, type QueueMany } from "./api";
 import { ApplyChoice } from "./applychoice";
 import { ConfirmQueue, Refused, useSelection } from "./bulk";
 import { useWorkspace } from "./context";
@@ -104,7 +104,7 @@ export function BoardView() {
   // A row reads as in line the moment Queue is pressed; the next read of the board confirms it, or a refusal puts it back.
   const [asked, setAsked] = useState<ReadonlyMap<string, number>>(() => new Map());
   const inLine = (r: BoardRow) => r.state === "queue" || (asked.get(r.id) ?? 0) > Date.now() - 30000;
-  const [asking, setAsking] = useState(false);
+  const [asking, setAsking] = useState<"add" | "front" | null>(null);
   const [refused, setRefused] = useState<QueueMany["refused"]>([]);
   const paging: Paging = { items: rows, total: b?.total ?? 0, page: b?.page ?? page, pages: b?.pages ?? 1, size, initialSize: 25, setPage, setSize };
   const filtered = !!q || fit !== "match" || role !== "all" || level !== "all" || company !== "all" || place !== "all" || posted !== "all" || platform !== "all";
@@ -138,12 +138,12 @@ export function BoardView() {
     void again();
   };
   const front = (r: BoardRow) => rowActs.act("add:" + r.id, async () => { const out = await moveToFront(r.id); void again(); return out; }, (out) => out.message);
-  const addSelected = () =>
+  const addSelected = (to: "add" | "front") =>
     run(
       "many",
       async () => {
         const ids = [...selection.ids];
-        const out = await addManyToQueue(ids);
+        const out = await (to === "front" ? frontManyInQueue([...ids].reverse()) : addManyToQueue(ids));
         selection.clear();
         setRefused(out.refused);
         const failed = new Set(out.refused.map((x) => x.job_id));
@@ -436,7 +436,7 @@ export function BoardView() {
         onRowClick={(r) => openJob(r.id)}
         selected={selection.chosen}
         onSelectedChange={selection.replace}
-        canSelect={(r) => r.can_add && !inLine(r)}
+        canSelect={(r) => r.can_add || r.state === "queue"}
         selectAll={b && !planning ? { count: b.selectable, run: selectAll, busy: pending === "select" } : undefined}
         rowLabel={(r) => `${r.title} at ${r.company}`}
         loading={(!b || planning) && !board.error}
@@ -444,9 +444,14 @@ export function BoardView() {
         busy={!!b && b.key !== key}
         footer={paging.total > 0 ? <Pagination paging={paging} label="Job board pages" /> : undefined}
         bulk={
-          <Button variant="primary" size="sm" loading={pending === "many"} disabled={pending !== null} onClick={() => setAsking(true)}>
-            {`Add to queue (${selection.ids.length.toLocaleString()})`}
-          </Button>
+          <>
+            <Button variant="primary" size="sm" loading={pending === "many"} disabled={pending !== null} onClick={() => setAsking("add")}>
+              {`Add to queue (${selection.ids.length.toLocaleString()})`}
+            </Button>
+            <Button size="sm" disabled={pending !== null} onClick={() => setAsking("front")}>
+              To front
+            </Button>
+          </>
         }
         empty={
           <Empty
@@ -458,12 +463,14 @@ export function BoardView() {
         }
       />
       <ConfirmQueue
-        open={asking}
+        open={asking !== null}
         count={selection.ids.length}
-        onClose={() => setAsking(false)}
+        title={asking === "front" ? `Move ${plural(selection.ids.length, "job")} to the front?` : undefined}
+        onClose={() => setAsking(null)}
         onConfirm={() => {
-          setAsking(false);
-          void addSelected();
+          const to = asking ?? "add";
+          setAsking(null);
+          void addSelected(to);
         }}
       />
     </div>

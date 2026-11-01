@@ -306,6 +306,7 @@
     display: -webkit-box;
     margin-top: 4px;
     overflow: hidden;
+    white-space: normal;
     color: var(--ink-2);
     font-size: var(--text-meta);
     line-height: 1.35;

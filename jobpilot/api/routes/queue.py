@@ -206,7 +206,7 @@ def router(service) -> APIRouter:
         added, already, refused = len(out["added"]), len(out["already"]), len(out["refused"])
         parts = [f"{added:,} {'job' if added == 1 else 'jobs'} {'moved to the front of' if front else 'added to'} the queue."] if added or not refused else []
         if already:
-            parts.append(f"{already:,} already running or applied.")
+            parts.append(f"{already:,} already in line, running or applied.")
         if refused:
             parts.append(f"{refused:,} couldn't be queued. Each says why.")
         return {"added": added, "already": already, "refused": out["refused"], "message": " ".join(parts)}

@@ -216,6 +216,8 @@ def _enqueue_row(s, job, front, hold):
         return _approve_row(s, job)
     if known is None:
         refusal(s, job, hold)
+    elif not front:
+        return {"job_id": job.id, "state": "in_line", "message": "Already in the queue."}
     # Asking for a job you took out of the line puts it back: the pause would otherwise refuse it when its turn came, and the request
     # would be dropped without a word.
     control = s.get(Setting, "job_control:" + job.id)
@@ -249,7 +251,7 @@ MANY_CHUNK = 25
 
 def enqueue_many(service, job_ids, front=False):
     """Ticked jobs, or a whole Select all: each decided as its own click, with one reading of what holds what. Returns what happened to
-    each: `added`, `already` (running, queued or applied, so nothing was done), and `refused` with the sentence. An employer limit
+    each: `added`, `already` (in line, running or applied, so nothing was done), and `refused` with the sentence. An employer limit
     counts what this same request has just put in line, and what was waiting: ten ticked jobs at an employer with room for two are two
     jobs, or a select-all walks past the approval the limit asks for."""
     from sqlalchemy.orm import defer

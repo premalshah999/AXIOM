@@ -387,8 +387,10 @@ def page(service, q="", role="all", company="all", place="all", posted="all", pl
                 tail[row["company"]] = row["id"]
         more = {tail[name]: n - PER_COMPANY for name, n in count.items() if n > PER_COMPANY}
         shown = kept
+    # Select all takes what a person can queue, or move up the line: not what waits on an approval, or what the posting rules out.
+    actionable = lambda row: row["can_add"] or row["state"] == "queue"
     if want == "ids":
-        return {"ids": [row["id"] for row in shown if row["can_add"]]}
+        return {"ids": [row["id"] for row in shown if actionable(row)]}
     size = max(1, min(100, int(size)))
     pages = max(1, -(-len(shown) // size))
     number = max(1, min(int(number), pages))
@@ -406,8 +408,7 @@ def page(service, q="", role="all", company="all", place="all", posted="all", pl
     levels = facet("level", lambda r: [r["level"]])
     return {
         **answer,
-        # What Select all takes: every row these filters show that can join the line, on any page.
-        "selectable": sum(1 for row in shown if row["can_add"]),
+        "selectable": sum(1 for row in shown if actionable(row)),
         "all": len(rows),
         "grouped": grouped,
         "per_company": PER_COMPANY,
