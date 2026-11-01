@@ -98,7 +98,8 @@ def _approve(service, job_id):
         if job.status in {"queued", "running", "submitting"}:
             return {"job_id": job_id, "state": job.status, "message": "This application is already running."}
         if job.status in {"confirmed", "submission_unknown", "already_applied"}:
-            return {"job_id": job_id, "state": job.status, "message": "This job is already applied."}
+            return {"job_id": job_id, "state": job.status,
+                    "message": f'This job is already applied: "{" ".join((job.title or "").split())[:120] or "untitled role"}" at {job.company or "this employer"}.'}
         if job.status == "archived":
             raise ValueError("This job was removed; restore it before applying")
         if job.status != "ready":
