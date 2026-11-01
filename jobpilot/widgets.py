@@ -1003,7 +1003,8 @@ async def click_option(frame, option, owner=None):
             # The menu closed between reading its options and clicking one (ALTEN's react-select closes on blur, 2026-11-01): the
             # same words are offered when it opens again, with new elements. Open it once more and look for the same choice.
             try:
-                if not await owned_picker_open(owner) and await owner.evaluate("e => e.getAttribute('role') === 'combobox'"):
+                # Its aria-expanded can still read true after the list was emptied, so an empty list is the sign, not that flag.
+                if await owner.evaluate("e => e.getAttribute('role') === 'combobox'"):
                     await open_combobox(owner)
                     await asyncio.sleep(0.15)
                     continue

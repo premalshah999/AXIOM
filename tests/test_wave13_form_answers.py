@@ -124,6 +124,7 @@ async def test_a_menu_that_closes_before_the_click_is_opened_again(page):
     scope = await _popup_scope(box)
     read = await visible_options(page.main_frame, scope)
     option = next(o for o in read if o["text"] == "NA")
-    await page.evaluate("document.getElementById('box').innerHTML=''; document.getElementById('visa').setAttribute('aria-expanded','false')")
+    # The list is emptied but the input still says expanded, as the gallery's menu does after its blur timer.
+    await page.evaluate("document.getElementById('box').innerHTML=''; document.getElementById('visa').setAttribute('aria-expanded','true')")
     await click_option(page.main_frame, {**option, "scope": scope}, owner=box)
     assert await page.inner_text("#picked") == "NA"
