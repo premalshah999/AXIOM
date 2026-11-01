@@ -350,7 +350,23 @@ def require_employer_cap(session, target, occupied):
     )
 
 
-def require_company_limit(session, job, run_id=None):
+class _Counted(Exception):
+    pass
+
+
+def company_count(session, job):
+    """(applications the employer has, the user's limit), or None when no limit reads on this job. A request of several jobs at one
+    employer needs the number, not only whether this one is over."""
+    try:
+        require_company_limit(session, job, _count=True)
+    except _Counted as found:
+        return found.args
+    except QueueBlocked:
+        pass  # The employer's own stated limit: the dispatcher's reading says that one.
+    return None
+
+
+def require_company_limit(session, job, run_id=None, _count=False):
     """Cap unique confirmed postings plus pending submit admissions at three.
 
     Count current posting once, even when it appears in imported history. The
@@ -429,6 +445,8 @@ def require_company_limit(session, job, run_id=None):
     # Owner setting (2026-10-14): 1 = only employers with no earlier application.
     saved = session.get(Setting, LIMIT_KEY)
     limit = int((saved.value or {}).get("limit", COMPANY_LIMIT)) if saved else COMPANY_LIMIT
+    if _count:
+        raise _Counted(len(occupied), limit)
     if len(occupied) >= limit:
         permanent = len(confirmed - {current_identity}) >= limit
         raise QueueBlocked(
