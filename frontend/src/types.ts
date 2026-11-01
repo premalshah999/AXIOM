@@ -669,3 +669,106 @@ export type OverLimitRow = {
   hold: { code: string; reason: string; count: number; limit: number };
 };
 export type OverLimitPage = { rows: OverLimitRow[]; total: number; count: number; page: number; pages: number; size: number; at: string };
+
+// GET /api/queue: what is running, then what starts next in the dispatcher's own order (jobpilot/queue_order.py).
+export type QueueRunning = {
+  job_id: string;
+  run_id: string;
+  title: string;
+  company: string;
+  url: string;
+  ats: string;
+  location: string;
+  state: string;
+  since: string;
+  phase: string;
+};
+export type QueueItem = {
+  id: string;
+  position: number;
+  title: string;
+  company: string;
+  url: string;
+  ats: string;
+  location: string;
+  score: number | null;
+  career_level: string;
+  posted_at: string;
+  kind: "front" | "request" | "auto" | "retry";
+  wait: string;
+};
+export type QueueRetry = {
+  job_id: string;
+  run_id: string;
+  title: string;
+  company: string;
+  url: string;
+  ats: string;
+  location: string;
+  state: string;
+  sentence: string;
+  reason: string;
+  since: string;
+  tries: number;
+};
+export type QueuePage = {
+  at: string;
+  planning?: boolean;
+  paused: boolean;
+  auto_submit: boolean;
+  auto_apply: boolean;
+  stopped: string | null;
+  workers: { normal: number; specialist: number; custom: number; free: number };
+  decides: string;
+  exact: number;
+  running: QueueRunning[];
+  next: QueueItem[];
+  total: number;
+  page: number;
+  pages: number;
+  size: number;
+  retrying: QueueRetry[] | null;
+  held: Startable["held"];
+  held_total: number;
+};
+export type HeldRow = { id: string; title: string; company: string; url: string; ats: string; location: string; score: number | null; hold: Hold };
+export type HeldPage = { rows: HeldRow[]; total: number; page: number; pages: number; size: number; held: Startable["held"] };
+
+// GET /api/board: one page of the Job board, and each filter's choices with exact counts (jobpilot/board_view.py).
+export type BoardRow = {
+  id: string;
+  title: string;
+  company: string;
+  location: string;
+  url: string;
+  ats: string;
+  posted_at: string;
+  dated: boolean;
+  source: string;
+  score: number | null;
+  state: "queue" | "approval" | "held" | "below" | "checking" | "ready";
+  line: string;
+  position: number | null;
+  can_add: boolean;
+  level: string;
+  approval: "" | "over" | "reserved";
+};
+export type BoardFacet = { value: string; label: string; count: number };
+export type BoardPage = {
+  planning?: boolean;
+  rows: BoardRow[];
+  total: number;
+  page: number;
+  pages: number;
+  size: number;
+  all: number;
+  hidden: { blank: number; stale: number; closed: number; applied: number; twin: number };
+  searched_at: string | null;
+  scanning: number;
+  enabled: boolean;
+  window: number;
+  facets: Record<"fit" | "role" | "company" | "place" | "platform" | "posted", BoardFacet[]>;
+};
+// GET /api/jobs/{id}/posting: the job panel's posting.
+export type JobPosting = { text: string; link: string; posted_at: string; dated: boolean; source: string; level: string; listed: boolean | null; last_seen: string | null };
+export type QueuePlace = { position: number; total: number; wait: string };

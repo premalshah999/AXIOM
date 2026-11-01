@@ -26,13 +26,13 @@ TTL = 60  # seconds a reading is reused; a stale one is served while the next is
 HOLDS = {
     "employer_limit": (
         "over the employer limit",
-        "It starts if you approve it in Jobs › Over employer limit, if that employer's count drops, or if you raise the limit in Settings.",
+        "It starts if you approve it in Needs you, if that employer's count drops, or if you raise the limit in Settings.",
     ),
     "employer_cap": ("held by the employer's own limit", "It starts by itself when that period ends. Nothing opens a browser until then."),
     "loop_guard": ("held after repeated failures at the employer", "It starts by itself after that, after an app update, or if you press Try again on the employer."),
     "employer_wait": ("waiting because the employer's site asked for a wait", "It starts by itself when that wait is over."),
     "internship": ("internships", "Internships are skipped. Turn on internships in your profile to allow them."),
-    "reserved": ("waiting for your approval", "It starts after you approve it in Jobs › Reserved."),
+    "reserved": ("waiting for your approval", "It starts after you approve it in Needs you."),
     "role": ("outside your target roles", "It starts if you add the role to your profile's target roles."),
     "location": ("outside your target locations", "It starts if you add the place to your target locations, or Apply to it yourself."),
     "fit": ("below your minimum fit", "It starts if you lower the minimum fit, or Apply to it yourself."),
@@ -42,6 +42,7 @@ HOLDS = {
     "aged": ("no longer fresh", "It is left alone: the posting is older than your window or no longer on its board."),
     "protected": ("already applied to", "Applying again would duplicate an application, so it is never started."),
     "excluded": ("ruled out by the posting's requirements", "It is not retried: the posting's own requirements rule you out."),
+    "twin": ("the same posting under another link", "The copy ahead of it in the queue is the one applied to."),
 }
 EMPLOYER_STOPS = {"employer_cap", "loop_guard", "employer_wait"}
 # Plain words for the discovery gate's codes (features/discovery/policy.gate).
@@ -55,7 +56,7 @@ GATE_WORDS = {
 
 
 def limit_sentence(company, count, limit):
-    """What Jobs › Over employer limit says of one job: how many applications the employer already has."""
+    """What Needs you says of a job over the employer limit: how many applications the employer already has."""
     name = " ".join((company or "").split()) or "This employer"
     return f"{name} already has {count:,} application{'' if count == 1 else 's'}; your limit is {limit:,}."
 
@@ -79,7 +80,7 @@ def classify(message):
 
 def read(service):
     """One reading, on the calling (worker) thread: {"ready", "startable", "waiting", "held": [...], "jobs": {id: {...}}}."""
-    from .autopilot import screen_job, unlisted_ready
+    from .autopilot import dispatch_order, screen_job, unlisted_ready
     from .execution_services import enabled as services_enabled, master_policy
     from .jobboard import board_snapshot, settings
     from .reserved import held_ids
@@ -116,8 +117,8 @@ def read(service):
     rejections = db.get_setting("job_board_autopilot", {}).get("rejections") or {}
     board_settings = db.get_setting("job_board_settings", {}) or {}
     data_dir = service.config.data_dir
-    jobs, tally, can = {}, {}, []
-    startable = waiting = 0
+    jobs, tally, can, details = {}, {}, [], {}
+    waiting = 0
     from .application_pacing import employer_identity, require_company_limit
     from .loop_guard import held_employers, stop_of
 
@@ -127,10 +128,10 @@ def read(service):
 
     for r in ready:
         job = listed.get(r.id) or unlisted.get(r.id) or {
-            "id": r.id, "title": r.title, "company": r.company, "location": r.location, "country": "",
+            "id": r.id, "title": r.title, "company": r.company, "location": r.location, "country": "", "url": r.url,
             "ats": r.ats, "status": r.status, "score": r.score, "posted_at": r.created_at or "", "career_level": "",
         }
-        verdict, extra = None, {}  # verdict: (code, sentence)
+        verdict, more, state = None, {}, ""  # verdict: (code, sentence)
         if r.id in reserved:
             verdict = ("reserved", "A reserved employer: nothing is applied there until you approve this job.")
         else:
@@ -171,21 +172,43 @@ def read(service):
                         # The user's own limit (Settings): the one the owner may approve past (Jobs › Over employer limit).
                         count, cap = exc.detail["count"], exc.detail["limit"]
                         verdict = ("employer_limit", limit_sentence(job.get("company") or r.company, count, cap))
-                        extra = {"count": count, "limit": cap}
+                        more = {"count": count, "limit": cap}
                     else:  # The employer's own stated cap: its rule, not the user's setting; no approval lifts it.
                         verdict = ("employer_cap", str(exc))
         if verdict is None and (why := rejections.get(r.id)) and why.get("outcome") in {"excluded", "protected"}:
             verdict = ("protected" if why["outcome"] == "protected" else "excluded", str(why.get("reason", ""))[:240])
         if verdict is None:
-            startable += 1
             can.append(r.id)
+            # What Queue needs: the fields the dispatcher sorts on, and the job's employer and lane.
+            details[r.id] = {
+                "id": r.id, "title": r.title, "company": r.company, "location": job.get("location") or r.location, "url": r.url, "ats": r.ats,
+                "score": r.score, "status": r.status, "posted_at": job.get("posted_at") or "", "career_level": job.get("career_level") or "",
+                "tailoring": state == "tailoring",
+            }
             continue
         code, sentence = verdict
-        jobs[r.id] = {"code": code, "reason": sentence, "next": HOLDS.get(code, HOLDS["excluded"])[1], **extra}
+        jobs[r.id] = {"code": code, "reason": sentence, "next": HOLDS.get(code, HOLDS["excluded"])[1], **more}
         tally[code] = tally.get(code, 0) + 1
         if code in EMPLOYER_STOPS:
             with db.session() as s:
                 identity_of[r.id] = employer_identity(s, s.get(Job, r.id))
+    # The dispatcher's order, on the same starting list as its own: the board's, then pasted links, then the unlisted.
+    place = {jid: i for i, jid in enumerate([*listed, *sorted(manual - set(listed)), *unlisted])}
+    can.sort(key=lambda jid: place.get(jid, len(place)))
+    can = [j["id"] for j in dispatch_order([details[jid] for jid in can], profile.job_priority)]
+    # The same posting under two links (a list's short link and the employer's own): counted, listed and applied to once. The
+    # later one waits behind the first, and the duplicate guard refuses it once the first has gone (122 pairs, 2026-11-01).
+    seen, kept = set(), []
+    for jid in can:
+        d = details[jid]
+        same = (" ".join((d["company"] or "").casefold().split()), " ".join((d["title"] or "").casefold().split()), " ".join((d["location"] or "").casefold().split()))
+        if all(same) and same in seen:
+            jobs[jid] = {"code": "twin", "reason": "The same posting is ahead of it in the queue under another link.", "next": HOLDS["twin"][1]}
+            tally["twin"] = tally.get("twin", 0) + 1
+            continue
+        seen.add(same)
+        kept.append(jid)
+    can, startable = kept, len(kept)
     held = [{"code": c, "count": tally[c], "phrase": HOLDS[c][0]} for c in HOLDS if tally.get(c)]
     # What stops every application at once comes first: a job that "can start" cannot while the model is unreachable.
     stopped = everything_stopped(service)
@@ -205,6 +228,7 @@ def read(service):
         "held": held,
         "jobs": jobs,
         "ids": can,
+        "details": {jid: details[jid] for jid in can},
         "idle": stopped or idle_line(startable, held),
         "stopped": stopped,
     }
@@ -290,16 +314,20 @@ def idle_line(startable, held):
 
 
 def without(value, job_ids):
-    """The reading with these held jobs taken out, every count following."""
-    gone = [j for j in job_ids if j in value["jobs"]]
+    """The reading with these jobs taken out, every count following: they were approved, moved or removed, and wait no longer."""
+    gone = {j for j in job_ids if j in value["jobs"] or j in value.get("ids", ())}
     if not gone:
         return value
     jobs = {j: h for j, h in value["jobs"].items() if j not in gone}
+    ids = [j for j in value.get("ids", []) if j not in gone]
     tally = {}
     for h in jobs.values():
         tally[h["code"]] = tally.get(h["code"], 0) + 1
     held = [{"code": c, "count": tally[c], "phrase": HOLDS[c][0]} for c in HOLDS if tally.get(c)]
-    return {**value, "jobs": jobs, "held": held, "ready": value["ready"] - len(gone), "idle": idle_line(value["startable"], held)}
+    return {
+        **value, "jobs": jobs, "ids": ids, "held": held, "ready": len(jobs) + len(ids), "startable": len(ids),
+        "idle": value.get("stopped") or idle_line(len(ids), held),
+    }
 
 
 class Reading:

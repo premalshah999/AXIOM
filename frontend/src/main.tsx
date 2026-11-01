@@ -33,8 +33,9 @@ import { ComingSoon } from "./shell/ComingSoon";
 import { ALL_ITEMS, titleFor } from "./shell/nav";
 import { Button, Loading, ToastStack } from "./ui/index";
 import { BatchView } from "./batch";
-import { JobsView } from "./jobs";
+import { BoardView } from "./jobboard";
 import { LedgerView } from "./ledger";
+import { QueueView } from "./queue";
 import { JobPanel } from "./jobdetail";
 import { AddJobDialog } from "./jobintake";
 import type { AccountStatus } from "./account";
@@ -122,8 +123,8 @@ function App() {
     };
   }, [auth]);
 
-  // Batch and Jobs show live state; other views only need occasional freshness.
-  const live = route.view === "batch" || route.view === "jobs" || !!route.job;
+  // Overview and Queue show live state; other views only need occasional freshness.
+  const live = route.view === "batch" || route.view === "queue" || !!route.job;
   const snap = usePoll<Snapshot>(
     (signal) =>
       api<Snapshot>("/snapshot?include_sources=false", "GET", undefined, signal),
@@ -333,7 +334,8 @@ function App() {
           }
         >
           {route.view === "batch" && <BatchView />}
-          {route.view === "jobs" && <JobsView />}
+          {route.view === "queue" && <QueueView />}
+          {route.view === "board" && <BoardView />}
           {route.view === "ledger" && <LedgerView />}
           {route.view === "needs" && <NeedsView />}
           {soon && <ComingSoon item={soon} />}

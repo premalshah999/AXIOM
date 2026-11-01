@@ -6,9 +6,9 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from ...db import Source, now
+from ...db import Setting, Source, now
 from ...features.discovery.tables import DcSourceHealth
 from ...jobboard import LOCKED, BoardSettings, board_snapshot, fit_of, managed_ids, setup_sources, settings
 from ...network import public_url
@@ -112,7 +112,21 @@ def router(service) -> APIRouter:
         from ...startable import reading
 
         value = reading(service).get(service)
-        return {key: item for key, item in value.items() if key not in {"jobs", "ids"}}
+        # Waiting requests are in line too (queue_order.py), so this is the number of rows Up next opens.
+        with db.session() as s:
+            asked = s.scalar(select(func.count()).select_from(Setting).where(Setting.key.startswith("owner_apply:", autoescape=True))) or 0
+        shown = {key: item for key, item in value.items() if key not in {"jobs", "ids", "details"}}
+        return {**shown, "startable": value["startable"] + asked, "ready": value["ready"] + asked}
+
+    @r.get("/api/board")
+    def job_board_page(
+        q: str = "", role: str = "all", company: str = "all", place: str = "all", posted: str = "all", platform: str = "all",
+        fit: Literal["match", "other", "all"] = "match", sort: Literal["fit", "newest", "company"] = "fit", page: int = 1, size: int = 25,
+    ):
+        """The Job board (board_view.py): one page of open postings, filters with exact counts. A `def` route: it reads on a worker thread."""
+        from ...board_view import page as board_page
+
+        return board_page(service, q[:200], role[:200], company[:200], place[:40], posted[:4], platform[:40], fit, sort, page, size)
 
     @r.get("/api/job-board")
     def snapshot(

@@ -152,11 +152,65 @@ async def start(service, job_id, mode="submit", **queue_options):
     return {"job_id": job_id, "run_id": run["id"], "state": "queued", "message": "Application queued."}
 
 
+def enqueue(service, job_id, front=False):
+    """Add a job to the queue, or move it to the front, without starting anything: the dispatcher starts it in its turn, so a
+    click here can never run past a Stop or a pause. `front`: ahead of everything else waiting (the latest click goes first).
+    The job's guards decide when its turn comes, as they do any Apply. Runs on a worker thread."""
+    if answered := _approve(service, job_id):
+        return answered
+    with service.db.session() as s:
+        known = s.get(Setting, KEY + job_id)
+    value = dict(known.value or {}) if known else {"at": now()}
+    value.update(code=value.get("code") or "queue", reason=value.get("reason") or "", not_before=now())
+    if front:
+        value["front"] = now()
+    service.db.set_setting(KEY + job_id, value)
+    return {
+        "job_id": job_id,
+        "state": "waiting",
+        "deferred": True,
+        "code": "queue",
+        "message": "Moved to the front of the queue." if front else "Added to the queue.",
+    }
+
+
+def back_in_line(service, job_id):
+    """Undo Remove from the queue: the pause is lifted and the job is Ready again, for the dispatcher to reach in its turn. Nothing
+    starts here. A job that has attempts goes through the owner's Resume instead (job_control.manage)."""
+    with service.db.exclusive() as s:
+        job = s.get(Job, job_id)
+        if job is None:
+            raise ValueError("Job not found")
+        control = s.get(Setting, "job_control:" + job_id)
+        if control is not None:
+            if job.status == "paused":
+                job.status = (control.value or {}).get("previous_status") or "ready"
+            s.delete(control)
+        status = job.status
+    return {"job_id": job_id, "state": status, "message": "Back in the queue."}
+
+
 def _forget(db, job_id):
     with db.exclusive() as s:
         row = s.get(Setting, KEY + job_id)
         if row is not None:
             s.delete(row)
+
+
+def request_order(waiting, attempted):
+    """The order waiting requests start in: first attempts before retries; within each, what the user moved to the front (the
+    latest click first), then the least recently tried, so a few jobs that stay blocked (one busy employer) never keep the
+    ones behind them from being tried. Queue shows this same order (queue_order.py)."""
+    def key(item):
+        job_id, value = item
+        front = value.get("front", "")
+        return (not front and job_id in attempted, not front, _descending(front), value.get("tried", ""), value.get("at", ""))
+
+    return sorted(waiting, key=key)
+
+
+def _descending(text):
+    return tuple(-ord(c) for c in text)
 
 
 async def due(service, limit, retries=None):
@@ -175,14 +229,13 @@ async def due(service, limit, retries=None):
         )) if waiting else set()
     # 247 resumed repeat-failures queued ahead of fresh postings filled every worker on 2026-10-24; their retries
     # succeed about one time in eight, first attempts far more often.
-    # Least recently tried first within each group, so a few jobs that stay blocked (one busy employer) never keep
-    # the ones behind them from being tried.
-    rows = sorted(waiting, key=lambda item: (item[0] in attempted, item[1].get("tried", ""), item[1].get("at", "")))
+    rows = request_order(waiting, attempted)
     started = retried = tries = 0
     for job_id, value in rows:
         if started >= limit or tries >= max(TRIES, 3 * limit):
             break
-        if job_id in attempted and retries is not None and retried >= retries:
+        # What the user moved to the front is theirs to start first, an earlier attempt or not.
+        if job_id in attempted and not value.get("front") and retries is not None and retried >= retries:
             break  # the rest are retries too
         if (value.get("not_before") or "") > now():
             continue

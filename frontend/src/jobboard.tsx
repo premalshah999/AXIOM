@@ -1,107 +1,107 @@
+// Job board: which real, open postings the app found, and why each one fits or doesn't (owner, 2026-11-01: "make the job board good
+// and legit"). Pages, filters and exact counts come from the server (GET /api/board, jobpilot/board_view.py), the same reading the
+// Queue is made from, so In queue 4 here is number 4 there. Closed, stale and duplicate rows never reach it.
+import { ExternalLink, FilterX, Plus, Radar, RefreshCw, SearchX } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { RefreshCw, Radar, SearchX } from "lucide-react";
-import { api } from "./api";
-import { ApplyOutcomes, useApplyMany, useSelection } from "./bulk";
+import { addToQueue, api, moveToFront } from "./api";
+import { useSelection } from "./bulk";
 import { useWorkspace } from "./context";
+import { ago, platformName, plural, stamp } from "./format";
 import { useAction, useDraft, useNow, usePoll } from "./hooks";
+import { OPEN_JOB_LINK } from "./jobintake";
 import { Pagination, type Paging } from "./pagination";
 import { TopActions, TopLine } from "./shell/Shell";
-import type { Board, Listing, Startable } from "./types";
-import { ago, jobWords, listedWhen, plainReason, platformName, plural, shownFit, stamp } from "./format";
-import { Button, Empty, Listbox, Table, Tooltip, type Column } from "./ui/index";
-import { Chips, JobCell, LoadError, Notice, Note, SearchBox, StatusPill } from "./worktools";
+import type { BoardFacet, BoardPage, BoardRow } from "./types";
+import { Button, Empty, Listbox, Monogram, Table, type Column } from "./ui/index";
+import { LoadError, Notice, SearchBox } from "./worktools";
+import "./styles/queue.css";
 
-// A listing in any of these states is already owned or protected.
-const LOCKED = new Set([
-  "paused",
-  "queued",
-  "running",
-  "submitting",
-  "confirmed",
-  "submission_unknown",
-  "already_applied",
-  "archived",
-  "closed",
-]);
-// A listing in one of these states is already owned or protected; "pending:" is an Apply just made.
-const locked = (status: string) => LOCKED.has(status) || status.startsWith("pending:");
-const RUN_STATES = new Set(["queued", "running", "submitting", "confirmed", "submission_unknown", "already_applied"]);
+const webLink = (url: string) => (/^https?:\/\//i.test(url) ? url : "");
 
-// "Why isn't this applying?": the batch's last reason for a Ready job it did not start. The server keeps codes such
-// as `generic_careers_page` as the reason for some guards, so they are read as words.
-function whyNot(r: NonNullable<Listing["rejection"]>) {
-  const text = /\s/.test(r.reason) ? r.reason : r.reason.replace(/_/g, " ");
-  const label = r.outcome === "deferred" || !r.outcome ? "Waiting" : "Not started";
-  return `${label}: ${text.charAt(0).toLowerCase()}${text.slice(1)}`;
+const SORTS = [
+  { value: "fit", label: "Best fit" },
+  { value: "newest", label: "Newest" },
+  { value: "company", label: "Company A to Z" },
+] as const;
+type Sort = (typeof SORTS)[number]["value"];
+type Fit = "match" | "other" | "all";
+
+// A row's place in one short phrase, the same word it has on every other screen.
+function StateCell({ r }: { r: BoardRow }) {
+  if (r.state === "queue")
+    return (
+      <span className="bd-state">
+        In queue <b>{r.position}</b>
+      </span>
+    );
+  if (r.state === "approval") return <span className="bd-state">Needs you</span>;
+  if (r.state === "checking") return <span className="bd-state is-idle">Checking fit</span>;
+  if (r.state === "ready") return <span className="bd-state">Ready</span>;
+  return <span className="bd-state is-idle">Not applying</span>;
 }
 
-// "Ready" is a job the batch can start now and "Held" one it will not, each with its reason (jobpilot/startable.py): the same two
-// numbers Overview's sentence quotes. "Everything found" adds jobs below your fit and ones not ranked yet. No counts on the chips:
-// the tab says how many are ready, and a count that changes meaning is worse than none.
-const FITS = [
-  ["ready", "Ready"],
-  ["held", "Held"],
-  ["all", "Everything found"],
-] as const;
+function When({ r, now }: { r: BoardRow; now: number }) {
+  const when = ago(r.posted_at, now);
+  return (
+    <time className="bd-when" dateTime={r.posted_at} title={`${r.dated ? "Posted" : "First found"} ${stamp(r.posted_at)}${r.dated ? "" : ". The posting gives no date."}`}>
+      <span>{r.dated ? when : `Found ${when}`}</span>
+      <small title={`${platformName(r.ats)} · ${r.source}`}>
+        {platformName(r.ats)} · {r.source}
+      </small>
+    </time>
+  );
+}
 
-// Jobs › Discovered pages, filters and counts come from the server (GET /api/job-board?page=): the dashboard used to
-// receive 500 listings (577 KB) every 20 s and filter them itself, so larger boards showed wrong totals and missed
-// rows (2026-10-22). Below-fit jobs can be ticked, a page or every match selected, and applied to in one request.
-export function DiscoveredJobs() {
-  const { snapshot, route, go, openJob, version, marks, counts } = useWorkspace();
-  const countsKey = `${counts.discovered}:${counts.pipeline}`;
-  const { pending, run } = useAction();
+export function BoardView() {
+  const { snapshot, route, go, openJob, version, refresh } = useWorkspace();
   const now = useNow(30000);
-  const [query, setQuery] = useDraft("board-query", "");
-  const ats = "all";
-  const level = "all";
+  const { pending, run } = useAction();
+  const [query, setQuery] = useDraft("board-query", route.q || "");
   const [q, setQ] = useState(query.trim());
+  const [fit, setFit] = useDraft<Fit>("board-fit", "match");
+  const [role, setRole] = useDraft("board-role", "all");
+  const [company, setCompany] = useDraft("board-company", "all");
+  const [place, setPlace] = useDraft("board-place", "all");
+  const [posted, setPosted] = useDraft("board-posted", "all");
+  const [platform, setPlatform] = useDraft("board-platform", "all");
+  const [sort, setSort] = useDraft<Sort>("board-sort", "fit");
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(25);
-  // "held:internship" is the Held list narrowed to one reason.
-  const [fit, hold = ""] = (route.filter || "ready").split(":") as [string, string?];
+  useEffect(() => {
+    if (route.q) setQuery(route.q);
+  }, [route.q, setQuery]);
   useEffect(() => {
     const timer = window.setTimeout(() => setQ(query.trim()), 250);
     return () => window.clearTimeout(timer);
   }, [query]);
-  useEffect(() => setPage(1), [q, ats, level, fit, hold, size]);
-  const key = new URLSearchParams({
-    include_sources: "false",
-    q,
-    ats,
-    level,
-    fit,
-    hold,
-    page: String(page),
-    size: String(size),
-  }).toString();
-  const board = usePoll<Board & { key: string }>(
-    async (signal) => ({ ...(await api<Board>(`/job-board?${key}`, "GET", undefined, signal)), key }),
-    10000,
-    [key, version, countsKey],
+  useEffect(() => setPage(1), [q, fit, role, company, place, posted, platform, sort, size]);
+  const key = new URLSearchParams({ q, fit, role, company, place, posted, platform, sort, page: String(page), size: String(size) }).toString();
+  const board = usePoll<BoardPage & { key: string }>(
+    async (signal) => ({ ...(await api<BoardPage>(`/board?${key}`, "GET", undefined, signal)), key }),
+    15000,
+    [key, version],
   );
+  const b = board.data;
+  const planning = !!b?.planning;
+  const reread = board.refresh;
+  // A cold start: the first screening is still under way, so ask again soon rather than in fifteen seconds.
+  useEffect(() => {
+    if (!planning) return;
+    const timer = window.setTimeout(reread, 1500);
+    return () => window.clearTimeout(timer);
+  }, [planning, b, reread]);
+  const rows = useMemo(() => b?.rows ?? [], [b]);
   const selection = useSelection();
-  const bulk = useApplyMany();
-  const settings = board.data?.settings;
-  // Keeps the server's reading of which Ready jobs can start warm, so rows and the Ready and Held counts have it.
-  usePoll<Startable>((signal) => api("/startable", "GET", undefined, signal), 30000, [version]);
-  const jobs = useMemo(
-    () =>
-      (board.data?.jobs || []).map((j) => {
-        const mark = marks[j.id];
-        return mark && mark.at > board.requestedAt ? { ...j, status: mark.state } : j;
-      }),
-    [board.data, marks, board.requestedAt],
-  );
-  const paging: Paging = {
-    items: jobs,
-    total: board.data?.total ?? jobs.length,
-    page: board.data?.page ?? page,
-    pages: board.data?.pages ?? 1,
-    size,
-    initialSize: 25,
-    setPage,
-    setSize,
+  const paging: Paging = { items: rows, total: b?.total ?? 0, page: b?.page ?? page, pages: b?.pages ?? 1, size, initialSize: 25, setPage, setSize };
+  const filtered = !!q || fit !== "match" || role !== "all" || company !== "all" || place !== "all" || posted !== "all" || platform !== "all";
+  const clear = () => {
+    setQuery("");
+    setFit("match");
+    setRole("all");
+    setCompany("all");
+    setPlace("all");
+    setPosted("all");
+    setPlatform("all");
   };
   const blockers = [
     !snapshot.config.workers_enabled && "application workers are disabled",
@@ -110,235 +110,202 @@ export function DiscoveredJobs() {
   ].filter(Boolean) as string[];
   const canApply = blockers.length === 0;
 
-  const applySelected = async () => {
-    if (await bulk.apply(selection.ids)) selection.clear();
+  const again = async () => {
+    await board.refresh();
+    void refresh();
   };
-
-  // One search: the employer boards and the internet-wide new-grad lists together. Two buttons and a second
-  // status panel (polled every 10 s) did the same job with different words (2026-10-23).
-  const sweep = usePoll<{ state?: string }>(
-    (signal) => api("/v2/discovery/feeds", "GET", undefined, signal),
-    30000,
-    [version],
-  );
-  const searching = (board.data?.scanning ?? 0) > 0 || sweep.data?.state === "running";
+  const add = (r: BoardRow) => run("add:" + r.id, async () => { const out = await addToQueue(r.id); await again(); return out; }, (out) => out?.message);
+  const front = (r: BoardRow) => run("add:" + r.id, async () => { const out = await moveToFront(r.id); await again(); return out; }, (out) => out?.message);
+  const addSelected = () =>
+    run(
+      "many",
+      async () => {
+        const out = await api<{ added: number; refused: number }>("/queue/add-many", "POST", { job_ids: selection.ids });
+        selection.clear();
+        await again();
+        return out;
+      },
+      (out) => out && `${plural(out.added, "job")} added to the queue.${out.refused ? ` ${out.refused} could not be added.` : ""}`,
+    );
   const scan = () =>
     run(
       "scan",
       async () => {
-        const r = await api<{ queued_sources: number; total_sources: number }>("/job-board/scrape", "POST");
+        const r = await api<{ queued_sources: number }>("/job-board/scrape", "POST");
         await api("/v2/discovery/feeds/refresh", "POST").catch(() => undefined);
-        await Promise.all([board.refresh(), sweep.refresh()]);
+        await board.refresh();
         return r;
       },
-      (r) =>
-        r &&
-        `Searching ${plural(r.queued_sources, "employer board")} and the new-grad lists. New jobs appear here as they arrive.`,
+      (r) => r && `Searching ${plural(r.queued_sources, "employer board")} and the new-grad lists. New jobs appear here as they arrive.`,
     );
+  const searching = (b?.scanning ?? 0) > 0;
+  const span = !b ? "" : b.window >= 720 ? "30 days" : b.window >= 168 ? "7 days" : "48 hours";
 
-  // What is happening to a found job, in one sentence: why it is held, why it is ruled out, or that it starts by itself.
-  const sentenceOf = (j: Listing) =>
-    j.hold
-      ? j.hold.reason
-      : j.status === "skipped" || j.status === "closed"
-        ? plainReason(j.reason) || "Below your minimum fit."
-        : j.status === "ready"
-          ? "Ready. Starts by itself."
-          : j.status === "new"
-            ? "Being checked against your profile."
-            : plainReason(j.reason);
-  // The pill is the vocabulary word: nothing on a Ready row (the list is "To apply"), "Not applying" for a held or ruled-out one.
-  const statusOf = (j: Listing) => {
-    if (j.hold || j.status === "skipped" || j.status === "closed") return <StatusPill state="job:skipped" />;
-    if (fit === "ready") return null;
-    return <StatusPill state={RUN_STATES.has(j.status) || j.status.startsWith("pending:") ? j.status : "job:" + j.status} />;
-  };
-  const columns: Column<Listing>[] = [
+  const columns: Column<BoardRow>[] = [
     {
       key: "job",
       header: "Job",
-      width: 520,
+      width: 420,
       truncate: true,
-      cell: (j) => (
-        <JobCell
-          {...jobWords(j)}
-          title={j.hold ? `${j.hold.reason} ${j.hold.next}` : undefined}
-          onOpen={() => openJob(j.id)}
-          meta={
-            <>
-              {statusOf(j)}
-              <span>{sentenceOf(j)}</span>
-              {shownFit(j) != null && <span className="mono">Fit {shownFit(j)}</span>}
-            </>
-          }
-        />
+      min: 220,
+      cell: (r) => (
+        <button
+          type="button"
+          className="bd-job"
+          onClick={(e) => {
+            e.stopPropagation();
+            openJob(r.id);
+          }}
+        >
+          <Monogram name={r.company} url={r.url} size="md" employer />
+          <span className="bd-title" title={r.title}>
+            {r.title}
+          </span>
+          <span className="bd-sub" title={`${r.company}${r.location ? " · " + r.location : ""}`}>
+            {r.company}
+            {r.location ? ` · ${r.location}` : " · Location not listed"}
+          </span>
+          <span className="bd-meta-line">{r.line}</span>
+          <span className="bd-meta">
+            {r.score != null && <span className="mono">Fit {r.score}</span>}
+            <span>{r.dated ? ago(r.posted_at, now) : `Found ${ago(r.posted_at, now)}`}</span>
+            <span>{platformName(r.ats)}</span>
+            <StateCell r={r} />
+          </span>
+        </button>
       ),
     },
-    { key: "where", header: "Location", hideBelow: 860, width: 170, truncate: true, cell: (j) => <Note>{j.location || "United States"}</Note> },
+    { key: "fit", header: "Fit", num: true, hideBelow: 600, cell: (r) => (r.score == null ? "—" : r.score) },
     {
-      key: "posted",
-      header: "Posted",
+      key: "why",
+      header: fit === "match" ? "Why it fits" : "Why",
       hideBelow: 600,
-      cell: (j) => {
-        const when = listedWhen(j, now);
+      width: 340,
+      truncate: true,
+      min: 180,
+      cell: (r) => (
+        <span className="bd-line" title={r.line}>
+          {r.line}
+        </span>
+      ),
+    },
+    { key: "when", header: "Posted, and where from", hideBelow: 860, cell: (r) => <When r={r} now={now} /> },
+    { key: "state", header: "Status", hideBelow: 600, cell: (r) => <StateCell r={r} /> },
+    {
+      key: "act",
+      header: <span className="sr-only">Posting and queue</span>,
+      width: "1%",
+      pin: true,
+      cell: (r) => {
+        const link = webLink(r.url);
         return (
-          <time dateTime={j.posted_at} title={when.title}>
-            {when.text}
-          </time>
+          <div className="ax-act" onClick={(e) => e.stopPropagation()}>
+            {r.state === "queue" && r.position !== 1 && (
+              <Button size="sm" className="ax-lead" disabled={pending !== null} loading={pending === "add:" + r.id} onClick={() => front(r)}>
+                To front
+              </Button>
+            )}
+            {r.state === "approval" && (
+              <Button size="sm" className="ax-lead" onClick={() => go({ view: "needs", filter: r.approval || "reserved" })}>
+                Review
+              </Button>
+            )}
+            {r.can_add && (
+              <Button size="sm" className="ax-lead" disabled={pending !== null} loading={pending === "add:" + r.id} icon={<Plus size={13} aria-hidden="true" />} onClick={() => add(r)}>
+                Queue
+              </Button>
+            )}
+            {link && (
+              <a className="ax-btn is-sm ax-lead bd-link" href={link} target="_blank" rel="noreferrer noopener" title="Open the employer's posting in your browser">
+                Posting <ExternalLink size={12} aria-hidden="true" />
+                <span className="sr-only"> (opens in your browser)</span>
+              </a>
+            )}
+          </div>
         );
       },
     },
-    {
-      key: "fit",
-      header: "Fit",
-      num: true,
-      hideBelow: 600,
-      cell: (j) => (
-        <Tooltip label={plainReason(j.reason) || j.match_reason}>
-          <span>{shownFit(j) == null ? "—" : shownFit(j)}</span>
-        </Tooltip>
-      ),
-    },
-    {
-      key: "status",
-      header: "What is happening",
-      hideBelow: 600,
-      width: 330,
-      truncate: true,
-      cell: (j) => <Note title={j.hold ? `${j.hold.reason} ${j.hold.next}` : undefined}>{sentenceOf(j)}</Note>,
-    },
-    {
-      key: "act",
-      header: <span className="sr-only">Actions</span>,
-      width: "1%",
-      pin: true,
-      cell: (j) =>
-        locked(j.status) ? null : (
-          <Button size="sm" className="ax-lead" disabled={!canApply || bulk.applying} onClick={() => bulk.apply([j.id])}>
-            Apply
-          </Button>
-        ),
-    },
   ];
 
-  const b = board.data;
-  const fresh = b ? (b.fresh_total ?? b.jobs.length) : 0;
-  const span = b?.max_age_hours === 720 ? "30 days" : b?.max_age_hours === 168 ? "7 days" : "48 hours";
-  const chips = FITS.map(([id, label]) => ({ id, label }));
-  const current = !!b && b.key === key;
+  const all = (label: string, facet?: BoardFacet[], rename?: (f: BoardFacet) => string) => [
+    { value: "all", label },
+    ...(facet ?? []).map((f) => ({ value: f.value, label: rename ? rename(f) : f.label, count: f.count })),
+  ];
+  const keep = (value: string, options: { value: string; label: string; count?: number }[]) =>
+    value === "all" || options.some((o) => o.value === value) ? options : [...options, { value, label: value, count: 0 }];
   return (
-    <>
+    <div className="ax-page ax-page-fill">
       <TopActions>
-        <Button
-          loading={searching}
-          disabled={pending !== null || !settings?.enabled}
-          onClick={scan}
-          icon={<RefreshCw size={14} aria-hidden="true" />}
-        >
+        <Button variant="secondary" icon={<Plus size={15} aria-hidden="true" />} onClick={() => window.dispatchEvent(new Event(OPEN_JOB_LINK))}>
+          Add a link
+        </Button>
+        <Button loading={searching || pending === "scan"} disabled={pending !== null || !b?.enabled || !snapshot.config.workers_enabled} onClick={scan} icon={<RefreshCw size={14} aria-hidden="true" />}>
           {searching ? "Searching…" : "Search now"}
         </Button>
       </TopActions>
-      {b && (fit === "ready" || fit === "held") && (
+      {b && !planning && (
         <TopLine>
-          {fit === "ready"
-            ? "Jobs AXIOM can apply to now. A running batch starts them by itself."
-            : "Jobs AXIOM will not apply to by itself, and why. Apply starts one yourself where the reason allows it."}
-        </TopLine>
-      )}
-      {b && fit !== "ready" && fit !== "held" && (
-        <TopLine>
-          Found and not applied to yet: US roles posted in the last {span}
-          {searching ? ", searching now" : b.last_requested_at ? `, last searched ${ago(b.last_requested_at, now)}` : ""}.{!settings?.auto_apply && " Automatic applications are off."}{" "}
+          {b.all.toLocaleString()} open US postings from the last {span}, with closed ones and duplicates left out
+          {b.searched_at ? `. Last searched ${ago(b.searched_at, now)}.` : "."}{" "}
           <button type="button" className="ax-link" onClick={() => go({ view: "settings", tab: "discovery" })}>
-            Discovery settings
+            What it looks for
           </button>
         </TopLine>
       )}
-      {b && !settings?.enabled && (
-        <Notice
-          tone="warn"
-          action={
-            <button type="button" className="ax-link" onClick={() => go({ view: "settings", tab: "discovery" })}>
-              Turn it on
-            </button>
-          }
-        >
-          Discovery is off, so no new listings arrive.
+      {b && !b.enabled && (
+        <Notice tone="warn" action={<button type="button" className="ax-link" onClick={() => go({ view: "settings", tab: "discovery" })}>Turn it on</button>}>
+          Job search is off, so no new postings arrive.
         </Notice>
       )}
-      {!canApply && <Notice tone="warn">Applying from this list is unavailable: {blockers.join("; ")}.</Notice>}
-      <div className="ax-toolbar">
-        <SearchBox value={query} onChange={setQuery} label="Search discovered jobs" placeholder="Role, company or city" />
-        <Chips
-          items={chips}
-          value={fit}
-          label="Show"
-          onChange={(id) => go({ view: "jobs", tab: "discovered", filter: id === "ready" ? undefined : id })}
-        />
-      </div>
-      {fit === "held" && b?.holds && b.holds.length > 1 && (
-        <div className="ax-toolbar">
-          <Chips
-            items={[
-              { id: "held", label: "Any reason" },
-              ...b.holds.map((h) => ({ id: `held:${h.code}`, label: h.phrase.charAt(0).toUpperCase() + h.phrase.slice(1) })),
-            ]}
-            value={hold ? `held:${hold}` : "held"}
-            label="Filter by reason"
-            onChange={(id) => go({ view: "jobs", tab: "discovered", filter: id })}
-          />
+      <div className="bd-search">
+        <div className="bd-toolbar" role="group" aria-label="Filter the job board">
+          <SearchBox value={query} onChange={setQuery} label="Search the job board" placeholder="Role, company or city" />
+          <Listbox label="Fit" value={fit} options={(b?.facets.fit?.length ? b.facets.fit : [{ value: "match", label: "Good fits" }]) as { value: Fit; label: string; count?: number }[]} onChange={setFit} />
+          <Listbox prefix="Role" label="Role" value={role} options={keep(role, all("Any", b?.facets.role))} onChange={setRole} />
+          <Listbox prefix="Company" label="Company" value={company} options={keep(company, all("Any", b?.facets.company))} onChange={setCompany} />
+          <Listbox prefix="Location" label="Location" value={place} options={keep(place, all("Any", b?.facets.place))} onChange={setPlace} />
+          <Listbox prefix="Posted" label="Posted" value={posted} options={all("Any", b?.facets.posted)} onChange={setPosted} />
+          <Listbox prefix="Platform" label="Platform" value={platform} options={keep(platform, all("Any", b?.facets.platform, (f) => platformName(f.value)))} onChange={setPlatform} />
+          {filtered && (
+            <Button variant="ghost" size="sm" icon={<FilterX size={14} aria-hidden="true" />} onClick={clear}>
+              Clear
+            </Button>
+          )}
+          <span className="bd-sort">
+            <Listbox prefix="Sort" label="Sort" align="end" value={sort} options={SORTS as unknown as { value: Sort; label: string }[]} onChange={setSort} />
+          </span>
         </div>
-      )}
-      {bulk.last && <ApplyOutcomes result={bulk.last} onClose={bulk.dismiss} />}
+      </div>
+      {board.error && b && <LoadError error={board.error} retry={board.refresh} />}
       <Table
         fill
-        label="Discovered jobs"
+        label="Job board"
         columns={columns}
-        rows={jobs}
-        rowKey={(j) => j.id}
-        onRowClick={(j) => openJob(j.id)}
+        rows={rows}
+        rowKey={(r) => r.id}
+        onRowClick={(r) => openJob(r.id)}
         selected={selection.chosen}
-        onSelectedChange={selection.replace}
-        canSelect={(j) => !locked(j.status)}
-        rowLabel={(j) => `${j.title} at ${j.company}`}
-        loading={!b && !board.error}
+        onSelectedChange={rows.some((r) => r.can_add) ? selection.replace : undefined}
+        canSelect={(r) => r.can_add}
+        rowLabel={(r) => `${r.title} at ${r.company}`}
+        loading={(!b || planning) && !board.error}
         error={board.error && !b ? <LoadError error={board.error} retry={board.refresh} /> : undefined}
-        busy={!!b && !current}
-        footer={paging.total > 0 ? <Pagination paging={paging} label="Listing pages" /> : undefined}
+        busy={!!b && b.key !== key}
+        footer={paging.total > 0 ? <Pagination paging={paging} label="Job board pages" /> : undefined}
         bulk={
-          <>
-            {(b?.selectable_total ?? 0) > jobs.length && (
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={selection.full}
-                onClick={() => selection.setMany(b?.selectable_ids || [], true)}
-              >
-                {(b?.selectable_total ?? 0) > selection.limit ? `Select the first ${selection.limit}` : `Select all ${(b?.selectable_total ?? 0).toLocaleString()}`}
-              </Button>
-            )}
-            {selection.full && <span className="ax-note">{selection.limit} at a time</span>}
-            <Button variant="primary" size="sm" disabled={!canApply} loading={bulk.applying} onClick={applySelected}>
-              {`Apply to selected (${selection.ids.length})`}
-            </Button>
-          </>
+          <Button variant="primary" size="sm" loading={pending === "many"} disabled={pending !== null} onClick={addSelected}>
+            {`Add to queue (${selection.ids.length})`}
+          </Button>
         }
         empty={
           <Empty
-            icon={fresh ? SearchX : Radar}
-            title={
-              fresh ? "No jobs match these filters" : searching ? "Searching for new jobs" : "Nothing new to apply to right now"
-            }
-            hint={
-              fresh
-                ? "Clear a filter to see more."
-                : searching
-                  ? "Employer boards and new-grad lists are being checked. Jobs appear as they arrive."
-                  : `Jobs you applied to are under Applied. Only US roles posted in the last ${span} with a known date are listed; the next scheduled search checks again.`
-            }
+            icon={filtered ? SearchX : Radar}
+            title={filtered ? "No jobs match these filters" : searching ? "Searching for new jobs" : "No open postings right now"}
+            hint={filtered ? "Clear a filter to see more." : searching ? "Employer boards and new-grad lists are being read. Jobs appear as they arrive." : `Only US roles posted in the last ${span} are listed. The next scheduled search checks again.`}
+            action={filtered ? <Button size="sm" onClick={clear}>Clear the filters</Button> : undefined}
           />
         }
       />
-    </>
+    </div>
   );
 }

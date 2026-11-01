@@ -1,12 +1,15 @@
 // Needs you: an inbox of what only the owner can settle. The list on the left leads with what frees the most applications; the
 // pane on the right answers one thing, and Enter moves to the next. The same question on several jobs is one entry, and supervisors
 // and references are one entry with a card per past job. What no answer can complete, and what has no question at all, look different.
-import { ArrowLeft, Check, CircleSlash, FileText, MessageCircleQuestion, Users, Video } from "lucide-react";
+import { ArrowLeft, Check, CircleSlash, FileText, MessageCircleQuestion, ShieldCheck, Users, Video } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKey } from "react";
 import { api, applyJob } from "./api";
 import { useWorkspace } from "./context";
 import { ago, employerOf, jobWords, plural } from "./format";
-import { useAction, useDraft } from "./hooks";
+import { useAction, useDraft, usePoll } from "./hooks";
+import { HistoryList } from "./history";
+import { OverLimitJobs } from "./overlimit";
+import { ReservedJobs } from "./reserved";
 import { EMAIL, entryOf, useQuestionnaires, type Field, type Module, type WorkRow } from "./qform";
 import {
   BLIND_TITLE,
@@ -22,7 +25,7 @@ import {
 } from "./questions";
 import { TopLine } from "./shell/Shell";
 import { useMedia } from "./shell/prefs";
-import type { Job, Review, Run } from "./types";
+import type { Job, OverLimitPage, ReservedPage, Review, Run } from "./types";
 import { Button, ConfirmButton, Empty, ErrorLine, Input, Monogram, MonogramStack, Segmented, Skeleton } from "./ui/index";
 import { MoreLink } from "./identity/Results";
 import "./styles/needs.css";
@@ -290,16 +293,52 @@ function useInbox() {
   return { ...model, contacts, setModule: forms.setModule, settled };
 }
 
+// What only you can decide that is not a question: jobs waiting for your approval (over your employer limit, at a reserved employer),
+// and applications sent without a receipt. Each count is read from the list it opens.
+type Decision = { id: string; title: string; note: string; count: number };
+
+function useDecisions(): Decision[] {
+  const { version, counts, route } = useWorkspace();
+  const over = usePoll<OverLimitPage>((signal) => api("/over-limit?page=1&size=1", "GET", undefined, signal), 30000, [version]);
+  const reserved = usePoll<ReservedPage>((signal) => api("/reserved?page=1&size=1", "GET", undefined, signal), 30000, [version]);
+  const list: Decision[] = [
+    { id: "decide:over", title: "Over your employer limit", note: "Approve to apply anyway", count: over.data?.count ?? 0 },
+    { id: "decide:reserved", title: "Reserved employers", note: "Nothing is applied there until you approve", count: (reserved.data?.sections ?? []).reduce((n, s) => n + s.held, 0) },
+    { id: "decide:unconfirmed", title: "Sent, with no receipt", note: "Check your email, or confirm it yourself", count: counts.groups.unconfirmed ?? 0 },
+  ];
+  return list.filter((d) => d.count > 0 || d.id === "decide:" + route.filter);
+}
+
+function DecisionRow({ entry, current, onPick }: { entry: Decision; current: boolean; onPick: () => void }) {
+  return (
+    <button type="button" className="nd-row is-decide" aria-current={current || undefined} data-entry={entry.id} onClick={onPick}>
+      <span className="nd-row-mono">
+        <span className="ax-mono nd-people-mono" aria-hidden="true">
+          <ShieldCheck size={13} />
+        </span>
+      </span>
+      <span className="nd-row-main">
+        <span className="nd-row-title">{entry.title}</span>
+        <small>{entry.note}</small>
+      </span>
+      <span className="nd-row-end">
+        <span className="nd-frees">{entry.count.toLocaleString()}</span>
+      </span>
+    </button>
+  );
+}
+
 // ---------- the page ----------
 export function NeedsView() {
-  const { counts, go } = useWorkspace();
+  const { counts, go, route } = useWorkspace();
   const inbox = useInbox();
+  const decisions = useDecisions();
   const phone = useMedia("(max-width: 899px)");
   const [skipped, setSkipped] = useDraft<string[]>("needs-skipped", []);
   const [done, setDone] = useDraft("needs-done", 0);
   const [sending, setSending] = useState<string[]>([]);
-  const [selected, setSelected] = useState("");
-  const [opened, setOpened] = useState(false);
+  const [selected, setSelected] = useState(route.filter === "over" || route.filter === "reserved" || route.filter === "unconfirmed" ? "decide:" + route.filter : "");
+  const [opened, setOpened] = useState(selected !== "");
   const [said, setSaid] = useState("");
   const pane = useRef<HTMLDivElement>(null);
   // Progress is what really left the list, by whichever way: answered here, dropped, or settled by the server from another answer.
@@ -315,7 +354,8 @@ export function NeedsView() {
   const parked = inbox.entries.filter((e) => skipped.includes(e.id) && !sending.includes(e.id));
   const open = inbox.entries.filter((e) => !skipped.includes(e.id) && !sending.includes(e.id));
   const answerable = open.filter((e) => e.type !== "none");
-  const current = inbox.entries.find((e) => e.id === selected && !sending.includes(e.id)) ?? open[0];
+  const deciding = selected.startsWith("decide:") ? selected : !open.length && !parked.length && decisions[0] ? decisions[0].id : "";
+  const current = deciding ? undefined : inbox.entries.find((e) => e.id === selected && !sending.includes(e.id)) ?? open[0];
   const currentId = current?.id;
 
   // Answering moves straight on: the next question's field has focus, so a run of answers is typed without the mouse.
@@ -389,7 +429,7 @@ export function NeedsView() {
       </div>
     );
 
-  if (!inbox.entries.length && !sending.length)
+  if (!inbox.entries.length && !sending.length && !decisions.length)
     return (
       <div className="ax-page">
         <Empty
@@ -417,8 +457,9 @@ export function NeedsView() {
   ];
   const left = answerable.reduce((n, e) => n + (e.type === "people" ? inbox.peopleQuestions : 1), 0);
   const total = done + inbox.questions;
-  const showList = !phone || !opened || !current;
-  const showPane = !phone || (opened && !!current);
+  const showList = !phone || !opened || (!current && !deciding);
+  const showPane = !phone || (opened && (!!current || !!deciding));
+  const waitingOnYou = decisions.filter((d) => d.id !== "decide:unconfirmed").reduce((n, d) => n + d.count, 0);
 
   return (
     <div className="ax-page ax-page-fill nd-page-root">
@@ -426,6 +467,7 @@ export function NeedsView() {
         {inbox.questions
           ? `${plural(inbox.questions, "question")} ${inbox.questions === 1 ? "is" : "are"} holding back ${plural(inbox.applications, "application")}.`
           : "No questions are open."}
+        {waitingOnYou ? ` ${plural(waitingOnYou, "job")} ${waitingOnYou === 1 ? "waits" : "wait"} for your approval.` : ""}
       </TopLine>
       <div className={"nd" + (showList ? "" : " is-pane") + (showPane ? "" : " is-list")}>
         {showList && (
@@ -457,6 +499,14 @@ export function NeedsView() {
                     </section>
                   ),
               )}
+              {decisions.length > 0 && (
+                <section aria-label="Waiting for your decision">
+                  <h2 className="nd-sec">Waiting for your decision</h2>
+                  {decisions.map((d) => (
+                    <DecisionRow key={d.id} entry={d} current={d.id === deciding && !phone} onPick={() => pick(d.id)} />
+                  ))}
+                </section>
+              )}
               {parked.length > 0 && (
                 <details className="nd-parked" open={parked.some((e) => e.id === currentId) || undefined}>
                   <summary>
@@ -469,8 +519,8 @@ export function NeedsView() {
               )}
               {(counts.groups.needs ?? 0) > inbox.applications + inbox.entries.filter((e) => e.type === "none").length && (
                 <div className="nd-foot">
-                  <MoreLink onClick={() => go({ view: "jobs", tab: "pipeline", filter: "needs" })}>
-                    All {(counts.groups.needs ?? 0).toLocaleString()} in Jobs
+                  <MoreLink onClick={() => pick("decide:all")}>
+                    All {(counts.groups.needs ?? 0).toLocaleString()} applications
                   </MoreLink>
                 </div>
               )}
@@ -487,7 +537,14 @@ export function NeedsView() {
                 <span className="ax-note">{plural(left, "question")} to go</span>
               </div>
             )}
-            {current ? (
+            {deciding ? (
+              <div className="nd-pane-in nd-decide">
+                {deciding === "decide:over" && <OverLimitJobs />}
+                {deciding === "decide:reserved" && <ReservedJobs />}
+                {deciding === "decide:unconfirmed" && <HistoryList word="unconfirmed" inline />}
+                {deciding === "decide:all" && <HistoryList word="needs" inline />}
+              </div>
+            ) : current ? (
               <div className="nd-pane-in">
                 {skipped.includes(current.id) && (
                   <p className="nd-parked-note">

@@ -1,4 +1,4 @@
-// Where everything lives (DESIGN.md, Navigation). Seven pages, then the coming-soon group. Each item maps onto the route table in
+// Where everything lives (DESIGN.md, Navigation). Eight pages, then the coming-soon group. Each item maps onto the route table in
 // context.ts, which is where old URLs are resolved.
 import {
   Briefcase,
@@ -6,6 +6,7 @@ import {
   FileText,
   Gauge,
   Inbox,
+  ListOrdered,
   Mail,
   Mic,
   Network,
@@ -33,7 +34,8 @@ export type NavItem = {
 
 export const ALL_ITEMS: NavItem[] = [
   { id: "overview", label: "Overview", icon: Gauge, route: { view: "batch" } },
-  { id: "jobs", label: "Jobs", icon: Briefcase, route: { view: "jobs" } },
+  { id: "queue", label: "Queue", icon: ListOrdered, route: { view: "queue" } },
+  { id: "board", label: "Job board", icon: Briefcase, route: { view: "board" } },
   { id: "needs", label: "Needs you", icon: Inbox, route: { view: "needs" }, badge: "needs" },
   { id: "applications", label: "Applications", icon: CheckCheck, route: { view: "ledger" } },
   { id: "resumes", label: "Resumes", icon: FileText, route: { view: "resumes" } },
@@ -68,15 +70,10 @@ export const ALL_ITEMS: NavItem[] = [
 
 // Each page's tabs. The palette offers them as places to jump to; the pages render from these.
 export const PAGE_TABS: Partial<Record<View, TabItem[]>> = {
-  jobs: [
-    { id: "discovered", label: "To apply" },
-    { id: "applying", label: "Applying" },
-    { id: "needs", label: "Needs you" },
-    { id: "failed", label: "Couldn't apply" },
-    { id: "not", label: "Not applying" },
-  ],
   ledger: [
     { id: "confirmed", label: "Applied" },
+    { id: "failed", label: "Couldn't apply" },
+    { id: "not", label: "Not applying" },
     { id: "archive", label: "Archive" },
   ],
   profile: [

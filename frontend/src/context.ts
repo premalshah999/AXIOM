@@ -2,10 +2,11 @@ import { createContext, useContext } from "react";
 import type { JobRow, Marks } from "./model";
 import type { Counts, Snapshot } from "./types";
 
-// The seven pages (batch is Overview, ledger is Applications), the resume editor and the coming-soon pages.
+// The pages (batch is Overview, ledger is Applications), the resume editor and the coming-soon pages.
 export type View =
   | "batch"
-  | "jobs"
+  | "queue"
+  | "board"
   | "needs"
   | "ledger"
   | "resumes"
@@ -25,12 +26,13 @@ export type Route = {
   /** A list's search, so a number elsewhere can open the list behind it ("Workday" on Overview opens Jobs searched for it). */
   q?: string;
 };
-/** A route as code or an old link may still spell it: "setup" is the old combined page, resolved by canonical(). */
-export type AnyRoute = Omit<Route, "view"> & { view: View | "setup" };
+/** A route as code or an old link may still spell it: "setup" and "jobs" are old pages, resolved by canonical(). */
+export type AnyRoute = Omit<Route, "view"> & { view: View | "setup" | "jobs" };
 
 const VIEWS: View[] = [
   "batch",
-  "jobs",
+  "queue",
+  "board",
   "needs",
   "ledger",
   "resumes",
@@ -76,11 +78,12 @@ const OLD_NAMES: Record<string, AnyRoute> = {
   "needs you": { view: "needs" },
   "needs-you": { view: "needs" },
   questions: { view: "needs" },
-  pipeline: { view: "jobs", tab: "pipeline" },
-  discovered: { view: "jobs", tab: "discovered" },
-  "job board": { view: "jobs", tab: "discovered" },
-  "job-board": { view: "jobs", tab: "discovered" },
-  reserved: { view: "jobs", tab: "reserved" },
+  jobs: { view: "jobs" },
+  pipeline: { view: "queue" },
+  discovered: { view: "board" },
+  "job board": { view: "board" },
+  "job-board": { view: "board" },
+  reserved: { view: "needs", filter: "reserved" },
   applications: { view: "ledger" },
   successful: { view: "ledger" },
   confirmed: { view: "ledger" },
@@ -102,9 +105,29 @@ const OLD_NAMES: Record<string, AnyRoute> = {
   resumes: SETUP_TABS.resumes!,
 };
 
+// Jobs was five tabs and three sub-filters until 2026-11-01 (owner: "the job board is confusing, don't know where my queue is"). Each
+// old address opens the page that now answers its question: what is next is Queue, what was found is the Job board, what needs a
+// decision is Needs you, what happened is Applications.
+function fromJobs(route: AnyRoute): Route {
+  const { tab, filter, q } = route;
+  const rest = { job: route.job, run: route.run, artifact: route.artifact, q };
+  if (filter === "needs" || tab === "needs") return { ...rest, view: "needs" };
+  if (tab === "overlimit") return { ...rest, view: "needs", filter: "over" };
+  if (tab === "reserved") return { ...rest, view: "needs", filter: filter || "reserved" };
+  if (tab === "failed") return { ...rest, view: "ledger", tab: "failed" };
+  if (tab === "not") return { ...rest, view: "ledger", tab: "not" };
+  if (tab === "applying" || filter === "active" || filter === "repair") return { ...rest, view: "queue" };
+  // Overview's "tried" and a platform's row: applications that started.
+  if (tab === "pipeline") return { ...rest, view: "ledger" };
+  if (filter === "ready") return { ...rest, view: "queue" };
+  if (filter === "held" || filter?.startsWith("held:")) return { ...rest, view: "queue", filter };
+  return { ...rest, view: "board" };
+}
+
 /** A route's one current spelling. go() and routeUrl() both pass through here, so old values never reach a page. */
 export function canonical(route: AnyRoute): Route {
   const { view, tab, filter } = route;
+  if (view === "jobs") return fromJobs(route);
   if (view === "setup") {
     const section = tab === "profile" && filter ? PROFILE_SECTIONS[filter] : undefined;
     if (section) return { ...route, filter: undefined, ...section };
@@ -115,9 +138,6 @@ export function canonical(route: AnyRoute): Route {
   if (view === "profile" && tab === "resumes") return { ...route, view: "resumes", tab: undefined };
   // Settings › Storage was removed; its address opens Connections.
   if (view === "settings" && tab === "storage") return { ...route, tab: "connections" } as Route;
-  // The archive moved from Jobs to Applications; the Pipeline's old "Not started" list is Discovered.
-  if (view === "jobs" && tab === "archive") return { ...route, view: "ledger" };
-  if (view === "jobs" && (!tab || tab === "pipeline") && filter === "new") return { ...route, view, tab: "discovered", filter: undefined };
   return route as Route;
 }
 
@@ -128,7 +148,7 @@ export function parseRoute(href = location.href): Route {
   const url = new URL(href);
   const q = url.searchParams;
   if (q.has("gmail")) return { view: "settings", tab: "email" };
-  if (q.get("page") === "job-board") return { view: "jobs", tab: "discovered" };
+  if (q.get("page") === "job-board") return { view: "board" };
   // Path-style links (/settings, /jobs) work as well as ?view=.
   const path = pathName(url);
   const raw = (q.get("view") || (isPageName(path) ? path : "")).toLowerCase();

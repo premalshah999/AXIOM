@@ -1,0 +1,333 @@
+/* Queue and Job board: the sections of a page that is one list after another, and a board row. Everything else is the family's. */
+.qu-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+.qu-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.qu-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.qu-head h2 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-title);
+  font-weight: 500;
+}
+.qu-head p {
+  max-width: 96ch;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  line-height: 1.45;
+}
+.qu-count {
+  color: var(--ink-3);
+  font-family: var(--font-data);
+  font-size: var(--text-data);
+  font-weight: 400;
+}
+.qu-none {
+  color: var(--ink-2);
+}
+.qu-pos {
+  color: var(--ink-2);
+}
+/* What is running: one line each, what it is doing beside who. */
+.qu-live {
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  list-style: none;
+}
+.qu-live li {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 4fr) 72px 120px auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 52px;
+  padding: var(--space-2) var(--space-4);
+}
+.qu-live li + li {
+  border-top: 1px solid var(--line-soft);
+}
+.qu-live-who {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.qu-live-name {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: var(--space-3);
+  flex: 1;
+  min-width: 0;
+}
+.qu-live-name strong,
+.qu-live-name span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qu-live-name strong {
+  font-weight: 500;
+}
+.qu-live-name span {
+  color: var(--ink-2);
+}
+.qu-live-doing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.qu-live-data {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+.qu-live-act {
+  min-width: 60px;
+  text-align: right;
+}
+.qu-held > summary {
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.qu-held-note {
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+}
+.qu-held-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+@media (max-width: 899px) {
+  .qu-page {
+    gap: var(--space-5);
+  }
+  .qu-live li {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px var(--space-3);
+    padding: var(--space-3);
+  }
+  .qu-live-name {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .qu-live-doing {
+    grid-column: 1;
+    padding-left: 44px;
+    color: var(--ink-2);
+    font-size: var(--text-meta);
+  }
+  .qu-live-act {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+  }
+  .qu-live-data {
+    display: none;
+  }
+  .qu-held-note {
+    display: block;
+    width: 100%;
+  }
+}
+
+/* The Job board: title first, as every job list a person knows; why it fits beside it; the row's two ways out at the end. */
+.bd-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.bd-toolbar .ax-search {
+  flex: 1 1 180px;
+  max-width: 240px;
+}
+.bd-sort {
+  margin-left: auto;
+}
+.bd-job {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0 var(--space-3);
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-2) 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.bd-job > .ax-mono {
+  grid-row: 1 / span 2;
+}
+.bd-title,
+.bd-sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bd-title {
+  font-weight: 500;
+}
+.bd-job:hover .bd-title {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.bd-sub {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.bd-meta {
+  display: none;
+}
+.ax-table time.bd-when {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-text);
+  font-size: var(--text-body);
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.bd-when small {
+  max-width: 190px;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: var(--text-meta);
+  text-overflow: ellipsis;
+}
+.bd-line {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  line-height: 1.35;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.bd-state {
+  white-space: nowrap;
+}
+.bd-state b {
+  font-family: var(--font-data);
+  font-size: var(--text-data);
+  font-weight: 500;
+}
+.bd-state.is-idle {
+  color: var(--ink-3);
+}
+.bd-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+@container ax-table (max-width: 599px) {
+  .bd-job {
+    align-items: start;
+    padding: var(--space-3) 0;
+  }
+  .bd-job > .ax-mono {
+    margin-top: 2px;
+    grid-row: 1 / span 4;
+  }
+  .bd-title {
+    display: -webkit-box;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+  .bd-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px var(--space-2);
+    margin-top: 4px;
+    color: var(--ink-3);
+    font-size: var(--text-meta);
+  }
+  .bd-meta-line {
+    display: -webkit-box;
+    margin-top: 4px;
+    overflow: hidden;
+    color: var(--ink-2);
+    font-size: var(--text-meta);
+    line-height: 1.35;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+}
+@container ax-table (min-width: 600px) {
+  .bd-meta-line {
+    display: none;
+  }
+}
+@media (max-width: 899px) {
+  .bd-toolbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin-inline: calc(var(--space-4) * -1);
+    padding-inline: var(--space-4);
+  }
+  .bd-toolbar .ax-btn {
+    flex: none;
+  }
+  .bd-search {
+    display: flex;
+  }
+  .bd-search .ax-search {
+    flex: 1;
+    max-width: none;
+  }
+  .bd-sort {
+    margin-left: 0;
+  }
+}
+
+/* The job panel: what happens next, and the posting's own words. */
+.dr-next {
+  color: var(--ink);
+}
+.dr-next span {
+  color: var(--ink-3);
+}
+.dr-posting {
+  max-height: 420px;
+  overflow: auto;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
