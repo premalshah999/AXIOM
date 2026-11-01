@@ -94,7 +94,7 @@ def test_accepting_a_batch_of_25_with_3_unticked_puts_exactly_22_in_line(service
     shown = [r["id"] for r in batch["rows"]]
     assert [r["score"] for r in batch["rows"]] == sorted((r["score"] for r in batch["rows"]), reverse=True)
     out, ticked = None, shown[3:]
-    out = client.post("/api/review-batch/accept", json={"batch_id": batch["id"], "job_ids": ticked}).json()
+    out = client.post("/api/review-batch/accept", json={"batch_id": batch["id"], "job_ids": ticked, "unticked": shown[:3]}).json()
     assert out["queued"] == 22 and out["passed"] == 3 and out["refused"] == []
     assert sorted(line(service)) == sorted(ticked) and sorted(requests(service)) == sorted(ticked)
     # The next batch is ready at once, and offers neither what was queued nor what was unticked.
@@ -139,6 +139,26 @@ def test_a_batch_stays_the_same_batch_until_it_is_decided_and_takes_a_few_from_o
     assert client.get("/api/review-batch").json()["id"] == first["id"]
     resized = client.post("/api/review-batch/size", json={"size": 5}).json()
     assert len(resized["rows"]) == 5 and resized["id"] != first["id"] and settings(service.db).review_size == 5
+
+
+def test_a_batch_short_of_its_size_takes_on_more_and_the_screen_decides_only_what_it_showed(service, client):
+    setup(service)
+    for i in range(3):
+        ready(service, f"f{i}", score=80)
+    fresh(service)
+    first = client.get("/api/review-batch").json()
+    assert len(first["rows"]) == 3
+    for i in range(3, 9):
+        ready(service, f"f{i}", score=70)
+    fresh(service)
+    grown = client.get("/api/review-batch").json()
+    assert grown["id"] == first["id"] and len(grown["rows"]) == 9
+    assert [r["id"] for r in grown["rows"]][:3] == [r["id"] for r in first["rows"]]
+    # Accepted from the screen that showed three: the six it never showed aren't passed on, and come next.
+    shown = [r["id"] for r in first["rows"]]
+    out = client.post("/api/review-batch/accept", json={"batch_id": first["id"], "job_ids": shown[:2], "unticked": shown[2:]}).json()
+    assert out["queued"] == 2 and out["passed"] == 1
+    assert len(out["next"]["rows"]) == 6
 
 
 def test_a_batch_never_queues_what_it_did_not_offer(service, client):

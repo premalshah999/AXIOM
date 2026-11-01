@@ -50,6 +50,7 @@ class ManyJobs(BaseModel):
 class Accept(BaseModel):
     batch_id: str = Field(min_length=1, max_length=64)
     job_ids: list[str] = Field(default_factory=list, max_length=100)
+    unticked: list[str] = Field(default_factory=list, max_length=100)
 
 
 class Size(BaseModel):
@@ -243,10 +244,10 @@ def router(service) -> APIRouter:
 
     @r.post("/api/review-batch/accept")
     def review_accept(data: Accept):
-        """Queue the ticked jobs of this batch and prepare the next. An empty list passes on the whole batch."""
+        """Queue the ticked jobs of this batch and prepare the next."""
         from ...review_batch import accept
 
-        return accept(service, data.batch_id, data.job_ids, lambda ids: changed(*ids))
+        return accept(service, data.batch_id, data.job_ids, data.unticked, lambda ids: changed(*ids))
 
     @r.post("/api/review-batch/size")
     def review_size(data: Size):

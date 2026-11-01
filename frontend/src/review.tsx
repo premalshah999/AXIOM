@@ -48,7 +48,7 @@ export function ReviewView() {
     run(
       key,
       async () => {
-        const out = await api<Accepted>("/review-batch/accept", "POST", { batch_id: batch!.id, job_ids: ids });
+        const out = await api<Accepted>("/review-batch/accept", "POST", { batch_id: batch!.id, job_ids: ids, unticked: rows.map((r) => r.id).filter((id) => !ids.includes(id)) });
         setDone(out);
         setLatest(out.next);
         void refresh();

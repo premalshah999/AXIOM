@@ -39,24 +39,29 @@ def _offered(row, passed):
     return row["state"] == "ready" and row["can_add"] and row["score"] is not None and row["id"] not in passed
 
 
-def _gather(rows, size, passed, leave=frozenset()):
-    """The best fits, newest first among equals, at most PER_COMPANY from one employer."""
+def _gather(rows, size, passed, leave=frozenset(), keep=()):
+    """The best fits, newest first among equals, at most PER_COMPANY from one employer, after the rows of `keep`. Returns them and how
+    many candidates there are in all."""
     best = sorted((r for r in rows if _offered(r, passed) and r["id"] not in leave), key=lambda r: r["posted_at"] or "", reverse=True)
     best.sort(key=lambda r: -r["score"])  # a stable sort: the newest stays first inside each fit
-    chosen, per = [], {}
+    chosen, per = list(keep), {}
+    for row in chosen:
+        per[row["company"].casefold()] = per.get(row["company"].casefold(), 0) + 1
+    have = {row["id"] for row in chosen}
     for row in best:
         name = row["company"].casefold()
-        if per.get(name, 0) < PER_COMPANY:
+        if len(chosen) >= size:
+            break
+        if row["id"] not in have and per.get(name, 0) < PER_COMPANY:
             per[name] = per.get(name, 0) + 1
             chosen.append(row)
-            if len(chosen) == size:
-                break
     return chosen, len(best)
 
 
 def current(service, leave=frozenset()):
-    """The open batch and what surrounds it. Gathered when none is open or every job in it has gone elsewhere (`leave`: jobs just decided,
-    which the board's last reading may not show yet)."""
+    """The open batch and what surrounds it. It stays the same batch until it is decided, and a batch short of its size takes on more as
+    they arrive, at its end: on a new install the first search finds a handful, and that handful must not be the batch for good.
+    `leave`: jobs just decided, which the board's last reading may not show yet."""
     db = service.db
     data = board(service).ready(service)
     cfg = settings(db)
@@ -67,26 +72,33 @@ def current(service, leave=frozenset()):
     passed = _passed(db)
     with _gathering:
         saved = db.get_setting(KEY, {}) or {}
-        live = [rows[j] for j in saved.get("job_ids", []) if j in rows and j not in leave and _offered(rows[j], passed)]
-        waiting = sum(1 for r in rows.values() if _offered(r, passed) and r["id"] not in leave)
-        if not live or saved.get("size") != cfg.review_size:
-            live, waiting = _gather(rows.values(), cfg.review_size, passed, leave)
-            saved = {"id": uuid.uuid4().hex[:16], "at": now(), "size": cfg.review_size, "job_ids": [r["id"] for r in live]} if live else {}
+        same_size = saved.get("size") == cfg.review_size
+        live = [rows[j] for j in saved.get("job_ids", []) if j in rows and j not in leave and _offered(rows[j], passed)] if same_size else []
+        chosen, waiting = _gather(rows.values(), cfg.review_size, passed, leave, live[: cfg.review_size])
+        ids = [r["id"] for r in chosen]
+        if not ids:
+            saved = {}
+        elif not live:
+            saved = {"id": uuid.uuid4().hex[:16], "at": now(), "size": cfg.review_size, "job_ids": ids}
+        elif ids != saved.get("job_ids"):
+            saved = {**saved, "job_ids": ids}
+        if saved != (db.get_setting(KEY, {}) or {}):
             db.set_setting(KEY, saved)
     return {
         **said,
         "id": saved.get("id", ""),
-        "rows": [{k: r[k] for k in ROW} for r in live],
+        "rows": [{k: r[k] for k in ROW} for r in chosen],
         # What the next batches hold, and what isn't ready to be offered yet: the empty screen says which is true.
-        "more": max(0, waiting - len(live)),
+        "more": max(0, waiting - len(chosen)),
         "checking": sum(1 for r in rows.values() if r["state"] == "checking"),
         "searching": (data.get("scanning") or 0) > 0,
     }
 
 
-def accept(service, batch_id, job_ids, changed):
-    """Queue the ticked jobs of the open batch and prepare the next. Only jobs of this batch, so a stale screen can't queue what it no
-    longer shows; a second press of Accept finds the batch gone and queues nothing."""
+def accept(service, batch_id, job_ids, unticked, changed):
+    """Queue the ticked jobs of the open batch, remember what the person unticked, and prepare the next. Only jobs of this batch, so a
+    stale screen can't queue what it no longer shows; a second press of Accept finds the batch gone and queues nothing. The screen says
+    what it unticked: a job the batch took on since the screen last read is neither ticked nor passed on, and is offered next."""
     from .owner_apply import enqueue_many
 
     db = service.db
@@ -96,16 +108,15 @@ def accept(service, batch_id, job_ids, changed):
             raise ValueError("This batch was already decided. Here is the next one.")
         db.set_setting(KEY, {})
     ticked = [j for j in saved["job_ids"] if j in set(job_ids)]
+    passing = [j for j in saved["job_ids"] if j in set(unticked) and j not in set(ticked)]
     out = enqueue_many(service, ticked) if ticked else {"added": [], "already": [], "refused": []}
-    unticked = [j for j in saved["job_ids"] if j not in set(ticked)]
-    if unticked:
+    if passing:
         kept = (db.get_setting(PASSED, {}) or {}).get("ids", [])
-        db.set_setting(PASSED, {"ids": [*kept, *unticked][-KEEP_PASSED:]})
+        db.set_setting(PASSED, {"ids": [*kept, *passing][-KEEP_PASSED:]})
     if out["added"]:
         changed(out["added"])
-    db.event("", "review_batch", f"Accepted a review batch: {len(out['added'])} queued, {len(unticked)} passed on, {len(out['refused'])} refused", {"batch": batch_id})
-    decided = set(saved["job_ids"])
-    return {"queued": len(out["added"]), "already": len(out["already"]), "passed": len(unticked), "refused": out["refused"], "next": current(service, decided)}
+    db.event("", "review_batch", f"Accepted a review batch: {len(out['added'])} queued, {len(passing)} passed on, {len(out['refused'])} refused", {"batch": batch_id})
+    return {"queued": len(out["added"]), "already": len(out["already"]), "passed": len(passing), "refused": out["refused"], "next": current(service, {*ticked, *passing})}
 
 
 def resize(service, size):
