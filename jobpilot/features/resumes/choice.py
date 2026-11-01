@@ -1,7 +1,8 @@
 """Apply, or Apply with a tailored resume: the per-job choice, the approval that guards it, and what queue admission asks.
 
 Off by default: no row means the job applies with the uploaded resume, as it always has. A tailored resume waits for the applicant's review, unless
-they've turned approval off in Settings. While approval is on, nothing tailored is sent unapproved, and approval names the exact file by hash.
+they've turned approval off in Settings. While approval is on, nothing tailored is sent unapproved, and approval names the exact file by hash. It's the same for every mode.
+It's checked twice in code, when a run is queued (pin_resume) and when the run takes the PDF (run_problem), so a later edit needs approving again even for a run already waiting.
 """
 
 import asyncio
@@ -208,6 +209,19 @@ def send_problem(session, row: RsArtifact) -> tuple[str, str] | None:
         if not choice or choice.approved_artifact_id != row.id or choice.approved_sha != row.pdf_sha:
             return REVIEW, "Waiting for you to review the tailored resume"
     return None
+
+
+def run_problem(db, packet: dict) -> str | None:
+    """Asked when a run takes its PDF. An edit or a withdrawn approval since it was queued stops it here, so it can't send what's no longer approved."""
+    artifact_id = (packet or {}).get("resume_artifact_id")
+    if not artifact_id:
+        return None
+    with db.session() as s:
+        row = s.get(RsArtifact, artifact_id)
+        if row is None:
+            return "This tailored resume is no longer on file"
+        problem = send_problem(s, row)
+    return problem[1] if problem else None
 
 
 def artifact_for_queue(session, job, mode: str) -> str | None:

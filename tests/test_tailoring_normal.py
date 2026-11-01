@@ -336,6 +336,72 @@ def test_an_unconfirmed_draft_in_the_file_stops_the_send_approval_on_or_off(serv
 
 
 @needs_tex
+def test_a_run_cant_take_a_pdf_whose_approval_has_gone(client, service):
+    """Queued while approved, then edited: the run stops where it picks up the file, instead of sending what's no longer approved."""
+    add_job(service)
+    tailored(service)
+    row = choice.get_choice(service.db, "j1")
+    choice.approve(service.db, service.config, "j1", row.artifact_id)
+    packet = {"resume_artifact_id": row.artifact_id}
+    assert choice.run_problem(service.db, packet) is None
+    assert choice.run_problem(service.db, {}) is None  # Plain Apply has nothing to ask.
+    view = client.get("/api/v2/resumes/tailor/job/j1").json()
+    doc = view["doc"]
+    target = next(b for s in doc["sections"] for e in s["entries"] for b in e["bullets"] if b["id"] == "b1")
+    target["text"] = "Built a reporting pipeline in Python and SQL that replaced a manual spreadsheet process for finance teams"
+    assert client.post("/api/v2/resumes/tailor/job/j1/save", json={"doc": doc}).status_code == 200
+    assert "review" in choice.run_problem(service.db, packet)
+    # The new version itself isn't approved either, until it is.
+    fresh = choice.get_choice(service.db, "j1")
+    assert "review" in choice.run_problem(service.db, {"resume_artifact_id": fresh.artifact_id})
+    choice.approve(service.db, service.config, "j1", fresh.artifact_id)
+    assert choice.run_problem(service.db, {"resume_artifact_id": fresh.artifact_id}) is None
+    assert "review" in choice.run_problem(service.db, packet)  # Approval is for that exact file, so the old one stays out.
+
+
+@needs_tex
+def test_a_changed_file_isnt_the_approved_file(service):
+    add_job(service)
+    tailored(service)
+    row = choice.get_choice(service.db, "j1")
+    choice.approve(service.db, service.config, "j1", row.artifact_id)
+    with service.db.exclusive() as s:
+        s.get(RsTailorChoice, "j1").approved_sha = "0" * 64
+    assert "review" in choice.run_problem(service.db, {"resume_artifact_id": row.artifact_id})
+
+
+@needs_tex
+def test_every_registered_mode_goes_through_the_same_approval(client, service, tmp_path):
+    """A mode that isn't Normal: same screen, same checks, same switch. Registered only for this test."""
+
+    async def run(job, source, profile, ctx):
+        built = await compile_pdf(editor.render(source.doc, editor.tailored_style(source.style)))
+        path = ctx.work_dir / "resume.pdf"
+        path.write_bytes(built.pdf)
+        return modes.ModeResult(latex="", pdf_path=path, drafts=[modes.Draft(id="d1", title="An Idea Not On The Page", bullets=["Something this resume doesn't say at all, written down as an idea only"])], doc=source.doc, style=editor.tailored_style(source.style))
+
+    modes.register(modes.ModeSpec("test-mode", "Test", "A test mode.", run))
+    try:
+        add_job(service)
+        answer = client.put("/api/v2/resumes/tailor/job/j1", json={"mode": "test-mode"})
+        assert answer.status_code == 200
+        assert asyncio.run(choice.run(service.db, service.config, "j1", model=stub()))["state"] == "review"
+        view = client.get("/api/v2/resumes/tailor/job/j1").json()
+        assert view["choice"]["mode"] == "test-mode" and view["ats"]["score"] is not None and view["rules"]["ok"]
+        assert [d["title"] for d in view["drafts"]] == ["An Idea Not On The Page"]
+        artifact = view["artifact"]["id"]
+        assert "review" in choice.run_problem(service.db, {"resume_artifact_id": artifact})
+        assert client.post("/api/v2/resumes/tailor/job/j1/approve", json={"artifact_id": artifact, "apply": False}).status_code == 200
+        assert choice.run_problem(service.db, {"resume_artifact_id": artifact}) is None
+        # With the switch off, the next version of this mode goes straight through, as any mode's does.
+        choice.set_approval(service.db, False)
+        client.post("/api/v2/resumes/tailor/job/j1/retry")
+        assert asyncio.run(choice.run(service.db, service.config, "j1", model=stub(), fresh=True))["state"] == "approved"
+    finally:
+        modes._REGISTRY.pop("test-mode")
+
+
+@needs_tex
 def test_a_failed_rules_check_cant_be_approved_or_sent(service):
     from jobpilot.admission import QueueBlocked
 
