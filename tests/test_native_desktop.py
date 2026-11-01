@@ -294,15 +294,31 @@ def test_the_app_will_not_start_beside_the_installation_it_was_moved_from(layout
     application is much worse than a false "not yet"). A moved-in checkout started again is exactly that."""
     old = tmp_path / "checkout"
     old.mkdir()
-    (old / ".env").write_text(f"POSTGRES_PASSWORD=x\nDATA_DIR={old}/.data\n")
-    cfg = prepare(load(old, environ={}))
     desktop.write_private(layout.moved_from_file, json.dumps({"source": str(old)}))
     assert desktop.old_installation_running(layout) == ""
-    cfg.state_file.write_text(json.dumps({"pid": os.getpid(), "lstart": process_start(os.getpid())}))
+    monkeypatch.setattr(desktop.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(
+        a, 0, f"/opt/pg/bin/postgres -D {old}/.data/postgres\n", ""))
     assert desktop.old_installation_running(layout) == str(old)
     monkeypatch.setattr(os, "execv", lambda *_: pytest.fail("the supervisor must not start"))
     assert desktop.boot(layout) == 1
     assert "still running" in json.loads(layout.progress_file.read_text())["message"]
+
+
+@pytest.mark.regression
+def test_the_old_folder_is_never_read_and_a_mere_mention_of_it_blocks_nothing(layout, tmp_path, monkeypatch):
+    """A checkout on the Desktop sits behind a macOS privacy prompt: reading its .env froze the first start (2026-10-31)."""
+    old = tmp_path / "checkout"
+    old.mkdir()
+    (old / ".env").write_text("POSTGRES_PASSWORD=x\n")
+    (old / ".env").chmod(0)
+    desktop.write_private(layout.moved_from_file, json.dumps({"source": str(old)}))
+    monkeypatch.setattr(desktop, "load", lambda *a, **k: pytest.fail("the old folder must not be read"))
+    table = f"vim {old}/notes.txt\ntail -f {old}/.data/native/logs/app.log\npython -m pytest {old}/tests\n"
+    monkeypatch.setattr(desktop.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, table, ""))
+    assert desktop.old_installation_running(layout) == ""
+    chrome = f"Chrome --user-data-dir={old}/.data/desktop-browser --remote-debugging-port=9224\n"
+    monkeypatch.setattr(desktop.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, chrome, ""))
+    assert desktop.old_installation_running(layout) == str(old)
 
 
 def owned_cfg(tmp_path, pid, started):

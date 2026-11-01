@@ -14,6 +14,7 @@ import json
 import os
 import platform
 import plistlib
+import re
 import secrets
 import shutil
 import socket
@@ -379,15 +380,20 @@ def refresh_login_item(layout):
 
 def old_installation_running(layout):
     """A moved-in checkout started again beside the app: two databases, each thinking it alone applies to these jobs, would
-    send every application twice. So the app will not start until the old one has stopped."""
+    send every application twice. So the app will not start until the old one has stopped.
+
+    Asked of the process table, not the old folder: a checkout on the Desktop or in Documents sits behind a macOS privacy
+    prompt, and reading its .env froze the first start until someone answered (2026-10-31). What applies is its database and
+    its Chrome, and each names its folder in its arguments."""
     source = read_json(layout.moved_from_file).get("source")
-    if not source or not Path(source).exists():
+    if not source:
         return ""
     try:
-        old = load(source, environ={})
-    except NativeError:
+        table = subprocess.run(["ps", "-axww", "-o", "command="], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.TimeoutExpired):
         return ""
-    return source if supervisor_alive(read_state(old)) else ""
+    holding = re.compile(r"(?:\s-D\s+|--user-data-dir=)" + re.escape(str(source).rstrip("/")) + "/")
+    return source if holding.search(table) else ""
 
 
 # ---- boot -----------------------------------------------------------------------------------------------------------
