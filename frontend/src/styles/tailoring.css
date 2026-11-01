@@ -1,0 +1,414 @@
+/* The tailoring screen and its small control (src/tailoring.tsx). The marks read in both themes because each is a tint of the text's own background. */
+.tl-page {
+  --tl-hit-bg: color-mix(in srgb, #2f9e62 26%, transparent);
+  --tl-have-bg: color-mix(in srgb, #c7931a 30%, transparent);
+  --tl-need-bg: color-mix(in srgb, var(--signal) 20%, transparent);
+  gap: var(--space-4);
+}
+.tl-choice {
+  --tl-hit-bg: color-mix(in srgb, #2f9e62 26%, transparent);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-3);
+  min-width: 0;
+}
+.tl-choice-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.tl-choice.is-compact .tl-choice-pick {
+  flex: 0 1 240px;
+}
+.tl-choice-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+}
+.tl-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 380px);
+  gap: var(--space-2) var(--space-5);
+  align-items: end;
+}
+.tl-back {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  justify-self: start;
+}
+.tl-head h1 {
+  margin: 0;
+  font-size: var(--text-title, 20px);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.tl-head h1 span {
+  color: var(--ink-2);
+  font-weight: 400;
+}
+.tl-mode label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tl-mode p {
+  margin: 6px 0 0;
+}
+.tl-working,
+.tl-failed,
+.tl-approved,
+.tl-message {
+  margin: 0;
+}
+.tl-working {
+  padding: var(--space-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius, 6px);
+  background: var(--raised);
+}
+.tl-failed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius, 6px);
+  background: var(--raised);
+}
+.tl-failed p {
+  flex: 1 1 320px;
+  margin: 0;
+}
+.tl-bar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius, 6px);
+  background: var(--raised);
+  box-shadow: var(--shadow-panel);
+}
+.tl-score {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.tl-score-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.tl-score-main > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.tl-score-main small {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.tl-score-number {
+  font-size: 30px;
+  line-height: 1;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.tl-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.tl-disclaimer {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.tl-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+.tl-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.tl-page h2 {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: 600;
+}
+.tl-page h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-meta);
+  font-weight: 600;
+}
+.tl-resume > h2 {
+  margin-bottom: calc(var(--space-3) * -1);
+}
+.tl-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px var(--space-2);
+  margin: 0;
+  font-size: var(--text-meta);
+}
+.tl-page mark {
+  color: inherit;
+  background: transparent;
+  border-radius: 2px;
+}
+.tl-page mark.tl-hit {
+  background: var(--tl-hit-bg);
+}
+.tl-page mark.tl-have {
+  background: var(--tl-have-bg);
+}
+.tl-page mark.tl-need {
+  background: var(--tl-need-bg);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.tl-legend mark {
+  padding: 1px 5px;
+}
+.tl-sec {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+.tl-entry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.tl-entry.is-off {
+  opacity: 0.6;
+}
+.tl-entry header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px var(--space-3);
+  font-size: var(--text-body);
+}
+.tl-entry em {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.tl-keep {
+  font-size: var(--text-meta);
+}
+.tl-bullets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tl-bullet {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.tl-fixed {
+  margin: 0;
+  font-size: var(--text-body);
+  white-space: pre-wrap;
+}
+/* The marks and the words share one grid cell, so they wrap alike and the box grows with what's typed. */
+.tl-area {
+  display: grid;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--field);
+}
+.tl-area:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.tl-area.is-invalid {
+  border-color: var(--bad);
+}
+.tl-area-marks,
+.tl-area textarea {
+  grid-area: 1 / 1;
+  margin: 0;
+  padding: 7px 9px;
+  border: 0;
+  font: inherit;
+  font-size: var(--text-body);
+  line-height: 1.45;
+  letter-spacing: normal;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.tl-area-marks {
+  color: transparent;
+  pointer-events: none;
+  user-select: none;
+}
+.tl-area textarea {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  resize: none;
+  color: var(--ink);
+  background: transparent;
+  outline: 0;
+}
+.tl-area-marks mark.tl-hit {
+  color: transparent;
+}
+.tl-bullet-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px var(--space-3);
+  font-size: var(--text-meta);
+}
+.tl-count {
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.tl-count.is-off {
+  color: var(--bad);
+  font-weight: 500;
+}
+.tl-was {
+  margin: 0;
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--line);
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.tl-diff ins {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.tl-diff del {
+  color: var(--ink-3);
+  text-decoration: line-through;
+}
+.tl-lists {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.tl-lists .ax-note {
+  margin: 4px 0 0;
+}
+.tl-terms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: var(--space-1, 4px) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.tl-terms li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 7px;
+  border-radius: 3px;
+  font-size: var(--text-meta);
+  overflow-wrap: anywhere;
+}
+.tl-terms li.tl-hit {
+  background: var(--tl-hit-bg);
+}
+.tl-terms li.tl-have {
+  background: var(--tl-have-bg);
+}
+.tl-terms li.tl-need {
+  background: var(--tl-need-bg);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.tl-posting {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.tl-posting-text {
+  max-height: 520px;
+  overflow: auto;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--raised);
+  font-size: var(--text-meta);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.tl-checks ul,
+.tl-drafts ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-meta);
+}
+.tl-checks li {
+  position: relative;
+  padding-left: 18px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+.tl-checks li::before {
+  position: absolute;
+  left: 0;
+  content: "✓";
+}
+.tl-checks li.is-bad {
+  color: var(--bad);
+}
+.tl-checks li.is-bad::before {
+  content: "✕";
+}
+.tl-checks li.is-warn::before {
+  content: "!";
+}
+@media (max-width: 960px) {
+  .tl-head,
+  .tl-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* What's being edited first, then what it's measured against. */
+  .tl-bar {
+    position: static;
+  }
+}

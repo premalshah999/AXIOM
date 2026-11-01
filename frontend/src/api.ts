@@ -5,6 +5,8 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** The answer's body, for a route that says more than its message. */
+    readonly data?: unknown,
   ) {
     super(message);
   }
@@ -69,7 +71,7 @@ export async function api<T = any>(
   if (!response.ok) {
     const message = detail(data, response.status);
     if (response.status === 401 && !CREDENTIAL_PATHS.has(path)) signedOut(message);
-    throw new ApiError(message, response.status);
+    throw new ApiError(message, response.status, data);
   }
   return data as T;
 }
