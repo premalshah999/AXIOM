@@ -10,6 +10,7 @@ export type Group =
   | "unconfirmed"
   | "paused"
   | "done"
+  | "existing"
   | "stopped"
   | "new"
   | "reserved";
@@ -111,14 +112,14 @@ export const STATES: Record<string, StateInfo> = {
   already_applied: {
     label: "Already applied",
     tone: "ok",
-    group: "done",
+    group: "existing",
     explain:
       "The employer says you have already applied. AXIOM won't apply here again.",
   },
   dry_run_passed: {
     label: "Dry run passed",
     tone: "ok",
-    group: "done",
+    group: "stopped",
     explain:
       "A dry run reached the final step and stopped. Dry runs never submit.",
   },
@@ -217,7 +218,9 @@ export const GROUPS: { id: Group | "all"; label: string }[] = [
   { id: "repair", label: "Repairing" },
   { id: "unconfirmed", label: "Unconfirmed" },
   { id: "paused", label: "Paused" },
-  { id: "done", label: "Done" },
+  // "Confirmed" is the Applications ledger's own list and count (jobpilot/api/pipeline.py confirmed_jobs).
+  { id: "done", label: "Confirmed" },
+  { id: "existing", label: "Already applied" },
   { id: "stopped", label: "Stopped" },
 ];
 
@@ -276,8 +279,9 @@ const PRIORITY: Record<Group, number> = {
   paused: 4,
   new: 5,
   done: 6,
-  stopped: 7,
-  reserved: 8,
+  existing: 7,
+  stopped: 8,
+  reserved: 9,
 };
 
 export function displayState(
@@ -304,7 +308,8 @@ export function rowFromServer(r: PipelineRow): JobRow {
     job: r.job,
     run,
     attempts: r.attempts,
-    state: displayState(r.job, run, control, r.request, r.reserved),
+    // A confirmed job reads Confirmed unless another attempt is running now (the Jobs "Confirmed" chip lists it).
+    state: r.confirmed && !(run && ACTIVE.has(run.state)) ? "confirmed" : displayState(r.job, run, control, r.request, r.reserved),
     control,
     request: r.request,
     reserved: r.reserved,

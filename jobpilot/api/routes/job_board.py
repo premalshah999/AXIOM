@@ -16,8 +16,9 @@ from ...schemas import SourceInput
 from ..snapshot import BATCH_BOOKKEEPING
 
 
-Fit = Literal["all", "eligible", "unranked", "below", "uncertain"]
+Fit = Literal["all", "eligible", "unranked", "below", "uncertain", "ready", "held"]
 SELECTABLE = 500
+READY_FITS = ("ready", "held")
 
 
 def unapplied(job):
@@ -105,6 +106,14 @@ def router(service) -> APIRouter:
             raise HTTPException(409, "Application workers are disabled")
         return {**await start_autonomous(service, data.target), "runtime": batch_snapshot(service)}
 
+    @r.get("/api/startable")
+    def startable():
+        """Ready jobs that can start, and for the rest why not (startable.py). A `def` route: it reads on a worker thread."""
+        from ...startable import reading
+
+        value = reading(service).get(service)
+        return {key: item for key, item in value.items() if key not in {"jobs", "ids"}}
+
     @r.get("/api/job-board")
     def snapshot(
         include_sources: bool = True,
@@ -114,6 +123,7 @@ def router(service) -> APIRouter:
         ats: str = "all",
         level: str = "all",
         fit: Fit = "all",
+        hold: str = "",
     ):
         """With `page`, one page of the fresh listings matching the filters and exact totals; without it, the newest
         500 as before."""
@@ -124,21 +134,39 @@ def router(service) -> APIRouter:
         # Why the batch has not started a job (autopilot.remember_rejection): only for a job nothing has been done to
         # yet, so the Discovered list answers "why isn't this applying?" without opening the job (2026-10-29).
         rejections = db.get_setting("job_board_autopilot", {}).get("rejections") or {}
+        from ...startable import reading
+
+        # A Ready job the dispatcher will not start says why (startable.read; never read here, only what was read).
+        holds = (reading(service).peek() or {}).get("jobs", {})
         for job in board["jobs"]:
             job["reserved"] = job["id"] in held
             if (why := rejections.get(job["id"])) and unapplied(job):
                 job["rejection"] = why
+            if (why_held := holds.get(job["id"])) and job["status"] == "ready":
+                job["hold"] = why_held
         board["source_count"] = len(board["sources"])
         board["source_health"] = source_health(db, board["sources"])
         if not include_sources:
             board["sources"] = []
         board["autopilot"] = {k: v for k, v in board["autopilot"].items() if k not in BATCH_BOOKKEEPING}
         if page:
-            board.update(
-                listing_page(
-                    board["jobs"], board["settings"]["minimum_auto_fit"], q, ats, level, fit, page, size
-                )
-            )
+            minimum = board["settings"]["minimum_auto_fit"]
+            board.update(listing_page(board["jobs"], minimum, q, ats, level, "all" if fit in READY_FITS else fit, page, size))
+            value = reading(service).get(service) if fit in READY_FITS else reading(service).peek()
+            if value is not None:
+                # "Ready" and "Held" read the startable reading (startable.py), which also holds the jobs no board lists:
+                # the numbers on the idle runners' line open exactly that many rows.
+                from ...startable import rows as ready_rows
+
+                def pick(which, code=""):
+                    return listing_page(ready_rows(db, value, which, code), minimum, q, ats, level, "all", page, size)
+
+                board["fits"] = {**board["fits"], "ready": pick("ready")["total"], "held": pick("held")["total"]}
+                if fit in READY_FITS:
+                    shown = pick(fit, hold)
+                    board.update({k: shown[k] for k in ("jobs", "total", "page", "pages", "selectable_ids", "selectable_total")})
+                board["holds"] = value["held"]
+
         return {
             **board,
             "search": {

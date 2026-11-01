@@ -17,7 +17,7 @@ from ...schemas import JobInput, QueueInput
 from .. import pipeline
 from ..success import success as success_report
 
-Group = Literal["all", "active", "needs", "repair", "unconfirmed", "paused", "done", "stopped", "new", "reserved"]
+Group = Literal["all", "active", "needs", "repair", "unconfirmed", "paused", "done", "existing", "stopped", "new", "reserved"]
 
 
 class ApplyMany(BaseModel):
@@ -125,6 +125,8 @@ def router(service) -> APIRouter:
             # A reserved employer (FAANG, MANGO, the Big Four): the panel offers the owner's approval (2026-10-27).
             found = match(s, row)
             reserved = {**found.as_dict(), "approved": approved(s, job_id)} if found else None
+        from ...startable import reading
+
         control = db.get_setting("job_control:" + job_id, {})
         # The owner's Apply waiting to start (owner_apply.start), so the job panel says so instead of "Eligible".
         request = db.get_setting("owner_apply:" + job_id)
@@ -138,6 +140,8 @@ def router(service) -> APIRouter:
             if request
             else None,
             "reserved": reserved,
+            # Why a Ready job will not start, and what happens next (startable.py; only what was read, never a read here).
+            "hold": ((reading(service).peek() or {}).get("jobs") or {}).get(job_id),
         }
 
     @r.get("/api/logo")

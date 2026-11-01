@@ -96,6 +96,7 @@ def test_counts_are_exact_with_more_jobs_and_runs_than_the_old_snapshot_sent(cli
         "unconfirmed": 1,
         "paused": 1,  # the queued job the owner paused
         "done": 2,  # a pause never hides a confirmed submission
+        "existing": 0,
         "stopped": 199,
         "new": 95,
         "reserved": 0,  # no reserved employer (FAANG, MANGO, Big Four) among these synthetic jobs

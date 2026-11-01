@@ -900,9 +900,11 @@ async def scrape_source(source, db, config):
 
 
 LISTED = "listing__"
-# A listing in one of these states is already owned or protected (frontend/src/jobboard.tsx LOCKED).
+# A listing in one of these states is already owned or protected (frontend/src/jobboard.tsx LOCKED). "closed" is a posting
+# that is gone or whose employer restriction rules the applicant out: not something found and waiting to be applied to
+# (Discovered listed such jobs with an Apply button and the word "closed", 2026-11-01).
 LOCKED = frozenset(
-    {"paused", "queued", "running", "submitting", "confirmed", "submission_unknown", "already_applied", "archived"}
+    {"paused", "queued", "running", "submitting", "confirmed", "submission_unknown", "already_applied", "archived", "closed"}
 )
 REQUESTED = "owner_apply:"  # owner_apply.KEY
 

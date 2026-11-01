@@ -12,7 +12,7 @@ import "./identity/overview.css";
 import { appliedState, evidenceLabel, STATES, type JobRow } from "./model";
 import { OPEN_JOB_LINK } from "./jobintake";
 import { groupQuestions, QuestionCard, type QuestionGroup } from "./questions";
-import type { ApplicationWorkers, MailStatus, RuntimeHealth, Snapshot, Success } from "./types";
+import type { ApplicationWorkers, MailStatus, RuntimeHealth, Snapshot, Startable, Success } from "./types";
 import { ago, day, employerOf, jobWords, plural, urlRole } from "./format";
 import { Button, Dialog, Empty, Monogram, MonogramStack, Panel, Skeleton } from "./ui/index";
 import { Notice } from "./worktools";
@@ -392,7 +392,9 @@ function ProviderNotice({ models, go }: { models?: RuntimeHealth["models"]; go: 
 
 // ---------- what is running now ----------
 function Live({ work, checking }: { work: WorkingState; checking: boolean }) {
-  const { snapshot, link, refresh, markJobs, go, openJob } = useWorkspace();
+  const { snapshot, link, refresh, markJobs, go, openJob, version } = useWorkspace();
+  // Which Ready jobs can start, and why the rest cannot (jobpilot/startable.py): the same screening the dispatcher uses.
+  const ready = usePoll<Startable>((signal) => api("/startable", "GET", undefined, signal), 30000, [version]);
   const { pending, run } = useAction();
   const now = useNow();
   const panel = panelState(snapshot, link.lost);
@@ -455,7 +457,7 @@ function Live({ work, checking }: { work: WorkingState; checking: boolean }) {
     restart: "Nothing new starts until automation restarts.",
     paused: "Nothing is running. Resume to start the next application.",
     complete: "Nothing is running. The batch reached its target.",
-    running: "Between applications. The next one starts as soon as a job is ready.",
+    running: "Between applications.",
     held: "Nothing is running while the batch is held.",
     none: "Nothing is running. Applications appear here with the step they're on.",
   };
@@ -487,9 +489,55 @@ function Live({ work, checking }: { work: WorkingState; checking: boolean }) {
       busy={work.busy.length}
       limit={work.limit}
       checking={checking}
-      empty={empty[panel]}
+      empty={panel === "running" ? <Idle said={ready.data} fallback={empty.running} go={go} /> : empty[panel]}
       foot={foot.length ? foot.map((item, i) => <span key={i}>{item}</span>) : undefined}
     />
+  );
+}
+
+/** Why nothing is running while a batch is on: how many Ready jobs can start, or what holds the rest, each number opening its list. */
+function Idle({ said, fallback, go }: { said?: Startable | null; fallback: string; go: (route: { view: "jobs"; tab: string; filter: string }) => void }) {
+  if (!said) return <>{fallback}</>;
+  const open = (filter: string) => go({ view: "jobs", tab: "discovered", filter });
+  if (said.startable > 0)
+    return (
+      <>
+        {fallback}{" "}
+        <button type="button" className="ov-foot-link" onClick={() => open("ready")}>
+          <b>{said.startable.toLocaleString()}</b> {said.startable === 1 ? "job is" : "jobs are"} ready to start
+        </button>
+        {said.held.length > 0 && (
+          <>
+            , <button type="button" className="ov-foot-link" onClick={() => open("held")}>{(said.ready - said.startable).toLocaleString()} held</button>
+          </>
+        )}
+        .
+      </>
+    );
+  if (!said.held.length) return <>{said.idle || fallback}</>;
+  const shown = said.held.slice(0, 4);
+  const rest = said.held.slice(4).reduce((n, h) => n + h.count, 0);
+  return (
+    <>
+      Nothing to run:{" "}
+      {shown.map((h, i) => (
+        <span key={h.code}>
+          {i > 0 && ", "}
+          <button type="button" className="ov-foot-link" onClick={() => open(`held:${h.code}`)}>
+            <b>{h.count.toLocaleString()}</b> {h.phrase}
+          </button>
+        </span>
+      ))}
+      .
+      {rest > 0 && (
+        <>
+          {" "}
+          <button type="button" className="ov-foot-link" onClick={() => open("held")}>
+            All {(said.ready - said.startable).toLocaleString()} held
+          </button>
+        </>
+      )}
+    </>
   );
 }
 

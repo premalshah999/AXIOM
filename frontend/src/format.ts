@@ -83,7 +83,7 @@ export function platformName(ats?: string) {
 export function urlRole(url?: string) {
   try {
     const u = new URL(url || "");
-    const generic = /^(?:jobs?|careers?|details?|apply|applications?|en|us|en-us|postings?|positions?|openings?|view|search)$/i;
+    const generic = /^(?:jobs?|careers?|details?|apply|applications?|en|us|en-us|postings?|positions?|openings?|view|search|requisitions?|reqs?|vacanc(?:y|ies)|careersite|ux|ats|home|jobdetail)$/i;
     // A shared board's first segment is the employer, not the role.
     const board = /greenhouse\.io$|lever\.co$|ashbyhq\.com$/.test(u.hostname) ? u.pathname.split("/").filter(Boolean)[0]?.toLowerCase() : "";
     const segment = u.pathname
@@ -154,4 +154,39 @@ export function linkHost(url?: string) {
   } catch {
     return "";
   }
+}
+
+// What a stored reason says to a person. The engine writes its own bookkeeping into them: who approved a job ("Owner approved: ",
+// "Applicant approved: Owner 10-29 night goal: ..."), why it was let past the fit score ("Admitted by title (admit_by_title setting):
+// ...") and eligibility checks as "Explicit hiring restriction | Eligibility check: citizenship: "quote"". A person reads the
+// sentence and, for a restriction, which rule it was.
+const RESTRICTIONS: Record<string, string> = {
+  citizenship: "The posting requires U.S. citizenship.",
+  security_clearance: "The posting requires a security clearance.",
+  visa_status: "The posting does not accept your work authorization.",
+};
+export function plainReason(text?: string | null) {
+  let s = (text || "").trim();
+  if (!s) return "";
+  const check = s.match(/Eligibility check:\s*(\w+)/);
+  if (/^Explicit hiring restriction/i.test(s) && check) return RESTRICTIONS[check[1]!] || "The posting has a hiring restriction you do not meet.";
+  s = s.replace(/^Owner approved:\s*/i, "").replace(/^Applicant approved:[^:]*:\s*/i, "");
+  s = s.replace(/^Admitted by title \(admit_by_title setting\):\s*/i, "");
+  if (/^An explicit hiring restriction conflicts with confirmed applicant fact/i.test(s)) return "The posting has a hiring restriction you do not meet.";
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** The score of a listing, or null when it has none worth showing: a ruled-out job is stored with a placeholder 0, not a fit. */
+export function shownFit(j: { score?: number | null; reason?: string | null }) {
+  if (j.score == null) return null;
+  return j.score === 0 && /hiring restriction/i.test(j.reason || "") ? null : j.score;
+}
+
+/** When a listing was last put in front of us. A date inferred from a feed is the day it was found, not the employer's date. */
+export function listedWhen(j: { posted_at?: string; date_basis?: string }, now: number) {
+  const basis = j.date_basis || "";
+  // "added": a job with no listing, dated by when it was saved. "inferred": a feed gave no date, so it is the day it was found.
+  const found = /inferred/i.test(basis) || basis === "added";
+  const note = /inferred/i.test(basis) ? ". The employer gave no posting date." : basis === "added" ? ". It has no posting date." : "";
+  return { text: (found ? "seen " : "") + ago(j.posted_at, now), title: `${found ? "Found" : basis || "Posted"} ${stamp(j.posted_at)}${note}` };
 }

@@ -10,6 +10,7 @@ from fastapi.responses import Response
 from sqlalchemy import select
 
 from ...db import Job, Run
+from ..pipeline import settled_confirmation
 from ..snapshot import SnapshotCache, build_snapshot, trusted_email
 
 
@@ -99,13 +100,15 @@ def router(service, cache: SnapshotCache) -> APIRouter:
                     Job.id.label("job_id"), Job.title, Job.company, Job.url, Job.ats,
                 )
                 .join(Job, Run.job_id == Job.id)
-                .where(Run.state == "confirmed", Job.demo.is_(False))
+                # CONFIRMED (pipeline.confirmed_jobs): the same test of a settled confirmed run as the Jobs chip and
+                # Overview, newest first, so a job's newest settled run is its row.
+                .where(Job.demo.is_(False), settled_confirmation())
                 .order_by(Run.finished_at.desc())
             ).all()
             seen, results = set(), []
             for row in rows:
                 receipt = row.receipt or {}
-                if row.job_id in seen or receipt.get("evidence_reconciliation") == "pending":
+                if row.job_id in seen:
                     continue
                 seen.add(row.job_id)
                 results.append(

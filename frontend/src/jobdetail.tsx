@@ -13,8 +13,8 @@ import {
   type JobRow,
 } from "./model";
 import { groupQuestions, QuestionCard } from "./questions";
-import type { Detail, Job, JobRequest, Reserved, Run } from "./types";
-import { jobWords, platformName, plural, seconds, shortId, stamp, words } from "./format";
+import type { Detail, Hold, Job, JobRequest, Reserved, Run } from "./types";
+import { day, jobWords, plainReason, platformName, plural, seconds, shortId, shownFit, stamp, words } from "./format";
 import { Button, Drawer, Monogram, Panel, Select, Skeleton, Textarea } from "./ui/index";
 import { Facts, Notice, StatusPill } from "./worktools";
 
@@ -39,6 +39,7 @@ export function JobPanel({
     job_control: { state?: string };
     request?: JobRequest | null;
     reserved?: Reserved | null;
+    hold?: Hold | null;
   }>(
     (signal) => api(`/jobs/${jobId}`, "GET", undefined, signal),
     60000,
@@ -101,7 +102,7 @@ export function JobPanel({
         {selectedRun ? (
           <RunSection key={selectedRun} runId={selectedRun} row={row} runs={runs} latest={latest} actions={actions} />
         ) : (
-          row && <NotStarted row={row} actions={actions} />
+          row && <NotStarted row={row} actions={actions} hold={historical.data?.hold} />
         )}
         {job && (
           <Suspense fallback={null}>
@@ -121,9 +122,10 @@ function JobSummary({ row }: { row: JobRow }) {
     <p className="dr-meta">
       <span>{job.location || "Location not listed"}</span>
       <span>{platformName(job.ats)}</span>
-      {job.score != null && (
+      {job.created_at && <span title={stamp(job.created_at)}>Found {day(job.created_at)}</span>}
+      {shownFit(job) != null && (
         <span>
-          Fit <span className="mono">{job.score}</span>
+          Fit <span className="mono">{shownFit(job)}</span>
         </span>
       )}
       <a className="ax-more-link" href={job.url} target="_blank" rel="noreferrer noopener">
@@ -157,16 +159,16 @@ function Technical({ jobId }: { jobId: string }) {
 }
 
 /** The status first, in words, with what to do next inside it. */
-function StatusBlock({ state, reason, earlier, children }: { state: string; reason?: string; earlier?: string; children?: React.ReactNode }) {
+function StatusBlock({ state, reason, earlier, hold, children }: { state: string; reason?: string; earlier?: string; hold?: Hold | null; children?: React.ReactNode }) {
   const info = stateInfo(state);
   return (
     <section className="dr-status" aria-label="Status">
       {earlier && <p className="ax-note">Earlier attempt, {earlier}</p>}
       <p className="dr-status-word">
-        <StatusPill state={state} />
+        {hold ? <StatusPill state={state} label="Held" tone="hold" /> : <StatusPill state={state} />}
       </p>
-      {info.explain && <p className="dr-status-why">{info.explain}</p>}
-      {reason && <p className="dr-status-reason">{reason}</p>}
+      {(hold ? hold.reason : info.explain) && <p className="dr-status-why">{hold ? hold.reason : info.explain}</p>}
+      {(hold ? hold.next : reason) && <p className="dr-status-reason">{hold ? hold.next : reason}</p>}
       {children}
     </section>
   );
@@ -471,10 +473,14 @@ function DetailBody({ detail, state, runs, runId, open }: { detail: Detail; stat
 }
 
 // A job with no attempt yet: why it is where it is. Its actions (Apply now, Dry run, Rank) come in under More.
-function NotStarted({ row, actions }: { row: JobRow; actions: React.ReactNode }) {
+function NotStarted({ row, actions, hold }: { row: JobRow; actions: React.ReactNode; hold?: Hold | null }) {
   const job = row.job;
   return (
-    <StatusBlock state={row.state} reason={row.state === "pending:waiting" && row.request?.reason ? row.request.reason : job.reason}>
+    <StatusBlock
+      state={row.state}
+      hold={row.state === "job:ready" ? hold : undefined}
+      reason={plainReason(row.state === "pending:waiting" && row.request?.reason ? row.request.reason : job.reason)}
+    >
       {actions}
     </StatusBlock>
   );
