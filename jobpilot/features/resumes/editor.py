@@ -90,6 +90,20 @@ class Style(BaseModel):
     header: Literal["center", "left"] = "center"
     headings: Literal["rule", "plain"] = "rule"
     name_size: float = Field(default=17, ge=12, le=26)
+    # The tailored template (owner, 2026-11-01): fixed sizes in PostScript points, dates in italics. The editor's other templates leave it off.
+    fixed_type: bool = False
+
+
+# Sizes in bp, the unit a PDF reports, so "9 pt" reads 9.00 in the file and not TeX's 8.97. validate.check_typography reads them back.
+TAILORED_TYPE = {"name": 16.0, "section": 10.5, "sub": 10.0, "bullet": 9.0}
+
+
+def tailored_style(base: "Style | None" = None) -> "Style":
+    """A tailored resume keeps the font and layout the applicant chose; only its type sizes are fixed."""
+    base = base or Style()
+    return base.model_copy(
+        update={"fixed_type": True, "font_size": TAILORED_TYPE["bullet"], "name_size": TAILORED_TYPE["name"], "line_spacing": min(base.line_spacing, 1.0)}
+    )
 
 
 class Bullet(BaseModel):
@@ -212,17 +226,27 @@ def from_inventory(
     return ResumeDoc(name=inv.name, contact=inv.contact, sections=sections)
 
 
+def _type(pt: float) -> str:
+    return rf"\fontsize{{{pt}bp}}{{{round(pt * 1.18, 2)}bp}}\selectfont"
+
+
 def render(doc: ResumeDoc, style: Style) -> str:
     base = 10 if style.font_size < 10.75 else 11 if style.font_size < 11.75 else 12
     lead = round(style.font_size * 1.2, 2)
     rule = r"\vspace{1pt}\hrule" if style.headings == "rule" else ""
+    fixed = style.fixed_type
+    font_line = FONTS[usable_font(style.font)][1]
+    if fixed:
+        font_line = font_line.replace("[scaled=0.95]", "")  # A scaled font would print 9 pt as 8.55.
+    normal = _type(TAILORED_TYPE["bullet"]) if fixed else rf"\fontsize{{{style.font_size}}}{{{lead}}}\selectfont"
+    heading = (_type(TAILORED_TYPE["section"]) + r"\bfseries") if fixed else r"\large\bfseries"
     lines = [
         rf"\documentclass[{base}pt,letterpaper]{{article}}",
         rf"\usepackage[letterpaper,top={style.margin_top}in,bottom={style.margin_bottom}in,"
         rf"left={style.margin_left}in,right={style.margin_right}in]{{geometry}}",
         r"\usepackage[T1]{fontenc}",
         r"\usepackage[utf8]{inputenc}",
-        FONTS[usable_font(style.font)][1],
+        font_line,
         r"\usepackage{tabularx}",
         r"\input{glyphtounicode}",
         r"\pdfgentounicode=1",
@@ -230,8 +254,10 @@ def render(doc: ResumeDoc, style: Style) -> str:
         r"\setlength{\parskip}{0pt}",
         r"\pagestyle{empty}",
         rf"\linespread{{{style.line_spacing}}}",
-        rf"\renewcommand{{\normalsize}}{{\fontsize{{{style.font_size}}}{{{lead}}}\selectfont}}",
-        rf"\newcommand{{\ressection}}[1]{{\vspace{{{style.section_gap}pt}}{{\large\bfseries #1}}\par{rule}\vspace{{3pt}}}}",
+        rf"\renewcommand{{\normalsize}}{{{normal}}}",
+        rf"\newcommand{{\ressection}}[1]{{\vspace{{{style.section_gap}pt}}{{{heading} #1}}\par{rule}\vspace{{3pt}}}}",
+        # A word split across lines is two words to a parser, so a tailored resume never hyphenates.
+        *([r"\hyphenpenalty=10000", r"\exhyphenpenalty=10000", r"\emergencystretch=2em"] if fixed else []),
         r"\newcommand{\resrow}[2]{\noindent\begin{tabularx}{\textwidth}{@{}X@{}r@{}}#1 & #2\end{tabularx}\par}",
         r"\newenvironment{resbullets}{\begin{list}{\textbullet}{\setlength{\leftmargin}{1.1em}"
         rf"\setlength{{\itemsep}}{{{style.bullet_gap}pt}}\setlength{{\topsep}}{{1pt}}\setlength{{\parsep}}{{0pt}}}}}}"
@@ -242,8 +268,12 @@ def render(doc: ResumeDoc, style: Style) -> str:
     align = "center" if style.header == "center" else "flushleft"
     lines += [
         rf"\begin{{{align}}}",
-        rf"{{\fontsize{{{style.name_size}}}{{{round(style.name_size * 1.2, 1)}}}\selectfont\bfseries {esc(doc.name)}}}\par\vspace{{2pt}}",
-        r"{\small " + r" \textbar{} ".join(esc(c) for c in doc.contact if c) + r"}\par",
+        (
+            rf"{{{_type(TAILORED_TYPE['name'])}\bfseries {esc(doc.name)}}}\par\vspace{{2pt}}"
+            if fixed
+            else rf"{{\fontsize{{{style.name_size}}}{{{round(style.name_size * 1.2, 1)}}}\selectfont\bfseries {esc(doc.name)}}}\par\vspace{{2pt}}"
+        ),
+        ("{" if fixed else r"{\small ") + r" \textbar{} ".join(esc(c) for c in doc.contact if c) + r"}\par",
         rf"\end{{{align}}}",
     ]
     for section in doc.sections:
@@ -270,9 +300,14 @@ def render(doc: ResumeDoc, style: Style) -> str:
             left = r"\textbf{" + esc(e.heading) + "}"
             if e.subheading:
                 left += ", " + esc(e.subheading)
-            lines.append(r"\resrow{" + left + "}{" + esc(e.dates) + "}")
+            if fixed:
+                sub = _type(TAILORED_TYPE["sub"])
+                dates = r"\textit{" + esc(e.dates) + "}" if e.dates else ""
+                lines.append(r"\resrow{" + sub + " " + left + "}{" + sub + " " + dates + "}")
+            else:
+                lines.append(r"\resrow{" + left + "}{" + esc(e.dates) + "}")
             if e.location:
-                lines.append(r"{\small\itshape " + esc(e.location) + r"}\par")
+                lines.append((r"{\itshape " if fixed else r"{\small\itshape ") + esc(e.location) + r"}\par")
             bullets = [b for b in e.bullets if b.include and b.text.strip()]
             if bullets:
                 lines.append(r"\begin{resbullets}")
