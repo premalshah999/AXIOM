@@ -74,3 +74,32 @@ def test_a_repeated_search_skips_identity_fetches(pool):
     assert {m["id"] for m in again["messages"]} == {"gm:900", "gm:901"}
     added = [c for conn in connections for c in conn.calls][before:]
     assert [c[0] for c in added if c[0] != "noop"] == ["search"]
+
+
+class AsciiConnection(FolderConnection):
+    """What imaplib does to a command: it sends every string argument as ASCII."""
+
+    def uid(self, operation, *args):
+        for arg in args:
+            if isinstance(arg, str):
+                bytes(arg, "ascii")
+        return super().uid(operation, *args)
+
+
+def test_a_search_with_an_accent_reaches_gmail(monkeypatch):
+    """"postulación" in the receipt search raised UnicodeEncodeError on every pass, read as a mailbox failure: no acknowledgement
+    was matched for five days (2026-10-27 to 2026-11-01)."""
+    connections = []
+    monkeypatch.setattr(gmail_imap, "_connect", lambda *_: connections.append(AsciiConnection()) or connections[-1])
+    pool = _Pool("alex@example.test", "secret")
+    pool.list = lambda: AsciiConnection().list()
+    result = _request(pool, "alex@example.test", "/messages", {"q": "after:1 (application OR postulación OR Société)"})
+    assert result["messages"]
+    query = next(c[2][2] for conn in connections for c in conn.calls if c[0] == "search")
+    assert "postulacion" in query and "Societe" in query
+
+
+def test_the_receipt_search_is_ascii_before_it_gets_here():
+    from jobpilot.receipts import RECEIPT_SEARCH
+
+    assert RECEIPT_SEARCH.isascii()

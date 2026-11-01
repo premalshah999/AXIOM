@@ -8,6 +8,7 @@ import re
 import ssl
 import threading
 import time
+import unicodedata
 from datetime import datetime
 from email import policy
 
@@ -284,6 +285,10 @@ def _request(client, address, path, params):
         # Raw Gmail queries otherwise exclude Spam. Selected folders still
         # bound the UID space; All Mail, Spam and Trash cover Gmail's mailbox.
         query = "in:anywhere " + str(params.get("q", "newer_than:1d"))
+        # imaplib sends a command as ASCII. "postulación" in the receipt search raised UnicodeEncodeError on every pass from
+        # 2026-10-27, read as "Mailbox operation failed; retry later": no acknowledgement was matched for five days. An
+        # accent falls away here (Gmail's search folds accents); any other character can't be searched for.
+        query = unicodedata.normalize("NFKD", query).encode("ascii", "ignore").decode()
         # Quote the IMAP search value as a string; never permit injected search commands.
         query = (
             '"' + query.replace("\\", "\\\\").replace('"', '\\"').replace("\r", " ").replace("\n", " ") + '"'

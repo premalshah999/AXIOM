@@ -188,7 +188,7 @@ RECEIPT_WORDING = re.compile(
 # Every RECEIPT_WORDING phrase carries one of these words: the mailbox search asks Gmail for them only. Unfiltered,
 # the search from the oldest unconfirmed run (18 days of codes and alerts) paged through old mail while new receipts
 # waited for the sweep to wrap; Lyft's "Thank you for your application" was never read (2026-10-25).
-RECEIPT_SEARCH = "(application OR applying OR resume OR Bewerbung OR candidature OR solicitud OR postulación)"
+RECEIPT_SEARCH = "(application OR applying OR resume OR Bewerbung OR candidature OR solicitud OR postulacion)"
 # How firmly an acknowledgement names its job: by its link, by its title, or only by arriving after the submit.
 BASIS_STRENGTH = {"job_url": 3, "title": 2, "submit_window": 1}
 # The "submitting" event is logged after the click that sends the application, and some employers' systems answer within
@@ -412,8 +412,12 @@ async def receipt_messages(
                     break
                 state, upgraded = {"query_id": query_id}, True
                 continue
-            except (TimeoutError, MailTransportError, MailOperationError):
+            except (TimeoutError, MailTransportError, MailOperationError) as exc:
                 report["failed"] = True
+                # Counted where it can be seen: a search that failed on every pass for five days looked like an empty mailbox
+                # (a non-ASCII search term, 2026-10-27 to 2026-11-01).
+                if note := getattr(mail, "note_failure", None):
+                    note("mail_search", exc)
                 break  # Keep the cursor; a mailbox transport outage changes no receipt.
             fetched_pages += 1
             ids = [item["id"] for item in listed.get("messages", []) if item.get("id")]
