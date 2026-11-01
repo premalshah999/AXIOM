@@ -312,3 +312,22 @@ def test_a_new_password_form_is_sent_by_whatever_its_button_says(label):
     control = {"id": "b1", "label": label, "aria_label": "", "automation_id": "", "href": ""}
     obs = {"controls": [{**control, "id": "b0", "label": "Privacy policy", "href": "/privacy"}, control], "fields": [], "text": ""}
     assert adapter.auth_button(obs, "reset")["id"] == "b1"
+
+
+def test_a_run_its_mail_released_is_not_spaced_as_a_new_application(service):
+    from jobpilot.admission import QueueBlocked
+    from jobpilot.application_pacing import gap_key, may_start, require_ats_admission
+    from jobpilot.db import Setting
+
+    spec = PLATFORMS["ashby"]
+    job, run = start_run(service, spec["url"], spec["ats"], spec["company"])
+    service.db.set_setting(gap_key("ashby"), {"run_id": "another", "started_at": time.time()})
+    with service.db.session() as s:
+        row = s.get(Job, job["id"])
+        with pytest.raises(QueueBlocked):
+            require_ats_admission(s, row, owner_pick=True)
+        require_ats_admission(s, row, email_continuation=True)
+        fresh = {"id": "n", "packet": {}}
+        woken = {"id": "n", "packet": {"email_wait_resume": {"challenge_id": "c"}}}
+        assert not may_start(s, row, fresh)
+        assert may_start(s, row, woken)

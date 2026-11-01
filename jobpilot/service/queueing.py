@@ -458,9 +458,9 @@ class QueueingMixin:
                 require_allowance(s, job_id, aliases=aliases, new_attempt=not email_continuation)
                 from ..application_pacing import require_company_limit, require_ats_admission
 
-                if not owner_pick:
+                if not owner_pick and not email_continuation:
                     require_company_limit(s, job)
-                require_ats_admission(s, job, owner_pick=owner_pick)
+                require_ats_admission(s, job, owner_pick=owner_pick, email_continuation=email_continuation)
                 if not self.mail.shared_sender_free(s, job):
                     raise QueueBlocked(
                         "Another application is verifying with this platform's email sender; this one waits its turn",
