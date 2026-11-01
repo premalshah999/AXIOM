@@ -55,7 +55,7 @@ def test_the_recorded_trigger_names_the_reason():
 
 
 def test_specialists_get_a_larger_budget_than_ats_workers():
-    config = settings()
+    config = settings(max_model_calls=18)
     assert pool_boost(config, "normal") == 1.0 and pool_boost(config, None) == 1.0
     assert pool_boost(config, "specialist") == 1.5
     # Wall clock: 8 minutes becomes 12; the 20-minute ceiling scales too.
@@ -66,7 +66,7 @@ def test_specialists_get_a_larger_budget_than_ats_workers():
     assert call_limit(config, 1) == 18 and call_limit(config, 1, "normal") == 18
     assert call_limit(config, 1, "specialist") == 27
     assert call_limit(config, 2, "specialist") == 60
-    assert call_limit(settings(specialist_budget_multiplier=2), 1, "specialist") == 36
+    assert call_limit(settings(max_model_calls=18, specialist_budget_multiplier=2), 1, "specialist") == 36
 
 
 def test_the_per_job_token_cap_scales_for_specialists(service):
