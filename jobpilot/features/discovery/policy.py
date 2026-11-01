@@ -141,7 +141,7 @@ REQ_IN_TEXT = re.compile(
 
 def requisition_key(url: str, title: str, location: str, description: str = "", company: str = "") -> str:
     """Same requisition seen through search results, boards and direct links → same key."""
-    tenant = tenant_alias(url) or ("name:" + norm(company))
+    tenant = tenant_alias(url, company) or ("name:" + norm(company))
     try:
         from ...ats import canonicalize, custom_like, detect
 

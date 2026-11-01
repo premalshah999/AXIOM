@@ -94,8 +94,10 @@ def dayforce_tenant(parts) -> str | None:
     return parts[0].casefold() if parts else None
 
 
-def tenant_alias(url: str) -> str | None:
-    """A stable ATS tenant key: the part of the URL that identifies the employer."""
+def tenant_alias(url: str, company: str = "") -> str | None:
+    """A stable ATS tenant key: the part of the URL that identifies the employer. A plain host ("domain:...") names an
+    employer only when the company is that host's own (see domain_fits): a link shortener, a feed's redirect host or a
+    shared career-site platform serves many employers."""
     try:
         p = urlsplit((url or "").strip())
     except ValueError:
@@ -128,7 +130,34 @@ def tenant_alias(url: str) -> str | None:
     # Hosts that serve many employers identify no single tenant.
     if not domain or domain in SHARED_DOMAINS or any(host.endswith(h) for h in SHARED_HOST_SUFFIXES):
         return None
+    if company and not domain_fits(domain, company):
+        return None
     return "domain:" + domain
+
+
+def domain_fits(domain: str, company: str) -> bool:
+    """Whether a registrable domain is the company's own: its first label begins the company's name or the name begins
+    the label ("careers.cintas.com" / "Cintas Corporation"), a long label is inside the name, or the label is the
+    name's initials ("ea.com" / "Electronic Arts"). A feed's link shortener once mapped to the first employer seen
+    through it, and 88 of the owner's applications through it counted against that one employer's cap while every
+    posting reached through it was refused as that employer's 89th (go.<feed>/<code>, 2026-11-01); applytojob.com,
+    jibeapply.com and jobs2web.com are the same mistake on shared platforms."""
+    label = re.sub(r"[^a-z0-9]", "", domain.split(".")[0].casefold())
+    if len(label) < 2:
+        return False
+    for name in name_aliases(company):
+        squashed = re.sub(r"[^a-z0-9]", "", name)
+        words = [w for w in re.findall(r"[a-z0-9]+", name) if w not in CONNECTIVES]
+        initials = "".join(w[0] for w in words)
+        if label == squashed or (len(squashed) >= 3 and (squashed.startswith(label) or label.startswith(squashed))):
+            return True
+        if (len(squashed) >= 4 and squashed in label) or (len(label) >= 5 and label in squashed):
+            return True
+        if len(words) >= 2 and (initials == label or (len(initials) >= 3 and label.startswith(initials))):
+            return True
+        if words and len(words[0]) >= 4 and label.startswith(words[0]):
+            return True
+    return False
 
 
 SHARED_DOMAINS = {
@@ -188,7 +217,7 @@ def add_alias(s, employer_id: str, alias: str, kind: str = "name", evidence: dic
 
 
 def resolve(s, name: str = "", url: str = "", create: bool = True) -> EmployerIdentity | None:
-    tenant = tenant_alias(url) if url else None
+    tenant = tenant_alias(url, name) if url else None
     names = name_aliases(name)
     found, how = None, "none"
     if tenant:

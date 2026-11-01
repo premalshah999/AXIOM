@@ -161,6 +161,18 @@ def pick_qualified(rows, wanted, state):
     return hits[0] if len(hits) == 1 else None
 
 
+def search_aliases(wanted):
+    """Equivalent spellings to type into a search-only picker, best first, at most two. The shorter or longer
+    spelling of the same words goes first: ordered by length alone, the longest of the localized names added on
+    2026-10-25 ("vereinigte staaten von amerika") filled the budget and "united states" was never typed. Each empty
+    search costs 2 s of the field's 12 s write budget."""
+    own = widgets.norm(wanted)
+    return sorted(
+        widgets._alias_group(wanted) - {own},
+        key=lambda a: (not (own.startswith(a + " ") or a.startswith(own + " ")), -len(a)),
+    )[:2]
+
+
 async def _options(el, family):
     return await el.evaluate(
         r"""(e,family)=>{
@@ -332,7 +344,7 @@ async def select_combo(frame, el, field, value, choose=None, *, rematch=None, ap
             # Remote catalogs often index "United States", while the saved
             # fact says "United States of America". Search bounded supported
             # equivalents, then commit an actual owned option.
-            aliases = sorted(widgets._alias_group(wanted) - {widgets.norm(wanted)}, key=len, reverse=True)[:3]
+            aliases = search_aliases(wanted)
             for query in aliases:
                 previous = options
                 await el.fill("", timeout=1000)

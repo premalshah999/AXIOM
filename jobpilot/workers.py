@@ -43,6 +43,14 @@ def source_failed(db, source_id, exc, managed, timezone):
                 row.next_run = (datetime.now(UTC) + wait).astimezone(ZoneInfo(timezone)).isoformat()  # an instant, not wall-clock arithmetic across a DST change
 
 
+# Boards jobboard.read_feed can read; anything else (a career page without a known feed) keeps the plain import.
+BOARD_KINDS = frozenset({"ashby", "greenhouse", "lever", "smartrecruiters", "workday"})
+
+
+def screened_source(source, managed):
+    return bool(managed or source["auto_queue"] or source["kind"] in BOARD_KINDS)
+
+
 @DBOS.workflow(max_recovery_attempts=1)
 async def source_workflow(source_id: str):
     service = SERVICE
@@ -59,6 +67,11 @@ async def source_workflow(source_id: str):
         from .jobboard import is_managed, scrape_source
 
         managed = is_managed(service.db, source_id)
+        # A board the autopilot can read is scanned with the owner's filters whoever added it. The unscreened import
+        # (`discover`) stored a board's every posting, 5,620 in one minute, none of them listed: the autopilot never sees
+        # a posting without a listing, so 99% of them were never ranked and the 45 that fit the filters (new-grad and
+        # early-career roles in the US) sat unseen until retention deleted them (2026-11-01).
+        screened = screened_source(source, managed)
         if source["kind"] == "web_search":
             from .jobsearch import expand_sources
 
@@ -66,10 +79,10 @@ async def source_workflow(source_id: str):
         else:
             ids = (
                 await scrape_source(source, service.db, service.config)
-                if managed or source["auto_queue"]
+                if screened
                 else await discover(source, service.db, service.config)
             )
-        if managed or source["auto_queue"]:
+        if screened:
             # All autonomous applications share freshness checks, batch ranking,
             # duplicate protection and the application scheduler.
             await enqueue_matching()

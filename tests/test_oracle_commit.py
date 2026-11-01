@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from jobpilot.widgets_ats import _wait_committed
+from jobpilot.widgets_ats import _wait_committed, search_aliases
 from jobpilot.browser import BrowserEngine
 from jobpilot.forms import FormSession
 from jobpilot.answers import Resolver
@@ -71,6 +71,17 @@ async def test_oracle_native_accepted_resume_has_no_visible_label(
     form = FormSession(page, Resolver(Profile(), service.db, service.config), resume, lambda *a: None)
     form.uploaded = True
     assert await form.accepted_resume_tile() is accepted
+
+
+@pytest.mark.parametrize(
+    "saved,first",
+    [("United States of America", "united states"), ("United States", "united states of america")],
+)
+def test_search_only_picker_tries_the_plain_spelling_before_localized_names(saved, first):
+    # The localized names added to the country aliases (2026-10-25) are longer than "United States", so a
+    # longest-first search never typed it and a search-only country picker found nothing.
+    aliases = search_aliases(saved)
+    assert aliases[0] == first and len(aliases) <= 2
 
 
 async def test_oracle_remote_country_searches_equivalent_before_claiming_unavailable(page, service, tmp_path):
