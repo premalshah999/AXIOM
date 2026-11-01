@@ -717,6 +717,13 @@ USEFUL_OPTIONAL = re.compile(
     r"linkedin|github|portfolio|website|salary|compensation|start date|notice|hear about|how did you|referr",
     re.IGNORECASE,
 )
+# A cookie banner announced as a dialog is never the page's step (ZincFive's ADP sign-in, 2026-10-27: the banner's
+# "manage your preferences" link and "x" hid the email box and Continue, and three runs stopped on "only a privacy
+# dialog with Close").
+COOKIE_NOTICE = re.compile(
+    r"\bcookies?\b.{0,240}\b(?:privacy|preferences|statement|policy|consent|settings)\b|\bcookie (?:settings|preferences)\b",
+    re.I | re.S,
+)
 # Single-page ATSs whose react-select comboboxes keep their proven live behavior.
 WORKDAY_HOST = re.compile(r"myworkdayjobs\.com|myworkdaysite\.com", re.I)
 # Frames that never hold applicant fields: CAPTCHA/bot-check providers, analytics, media, chat.
@@ -724,7 +731,11 @@ PROVIDER_FRAME = re.compile(
     r"hcaptcha\.com|newassets\.hcaptcha|google\.com/recaptcha|recaptcha\.net|gstatic\.com/recaptcha|"
     r"challenges\.cloudflare\.com|turnstile|arkoselabs|funcaptcha|geetest|datadome|perimeterx|px-cdn|"
     r"captcha-delivery|googletagmanager|doubleclick|youtube\.com/embed|player\.vimeo|intercom|drift\.com|"
-    r"zendesk|livechat",
+    r"zendesk|livechat|"
+    # An employer's own chat assistant (Toyota's Phenom job page, 2026-10-31): its floating role=dialog became the "active
+    # dialog" that hides everything else, so the page's Apply Now was never a control, "Bot message" was its only field and
+    # the chat's own "I'm interested" button was clicked instead.
+    r"chat-?bot|chat-?widget|chat-?window|web-?chat|chat-?frame",
     re.I,
 )
 MAX_FRAMES = 12
@@ -1822,6 +1833,8 @@ class FormSession:
                     item["id"] = f"f{n}-{data['document_id']}-{item['id']}"
                     item["frame_url"] = frame.url
                     item["member_ids"] = item.pop("members", [])
+                    if kind == "fields" and item.get("alert_signup"):
+                        continue  # A job page's own "Get notified for similar jobs" box is never an application question.
                     if kind == "fields" and site_search(item):
                         continue  # The career site's own search box is never an application question.
                     self.frames[item["id"]] = frame
@@ -1879,7 +1892,14 @@ class FormSession:
                 self.emit("dialog_acknowledgement", "Informational dialog acknowledgement failed",
                           {"error_type": type(exc).__name__, "attempt": acknowledgements[ack]})
         # Every execution route sees the active dialog, never controls behind it.
-        dialogs = [d for d in meta["dialogs"] if d.get("field_ids") or d.get("control_ids")]
+        # A cookie banner announced as a dialog hides nothing: ADP's "Privacy" bar (role=dialog, 61 px) left the page's
+        # Apply and every other control out of the scan (ADP job pages, 2026-10-31: five of five live pages read "Unrecognized page").
+        dialogs = [
+            d
+            for d in meta["dialogs"]
+            if d.get("field_ids")
+            or (d.get("control_ids") and not COOKIE_NOTICE.search(str(d.get("text", "")) + " " + str(d.get("title", ""))))
+        ]
         if dialogs:
             active = dialogs[-1]
             useful = [
