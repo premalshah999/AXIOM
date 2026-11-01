@@ -2087,8 +2087,11 @@ class BrowserEngine:
         if not getattr(self, "armed", False) and (limit := limit_notice(obs)):
             # TikTok's cap notice sits over a full form (see APPLICATION_LIMIT): the form does not make it open. Its
             # own limit_check answered it, and the mailbox holds four ByteDance applications of 2026-10-14.
+            from .employer_limit import application_cap
+
             return {"state": "closed", "reason": "The employer's application limit for this applicant is reached, so "
-                    "nothing was submitted: " + limit[:300]}
+                    "nothing was submitted: " + limit[:300], "blocker_type": "employer_limit",
+                    "employer_cap": application_cap(limit)}
         if form_open(obs) or not (match := closed_notice(obs)):
             return None
         verdict = await self.posting_closure("The posting is closed: " + match[0][:120])
@@ -2900,16 +2903,17 @@ class BrowserEngine:
             pass  # A failed clean-up leaves the previous behaviour; the run still proceeds.
 
     async def employer_limit_result(self, rejection):
-        """The employer refused because its own application limit is reached: close this job, remember the limit."""
-        from .application_pacing import cap_reason, record_employer_cap
+        """The employer refused a submission over its own application limit: close this job. service.completion remembers
+        the limit in the transaction that records this result."""
+        from .application_pacing import cap_reason
 
         cap = rejection.get("cap") or {}
-        await asyncio.to_thread(record_employer_cap, self.db, self.job, cap)
         return {
             "state": "closed",
             "reason": cap_reason(self.job.get("company"), cap),
             "receipt": rejection,
             "blocker_type": "employer_limit",
+            "employer_cap": cap,
         }
 
     async def navigator_handoff(self):

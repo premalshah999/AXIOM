@@ -164,6 +164,16 @@ class ExecutionMixin:
                     row.reason = f"{hold.employer} is a reserved employer ({hold.label}){HOLD_WAIT}"
                     s.get(Job, row.job_id).status = "ready"
                     return
+                if row.mode == "submit" and not row.packet.get("verification_only") and not row.packet.get("email_wait_resume"):
+                    from ..admission import EMPLOYER_WAIT
+                    from ..loop_guard import stop_of
+
+                    if stopped := stop_of(s, s.get(Job, row.job_id)):
+                        # Queued before its employer refused or the loop guard tripped: no browser opens for it.
+                        row.state, row.finished_at = "cancelled", now()
+                        row.reason = EMPLOYER_WAIT + str(stopped)
+                        s.get(Job, row.job_id).status = "ready"
+                        return
                 if s.get(Setting, "control").value.get("paused"):
                     return
                 from .. import host_health

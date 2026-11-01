@@ -160,11 +160,20 @@ class ChallengesMixin:
         return None
 
     def shared_sender_free(self, session, job):
-        """False while another job holds the sender of a platform that mails every employer from one sender."""
-        if job.ats not in SHARED_SENDER_ATS or job.demo:
+        """False while another job holds the sender this job would need: this employer's own (its mail rule), or the one
+        sender of a platform that mails every employer from it. Another employer's window on a platform that attributes its
+        mail per tenant is not waited for here (Workday's last seconds at a time; begin() has its own short wait for those).
+
+        A career site's jobs started, opened a browser, reached the code step and gave up, six in 40 minutes while one
+        sibling's code window was open (ByteDance, 2026-11-01); 20 of 69 such runs in two weeks were the employer's own
+        sender. Only Oracle's and iCIMS's were checked before the start."""
+        if job.demo:
             return True
+        shared = job.ats in SHARED_SENDER_ATS
         rule = self.rule_for(job.url, session=session)
         if rule is None:
+            if not shared:
+                return True  # No address has been asked for yet at this employer: nothing to wait behind.
             # A tenant with no saved rule yet still shares the platform's sender with every other tenant.
             box = session.scalar(select(Mailbox.id).where(Mailbox.state == "connected"))
             if box is None:
@@ -178,7 +187,11 @@ class ChallengesMixin:
         blocker = self.sender_blocker(session, rule, None)
         challenge = session.get(MailChallenge, blocker) if blocker else None
         holder = session.get(Run, challenge.run_id) if challenge else None
-        return holder is None or holder.job_id == job.id
+        if holder is None or holder.job_id == job.id:
+            return True
+        if shared:
+            return False
+        return challenge.rule_id != rule.get("id")
 
     def recovery_sender_ready(self, session, job, recovery):
         """Wait before starting another browser when its observed blocker is a sender lease."""

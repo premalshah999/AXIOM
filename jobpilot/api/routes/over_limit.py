@@ -10,7 +10,7 @@ leaves the section the moment it is approved; the autopilot never starts one of 
 
 import asyncio
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from ...owner_apply import MANY
 from ...startable import over_limit, over_limit_count, reading
@@ -21,6 +21,22 @@ KEEP = ("id", "company", "title", "location", "ats", "url", "score", "created_at
 def router(service) -> APIRouter:
     db = service.db
     r = APIRouter()
+
+    @r.post("/api/held-employers/release")
+    async def release_employer(data: dict):
+        """Try again on one held employer (loop_guard.held_employers): its jobs may start. A limit that was real comes back with
+        the next refusal, and a loop with the next two failures."""
+        from ...loop_guard import release
+
+        def lift():
+            with db.exclusive() as s:
+                return release(s, str(data.get("key") or ""))
+
+        if not await asyncio.to_thread(lift):
+            raise HTTPException(404, "That employer is no longer held")
+        await asyncio.to_thread(db.event, "", "employer_released", "Owner pressed Try again on a held employer", {"key": str(data.get("key"))[:200]})
+        reading(service).at = 0.0
+        return {"released": True}
 
     @r.get("/api/over-limit")
     def listing(q: str = "", page: int = 1, size: int = 25):

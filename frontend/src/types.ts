@@ -511,6 +511,8 @@ export type Startable = {
   waiting: number;
   held: { code: string; count: number; phrase: string }[];
   idle: string | null;
+  // Employers stopped as a whole (jobpilot/loop_guard.py), one item each however many jobs wait behind them.
+  employers?: { key: string; kind: "limit" | "loop" | "site"; company: string; reason: string; until: string; jobs: number }[];
 };
 type SourceHealth = {
   failures: number;

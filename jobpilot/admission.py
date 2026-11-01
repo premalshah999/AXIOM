@@ -289,7 +289,9 @@ def unknown_resubmit_allowed(session, runs, at=None, *, checked=True):
 APP_CANCELS = (
     "Owner cancelled saved application during maintenance",  # the 2026-10-10 sweep of saved drafts
     "Replaced by a newer attempt",  # operations.superseded: the newer run is the attempt
+    "This application waits: ",  # EMPLOYER_WAIT: its employer's own limit or a loop stopped it; nothing was sent
 )
+EMPLOYER_WAIT = "This application waits: "
 HOLD_WAIT = "; it waits for your approval"  # service.execution: queued before its employer was reserved
 
 

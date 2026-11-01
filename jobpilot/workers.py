@@ -368,6 +368,9 @@ async def start(service):
     global SERVICE
     SERVICE = service
     recover_interrupted(service)
+    from .loop_guard import learn_from_history
+
+    learn_from_history(service.db)
     from .recovery import schedule_version_repairs
 
     schedule_version_repairs(service)

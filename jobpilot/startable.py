@@ -28,7 +28,9 @@ HOLDS = {
         "over the employer limit",
         "It starts if you approve it in Jobs › Over employer limit, if that employer's count drops, or if you raise the limit in Settings.",
     ),
-    "employer_cap": ("held by the employer's own limit", "The employer's site said it accepts only so many applications. Its other jobs wait."),
+    "employer_cap": ("held by the employer's own limit", "It starts by itself when that period ends. Nothing opens a browser until then."),
+    "loop_guard": ("held after repeated failures at the employer", "It starts by itself after that, after an app update, or if you press Try again on the employer."),
+    "employer_wait": ("waiting because the employer's site asked for a wait", "It starts by itself when that wait is over."),
     "internship": ("internships", "Internships are skipped. Turn on internships in your profile to allow them."),
     "reserved": ("waiting for your approval", "It starts after you approve it in Jobs › Reserved."),
     "role": ("outside your target roles", "It starts if you add the role to your profile's target roles."),
@@ -41,6 +43,7 @@ HOLDS = {
     "protected": ("already applied to", "Applying again would duplicate an application, so it is never started."),
     "excluded": ("ruled out by the posting's requirements", "It is not retried: the posting's own requirements rule you out."),
 }
+EMPLOYER_STOPS = {"employer_cap", "loop_guard", "employer_wait"}
 # Plain words for the discovery gate's codes (features/discovery/policy.gate).
 GATE_WORDS = {
     "generic_careers_page": "The link is a general careers page, not one job.",
@@ -115,7 +118,12 @@ def read(service):
     data_dir = service.config.data_dir
     jobs, tally, can = {}, {}, []
     startable = waiting = 0
-    from .application_pacing import require_company_limit
+    from .application_pacing import employer_identity, require_company_limit
+    from .loop_guard import held_employers, stop_of
+
+    with db.session() as s:
+        stopped_employers = held_employers(s)
+        identity_of = {}
 
     for r in ready:
         job = listed.get(r.id) or extra.get(r.id) or {
@@ -146,9 +154,20 @@ def read(service):
         if verdict is None:
             with db.session() as s:
                 try:
-                    require_company_limit(s, s.get(Job, r.id))
+                    row = s.get(Job, r.id)
+                    # Whatever stops the employer as a whole, as admission reads it (service.queueing).
+                    if stopped := stop_of(s, row):
+                        raise stopped
+                    service.check_site_wait(s, row)
+                    require_company_limit(s, row)
                 except QueueBlocked as exc:
-                    if exc.code == "company_limit" and exc.detail:
+                    if exc.code == "loop_guard":
+                        verdict = ("loop_guard", str(exc))
+                    elif exc.code in {"site_circuit", "employer_cooldown", "employer_wait"}:
+                        verdict = ("employer_wait", str(exc))
+                    elif exc.code in {"ats_maintenance", "platform_bot_check"}:
+                        waiting += 1  # The whole platform waits for itself; no employer's doing.
+                    elif exc.code == "company_limit" and exc.detail:
                         # The user's own limit (Settings): the one the owner may approve past (Jobs › Over employer limit).
                         count, cap = exc.detail["count"], exc.detail["limit"]
                         verdict = ("employer_limit", limit_sentence(job.get("company") or r.company, count, cap))
@@ -164,13 +183,22 @@ def read(service):
         code, sentence = verdict
         jobs[r.id] = {"code": code, "reason": sentence, "next": HOLDS.get(code, HOLDS["excluded"])[1], **extra}
         tally[code] = tally.get(code, 0) + 1
+        if code in EMPLOYER_STOPS:
+            with db.session() as s:
+                identity_of[r.id] = employer_identity(s, s.get(Job, r.id))
     held = [{"code": c, "count": tally[c], "phrase": HOLDS[c][0]} for c in HOLDS if tally.get(c)]
     # What stops every application at once comes first: a job that "can start" cannot while the model is unreachable.
     stopped = everything_stopped(service)
     if not stopped and not startable and (outside := outside_search_area(profile)):
         stopped = outside
+    # One item per employer: dozens of jobs held for one reason are one thing to read. The jobs it holds come with it.
+    per_employer = {}
+    for job_id, identity in identity_of.items():
+        per_employer[identity] = per_employer.get(identity, 0) + 1
+    employers = [{**item, "jobs": per_employer.get(item["key"].split(":", 1)[1], 0)} for item in stopped_employers]
     return {
         "at": datetime.now(UTC).isoformat(),
+        "employers": employers,
         "ready": len(jobs) + startable,
         "startable": startable,
         "waiting": waiting,

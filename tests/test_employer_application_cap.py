@@ -53,14 +53,17 @@ def test_an_active_cap_excludes_until_the_owner_acts(service):
     with service.db.session() as s:
         with pytest.raises(QueueBlocked) as blocked:
             require_company_limit(s, s.get(Job, "Benchling-next"))
-    assert blocked.value.outcome == "excluded"
+    # A refusal naming no period waits a sensible while (employer_limit.DEFAULT_WAIT_DAYS), then one job is tried again.
+    assert blocked.value.outcome == "deferred" and blocked.value.not_before
 
 
-def test_below_the_cap_the_employer_is_open(service):
+def test_a_refusal_holds_below_this_apps_own_count(service):
+    # The applications that used the limit up may predate the app.
     _jobs(service, "OpenAI", 2)
     record_employer_cap(service.db, {"company": "OpenAI", "url": "https://jobs.ashbyhq.com/OpenAI/0"}, application_cap(OPENAI))
-    with service.db.session() as s:
+    with service.db.session() as s, pytest.raises(QueueBlocked) as blocked:
         require_company_limit(s, s.get(Job, "OpenAI-next"))
+    assert blocked.value.code == "employer_cap"
 
 
 async def test_the_refusal_page_is_an_employer_limit(page, tmp_path):

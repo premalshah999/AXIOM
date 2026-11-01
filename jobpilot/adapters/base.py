@@ -20,6 +20,7 @@ from ..accounts import Accounts
 from ..captcha_observation import ARM_JS
 from ..forms import AUTH, COOKIE_NOTICE, FINAL, LAUNCHER, SURVEY_DONE
 from ..privacy import acknowledge_privacy_notice, dismiss_cookies
+from ..employer_limit import APPLICATION_LIMIT, application_cap
 from ..mail_errors import MailPending, code_inline_wait
 
 APPLY = re.compile(
@@ -176,15 +177,6 @@ CLOSED = re.compile(
     r"\b(?:that|this|the) (?:job|position|posting|requisition|opening) is not currently (?:active|available|open)",
     re.I,
 )
-# The employer's cap on this applicant's applications. TikTok (2026-10-28): "From 2026-07-01 to 2026-12-31, you can submit
-# up to 2 job applications (including referrals) within the "Bachelor/Master Graduate - 2027 Start" recruitment project.
-# You've reached the application limit." over a full form whose Submit is refused; three runs parked on it for the owner.
-APPLICATION_LIMIT = re.compile(
-    r"\byou(?:'ve| have) reached (?:the|your) (?:\w+ )?(?:job )?(?:application|applications|apply) limit\b|"
-    r"\b(?:reached|exceeded) (?:the|your) (?:maximum|max) (?:number of )?(?:job )?applications\b|"
-    r"\b(?:job )?application limit (?:has been |was |is )?(?:reached|exceeded)\b",
-    re.I,
-)
 # A notice the page itself announces stands in a heading, an error banner or an open dialog, or alone on a short line of
 # its text; prose inside a job description or a help paragraph does not. Lines longer than this are prose.
 NOTICE_LINE = 400
@@ -209,14 +201,32 @@ def closed_notice(obs):
     return notice(obs, CLOSED)
 
 
+LIMIT_RULE = re.compile(r"\bapplications?\b|\bapply\b", re.I)
+LIMIT_DATE = re.compile(r"\d{4}|\b\d+[ -]?(?:day|week|month|year)|\b(?:apply|reapply) again\b", re.I)
+
+
 def limit_notice(obs):
-    """The employer's own cap notice, as one sentence or two, or ''."""
+    """The employer's own cap notice with the sentence before it and any date after it, or ''. The rule comes first ("From A
+    to B you can submit up to 2 ..."), the date often after ("You can apply again after B"), and a page may set them on
+    separate lines."""
     found = notice(obs, APPLICATION_LIMIT)
     if not found:
         return ""
     where = found.string
-    window = " ".join(where[max(0, found.start() - 250) : found.end()].split())
-    return " ".join(re.split(r"(?<=[.!?])\s+", window)[-2:])
+    lines = [line for line in (" ".join(raw.split()) for raw in str(obs.get("text") or "").splitlines()) if line]
+    line = " ".join(where.split())
+    at = lines.index(line) if line in lines else None
+    before = " ".join(where[max(0, found.start() - 250) : found.start()].split())
+    after = " ".join(where[found.end() : found.end() + 200].split()).lstrip(".! ")
+    if not before and at and LIMIT_RULE.search(lines[at - 1]):
+        before = lines[at - 1]
+    if not after and at is not None and at + 1 < len(lines):
+        after = lines[at + 1]
+    sentences = re.split(r"(?<=[.!?])\s+", before) if before else []
+    # A notice that starts mid-sentence ("Sorry, you've reached ...") keeps the sentence before that too.
+    head = " ".join(sentences[-1:] if before.endswith((".", "!", "?")) else sentences[-2:])
+    tail = next(iter(re.split(r"(?<=[.!?])\s+", after)), "")
+    return " ".join(part for part in (head, found[0] + ".", tail if LIMIT_DATE.search(tail) else "") if part)
 
 
 def form_open(obs):
@@ -1979,10 +1989,13 @@ class Adapter:
 
     async def on_closed(self, obs):
         if limit := limit_notice(obs):
+            # service.completion holds the employer's other jobs on this refusal, and this one with them.
             return {
                 "state": "closed",
                 "reason": "The employer's application limit for this applicant is reached, so nothing was submitted: "
                 + limit,
+                "blocker_type": "employer_limit",
+                "employer_cap": application_cap(limit),
             }
         closure = getattr(self.e, "posting_closure", None)  # Workday closes only on its own search (browser.py).
         return await closure() if closure else {"state": "closed", "reason": "The posting is closed or no longer available"}

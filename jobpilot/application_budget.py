@@ -69,6 +69,7 @@ REPEAT_STOP_LIMIT = 5
 REPEAT_STOP_SPACING = timedelta(hours=24)
 CATCH_ALL_STOP = "the browser did not advance"
 REPEAT_STOP_REFUSAL = "The same stop has now ended this application"
+JOB_CEILING_REFUSAL = "AXIOM has started this application"
 STOP_STATES = {"waiting_browser", "timed_out", "needs_review"}
 
 
@@ -236,6 +237,55 @@ def repeat_stop_block(session, job_id, *, at=None, aliases=None):
     )
 
 
+# However many builds, however the stops are worded. Textron's Taleo sign-in ran 37 times in nine days, Midco's ADP form 36,
+# Farmers' SuccessFactors account 33 (2026-10-18..11-01): each build gave three fresh starts (allowance), and a stop the model
+# words afresh each time never repeats for repeated_stop. Past ten starts a further run confirmed 1 time in 10, and half of
+# those were the applicant's own word; the ceiling saves 249 starts of 5,718 and 26 of 2,319 confirmations ran past it. After it,
+# one try a day, and only on a build the job has not tried. The owner's Apply or answer starts the count afresh.
+JOB_TRY_CEILING = 10
+JOB_TRY_SPACING = timedelta(hours=24)
+
+
+def job_ceiling_block(session, job_id, *, at=None, aliases=None):
+    """A QueueBlocked once a job has started JOB_TRY_CEILING times with nothing new, else None. What cost nothing at the
+    employer (nothing_sent), cancelled runs and the continuation of a matched email are not tries."""
+    at = at or datetime.now(UTC)
+    aliases = aliases or job_aliases(session, job_id)
+    reset_at = budget_reset_at(session, aliases)
+    count, newest, engine = 0, None, None
+    for state, reason, started, finished, built, resumed, verifying in session.execute(
+        select(Run.state, Run.reason, Run.started_at, Run.finished_at, Run.packet["engine_version"].as_string(),
+               Run.packet["email_wait_resume"].as_string(), Run.packet["verification_only"].as_boolean())
+        .where(Run.job_id.in_(aliases), Run.mode == "submit", Run.started_at.is_not(None))
+        .order_by(Run.started_at)
+    ):
+        instant = datetime.fromisoformat(started.replace("Z", "+00:00"))
+        instant = instant.replace(tzinfo=UTC) if instant.tzinfo is None else instant
+        if (reset_at and instant < reset_at) or resumed or verifying or state in {"cancelled", "paused", "queued", "running", "submitting"}:
+            continue
+        if nothing_sent(state, reason):
+            continue
+        count += 1
+        newest, engine = (reason, finished or started), built
+    if count < JOB_TRY_CEILING:
+        return None
+    from .runtime import engine_version
+
+    reason, last = newest
+    try:
+        last = datetime.fromisoformat((last or "").replace("Z", "+00:00"))
+    except ValueError:
+        last = at
+    last = last.replace(tzinfo=UTC) if last.tzinfo is None else last
+    if engine != engine_version() and last + JOB_TRY_SPACING <= at:
+        return None
+    return QueueBlocked(
+        f"{JOB_CEILING_REFUSAL} {count} times and it keeps stopping (latest: {(reason or 'no reason recorded')[:140].rstrip('. ')}). "
+        "It is tried again after an app update; applying again yourself starts it afresh",
+        outcome="deferred", code="job_ceiling", not_before=(max(last, at) + JOB_TRY_SPACING).isoformat(),
+    )
+
+
 def require_allowance(session, job_id, *, exclude_run=None, at=None, aliases=None, new_attempt=True):
     aliases = aliases or job_aliases(session, job_id)
     deadline, remaining, starts = allowance(
@@ -246,5 +296,7 @@ def require_allowance(session, job_id, *, exclude_run=None, at=None, aliases=Non
     if new_attempt and starts >= MAX_STARTS:
         raise QueueBlocked("Application already used its initial attempt and two retries", code="application_retry_limit")
     if new_attempt and (blocked := repeat_stop_block(session, job_id, at=at, aliases=aliases)):
+        raise blocked
+    if new_attempt and (blocked := job_ceiling_block(session, job_id, at=at, aliases=aliases)):
         raise blocked
     return deadline, remaining

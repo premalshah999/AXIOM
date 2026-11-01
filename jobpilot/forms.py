@@ -6869,7 +6869,7 @@ class FormSession:
             if "expired" in phrase:
                 return {"type": "explicit_rejection_page", "url": self.page.url, "category": "closed",
                         "evidence": text[max(0, match.start() - 20) : match.end() + 200], "missing_fields": []}
-            from .application_pacing import application_cap
+            from .employer_limit import application_cap
 
             if cap := application_cap(tail):
                 # The employer's own application limit (Benchling, Aurora, OpenAI on Ashby): nothing was accepted.
