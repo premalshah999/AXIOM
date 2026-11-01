@@ -623,7 +623,7 @@ def check_update(layout, fetch=None):
     latest = str(release.get("tag_name") or "").lstrip("vV") if isinstance(release, dict) else ""
     url = str(release.get("html_url") or "") if isinstance(release, dict) else ""
     # Only ever offer a page on GitHub: the answer is data, and the window opens whatever address it is given.
-    if not url.startswith("https://github.com/"):
+    if not url.startswith(RELEASE_PAGE.rsplit("releases/", 1)[0]):
         url = RELEASE_PAGE
     answer.update(latest=latest, url=url, newer=newer_version(current, latest))
     return answer
