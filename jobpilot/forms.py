@@ -2258,7 +2258,7 @@ class FormSession:
                         alternative = next(
                             (o for o in options if o["text"] == supported.value and o["leaf"] and not o["disabled"]),
                             None,
-                        )
+                        ) or widgets.best_option([o for o in options if o["leaf"] and not o["disabled"]], supported.value)
                         if alternative is None:
                             raise ChoiceRejected(
                                 "unsupported",

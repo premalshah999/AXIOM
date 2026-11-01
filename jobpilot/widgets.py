@@ -299,6 +299,36 @@ def visa_option(value, options):
     return options[same[0]] if len(same) == 1 else None
 
 
+MONTH_NAME = "|".join(sorted(MONTH_NUMBERS, key=len, reverse=True))
+
+
+def month_of(value):
+    """(year, month) for "05/2026", "2026-05", "05/20/2026" or "May 2026"; else None."""
+    text = str(value).strip()
+    for pattern, order in (
+        (r"(\d{1,2})[/.-](?:\d{1,2}[/.-])?(\d{4})", "my"),
+        (r"(\d{4})[/.-](\d{1,2})(?:[/.-]\d{1,2})?", "ym"),
+        (rf"({MONTH_NAME})\.?,?\s+(?:\d{{1,2}},?\s+)?(\d{{4}})", "Ny"),
+    ):
+        if match := re.fullmatch(pattern, text, re.I):
+            a, b = match[1], match[2]
+            year, month = (int(b), int(a)) if order == "my" else (int(a), int(b)) if order == "ym" else (int(b), MONTH_NUMBERS[a.lower()])
+            return (year, month) if 1 <= month <= 12 else None
+    return None
+
+
+def month_span(label):
+    """(year, first month, last month) for "April - June 2026" or "Q2 2026"; else None."""
+    text = str(label).strip()
+    if match := re.fullmatch(rf"({MONTH_NAME})\.?\s*(?:-|\u2013|\u2014|to)\s*({MONTH_NAME})\.?,?\s*(\d{{4}})", text, re.I):
+        first, last = MONTH_NUMBERS[match[1].lower()], MONTH_NUMBERS[match[2].lower()]
+        return (int(match[3]), first, last) if first <= last else None
+    if match := re.fullmatch(r"(?:Q([1-4])\s*,?\s*(\d{4})|(\d{4})\s*Q([1-4]))", text, re.I):
+        quarter, year = int(match[1] or match[4]), int(match[2] or match[3])
+        return year, 3 * quarter - 2, 3 * quarter
+    return None
+
+
 def best_option(options, value):
     """Choose one observed option for a desired value. Ambiguity returns None, never a guess."""
     options = [o for o in options if not placeholder_option(o["text"] if isinstance(o, dict) else o)]
@@ -319,6 +349,12 @@ def best_option(options, value):
         named = [i for i, x in enumerate(labels) if MONTH_NUMBERS.get(norm(x)) == int(want)]
         if len(named) == 1:
             return options[named[0]]
+    # A month in a menu of month spans: Oracle's "expected graduation date" offers "April - June 2026", and the saved
+    # answer "05/2026" was refused as "supports '05/2026' instead" on five runs (2026-10-31). Only a single containing span.
+    if (month := month_of(value)) and sum(month_span(x) is not None for x in labels) >= 3:
+        inside = [i for i, x in enumerate(labels) if (span := month_span(x)) and span[0] == month[0] and span[1] <= month[1] <= span[2]]
+        if len(inside) == 1:
+            return options[inside[0]]
     # "85000" is the offered "$85,000" (or "85K"). Only an exact single amount;
     # ranges and open-ended labels ("or higher") are left to interpretation.
     if (amount := money_amount(value)) is not None:
