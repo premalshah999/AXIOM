@@ -28,7 +28,7 @@ export function rulesWithDefaults(p: Profile): AnswerRules {
     demographics[key] = {
       decline_first: p.decline_demographics,
       answer: "",
-      when_missing: "ask",
+      when_missing: "closest",
       ...(saved.demographics?.[key] || {}),
     };
   }
