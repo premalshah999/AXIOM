@@ -178,7 +178,9 @@ def master_resume(db) -> str | None:
     Readiness and status asked for tailored resumes under this policy: "Tailoring: 31 eligible jobs are waiting for a
     tailored resume" while nothing had been built since 2026-10-07 and `ready_to_apply` read 0 beside 260 ready jobs
     (2026-10-28)."""
-    policy = db.get_setting("application_resume_policy", {}) or {}
+    from ...execution_services import resume_policy
+
+    policy = resume_policy(db)
     return (policy.get("resume_id") or policy.get("source_resume_id") or "") if policy.get("mode") == "master" else None
 
 
