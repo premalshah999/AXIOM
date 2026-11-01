@@ -1,187 +1,190 @@
 {
   "ashby": [
-    "11x",
     "1x",
     "abridge",
-    "adept",
-    "airplane",
+    "AeroVect",
+    "aiprise",
     "ambiencehealthcare",
+    "Antares",
     "anyscale",
-    "anysphere",
-    "applied-intuition",
-    "arize",
     "artisan",
-    "assemblyai",
+    "astera",
     "attio",
-    "augment",
+    "augmodo",
     "baseten",
+    "batoncorporation",
     "bland",
+    "blissway",
+    "bracket-bot",
     "braintrust",
-    "browser-use",
     "browserbase",
-    "captions",
     "cartesia",
     "cerebras",
+    "certa",
     "character",
-    "chroma",
-    "clay",
+    "chariot",
     "clerk",
-    "coda",
-    "codeium",
+    "cogent-security",
     "cognition",
     "cohere",
-    "consensus",
-    "contextual",
-    "convex",
-    "copy-ai",
-    "coreweave",
-    "covariant",
-    "cresta",
+    "collinear-ai",
+    "concourse",
+    "credal",
     "crusoe",
     "cursor",
-    "dagster",
-    "daytona",
+    "datafold",
     "decagon",
+    "dedalus-labs",
     "deel",
     "deepgram",
-    "descript",
+    "discernis",
     "dust",
     "e2b",
     "elevenlabs",
     "elicit",
     "ema",
-    "eudia",
+    "Etched",
     "exa",
     "extend",
+    "f7d8749a-72d6-407c-bf98-292ea630c73a",
+    "fab2",
+    "fable",
     "factory",
-    "fern",
     "figure",
     "firecrawl",
-    "fireworks-ai",
-    "fixie",
-    "galileo",
+    "fluidstack",
     "gamma",
-    "glean",
+    "generalintuition-medal",
     "granola",
     "graphite",
-    "groq",
+    "greenboard",
     "harvey",
-    "hebbia",
-    "helicone",
+    "heron-power",
     "hex",
-    "heygen",
-    "hippocratic",
-    "huggingface",
-    "humanloop",
-    "hume",
+    "hipp",
+    "hud",
+    "human-computer-lab",
     "hyperbound",
-    "imbue",
-    "inflection",
+    "infisical",
     "inngest",
-    "inworld",
-    "ironclad",
-    "jasper",
+    "ixianrobotics",
     "kong",
-    "labelbox",
     "lambda",
-    "lamini",
     "lancedb",
     "langchain",
     "langfuse",
-    "lindy",
+    "lgads",
     "linear",
     "listenlabs",
     "llamaindex",
-    "luma",
+    "Lunon",
     "magic",
-    "martian",
+    "makai-labs",
+    "matx",
+    "maxima",
+    "maxinsights",
+    "melotech",
+    "meow",
     "mercor",
+    "meridianlink",
+    "meter",
     "mintlify",
-    "mistral",
     "modal",
     "mosaic",
-    "motion",
-    "multion",
     "n8n",
     "nabla",
+    "Nash",
     "neon",
-    "nominal",
-    "not-diamond",
+    "netic",
+    "normalcomputing",
+    "nory-co",
     "notion",
-    "observe",
+    "nox-metals",
+    "nubank",
+    "observable-space",
+    "obvio",
+    "oceanus",
+    "old-mission-capital",
     "openai",
+    "openart",
+    "openmind",
     "openrouter",
-    "outerbounds",
+    "oratomic",
+    "pangramlabs",
     "parallel",
     "perplexity",
-    "perplexity-ai",
     "persona",
-    "physical-intelligence",
+    "petra-security",
     "pika",
     "pinecone",
-    "pipedream",
-    "pitch",
     "plaid",
     "poolside",
-    "portkey",
     "posthog",
-    "predibase",
-    "qdrant",
+    "powertown",
+    "PrimeIntellect",
+    "quadric",
+    "qumulo",
+    "rain",
     "ramp",
+    "range",
     "raycast",
-    "reclaim",
     "reducto",
     "reka",
-    "replicate",
+    "reliable-robotics",
     "replit",
     "resend",
-    "retool",
+    "resurgent-industries",
+    "rivet",
+    "rivianvw.tech",
+    "Roadrunner",
+    "roboflow",
     "rogo",
+    "rubie",
+    "runpod",
     "runway",
-    "sambanova",
-    "sana",
+    "salient",
+    "sela",
     "sesame",
+    "shepherd",
     "sierra",
-    "skild",
-    "skyvern",
-    "snorkel",
-    "sourcegraph",
+    "signoz",
+    "silnahealth.com",
+    "sim",
+    "snapmagic",
+    "socure",
+    "solace",
     "speakeasy",
-    "stainless",
+    "spectral%20labs",
     "stytch",
     "suno",
     "supabase",
-    "superhuman",
+    "Superhuman%20Platform%20Inc",
+    "swarmaero",
     "synthesia",
-    "tabnine",
     "tavily",
     "tavus",
-    "tecton",
     "temporal",
-    "together",
-    "tome",
-    "trigger",
+    "the-exploration-company",
     "turbopuffer",
     "twenty",
-    "tyk",
-    "typeface",
     "unify",
     "unstructured",
+    "valinor",
     "vapi",
-    "vectara",
     "vercel",
-    "wandb",
+    "veritus",
     "warp",
     "watershed",
     "wayve",
+    "weave",
     "weaviate",
-    "windsurf",
+    "webfx",
     "workos",
+    "worldengine",
     "writer",
-    "you",
     "zapier",
     "zed",
-    "zuplo"
+    "zensors"
   ],
   "career_page": [
     [
@@ -205,80 +208,24 @@
       "https://careers-additionalrovisysopportunities.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
     ],
     [
-      "careers-akamai.icims.com",
-      "https://careers-akamai.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-alkami.icims.com",
-      "https://careers-alkami.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
       "careers-americas.icims.com",
       "https://careers-americas.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-ametek.icims.com",
-      "https://careers-ametek.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
     ],
     [
       "careers-amtrustgroup.icims.com",
       "https://careers-amtrustgroup.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
     ],
     [
-      "careers-ansys.icims.com",
-      "https://careers-ansys.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-athenahealth.icims.com",
-      "https://careers-athenahealth.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
       "careers-avalara.icims.com",
       "https://careers-avalara.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-blackbaud.icims.com",
-      "https://careers-blackbaud.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
     ],
     [
       "careers-bottomline.icims.com",
       "https://careers-bottomline.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
     ],
     [
-      "careers-broadridge.icims.com",
-      "https://careers-broadridge.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-cadence.icims.com",
-      "https://careers-cadence.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-cboe.icims.com",
-      "https://careers-cboe.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-cerence.icims.com",
-      "https://careers-cerence.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-cerner.icims.com",
-      "https://careers-cerner.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-ciena.icims.com",
-      "https://careers-ciena.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
       "careers-cotiviti.icims.com",
       "https://careers-cotiviti.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-crowe.icims.com",
-      "https://careers-crowe.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-cvshealth.icims.com",
-      "https://careers-cvshealth.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
     ],
     [
       "careers-daddario.icims.com",
@@ -289,44 +236,8 @@
       "https://careers-empowerai.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
     ],
     [
-      "careers-ensono.icims.com",
-      "https://careers-ensono.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-epic.icims.com",
-      "https://careers-epic.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-epiq.icims.com",
-      "https://careers-epiq.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-factset.icims.com",
-      "https://careers-factset.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-fiserv.icims.com",
-      "https://careers-fiserv.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-globalfoundries.icims.com",
-      "https://careers-globalfoundries.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-guidehouse.icims.com",
-      "https://careers-guidehouse.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
       "careers-hamiltoncompany.icims.com",
       "https://careers-hamiltoncompany.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-hexagon.icims.com",
-      "https://careers-hexagon.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-humana.icims.com",
-      "https://careers-humana.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
     ],
     [
       "careers-i3-corps.icims.com",
@@ -341,108 +252,16 @@
       "https://careers-ipipeline.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
     ],
     [
-      "careers-iqvia.icims.com",
-      "https://careers-iqvia.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-jackhenry.icims.com",
-      "https://careers-jackhenry.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
       "careers-keysight.icims.com",
       "https://careers-keysight.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-labcorp.icims.com",
-      "https://careers-labcorp.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-marketaxess.icims.com",
-      "https://careers-marketaxess.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-mathematica.icims.com",
-      "https://careers-mathematica.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-mercury.icims.com",
-      "https://careers-mercury.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-mitre.icims.com",
-      "https://careers-mitre.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-moodys.icims.com",
-      "https://careers-moodys.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-morningstar.icims.com",
-      "https://careers-morningstar.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
     ],
     [
       "careers-msci.icims.com",
       "https://careers-msci.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
     ],
     [
-      "careers-nasdaq.icims.com",
-      "https://careers-nasdaq.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-ncino.icims.com",
-      "https://careers-ncino.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-ncr.icims.com",
-      "https://careers-ncr.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-netscout.icims.com",
-      "https://careers-netscout.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-ni.icims.com",
-      "https://careers-ni.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-nuance.icims.com",
-      "https://careers-nuance.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-nvent.icims.com",
-      "https://careers-nvent.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-optum.icims.com",
-      "https://careers-optum.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-parsons.icims.com",
-      "https://careers-parsons.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
       "careers-paychex.icims.com",
       "https://careers-paychex.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-paylocity.icims.com",
-      "https://careers-paylocity.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-plexus.icims.com",
-      "https://careers-plexus.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-ptc.icims.com",
-      "https://careers-ptc.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-q2.icims.com",
-      "https://careers-q2.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-quest-diagnostics.icims.com",
-      "https://careers-quest-diagnostics.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
     ],
     [
       "careers-quest.icims.com",
@@ -453,28 +272,8 @@
       "https://careers-rambus.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
     ],
     [
-      "careers-roper.icims.com",
-      "https://careers-roper.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
       "careers-rovisys.icims.com",
       "https://careers-rovisys.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-sei.icims.com",
-      "https://careers-sei.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-sonos.icims.com",
-      "https://careers-sonos.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-spglobal.icims.com",
-      "https://careers-spglobal.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-ss-c.icims.com",
-      "https://careers-ss-c.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
     ],
     [
       "careers-sscgp.icims.com",
@@ -485,64 +284,12 @@
       "https://careers-stifel.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
     ],
     [
-      "careers-synopsys.icims.com",
-      "https://careers-synopsys.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-teradyne.icims.com",
-      "https://careers-teradyne.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-tradeweb.icims.com",
-      "https://careers-tradeweb.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-trimble.icims.com",
-      "https://careers-trimble.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-tylertech.icims.com",
-      "https://careers-tylertech.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-ultimate.icims.com",
-      "https://careers-ultimate.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-unitedhealthgroup.icims.com",
-      "https://careers-unitedhealthgroup.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
       "careers-usu.icims.com",
       "https://careers-usu.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
     ],
     [
-      "careers-veeva.icims.com",
-      "https://careers-veeva.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-vertex.icims.com",
-      "https://careers-vertex.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
       "careers-viasat.icims.com",
       "https://careers-viasat.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-virtu.icims.com",
-      "https://careers-virtu.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-wexinc.icims.com",
-      "https://careers-wexinc.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers-zebra.icims.com",
-      "https://careers-zebra.icims.com/jobs/search?ss=1&searchKeyword=software&in_iframe=1"
-    ],
-    [
-      "careers.abb.com",
-      "https://careers.abb.com/search/?q=software"
     ],
     [
       "careers.acuitybrands.com",
@@ -553,28 +300,12 @@
       "https://careers.adm.com/search/?q=software"
     ],
     [
-      "careers.amphenol.com",
-      "https://careers.amphenol.com/search/?q=software"
-    ],
-    [
-      "careers.atos.net",
-      "https://careers.atos.net/search/?q=software"
-    ],
-    [
       "careers.avaya.com",
       "https://careers.avaya.com/search/?q=software"
     ],
     [
       "careers.basco.com",
       "https://careers.basco.com/search/?q=software"
-    ],
-    [
-      "careers.bat.com",
-      "https://careers.bat.com/search/?q=software"
-    ],
-    [
-      "careers.bosch-usa.com",
-      "https://careers.bosch-usa.com/search/?q=software"
     ],
     [
       "careers.capgemini.com",
@@ -585,28 +316,12 @@
       "https://careers.carrier.com/search/?q=software"
     ],
     [
-      "careers.cgi.com",
-      "https://careers.cgi.com/search/?q=software"
-    ],
-    [
       "careers.conduent.com",
       "https://careers.conduent.com/search/?q=software"
     ],
     [
-      "careers.dxc.com",
-      "https://careers.dxc.com/search/?q=software"
-    ],
-    [
-      "careers.eaton.com",
-      "https://careers.eaton.com/search/?q=software"
-    ],
-    [
       "careers.emdgroup.com",
       "https://careers.emdgroup.com/search/?q=software"
-    ],
-    [
-      "careers.emerson.com",
-      "https://careers.emerson.com/search/?q=software"
     ],
     [
       "careers.endava.com",
@@ -625,80 +340,28 @@
       "https://careers.fcc-asrgroup.com/search/?q=software"
     ],
     [
-      "careers.flex.com",
-      "https://careers.flex.com/search/?q=software"
-    ],
-    [
       "careers.flightsafety.com",
       "https://careers.flightsafety.com/search/?q=software"
-    ],
-    [
-      "careers.fujitsu.com",
-      "https://careers.fujitsu.com/search/?q=software"
-    ],
-    [
-      "careers.ge.com",
-      "https://careers.ge.com/search/?q=software"
     ],
     [
       "careers.gentherm.com",
       "https://careers.gentherm.com/search/?q=software"
     ],
     [
-      "careers.globallogic.com",
-      "https://careers.globallogic.com/search/?q=software"
-    ],
-    [
       "careers.hcltech.com",
       "https://careers.hcltech.com/search/?q=software"
-    ],
-    [
-      "careers.henkel.com",
-      "https://careers.henkel.com/search/?q=software"
-    ],
-    [
-      "careers.hexaware.com",
-      "https://careers.hexaware.com/search/?q=software"
-    ],
-    [
-      "careers.hitachivantara.com",
-      "https://careers.hitachivantara.com/search/?q=software"
     ],
     [
       "careers.honeywell.com",
       "https://careers.honeywell.com/search/?q=software"
     ],
     [
-      "careers.ibm.com",
-      "https://careers.ibm.com/search/?q=software"
-    ],
-    [
       "careers.internationalsos.com",
       "https://careers.internationalsos.com/search/?q=software"
     ],
     [
-      "careers.jabil.com",
-      "https://careers.jabil.com/search/?q=software"
-    ],
-    [
-      "careers.kohler.com",
-      "https://careers.kohler.com/search/?q=software"
-    ],
-    [
       "careers.leidos.com",
       "https://careers.leidos.com/search/?q=software"
-    ],
-    [
-      "careers.ltimindtree.com",
-      "https://careers.ltimindtree.com/search/?q=software"
-    ],
-    [
-      "careers.moodys.com",
-      "https://careers.moodys.com/search/?q=software"
-    ],
-    [
-      "careers.mphasis.com",
-      "https://careers.mphasis.com/search/?q=software"
     ],
     [
       "careers.na.panasonic.com",
@@ -709,20 +372,12 @@
       "https://careers.nec.com/search/?q=software"
     ],
     [
-      "careers.nestleusa.com",
-      "https://careers.nestleusa.com/search/?q=software"
-    ],
-    [
       "careers.nttdata.com",
       "https://careers.nttdata.com/search/?q=software"
     ],
     [
       "careers.olympusamerica.com",
       "https://careers.olympusamerica.com/search/?q=software"
-    ],
-    [
-      "careers.otis.com",
-      "https://careers.otis.com/search/?q=software"
     ],
     [
       "careers.persistent.com",
@@ -737,24 +392,8 @@
       "https://careers.philips.com/search/?q=software"
     ],
     [
-      "careers.pmi.com",
-      "https://careers.pmi.com/search/?q=software"
-    ],
-    [
-      "careers.ricoh-usa.com",
-      "https://careers.ricoh-usa.com/search/?q=software"
-    ],
-    [
       "careers.rockwellautomation.com",
       "https://careers.rockwellautomation.com/search/?q=software"
-    ],
-    [
-      "careers.saic.com",
-      "https://careers.saic.com/search/?q=software"
-    ],
-    [
-      "careers.sanmina.com",
-      "https://careers.sanmina.com/search/?q=software"
     ],
     [
       "careers.sap.com",
@@ -765,40 +404,16 @@
       "https://careers.schaeffler.com/search/?q=software"
     ],
     [
-      "careers.schneider-electric.com",
-      "https://careers.schneider-electric.com/search/?q=software"
-    ],
-    [
       "careers.siemens-healthineers.com",
       "https://careers.siemens-healthineers.com/search/?q=software"
-    ],
-    [
-      "careers.tcs.com",
-      "https://careers.tcs.com/search/?q=software"
     ],
     [
       "careers.te.com",
       "https://careers.te.com/search/?q=software"
     ],
     [
-      "careers.techmahindra.com",
-      "https://careers.techmahindra.com/search/?q=software"
-    ],
-    [
-      "careers.thoughtworks.com",
-      "https://careers.thoughtworks.com/search/?q=software"
-    ],
-    [
       "careers.toyota.com",
       "https://careers.toyota.com/search/?q=software"
-    ],
-    [
-      "careers.unilever.com",
-      "https://careers.unilever.com/search/?q=software"
-    ],
-    [
-      "careers.unisys.com",
-      "https://careers.unisys.com/search/?q=software"
     ],
     [
       "careers.virtusa.com",
@@ -811,14 +426,6 @@
     [
       "careers.wipro.com",
       "https://careers.wipro.com/search/?q=software"
-    ],
-    [
-      "careers.xerox.com",
-      "https://careers.xerox.com/search/?q=software"
-    ],
-    [
-      "careers.zensar.com",
-      "https://careers.zensar.com/search/?q=software"
     ],
     [
       "corningjobs.corning.com",
@@ -835,14 +442,6 @@
     [
       "jobs.bunge.com",
       "https://jobs.bunge.com/search/?q=software"
-    ],
-    [
-      "jobs.continental.com",
-      "https://jobs.continental.com/search/?q=software"
-    ],
-    [
-      "jobs.daimlertruck.com",
-      "https://jobs.daimlertruck.com/search/?q=software"
     ],
     [
       "jobs.danfoss.com",
@@ -865,24 +464,12 @@
       "https://jobs.exxonmobil.com/search/?q=software"
     ],
     [
-      "jobs.hitachi.com",
-      "https://jobs.hitachi.com/search/?q=software"
-    ],
-    [
-      "jobs.infosys.com",
-      "https://jobs.infosys.com/search/?q=software"
-    ],
-    [
       "jobs.jjkeller.com",
       "https://jobs.jjkeller.com/search/?q=software"
     ],
     [
       "jobs.lincolnfinancial.com",
       "https://jobs.lincolnfinancial.com/search/?q=software"
-    ],
-    [
-      "jobs.mercedes-benz.com",
-      "https://jobs.mercedes-benz.com/search/?q=software"
     ],
     [
       "jobs.netapp.com",
@@ -921,16 +508,8 @@
       "https://jobs.paccar.com/search/?q=software"
     ],
     [
-      "jobs.sanofi.com",
-      "https://jobs.sanofi.com/search/?q=software"
-    ],
-    [
       "jobs.sap.com",
       "https://jobs.sap.com/search/?q=software"
-    ],
-    [
-      "jobs.siemens-energy.com",
-      "https://jobs.siemens-energy.com/search/?q=software"
     ],
     [
       "jobs.supermicro.com",
@@ -962,285 +541,791 @@
     ]
   ],
   "greenhouse": [
-    "1password",
+    "66degrees",
+    "abacus",
     "abnormalsecurity",
-    "acorns",
-    "addepar",
+    "accenturefederalservices",
     "affirm",
     "airbnb",
-    "airbyte",
     "airtable",
-    "akamai",
-    "alation",
-    "alchemy",
-    "alltrails",
-    "alto",
-    "amplitude",
-    "anduril",
+    "alarmcom",
+    "alphataraxia",
+    "altentechnologyusa",
     "anthropic",
     "appian",
     "applovin",
-    "aquasecurity",
     "archer",
-    "arcticwolf",
+    "arizeai",
     "asana",
+    "asteraearlycareer2027",
     "astranis",
-    "astronomer",
-    "athenahealth",
-    "atomwise",
+    "astspacemobile",
+    "atoms",
     "attentive",
-    "aurorainnovation",
     "axon",
     "backblaze",
-    "benchling",
-    "benchsci",
+    "bertramcapitalmanagement",
     "betterment",
+    "bgeinc",
+    "bgeinccampus",
     "bigid",
-    "bill",
     "block",
-    "bolt",
+    "botauto",
     "braze",
     "brex",
-    "brightline",
+    "brunswickgroup",
     "calendly",
     "calm",
-    "capsule",
     "carta",
-    "cedar",
-    "chainalysis",
-    "checkout",
+    "castelioncorporation",
     "checkr",
-    "chegg",
-    "chewy",
+    "chicagotrading",
     "chime",
-    "chronosphere",
-    "circle",
-    "cityblock",
-    "clickhouse",
     "cloudflare",
     "cockroachlabs",
-    "cohesity",
     "coinbase",
     "collibra",
-    "color",
-    "commure",
-    "compass",
-    "confluent",
     "consensys",
     "contentful",
-    "convoy",
+    "convene",
     "coursera",
-    "creditkarma",
     "cribl",
-    "crowdstrike",
-    "cyera",
+    "cssmerge",
     "databricks",
     "datadog",
     "dataiku",
-    "dave",
-    "dbtlabs",
-    "devoted",
-    "digitalocean",
+    "didi",
     "discord",
+    "divergent",
     "doordashusa",
     "doximity",
-    "drata",
     "dropbox",
     "druva",
-    "duckduckgo",
     "duolingo",
+    "duolingounirecruitment",
+    "echodynecorp",
     "elastic",
     "epicgames",
-    "etsy",
-    "everlywell",
+    "esri",
+    "eventsource",
     "expel",
-    "expensify",
     "faire",
+    "fanaticscollectibles",
+    "fanduel",
+    "farmersmutualhailinsurancecompany",
     "fastly",
     "figma",
     "fireblocks",
-    "firefly",
     "fivetran",
+    "flagshippioneeringinc",
     "flatironhealth",
     "flexe",
     "flexport",
-    "flocksafety",
     "fourkites",
-    "garner",
+    "freeformfuturecorp",
+    "garnerhealth",
     "gemini",
-    "ginkgo",
+    "geocgi",
+    "ginkgobioworks",
     "gitlab",
     "gongio",
-    "goodrx",
-    "gopuff",
     "grafanalabs",
-    "grail",
-    "grammarly",
     "greenhouse",
-    "grubhub",
+    "grvty",
     "gusto",
-    "hashicorp",
+    "hackerrank",
+    "hanwhaenergyusa",
     "hawkeye360",
-    "headspace",
-    "headway",
-    "hermeus",
-    "hightouch",
-    "hims",
-    "hinge",
+    "hearst",
     "honeycomb",
-    "hubspot",
     "hudl",
     "huntress",
-    "illumio",
-    "imprivata",
-    "impulse",
-    "included",
-    "insitro",
+    "idmeuniversityrecruiting",
+    "impact",
     "instacart",
     "intercom",
+    "intrinsicrobotics",
     "iterable",
-    "joby",
+    "judihealth",
     "justworks",
-    "keeptruckin",
+    "ketch",
     "klaviyo",
     "komodohealth",
-    "kraken",
-    "lacework",
     "lattice",
     "launchdarkly",
-    "lever",
-    "lightspeed",
-    "linode",
+    "lgelectronics",
+    "lightmatter",
+    "lucidmotors",
     "lyft",
-    "lyra",
-    "marqeta",
-    "materialize",
-    "medallia",
+    "machindustries",
+    "mediaalpha",
     "melio",
     "mercury",
-    "miro",
     "mixpanel",
-    "momentive",
     "mongodb",
-    "montecarlodata",
     "motive",
-    "navan",
+    "moxxidigital",
+    "mthreerecruitingportal",
     "nayya",
-    "nerdwallet",
     "netlify",
     "netskope",
+    "neuralink",
     "newrelic",
+    "newtonresearch",
     "nextdoor",
-    "niantic",
-    "nomihealth",
     "nuro",
     "okta",
-    "olo",
-    "omada",
+    "omadahealth",
     "onetrust",
-    "opendoor",
-    "opensea",
+    "openeye",
     "orca",
     "oscar",
     "oura",
-    "outreach",
     "pagerduty",
-    "paxos",
     "peloton",
     "pendo",
+    "phoenixcontact",
     "pinterest",
-    "planet",
-    "postman",
-    "prefect",
-    "procore",
+    "podium81",
     "project44",
+    "prolaio",
+    "prolificacademicltd",
     "qualtrics",
-    "quizlet",
-    "recursion",
-    "redcanary",
+    "quberesearchandtechnologies",
+    "queracomputinginc",
+    "recidiviz",
     "reddit",
-    "redfin",
-    "redpanda",
     "relativity",
-    "remitly",
+    "rhombuspower",
     "riotgames",
     "ripple",
-    "rippling",
-    "ro",
     "robinhood",
     "roblox",
     "rocketlab",
+    "roku",
     "roofstock",
     "rubrik",
-    "rudderstack",
+    "rvohealth",
     "samsara",
-    "sanity",
-    "saronic",
+    "samsungresearchamericainternship",
     "scaleai",
     "seatgeek",
-    "secureframe",
-    "segment",
-    "sentinelone",
-    "sentry",
-    "servicetitan",
+    "sesco",
     "sezzle",
     "shield",
-    "shipbob",
     "sigmacomputing",
     "singlestore",
-    "skydio",
+    "skhynixmemorysolutionsamericainc",
     "smartsheet",
-    "snowflake",
-    "snyk",
     "sofi",
+    "sonyinteractiveentertainmentglobal",
+    "spacex",
     "spire",
-    "spotify",
-    "spring",
-    "sprinklr",
     "squarespace",
     "starburst",
-    "stash",
     "stockx",
-    "strava",
     "stripe",
     "sumologic",
-    "sword",
+    "superapp",
     "talkspace",
     "tanium",
     "tebra",
-    "tempus",
-    "thoughtspot",
-    "thumbtack",
-    "tipalti",
+    "textnowinc",
     "toast",
+    "torcrobotics",
     "tripadvisor",
+    "trueanomalyinc",
     "twilio",
     "twitch",
     "typeform",
-    "unity3d",
+    "undercontrolroboticsinc",
     "upstart",
-    "vanta",
-    "varda",
-    "veeva",
-    "verily",
     "verkada",
     "via",
-    "vultr",
-    "warbyparker",
+    "vialogic",
     "wasabi",
-    "wayfair",
     "waymo",
-    "wealthfront",
     "webflow",
-    "whoop",
     "wise",
-    "wiz",
+    "xai",
+    "yesenergy",
     "yext",
-    "zendesk",
-    "zillow",
-    "zipline",
+    "youcom",
     "zocdoc",
-    "zscaler",
-    "zus"
+    "zscaler"
+  ],
+  "smartrecruiters": [
+    "AntonPaar1",
+    "Bertelsmann-Jobs",
+    "CapTechConsulting",
+    "CityofPhiladelphia",
+    "EVERSANA1",
+    "HarvardUniversity",
+    "IFS1",
+    "JobsForHumanity",
+    "LLNL",
+    "M3USA",
+    "MATHoldings",
+    "Mirantis",
+    "PAConsulting",
+    "prosidianconsulting",
+    "ProximateTechnologiesInc1",
+    "SBTGlobalInc",
+    "SmithsGroup2",
+    "WJCompany"
+  ],
+  "workday": [
+    [
+      "Caterpillar",
+      "https://cat.wd5.myworkdayjobs.com/en-US/caterpillarcareers"
+    ],
+    [
+      "Micron Technology",
+      "https://micron.wd1.myworkdayjobs.com/External"
+    ],
+    [
+      "Verizon Communications",
+      "https://verizon.wd12.myworkdayjobs.com/verizon-careers"
+    ],
+    [
+      "Applied Materials",
+      "https://amat.wd1.myworkdayjobs.com/External"
+    ],
+    [
+      "University of Wisconsin-Madison",
+      "https://wisconsin.wd1.myworkdayjobs.com/UW_Madison"
+    ],
+    [
+      "Trimble",
+      "https://trimble.wd1.myworkdayjobs.com/en-US/TrimbleCareers"
+    ],
+    [
+      "Hewlett Packard Enterprise",
+      "https://hpe.wd5.myworkdayjobs.com/acjobsite"
+    ],
+    [
+      "Moog",
+      "https://moog.wd5.myworkdayjobs.com/moog_external_career_site"
+    ],
+    [
+      "Texas A&M University System",
+      "https://tamus.wd1.myworkdayjobs.com/System-wide_External"
+    ],
+    [
+      "3M",
+      "https://3m.wd1.myworkdayjobs.com/en-US/Search"
+    ],
+    [
+      "Pennsylvania State University",
+      "https://psu.wd1.myworkdayjobs.com/PSU_Academic"
+    ],
+    [
+      "S&P Global ",
+      "https://spgi.wd5.myworkdayjobs.com/en-US/SPGI_Careers"
+    ],
+    [
+      "Tempus",
+      "https://tempus.wd5.myworkdayjobs.com/Tempus_Careers"
+    ],
+    [
+      "U.S. Bank",
+      "https://usbank.wd1.myworkdayjobs.com/US_Bank_Careers"
+    ],
+    [
+      "University of Texas at Austin",
+      "https://utaustin.wd1.myworkdayjobs.com/UTstaff"
+    ],
+    [
+      "LPL Financial Holdings",
+      "https://lplfinancial.wd1.myworkdayjobs.com/External"
+    ],
+    [
+      "Vizient ",
+      "https://vizient.wd1.myworkdayjobs.com/Vizient_Careers"
+    ],
+    [
+      "Unity",
+      "https://unitytech.wd1.myworkdayjobs.com/Unity"
+    ],
+    [
+      "Premier",
+      "https://premierinc.wd1.myworkdayjobs.com/external_professional"
+    ],
+    [
+      "American Family Insurance Group",
+      "https://amfam.wd1.myworkdayjobs.com/Careers"
+    ],
+    [
+      "Rockwell Automation",
+      "https://rockwellautomation.wd1.myworkdayjobs.com/External_Rockwell_Automation"
+    ],
+    [
+      "Bank of America",
+      "https://ghr.wd1.myworkdayjobs.com/us-emplsv"
+    ],
+    [
+      "AAA Club Alliance",
+      "https://ace.wd5.myworkdayjobs.com/careers"
+    ],
+    [
+      "Centific",
+      "https://centific.wd1.myworkdayjobs.com/Centific_Global"
+    ],
+    [
+      "Stevens Institute of Technology",
+      "https://stevens.wd5.myworkdayjobs.com/External"
+    ],
+    [
+      "Moffitt Cancer Center",
+      "https://moffitt.wd108.myworkdayjobs.com/Moffitt"
+    ],
+    [
+      "State Street",
+      "https://statestreet.wd1.myworkdayjobs.com/equest"
+    ],
+    [
+      "Booz Allen",
+      "https://bah.wd1.myworkdayjobs.com/Confidential"
+    ],
+    [
+      "Living Spaces",
+      "https://livingspaces.wd5.myworkdayjobs.com/ls"
+    ],
+    [
+      "KeyBank",
+      "https://keybank.wd5.myworkdayjobs.com/External_Career_Site"
+    ],
+    [
+      "Expedia Group",
+      "https://expedia.wd108.myworkdayjobs.com/private"
+    ],
+    [
+      "Cardinal Health",
+      "https://cardinalhealth.wd1.myworkdayjobs.com/EXT"
+    ],
+    [
+      "Johnson & Johnson",
+      "https://jj.wd5.myworkdayjobs.com/JJ"
+    ],
+    [
+      "Intermountain Healthcare",
+      "https://imh.wd108.myworkdayjobs.com/IntermountainCareers"
+    ],
+    [
+      "Prudential Financial",
+      "https://pru.wd5.myworkdayjobs.com/Careers"
+    ],
+    [
+      "General Motors",
+      "https://generalmotors.wd5.myworkdayjobs.com/en-US/careers_gm"
+    ],
+    [
+      "Conagra Brands",
+      "https://conagrabrands.wd1.myworkdayjobs.com/Careers_US"
+    ],
+    [
+      "Goodwin",
+      "https://goodwinprocter.wd5.myworkdayjobs.com/en-US/External_Careers"
+    ],
+    [
+      "The Walt Disney Company",
+      "https://disney.wd5.myworkdayjobs.com/disneycareer"
+    ],
+    [
+      "Brown University Health",
+      "https://brownhealth.wd12.myworkdayjobs.com/External_Careers"
+    ],
+    [
+      "Capital Health",
+      "https://capitalhealth.wd1.myworkdayjobs.com/CapitalHealthCareers"
+    ],
+    [
+      "thyssenkrupp",
+      "https://thyssenkruppmaterialsna.wd12.myworkdayjobs.com/1"
+    ],
+    [
+      "Palo Alto Networks",
+      "https://paloaltonetworks.wd5.myworkdayjobs.com/panwexternalcareers"
+    ],
+    [
+      "Simon Property Group",
+      "https://simon.wd1.myworkdayjobs.com/Simon"
+    ],
+    [
+      "AES",
+      "https://aes.wd1.myworkdayjobs.com/AES_US"
+    ],
+    [
+      "Citi",
+      "https://citi.wd5.myworkdayjobs.com/2"
+    ],
+    [
+      "Agilent Technologies",
+      "https://agilent.wd5.myworkdayjobs.com/Agilent_Careers"
+    ],
+    [
+      "The Federal Reserve System",
+      "https://rb.wd5.myworkdayjobs.com/en-US/FRS"
+    ],
+    [
+      "Enbridge",
+      "https://enbridge.wd3.myworkdayjobs.com/enbridge_careers"
+    ],
+    [
+      "EverCommerce",
+      "https://evercommerce.wd1.myworkdayjobs.com/evercommerce_careers"
+    ],
+    [
+      "Menasha Corporation",
+      "https://menasha.wd12.myworkdayjobs.com/menashacorp"
+    ],
+    [
+      "Light & Wonder",
+      "https://lnw.wd5.myworkdayjobs.com/lightwonderexternalcareers"
+    ],
+    [
+      "City of Aurora",
+      "https://auroragov.wd1.myworkdayjobs.com/careers"
+    ],
+    [
+      "City of Vancouver",
+      "https://cityofvancouver.wd5.myworkdayjobs.com/COV"
+    ],
+    [
+      "Remitly",
+      "https://remitly.wd5.myworkdayjobs.com/en-US/Remitly_Careers"
+    ],
+    [
+      "Magna International",
+      "https://magna.wd3.myworkdayjobs.com/Magna"
+    ],
+    [
+      "Orchid Orthopedic Solutions",
+      "https://orchidortho.wd5.myworkdayjobs.com/careers"
+    ],
+    [
+      "Scientific Games",
+      "https://sglottery.wd5.myworkdayjobs.com/ScientificGamesExternalCareers"
+    ],
+    [
+      "University of Arkansas",
+      "https://uasys.wd5.myworkdayjobs.com/uasys"
+    ],
+    [
+      "Axiom Space",
+      "https://axiomspace.wd5.myworkdayjobs.com/External_Career_Site"
+    ],
+    [
+      "Baker Tilly",
+      "https://bakertilly.wd5.myworkdayjobs.com/BTCareers"
+    ],
+    [
+      "Nordson",
+      "https://nordsonhcm.wd501.myworkdayjobs.com/nordsoncareers"
+    ],
+    [
+      "Merrick Bank",
+      "https://cardworks.wd12.myworkdayjobs.com/Merrick_Bank_External"
+    ],
+    [
+      "Procter & Gamble",
+      "https://pg.wd5.myworkdayjobs.com/1000"
+    ],
+    [
+      "Canvas, Inc.",
+      "https://canvasinc.wd108.myworkdayjobs.com/Canvas"
+    ],
+    [
+      "Loyola Marymount University",
+      "https://lmu.wd1.myworkdayjobs.com/careers"
+    ],
+    [
+      "Lennar",
+      "https://lennar.wd1.myworkdayjobs.com/Lennar_Jobs"
+    ],
+    [
+      "Auto Club Group",
+      "https://acg.wd1.myworkdayjobs.com/Careers"
+    ],
+    [
+      "RELX",
+      "https://relx.wd3.myworkdayjobs.com/en-US/relx"
+    ],
+    [
+      "Prysmian Cables & Systems",
+      "https://prysmiangroup.wd3.myworkdayjobs.com/careers"
+    ],
+    [
+      "Crowdstrike",
+      "https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers"
+    ],
+    [
+      "Seminole Hard Rock",
+      "https://seminolehardrock.wd503.myworkdayjobs.com/seminolehardrockcareers"
+    ],
+    [
+      "General Motors",
+      "https://generalmotors.wd5.myworkdayjobs.com/Careers_GM"
+    ],
+    [
+      "Danaher",
+      "https://danaher.wd1.myworkdayjobs.com/danaherjobs"
+    ],
+    [
+      "Simpson Strong-Tie",
+      "https://strongtie.wd1.myworkdayjobs.com/en-US/External"
+    ],
+    [
+      "Edwards Lifesciences",
+      "https://edwards.wd5.myworkdayjobs.com/edwardscareers"
+    ],
+    [
+      "Faith Technologies",
+      "https://faithtechnologies.wd1.myworkdayjobs.com/fti"
+    ],
+    [
+      "Etsy",
+      "https://etsy.wd5.myworkdayjobs.com/Etsy_Careers"
+    ],
+    [
+      "Fidelity Investments",
+      "https://fmr.wd1.myworkdayjobs.com/fidelitycareers"
+    ],
+    [
+      "Florida Gulf Coast University",
+      "https://fgcu.wd5.myworkdayjobs.com/eaglejobs"
+    ],
+    [
+      "International Rescue Committee (IRC)",
+      "https://theirc.wd1.myworkdayjobs.com/External_Careers"
+    ],
+    [
+      "US Acute Care Solutions",
+      "https://usacs.wd1.myworkdayjobs.com/usacscareers"
+    ],
+    [
+      "Exelixis",
+      "https://exelixis.wd1.myworkdayjobs.com/exel"
+    ],
+    [
+      "Oshkosh",
+      "https://oshkoshcorporation.wd5.myworkdayjobs.com/Oshkosh"
+    ],
+    [
+      "Nidec",
+      "https://nidec.wd1.myworkdayjobs.com/nidec"
+    ],
+    [
+      "KION Group",
+      "https://kiongroup.wd3.myworkdayjobs.com/en-US/KION_SCS"
+    ],
+    [
+      "Health Research",
+      "https://healthresearch.wd1.myworkdayjobs.com/hri_careers"
+    ],
+    [
+      "Veralto",
+      "https://veralto.wd1.myworkdayjobs.com/hachjobs"
+    ],
+    [
+      "Blue Cross and Blue Shield of Rhode Island",
+      "https://bcbsri.wd1.myworkdayjobs.com/BCBSRICareers"
+    ],
+    [
+      "Volaris Group",
+      "https://volarisgroup.wd3.myworkdayjobs.com/volaris"
+    ],
+    [
+      "Amcor",
+      "https://amcor.wd5.myworkdayjobs.com/amcor_external_career_site"
+    ],
+    [
+      "Memorial Sloan Kettering Cancer Center",
+      "https://msk.wd108.myworkdayjobs.com/MSKCC_Careers_Primary"
+    ],
+    [
+      "TD Bank",
+      "https://td.wd3.myworkdayjobs.com/TD_Bank_Careers"
+    ],
+    [
+      "WGU",
+      "https://wgu.wd5.myworkdayjobs.com/en-US/External"
+    ],
+    [
+      "Jain Global",
+      "https://jainglobal.wd5.myworkdayjobs.com/ExternalSite"
+    ],
+    [
+      "Zillow",
+      "https://zillow.wd5.myworkdayjobs.com/Zillow_Group_External"
+    ],
+    [
+      "Healthfirst",
+      "https://healthfirst.wd1.myworkdayjobs.com/healthfirst"
+    ],
+    [
+      "Particle Measuring Systems",
+      "https://spectris.wd3.myworkdayjobs.com/PMS_Careers"
+    ],
+    [
+      "nVent",
+      "https://nvent.wd5.myworkdayjobs.com/en-US/nVent"
+    ],
+    [
+      "SWBC",
+      "https://swbc.wd1.myworkdayjobs.com/swbccareers"
+    ],
+    [
+      "Topgolf International",
+      "https://topgolf.wd501.myworkdayjobs.com/TopgolfCareers"
+    ],
+    [
+      "Viavi Solutions",
+      "https://viavisolutions.wd1.myworkdayjobs.com/careers"
+    ],
+    [
+      "Humana",
+      "https://humana.wd5.myworkdayjobs.com/humana_external_career_site"
+    ],
+    [
+      "The Campbell's Company",
+      "https://campbellsoup.wd5.myworkdayjobs.com/externalcareers_globalsite"
+    ],
+    [
+      "Transamerica",
+      "https://transamerica.wd5.myworkdayjobs.com/US"
+    ],
+    [
+      "Freudenberg Group",
+      "https://freudenberg.wd3.myworkdayjobs.com/freudenberg-group"
+    ],
+    [
+      "University System of New Hampshire",
+      "https://usnh.wd5.myworkdayjobs.com/Careers"
+    ],
+    [
+      "Sandvik",
+      "https://sandvik.wd3.myworkdayjobs.com/sandvik-jobs"
+    ],
+    [
+      "Advocate Health Care",
+      "https://aah.wd5.myworkdayjobs.com/External"
+    ],
+    [
+      "The New School",
+      "https://newschool.wd1.myworkdayjobs.com/external"
+    ],
+    [
+      "Labcorp",
+      "https://labcorp.wd1.myworkdayjobs.com/en-US/external"
+    ],
+    [
+      "Valeo",
+      "https://valeo.wd3.myworkdayjobs.com/valeo_jobs"
+    ],
+    [
+      "NASCAR",
+      "https://nascar.wd1.myworkdayjobs.com/en-US/NASCAR"
+    ],
+    [
+      "Major League Baseball",
+      "https://sterlingmets.wd5.myworkdayjobs.com/Mets"
+    ],
+    [
+      "MUFG",
+      "https://mufgub.wd3.myworkdayjobs.com/mufg-careers"
+    ],
+    [
+      "Allegion",
+      "https://allegion.wd5.myworkdayjobs.com/en-US/careers"
+    ],
+    [
+      "Voya Financial",
+      "https://godirect.wd5.myworkdayjobs.com/voya_jobs"
+    ],
+    [
+      "Gartner",
+      "https://gartner.wd5.myworkdayjobs.com/EXT"
+    ],
+    [
+      "Axcelis Technologies",
+      "https://axcelis.wd1.myworkdayjobs.com/axcelis"
+    ],
+    [
+      "Woodward Governor",
+      "https://woodward.wd5.myworkdayjobs.com/woodward"
+    ],
+    [
+      "Sony",
+      "https://sonyglobal.wd1.myworkdayjobs.com/SonyGlobalCareers"
+    ],
+    [
+      "Northrop Grumman",
+      "https://ngc.wd1.myworkdayjobs.com/Northrop_Grumman_External_Site"
+    ],
+    [
+      "Brown Brothers Harriman",
+      "https://bbh.wd5.myworkdayjobs.com/en-US/BBH"
+    ],
+    [
+      "Netsmart",
+      "https://ntst.wd1.myworkdayjobs.com/careers"
+    ],
+    [
+      "Neogen",
+      "https://neogen.wd5.myworkdayjobs.com/neogencareers"
+    ],
+    [
+      "Alegeus",
+      "https://alegeus.wd1.myworkdayjobs.com/en-US/Alegeus_External_Careers"
+    ],
+    [
+      "Ohio State University",
+      "https://osu.wd1.myworkdayjobs.com/OSUCareers"
+    ],
+    [
+      "Epiq Systems",
+      "https://epiqsystems.wd503.myworkdayjobs.com/Epiq_Careers"
+    ],
+    [
+      "RaceTrac",
+      "https://racetrac.wd5.myworkdayjobs.com/ssc"
+    ],
+    [
+      "Intapp",
+      "https://intapp.wd1.myworkdayjobs.com/Intapp"
+    ],
+    [
+      "Globus Medical",
+      "https://globusmedical.wd5.myworkdayjobs.com/GMED_Careers"
+    ],
+    [
+      "eBay",
+      "https://ebay.wd5.myworkdayjobs.com/apply"
+    ],
+    [
+      "Itron",
+      "https://itron.wd5.myworkdayjobs.com/Early_Careers"
+    ],
+    [
+      "Mizuho Securities USA",
+      "https://mizuho.wd1.myworkdayjobs.com/mizuhoamericas"
+    ],
+    [
+      "TransUnion",
+      "https://transunion.wd5.myworkdayjobs.com/en-US/TransUnion"
+    ],
+    [
+      "Broadcom",
+      "https://broadcom.wd1.myworkdayjobs.com/external_career"
+    ],
+    [
+      "Regions Bank",
+      "https://regions.wd5.myworkdayjobs.com/regions_careers"
+    ],
+    [
+      "Plug Power",
+      "https://plugpower.wd5.myworkdayjobs.com/Plug_Power_Inc"
+    ]
   ]
 }

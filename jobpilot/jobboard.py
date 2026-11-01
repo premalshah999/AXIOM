@@ -1189,7 +1189,6 @@ CATALOG = {
         "perplexity",
         "vercel",
         "linear",
-        "figma",
         "replit",
         "modal",
         "baseten",
@@ -1228,7 +1227,6 @@ CATALOG = {
         "lyft",
         "gusto",
         "robinhood",
-        "hubspot",
         "mongodb",
         "elastic",
         "samsara",
@@ -1263,9 +1261,11 @@ CATALOG = {
 
 def _extend_catalog():
     hints = json.loads((Path(__file__).parent / "data" / "employer_catalog.json").read_text())
-    for kind in ("greenhouse", "ashby"):
-        existing = {entry for entry in CATALOG[kind] if isinstance(entry, str)}
-        CATALOG[kind].extend(slug for slug in hints[kind] if slug not in existing)
+    for kind in ("greenhouse", "ashby", "smartrecruiters"):
+        existing = {entry for entry in CATALOG.setdefault(kind, []) if isinstance(entry, str)}
+        CATALOG[kind].extend(slug for slug in hints.get(kind, []) if slug not in existing)
+    known = {entry[1] for entry in CATALOG["workday"]}
+    CATALOG["workday"].extend(tuple(entry) for entry in hints.get("workday", []) if entry[1] not in known)
     CATALOG["career_page"] = [tuple(entry) for entry in hints["career_page"]]
 
 

@@ -111,3 +111,15 @@ def test_navigator_help_never_asks_about_an_evidence_answered_field(service):
     # A field the engine did not answer with evidence is still asked.
     form.ledger = {"q": {"answer": "No", "evidence_ids": [], "verified": True}}
     assert engine.record_help_reviews(request) == [] and asked == ["q"]
+
+
+def test_the_bundled_catalog_has_no_duplicates_and_every_board_has_a_name_and_address():
+    """Checked live against each platform's public board API on 2026-11-01: 233 of the default boards answered 404 and were removed,
+    and 321 boards that production's own scans read were added. No board is listed twice and every entry can become a source."""
+    from jobpilot.jobboard import CATALOG
+
+    for kind, entries in CATALOG.items():
+        keys = [(e[1].lower() if kind in {"workday", "career_page"} else e[1].rstrip("/").rsplit("/", 1)[-1].lower() if isinstance(e, tuple) else e.lower()) for e in entries]
+        assert len(keys) == len(set(keys)), (kind, [k for k in keys if keys.count(k) > 1][:5])
+        assert all(isinstance(e, str) and e or (isinstance(e, tuple) and len(e) == 2 and e[1].startswith("https://")) for e in entries), kind
+    assert sum(len(v) for v in CATALOG.values()) >= 600
