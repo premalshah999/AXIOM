@@ -62,3 +62,27 @@ def test_scan_and_batch_need_workers(client):
 def test_the_batch_target_is_bounded(client):
     assert client.post("/api/job-board/autopilot/start", json={"target": 0}).status_code == 422
     assert client.post("/api/job-board/autopilot/start", json={"target": 501}).status_code == 422
+
+
+def test_a_new_install_with_roles_searches_without_being_asked(service):
+    # The boards exist only after Search now or Start, so two friends who finished setup and waited saw nothing (2026-11-01).
+    import asyncio
+
+    from jobpilot.jobboard import first_search_due, managed_ids, request_scan
+
+    db = service.db
+    assert not first_search_due(db), "no roles, nothing to look for"
+    db.set_setting("profile", {"target_roles": ["Data Analyst"]})
+    assert first_search_due(db)
+    queued = []
+
+    async def enqueue(source_id):
+        queued.append(source_id)
+        return True
+
+    ids, count = asyncio.run(request_scan(db, enqueue))
+    assert ids and count == len(ids) == len(queued) == len(managed_ids(db))
+    assert not first_search_due(db), "asked once; later searches follow the schedule or the button"
+    assert db.get_setting("job_board_scan:" + queued[0], {})["state"] == "queued"
+    again_ids, again = asyncio.run(request_scan(db, enqueue))
+    assert again == 0 and again_ids == ids, "boards already queued are not queued twice"

@@ -68,7 +68,7 @@ create_env() {
     # Each worker drives its own Chrome tab: a 16 GB Mac ran out of memory with eight (2026-10-26).
     mem_gb=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 17179869184) / 1073741824 ))
     if [ "$mem_gb" -le 16 ]; then
-      printf 'NORMAL_WORKERS=3\nSPECIALIST_WORKERS=1\nDISCOVERY_WORKERS=1\n'
+      printf 'NORMAL_WORKERS=3\nSPECIALIST_WORKERS=1\n'
     fi
   } >>"$tmp"
   mv "$tmp" .env

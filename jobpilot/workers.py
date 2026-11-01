@@ -253,7 +253,9 @@ async def enqueue_feed_if_due(service):
         return False
     try:
         with SetEnqueueOptions(deduplication_id="new-grad-feed-sweep"):
-            await DBOS.enqueue_workflow_async("discovery", feed_workflow)
+            # Its own queue: one sweep reads thousands of boards for minutes, and in the discovery queue it held the only slot
+            # of a 16 GB Mac while all 680 board scans waited behind it (a fresh install, 2026-11-01: no job for five minutes).
+            await DBOS.enqueue_workflow_async("feeds", feed_workflow)
     except DBOSQueueDeduplicatedError:
         return False
     service.db.set_setting("discovery_feed_delivery", {"state": "queued", "enqueued_at": now()})
@@ -304,6 +306,14 @@ async def scheduled_tick(scheduled_time: datetime, context: dict):
             if datetime.fromisoformat(row.next_run) <= current:
                 due.append(row.id)
                 row.next_run = croniter(row.cron, current).get_next(datetime).isoformat()
+    if discovery_enabled and not paused:
+        from .jobboard import first_search_due, request_scan
+
+        try:
+            if await asyncio.to_thread(first_search_due, SERVICE.db):
+                await request_scan(SERVICE.db, enqueue_source)
+        except Exception:
+            pass  # The next tick asks again; a search that cannot start must not stop the tick.
     # Refill applications before processing thousands of discovery deliveries.
     # Neither a failed feed nor a deferred application controls the other queue.
     await enqueue_matching()
@@ -412,6 +422,7 @@ async def start(service):
         global_concurrency=service.config.discovery_workers,
         **polling,
     )
+    await DBOS.register_queue_async("feeds", worker_concurrency=1, global_concurrency=1, **polling)
     await DBOS.register_queue_async("matching", worker_concurrency=1, global_concurrency=1, **polling)
     await DBOS.register_queue_async("classification", worker_concurrency=1, global_concurrency=1, **polling)
     await DBOS.register_queue_async("tailoring", worker_concurrency=2, global_concurrency=2, **polling)
@@ -477,6 +488,7 @@ async def retire_obsolete_deliveries(service):
             queue_name=[
                 "matching",
                 "discovery",
+                "feeds",
                 "applications",
                 "applications_oct04",
                 "applications_experimental",

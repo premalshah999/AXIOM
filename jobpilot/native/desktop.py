@@ -168,7 +168,9 @@ def first_config(memory_gb=None):
         lines.append(f"TIMEZONE={zone}")
     # Each worker drives its own Chrome tab: a 16 GB Mac ran out of memory with eight (2026-10-26).
     if (physical_memory_gb() if memory_gb is None else memory_gb) <= 16:
-        lines += ["NORMAL_WORKERS=3", "SPECIALIST_WORKERS=1", "DISCOVERY_WORKERS=1"]
+        # Not discovery: it reads job boards over the network and drives no Chrome tab, so memory is no reason to read one board
+        # at a time. With one, a first search of 680 boards took half an hour.
+        lines += ["NORMAL_WORKERS=3", "SPECIALIST_WORKERS=1"]
     return "\n".join(lines) + "\n"
 
 
@@ -179,7 +181,23 @@ def ensure_config(layout):
     created = not layout.env_file.exists()
     if created:
         write_private(layout.env_file, first_config())
+    else:
+        _drop_one_discovery_worker(layout.env_file)
     return created
+
+
+def _drop_one_discovery_worker(path):
+    """Installs made before 2026-11-01 carry `DISCOVERY_WORKERS=1` from the template above. It made their first search read 680
+    boards one at a time behind the new-grad sweep. Only that line, and only in a file AXIOM wrote; the password stays."""
+    try:
+        text = Path(path).read_text()
+    except OSError:
+        return
+    if not text.startswith("# Written by AXIOM on first run"):
+        return
+    kept = [line for line in text.splitlines() if line.strip() != "DISCOVERY_WORKERS=1"]
+    if len(kept) != len(text.splitlines()):
+        write_private(path, "\n".join(kept) + "\n")
 
 
 # ---- ports ----------------------------------------------------------------------------------------------------------

@@ -765,6 +765,9 @@ export type BoardPage = {
   hidden: { blank: number; stale: number; closed: number; applied: number; twin: number };
   searched_at: string | null;
   scanning: number;
+  /** Boards of the latest search that have been read (or failed), out of all of them. */
+  scan_read?: number;
+  scan_total?: number;
   enabled: boolean;
   window: number;
   facets: Record<"fit" | "role" | "company" | "place" | "platform" | "posted", BoardFacet[]>;

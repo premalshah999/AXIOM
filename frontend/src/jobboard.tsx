@@ -139,6 +139,8 @@ export function BoardView() {
       (r) => r && `Searching ${plural(r.queued_sources, "employer board")} and the new-grad lists. New jobs appear here as they arrive.`,
     );
   const searching = (b?.scanning ?? 0) > 0;
+  // What the search has done so far, in the words the person would use: boards read of all.
+  const progress = b && searching && b.scan_total ? `${(b.scan_read ?? 0).toLocaleString()} of ${b.scan_total.toLocaleString()} employer boards read` : "";
   const span = !b ? "" : b.window >= 720 ? "30 days" : b.window >= 168 ? "7 days" : "48 hours";
 
   const columns: Column<BoardRow>[] = [
@@ -246,7 +248,7 @@ export function BoardView() {
       {b && !planning && (
         <TopLine>
           {b.all.toLocaleString()} open US postings from the last {span}, with closed ones and duplicates left out
-          {b.searched_at ? `. Last searched ${ago(b.searched_at, now)}.` : "."}{" "}
+          {progress ? `. Searching: ${progress}.` : b.searched_at ? `. Last searched ${ago(b.searched_at, now)}.` : "."}{" "}
           <button type="button" className="ax-link" onClick={() => go({ view: "settings", tab: "discovery" })}>
             What it looks for
           </button>
@@ -301,7 +303,7 @@ export function BoardView() {
           <Empty
             icon={filtered ? SearchX : Radar}
             title={filtered ? "No jobs match these filters" : searching ? "Searching for new jobs" : "No open postings right now"}
-            hint={filtered ? "Clear a filter to see more." : searching ? "Employer boards and new-grad lists are being read. Jobs appear as they arrive." : `Only US roles posted in the last ${span} are listed. The next scheduled search checks again.`}
+            hint={filtered ? "Clear a filter to see more." : searching ? `${progress ? progress + ". " : ""}Jobs appear here as they arrive.` : `Only US roles posted in the last ${span} are listed. The next scheduled search checks again.`}
             action={filtered ? <Button size="sm" onClick={clear}>Clear the filters</Button> : undefined}
           />
         }

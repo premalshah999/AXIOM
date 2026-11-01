@@ -80,3 +80,20 @@ def test_a_file_that_is_not_a_pdf_is_refused(client):
 
 def test_download_of_an_unknown_resume_is_404(client):
     assert client.get("/api/resumes/unknown/download").status_code == 404
+
+
+def test_a_slow_or_failed_resume_read_says_what_happened_and_waits_long_enough(client, resume_pdf, monkeypatch):
+    # The setup guide showed an empty sentence when the AI took over 25 s (2026-11-01); a person is waiting here, so it gets two minutes.
+    from jobpilot import models
+
+    client.post("/api/resumes", data={"name": "Backend", "roles": ""}, files={"file": ("resume.pdf", resume_pdf, "application/pdf")})
+    seen = {}
+
+    async def slow(*args, **kwargs):
+        seen.update(kwargs)
+        raise models.AnswerModelTimeout()
+
+    monkeypatch.setattr(models, "structured", slow)
+    answer = client.post("/api/profile/extract", json={})
+    assert answer.status_code == 400 and "took too long" in answer.json()["detail"]
+    assert seen["timeout"] >= 90 and seen["max_tokens"] >= 5000

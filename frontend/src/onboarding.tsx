@@ -789,12 +789,15 @@ function ResumeStep({
   const [file, setFile] = useState<File | null>(null);
   const [state, setState] = useState<"idle" | "uploading" | "reading" | "done" | "error">("idle");
   const [message, setMessage] = useState("");
+  // The resume a failed read can be tried on again, without choosing the file again.
+  const [readId, setReadId] = useState("");
 
   useEffect(() => {
     api<{ id: string; name: string }[]>("/resumes").then(setResumes).catch(() => setResumes([]));
   }, []);
 
   async function read(resumeId: string) {
+    setReadId(resumeId);
     setState("reading");
     setMessage("Reading your resume…");
     try {
@@ -835,6 +838,7 @@ function ResumeStep({
       setResumes((list) => [row, ...(list || []).filter((r) => r.id !== row.id)]);
       await read(row.id);
     } catch (e) {
+      setReadId("");
       setState("error");
       setMessage((e as Error).message);
     }
@@ -877,6 +881,11 @@ function ResumeStep({
           {state === "error" && /AI key/.test(message) && (
             <button type="button" className="ax-link" onClick={connect}>
               Connect it
+            </button>
+          )}
+          {state === "error" && readId && !/AI key/.test(message) && (
+            <button type="button" className="ax-link" onClick={() => read(readId)}>
+              Try again
             </button>
           )}
         </p>

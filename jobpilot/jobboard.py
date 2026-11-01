@@ -1011,6 +1011,55 @@ def within_window(cfg, at):
     )
 
 
+async def request_scan(db, enqueue):
+    """Queue a scan of every managed board now: the Search now button, and the first search of a new install.
+    Returns (ids of all boards, how many were queued). A board already queued or running is left alone."""
+    started = now()
+
+    def claim_scans():
+        # Every source's scan flag is a read and a locked write; hundreds of boards ran them one by one on the
+        # event loop (2026-10-29). One thread does them all.
+        setup_sources(db)
+        with db.session() as s:
+            wanted = Source.id.in_(managed_ids(db))
+            ids = list(s.scalars(select(Source.id).where(wanted, Source.enabled.is_(True))))
+        claimed = []
+        for sid in ids:
+            scan = db.get_setting("job_board_scan:" + sid, {})
+            if scan.get("state") in {"queued", "running"} and datetime.now(UTC) - datetime.fromisoformat(
+                scan.get("started_at", started)
+            ) < timedelta(hours=6):
+                continue
+            db.set_setting("job_board_scan:" + sid, {"state": "queued", "started_at": started})
+            claimed.append(sid)
+        return ids, claimed
+
+    ids, claimed = await asyncio.to_thread(claim_scans)
+    queued = 0
+    for sid in claimed:
+        try:
+            queued += bool(await enqueue(sid))
+        except Exception:
+            await asyncio.to_thread(
+                db.set_setting,
+                "job_board_scan:" + sid,
+                {"state": "error", "started_at": started, "error": "Could not queue this source"},
+            )
+    await asyncio.to_thread(db.set_setting, "job_board_requested", {"at": started})
+    return ids, queued
+
+
+def first_search_due(db):
+    """A profile with roles and a job board that was never searched: nothing has made the boards yet. They exist only after
+    Search now or Start, so a friend who finished setup and opened the Job board saw the new-grad lists at best, and
+    'the next scheduled search' was two hours after boards nobody had created (two fresh installs, 2026-11-01)."""
+    if not (db.get_setting("profile", {}) or {}).get("target_roles"):
+        return False
+    if db.get_setting("job_board_requested", {}) or managed_ids(db):
+        return False
+    return settings(db).enabled
+
+
 def board_snapshot(db, limit=500, *, jobs_only=False):
     """The fresh listings and, unless `jobs_only`, every source with its last scan and the autopilot's state.
 

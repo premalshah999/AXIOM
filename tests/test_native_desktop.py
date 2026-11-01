@@ -745,3 +745,18 @@ def test_an_incomplete_copy_is_told_from_a_whole_one(tmp_path):
     assert "importlib.py" in desktop.install_problem(resources), "a file cut short is damaged too"
     (resources / "install-manifest.txt").unlink()
     assert "manifest" in desktop.install_problem(resources)
+
+
+def test_discovery_is_never_limited_to_one_board_at_a_time(layout):
+    # It drives no Chrome; one worker read a first search's 680 boards one by one (2026-11-01).
+    assert "DISCOVERY_WORKERS" not in desktop.first_config(16)
+    old = desktop.first_config(16).rstrip("\n") + "\nDISCOVERY_WORKERS=1\nOPENROUTER_BASE_URL=x\n"
+    layout.support.mkdir(parents=True, exist_ok=True)
+    layout.env_file.write_text(old)
+    assert desktop.ensure_config(layout) is False
+    text = layout.env_file.read_text()
+    assert "DISCOVERY_WORKERS" not in text and "OPENROUTER_BASE_URL=x" in text and "POSTGRES_PASSWORD=" in text
+    mine = "# my own file\nDISCOVERY_WORKERS=1\n"
+    layout.env_file.write_text(mine)
+    desktop.ensure_config(layout)
+    assert layout.env_file.read_text() == mine

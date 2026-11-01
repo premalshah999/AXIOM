@@ -228,3 +228,27 @@ def test_an_employers_words_are_left_alone():
     from jobpilot.vocabulary import plain_sentence
 
     assert plain_sentence("The posting is closed or no longer available") == "The posting is closed or no longer available."
+
+
+def encrypted(content, user_password="", algorithm="AES-128"):
+    from pypdf import PdfReader
+
+    writer = PdfWriter()
+    for page in PdfReader(io.BytesIO(content)).pages:
+        writer.add_page(page)
+    writer.encrypt(user_password=user_password, owner_password="owner", algorithm=algorithm)
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
+@pytest.mark.parametrize("algorithm", ["RC4-128", "AES-128", "AES-256"])
+def test_a_pdf_restricted_only_by_an_owner_password_is_a_resume(client, algorithm):
+    # Word's and Preview's protected exports and many resume builders; two friends' installs refused them as "locked" (2026-11-01).
+    reply = upload(client, encrypted(resume_pdf(), algorithm=algorithm), name="restricted-" + algorithm)
+    assert reply.status_code == 200, reply.text
+
+
+def test_a_pdf_that_asks_for_a_password_says_so(client):
+    reply = upload(client, encrypted(resume_pdf(), user_password="secret"), name="needs-password")
+    assert reply.status_code == 400 and "asks for a password" in reply.json()["detail"]
