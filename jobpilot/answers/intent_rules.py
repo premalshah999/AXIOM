@@ -6,6 +6,7 @@ import asyncio
 import re
 from ..answer_context import status_defined_answer
 from ..schemas import Answer
+from ..widgets import range_midpoint
 from .consent import CHECK_WILLINGNESS
 from .consent import NEGATED
 from .consent import RECORD_STATEMENT
@@ -54,6 +55,16 @@ class IntentRulesMixin:
             if "desired_salary" in keys and NOT_DESIRED.search(f["label"]):
                 return None  # "Current/previous salary" is a different fact.
             stance = self.answer_rules.salary_stance.strip()
+            if (
+                "desired_salary" in keys
+                and f.get("type") == "number"
+                and not f.get("options")
+                and (amount := range_midpoint(stance))
+                and not p.salary_expectation
+            ):
+                # A number input takes one amount: the middle of the applicant's saved range (a "Salary Range" number
+                # box would otherwise get no answer, or the range text it cannot hold).
+                return self._ans(f, amount, ["policy:compensation_choice"])
             if (
                 "desired_salary" in keys
                 and f.get("type") in {"text", "textarea"}
@@ -112,6 +123,14 @@ class IntentRulesMixin:
             if value is None:
                 key = next((k for k in keys if extra.get(k)), None)
                 value = extra.get(key) if key else None
+            if (
+                "desired_salary" in keys
+                and isinstance(value, str)
+                and (amount := range_midpoint(value))
+                and (f.get("type") == "number" or not re.search(r"\branges?\b", f["label"], re.I))
+                and not re.search(r"\b(?:from|to)\s*:?\s*$", f["label"], re.I)
+            ):
+                value = amount  # The saved pay expectation is a range and this box takes one amount.
             if value is None and "requires_relocation_assistance" in keys:
                 return None  # Never fall through to the broader willingness-to-relocate fact.
             if value is None:

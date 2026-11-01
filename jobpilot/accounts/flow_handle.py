@@ -320,7 +320,7 @@ class FlowHandleMixin:
         unresolved = [
             q
             for q in report["pending"]
-            if q.get("key") != "session" and not re.fullmatch(r"user ?name|login", q["question"], re.I)
+            if q.get("key") != "session" and not re.fullmatch(r"(?:user ?name|login)[\s.]*", q["question"], re.I)
         ]
         if unresolved:
             e.result = {
@@ -331,7 +331,7 @@ class FlowHandleMixin:
             return True
         # The login identifier is typed with the credentials below; its blank box is no reason to stop (PeopleAdmin's
         # "Username", NC State 2026-10-26).
-        problems = [p for p in report.get("problems", []) if not re.search(r":\s*(?:user ?name|login)\s*$", str(p), re.I)]
+        problems = [p for p in report.get("problems", []) if not re.search(r":\s*(?:user ?name|login)[\s.]*$", str(p), re.I)]
         if not report.get("ok", True) and (problems or not report.get("problems")):
             e.result = {
                 "state": "waiting_browser",

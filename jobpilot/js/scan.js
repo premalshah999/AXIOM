@@ -317,6 +317,27 @@
     }
     return false;
   };
+  // A job page's "Get notified for similar jobs" box: one email box, one Subscribe/Activate button, in a block that says so.
+  // Toyota's (2026-10-31, a required email box beside Apply Now) made the page an email step, and Apply was never clicked.
+  const alertSignup = el => {
+    if (!(el.tagName === 'INPUT' && /^(?:text|email|)$/i.test(el.getAttribute('type') || ''))) return false;
+    const ALERT_WORDS = /job alerts?|get notified|similar jobs|new jobs|email alerts?|newsletter|subscribe/i;
+    const lone = box => [...box.querySelectorAll('input,select,textarea')].filter(visible)
+      .filter(e => !['hidden','submit','button'].includes((e.type || '').toLowerCase())).length === 1;
+    for (let box = el.parentElement, depth = 0; box && depth < 5; box = box.parentElement, depth++) {
+      const actions = [...box.querySelectorAll('button,[role=button],input[type=submit],a[role=button]')].filter(visible);
+      if (!actions.length) continue;
+      if (!lone(box) || !actions.every(b => /^(?:subscribe|activate|notify me|get (?:job )?(?:alerts?|notified)|create (?:a )?(?:job )?alert|set (?:up )?(?:a )?(?:job )?alert|sign up(?: for (?:job )?alerts?)?)$/i
+        .test(clean(b.innerText || b.value || b.getAttribute('aria-label') || '')))) return false;
+      // The block's own heading may sit a few levels up, still around this one box ("Get notified for similar jobs").
+      for (let up = box, k = 0; up && k < 5; up = up.parentElement, k++) {
+        if (!lone(up)) return false;
+        if (ALERT_WORDS.test(clean(up.innerText || ''))) return true;
+      }
+      return false;
+    }
+    return false;
+  };
   // One box for a whole period ("Start & end date", "Dates of employment", "From - To").
   const DATE_RANGE = /^(?:start\s*(?:&|and|\/|-|–)\s*end dates?|dates? of (?:employment|attendance)|employment dates|(?:time )?period|from\s*[-–]\s*to)$/i;
   const historyMemo = new WeakMap();
@@ -499,7 +520,21 @@
     const h = hiddenBy(el);
     return !!h && !(h === el && el.tagName === 'SELECT');
   };
-  const excluded = el => hiddenTree(el) || !!el.closest(CAPTCHA_BOX)
+  // An employer's floating chat assistant is not the page (Toyota and HelloFresh, 2026-10-31): its role=dialog window hid the
+  // page's Apply Now from the scan, its "I'm interested" was clicked as Apply and its message box read as the application form.
+  const CHAT_NAME = /chat-?bot|chat-?widget|chat-?window|live-?chat|web-?chat|chat-?launcher|chat-?assistant/i;
+  const chatCache = new Map();
+  const inChat = el => {
+    if (chatCache.has(el)) return chatCache.get(el);
+    let named = false, floating = false;
+    for (let n = el; n && n !== document.body && n !== document.documentElement; n = parentOf(n)) {
+      if (!named && CHAT_NAME.test(`${n.id || ''} ${n.className && n.className.baseVal === undefined ? n.className : ''} ${n.getAttribute?.('aria-label') || ''}`)) named = true;
+      if (named && n.nodeType === 1 && getComputedStyle(n).position === 'fixed') { floating = true; break; }
+    }
+    chatCache.set(el, floating);
+    return floating;
+  };
+  const excluded = el => hiddenTree(el) || inChat(el) || !!el.closest(CAPTCHA_BOX)
     || !!el.closest('[data-automation-id="languageSelectorButton"],[data-automation-id="settingsSelectorButton"]')
     || el.dataset.automationId === 'beecatcher'
     || HONEYPOT.test(`${el.id || ''} ${el.getAttribute('name') || ''} ${el.className && el.className.baseVal === undefined ? el.className : ''}`)
@@ -596,7 +631,7 @@
       valid: (f.valid ?? ((el.validity ? el.validity.valid : true) && el.getAttribute('aria-invalid') !== 'true'))
         && !error && !composedClosest(el,'spl-internal-form-field')?.hasAttribute('errorstate'),
       name: el.getAttribute('name') || '', html_id: el.id || '', automation_id: el.dataset.automationId || '',
-      placeholder: el.getAttribute('placeholder') || '', error, widget: f.widget || '', search_box: searchBox(el),
+      placeholder: el.getAttribute('placeholder') || '', error, widget: f.widget || '', search_box: searchBox(el), alert_signup: alertSignup(el),
       parts: f.parts || [], accept: el.getAttribute('accept') || '', hint: clean([f.hint || '', help, description].join(' ')).slice(0,2500),
       date_format: f.date_format || '', side_login: sideLogin(el) || chromeLogin(el),
       members: (f.members || []).map(id), list_caption: f.list_caption || '', list_items: f.list_items || [],
@@ -677,7 +712,15 @@
     // ADP's pick list names itself only "Add response." (an ARIA prompt, Midco 2026-10-31): the question is the text printed
     // just above it ("Please indicate which type of device you are using to apply.").
     if (/^(?:add|enter|provide) (?:a )?(?:response|answer)\.?$|^unlabelled field$/i.test(q)) {
-      q = precedingText(host, new Set(items.map(itemText))) || q;
+      const shown = new Set(items.map(itemText));
+      // The question the pick list prints itself (its label property, or its own shadow root) comes before any text
+      // above it: with a first question answered just over it (Midco 2026-10-31), the text above was that question,
+      // and the device question was answered "No" (a radio's option) 5 runs in a row.
+      const own = [host.label, host.getAttribute('label'),
+        ...[...(host.shadowRoot?.querySelectorAll('label,legend,[class*=label],[part*=label]') || [])].map(e => e.textContent)]
+        .map(v => clean(typeof v === 'string' ? v : '')).find(v => /[a-z]{3}/i.test(v) && v.length <= 300 && !shown.has(v)
+          && !/^(?:select|add (?:a )?(?:response|answer)\.?|close)$/i.test(v));
+      q = own || precedingText(host, shown) || q;
     }
     const req = isReq(host, q) || host.hasAttribute('required');
     consumed.add(host);
@@ -1464,7 +1507,7 @@
     // ADP labels live in the web-component's light DOM, while its native
     // shadow button is blank. Expose the owner once, with its actual label.
     .filter(el => el.matches('sdf-button') || !composedClosest(el,'sdf-button'))
-    .filter(el => !consumed.has(el) && !fieldIds.has(el.dataset.jpId) && visible(el) && !el.disabled
+    .filter(el => !consumed.has(el) && !fieldIds.has(el.dataset.jpId) && visible(el) && !el.disabled && !inChat(el)
       && !composedClosest(el,'[data-automation-id="languageSelectorButton"],[data-automation-id="settingsSelectorButton"]')
       // A typed date box's calendar popup (Prev / Next / 1..31) is not page navigation: left open after Axtria's
       // JazzHR mm/yyyy date, its "Next" was taken for the application's Next 45 times (2026-10-27).
@@ -1534,7 +1577,7 @@
       && r.height < innerHeight * 0.5;
   };
   const dialogs = all.filter(d => d.matches('[role=dialog],[role=alertdialog],[aria-modal=true],[data-sdf-modal],dialog[open],[data-automation-id="popUpDialog"],[data-automation-id="wd-Popup"]'))
-    .filter(d => visible(d) && !compactNavigation(d) && !d.closest(CAPTCHA_BOX) && d.getBoundingClientRect().width > 120)
+    .filter(d => visible(d) && !compactNavigation(d) && !inChat(d) && !d.closest(CAPTCHA_BOX) && d.getBoundingClientRect().width > 120)
     .map(d => ({
       title: clean(d.querySelector('h1,h2,h3,[role=heading]')?.innerText || d.getAttribute('aria-label') || ''),
       text: textOf(d).slice(0, 4000),

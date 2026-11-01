@@ -256,6 +256,12 @@ class FlowGatesMixin:
         )
         result = await adapter.recover(await e.form.scan(), detail)
         e.page = e.form.page
+        # recover() may only have clicked a link (the sign-up route, or Forgot password). Farmers (SuccessFactors,
+        # 2026-11-01): the next sign-in was typed into the page the click was still leaving, was refused again, and the
+        # run ended "Could not sign in" without the sign-up it had just opened ever being filled.
+        settle = getattr(e.form, "settle", None)
+        if settle and not (result and result.get("state")):
+            await settle(timeout=8)
         if result and result.get("state"):
             e.result = result
         else:

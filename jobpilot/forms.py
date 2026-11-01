@@ -717,6 +717,13 @@ USEFUL_OPTIONAL = re.compile(
     r"linkedin|github|portfolio|website|salary|compensation|start date|notice|hear about|how did you|referr",
     re.IGNORECASE,
 )
+# A cookie banner announced as a dialog is never the page's step (ZincFive's ADP sign-in, 2026-10-27: the banner's
+# "manage your preferences" link and "x" hid the email box and Continue, and three runs stopped on "only a privacy
+# dialog with Close").
+COOKIE_NOTICE = re.compile(
+    r"\bcookies?\b.{0,240}\b(?:privacy|preferences|statement|policy|consent|settings)\b|\bcookie (?:settings|preferences)\b",
+    re.I | re.S,
+)
 # Single-page ATSs whose react-select comboboxes keep their proven live behavior.
 WORKDAY_HOST = re.compile(r"myworkdayjobs\.com|myworkdaysite\.com", re.I)
 # Frames that never hold applicant fields: CAPTCHA/bot-check providers, analytics, media, chat.
@@ -724,7 +731,11 @@ PROVIDER_FRAME = re.compile(
     r"hcaptcha\.com|newassets\.hcaptcha|google\.com/recaptcha|recaptcha\.net|gstatic\.com/recaptcha|"
     r"challenges\.cloudflare\.com|turnstile|arkoselabs|funcaptcha|geetest|datadome|perimeterx|px-cdn|"
     r"captcha-delivery|googletagmanager|doubleclick|youtube\.com/embed|player\.vimeo|intercom|drift\.com|"
-    r"zendesk|livechat",
+    r"zendesk|livechat|"
+    # An employer's own chat assistant (Toyota's Phenom job page, 2026-10-31): its floating role=dialog became the "active
+    # dialog" that hides everything else, so the page's Apply Now was never a control, "Bot message" was its only field and
+    # the chat's own "I'm interested" button was clicked instead.
+    r"chat-?bot|chat-?widget|chat-?window|web-?chat|chat-?frame",
     re.I,
 )
 MAX_FRAMES = 12
@@ -1822,6 +1833,8 @@ class FormSession:
                     item["id"] = f"f{n}-{data['document_id']}-{item['id']}"
                     item["frame_url"] = frame.url
                     item["member_ids"] = item.pop("members", [])
+                    if kind == "fields" and item.get("alert_signup"):
+                        continue  # A job page's own "Get notified for similar jobs" box is never an application question.
                     if kind == "fields" and site_search(item):
                         continue  # The career site's own search box is never an application question.
                     self.frames[item["id"]] = frame
@@ -1879,7 +1892,14 @@ class FormSession:
                 self.emit("dialog_acknowledgement", "Informational dialog acknowledgement failed",
                           {"error_type": type(exc).__name__, "attempt": acknowledgements[ack]})
         # Every execution route sees the active dialog, never controls behind it.
-        dialogs = [d for d in meta["dialogs"] if d.get("field_ids") or d.get("control_ids")]
+        # A cookie banner announced as a dialog hides nothing: ADP's "Privacy" bar (role=dialog, 61 px) left the page's
+        # Apply and every other control out of the scan (ADP job pages, 2026-10-31: five of five live pages read "Unrecognized page").
+        dialogs = [
+            d
+            for d in meta["dialogs"]
+            if d.get("field_ids")
+            or (d.get("control_ids") and not COOKIE_NOTICE.search(str(d.get("text", "")) + " " + str(d.get("title", ""))))
+        ]
         if dialogs:
             active = dialogs[-1]
             useful = [
@@ -2852,6 +2872,8 @@ class FormSession:
             parsed_url = urlsplit(str(value))
             if parsed_url.hostname == "linkedin.com" and parsed_url.path.startswith("/in/"):
                 value = urlunsplit(parsed_url._replace(netloc="www.linkedin.com"))
+        if kind == "number" and (amount := widgets.range_midpoint(value)):
+            value = amount  # A number input takes one amount: the middle of the saved range.
         committed = value
 
         async def choose(options, *, partial=False):
@@ -3428,6 +3450,21 @@ class FormSession:
                 await el.blur()
             except Exception:
                 pass
+            if kind == "text" and (amount := widgets.range_midpoint(value)):
+                # A text box with a digits-only mask keeps "$90,000 - $120,000" as "90,000,120,000" and refuses it
+                # (Workable "Salary Range", a number question drawn as a text input, 2026-11-01: four runs stopped
+                # on "Value not accepted"). Digits and separators left over from a range mean the box wants one
+                # amount: write the middle of the saved range.
+                try:
+                    shown = await el.input_value(timeout=1500)
+                except PlaywrightError:
+                    shown = ""
+                if shown and re.fullmatch(r"[\d,.\s]+", shown) and not widgets.same_value(field, shown, value):
+                    await el.fill("", timeout=4000)
+                    await el.press_sequentially(amount, delay=40, timeout=8000)
+                    await el.blur()
+                    committed = amount
+                    self.emit("control_recovery", "Adapted a pay range to the website's single-amount input")
             if kind == "text" and await widgets.ui5_uncommitted(el, committed):
                 # UI5 clears or flags a typed value that no suggestion committed; report it like a rejected choice.
                 raise ValueError("The website did not commit the observed choice")

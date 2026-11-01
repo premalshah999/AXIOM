@@ -207,6 +207,11 @@ class PolicyRulesMixin:
         from .. import phone_fields
 
         desired = p.salary_expectation or p.facts.get("desired_salary")
+        if not desired and re.search(r"salary|compensation|\bpay\b", label, re.I) and not NOT_DESIRED.search(label):
+            from ..widgets import range_midpoint
+
+            # Only a range is saved: the offered band holding its middle.
+            desired = range_midpoint(self.answer_rules.salary_stance or "")
         if (
             desired
             and re.search(r"salary|compensation|\bpay\b", label, re.I)

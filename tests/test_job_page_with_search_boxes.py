@@ -68,3 +68,49 @@ def test_search_boxes_with_no_apply_button_decide_nothing_new():
 def test_the_scan_marking_a_search_box_counts():
     assert site_filter(field("Tagline", search_box=True))
     assert not site_filter(field("Tagline", search_box=True, required=True))
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        [field("Resume", "file")],
+        [field("Search by Location"), field("Write a reply...", "textarea"), field("Upload Video", "file")],
+        [field("Write a reply...", "textarea"), field("Upload Video", "file")],
+    ],
+)
+def test_a_posting_widget_beside_apply_is_the_job_page(fields):
+    """Eightfold's "match your resume" file input and SuccessFactors' comment box and video upload (2026-11-01) read as
+    the form on 10 live postings that each showed an Apply button."""
+    assert adapter().classify_page(page(fields)) == Step.JOB
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        [field("Resume", "file", required=True)],
+        [field("Resume", "file"), field("First Name")],
+        [field("Write a reply...", "textarea"), field("Upload Video", "file"), field("Phone", "tel")],
+    ],
+)
+def test_a_required_file_or_another_question_still_makes_it_the_form(fields):
+    assert adapter().classify_page(page(fields)) == Step.FORM
+
+
+def test_a_lone_upload_is_the_postings_tool_only_before_the_application_is_under_way():
+    resume = [field("Resume", "file")]
+    assert adapter().classify_page({**page(resume), "url": "https://careers.example.test/careers/job/1"}) == Step.JOB
+    # The application page itself: its Apply may be the submit, and the resume is still to be attached.
+    application = {**page(resume, controls=("Apply",)), "url": "https://career.example.test/portalcareer?career_ns=job_application"}
+    assert adapter().classify_page(application) == Step.FORM
+    assert adapter().classify_page({**page(resume), "url": "https://careers.example.test/job/1/apply/"}) == Step.FORM
+    pressed = adapter()
+    pressed.attempts["apply"] = 1
+    assert pressed.classify_page({**page(resume), "url": "https://careers.example.test/careers/job/1"}) == Step.FORM
+
+
+def test_a_posting_comment_box_and_video_upload_are_still_the_job_page_after_a_press():
+    pressed = adapter()
+    pressed.attempts["apply"] = 1
+    widgets = [field("Write a reply...", "textarea"), field("Upload Video", "file")]
+    assert pressed.classify_page(page(widgets)) == Step.JOB
+
