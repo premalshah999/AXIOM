@@ -152,6 +152,32 @@ def test_an_unanswered_central_reset_sends_the_next_run_through_apply(service, m
     assert value.find_apply(obs)["id"] == route
 
 
+@pytest.mark.parametrize("state", ["password_unknown", "credentials_rejected"])
+@pytest.mark.parametrize("minutes_ago,route", [(20, "apply"), (1, "return")])
+def test_a_settled_unanswered_reset_still_sends_the_next_run_through_apply(service, state, minutes_ago, route):
+    """HERE, Berry and National Louis (iCIMS, 2026-10-29/30): a refused sign-in after an unanswered reset rewrites the
+    record from reset_requested to password_unknown (26f09f6), so the 10-21 rule above never matched again and the
+    returning route (and its reset that brings no mail) was taken on every run. The employer's own confirmed request
+    (reset_submitted_at) that nothing answered is the same silence whatever state the record settled in."""
+    import time
+
+    value, obs = returning_page(service)
+    value.accounts.mark(
+        value.job["url"], state, None, reset_requested_at=time.time() - minutes_ago * 60,
+        reset_submitted_at="2026-10-30T00:00:00+00:00",
+    )
+    assert value.find_apply(obs)["id"] == route
+
+
+def test_a_refused_sign_in_with_no_confirmed_reset_keeps_the_returning_route(service):
+    """The silence is read only from a reset the employer's page confirmed; a saved login the employer refused is not it."""
+    import time
+
+    value, obs = returning_page(service)
+    value.accounts.mark(value.job["url"], "credentials_rejected", None, reset_requested_at=time.time() - 3600)
+    assert value.find_apply(obs)["id"] == "return"
+
+
 @pytest.mark.parametrize(
     "status,confirmation,credited",
     [

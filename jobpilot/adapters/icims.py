@@ -17,7 +17,7 @@ from ..db import Event, Job, MailChallenge, MailRule, Run, Setting, now
 from ..accounts import account_tenant
 from ..schemas import Answer
 
-from .base import ALIAS_UNREGISTERED, Adapter, Step, KNOWN_ACCOUNT
+from .base import ALIAS_UNREGISTERED, Adapter, Step, KNOWN_ACCOUNT, unanswered_reset_record
 
 # Schwab labels it "Apply for this job" (no "online"); unmatched, every Schwab run left the iCIMS flow at the job page
 # and the generic navigator clicked an email step it cannot pass (2026-10-21). The link target still has to be this job's.
@@ -526,8 +526,12 @@ class ICIMS(Adapter):
     def unanswered_reset(record):
         """A Central reset that never produced its email. Central shows the password step and "Check Your Email"
         whether or not an account exists, so an unanswered reset is the only evidence there is none: Emory
-        (2026-10-21) took the returning route five times, reset each time, and no email ever came."""
-        return record.get("state") == "reset_requested" and time.time() - record.get("reset_requested_at", 0) > 600
+        (2026-10-21) took the returning route five times, reset each time, and no email ever came. The refused sign-in that
+        follows rewrites "reset_requested" to "password_unknown" or "credentials_rejected" (HERE, Berry and National Louis,
+        2026-10-29/30), so the employer's confirmed request that nothing answered counts in those states too."""
+        return (
+            record.get("state") == "reset_requested" and time.time() - record.get("reset_requested_at", 0) > 600
+        ) or unanswered_reset_record(record)
 
     def find_apply(self, obs):
         accounts = getattr(self, "accounts", None)
