@@ -299,6 +299,8 @@ def add(r, service) -> None:
         removed = [x for x in data.removed_projects if x in known]
         was = {b.id: b.text for s_ in before.sections for e in s_.entries for b in e.bullets}
         edited = [b.id for s_ in data.doc.sections for e in s_.entries for b in e.bullets if was.get(b.id) != b.text]
+        had = {s_.id: s_.text for s_ in before.sections}
+        edited += [s_.id for s_ in data.doc.sections if s_.kind in {"text", "skills"} and had.get(s_.id) != s_.text]
         added = [editor.Entry.model_validate(e) for e in v.get("added_projects") or []]
         # Decide the structure first: there's no point compiling what can't be saved, and the answer names the bullet to fix.
         first = check_rules(data.doc, source, allowed_skills=v.get("allowed_skills") or [], added_projects=added, removed_projects=removed, unconfirmed=v.get("drafts") or [], vocabulary=evidence_text, edited=edited)
@@ -314,6 +316,11 @@ def add(r, service) -> None:
         parsed = parse_check(compiled.pdf, data.doc)
         terms = v.get("ats_terms") or []
         from . import gates
+
+        # A term nothing supports, which they typed themselves. It stays, because it's their resume, and they're told plainly.
+        typed = ats.adds_forbidden(doc_plain(data.doc), evidence_text, ats.forbidden(ats.score(terms, doc_plain(source), evidence_text)))
+        if typed:
+            rules["warnings"].append({"code": "your_statement", "where": "resume", "message": "Nothing else you've given AXIOM says you have: " + ", ".join(typed[:8]) + ". Keep it only if it's true."})
 
         v.update(
             editor={"doc": data.doc.model_dump(), "style": laid["style"].model_dump()},

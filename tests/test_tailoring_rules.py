@@ -166,6 +166,20 @@ def test_a_summary_may_be_added_but_not_with_an_invented_claim():
     assert "unsupported_claim" in codes(report)
 
 
+def test_a_summary_the_user_typed_warns_where_a_generated_one_fails():
+    bad = Section(id="summary", title="Summary", kind="text", text="Data analyst with 9 years at Kubernetes shops.")
+    report = check_rules(edit(lambda d: d.sections.insert(0, bad)), source(), edited=["summary"])
+    assert report["ok"] and {w["code"] for w in report["warnings"]} == {"unsupported_claim"}
+
+
+def test_a_real_name_ending_a_sentence_isnt_an_invented_one():
+    from jobpilot.features.resumes import claims
+
+    assert claims.check("Wrote reports in Python.", "Wrote reports in Python", max_growth=2) == []
+    assert claims.check("Ran it on Node.js.", "Ran it on Node.js", max_growth=2) == []
+    assert "unsupported name or tool: Rust" in claims.check("Wrote reports in Rust.", "Wrote reports in Python", max_growth=2)
+
+
 def test_any_other_new_section_fails_and_a_kept_one_stays_as_written():
     extra = Section(id="x", title="Publications", kind="text", text="Nature, 2024")
     assert "unknown_section" in codes(check_rules(edit(lambda d: d.sections.append(extra)), source()))

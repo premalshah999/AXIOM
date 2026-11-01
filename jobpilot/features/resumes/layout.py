@@ -9,6 +9,7 @@ from .master import measure_fill
 PAGE_PT = 792
 TARGET_GAP_PT = 16  # About 1.5 lines of 9 pt text: the target state, not a problem to fix.
 MAX_WIDEN = {"section_gap": 14.0, "entry_gap": 8.0, "bullet_gap": 3.5}
+LINE_SPACING_STEPS = (1.08, 1.15)  # Once the gaps are at their limit. Beyond this it stops looking like a resume.
 # Tighter and tighter, sizes untouched. Past the last step the content really doesn't fit one page.
 TIGHTER = (
     {"section_gap": 5, "entry_gap": 2, "bullet_gap": 0.5},
@@ -69,7 +70,7 @@ async def fit(doc: ResumeDoc, style: Style, compile_fn, timeout: float = 40) -> 
             }
         )
         if (tried.section_gap, tried.entry_gap, tried.bullet_gap) == (style.section_gap, style.entry_gap, style.bullet_gap):
-            break  # Every gap is at its limit, and the rest stays white: no words are added to fill a page.
+            break  # Every gap is at its limit.
         attempt = await build(tried)
         if not attempt.ok:
             break
@@ -77,4 +78,16 @@ async def fit(doc: ResumeDoc, style: Style, compile_fn, timeout: float = 40) -> 
         if measured["pages"] > 1:
             break
         compiled, style, fill = attempt, tried, measured
+    for spacing in LINE_SPACING_STEPS:
+        if gap_points(fill, style) <= TARGET_GAP_PT or spacing <= style.line_spacing:
+            continue
+        tried = style.model_copy(update={"line_spacing": spacing})
+        attempt = await build(tried)
+        if not attempt.ok:
+            break
+        measured = measure_fill(attempt.pdf)
+        if measured["pages"] > 1:
+            break
+        compiled, style, fill = attempt, tried, measured
+    # What's left stays white: no words are added to fill a page.
     return {"compiled": compiled, "style": style, "fill": fill, "gap_pt": round(gap_points(fill, style), 1), "overflow": False, "compiles": compiles}

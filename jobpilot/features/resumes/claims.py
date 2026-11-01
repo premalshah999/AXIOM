@@ -61,7 +61,9 @@ def check(candidate: str, source: str, vocabulary: str = "", max_growth: float =
     # A capitalized word inside a sentence is a name, tool or product.
     named |= {m.group(1) for m in re.finditer(r"(?<![.!?:]\s)(?<!^)\b([A-Z][a-z][A-Za-z0-9+#.]*)", text)}
     first = text.split()[0] if text.split() else ""
-    unsupported = sorted(t for t in named if norm(t) not in src_norm and norm(t) not in vocab and t != first)
+    # The token pattern allows a dot for Node.js, so a name that ends a sentence arrives as "Python.", which its source never spells.
+    named = {t.rstrip(".") for t in named}
+    unsupported = sorted(t for t in named if t and norm(t) not in src_norm and norm(t) not in vocab and t != first)
     if unsupported:
         problems.append("unsupported name or tool: " + ", ".join(unsupported))
     if URL.search(text) and not URL.search(source):

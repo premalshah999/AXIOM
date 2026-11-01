@@ -109,7 +109,7 @@ def check_rules(
     added_projects:   entries that may join Projects (confirmed by the applicant), holding the bullets they confirmed.
     removed_projects: ids the applicant chose to take off this resume.
     unconfirmed:      drafts that must not appear anywhere.
-    edited:           bullet ids the applicant typed themselves. A number or name they added is their own statement, so it warns.
+    edited:           bullet and section ids the applicant typed themselves. A number or name they added is their own statement, so it warns.
     """
     problems: list[dict] = []
     warnings: list[dict] = []
@@ -219,10 +219,10 @@ def check_rules(
     for s in tailored.sections:
         if not s.include or s.id in source_ids or norm(s.title) in source_titles:
             if s.include and s.kind == "text" and SUMMARY_TITLE.match(s.title):
-                _check_summary(s, whole_source, fail)
+                _check_summary(s, whole_source, warn if s.id in edited else fail)
             continue
         if s.kind == "text" and SUMMARY_TITLE.match(s.title):
-            _check_summary(s, whole_source, fail)
+            _check_summary(s, whole_source, warn if s.id in edited else fail)
         elif s.kind == "skills" and "skills" not in source_kinds:
             ok = {norm(x) for x in allowed_skills}
             added = [x for x in skill_items(s.text) if norm(x) not in ok]
@@ -255,8 +255,9 @@ def check_rules(
     return {"ok": not problems, "problems": problems[:60], "warnings": warnings[:40], "typography": typography, "pages": pages}
 
 
-def _check_summary(section, whole_source: str, fail):
+def _check_summary(section, whole_source: str, report):
+    """`report` is fail for what a mode wrote, and warn for what the applicant typed: their own statement, which only they can vouch for."""
     if section.text.strip():
         for problem in claims.check(section.text, whole_source, "", max_growth=1000):
             if problem.startswith(TRUTH):
-                fail("unsupported_claim", section.id, f"{problem}: in the summary")
+                report("unsupported_claim", section.id, f"{problem}: in the summary. Keep it only if it's true.")
