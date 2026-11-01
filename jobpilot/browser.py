@@ -5605,7 +5605,7 @@ class BrowserEngine:
                             self.reroute_submit_hint not in str(exc)
                             or self.armed
                             or self.submit_rerouted
-                            or self.form.buttons.get(decision.control_id, {}).get("type") != "submit"
+                            or self.form.buttons.get(decision.control_id, {}).get("type") not in {"submit", ""}
                         ):
                             raise
                         # Only a control that reads as the final submit ("Edit" is also type=submit, SAIC),

@@ -631,6 +631,10 @@ NOT_FINAL_SUBMIT = re.compile(
     r"submit (?:a |an |your )?(?:request|ticket|feedback|question|inquiry|enquiry|complaint|referral|idea)|privacy|cookie",
     re.I,
 )
+# An Apply that sends the application when it sits on the application's own form. Outside any <form> the scan gives it no
+# type, so the guard for bare submit controls never saw it: Gem's Apply went out as a plain click, with no reservation or
+# commit record, and a later run pressed it again (Imagen Technologies 2026-10-28, Nuvo 10-31).
+FORM_APPLY = re.compile(r"apply(?: now| for (?:this|the) (?:job|position)| (?:and|&) save| without saving)?[\s!.]*", re.I)
 ENTRY = re.compile(
     r"^(?:apply(?: now| for (?:this|the) (?:job|position))?|start (?:your )?application|"
     r"continue application|i.m interested|apply manually|autofill with resume)$",
@@ -5293,13 +5297,13 @@ class FormSession:
                 and files
                 and self.uploaded
                 and self.upload_verified
-                and button["type"] == "submit"
+                and (button["type"] == "submit" or (button["type"] == "" and not button.get("href") and self.application_form_here(button["id"])))
             ):
                 handle = await self.locator(button["id"]).element_handle()
                 if all(
                     [
                         await self.locator(f["id"]).evaluate(
-                            "(e,b)=>Boolean(e.form) && e.form===b.form", handle
+                            "(e,b)=>b.form ? Boolean(e.form) && e.form===b.form : true", handle
                         )
                         for f in files
                     ]
@@ -5867,6 +5871,14 @@ class FormSession:
         """True when the button's own form asks only who the applicant is: name and email (phone, consent boxes) and no
         upload, question or choice. Submitting it opens the application; it is not the application."""
         try:
+            # A hidden file input, a hidden select, a widget question or an upload button makes it the application itself.
+            if self.uploaded or any(f["type"] == "file" for f in self.fields.values()) or await self.locator(control_id).evaluate(
+                """e => !!e.form && ([...e.form.elements].some(x => x.type === 'file' || x.matches('select,textarea'))
+                    || !!e.form.querySelector('[role=combobox],[role=radio],[role=radiogroup],[role=listbox],[contenteditable=true]')
+                    || /r[eé]sum[eé]|\\bcv\\b|upload|attach/i.test(e.form.innerText || ''))""",
+                timeout=3000,
+            ):
+                return False
             members = await self.locator(control_id).evaluate(
                 """e => e.form ? [...e.form.elements].filter(x => x.matches('input,select,textarea')
                     && !['hidden','submit','button','reset','image'].includes(x.type)
@@ -5893,6 +5905,16 @@ class FormSession:
                 for m in texts
             )
         )
+
+    def application_form_here(self, control_id):
+        """The control's page holds the application itself: a resume field and at least two other applicant fields."""
+        frame = self.frames.get(control_id)
+        here = [f for f in self.fields.values() if self.frames.get(f["id"]) == frame]
+        others = [
+            f for f in here
+            if f["type"] not in {"file", "search", "hidden", "password"} and not re.search(r"search|keyword|location", f["label"], re.I)
+        ]
+        return any(f["type"] == "file" for f in here) and len(others) >= 2
 
     def not_a_button(self, field):
         """The refusal for a click on a field's id, and the action that can work instead. "Use fill" is wrong once fill
@@ -6030,6 +6052,14 @@ class FormSession:
         # name and Email. It starts the application, as an entry link does, but the page's other fields (a job-alert
         # widget) hid that from the page-wide check above, so the click was refused as a final submit in 3 runs.
         entry = entry or (bool(ENTRY.fullmatch(button["label"])) and await self.identity_gate_form(control_id))
+        if (
+            FORM_APPLY.fullmatch(button["label"].strip())
+            and not allowed
+            and not button.get("href")
+            and self.application_form_here(control_id)
+            and not await self.frames[control_id].evaluate("Boolean(window.__jpArmed)")
+        ):
+            raise ValueError("This may submit the application; use submit_application")
         # Never let a generic navigation action activate a bare HTML submit control.
         if (
             not allowed
