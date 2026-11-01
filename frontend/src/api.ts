@@ -124,3 +124,8 @@ type ApproveResult = ApplyResult & { approved: boolean; employer: string; label:
 export function approveReserved(jobId: string, apply = true): Promise<ApproveResult> {
   return api<ApproveResult>(`/jobs/${jobId}/approve-reserved`, "POST", { apply });
 }
+
+// Over the employer limit: the user's own Apply for a job the autopilot holds because its employer has reached the limit.
+export function approveOverLimit(jobId: string): Promise<ApplyResult> {
+  return api<ApplyResult>(`/jobs/${jobId}/approve-over-limit`, "POST");
+}

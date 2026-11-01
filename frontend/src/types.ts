@@ -648,3 +648,17 @@ export type MailStatus = {
   rules: MailRule[];
   challenges: MailChallenge[];
 };
+
+// GET /api/over-limit: Ready jobs held only because their employer reached the user's limit (jobpilot/startable.py), best fit first.
+export type OverLimitRow = {
+  id: string;
+  company: string;
+  title: string;
+  location: string;
+  ats: string;
+  url: string;
+  score: number | null;
+  created_at: string;
+  hold: { code: string; reason: string; count: number; limit: number };
+};
+export type OverLimitPage = { rows: OverLimitRow[]; total: number; count: number; page: number; pages: number; size: number; at: string };

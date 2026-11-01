@@ -20,6 +20,7 @@ from .routes import (
     jobs,
     knowledge,
     mail,
+    over_limit,
     owner,
     profile,
     queue,
@@ -73,6 +74,7 @@ def create_app(config: Settings | None = None):
     app.include_router(database.router(service))
     app.include_router(jobs.router(service))
     app.include_router(reserved.router(service))
+    app.include_router(over_limit.router(service))
     app.include_router(queue.router(service))
     app.include_router(runs.router(service))
     app.include_router(knowledge.router(service))

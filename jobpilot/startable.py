@@ -24,7 +24,11 @@ TTL = 60  # seconds a reading is reused; a stale one is served while the next is
 
 # code -> (phrase for a count in the runner line, what happens next). Order is the order the runner line lists them in.
 HOLDS = {
-    "employer_limit": ("at the employer limit", "It starts only if that employer's count drops or you raise the limit in Settings."),
+    "employer_limit": (
+        "over the employer limit",
+        "It starts if you approve it in Jobs › Over employer limit, if that employer's count drops, or if you raise the limit in Settings.",
+    ),
+    "employer_cap": ("held by the employer's own limit", "The employer's site said it accepts only so many applications. Its other jobs wait."),
     "internship": ("internships", "Internships are skipped. Turn on internships in your profile to allow them."),
     "reserved": ("waiting for your approval", "It starts after you approve it in Jobs › Reserved."),
     "role": ("outside your target roles", "It starts if you add the role to your profile's target roles."),
@@ -44,6 +48,12 @@ GATE_WORDS = {
     "seniority": "The posting is for a senior role.",
     "experience_required": "The posting asks for more years of experience than your limit.",
 }
+
+
+def limit_sentence(company, count, limit):
+    """What Jobs › Over employer limit says of one job: how many applications the employer already has."""
+    name = " ".join((company or "").split()) or "This employer"
+    return f"{name} already has {count:,} application{'' if count == 1 else 's'}; your limit is {limit:,}."
 
 
 def classify(message):
@@ -109,7 +119,7 @@ def read(service):
             "id": r.id, "title": r.title, "company": r.company, "location": r.location, "country": "",
             "ats": r.ats, "status": r.status, "score": r.score, "posted_at": r.created_at or "", "career_level": "",
         }
-        verdict = None  # (code, sentence)
+        verdict, extra = None, {}  # verdict: (code, sentence)
         if r.id in reserved:
             verdict = ("reserved", "A reserved employer: nothing is applied there until you approve this job.")
         else:
@@ -135,7 +145,13 @@ def read(service):
                 try:
                     require_company_limit(s, s.get(Job, r.id))
                 except QueueBlocked as exc:
-                    verdict = ("employer_limit", str(exc))
+                    if exc.code == "company_limit" and exc.detail:
+                        # The user's own limit (Settings): the one the owner may approve past (Jobs › Over employer limit).
+                        count, cap = exc.detail["count"], exc.detail["limit"]
+                        verdict = ("employer_limit", limit_sentence(job.get("company") or r.company, count, cap))
+                        extra = {"count": count, "limit": cap}
+                    else:  # The employer's own stated cap: its rule, not the user's setting; no approval lifts it.
+                        verdict = ("employer_cap", str(exc))
         if verdict is None and (why := rejections.get(r.id)) and why.get("outcome") in {"excluded", "protected"}:
             verdict = ("protected" if why["outcome"] == "protected" else "excluded", str(why.get("reason", ""))[:240])
         if verdict is None:
@@ -143,7 +159,7 @@ def read(service):
             can.append(r.id)
             continue
         code, sentence = verdict
-        jobs[r.id] = {"code": code, "reason": sentence, "next": HOLDS.get(code, HOLDS["excluded"])[1]}
+        jobs[r.id] = {"code": code, "reason": sentence, "next": HOLDS.get(code, HOLDS["excluded"])[1], **extra}
         tally[code] = tally.get(code, 0) + 1
     held = [{"code": c, "count": tally[c], "phrase": HOLDS[c][0]} for c in HOLDS if tally.get(c)]
     return {
@@ -187,6 +203,21 @@ def rows(db, value, which="", hold=""):
     return out
 
 
+def over_limit(db, value, q=""):
+    """The jobs of Jobs › Over employer limit, best fit first: Ready jobs the dispatcher holds only because their employer
+    has reached the user's limit. The same reading as the counts, so the tab's number is exactly these rows (the search
+    narrows the rows, never the number)."""
+    items = rows(db, value, "held", "employer_limit")
+    needle = " ".join((q or "").lower().split())
+    if needle:
+        items = [i for i in items if needle in " ".join(str(i.get(k) or "") for k in ("company", "title", "location", "ats")).lower()]
+    return sorted(items, key=lambda i: (-(i["score"] if i["score"] is not None else -1), i["company"] or "", i["id"]))
+
+
+def over_limit_count(value):
+    return sum(1 for h in (value or {}).get("jobs", {}).values() if h["code"] == "employer_limit")
+
+
 def idle_line(startable, held):
     """Why runners sit idle, in one sentence, from the same tally: None when something can start."""
     if startable:
@@ -197,11 +228,25 @@ def idle_line(startable, held):
     return "Nothing to run: " + ", ".join(parts) + "." + (f" {sum(h['count'] for h in held):,} held in all." if len(held) > 4 else "")
 
 
+def without(value, job_ids):
+    """The reading with these held jobs taken out, every count following."""
+    gone = [j for j in job_ids if j in value["jobs"]]
+    if not gone:
+        return value
+    jobs = {j: h for j, h in value["jobs"].items() if j not in gone}
+    tally = {}
+    for h in jobs.values():
+        tally[h["code"]] = tally.get(h["code"], 0) + 1
+    held = [{"code": c, "count": tally[c], "phrase": HOLDS[c][0]} for c in HOLDS if tally.get(c)]
+    return {**value, "jobs": jobs, "held": held, "ready": value["ready"] - len(gone), "idle": idle_line(value["startable"], held)}
+
+
 class Reading:
     """The latest reading, shared by every request; one thread reads at a time."""
 
     def __init__(self):
         self.value, self.at, self.busy = None, 0.0, threading.Lock()
+        self.guard, self.dropped = threading.Lock(), {}
 
     def get(self, service):
         age = time.monotonic() - self.at
@@ -218,7 +263,11 @@ class Reading:
         return self.value
 
     def _load(self, service):
-        self.value, self.at = read(service), time.monotonic()
+        value = read(service)
+        with self.guard:
+            now = time.monotonic()
+            self.dropped = {j: at for j, at in self.dropped.items() if now - at < 120}
+            self.value, self.at = without(value, self.dropped), now
 
     def _fill(self, service):
         try:
@@ -227,6 +276,16 @@ class Reading:
             self.at = time.monotonic() - TTL / 2  # try again in half a minute, serve the old reading meanwhile
         finally:
             self.busy.release()
+
+    def drop(self, job_ids):
+        """Take jobs out of the reading now: they were approved and no longer wait. A reading already under way when they
+        were approved would bring them back, so for two minutes every reading leaves them out; the next reading, started
+        at once in the background, finds them started or requested."""
+        with self.guard:
+            self.dropped.update(dict.fromkeys(job_ids, time.monotonic()))
+            if self.value is not None:
+                self.value = without(self.value, job_ids)
+                self.at = 0.0  # stale: the next get() serves this and reads again in the background
 
     def peek(self):
         """The reading if there is one: never reads."""
