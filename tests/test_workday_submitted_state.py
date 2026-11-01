@@ -36,6 +36,7 @@ class FakeEngine:
         self.result = None
         self.events = []
         self.run_id = "run-1"
+        self.run_record = {"packet": {}}  # the real Engine always has one; WorkdayAuth.run reads its resume marker
         self.armed = False
         self.form = SimpleNamespace(
             resolver=SimpleNamespace(

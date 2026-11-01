@@ -32,6 +32,7 @@ async def test_recent_explicit_rejection_of_known_login_avoids_repeated_sign_in(
         value.accounts.mark(URL, "credentials_rejected", {**LOGIN, "password": "Another9!x"})
     elif change == "legacy":
         record.pop("rejected_login_context")
+        record.pop("rejected_fingerprints", None)  # a legacy record predates both the context and the refusal list
         service.db.set_setting(value.accounts.store.key(URL), record)
     value.attempts.clear()
     await Adapter.authenticate(value, obs, "sign_in")

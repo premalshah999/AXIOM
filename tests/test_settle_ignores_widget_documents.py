@@ -9,6 +9,7 @@ import asyncio
 import time
 
 from jobpilot.forms import FormSession
+from jobpilot.page_clock import PageClock
 
 WIDGET = "https://www.linkedin.com/talentwidgets/apply-with-linkedin"
 PAGE = f"""<!doctype html><title>Apply</title><label>Name<input id=n></label>
@@ -33,6 +34,7 @@ async def test_a_stalled_sign_in_widget_document_does_not_hold_the_wait(page):
     release = asyncio.Event()
     await hold_widget(page, release)
     form = FormSession.__new__(FormSession)
+    form.clock = PageClock()  # __init__ is skipped; settle is timed on it
     from jobpilot.forms import NetworkMonitor
 
     form.page, form.network = page, NetworkMonitor(page)

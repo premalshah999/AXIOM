@@ -761,6 +761,13 @@ class EmailBrowser:
                                     "Email was accepted but the application did not resume; requires an employer adapter"
                                 )
                     self.mail.outcome(self.challenge_id, "verified", "Website accepted email verification")
+                    # The code or link worked: the sign-up it finished is an account, not "Needs email verification". The adapter's
+                    # own code step does this (base.submit_code); a run that parked for the mail and came back finishes here.
+                    from .accounts import Accounts
+
+                    accounts = Accounts(e.service, e.profile, e.job["url"])
+                    if accounts.store.state(e.page.url) in {"created_locally", "signing_in", "verification_pending"}:
+                        accounts.mark(e.page.url, "authenticated")
                     e.emit(
                         "email_verified",
                         "Employer email verification completed",

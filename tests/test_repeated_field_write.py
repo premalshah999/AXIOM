@@ -296,7 +296,7 @@ async def test_a_page_that_alternates_between_a_few_states_is_not_driven_to_the_
         return states[len(visits) % 4]
 
     adapter = object.__new__(Adapter)
-    form = SimpleNamespace(settle=AsyncMock(), scan=scan)
+    form = SimpleNamespace(settle=AsyncMock(), resume_gate=AsyncMock(return_value=False), scan=scan)
     adapter.e = SimpleNamespace(result=None, form=form, trace=AsyncMock(), redact=lambda u: u,
                            refresh_expired_entry=AsyncMock(return_value=False))
     adapter.job = {"url": "https://jobs.example.test/apply/1"}

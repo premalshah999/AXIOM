@@ -77,7 +77,9 @@ def test_a_menus_na_answers_an_if_yes_after_a_no(service):
     assert answer and answer.value == "NA"
 
 
-MENU = """<label for="visa">If yes, please enter visa type</label>
+MENU = """<label for="sponsor">Will you now or in the future require sponsorship?</label>
+<select id="sponsor"><option>Yes</option><option selected>No</option></select>
+<label for="visa">If yes, please enter visa type</label>
 <div class="select__control"><input id="visa" role="combobox" class="select__input" aria-haspopup="true" aria-expanded="false"
   onclick="openMenu()" onfocus="openMenu()"></div><div id="box"></div><p id="picked"></p>
 <script>
@@ -96,7 +98,10 @@ async def test_an_option_read_before_the_menu_reopened_is_still_the_choice(page,
     from jobpilot.widgets import open_owned_picker
 
     await page.set_content(MENU)
-    form = FormSession(page, resolver(service), tmp_path / "r.pdf", lambda *a: None)
+    # The page asks the sponsorship question above it, answered No: "If yes, ..." has an answer only because of that (the test page
+    # once held the menu alone, and no saved fact supports a lone optional "NA").
+    facts = {"requires_future_sponsorship_US": False, "work_authorization_US": "Yes", "us_citizen": False, "permanent_resident": False}
+    form = FormSession(page, resolver(service, facts=facts), tmp_path / "r.pdf", lambda *a: None)
     obs = await form.scan()
     field = next(f for f in obs["fields"] if "visa" in f["label"])
     await open_owned_picker(page.main_frame, form.locator(field["id"]), field["type"])
@@ -107,3 +112,19 @@ async def test_an_option_read_before_the_menu_reopened_is_still_the_choice(page,
     obs = await form.scan()
     result = await form.control_action("choose", field["id"], obs["revision"], owner_id=form.owner_id, option_id=wanted["id"])
     assert await page.inner_text("#picked") == "NA", result
+
+
+async def test_a_menu_that_closes_before_the_click_is_opened_again(page):
+    """The same menu, closing on blur between the read and the click: the option is found again once the menu is reopened."""
+    from jobpilot.widgets import click_option, visible_options, _popup_scope
+
+    await page.set_content(MENU)
+    box = page.locator("#visa")
+    await box.click()
+    scope = await _popup_scope(box)
+    read = await visible_options(page.main_frame, scope)
+    option = next(o for o in read if o["text"] == "NA")
+    # The list is emptied but the input still says expanded, as the gallery's menu does after its blur timer.
+    await page.evaluate("document.getElementById('box').innerHTML=''; document.getElementById('visa').setAttribute('aria-expanded','true')")
+    await click_option(page.main_frame, {**option, "scope": scope}, owner=box)
+    assert await page.inner_text("#picked") == "NA"

@@ -1124,10 +1124,13 @@ class NetworkMonitor:
 # a script can change without a mutation. The scan's own tagging of controls counts as mutations; it is read after the scan.
 EPOCH_MAX_AGE = 5.0
 EPOCH_JS = """() => {
-  let s = window.__jpEpoch;
+  // Kept on the root element, not the window: document.open()/write() (and some single-page shells) replace the root and keep the
+  // window, which left the observer watching a dead tree and the count frozen while the new page changed.
+  const root = document.documentElement;
+  let s = root.__jpEpoch;
   if (!s) {
-    s = window.__jpEpoch = {id: Math.random().toString(36).slice(2), n: 0};
-    new MutationObserver(r => { s.n += r.length; }).observe(document.documentElement,
+    s = root.__jpEpoch = {id: Math.random().toString(36).slice(2), n: 0};
+    new MutationObserver(r => { s.n += r.length; }).observe(root,
       {subtree: true, childList: true, attributes: true, characterData: true});
   }
   let h = 0;
@@ -1138,7 +1141,16 @@ EPOCH_JS = """() => {
     h = (h * 31 + 7) | 0;
   }
   const a = document.activeElement;
-  return s.id + ':' + s.n + ':' + els.length + ':' + h + ':' + (a ? (a.id || a.name || a.tagName) : '') + ':' + document.readyState;
+  // What the observer and the value hash cannot see. A shadow root's fields and mutations are invisible to both, yet the scanner
+  // reads them: a page with any is always read again. A stylesheet rule can show or hide a message with no DOM change at all,
+  // so the rule count of every sheet and the viewport size are part of the mark.
+  for (const e of document.querySelectorAll('*')) if (e.shadowRoot) return 'shadow:' + Math.random();
+  let css = 0;
+  for (const sheet of [...document.styleSheets, ...(document.adoptedStyleSheets || [])]) {
+    try { css += 1 + sheet.cssRules.length; } catch (_) { css += 1; }
+  }
+  return s.id + ':' + s.n + ':' + els.length + ':' + h + ':' + (a ? (a.id || a.name || a.tagName) : '') + ':' + document.readyState
+    + ':' + css + ':' + innerWidth + 'x' + innerHeight;
 }"""
 
 SETTLE_JS = """async ({quiet, budget}) => {
@@ -7145,7 +7157,7 @@ class FormSession:
             if re.search(r"answered all questions|highlighted errors|answer all required questions", phrase):
                 return {"type": "explicit_rejection_page", "url": self.page.url, "category": "validation",
                         "evidence": text[max(0, match.start() - 20) : match.end() + 200],
-                        "missing_fields": self.inline_field_errors(await self.scan())[:10]}
+                        "missing_fields": self.inline_field_errors(await self.scan(force=True))[:10]}
             if "problem saving answers" in phrase or (
                 "cannot submit" in phrase and re.match(r"[^\n]{0,10}due to validation issues", tail, re.I)
             ):

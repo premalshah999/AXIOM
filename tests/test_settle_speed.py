@@ -3,6 +3,7 @@
 import time
 
 from jobpilot.forms import FormSession, NetworkMonitor
+from jobpilot.page_clock import PageClock
 
 
 async def test_a_frame_replaced_during_the_wait_is_read_again_not_retried_until_the_deadline():
@@ -21,6 +22,7 @@ async def test_a_frame_replaced_during_the_wait_is_read_again_not_retried_until_
         return [Detached()] if len(reads) == 1 else [Live()]
 
     form = object.__new__(FormSession)
+    form.clock = PageClock()  # __init__ is skipped; settle is timed on it
     form.application_frames = frames
     form.network = None
     started = time.monotonic()

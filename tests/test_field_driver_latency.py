@@ -3,6 +3,7 @@ import time
 from types import SimpleNamespace
 from jobpilot import widgets
 from jobpilot.forms import FormSession
+from jobpilot.page_clock import PageClock
 
 
 async def test_plain_text_uses_input_change_and_readback_without_key_delays(page):
@@ -45,6 +46,7 @@ async def test_settle_deadline_includes_hung_renderer():
     async def frames():
         return [HungFrame()]
     form=object.__new__(FormSession)
+    form.clock=PageClock()  # __init__ is skipped; every settle and write is timed on it (page_clock.py)
     form.application_frames=frames
     form.network=None
     start=time.monotonic()
@@ -56,6 +58,7 @@ async def test_field_write_bounds_nested_widget_retries(monkeypatch):
     import pytest
     from jobpilot import forms
     form=object.__new__(FormSession)
+    form.clock=PageClock()
     async def hung(*args):
         await asyncio.sleep(30)
     form._fill=hung
