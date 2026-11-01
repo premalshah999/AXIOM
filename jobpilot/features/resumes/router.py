@@ -38,6 +38,9 @@ class PolicyInput(BaseModel):
 def router(service) -> APIRouter:
     db, config = service.db, service.config
     r = APIRouter(prefix="/api/v2/resumes", tags=["resumes"])
+    from . import tailor_routes
+
+    tailor_routes.add(r, service)
 
     def version_facts(s, rows) -> dict:
         """What tells one version from another: the job it was made for, and whether an application went out with it.
@@ -289,6 +292,10 @@ def router(service) -> APIRouter:
         os.chmod(path, 0o600)
         validation = {k: v for k, v in check.items() if k != "text"}
         validation["edited_by"] = "applicant"
+        if data.job_id:
+            from .tailor_routes import editor_rules
+
+            validation["rules"] = editor_rules(db, data, result.pdf)
         validation["editor"] = {
             "doc": doc.model_dump() if doc else None,
             "style": data.style.model_dump(),
