@@ -201,7 +201,9 @@ def judge_fill(result):
 def child_environment(data_dir, code_path=None):
     """Nothing is inherited: the running app's `.env` values must not reach a copy that applies, even to a local site."""
     env = {
-        "HOME": str(data_dir),
+        # The real one, for Chrome alone: under a home with no login keychain macOS shows the owner a dialog, even for a headless browser.
+        # The profile is a temporary folder (BrowserEngine.run), and nothing here reads anything else from HOME.
+        "HOME": os.environ.get("HOME") or str(Path.home()),
         "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
         "LANG": "en_US.UTF-8",
         "TZ": "UTC",

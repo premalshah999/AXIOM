@@ -3,9 +3,9 @@
 
     python3 scripts/dev/upgrade_check.py --old /Applications/AXIOM.app --new path/to/AXIOM.app [--work dir] [--keep]
 
-Nothing here can reach an installation in use. HOME is a new empty folder, so the bundle's own layout puts its data, ports, database and
-Chromes there; its `.env` says ENABLE_WORKERS=false and holds no keys, so nothing applies and nothing leaves this computer; the bundles
-are only run, never written.
+Nothing here can reach an installation in use. HOME is a new empty folder, so the bundle's own layout puts its data, ports and database
+there; no Chrome is started; its `.env` says ENABLE_WORKERS=false and holds no keys, so nothing applies and nothing leaves this computer;
+the bundles are only run, never written.
 
   1 install   the old build starts on an empty home, and synthetic data goes in: rows, an application in each state, saved files
   2 upgrade   the new build starts on it: every row and file must be as it was, the schema as the new code expects
@@ -55,6 +55,22 @@ SEEDED = """select md5(string_agg(row, ',' order by row)) from (
   union all select key || value::text from settings where key in ('profile', 'owner_answer:seed')) as seeded"""
 
 
+BOOT_WITHOUT_CHROME = """
+import os, sys
+from jobpilot.native import desktop, release
+from jobpilot.native.env import load, prepare
+layout = desktop.Layout.here()
+layout.native.mkdir(parents=True, exist_ok=True, mode=0o700)
+layout.logs.mkdir(parents=True, exist_ok=True, mode=0o700)
+os.environ.update(desktop.environment(layout, desktop.pick_ports(layout), ""))
+for name in ("BROWSER_CDP_URL", "BROWSER_TWIN_CDP_URL"):  # Without these the supervisor has no Chrome to start.
+    os.environ.pop(name, None)
+release.activate(prepare(load()), layout.app)
+desktop._detach(layout)
+os.execv(sys.executable, [sys.executable, "-u", "-m", "jobpilot.native", "_supervise"])
+"""
+
+
 class Stop(Exception):
     pass
 
@@ -90,9 +106,14 @@ class Home:
             return {}
 
     def start(self, wait=START_SECONDS):
-        """As the window does. True when every service came up in time."""
-        boot = subprocess.Popen([self.axiom, "boot"], env=self.env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                start_new_session=True)
+        """The bundle's own supervisor, database and app, on the same steps as the window's `boot`, except that it starts no Chrome. Nothing here
+        needs one, and a Chrome under a home with no login keychain puts a "Keychain Not Found" dialog on the real screen, even headless
+        (54 of them on 2026-11-01). True when every service came up in time."""
+        resources = self.axiom.parents[1]
+        env = {**self.env, "AXIOM_BUNDLE": str(resources), "PYTHONPATH": str(resources / "app"), "PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1",
+               "PYTHONSAFEPATH": "1", "OPENSSL_CONF": str(resources / "openssl.cnf")}
+        boot = subprocess.Popen([resources / "python" / "bin" / "python3", "-c", BOOT_WITHOUT_CHROME], env=env, cwd=resources, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         # `boot` becomes the supervisor, in this same process. Unreaped it would stay a zombie after it stops, which `axiom stop` reads as
         # still running: the window reaps it in the real app.
         threading.Thread(target=boot.wait, daemon=True).start()

@@ -96,3 +96,13 @@ def test_the_isolated_copy_inherits_nothing_of_the_running_apps(monkeypatch):
     env = smoke.child_environment(Path("/tmp/x"))
     assert not {"DATABASE_URL", "APP_TOKEN", "BROWSER_CDP_URL", "MIMO_API_KEY", "DEEPSEEK_API_KEY", "AXIOM_BUNDLE", "AXIOM_CONFIG_DIR"} & set(env)
     assert env["ENABLE_WORKERS"] == "false" and env["DATA_DIR"] == "/tmp/x/data"
+
+
+def test_no_chrome_of_ours_can_put_a_keychain_dialog_on_the_owners_screen(monkeypatch):
+    """A Chrome under a home with no login keychain shows "Keychain Not Found" on the real screen, even headless (54 on 2026-11-01)."""
+    root = Path(__file__).resolve().parents[1]
+    monkeypatch.setenv("HOME", "/Users/alex")
+    assert smoke.child_environment(Path("/tmp/x"))["HOME"] == "/Users/alex"  # The dry fill's Chrome keeps the real home.
+    assert '"--use-mock-keychain"' in (root / "jobpilot" / "browser.py").read_text()  # The engine's own browser asks no keychain at all.
+    check = (root / "scripts" / "dev" / "upgrade_check.py").read_text()
+    assert '"boot"' not in check and 'os.environ.pop(name, None)' in check  # Its throwaway home starts the app with no Chrome.
