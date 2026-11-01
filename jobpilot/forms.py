@@ -25,6 +25,7 @@ from .answers.text import FROM_RECORD, strip_catalog_code
 from .knowledge import topic
 from .browser_contracts import ActionResult, action_result, field_identity, fingerprint
 from .models import AnswerModelUnavailable
+from .page_clock import PageClock, timed
 from .playwright_fast import install as install_playwright_fast
 from .privacy import dismiss_cookies
 
@@ -1360,6 +1361,7 @@ LAUNCHER = (
 class FormSession:
     def __init__(self, page, resolver, resume_path, emit):
         self.page, self.resolver, self.resume_path, self.emit = page, resolver, resume_path, emit
+        self.clock = PageClock()
         self.retyped_phones = set()
         # Greenhouse phones typed (and read back) in this run: the site's "too short" from an
         # earlier submit stays on the field until the next submit re-validates it.
@@ -1739,6 +1741,7 @@ class FormSession:
             pass  # The owned navigator observes and repairs anything still incomplete.
         return True
 
+    @timed("scan")
     async def scan(self):
         if self.page.is_closed() and getattr(self, "openers", None):
             await self.return_to_opener()
@@ -2480,6 +2483,7 @@ class FormSession:
             return False
         finally:
             elapsed = time.monotonic() - started
+            self.clock.add("settle", elapsed)
             if elapsed >= 1 and hasattr(self, "emit"):
                 busy = bool(self.network and not self.network.quiet(quiet))
                 details = {"seconds": round(elapsed, 2), "settled": settled, "network_busy": busy}
@@ -2823,6 +2827,7 @@ class FormSession:
             error = type(exc).__name__
             raise
         finally:
+            self.clock.field(field.get("label", ""), field.get("type", ""), field.get("widget", ""), time.monotonic() - started, error)
             seconds = round(time.monotonic() - started, 1)
             if seconds >= 3:
                 self.emit(
@@ -3537,6 +3542,7 @@ class FormSession:
         address = self.resolver.profile.address
         return lambda texts: address_location_option(texts, address)
 
+    @timed("discover")
     async def discover_options(self, field):
         """Open custom selects once to read their real choices before the resolver decides."""
         try:
@@ -3796,6 +3802,7 @@ class FormSession:
             and re.search(r"replace resume|select your resume", text or "", re.I)
         )
 
+    @timed("upload_wait")
     async def wait_upload(self):
         """Wait for the website's own upload acknowledgement, not a fixed delay."""
         try:
@@ -4268,6 +4275,19 @@ class FormSession:
         }
 
     async def fill_current(self, accept_prefilled=None):
+        self.clock.reset()
+        try:
+            return await self._fill_current(accept_prefilled)
+        finally:
+            # One event per page: where its seconds went (page_clock.py). Never allowed to alter the run.
+            try:
+                summary = self.clock.take()
+                if summary["wall_s"] >= 0.5:
+                    self.emit("page_timing", "Where this page's time went", summary)
+            except Exception:
+                pass
+
+    async def _fill_current(self, accept_prefilled=None):
         from .ats import oracle_job_catalog
 
         if oracle_job_catalog(self.page.url):
@@ -4560,7 +4580,13 @@ class FormSession:
                 answers = [a for _, a in known]
             else:
                 selected = ask
-                answers = [a for _, a in known] if known else await self.resolver.resolve(ask) if ask else []
+                if known:
+                    answers = [a for _, a in known]
+                elif ask:
+                    with self.clock.span("answers"):
+                        answers = await self.resolver.resolve(ask)
+                else:
+                    answers = []
             handled.update({x["id"]: self.question_shape(x) for x in selected})
             original_fields = {x["id"]: deepcopy(x) for x in selected}
             changed = False
@@ -5497,6 +5523,7 @@ class FormSession:
                 {"field": field["label"], "type": field["type"], "structure": structure},
             )
 
+    @timed("verify")
     async def verify(self):
         obs = await self.scan()
         from .ats import oracle_job_catalog
