@@ -7,6 +7,7 @@ and date-of-birth fields never match. Values are never read or stored; only labe
 """
 
 import re
+from urllib.parse import urlsplit
 
 ENTRY_TYPES = {"text", "textarea", "number", "password", "contenteditable", "tel", ""}
 MAX_LABEL = 160
@@ -87,6 +88,53 @@ def sensitive_matches(fields):
     return out
 
 
+# An identity check is the same ask as a typed identifier: the page wants a photo of a government ID or a selfie, which
+# only the owner holds and which the owner rule drops. Amazon (2026-10-27/29): the last step of its form read "To verify
+# your identity, please upload a picture of your government ID and take a photo of yourself in the verification portal"
+# with "I consent to identity verification" and "Begin identity verification"; four runs reached it and one pressed Submit
+# over it. Found by what the page asks, never by employer: the sentence, the control, or a known verification vendor's page.
+ID_PHOTO = re.compile(
+    r"\b(?:upload|take|submit|provide|scan|capture|send)\s+(?:a\s+|an\s+|your\s+|the\s+)?(?:clear\s+|current\s+)?"
+    r"(?:photo|picture|image|scan|copy)s?\s+of\s+(?:your\s+|a\s+|the\s+)?(?:valid\s+|current\s+)?"
+    r"(?:(?:government|state|national|photo)[- ]?(?:issued\s+)?(?:photo\s+)?)?(?:id\b|identification|passport|driver|driving)",
+    re.I,
+)
+SELFIE = re.compile(r"\bselfie\b|\bliveness (?:check|test)\b|\bface (?:scan|match|verification)\b", re.I)
+CHECK_CONTROL = re.compile(
+    r"^(?:begin|start|complete|continue with|launch)\s+(?:the\s+|your\s+|my\s+)?(?:identity|id)\s+(?:verification|check)\b"
+    r"|^i\s+consent\s+to\s+(?:the\s+)?(?:identity|id)\s+(?:verification|check)\b|^verify\s+(?:my|your)\s+identity$",
+    re.I,
+)
+# Third-party identity-verification services; a page of theirs inside an application is the check itself.
+ID_VENDOR_HOSTS = (
+    "withpersona.com", "persona-id.com", "onfido.com", "veriff.com", "veriff.me", "jumio.com", "au10tix.com",
+    "incode.com", "idnow.io", "trulioo.com", "socure.com", "verify.stripe.com", "id.me", "clearme.com", "mitek.com",
+)
+MAX_SENTENCE = 400
+
+
+def identity_check(observation):
+    """True when the observed page asks for a photo of a government ID or a selfie (see ID_PHOTO). An optional upload,
+    or prose longer than a sentence or two, is not the check."""
+    host = (urlsplit(str(observation.get("url") or "")).hostname or "").lower()
+    if any(host == d or host.endswith("." + d) for d in ID_VENDOR_HOSTS):
+        return True
+    labels = [str(c.get("label") or "") for c in observation.get("controls") or [] if isinstance(c, dict)]
+    labels += [str(f.get("label") or "") for f in observation.get("fields") or [] if isinstance(f, dict)]
+    if any(CHECK_CONTROL.search(" ".join(label.split())) for label in labels):
+        return True
+    for line in str(observation.get("text") or "").splitlines():
+        line = " ".join(line.split())
+        if (
+            line
+            and len(line) <= MAX_SENTENCE
+            and (ID_PHOTO.search(line) or SELFIE.search(line))
+            and not re.search(r"\boptional\b|\bnot required\b", line, re.I)
+        ):
+            return True
+    return False
+
+
 async def stop_if_sensitive(engine, observation):
     """Stop the run and remove the job when this owned page asks for an identifier.
 
@@ -101,10 +149,13 @@ async def stop_if_sensitive(engine, observation):
     if await stop_if_identity_conflict(engine, observation):
         return True
     matches = sensitive_matches(observation.get("fields") or [])
-    if not matches:
+    check = identity_check(observation)
+    if not matches and not check:
         return False
     kinds = list(dict.fromkeys(kind for kind, _ in matches))
     labels = [label for _, label in matches][:5]
+    if check:
+        kinds.append("identity_check")
     engine.emit(
         "sensitive_id_requested",
         "Application asks for a government or bank identifier; the job is removed",
@@ -113,7 +164,7 @@ async def stop_if_sensitive(engine, observation):
     engine.result = {
         "state": "cancelled",
         "reason": "Application asks for "
-        + ", ".join(kinds).replace("_", " ")
+        + ", ".join("a government ID photo or selfie check" if k == "identity_check" else k.replace("_", " ") for k in kinds)
         + "; the job was removed under the owner rule",
         "blocker_type": "sensitive_id",
         "recoverable": False,
