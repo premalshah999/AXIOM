@@ -45,6 +45,8 @@ ROTATE_SECONDS = 30.0
 LOG_BYTES, LOG_KEEP = 10 * 1024 * 1024, 3  # compose.yaml's json-file limits.
 CHROME_GRACE, POSTGRES_GRACE, CHROME_WAIT = 10.0, 30.0, 30.0
 ACTIVE_RUNS = "select count(*) from runs where state in ('queued','running','submitting')"
+# What a stop could cut. A run still queued holds no browser and waits out a hold, so counting it would never reach zero.
+IN_FLIGHT_RUNS = "select count(*) from runs where state in ('running','submitting')"
 NOFILE = (65536, 10240)
 
 

@@ -172,6 +172,15 @@ class ExecutionMixin:
                     return  # The server is stopping: the run stays queued and starts after the restart.
                 # A run queued earlier still waits while the host runs late or the worker Chrome is gone.
                 gate = host_health.check(self.config.workers, session=s)
+                from ..admission import require_intake
+
+                try:
+                    # The hold a release sets before it stops the app. Admission and the retries read it, but a run already
+                    # queued did not: it started under the hold, in the window between "nothing is running" and the stop,
+                    # and the stop then cut it. It waits here, holding no browser, and starts when the hold lifts.
+                    require_intake(s, row.job_id)
+                except QueueBlocked as exc:
+                    gate = host_health.Gate(0, "deployment_hold", str(exc))
                 from ..application_budget import require_allowance
 
                 try:
@@ -220,11 +229,12 @@ class ExecutionMixin:
 
                 current_job = s.get(Job, row.job_id)
                 recovery_row = s.get(Setting, "draft_recovery:" + row.job_id)
-                # An emailed code expires: a continuation is not held back for load, only for a dead browser or a stop.
+                # An emailed code expires: a continuation is not held back for load or a release's hold (the release waits for
+                # it as for any other run), only for a dead browser or a stop.
                 urgent = bool(row.packet.get("email_wait_resume") or row.packet.get("verification_only"))
                 allowed = (
                     self.config.workers
-                    if urgent and gate.code in {"host_loaded", "host_overloaded"}
+                    if urgent and gate.code in {"host_loaded", "host_overloaded", "deployment_hold"}
                     else min(self.config.workers, gate.limit)
                 )
                 if (
