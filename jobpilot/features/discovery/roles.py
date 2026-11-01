@@ -218,7 +218,7 @@ _MID = re.compile(
     re.I,
 )
 _SENIOR = re.compile(
-    r"\b(?:senior|sr\.?|staff|principal|distinguished|lead|director|head of|vp|vice president|avp|fellow|chief|architect|"
+    r"\b(?:senior|sr\.?|staff|principal|prin|distinguished|lead|director|head of|vp|vice president|avp|fellow|chief|architect|"
     r"(?:engineer|developer|scientist|analyst|swe|sde|specialist|programmer|designer|consultant)\s*(?:[3-9]|iii|iv|v)(?![\w+])|"
     r"engineering manager|manager,? engineering|group manager|general manager)\b",
     re.I,
@@ -227,11 +227,13 @@ _SENIOR = re.compile(
 _SPELLED = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
 _YEARS = re.compile(
     r"\b(?P<low>\d{1,2}|" + "|".join(_SPELLED) + r")\b(?:\s*\(\d{1,2}\))?\s*(?:\+|(?:[-–—]|to)\s*\d{1,2}\+?)?\s*"
-    r"(?:years?|yrs?)[’']?\s+(?:[a-z][\w/,&-]*\s+){0,8}?(?:experience|exp\b)",
+    r"(?:years?|yrs?)[’']?\s+(?:[-–—:]\s+)?(?:[a-z][\w/,&-]*\s+){0,8}?(?:experience|exp\b)",
     re.I,
 )
-# A mention that is not the job's own minimum: preferred skills, and what a higher degree or schooling substitutes.
-_OPTIONAL = re.compile(r"preferred|nice.to.have|bonus|ideally|a plus|desired|master|ph\.?d|doctora|advanced degree|in lieu", re.I)
+# A mention that is not the job's own minimum: a preferred skill (around it), or what a higher degree substitutes (before it: "a
+# Master's with 3 years" is the alternative, "a Bachelor's with 5 years or a Master's" names 5 first).
+_OPTIONAL = re.compile(r"preferred|nice.to.have|bonus|ideally|a plus|desired", re.I)
+_ALTERNATIVE = re.compile(r"master|ph\.?d|doctora|advanced degree", re.I)
 # Only an experience claim about the candidate: a company's "60 years of experience across industries" is not one.
 _MOST_YEARS = 20
 _ENTRY_TEXT = re.compile(r"\bentry[ -]?level\b|\bno (?:prior )?experience (?:is )?(?:required|necessary)\b", re.I)
@@ -240,13 +242,14 @@ _BULLET_YEARS = re.compile(r"(?m)^[\W_]*(?P<low>\d{1,2})\s*\+?\s*(?:years?|yrs?)
 
 def stated_years(text):
     """The largest minimum of experience a posting's text requires, in years, or None: the headline requirement ("5+ years") outranks
-    the skill-by-skill ones under it ("3+ years of Python"). A mention is read within its own line;
-    preferred skills, a higher degree's alternative and absurd figures (a company's age) are left out."""
+    the skill-by-skill ones under it ("3+ years of Python"). A mention is read within its own line; preferred skills, a higher
+    degree's alternative and absurd figures (a company's age) are left out."""
     text = text or ""
     found = []
     for match in [*_YEARS.finditer(text), *_BULLET_YEARS.finditer(text)]:
         start, end = text.rfind("\n", 0, match.start()) + 1, text.find("\n", match.end())
-        if _OPTIONAL.search(text[max(start, match.start() - 120) : min(end if end >= 0 else len(text), match.end() + 80)]):
+        end = min(end if end >= 0 else len(text), match.end() + 80)
+        if _OPTIONAL.search(text[max(start, match.start() - 120) : end]) or _ALTERNATIVE.search(text[max(start, match.start() - 45) : match.start()]):
             continue
         if re.search(r"education|school|study|degree", match.group(0), re.I):  # "4 years of relevant education and/or experience"
             continue
