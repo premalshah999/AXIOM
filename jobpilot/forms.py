@@ -2852,6 +2852,8 @@ class FormSession:
             parsed_url = urlsplit(str(value))
             if parsed_url.hostname == "linkedin.com" and parsed_url.path.startswith("/in/"):
                 value = urlunsplit(parsed_url._replace(netloc="www.linkedin.com"))
+        if kind == "number" and (amount := widgets.range_midpoint(value)):
+            value = amount  # A number input takes one amount: the middle of the saved range.
         committed = value
 
         async def choose(options, *, partial=False):
@@ -3428,6 +3430,21 @@ class FormSession:
                 await el.blur()
             except Exception:
                 pass
+            if kind == "text" and (amount := widgets.range_midpoint(value)):
+                # A text box with a digits-only mask keeps "$90,000 - $120,000" as "90,000,120,000" and refuses it
+                # (Workable "Salary Range", a number question drawn as a text input, 2026-11-01: four runs stopped
+                # on "Value not accepted"). Digits and separators left over from a range mean the box wants one
+                # amount: write the middle of the saved range.
+                try:
+                    shown = await el.input_value(timeout=1500)
+                except PlaywrightError:
+                    shown = ""
+                if shown and re.fullmatch(r"[\d,.\s]+", shown) and not widgets.same_value(field, shown, value):
+                    await el.fill("", timeout=4000)
+                    await el.press_sequentially(amount, delay=40, timeout=8000)
+                    await el.blur()
+                    committed = amount
+                    self.emit("control_recovery", "Adapted a pay range to the website's single-amount input")
             if kind == "text" and await widgets.ui5_uncommitted(el, committed):
                 # UI5 clears or flags a typed value that no suggestion committed; report it like a rejected choice.
                 raise ValueError("The website did not commit the observed choice")
