@@ -93,6 +93,26 @@ Tailoring works on a Mac with no LaTeX: `pdflatex` is in the bundle, first on th
 
 **A hand-written `\usepackage` of something not installed** fails with LaTeX's own "not found", exactly as it does on a checkout's TinyTeX: every package that TeX has is bundled, and none is ever downloaded at run time.
 
+## Shipping a build
+
+`python3 scripts/release.py` from a clean checkout on the commit to ship. It stops at the first stage that fails, by that stage's real exit status, and puts back whatever it changed. `--until verified` does everything that does not touch the running app.
+
+| Stage | What it does | Exit status when it fails |
+| --- | --- | --- |
+| preflight | clean tree, disk room, same volume as the app | 2 |
+| gate | `scripts/dev/gate.sh release`: the suite without a browser, then the gallery | 2 |
+| build | `desktop/build.sh` | 3 |
+| verified | a complete copy outside the install location: signature, every file at its size, Python, its engine applying to a local site, and `scripts/dev/upgrade_check.py` between the installed build and this one on a throwaway home | 3 |
+| drain | the hold goes on and running applications get 20 minutes. A commit still running then stops the release with nothing changed | 4 |
+| swap | stop, one rename away, one rename in, open | 5 |
+| smoke | `axiom smoke` on the installed build, including that the process runs the code just built; on failure the previous build goes back | 6 |
+
+**What a stop does to applications.** The hold stops anything new from starting, including runs already queued: they wait, holding no browser, and start when it lifts. A stop never cuts a commit: none may begin once it starts and it waits for those under way (`Service.drain`). A run still filling when the app stops sent nothing: at the next start it is recorded `Worker interrupted before submission`, resumes within a minute or two, costs no start from its allowance, and does not count as its job's first try. A stop during a commit that outlives the drain is `submission_unknown`: never replayed, reconciled against the mailbox first (`autopilot.receipt_first`).
+
+The tests split by what they can see. `gate.sh fast` is every test without a browser. `gate.sh gallery` is `tests/gallery`: pages that reproduce real traps on a fake employer on 127.0.0.1, driven through `Service.queue` and `BrowserEngine.run` to a submit the local site records. When someone finds a bug by eye on a real page, the page's behaviour goes there. `gate.sh browser` is the rest, for changes to the engine.
+
+`scripts/dev/replay_corpus.py` replays the page classifiers, the work-status rule and `scan.js` over real saved pages kept in a private folder outside this repository, and lists what a change would read differently. Run `compare` and read every line before shipping a change to how pages or answers are read.
+
 ## Upgrades
 
 Drag the new version over the old one. All data stays, because none of it is in the bundle, and the schema migrates when the app starts, as it does in a deploy. The next major PostgreSQL would need `pg_upgrade`: a cluster of another major version is refused with a message and never touched.

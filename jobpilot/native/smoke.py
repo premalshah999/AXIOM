@@ -28,6 +28,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -338,6 +339,14 @@ def psql_rows(pg, bin_dir, cfg, sql):
     return [line.split("|") for line in pg.psql(bin_dir, cfg, sql, timeout=20).splitlines() if line]
 
 
+def seconds_since(moment):
+    try:
+        at = datetime.fromisoformat(moment.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return float("inf")
+    return (datetime.now(UTC) - (at if at.tzinfo else at.replace(tzinfo=UTC))).total_seconds()
+
+
 def check_installation(cfg, expected_engine=None, since=None, hold_expected=False):
     """Read-only checks of the running app. `expected_engine` is the engine version of the build that should be running; `since` the
     moment it should have started after (an ISO time): together, proof that the process is the new code and not a survivor."""
@@ -383,9 +392,12 @@ def check_installation(cfg, expected_engine=None, since=None, hold_expected=Fals
             if expected_engine:
                 checks.append(Check("running code", engine == expected_engine and (not since or at >= since),
                                     f"the app started {engine} at {at}; expected {expected_engine} after {since}"))
-            heartbeat = pg.psql(bin_dir, cfg, "select value->>'at' from settings where key = 'scheduler_heartbeat'", timeout=10)
             checks.append(Check("database writes", bool(started), "the app recorded its start"))
-            checks.append(Check("heartbeat", True, heartbeat or "none yet"))
+            heartbeat = pg.psql(bin_dir, cfg, "select value->>'at' from settings where key = 'scheduler_heartbeat'", timeout=10)
+            age = seconds_since(heartbeat)
+            # The tick is once a minute: a heartbeat from before a restart is no failure until the app has had time to tick.
+            checks.append(Check("heartbeat", age <= HEARTBEAT_SECONDS or seconds_since(at) <= HEARTBEAT_SECONDS,
+                                f"the scheduler last ticked {age:.0f} s ago"))
         except Exception as exc:  # A check that cannot run has failed, and says why.
             checks.append(Check("database", False, f"{type(exc).__name__}: {str(exc)[:200]}"))
     token = app_token(cfg)
