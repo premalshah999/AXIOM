@@ -158,6 +158,19 @@ ASSESSMENT_FORWARD = re.compile(
     r"\s*(?:next|continue|submit|finish|done|complete|proceed|take|start|begin|agree|i agree|accept)\b.{0,30}", re.I
 )
 ASSESSMENT_RETURN = re.compile(r"\s*(?:return|back|go back) to (?:the |your )?(?:application|workday|job)\W*", re.I)
+# The application's own words for a questionnaire it has no record of. A vendor tells the application a moment after the survey ends:
+# Tyson Foods' Workday refused Save and Continue for a minute after the finished survey and went straight to Review 30 s later (2026-10-28).
+ASSESSMENT_DEMAND = re.compile(r"\b(?:must|need to|required to|please) (?:complete|take|finish) (?:the |this |your )?(?:\w+ ){0,3}assessment\b", re.I)
+ASSESSMENT_RECORD_TRIES = 3
+# A test of the applicant themself, which only they can take. GreatAmerica's Workday step opened the Predictive Index: 87 adjectives
+# describing how you act (2026-10-30), and ten runs went round it and its login page. Answering it for them would be inventing them.
+PERSONAL_TEST = re.compile(
+    r"\bbehaviou?ral (?:assessment|survey|inventory|profile)\b|\bpersonality (?:test|assessment|survey|inventory|questionnaire|profile)\b|"
+    r"\bpredictive index\b|\bpsychometric\b|\b(?:cognitive|aptitude|situational judg[e]?ment)(?: ability)? (?:test|assessment)\b|"
+    r"\b(?:coding|technical|skills?) (?:test|assessment|challenge)\b",
+    re.I,
+)
+PERSONAL_TEST_REASON = "The employer requires a personal test (personality, aptitude or skills) that only you can take, so nothing was sent"
 ASSESSMENT_EXIT = re.compile(r"\blater\b|\bexit\b|\bcancel\b|\bquit\b|\bclose\b|\bwithout\b|\bdecline\b|\bdisagree\b", re.I)
 
 
@@ -680,6 +693,7 @@ class Adapter:
     email_submit_ids: tuple[str, ...] = ()
     # How long a questionnaire page without questions or a way forward is given to open its pop-up.
     ASSESSMENT_SETTLE_SECONDS = 2.5
+    ASSESSMENT_RECORD_SECONDS = 20
     # A run released by a matched emailed sign-in link opens it first (matched_link_waiting). Workday, Oracle and iCIMS
     # keep their own continuations of a parked mail wait.
     link_resume = True
@@ -979,14 +993,31 @@ class Adapter:
             return None
         for control in obs.get("controls", []):
             label = control["label"].strip()
+            # Workday's step names only "Take Assessment", and the application goes no further without it: a person opens it to see
+            # what it is (Smithfield 2026-10-31, where the model had to find it). on_assessment reads what it opened.
+            if control.get("automation_id") == "inlineAssessmentButton":
+                return control
             if (
-                control.get("automation_id") == "inlineAssessmentButton"
-                or control.get("partner")  # Oracle's inline partner button, named by its block when it has no text
+                control.get("partner")  # Oracle's inline partner button, named by its block when it has no text
                 or re.fullmatch(LAUNCHER, label, re.I)
             ):
                 if TAX_CREDIT.search(label) or TAX_CREDIT.search(obs.get("text", "")):
                     return control
         return None
+
+    async def await_assessment_record(self, obs):
+        """The questionnaire is finished and the application still asks for it: wait, read the application again. Opening another
+        survey starts a new one in place of the finished one, which is what the model did 15 s after each (Smithfield 2026-10-31)."""
+        if not getattr(self.form, "survey_finished", False) or self.attempts["assessment_record"] >= ASSESSMENT_RECORD_TRIES:
+            return False
+        if not ASSESSMENT_DEMAND.search(" ".join(str(e) for e in obs.get("errors", []))):
+            return False
+        self.attempts["assessment_record"] += 1
+        self.emit("assessment_wait", "Waiting for the employer to record the finished questionnaire")
+        await asyncio.sleep(self.ASSESSMENT_RECORD_SECONDS)
+        await self.page.reload(wait_until="domcontentloaded")
+        await self.form.settle(timeout=8)
+        return True
 
     async def launch_assessment(self, obs, again=False):
         """Open the questionnaire before the application's own submit: Rentokil's Workday answered Save and Continue
@@ -1016,6 +1047,13 @@ class Adapter:
                 "recovery_cause": "control_observation",
             }
         before = await self.form.scan()
+        if PERSONAL_TEST.search(before.get("text", "")) and not TAX_CREDIT.search(before.get("text", "")):
+            return {"state": "closed", "reason": PERSONAL_TEST_REASON, "blocker_type": "personal_test"}
+        # A survey that asks for a Social Security number closes under the owner's rule before anything on it is answered or asked of a model.
+        from ..sensitive_ids import sensitive_matches, stop_if_sensitive
+
+        if sensitive_matches(before.get("fields") or []) and await stop_if_sensitive(self.e, before):
+            return self.e.result
         report = await self.fill_page()
         if isinstance(report, dict) and report.get("state"):
             return report
@@ -1056,8 +1094,9 @@ class Adapter:
         except PlaywrightError:
             if not self.form.page.is_closed():
                 raise
-        if self.form.page.is_closed():
-            # TaxCreditCo closes its own tab after the final submit (Tyson Foods 2026-10-24).
+        if self.form.page.is_closed() or (getattr(self.form, "openers", None) and not self.in_assessment()):
+            # TaxCreditCo closes its own tab after the final submit (Tyson Foods 2026-10-24); a last link can also lead to the
+            # application inside the survey's tab.
             await self.form.return_to_opener()
             await self.form.settle(timeout=6)
         return None
@@ -1826,6 +1865,11 @@ class Adapter:
         await self.click(nxt, step=True)
         after = await self.form.scan()
         if self.signature(self.classify(after), after) == before:
+            if await self.await_assessment_record(after):
+                return None
+            # The application asks for its questionnaire; opening it is the only way on (again=True: once more if it was opened before).
+            if ASSESSMENT_DEMAND.search(" ".join(str(e) for e in after.get("errors", []))) and await self.launch_assessment(after, again=True):
+                return None
             # Server-side validation: answer what it flagged, then try once more.
             if after["errors"] or any(f["error"] for f in after["fields"]):
                 repaired = await self.repair(after)

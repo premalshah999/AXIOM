@@ -1,5 +1,7 @@
 """The traps, one scenario each, each one a failure a real page caused and a person spotted by eye. All names are invented."""
 
+import time
+
 from support_react_select import markup as react_select
 from .site import Scenario
 
@@ -295,6 +297,119 @@ closed = Scenario(
     expect={},
 )
 
+# ---- questionnaires an application requires -------------------------------------------------------------------------------
+
+
+def _survey_page(request, body):
+    return page("Survey", f"<h1>Survey</h1><p>Voluntary work opportunity tax credit survey.</p>{body}")
+
+
+def _survey_entry(request):
+    return _survey_page(request, """<form action="/survey/2" method="get"><p>Dear Candidate, we participate in various incentive programs.</p>
+    <label for="lang">Select a language</label><select id="lang" name="lang"><option>English</option><option>Español</option></select>
+    <button type="submit">Next</button></form>""")
+
+
+def _survey_checks(request):
+    def box(name, text):
+        return f'<div class="question"><input type="checkbox" id="{name}" name="{name}" class="checkbox-input"><label for="{name}">{text}</label></div>'
+
+    return _survey_page(request, '<h2>Check all that apply</h2><p id="err" style="color:#b00020"></p><form id="wotc" action="/survey/done" method="get">'
+        "<p>I or a household member receive or received the following government benefits:</p>"
+        + box("snap", "Food Stamps (SNAP) / AFDC / TANF") + box("benefits_unsure", "Not sure") + box("benefits_none", "None of the Above")
+        + "<p>I have:</p>"
+        + box("military", "Served in the US Military") + box("rehab", "Received Rehab") + box("ssi", "Received SSI") + box("unemployed", "Been Unemployed")
+        + box("felony", "Been Convicted of a Felony") + box("other_none", "None of the Above")
+        + """<button type="submit">Next</button></form><script>document.getElementById('wotc').addEventListener('submit',e=>{
+        if(!(benefits_none.checked||snap.checked||benefits_unsure.checked)||!(other_none.checked||military.checked||rehab.checked||ssi.checked||unemployed.checked||felony.checked)){
+          e.preventDefault();document.getElementById('err').textContent='"None of the Above" is required.'}});</script>""")
+
+
+def _survey_done(request):
+    # The vendor's Done state: a thank-you message and one "Next", a link to the return address. Only that link tells the application.
+    back = f"http://127.0.0.1:{request.site.port}/assessment/return"
+    return _survey_page(request, f'<p>Thank you for completing this survey.</p><a class="button button-next" href="{back}">Next</a>')
+
+
+def _assessment_return(request):
+    request.site.state["told"] = time.monotonic()
+    return "<!doctype html><title>Done</title><p>Returning to your application.</p><script>window.close()</script>"
+
+
+def _assessment_step(request):
+    told = request.site.state.get("told")
+    if request.method == "POST" and told and time.monotonic() - told > 3:  # The employer records it a moment after the survey says so.
+        return page("Apply", "<h1>Resume</h1>" + form(
+            *(f'<input type="hidden" name="{k}" value="{request.site.state.get(k, "")}">' for k in ("first_name", "last_name", "email")),
+            RESUME_FIELD, SUBMIT_BUTTON))
+    if request.method == "POST":
+        for key in ("first_name", "last_name", "email"):
+            if request.form.get(key):
+                request.site.state[key] = request.form[key]
+    survey = f"http://localhost:{request.site.port}/survey/1"
+    error = '<div role="alert" data-automation-id="errorMessage">Error - Page Error You must complete the assessment test to continue with your job application.</div>' if request.method == "POST" else ""
+    return page("Application", f"""<h1>Take Assessment</h1>{error}
+    <button type="button" data-automation-id="inlineAssessmentButton" onclick="window.open('{survey}')">Take Assessment</button>
+    <form method="post" action="/apply/step">{"".join(f'<input type="hidden" name="{k}" value="{request.site.state.get(k, "")}">' for k in ("first_name", "last_name", "email"))}
+    <button type="submit">Save and Continue</button></form>""")
+
+
+def _first_step(request):
+    return page("Application", "<h1>My Information</h1>" + form(NAME_FIELDS, EMAIL_FIELD, '<p><button type="submit">Save and Continue</button></p>', action="/apply/step"))
+
+
+SURVEY_PAGES = {"/survey/1": _survey_entry, "/survey/2": _survey_checks, "/survey/done": _survey_done, "/assessment/return": _assessment_return}
+
+survey_return_link = Scenario(
+    "survey_tells_the_application_through_its_last_link",
+    "The engine closed a finished survey on its thank-you page, so its last \"Next\" never told Workday: eight finished surveys and "
+    "\"You must complete the assessment test\" each time (Smithfield 2026-10-31).",
+    {"/jobs/1": page("Software Engineer", POSTING + APPLY_LINK), "/apply/1": _first_step, "/apply/step": _assessment_step, "/submit/1": THANKS, **SURVEY_PAGES},
+    facts={"tax_credit_screening_no": True},
+)
+
+
+def _personal_entry(request):
+    return page("Assessment", """<h1>PI Behavioral Assessment</h1><form action="/test/2" method="get">
+    <label for="lang">Please select the language in which you would like to take this assessment</label><select id="lang" name="lang"><option>English</option></select>
+    <button type="submit">Continue</button></form>""")
+
+
+def _personal_step(request):
+    survey = f"http://localhost:{request.site.port}/test/1"
+    return page("Application", f"""<h1>Take Assessment</h1>
+    <button type="button" data-automation-id="inlineAssessmentButton" onclick="window.open('{survey}')">Take Assessment</button>
+    <form method="post" action="/apply/step"><button type="submit">Save and Continue</button></form>""")
+
+
+personal_test = Scenario(
+    "a_personality_test_is_left_to_the_person",
+    "A required Predictive Index test (87 adjectives about yourself) went round ten runs and its login page (GreatAmerica 2026-10-30): "
+    "it cannot be answered truthfully for anyone, so the run says so once and sends nothing.",
+    {"/jobs/1": page("Software Engineer", POSTING + APPLY_LINK), "/apply/1": _personal_step, "/apply/step": _personal_step, "/test/1": _personal_entry,
+     "/test/2": page("Assessment", "<h1>Choose the adjectives that describe you</h1>")},
+    state="closed",
+    applications=0,
+    expect={},
+    never=("/test/2",),
+)
+
+
+def _ssn_survey(request):
+    return _survey_page(request, """<form action="/survey/done" method="get"><label for="ssn">Social Security Number</label><input id="ssn" name="ssn" required>
+    <button type="submit">Next</button></form>""")
+
+
+ssn_survey = Scenario(
+    "a_survey_that_asks_for_an_ssn_closes_the_job",
+    "A tax-credit survey asking for a Social Security number: the owner's rule removes the job, nothing is typed, nothing is sent (Epiq 2026-11-01).",
+    {"/jobs/1": page("Software Engineer", POSTING + APPLY_LINK), "/apply/1": _first_step, "/apply/step": _assessment_step,
+     **SURVEY_PAGES, "/survey/1": _ssn_survey},
+    state="cancelled",
+    applications=0,
+    expect={},
+)
+
 SCENARIOS = [
     plain,
     search_box,
@@ -311,4 +426,7 @@ SCENARIOS = [
     server_refusal,
     no_receipt,
     closed,
+    survey_return_link,
+    personal_test,
+    ssn_survey,
 ]

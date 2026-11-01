@@ -1338,6 +1338,14 @@ SURVEY_DONE = re.compile(
     r"your (?:wotc )?control number is",
     re.I,
 )
+# A finished questionnaire's own way out. Synergi's last page says thank you and shows one "Next": a link to the return address
+# that tells the application the survey is done. Closing the tab there left Workday asking "You must complete the assessment test"
+# after eight finished surveys (Smithfield 2026-10-31).
+SURVEY_ONWARD = re.compile(
+    r"\s*(?:next|continue|finish|done|proceed|ok(?:ay)?|return\b.{0,30}|(?:go )?back to\b.{0,30}|close(?: this)?(?: window| tab)?)\W*", re.I
+)
+# How long a finished questionnaire gets to close or leave by itself: "you will be redirected in 5 seconds".
+SURVEY_LEAVE_SECONDS = 8
 LAUNCHER = (
     r"\s*(?:take|start|complete|begin)(?: the)? (?:(?:tax credit|wotc|work opportunity tax credit)"
     # Workday's step button says only "Take Assessment" (Tyson Foods' TaxCreditCo survey tab, 2026-10-24).
@@ -1688,6 +1696,24 @@ class FormSession:
         application = detect("https://" + origin + "/").id
         return custom_like(application) or detect(url).id != application
 
+    async def survey_leaves(self, seconds=None):
+        """A finished questionnaire can still be telling the application: give it a moment to close or leave by itself."""
+        page, url = self.page, self.page.url
+        deadline = time.monotonic() + (SURVEY_LEAVE_SECONDS if seconds is None else seconds)
+        while time.monotonic() < deadline:
+            if page.is_closed() or page.url != url:
+                return True
+            await asyncio.sleep(0.25)
+        return False
+
+    def assessment_tab_returned(self):
+        """The launched survey's tab now shows the application's own host: its last link was the way back."""
+        origin = getattr(self, "assessment_origin", "")
+        try:
+            return bool(origin) and (urlsplit(self.page.url).hostname or "") == origin
+        except Exception:
+            return False
+
     async def return_from_questionnaire(self):
         """Back to the application once the questionnaire is finished: its tab, or the address it replaced."""
         if getattr(self, "openers", None):
@@ -1695,6 +1721,7 @@ class FormSession:
         url = getattr(self, "assessment_return", "")
         if not url or not self.on_questionnaire():
             return False
+        self.survey_finished = True
         await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
         self.emit("survey_returned", "Returned to the application after the tax-credit questionnaire")
         await self.settle(timeout=8)
@@ -1711,6 +1738,7 @@ class FormSession:
             return False
         survey = self.page
         self.page = openers.pop()
+        self.survey_finished = True
         if not survey.is_closed():
             try:
                 await survey.close()
@@ -1845,6 +1873,7 @@ class FormSession:
                     getattr(self, kind)[item["id"]] = item
             try:
                 frame_options = (await widgets.visible_options(frame))[:150]
+                self.remember_options(frame_options)
                 for option in frame_options:
                     if owner := option.get("owner_dom_id"):
                         owner_id = f"f{n}-{data['document_id']}-{owner}"
@@ -2103,6 +2132,7 @@ class FormSession:
             if current["type"] in {"select", "select-multiple"}
             else await widgets.wait_options(frame, await widgets._popup_scope(el), timeout=1, owner=el)
         )
+        self.remember_options(options)
         option_count = len(options)
         if query:
             options = [o for o in options if normalize(query) in normalize(o["text"])]
@@ -2126,6 +2156,17 @@ class FormSession:
             "more_options": more,
             "progress_fingerprint": obs["progress_fingerprint"],
         }
+
+    def remember_options(self, options):
+        """What each option id said when it was read. A react-select builds new elements each time its menu opens, so the id the model
+        read a moment ago is gone though the option is still there: "F1" was refused as stale three times with F1 on the screen (ALTEN's
+        Greenhouse form, 2026-11-01; 245 runs hit the same refusal on other menus)."""
+        words = self.__dict__.setdefault("option_words", {})
+        if len(words) > 4000:
+            words.clear()
+        for option in options:
+            if option.get("id") and option.get("text"):
+                words[option["id"]] = option["text"]
 
     async def native_options(self, field):
         """Native options need no popup; identities bind owner, index and content."""
@@ -2214,6 +2255,10 @@ class FormSession:
                         await widgets.open_owned_picker(frame, el, field["type"])
                         options = await widgets.visible_options(frame, await widgets._popup_scope(el))
                 option = next((o for o in options if o["id"] == option_id and not o["disabled"]), None)
+                if not option and (said := getattr(self, "option_words", {}).get(option_id)):
+                    # The same words in the menu this control has open now: the choice the model made, on a re-rendered menu.
+                    same = [o for o in options if o["text"] == said and not o["disabled"]]
+                    option = same[0] if len(same) == 1 else None
                 decided = None
                 # ADP's sdf-select lists its items in the host's own children and commits through its own driver
                 # (fill): the open pane read above is not its catalog, so a menu that closed or re-rendered left every
@@ -6093,6 +6138,7 @@ class FormSession:
         ):
             raise ValueError("This may submit the application; use submit_application")
         opener = self.page
+        on_survey = self.on_questionnaire()
         opened = []
 
         def on_popup(page):
@@ -6227,7 +6273,16 @@ class FormSession:
             getattr(self, "openers", None)
             and not after["fields"]
             and SURVEY_DONE.search(after.get("text", ""))
+            and not any(SURVEY_ONWARD.fullmatch(b["label"]) for b in after["controls"])
         ):
+            # Its thank-you page with no way on: it closes or leaves by itself, or a person closes it.
+            await self.survey_leaves()
+            if getattr(self, "openers", None):
+                await self.return_to_opener()
+            await self.settle(timeout=8)
+            after = await self.scan()
+        elif on_survey and getattr(self, "openers", None) and not self.page.is_closed() and self.assessment_tab_returned():
+            # Its last link led back to the application inside the survey's own tab: the opener is the application.
             await self.return_to_opener()
             await self.settle(timeout=8)
             after = await self.scan()
@@ -6238,6 +6293,7 @@ class FormSession:
             and not any(re.search(r"\b(?:take|start|begin|next|continue)\b", b["label"], re.I) for b in after["controls"])
         ):
             # The questionnaire replaced the application page and ended on its own thank-you page.
+            await self.survey_leaves()
             await self.return_from_questionnaire()
             after = await self.scan()
         education_saved(education_context, after)
