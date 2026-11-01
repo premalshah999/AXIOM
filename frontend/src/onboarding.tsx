@@ -5,6 +5,7 @@ import { routeUrl } from "./context";
 import { Wordmark } from "./shell/Brand";
 import { resumeFileRefusal } from "./format";
 import { SwitchRow } from "./setup-kit";
+import { MainPassword } from "./mainpassword";
 import { YesNo } from "./qform";
 import { Button, Dropzone, ErrorLine, External, Input, Loading, Monogram, Pill, Segmented, Select } from "./ui/index";
 import type { EducationEntry, Profile, WorkEntry } from "./types";
@@ -1421,7 +1422,7 @@ function AutomationStep({
         <div className="ax-ob-switches">
           <SwitchRow
             label="Create employer accounts for me"
-            note="Many employers make you create an account before you can apply. AXIOM makes a strong password for each and keeps it encrypted on this Mac. Off: those applications can't go through."
+            note="Many employers make you create an account before you can apply. AXIOM makes a strong password and keeps it encrypted on this Mac; you can choose your own main password below. Off: those applications can't go through."
             checked={draft.allow_account_creation}
             onChange={() => setTop("allow_account_creation", !draft.allow_account_creation)}
           />
@@ -1453,6 +1454,7 @@ function AutomationStep({
             }
           />
         </div>
+        {draft.allow_account_creation && <MainPassword compact />}
       </Section>
       <Section title="Finding jobs">
         <div className="ax-ob-switches">
