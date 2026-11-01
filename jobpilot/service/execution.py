@@ -179,7 +179,13 @@ class ExecutionMixin:
                         from ..application_budget import max_seconds
 
                         cap = max_seconds(s)
-                        deadline, remaining = require_allowance(s, row.job_id, exclude_run=row.id)
+                        # A matched email continues the attempt that waited for it (service.queueing admitted it as one). Checked
+                        # here as a new attempt, Amcor's activation link arrived and the job ended "already used its
+                        # initial attempt and two retries" one second later (2026-11-01).
+                        deadline, remaining = require_allowance(
+                            s, row.job_id, exclude_run=row.id,
+                            new_attempt=row.packet.get("recovery_continuation_cause") != "email_matched",
+                        )
                         first_attempt = remaining is not None and remaining == cap
                         budget_checked = True
                     elif first_attempt:
