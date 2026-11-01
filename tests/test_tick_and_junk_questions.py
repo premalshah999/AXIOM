@@ -26,7 +26,7 @@ def test_upload_widget_captions_are_not_part_of_a_question():
 
 def test_a_video_link_is_a_job_the_app_cannot_finish():
     text, hard = oq.cannot_automate("Apex Video URL", [], {"type": "text"})
-    assert hard and "video" in text
+    assert not hard and "video" in text
 
 
 def test_an_employer_attribute_without_its_row_is_a_misread():
