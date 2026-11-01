@@ -276,3 +276,15 @@ async def test_a_page_already_showing_a_code_box_reaches_back_to_the_click_that_
     begun = time.time()
     c = service.mail.begin(run["id"], rule, ME, "code", since=begun - 900)
     assert begun - 31 <= c["since"] <= begun - 29  # the click just before this page, never the whole run
+
+
+async def test_a_link_window_whose_page_asks_for_a_code_accepts_the_code(client, service, imap):
+    service.config.mail_poll_seconds = 0.1
+    spec = PLATFORMS["workday"]
+    onboard(client)
+    job, run = start_run(service, spec["url"], spec["ats"], spec["company"])
+    challenge = await service.inbox.arm(run["id"], job, ME, "link")
+    service.mail.restrict_kind(challenge["id"], run["id"], "code")
+    time.sleep(1.1)
+    code = deliver(imap, "workday", "code")
+    assert (await service.inbox.wait(challenge, max_wait_seconds=4))["value"] == code

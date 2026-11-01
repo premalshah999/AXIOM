@@ -258,5 +258,7 @@ class RulesMixin:
             owner = session.get(Run, run_id)
             if not row or row.run_id != run_id or not owner or owner.state not in {"running", "submitting"}:
                 raise ValueError("Verification request does not belong to this active application")
-            if row.kind == "auto" and row.state == "pending":
+            # A window armed for an activation link before Create Account (Workday) and a page that then asks for an emailed code:
+            # the mail is a code. Left as a link window, it refused the code it was waiting for until it ran out.
+            if row.state == "pending" and (row.kind == "auto" or (row.kind == "link" and kind == "code")):
                 row.kind = kind
