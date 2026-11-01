@@ -760,7 +760,7 @@ class LocalRulesMixin:
                 saved
                 and applicable(reviewed, employer)
                 and question_text(reviewed.question) == question_text(f["label"])
-                and not foreign_fallback(reviewed.answer, reviewed.options, options)
+                and not foreign_fallback(reviewed.answer, reviewed.options, options, reviewed.question)
             ):
                 value = option_value(reviewed.answer, options)
                 if value is not None:

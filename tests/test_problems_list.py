@@ -76,3 +76,23 @@ def test_the_engines_words_become_a_sentence_a_person_reads():
     assert plain_sentence("Recovery stopped: Only an observed dismiss control can close a dialog; draft saved.") == "A pop-up covered the form and AXIOM could not close it."
     long = plain_sentence("The website did not accept known answers: " + "word " * 80)
     assert len(long) < 150 and long.startswith("The site would not take")
+
+
+def test_a_jobs_panel_and_the_list_give_one_answer_from_one_function(service):
+    """The list said "The app has given up" while the job's panel said "will try again on its own" for the same job (clean-install
+    run, 2026-11-01). Both read problems.next_for_job: the word is the list's, and a retry says when it is due."""
+    from jobpilot.problems import next_for_job
+
+    with service.db.exclusive() as s:
+        add(s, "retrying", [("waiting_browser", "Recovery stopped: No observed action advanced the application; draft saved.", 5)])
+        add(s, "looped", [("waiting_browser", "Application already used its initial attempt and two retries", 50),
+                          ("waiting_browser", "Application already used its initial attempt and two retries", 40),
+                          ("waiting_browser", "Application already used its initial attempt and two retries", 35)])
+        add(s, "never", [])
+    with service.db.session() as s:
+        listed = {r["run_id"]: r for r in recent(s)["rows"]}
+        retry, gone, none = next_for_job(s, "retrying"), next_for_job(s, "looped"), next_for_job(s, "never")
+    assert retry["word"] == "applying" and retry["kind"] == listed["retrying-0"]["next"]["kind"] == "retry"
+    assert retry["sentence"] == listed["retrying-0"]["next"]["sentence"] and retry["sentence"].startswith("Tries again")
+    assert gone["word"] == "failed" and gone["kind"] == "stopped" and "stopped trying" in gone["sentence"]
+    assert none is None

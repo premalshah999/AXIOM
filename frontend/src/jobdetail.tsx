@@ -79,6 +79,8 @@ export function JobPanel({
     [historical.data, historical.requestedAt, attempts.data, marks],
   );
   const row = workspaceRow || historicalRow;
+  // Whether the app is still trying, and when: the server's one answer (problems.next_for_job), the same one Applications reads.
+  const outlook = usePoll<Outlook>((signal) => api(`/jobs/${jobId}/outlook`, "GET", undefined, signal), 30000, [jobId, version]);
   const runs = useMemo(
     () =>
       attempts.data?.runs ||
@@ -105,7 +107,7 @@ export function JobPanel({
         )}
         {!workspaceRow && historical.error && <Notice tone="bad">{historical.error.message}</Notice>}
         {selectedRun ? (
-          <RunSection key={selectedRun} runId={selectedRun} row={row} runs={runs} latest={latest} actions={actions} />
+          <RunSection key={selectedRun} runId={selectedRun} row={row} runs={runs} latest={latest} actions={actions} outlook={outlook.data} />
         ) : (
           row && <NotStarted row={row} actions={actions} hold={held} place={place} />
         )}
@@ -195,7 +197,7 @@ function nextStep(state: string, paused: boolean, place?: QueuePlace | null, hol
 }
 
 /** The status first, in words, with what to do next inside it. */
-function StatusBlock({ state, reason, earlier, hold, place, children }: { state: string; reason?: string; earlier?: string; hold?: Hold | null; place?: QueuePlace | null; children?: React.ReactNode }) {
+function StatusBlock({ state, reason, earlier, hold, place, next, children }: { state: string; reason?: string; earlier?: string; hold?: Hold | null; place?: QueuePlace | null; next?: string; children?: React.ReactNode }) {
   const { snapshot } = useWorkspace();
   const info = stateInfo(state);
   return (
@@ -206,11 +208,13 @@ function StatusBlock({ state, reason, earlier, hold, place, children }: { state:
       </p>
       {(hold ? hold.reason : info.explain) && <p className="dr-status-why">{hold ? hold.reason : info.explain}</p>}
       {!hold && reason && <p className="dr-status-reason">{reason}</p>}
-      {!earlier && <p className="dr-next">{nextStep(state, snapshot.control.paused, place, hold)}</p>}
+      {!earlier && <p className="dr-next">{next || nextStep(state, snapshot.control.paused, place, hold)}</p>}
       {children}
     </section>
   );
 }
+
+type Outlook = { word: string; kind: string; sentence: string; at: string };
 
 function RunSection({
   runId,
@@ -218,7 +222,9 @@ function RunSection({
   runs,
   latest,
   actions,
+  outlook,
 }: {
+  outlook?: Outlook | null;
   runId: string;
   row?: JobRow;
   runs: Run[];
@@ -236,13 +242,15 @@ function RunSection({
     [runId, live],
   );
   const run = detail.data?.run || snapRun;
-  const state =
-    latest && row ? row.state : run ? displayState(row?.job || ({} as never), run, undefined) : "";
+  const shown = latest && row ? row.state : run ? displayState(row?.job || ({} as never), run, undefined) : "";
+  // A stop the app has given up on is "Couldn't apply" here as in the list, and one it will retry says when (outlook).
+  const state = latest && outlook?.word === "failed" && stateInfo(shown).group === "repair" ? "gave_up" : shown;
+  const next = latest && (outlook?.kind === "retry" || outlook?.kind === "stopped") ? outlook.sentence : "";
   const questions = row && latest ? row.reviews : [];
   const jobs = new Map(snapshot.jobs.map((j) => [j.id, j]));
   return (
     <>
-      <StatusBlock state={state} reason={run?.reason && state !== "confirmed" ? plainReason(run.reason) : undefined} earlier={run && !latest ? stamp(run.created_at) : undefined}>
+      <StatusBlock state={state} next={next} reason={run?.reason && state !== "confirmed" ? plainReason(run.reason) : undefined} earlier={run && !latest ? stamp(run.created_at) : undefined}>
         {questions.length > 0 &&
           groupQuestions(questions, (id) => jobs.get(snapshot.runs.find((r) => r.id === id)?.job_id || "")).map((g) => (
             <div key={g.review.id} className="dr-question">
