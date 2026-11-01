@@ -1,5 +1,6 @@
-// Needs you › Reserved employers: FAANG, MANGO and the Big Four apply only with the owner's approval (owner, 2026-10-27: "make a
-// different section for FAANG, MANGO, Big four consulting, and these scrapers should not apply before my permission").
+// Needs you › Reserved: the companies and job boards the user reserves (and, if they switch it on, FAANG, MANGO and the Big Four)
+// apply only with their approval (owner, 2026-10-27: "these scrapers should not apply before my permission"; 2026-11-01: "users
+// could actually reserve job boards, companies they like").
 // Their jobs are found and ranked as usual and wait here, one section at a time; Approve starts one exactly as Apply
 // does, and Approve all lifts the hold on a whole section so the autopilot applies to the ones that fit.
 import { useEffect, useMemo, useState } from "react";
@@ -185,7 +186,7 @@ export function ReservedJobs() {
       {list.error && data && <LoadError error={list.error} retry={list.refresh} />}
       {(!data || data.enabled) && (
         <Table
-          label="Reserved employers"
+          label="Reserved"
           columns={columns}
           rows={rows}
           rowKey={(r) => r.job.id}

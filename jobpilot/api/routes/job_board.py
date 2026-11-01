@@ -1,6 +1,7 @@
 """Authenticated job board routes; manual application clicks use normal queue protections."""
 
 import asyncio
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
@@ -88,6 +89,40 @@ def listing_page(jobs, minimum, q, ats, level, fit, page, size):
         "selectable_ids": [job["id"] for job in matching][:SELECTABLE],
         "selectable_total": len(matching),
     }
+
+
+class SourceLink(BaseModel):
+    url: str = Field(min_length=4, max_length=2048)
+
+
+# What each kind's board address looks like to the scanner: the platforms that name the employer in the path keep only that
+# first part, so a pasted posting link becomes its employer's board.
+BOARD_KINDS = {"greenhouse": "greenhouse", "lever": "lever", "ashby": "ashby", "smartrecruiters": "smartrecruiters", "workday": "workday"}
+
+
+def source_from_link(text):
+    """(name, kind, url) for a link a user pastes to a company's job board or one of its postings; ValueError says what is wrong."""
+    from urllib.parse import urlsplit
+
+    from ...ats import detect
+    from ...reserved import employer_of
+
+    link = text.strip()
+    if "://" not in link:
+        link = "https://" + link
+    parts = urlsplit(link)
+    if parts.scheme not in {"http", "https"} or not parts.hostname:
+        raise ValueError("Paste the link to a company's job board")
+    name, _ = employer_of(link)  # a shared platform with no company in the link is refused here
+    kind = BOARD_KINDS.get(detect(link).id, "career_page")
+    path = [part for part in parts.path.split("/") if part]
+    if kind == "workday":
+        path = [part for part in path[:2] if not re.fullmatch(r"[a-z]{2}-[A-Z]{2}", part)][:1]
+    elif kind != "career_page":
+        path = path[:1]
+    if kind == "career_page":
+        return name, kind, f"https://{parts.hostname}{parts.path}"
+    return name, kind, f"https://{parts.hostname}" + ("/" + "/".join(path) if path else "")
 
 
 class BatchStart(BaseModel):
@@ -233,6 +268,16 @@ def router(service) -> APIRouter:
 
         row_id = await asyncio.to_thread(save)
         return {"added": True, "id": row_id}
+
+    @r.post("/api/job-board/sources/link")
+    async def add_source_by_link(data: SourceLink):
+        """Add a company's job board from a link alone: its name, kind and board address are read from the link."""
+        try:
+            name, kind, url = source_from_link(data.url)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        added = await add_source(SourceInput(name=name, kind=kind, url=url))
+        return {**added, "name": name, "kind": kind, "url": url}
 
     @r.post("/api/job-board/scrape")
     async def scrape_now():

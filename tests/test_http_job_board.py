@@ -86,3 +86,17 @@ def test_a_new_install_with_roles_searches_without_being_asked(service):
     assert db.get_setting("job_board_scan:" + queued[0], {})["state"] == "queued"
     again_ids, again = asyncio.run(request_scan(db, enqueue))
     assert again == 0 and again_ids == ids, "boards already queued are not queued twice"
+
+
+def test_a_board_is_added_from_a_link_alone_and_a_posting_link_becomes_its_board(client, service):
+    from jobpilot.db import Source
+
+    posting = client.post("/api/job-board/sources/link", json={"url": "https://boards.greenhouse.io/example-co/jobs/123?gh_src=x"})
+    assert posting.status_code == 200, posting.text
+    assert (posting.json()["name"], posting.json()["kind"], posting.json()["url"]) == ("Example Co", "greenhouse", "https://boards.greenhouse.io/example-co")
+    with service.db.session() as s:
+        assert s.get(Source, posting.json()["id"]).url == "https://boards.greenhouse.io/example-co"
+    again = client.post("/api/job-board/sources/link", json={"url": "boards.greenhouse.io/example-co"})
+    assert again.json()["id"] == posting.json()["id"]  # the same board, however it was pasted
+    assert client.post("/api/job-board/sources/link", json={"url": "https://boards.greenhouse.io"}).status_code == 422  # no company named
+    assert client.post("/api/job-board/sources/link", json={"url": "ftp://example.test"}).status_code == 422

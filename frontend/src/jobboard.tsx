@@ -12,7 +12,7 @@ import { OPEN_JOB_LINK } from "./jobintake";
 import { Pagination, type Paging } from "./pagination";
 import { TopActions, TopLine } from "./shell/Shell";
 import type { BoardFacet, BoardPage, BoardRow } from "./types";
-import { Button, Empty, Listbox, Monogram, Table, type Column } from "./ui/index";
+import { Button, Dialog, Empty, Input, Listbox, Monogram, Table, type Column } from "./ui/index";
 import { LoadError, Notice, SearchBox } from "./worktools";
 import "./styles/queue.css";
 
@@ -145,6 +145,20 @@ export function BoardView() {
         r.reserved
           ? `${r.reserved} is no longer reserved. Its jobs apply like any other.`
           : `${r.company} is reserved. AXIOM still finds and ranks its jobs, and applies only after you approve each one.`,
+    );
+  const [adding, setAdding] = useState(false);
+  const [boardLink, setBoardLink] = useDraft("board-add-link", "");
+  const addBoard = () =>
+    run(
+      "board",
+      async () => {
+        const out = await api<{ name: string }>("/job-board/sources/link", "POST", { url: boardLink.trim() });
+        setBoardLink("");
+        setAdding(false);
+        void refresh();
+        return out;
+      },
+      (out) => out && `${out.name} added. It is searched on the schedule; press Search now to read it at once.`,
     );
   const scan = () =>
     run(
@@ -286,9 +300,38 @@ export function BoardView() {
     value === "all" || options.some((o) => o.value === value) ? options : [...options, { value, label: value, count: 0 }];
   return (
     <div className="ax-page ax-page-fill">
+      <Dialog
+        open={adding}
+        onClose={() => setAdding(false)}
+        title="Add a company's job board"
+        sub="Paste the link to its list of open roles, or to any one posting on it. AXIOM reads the board on its schedule."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setAdding(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit" form="add-board-link" loading={pending === "board"} disabled={!boardLink.trim()}>
+              Add board
+            </Button>
+          </>
+        }
+      >
+        <form
+          id="add-board-link"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (boardLink.trim()) void addBoard();
+          }}
+        >
+          <Input label="Link" value={boardLink} onChange={(e) => setBoardLink(e.target.value)} placeholder="https://boards.greenhouse.io/example" autoFocus />
+        </form>
+      </Dialog>
       <TopActions>
         <Button variant="secondary" icon={<Plus size={15} aria-hidden="true" />} onClick={() => window.dispatchEvent(new Event(OPEN_JOB_LINK))}>
           Add a link
+        </Button>
+        <Button variant="secondary" onClick={() => setAdding(true)}>
+          Add a board
         </Button>
         <Button loading={searching || pending === "scan"} disabled={pending !== null || !b?.enabled || !snapshot.config.workers_enabled} onClick={scan} icon={<RefreshCw size={14} aria-hidden="true" />}>
           {searching ? "Searching…" : "Search now"}
