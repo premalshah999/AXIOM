@@ -33,6 +33,12 @@ def form(*parts, action="/submit/1"):
 
 
 APPLY_LINK = '<p><a class="apply" href="/apply/1">Apply for this job</a></p>'
+# The page's own witness of a lost click: a press whose click never reached the control pressed. The engine may recover by pressing again,
+# so without this a run would pass and hide the very thing the trap is for. What matters is that the first press is not lost.
+LOST_CLICK = """<script>let pressed=null,timer=null;
+document.addEventListener('mousedown',e=>{pressed=e.target.closest('a,button');clearTimeout(timer);
+  timer=pressed&&setTimeout(()=>navigator.sendBeacon('/lost-click'),600)},true);
+document.addEventListener('click',e=>{if(pressed&&e.target.closest('a,button')===pressed)clearTimeout(timer)},true);</script>"""
 PLAIN_FORM = page("Apply", "<h1>Apply: Software Engineer</h1>" + form(NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD, SUBMIT_BUTTON))
 THREE_PAGES = {"/apply/1": PLAIN_FORM, "/submit/1": THANKS}
 
@@ -86,12 +92,14 @@ blur_moves_apply = Scenario(
         "/jobs/1": page(
             "Software Engineer",
             """<label for="a">Get job alerts by email</label><input id="a" name="alert" type="email" autofocus required>
-            <div id="m"></div>""" + POSTING + APPLY_LINK + """<script>
+            <div id="m"></div>""" + POSTING + APPLY_LINK + LOST_CLICK + """<script>
             document.getElementById('a').addEventListener('blur',e=>{ if(!e.target.value)
               document.getElementById('m').innerHTML='<div class="err">An email address is required.</div>' })</script>""",
         ),
+        "/lost-click": "{}",
         **THREE_PAGES,
     },
+    never=("/lost-click",),
 )
 
 autofocus_gate = Scenario(
@@ -124,13 +132,16 @@ blur_moves_submit = Scenario(
                 NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD,
                 '<div id="m"></div>', SUBMIT_BUTTON,
             )
+            + LOST_CLICK
             # Only when focus leaves for the button or for nothing, with the form complete: the press of Submit, and nothing before it.
             + """<script>let shown=false;const form=document.querySelector('form');form.addEventListener('focusout',e=>{
               const to=e.relatedTarget; if(shown||(to&&to.tagName!=='BUTTON')||![...form.elements].every(x=>x.tagName==='BUTTON'||x.value)) return; shown=true;
               document.getElementById('m').innerHTML='<div class="err">Please check your answers before you send them.</div>' })</script>""",
         ),
+        "/lost-click": "{}",
         "/submit/1": THANKS,
     },
+    never=("/lost-click",),
 )
 
 cookie_wall = Scenario(

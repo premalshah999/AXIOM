@@ -2462,12 +2462,12 @@ class BrowserEngine:
 
     async def prepare_page(self, page):
         """Per-page protections; never context-wide, because the desktop browser is shared."""
-        if self.config.browser_cdp_url:
-            # no_defaults avoids Chrome's unsupported download override, but also omits
-            # Playwright's focus emulation. This does not activate a tab or an OS window.
-            focus = await self.context.new_cdp_session(page)
-            await focus.send("Emulation.setFocusEmulationEnabled", {"enabled": True})
-            self.focus_sessions.append(focus)
+        # no_defaults avoids Chrome's unsupported download override, but also omits Playwright's focus emulation: on connect_over_cdp, which
+        # both browsers use. Without it a page has no focus, blur handlers never fire, and a run on the own browser never met what the
+        # worker Chrome meets: on-blur validation moving a control. This does not activate a tab or an OS window.
+        focus = await self.context.new_cdp_session(page)
+        await focus.send("Emulation.setFocusEmulationEnabled", {"enabled": True})
+        self.focus_sessions.append(focus)
         await deny_location(self.context, page)
         await self.captcha.install(page)
         page.on("request", self.commit_request)
