@@ -3089,7 +3089,7 @@ class Adapter:
             "create": r"^(?:create(?: (?:an? )?account)?|register|sign up|create profile|submit|continue|next)$",
             "reset": r"^(?:submit|send|send (?:a |the )?(?:reset )?(?:link|email|code|instructions)|send reset link|"
             r"reset(?: (?:my )?password)?|request (?:a )?reset|continue|set(?: (?:my |a |new )*)?password|"
-            r"change(?: (?:my |new )*)?password|save(?: (?:my |new |and continue|changes)*)?(?: password)?|"
+            r"change(?: (?:my |new )*)?password|save(?: and continue| changes| (?:(?:my|new) )*password)?|"
             r"update(?: (?:my |new )*)?(?:password)?|confirm(?: (?:my |new )*password)?)$",
         }[mode]
         hits = [
