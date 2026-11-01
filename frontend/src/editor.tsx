@@ -368,7 +368,7 @@ function Workbench({
         : { tone: "neutral", text: "Building preview…" };
   const fileName = pdfName((draft.doc.name || "Resume") + (initial.version?.job ? " for " + initial.version.job.company : " resume"));
   const job = initial.version?.job;
-  const title = master ? "Your copy" : job ? job.company : initial.base_artifact_id ? "Tailored version" : "New version";
+  const title = master ? "Your copy" : job ? job.company : initial.base_artifact_id ? "Version for a job" : "New version";
   const subtitle = master
     ? `${master.status === "approved" ? "Approved" : "Draft"} · ${(Math.floor((master.verification.coverage ?? 0) * 1000) / 10).toString()}% of your original words`
     : initial.base_artifact_id
@@ -399,7 +399,7 @@ function Workbench({
         (r.problems.length
           ? `Saved as a new version. Check: ${r.problems[0]}.`
           : tailoringOff
-            ? "Saved as a new version. It isn't sent to anyone while tailoring is off."
+            ? "Saved as a new version. It isn't sent to anyone while rewording is off."
             : draft.job
               ? "Saved as a new version. Applications for this job will use it."
               : "Saved as a new version."),

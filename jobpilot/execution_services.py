@@ -20,8 +20,22 @@ def enabled(db):
     return bool(db.get_setting("execution_services", {}).get("enabled"))
 
 
+def resume_policy(db):
+    """What employers receive. Never chosen means the newest uploaded PDF as it is: rewording starts from an approved copy, which
+    only the person's own steps on Resumes make, so a default of "tailored" held every application of a new install at "Preparing
+    a tailored resume" for ever (a first run, 2026-11-01; it only ever worked for an installation whose policy was set by hand)."""
+    from .db import Resume
+
+    policy = db.get_setting("application_resume_policy", {}) or {}
+    if policy:
+        return policy
+    with db.session() as s:
+        newest = s.scalar(select(Resume.id).where(Resume.demo.is_(False)).order_by(Resume.created_at.desc()).limit(1))
+    return {"mode": "master", "resume_id": newest, "automatic_tailoring": False, "source": "default"} if newest else {}
+
+
 def master_policy(db):
-    policy = db.get_setting("application_resume_policy", {})
+    policy = resume_policy(db)
     return policy if policy.get("mode") == "master" else None
 
 

@@ -114,7 +114,9 @@ def source_pdf(db, config, resume_id: str | None = None):
     """(resume row values, pdf bytes) for the master source resume."""
     from ...db import Resume
 
-    policy = db.get_setting("application_resume_policy", {}) or {}
+    from ...execution_services import resume_policy
+
+    policy = resume_policy(db)
     with db.session() as s:
         # The policy names the resume it sends as resume_id (readiness and the queue read that): with two resumes uploaded, this took
         # the first it found, so the page named and Import transcribed a PDF that wasn't the one being sent.

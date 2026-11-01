@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
+from ...execution_services import resume_policy
 from . import editor, evidence, pipeline
 from . import master as master_mod
 from .tables import RsArtifact
@@ -343,7 +344,7 @@ def router(service) -> APIRouter:
             "master": master_mod.master_view(row),
             "approved_id": approved.id if approved else None,
             "source": {"id": source["id"], "name": source["name"]} if source else None,
-            "policy": db.get_setting("application_resume_policy", {}) or {"mode": "tailored"},
+            "policy": resume_policy(db) or {"mode": "tailored"},
         }
 
     @r.put("/policy")
