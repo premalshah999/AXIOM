@@ -167,8 +167,8 @@ function StatusBlock({ state, reason, earlier, hold, children }: { state: string
       <p className="dr-status-word">
         {hold ? <StatusPill state={state} label="Held" tone="hold" /> : <StatusPill state={state} />}
       </p>
-      {(hold ? hold.next : info.explain) && <p className="dr-status-why">{hold ? hold.next : info.explain}</p>}
-      {(hold ? hold.reason : reason) && <p className="dr-status-reason">{hold ? hold.reason : reason}</p>}
+      {(hold ? hold.reason : info.explain) && <p className="dr-status-why">{hold ? hold.reason : info.explain}</p>}
+      {(hold ? hold.next : reason) && <p className="dr-status-reason">{hold ? hold.next : reason}</p>}
       {children}
     </section>
   );
