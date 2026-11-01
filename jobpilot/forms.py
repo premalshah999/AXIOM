@@ -1055,8 +1055,12 @@ class NetworkMonitor:
         host = (parts.hostname or "").lower()
         telemetry = ("google-analytics.com", "googletagmanager.com", "doubleclick.net",
                      "segment.io", "sentry.io", "datadoghq.com", "hotjar.com", "clarity.ms", "nr-data.net")
-        if request.resource_type != "document" and (
-            any(host == d or host.endswith("." + d) for d in telemetry) or BEACON_REQUEST.search(host + parts.path)
+        # A sign-in widget is a form POSTed into an iframe, so the browser calls it a document and the rule below that
+        # counts every document at any age held each readiness wait to its deadline: Workday's "Apply with LinkedIn"
+        # held 1,592 waits for 8,120 s in a week (2.3 h, 12 s per Workday application, 2026-11-01). A beacon host is
+        # never the application, whatever the request calls itself.
+        if BEACON_REQUEST.search(host + parts.path) or (
+            request.resource_type != "document" and any(host == d or host.endswith("." + d) for d in telemetry)
         ):
             return
         if request.resource_type in {"xhr", "fetch", "document"}:
