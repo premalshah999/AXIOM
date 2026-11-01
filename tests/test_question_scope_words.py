@@ -51,3 +51,11 @@ def test_a_recorded_debarment_fact_supports_a_debarment_question():
     label = "Please indicate whether you have been declared ineligible to contract with any agency of the U.S. Government."
     assert topic(label) == "government"
     assert relevant_fact(label, "debarment_proceedings_pending")
+
+
+def test_opting_out_is_no_visa():
+    from jobpilot.eligibility import _visa_tokens
+
+    assert not _visa_tokens("Employees are not eligible for the plan but may opt out at any time; opt-in media is ineligible.")
+    assert _visa_tokens("Candidates on OPT are not eligible.") == {"opt"}
+    assert _visa_tokens("STEM OPT and CPT are not accepted.") == {"opt", "cpt"}
