@@ -19,7 +19,7 @@ from ...db import Job, Run, Setting
 from ...discovery import add_job, posting_api_text
 from ...link_intake import prepare
 from ...network import public_url
-from ...owner_apply import KEY, apply
+from ...owner_apply import KEY, apply, restore
 from ...schemas import JobInput
 
 MAX_LINKS = 25
@@ -108,6 +108,10 @@ def router(service) -> APIRouter:
                 if created:
                     # The posting's text arrives in the background; queueing does not wait for it.
                     asyncio.create_task(posting_api_text(db, row["id"], row["url"]))
+                if row["status"] == "archived":
+                    # Pasting the link again is the owner asking for it again. A removed job comes back unless an
+                    # application may have reached the employer or it asked for an identifier (restore says which).
+                    await asyncio.to_thread(restore, service, row["id"])
                 outcome = await apply(service, row["id"])
                 results.append({"url": url, "job_id": row["id"], "created": created, **outcome, **({"resolved_url": link} if link != url else {})})
             except QueueBlocked as exc:

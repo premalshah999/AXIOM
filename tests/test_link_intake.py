@@ -199,3 +199,33 @@ async def test_a_page_without_structured_data_does_not_give_the_job_its_page_tit
     with service.db.session() as s:
         row = s.get(Job, job_id)
         assert row.title == "" and "data pipelines" in row.description
+
+
+def test_pasting_a_removed_jobs_link_again_brings_it_back_unless_the_rule_removed_it(client, service, monkeypatch):
+    """The dialog said "restore it before applying" and offered no way to (owner re-pasted sign-in failures, 2026-10)."""
+    from jobpilot.db import Run
+
+    service.dispatch = True
+    seen = []
+
+    async def fake_apply(service, job_id):
+        with service.db.session() as s:
+            seen.append(s.get(Job, job_id).status)
+        return {"job_id": job_id, "state": "queued", "run_id": "r", "message": "Application queued."}
+
+    async def nothing(*a):
+        return None
+
+    monkeypatch.setattr("jobpilot.api.routes.queue.apply", fake_apply)
+    monkeypatch.setattr("jobpilot.api.routes.queue.posting_api_text", nothing)
+    urls = ["https://boards.example.test/acme/jobs/31", "https://boards.example.test/acme/jobs/32"]
+    first = client.post("/api/queue/links", json={"urls": urls}).json()["results"]
+    with service.db.exclusive() as s:
+        for r in first:
+            s.get(Job, r["job_id"]).status = "archived"
+        s.add(Run(job_id=first[0]["job_id"], state="waiting_browser", mode="submit", reason="Could not sign in"))
+        s.add(Run(job_id=first[1]["job_id"], state="cancelled", mode="submit",
+                  reason="Application asks for ssn; the job was removed under the owner rule"))
+    again = client.post("/api/queue/links", json={"urls": urls}).json()["results"]
+    assert [r["state"] for r in again] == ["queued", "refused"]
+    assert seen[-1] == "ready" and "government or bank identifier" in again[1]["message"]
