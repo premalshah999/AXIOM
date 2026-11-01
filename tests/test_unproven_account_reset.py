@@ -118,7 +118,7 @@ async def test_a_refusal_after_an_unanswered_reset_does_not_request_another_rese
     value.config.account_password_reset = True
     result = await value.on_sign_in(obs)
     value.request_reset.assert_not_awaited()
-    assert result["reason"].startswith("This employer has an account")
+    assert result["reason"].startswith("This employer refuses the saved password")
     assert value.accounts.record(URL)["state"] == "password_unknown"
     # The page's own controls are named, so a wording the pattern misses shows in the trail.
     assert any("no registration link" in m and d and d.get("controls") for _, m, d in emitted)

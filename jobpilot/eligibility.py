@@ -31,9 +31,14 @@ SPONSOR_EXCLUSION = re.compile(
     r"\bsponsorship\s+will\s+not\s+be\s+(?:available|provided|offered)\b|"
     r"\b(?:cannot|unable to|not able to|will not|do not|does not)\s+(?:provide\s+)?sponsor(?:ship)?\b|"
     r"\bmust\s+(?:not|never)\s+(?:require|need)\s+(?:\w+\s+){0,3}sponsorship\b|"
-    r"\bwithout\s+(?:(?:requiring|needing)\s+)?(?:\w+\s+){0,3}sponsorship\b",
+    r"\bwithout\s+(?:(?:requiring|needing)\s+)?(?:\w+\s+){0,3}sponsorship\b|"
+    # "does not provide immigration-related sponsorship", "Do not apply for this role if you will need ... sponsorship".
+    r"\b(?:cannot|unable to|not able to|will not|do not|does not)\s+(?:provide|offer)\s+(?:[\w-]+\s+){0,2}sponsorship\b|"
+    r"\bdo not apply\b.{0,80}\b(?:need|require)\b.{0,40}\bsponsorship\b",
     re.I,
 )
+# The sentence after a bar that spells out whom it covers: "... This includes ... work authorization (e.g., H1-B, OPT)."
+BAR_CONTINUES = re.compile(r"(?:this|that|which)\s+(?:includes?|covers?|applies to|means)\b", re.I)
 
 
 # "U.S. citizenship is required", "U.S. Citizenship required", "Must be a U.S. citizen", "U.S. citizens only". A posting
@@ -217,6 +222,7 @@ def policy_findings(text, profile, source="posting"):
     status, status_ids = confirmed_status(profile.facts)
     # Paragraph/sentence boundaries avoid attaching an EEO statement to a restriction. "U.S." is one word: its periods
     # ended the sentence of "U.S. citizenship is required".
+    after_bar = False
     for raw in re.split(r"(?<=[.!?])\s+|[\r\n]+", _us_words(text)):
         quote = _normalized(raw)
         if not quote or len(quote) > 2000:
@@ -227,11 +233,12 @@ def policy_findings(text, profile, source="posting"):
             re.I,
         ):
             continue
-        barred = bool(INELIGIBLE.search(quote))
+        barred = bool(INELIGIBLE.search(quote)) or bool(after_bar and BAR_CONTINUES.match(quote))
         exception = bool(re.search(r"\b(?:unless|except|case.by.case)\b", quote, re.I))
         sponsor = bool(SPONSOR_EXCLUSION.search(quote)) or bool(
             barred and re.search(r"\b(?:need(?:ing)?|requir(?:e|ing))\b.{0,60}\bsponsorship\b", quote, re.I)
         )
+        after_bar = sponsor or barred
         if sponsor:
             yield PolicyFinding(
                 "sponsorship",

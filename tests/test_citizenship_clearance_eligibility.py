@@ -75,3 +75,16 @@ def test_a_negation_does_not_reach_across_a_clause():
     assert any(f.subject == "citizenship" and f.verdict == "unmet" for f in check(text, NOT_CITIZEN).findings)
     # Inside one clause the negation still stands.
     assert not any(f.subject == "citizenship" for f in check("U.S. citizenship is not required for this role.", NOT_CITIZEN).findings)
+
+
+def test_a_bar_spelled_out_in_the_next_sentence_closes_the_role_to_a_named_status():
+    text = (
+        "The employer does not provide immigration-related sponsorship for this role. Do not apply for this role if you will "
+        "need sponsorship now or in the future. This includes any work authorization requiring immigration support from the "
+        "company (e.g., H1-B, OPT, STEM OPT, CPT)."
+    )
+    profile = Profile(facts={"current_immigration_status_us": "OPT", "requires_future_sponsorship_US": False})
+    assert [f.subject for f in check_eligibility(text, profile).conflicts] == ["visa_status"]
+    assert not check_eligibility("Candidates include those on OPT. This includes OPT and CPT.", profile).conflicts
+    citizen = Profile(facts={"current_immigration_status_us": "Citizen", "requires_future_sponsorship_US": False})
+    assert not check_eligibility(text, citizen).conflicts

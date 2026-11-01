@@ -384,8 +384,8 @@ RESET_RETRY_SECONDS = 6 * 3600
 RESET_CODE_INLINE_WAIT = 150
 RESET_WINDOW_SECONDS = 24 * 3600
 PASSWORD_UNKNOWN = (
-    "This employer has an account for your email but refuses the saved password, and its password reset email never "
-    "arrives. Reset the password in your own browser, then save it under Settings > Accounts"
+    "This employer refuses the saved password, its password reset email never arrives, and signing up did not open a new "
+    "account. Reset the password in your own browser, then save it under Settings > Accounts"
 )
 ALIAS_REFUSED = (
     "This employer's sign-up form refuses the plus-address that was to replace its unusable account for your email. "
@@ -587,6 +587,8 @@ class Adapter:
     # A run released by a matched emailed sign-in link opens it first (matched_link_waiting). Workday, Oracle and iCIMS
     # keep their own continuations of a parked mail wait.
     link_resume = True
+    # The last page of this run that offered "Forgot your password?".
+    sign_in_page = None
 
     def __init__(self, engine, ats_id=None, name=None):
         if ats_id:
@@ -2459,6 +2461,8 @@ class Adapter:
         if not self.accounts.ready:
             return self.defer("Add your email to the profile so I can identify you to employers")
         url = self.auth_url(obs)
+        if any(FORGOT.search(b["label"]) for b in obs["controls"]):
+            self.sign_in_page = self.page.url
         record = self.accounts.record(url)
         known = record.get("state") in KNOWN_ACCOUNT
         if mode == "create" and not self.accounts.may_create and not known:
@@ -2966,6 +2970,21 @@ class Adapter:
             await asyncio.sleep(0.4)
         return "unknown", "; ".join(obs["errors"][:2])
 
+    async def form_changed(self, before, wait=8.0):
+        """A click left the form in `before`. A slow postback still shows the old page for seconds, and the next step would
+        act on the page it is leaving; False after `wait` means the click opened nothing."""
+        shape = lambda obs: sorted((f.get("label"), f.get("type")) for f in obs["fields"])  # noqa: E731
+        deadline = time.monotonic() + wait
+        while True:
+            try:
+                if shape(await self.form.scan()) != shape(before):
+                    return True
+            except Exception:
+                pass  # The page is navigating.
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(0.5)
+
     async def switch(self, obs, pattern):
         # The page usually changed since `obs` (a failed sign-in reloads it); observe it again.
         obs = await self.form.scan()
@@ -3082,21 +3101,27 @@ class Adapter:
                 state="waiting_browser",
                 blocker_type="account",
             )
-        if resets_unanswered(record) >= RESET_UNANSWERED_CAP:
-            # Two confirmed resets, no mail: a third would only repeat the silence (Textron 9 waits, Lenovo 8, Bain and
-            # Intuit 7 each). The job stops here, with the reason, until a password is saved under Settings > Accounts.
-            return self.defer(PASSWORD_UNKNOWN, manual, state="waiting_browser", blocker_type="account")
         if (self.alias_unregistered(record) or not account_evidenced(record)) and not self.attempts["create_first"]:
             # An address the employer has no account for gets no mail from a reset. A replacement address was never
             # registered; any other account that nothing shows exists is tried at the sign-up route once first (it answers
             # "already exists" if it does, and then a reset is justified).
             self.attempts["create_first"] += 1
+            before = await self.form.scan()
             if self.accounts.may_create and not create_spent(record) and create_allowed(record, self.e.run_id) and await self.switch(obs, CREATE_LINK):
-                self.accounts.mark(url, "no_account", self.accounts.saved(url) or self.accounts.credentials(url))
-                self.emit("account", "Nothing shows this employer has an account for this address; trying its sign-up route before asking for a reset")
-                return None
+                if await self.form_changed(before):
+                    self.accounts.mark(url, "no_account", self.accounts.saved(url) or self.accounts.credentials(url))
+                    self.emit("account", "Nothing shows this employer has an account for this address; trying its sign-up route before asking for a reset")
+                    return None
+                # The link opened nothing the run can follow. Typing the refused password again cannot help and walks toward
+                # a lockout (Farmers' SuccessFactors, 2026-11-01), so the page's own password reset is next.
+                self.emit("account", "The employer's sign-up link did not open; resetting the password instead")
             if self.alias_unregistered(record):
                 return self.defer(ALIAS_UNREGISTERED, manual, state="waiting_browser", blocker_type="account")
+        if resets_unanswered(record) >= RESET_UNANSWERED_CAP:
+            # Two confirmed resets, no mail: a third would only repeat the silence (Textron 9 waits, Lenovo 8, Bain and
+            # Intuit 7 each). Silence can mean no account exists, so the sign-up route above comes first. The job stops
+            # here, with the reason, until a password is saved under Settings > Accounts.
+            return self.defer(PASSWORD_UNKNOWN, manual, state="waiting_browser", blocker_type="account")
         self.attempts["reset"] += 1
         obs = await self.form.scan()
         forgot = [b for b in obs["controls"] if FORGOT.search(b["label"])]
@@ -3108,6 +3133,12 @@ class Adapter:
             forgot = [b for b in obs["controls"] if FORGOT.search(b["label"])]
         if not forgot and await self.switch(obs, SIGNIN_LINK):
             # "Forgot password" usually lives on the sign-in page, not the sign-up page.
+            obs = await self.form.scan()
+            forgot = [b for b in obs["controls"] if FORGOT.search(b["label"])]
+        if not forgot and self.sign_in_page:
+            # A registration page with only Register and Cancel has no link back, and its "already exists" is what justifies
+            # this reset (Textron's Taleo, 2026-11-01). The sign-in page seen earlier in the run holds "Forgot your password?".
+            await self.page.goto(self.sign_in_page, wait_until="domcontentloaded", timeout=25000)
             obs = await self.form.scan()
             forgot = [b for b in obs["controls"] if FORGOT.search(b["label"])]
         if not forgot:
