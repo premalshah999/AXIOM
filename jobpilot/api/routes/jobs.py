@@ -125,6 +125,19 @@ def router(service) -> APIRouter:
             "reserved": reserved,
         }
 
+    @r.get("/api/logo")
+    async def company_logo(company: str = "", url: str = ""):
+        """A company's icon from this computer's cache, fetched once. 404 means the page shows its letter tile."""
+        from fastapi.responses import Response
+
+        from ...logos import domain_for, logo
+
+        domain = domain_for(company, url) if config.company_logos else None
+        image = await logo(config.data_dir, domain) if domain else None
+        if not image:
+            raise HTTPException(404, "No logo")
+        return Response(image, media_type="image/png", headers={"Cache-Control": "private, max-age=604800"})
+
     @r.post("/api/jobs/{job_id}/rank")
     async def classify(job_id: str):
         return await asyncio.to_thread(rank_in_thread, db, config, job_id)

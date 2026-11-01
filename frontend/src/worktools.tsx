@@ -83,6 +83,7 @@ export function Chips({
  */
 export function JobCell({
   company,
+  url,
   role,
   title,
   meta,
@@ -91,6 +92,8 @@ export function JobCell({
   onOpen,
 }: {
   company: string;
+  /** The posting's address: with it, the company's icon can replace its letter. */
+  url?: string;
   role: string;
   title?: string;
   meta?: ReactNode;
@@ -110,7 +113,7 @@ export function JobCell({
         onOpen();
       }}
     >
-      <Monogram name={company} />
+      <Monogram name={company} url={url} />
       <strong title={company}>{company}</strong>
       <span className={"ax-job-role" + (unread ? " is-unread" : "")} title={hint ? `${role} · ${hint}` : role}>
         {role}

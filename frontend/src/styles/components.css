@@ -1431,6 +1431,23 @@ body:has(.ax-savebar) .ax-toasts {
   line-height: 1;
   user-select: none;
 }
+.ax-mono {
+  position: relative;
+  overflow: hidden;
+}
+.ax-mono > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 12%;
+  object-fit: contain;
+  background: #fff;
+  opacity: 0;
+}
+.ax-mono.has-logo > img {
+  opacity: 1;
+}
 .ax-mono[data-tone="0"] {
   background: var(--mono-0);
 }

@@ -30,6 +30,9 @@ FIELDS = {
     "telegram_bot_token": ("Telegram", "Telegram bot token", True, "From @BotFather in Telegram: /newbot."),
     "telegram_user_id": ("Telegram", "Your Telegram user ID", False, "A number, from @userinfobot in Telegram."),
     "twocaptcha_api_key": ("Captcha", "2Captcha API key", True, "Optional, paid per solve. 2captcha.com > Dashboard."),
+    "company_logos": ("Appearance", "Show company logos", False,
+                      "Fetches a company's icon from Google once and keeps it on this computer. Google sees the company's "
+                      "web address, not you or the job. Off: letter tiles only."),
     "serper_api_key": ("Discovery", "Serper API key", True, "Optional. Adds Google results to job discovery (serper.dev)."),
     # Everything else a new owner sets (owner 2026-10-28: "a user should be able to configure API keys, captcha keys,
     # gmail app password, everything through the web interface").
