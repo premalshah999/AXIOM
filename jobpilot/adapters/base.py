@@ -320,6 +320,8 @@ SEND_CODE = re.compile(
     r" (?:code|passcode|otp|pin)$",
     re.I,
 )
+# How long a code step looks for the picture puzzle its "Get code" opens before it concludes none was shown.
+PUZZLE_WATCH_SECONDS = 12
 CONSENT_MENUS = {"select", "combobox", "dropdown", "radio"}
 CONSENT_LABEL = re.compile(r"acknowledg|agree|consent|accept|privacy|terms", re.I)
 AUTH_BUTTON = re.compile(
@@ -1580,11 +1582,16 @@ class Adapter:
             return challenge
         # ByteDance's "Get code" opens its picture puzzle ("Select 2 objects that are the same shape", 2026-10-28) and
         # mails the code only once it is solved; the run waited for a code that was never sent.
+        # The puzzle is drawn after the site's own request for it returns, not at the click: ByteDance's runs of 2026-11-01
+        # (19 runs, 15 jobs, none ever confirmed) looked for 3 s, saw none, and parked for the 20-minute code wait with the
+        # puzzle open on the page (final.png), so no code was ever sent and the parked wait held the email sender lease
+        # that seven other applications then timed out on. Watch for it for PUZZLE_WATCH_SECONDS before concluding none.
         solved = self.attempts["inpage_puzzle"]
-        for _ in range(4):
+        deadline = time.monotonic() + PUZZLE_WATCH_SECONDS
+        while True:
             if blocked := await self.solve_inpage_puzzle():
                 return blocked
-            if self.attempts["inpage_puzzle"] != solved:
+            if self.attempts["inpage_puzzle"] != solved or time.monotonic() >= deadline:
                 break
             await asyncio.sleep(0.75)
         return True
