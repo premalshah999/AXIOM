@@ -357,6 +357,13 @@ def discover_due(
         if j["id"] not in good
         and (
             j["id"] not in outcomes
+            # A gate rejection recorded when the gate read the posting wrongly (a city-only location without its country,
+            # 46 listed jobs, 2026-11-01) is ranked once the gate passes it; the cheap check below keeps it out otherwise.
+            or (
+                outcomes[j["id"]]["status"] == "rejected"
+                and outcomes[j["id"]]["result"].get("gate")
+                and not graduation_gate(j, profile, at)
+            )
             or (
                 outcomes[j["id"]]["status"] == "failed"
                 and (outcomes[j["id"]]["retry_at"] or "") <= at.isoformat()

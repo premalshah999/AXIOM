@@ -7,7 +7,7 @@ from dbos import DBOS, SetEnqueueOptions
 from dbos._error import DBOSQueueDeduplicatedError
 from sqlalchemy import select
 
-from .db import Job, Run, Source, now, record
+from .db import Job, JobListing, Run, Source, now, record
 from .discovery import discover
 from .admission import employer_partition
 from .host_health import INTERRUPTED
@@ -157,6 +157,24 @@ async def enqueue_matching():
         return False
 
 
+def classification_inputs(session, job_ids):
+    """The unranked jobs among `job_ids`, as the gate and ranker read them. The listing's country rides with each job:
+    the board screen already read it from the posting's own data. A Workday row says only "Arlington" or "Santa Clara";
+    the gate read that without a country as non-US and recorded a rejection no later pass revisited: 46 of 104 unranked
+    listed jobs (2026-11-01)."""
+    return [
+        {
+            **{k: getattr(j, k) for k in ("id", "identity", "url", "title", "location", "description", "company")},
+            "country": country or "",
+        }
+        for j, country in session.execute(
+            select(Job, JobListing.country)
+            .outerjoin(JobListing, JobListing.job_id == Job.id)
+            .where(Job.id.in_(job_ids), Job.status == "new", Job.score.is_(None))
+        )
+    ]
+
+
 @DBOS.workflow(max_recovery_attempts=2)
 async def classification_workflow(job_ids: list[str]):
     """Ranking is background work; partial progress wakes preparation/dispatch."""
@@ -170,17 +188,7 @@ async def classification_workflow(job_ids: list[str]):
         if SERVICE.db.get_setting("control", {}).get("paused"):
             return
         with SERVICE.db.session() as s:
-            jobs = [
-                {
-                    k: getattr(j, k)
-                    for k in ("id", "identity", "url", "title", "location", "description", "company")
-                }
-                for j in s.scalars(
-                    select(Job).where(
-                        Job.id.in_(job_ids[offset : offset + policy.classify_batch]), Job.status == "new", Job.score.is_(None)
-                    )
-                )
-            ]
+            jobs = classification_inputs(s, job_ids[offset : offset + policy.classify_batch])
         if not jobs:
             continue
         await classify(
