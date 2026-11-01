@@ -3830,6 +3830,11 @@ class FormSession:
                 editable = await el.evaluate(
                     "e => ['INPUT','TEXTAREA'].includes(e.tagName) && !e.readOnly && !e.disabled"
                 )
+                if not opts and not (editable and await el.get_attribute("aria-autocomplete") in {"list", "both"}):
+                    # A menu that fetches its rows when it opens shows nothing for a second or more; it was read as offering
+                    # no choices, and the question reached the owner with an empty dropdown (owner 2026-11-01). One patient
+                    # look, only where the control is not a search box (those list nothing until typed, by design).
+                    opts = await widgets.wait_options(frame, scope, timeout=4.0, owner=el)
                 field["options"] = [
                     o["text"] for o in opts if not o["disabled"] and not widgets.placeholder_option(o["text"])
                 ][:250]
@@ -3938,6 +3943,11 @@ class FormSession:
                 dom_id = (self.fields.get(item["field_id"]) or {}).get("dom_id")
                 if dom_id:
                     self.row_hints[dom_id] = {"kind": found["kind"], "identity": identity}
+        from .option_reader import complete_choices
+
+        # The owner is asked with every choice the page offers, read patiently (a menu that loads when opened, a long scrolled
+        # list), or told it is a search to type into: never an empty dropdown (owner 2026-11-01).
+        await complete_choices(self)
 
     async def attach_owner_documents(self):
         """Attach a document the owner sent for an upload question (a transcript, a work sample) to each required,

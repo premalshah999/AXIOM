@@ -15,6 +15,11 @@ class AnswerInput(BaseModel):
     answer: str = Field(min_length=1, max_length=8000)
 
 
+class BatchAnswer(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=200)
+    answer: str = Field(min_length=1, max_length=8000)
+
+
 class Reconcile(BaseModel):
     submitted: bool
     evidence: str = Field(min_length=5, max_length=4000)
@@ -106,6 +111,14 @@ def router(service) -> APIRouter:
         from ...receipts import check_receipts
 
         return await check_receipts(service.mail, run_id)
+
+    @r.post("/api/reviews/batch")
+    async def review_batch(data: BatchAnswer):
+        """One answer for every row of one question (Needs you › Send to N applications)."""
+        try:
+            return await service.resolve_reviews(data.ids, data.answer)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
 
     @r.post("/api/reviews/{review_id}")
     async def review(review_id: str, data: AnswerInput):

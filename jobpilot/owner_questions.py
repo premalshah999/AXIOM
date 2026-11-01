@@ -76,6 +76,8 @@ def context_from(item):
             k: str(v)[:120] for k, v in (extra.get("history_identity") or {}).items() if v and isinstance(k, str)
         },
         "options_partial": bool(extra.get("options_partial")),
+        # A list that stays empty until something is typed (option_reader): the owner types the start of the answer.
+        "search_only": bool(extra.get("search_only")),
         "required": bool(item.get("required")),
         "date_format": str(extra.get("date_format") or "")[:40],
         "date_parts": [str(x)[:10] for x in (extra.get("date_parts") or [])][:3],
@@ -425,7 +427,9 @@ def requirement(question, options=(), context=None, reason=""):
     else:
         shape = expected_format(context)
         limit = context.get("maxlength") or 0
-        if shape:
+        if context.get("search_only"):
+            line = "Search box: type the start of your answer; the form lists matches as you type"
+        elif shape:
             line = f"Type {shape}"
         elif field_type == "textarea":
             line = "Paragraph: a few sentences" + (f", at most {limit} characters" if limit else "")
@@ -441,6 +445,11 @@ def free_text_allowed(options, context=None):
     """A searchable or partly read list, or one whose only "option" was a placeholder, takes a typed answer."""
     if (context or {}).get("type") == "checkbox":
         return False  # Yes or No: nothing else sets a box.
+    listed = sorted(normalize(t) for _, t in choices(options))
+    # A react-select's input is editable, so its list is marked partial; two choices, Yes and No, are the whole list
+    # (production 2026-11-01: "Are you a collector?" asked as a text box with two chips beside it).
+    if listed == ["no", "yes"]:
+        return False
     return bool((context or {}).get("options_partial")) or not choices(options)
 
 
