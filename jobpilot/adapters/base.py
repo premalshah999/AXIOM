@@ -548,8 +548,13 @@ class SiteWrites:
 
     def note(self, request):
         try:
-            own = (urlsplit(request.url).hostname or "").split(".")[-2:] == (urlsplit(self.page.url).hostname or "").split(".")[-2:]
-            if own and request.method in {"POST", "PUT", "PATCH"} and request.resource_type in {"document", "xhr", "fetch"}:
+            from ..browser import COMMIT_NOISE, COMMIT_TRACKING
+
+            parts = urlsplit(request.url)
+            own = (parts.hostname or "").split(".")[-2:] == (urlsplit(self.page.url).hostname or "").split(".")[-2:]
+            # Another host counts too, unless it is a pixel: sign-up forms post to the platform behind the page or sit in its frame.
+            other = not COMMIT_TRACKING.search(parts.path) and not COMMIT_NOISE.search(parts.hostname or "")
+            if (own or other) and request.method in {"POST", "PUT", "PATCH"} and request.resource_type in {"document", "xhr", "fetch"}:
                 self.seen = True
         except Exception:
             self.seen = True  # Unreadable counts as sent: the registration limit stays on the safe side.

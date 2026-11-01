@@ -151,3 +151,25 @@ async def test_a_press_that_sends_nothing_is_told_from_one_that_sends(page):
         await page.click("#sends")
         await page.wait_for_timeout(100)
     assert writes.seen
+
+
+def press_sees(url, page="https://careers.example.test/join", method="POST", kind="xhr"):
+    from jobpilot.adapters.base import SiteWrites
+
+    writes = SiteWrites(SimpleNamespace(url=page))
+    writes.note(SimpleNamespace(url=url, method=method, resource_type=kind))
+    return writes.seen
+
+
+def test_a_registration_posted_to_the_platform_behind_the_page_is_sent():
+    """Sign-up forms post to the platform's host, or sit in its frame. Read as "the page sent nothing", the stamp came off and
+    each run mailed another passcode with no daily limit (the limit's own safe side is "counts as sent")."""
+    assert press_sees("https://careers-example.platform.test/register")
+    assert press_sees("https://careers.example.test/register")
+    assert press_sees("https://other.example.test/join", kind="document")
+
+
+def test_a_pixel_on_another_host_and_a_read_are_not_a_registration():
+    assert not press_sees("https://px.ads.test/collect")
+    assert not press_sees("https://www.google-analytics.com/g/collect")
+    assert not press_sees("https://careers-example.platform.test/register", method="GET")
