@@ -89,6 +89,14 @@ def login_identifier(field):
     )
 
 
+# The address a second time. "Retype Email Address:" kept the resolver's address while "Email Address:" took the account's
+# (a plus-address), and the employer answered "Your email address doesn't match the repeated one" (Farmers, 2026-11-01).
+CONFIRM_EMAIL = re.compile(
+    r"^\W*(?:re-?type|re-?enter|confirm|verify|repeat)\b(?!.*\bcode\b).{0,24}e.?mail|^\W*e.?mail\b(?!.*\bcode\b).{0,24}\b(?:again|confirm\w*|re-?type|re-?enter)",
+    re.I,
+)
+
+
 SECURITY_QUESTION = re.compile(
     r"^\s*(?:security|secret|challenge) question(?:\s*(?:#|no\.?)?\s*\d+)?\s*\*?\s*$", re.I
 )
