@@ -774,6 +774,18 @@ def renderer_crashed(exc):
     return "crashed" in str(exc).split("\n", 1)[0].lower()
 
 
+def window_closed(exc, page=None):
+    """True when the tab, the window or the whole browser was closed under the run (by hand, by a crash, by quitting Chrome).
+    Playwright says so by class (TargetClosedError) or only by message ("Browser has been closed", "Connection closed while
+    reading from the driver", "Target closed"); a closed page is the third sign."""
+    first = str(exc).split("\n", 1)[0].lower()
+    return bool(
+        type(exc).__name__ in {"TargetClosedError", "BrowserTabClosed"}
+        or (page is not None and page.is_closed())
+        or re.search(r"(?:target|page|context|browser|connection|window)\b[^.:]{0,60}\b(?:has been |was |is )?(?:closed|disconnected)\b", first)
+    )
+
+
 class BrowserUnavailable(RuntimeError):
     """The worker's desktop browser is not running; nothing was opened or sent."""
 
@@ -1899,16 +1911,23 @@ class BrowserEngine:
             if not self.armed and (failed := net_failure(exc, diagnostics=exception_diagnostics(exc))):
                 self.result = failed
                 return self.result
-            if not self.armed and (
-                type(exc).__name__ in {"TargetClosedError", "BrowserTabClosed"}
-                or (page is not None and page.is_closed())
-                or renderer_crashed(exc)
-            ):
+            if self.armed and window_closed(exc, page):
+                # The owner closed the Chrome window (or Chrome quit) after Submit was pressed: what the employer received is
+                # not known, so the receipt check decides. The stored reason says what happened, not where the code was.
+                self.result = {
+                    "state": "submission_unknown",
+                    "reason": "The browser window was closed while the application was being sent; checking whether it went through",
+                    "blocker_type": "control_failure",
+                }
+                if confirmed := await self.confirm_post_commit():
+                    self.result = confirmed
+                return self.result
+            if not self.armed and (window_closed(exc, page) or renderer_crashed(exc)):
                 # Several same-site tabs can die with one renderer: infrastructure, not this
                 # application. Retry without spending a repair attempt.
                 self.result = {
                     "state": "timed_out",
-                    "reason": "The browser tab closed unexpectedly; the application will be retried",
+                    "reason": "The browser tab closed unexpectedly; the application will be retried",  # also: a window closed by hand
                     "blocker_type": "site_transient",
                     "recovery_cause": "browser_unavailable",
                 }

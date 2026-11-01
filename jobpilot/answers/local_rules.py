@@ -103,6 +103,13 @@ RECRUITER_AGENCY = re.compile(
     re.I,
 )
 
+# A question whose answer is the day it is filed: "Today's Date (Month)", "Date signed", "Signature date". Read from memory it
+# is a past day.
+DAY_OF_FILING = re.compile(
+    r"^\W*(?:today\W*s?\W+date|current date|date (?:signed|of signature)|signature date|signed on)\b(?:\W*(?:month|day|year))?\W*$",
+    re.I,
+)
+
 # When the applicant's current contract or assignment ends: for an applicant available immediately, the date they are
 # free to start. OmegaHires' required "Current contract end date" (JazzHR datepicker) took an "N/A" no date box
 # accepts; the owner's own answer was today's date (2026-10-27).
@@ -691,7 +698,14 @@ class LocalRulesMixin:
 
         # A bare "End Date" names no row: a confirmed answer to one row (an owner's birth date, saved by an earlier
         # build) answered every row, and SuccessFactors kept it as a current role's end date (Supermicro 2026-10-27).
-        saved = topic(f["label"]) != "source" and not BARE_HISTORY_DATE.fullmatch(f["label"])
+        # A question whose answer is the day itself ("Today's Date (Day)", "Date signed") is never read back from memory: PepsiCo
+        # (2026-10-27) sent the 22nd on the 27th, Mattel (2026-10-31) a date two weeks old, because an earlier run's stored day
+        # answered before the rule that writes today's date was reached.
+        saved = (
+            topic(f["label"]) != "source"
+            and not BARE_HISTORY_DATE.fullmatch(f["label"])
+            and not DAY_OF_FILING.search(f["label"])
+        )
         # Legacy punctuation-stripping hashes are intentionally not reused without
         # their reviewed question. ReviewedAnswer below safely retains that provenance.
         if key in p.approved_answers and saved:
@@ -1128,7 +1142,7 @@ class LocalRulesMixin:
                 label,
             )
         )
-        if part := re.fullmatch(r"today s date (month|day|year)", label):
+        if part := re.fullmatch(r"(?:today s date|current date|date signed|signature date) (month|day|year)", label):
             # A self-identification form's date in three controls (forms.label_signature_date), in the options' format.
             today = datetime.now(ZoneInfo(self.config.timezone)).date()
             candidates = {

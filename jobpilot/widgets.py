@@ -507,6 +507,15 @@ def checkbox_value(value):
 AMOUNT = re.compile(r"\$?\s*(\d{1,3}(?:[, \u00a0]\d{3})+|\d+)(?:\.(\d{1,2}))?")
 
 
+IDENTIFIER_LABEL = re.compile(
+    r"zip|postal|post\s?code|pin\s?code|phone|mobile|telephone|\bssn\b|social security|\bid\b|identif|licen[sc]e|passport"
+    r"|account|routing|\bein\b|\btax\b|\bcode\b",
+    re.I,
+)
+PHONE_EXT = re.compile(r"\s*(?:ext\.?|x)\s*\d+$", re.I)
+PHONE_SHAPE = re.compile(r"[+\d\s().\-\u2013/]*(?:\s*(?:ext\.?|x)\s*\d+)?", re.I)
+
+
 def same_amount(a, b):
     """Two AMOUNT matches name the same number."""
     whole = [re.sub(r"\D", "", m[1]) for m in (a, b)]
@@ -525,13 +534,23 @@ def same_value(field, actual, expected):
 
     if (shown := display_date(a)) and shown == display_date(e):
         return True  # "16 Oct 2026" (picker) is the date "10/16/2026" or "today".
-    if (number := AMOUNT.fullmatch(a)) and (typed := AMOUNT.fullmatch(e)) and same_amount(number, typed):
+    if (
+        (number := AMOUNT.fullmatch(a))
+        and (typed := AMOUNT.fullmatch(e))
+        and same_amount(number, typed)
+        and not IDENTIFIER_LABEL.search(str(field.get("label", "")))
+    ):
         # Workable shows the typed salary "80000" as "80,000" (Funnel Leasing 2026-10-25: read back as refused).
+        # A code is not an amount: the zip "20,874" was accepted for 20874 and submitted (Flourish Research, 2026-10-30).
         return True
     kind, label = field.get("type", ""), field.get("label", "")
     if kind == "tel" or re.search(r"phone|mobile|telephone|\bcell(?:ular)?\b", str(label), re.I):
         # "+1 555-555-0100" (widget format after typing) is the same number as "(555) 555-0100".
-        da, de = re.sub(r"\D", "", a), re.sub(r"\D", "", e)
+        if not PHONE_SHAPE.fullmatch(a) and not re.search(r"code|country|type|device|region", str(label), re.I):
+            # Letters among the digits are keystrokes that reached a country search ("+ de1 am2éric4a05013450" was
+            # read back as the right number and sent, Oscar Health 2026-10-31): digits alone do not make a phone.
+            return False
+        da, de = re.sub(r"\D", "", PHONE_EXT.sub("", a)), re.sub(r"\D", "", PHONE_EXT.sub("", e))
         if len(da) >= 10 and len(de) >= 10 and da[-10:] == de[-10:]:
             return True
     if kind == "checkbox":
@@ -616,6 +635,8 @@ def same_value(field, actual, expected):
             if not (a_date[1] and e_date[1]) or a_date[1] == e_date[1]:
                 return True
     if kind in {"tel", "date_parts", "date"} or re.search(r"phone|mobile|telephone|date", label, re.I):
+        if kind == "tel" and not PHONE_SHAPE.fullmatch(a):
+            return False  # Digits among other characters are not the number (see above).
         digits_a, digits_e = re.sub(r"\D", "", a), re.sub(r"\D", "", e)
         return bool(digits_e) and (digits_a == digits_e or digits_a.endswith(digits_e))
     if kind == "url" or re.search(r"linkedin|website|url|github|portfolio", label, re.I):

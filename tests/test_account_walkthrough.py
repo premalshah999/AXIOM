@@ -16,6 +16,7 @@ import pytest
 from jobpilot.adapters.base import Adapter, create_allowed, create_stamp
 from jobpilot.answers import Resolver
 from jobpilot.forms import FormSession
+from jobpilot.mail.vault import Vault
 from jobpilot.schemas import Profile
 
 GUEST_PAGE = """<!doctype html><html><head><title>Create a User Name and Password</title></head><body>
@@ -45,12 +46,12 @@ GIGYA_PAGE = """<!doctype html><html><body><h2>Career Opportunities: Create an A
 <label for=r>Retype password</label><input id=r type=password>
 <label for=fn>First name</label><input id=fn type=text><label for=ln>Last name</label><input id=ln type=text>
 <label for=c>Country/Region of Residence</label><select id=c><option>- Select -</option><option>United States</option></select>
-<div><input type=checkbox id=ack disabled> <a href="#" id=opener>Read and acknowledge the data privacy statement.</a> *</div>
+<div><input type=checkbox id=ack disabled> <a href="#" id=stmt>Read and acknowledge the data privacy statement.</a> *</div>
 <button type=button id=submit>Submit</button></form>
 <div id=dlg role=dialog style="display:none"><p>Data privacy statement ...</p>
 <button type=button id=accept>Acknowledge</button><button type=button id=cancel>Cancel</button></div>
 <script>
-opener.onclick=e=>{e.preventDefault();dlg.style.display='block'};
+stmt.onclick=e=>{e.preventDefault();dlg.style.display='block'};  // not id=stmt: window.opener is built in
 cancel.onclick=()=>dlg.style.display='none';
 accept.onclick=()=>{dlg.style.display='none';ack.disabled=false;ack.checked=true;};
 submit.onclick=()=>{window.sent=ack.checked?[e.value,p.value]:null;if(!ack.checked)window.refused=true};
@@ -154,11 +155,12 @@ async def build(page, service, tmp_path, url, inbox, job_url=None, ats="custom")
 
     engine = SimpleNamespace(
         service=SimpleNamespace(db=service.db, config=service.config, inbox=inbox,
-                                mail=SimpleNamespace(narrow=lambda *a: None, rule_for=lambda *_: True)),
+                                mail=SimpleNamespace(narrow=lambda *a: None, rule_for=lambda *_: True,
+                                                     vault=Vault(service.config))),
         config=service.config, form=form, page=page, profile=profile, run_id="run-1",
         job={"id": "j1", "url": job_url or url, "ats": ats}, run_record={"packet": {}}, result=None,
         emit=lambda kind, message, data=None: events.append((kind, message)),
-        redact=lambda u: u, extend=lambda *_: None, trace=nothing, refresh_expired_entry=false,
+        redact=lambda u: u, extend=lambda *_: None, trace=nothing, refresh_expired_entry=false, solve_captcha=nothing,
         email_verification=SimpleNamespace(prepare_submission=nothing), browser_challenge=nothing,
     )
     adapter = Adapter(engine)
@@ -209,6 +211,20 @@ async def test_a_gated_privacy_checkbox_is_acknowledged_before_the_registration_
     await page.goto(site.url + "/gigya")
     assert not await acknowledge_privacy_notice(page, authorized=False)
     assert not await page.evaluate("document.querySelector('#ack').checked")
+
+
+async def test_the_adapter_ticks_the_gated_privacy_box_before_it_presses_create(page, service, tmp_path, site):
+    """The same Atlas Copco page through Adapter.drive: the registration form is filled, the box acknowledged, and only
+    then Create is pressed, so the page's own Submit sees a ticked box (it refuses an unticked one)."""
+    await page.goto(site.url + "/gigya")
+    adapter, engine, events = await build(page, service, tmp_path, site.url + "/gigya", FakeInbox(""))
+    adapter.max_steps = 3
+    result = await adapter.drive()
+    assert await page.evaluate("document.querySelector('#ack').checked"), (result, events)
+    assert not await page.evaluate("!!window.refused"), (result, events)
+    sent = await page.evaluate("window.sent")
+    assert sent and sent[0] == "alex@example.test" and sent[1], (sent, result, events)
+    assert any(kind == "policy_accepted" for kind, _ in events), events
 
 
 def test_one_run_pressing_create_twice_is_one_registration_not_two():

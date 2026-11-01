@@ -7,7 +7,16 @@ from collections import Counter
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
+from jobpilot.adapters import base
 from jobpilot.adapters.base import Adapter
+
+
+@pytest.fixture(autouse=True)
+def no_puzzle_watch(monkeypatch):
+    # The mocked puzzle check answers at once; the real watch waits for a late puzzle (tests/test_code_puzzle_arrives_late.py).
+    monkeypatch.setattr(base, "PUZZLE_WATCH_SECONDS", 0)
 
 
 def field(fid, label, value=""):
