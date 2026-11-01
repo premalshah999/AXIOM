@@ -3989,6 +3989,17 @@ class BrowserEngine:
             detail["diagnostics_error"] = type(exc).__name__
         self.emit("finish_refused", str(result.get("reason", ""))[:200], detail)
 
+    def advance_control(self):
+        """The one enabled Next/Continue/Review control on the current page, or None when there is none or several."""
+        from .adapters.base import NEXT
+
+        found = {}
+        for button in self.form.buttons.values():
+            label = " ".join(str(button.get("label") or "").split())
+            if label and NEXT.match(label) and button.get("id"):
+                found.setdefault(label.lower(), button)
+        return next(iter(found.values())) if len(found) == 1 else None
+
     async def break_stall(self, decision, target):
         """Why did the same action change nothing? Run the generic causes once, before it repeats.
 
@@ -5105,6 +5116,9 @@ class BrowserEngine:
             limit=max(2, self.config.browser_recovery_actions * self.config.browser_recovery_episodes)
         )
         refused, rejected, diagnosed = 0, {}, set()
+        # Page-wide fills that read back clean (action keys), and the (page, control) pairs already advanced by the
+        # controller: a clean page the model keeps re-filling moves on with its own Next/Continue instead.
+        clean_fills, advanced = set(), set()
         control_failures = ControlFailures()
         for step in range(30):
             if self.result or self.db.get_setting("control", {}).get("paused"):
@@ -5384,6 +5398,24 @@ class BrowserEngine:
                         "A verified page was sent to the submit path instead of a repeated fill",
                     )
                     decision = decision.model_copy(update={"action": "submit", "control_id": ""})
+            if repeated[action_key] > 1 and decision.action == "fill" and action_key in clean_fills:
+                # Paylocity (10-26), ADP, Oracle, Rippling: the page read back clean (298 fields verified, nothing pending)
+                # and the model chose the same fill 3-5 more times with a visible "Next Step"/"Continue", until the run
+                # stalled. 104 of 328 stalled guided runs (10-25..31) ended this way. A person clicks Next.
+                if advance := self.advance_control():
+                    if (signature, advance["id"]) not in advanced:
+                        advanced.add((signature, advance["id"]))
+                        self.emit(
+                            "advance_clean_page",
+                            "A clean page the model kept re-filling was advanced with its own control",
+                            {"control_id": advance["id"], "label": advance.get("label", "")[:60]},
+                        )
+                        decision = decision.model_copy(update={"action": "click", "control_id": advance["id"]})
+                        target = advance
+                        action_key = hashlib.sha256(
+                            json.dumps((signature, "click", field_identity(target), "", "")).encode()
+                        ).hexdigest()
+                        repeated[action_key] = repeated.get(action_key, 0) + 1
             # A page-wide fill that already held back a write (the same field failed the same way twice on this page)
             # cannot do better the second time it is chosen: it skips that field again. bd8ca424 (iCIMS "Desired
             # Location", 10-28) spent 19 decisions and 5 minutes on one field; Avature ran 84 answer calls on a picker.
@@ -5446,6 +5478,8 @@ class BrowserEngine:
                     if not report["ok"]:
                         report = await self.form.recover_controls(report)
                     outcome = json.dumps(report)
+                    if report["ok"] and not report["pending"]:
+                        clean_fills.add(action_key)
                     if report["ok"] and not report["pending"] and blocker:
                         # The page-wide fill verified every field, so the blocked step that
                         # started recovery is resolved. Keeping it in the prompt made the model
