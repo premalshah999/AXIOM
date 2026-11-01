@@ -1795,6 +1795,8 @@ class Adapter:
                 return None
             return await self.on_review(obs, report)
         if not nxt:
+            if await self.leave_site_page(obs):
+                return None
             return {"fallback": True, "reason": "No way forward from this page"}
         # Review each step while its controls are still editable. Reviewing only
         # on a read-only final page turned every correction into Back navigation
@@ -1806,6 +1808,8 @@ class Adapter:
             obs = await self.form.scan()
             nxt = self.find_next(obs)
             if not nxt:
+                if await self.leave_site_page(obs):
+                    return None
                 return {"fallback": True, "reason": "No way forward from this page"}
         page = semantic_state(obs)["page"]
         if challenge := await self.solve_captcha():
@@ -2459,6 +2463,33 @@ class Adapter:
     async def return_to_application(self):
         target = self.apply_url or self.job["url"]
         await self.page.goto(target, wait_until="domcontentloaded", timeout=25000)
+
+    async def leave_site_page(self, obs):
+        """A page that asks nothing and offers no way forward is the employer's own site, not the application: its job
+        search (Electronic Arts' /SearchJobs: Keywords, Country, Job Category), its home page after a sign-in or a password
+        reset (Lenovo's /careers: Country/Region, Career Area), a candidate portal landing page (ASSA ABLOY's "My
+        Applications"). Read as the form it had nothing to fill, and the run went to the model with "No way forward from
+        this page" (Avature, SuccessFactors and Eightfold, 2026-10-25..11-01: 31 saved pages in 31 runs of 10 jobs; the other stops of
+        that kind were job pages with an Apply control). A person goes back to the job: the application's own address, once.
+        True when the browser was sent there."""
+        fields = [f for f in self.app_fields(obs) if f["type"] != "checkbox"]
+        if (
+            self.committed
+            or self.attempts["reopen"]
+            or any(f.get("required") for f in fields)
+            or self.find_final(obs)
+            or self.find_next(obs)
+        ):
+            return False
+        target = self.apply_url or self.job["url"]
+        here, there = urlsplit(self.page.url), urlsplit(target)
+        if (here.path.rstrip("/"), here.query) == (there.path.rstrip("/"), there.query):
+            return False  # Already on the application's address: the page is what it is.
+        self.attempts["reopen"] += 1
+        self.emit("navigation", "This page asks nothing and offers no way forward; back to the job's own page once")
+        await self.return_to_application()
+        await self.form.settle(timeout=6)
+        return True
 
     # ----- email ------------------------------------------------------------------------------
     def mail_job(self, kind):
@@ -3914,7 +3945,7 @@ class Adapter:
             return self.defer("The password reset link did not open a new-password form")
         # The new password obeys the reset form's stated maximum (Westinghouse: 18 characters).
         credentials, configured, maxima = self.new_password(url, passwords, obs)
-        if forced and not configured and PASSWORD_HISTORY.search(obs.get("text", "")):
+        if not configured and PASSWORD_HISTORY.search(obs.get("text", "")):
             # An explicit history rule makes reusing the account password inappropriate. Keep this value local until
             # the employer accepts the change, so a refused action never replaces the saved credential.
             credentials = {**credentials, "password": self.accounts.store.fallback(
@@ -3928,9 +3959,10 @@ class Adapter:
             # A "Create a User Name and Password" form (Taleo's guest-record link) asks for the login beside the password.
             if self.is_login_field(f) and not f.get("value") and f["type"] != "password":
                 await self.form.locator(f["id"]).fill(self.login_value(f, credentials), timeout=4000)
-        if forced:
-            # Disabled Next is omitted by the scanner until both fields satisfy the page's checks.
-            obs = await self.form.scan()
+        # Disabled Next is omitted by the scanner until both fields satisfy the page's checks. A reset opened from the emailed
+        # link read the page before the password was typed and found no submit control (Lenovo's Avature, 2026-11-01: the run
+        # stopped with a "control failure" and took the page to the model); the page is read again whichever way it was reached.
+        obs = await self.form.scan()
         button = self.auth_button(obs, "reset")
         if not button:
             self.finish_mail("failed", "No new-password submit control")
