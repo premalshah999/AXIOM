@@ -9,7 +9,7 @@ import { Wordmark } from "./shell/Brand";
 import { FormGrid } from "./setup-kit";
 import "./styles/settings.css";
 import "./styles/auth.css";
-import { Button, Check, ConfirmButton, ErrorLine, Field, IconButton, Loading, Monogram, Panel, Pill, Segmented, Skeleton } from "./ui/index";
+import { Button, Check, ConfirmButton, ErrorLine, Field, IconButton, Input, Loading, Monogram, Panel, Pill, Segmented, Skeleton } from "./ui/index";
 
 // ---------------------------------------------------------------------------
 // The owner's account (server: owner_account.py, api/routes/owner.py): sign-up with recovery codes, sign-in,
@@ -1181,21 +1181,131 @@ function AddSignIn({ onAdded }: { onAdded: () => void }) {
   );
 }
 
-/** The data is only ever on this Mac, so deleting it is deleting two folders. Said here so nobody has to ask how to leave. */
+// What Delete everything removes and what it cannot (jobpilot/erase.py has the same two lists; the server returns the second).
+const ERASES = [
+  "your profile, resumes, answers and every saved application page",
+  "the jobs, queue and history",
+  "the accounts and passwords AXIOM saved, your AI key and the mailbox connection",
+  "the cached Chrome profile and the automatic database backups",
+];
+const CANNOT_REMOVE = [
+  "Applications already sent. The employers have them.",
+  "Accounts AXIOM created at employers. Close them on the employers' sites; their emails to you stay in your own mailbox.",
+];
+
+/** Delete everything: stops work, removes the data and leaves the app as on its first run. Typed confirmation, and no undo. */
 function DeleteDataRow() {
-  return (
-    <SettingRow
-      title="Delete my data"
-      note={
-        <>
-          Everything AXIOM keeps about you is on this Mac. Quit AXIOM, then in Finder choose Go, then Go to Folder, paste{" "}
-          <code>~/Library/Application Support/AXIOM</code> and move that folder to the Bin. Do the same for <code>~/Library/Logs/AXIOM</code>, and drag
-          AXIOM from Applications to the Bin. Applications already sent, and accounts made at employers, stay with those employers.
-        </>
+  const [open, setOpen] = useState(false);
+  const [phrase, setPhrase] = useState("");
+  const [error, setError] = useState("");
+  const [erasing, setErasing] = useState(false);
+  const REQUIRED = "DELETE EVERYTHING";
+  async function erase() {
+    setError("");
+    try {
+      await api("/system/erase", "POST", { confirm: phrase });
+      setErasing(true);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  // The app exits to delete, then starts again empty: wait for it, then open it as a first run.
+  useEffect(() => {
+    if (!erasing) return;
+    let live = true;
+    const began = Date.now();
+    const look = async () => {
+      if (!live) return;
+      try {
+        const answer = await fetch("/api/account", { credentials: "same-origin" });
+        const now = answer.ok ? ((await answer.json()) as AccountStatus) : null;
+        if (now?.installation === "fresh" && Date.now() - began > 2000) {
+          window.location.assign("/");
+          return;
+        }
+      } catch {
+        // Down while it deletes: expected.
       }
-    >
-      {null}
-    </SettingRow>
+      window.setTimeout(look, 1000);
+    };
+    window.setTimeout(look, 2000);
+    return () => {
+      live = false;
+    };
+  }, [erasing]);
+  if (erasing)
+    return (
+      <li>
+        <div className="ax-delete-wait" role="status">
+          <Loading label="Deleting everything. AXIOM will open as new when it is done." />
+        </div>
+      </li>
+    );
+  return (
+    <>
+      <SettingRow
+        title="Delete everything"
+        note="Stops all work and removes everything AXIOM keeps about you, on this Mac. It cannot be undone."
+      >
+        {!open && (
+          <Button variant="danger" onClick={() => setOpen(true)}>
+            Delete everything…
+          </Button>
+        )}
+      </SettingRow>
+      {open && (
+        <li className="is-open">
+          <form
+            className="ax-delete"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (phrase === REQUIRED) erase();
+            }}
+          >
+            <p>
+              <strong>This stops sending and deletes, for good:</strong>
+            </p>
+            <ul>
+              {ERASES.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+            <p>
+              <strong>It cannot remove:</strong>
+            </p>
+            <ul>
+              {CANNOT_REMOVE.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+            <p>AXIOM then opens as if you had just installed it.</p>
+            <Input
+              label={`Type ${REQUIRED} to confirm`}
+              error={error}
+              value={phrase}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(e) => setPhrase(e.target.value)}
+            />
+            <span className="ax-ask">
+              <Button variant="danger-solid" type="submit" disabled={phrase !== REQUIRED}>
+                Delete everything
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setOpen(false);
+                  setPhrase("");
+                  setError("");
+                }}
+              >
+                Cancel
+              </Button>
+            </span>
+          </form>
+        </li>
+      )}
+    </>
   );
 }
 

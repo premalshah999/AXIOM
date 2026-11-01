@@ -10,6 +10,7 @@ They are skipped rather than allowed to fill the disk, and the newest few are ke
 """
 
 import json
+import os
 import shutil
 import time
 from pathlib import Path
@@ -23,7 +24,8 @@ FLOOR_BYTES = 3 * 1024**3
 
 
 def folder():
-    return Path.home() / "axiom-backups"
+    # AXIOM_BACKUP_DIR moves it: a test or an isolated instance must never read or delete the real folder (erase.py).
+    return Path(os.environ.get("AXIOM_BACKUP_DIR") or Path.home() / "axiom-backups")
 
 
 def marker(cfg):

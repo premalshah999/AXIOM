@@ -25,6 +25,12 @@ class Platforms(BaseModel):
     reason: str = Field(default="", max_length=300)
 
 
+class Erase(BaseModel):
+    """The typed confirmation for Settings › Delete everything (erase.PHRASE, exactly)."""
+
+    confirm: str = Field(default="", max_length=100)
+
+
 class ConnectionsUpdate(BaseModel):
     """Values to save in Setup > Connections; a blank value clears that saved value."""
 
@@ -109,6 +115,31 @@ def router(service) -> APIRouter:
         db.flush_events()  # os._exit skips the exit hook that would write a remote database's batched events.
         asyncio.get_running_loop().call_later(1.0, os._exit, 0)
         return {"restarting": True}
+
+    @r.get("/api/system/erase")
+    def erase_status():
+        from ... import erase
+
+        return {"erasing": erase.running(config.data_dir), "phrase": erase.PHRASE, "cannot_remove": erase.CANNOT}
+
+    @r.post("/api/system/erase", status_code=202)
+    async def erase_everything(data: Erase):
+        """Delete everything this installation holds and return it to its first run. A separate process does the deleting after this
+        one has exited (erase.py), so no worker outlives its data. Only the exact typed phrase starts it."""
+        import asyncio
+        import os
+
+        from ... import erase
+
+        if data.confirm.strip() != erase.PHRASE:
+            raise HTTPException(422, f"Type {erase.PHRASE} to confirm.")
+        try:
+            await asyncio.to_thread(erase.begin, config, db)
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from None
+        # Work stops with the process: whatever was running is not left to finish against data that is about to go.
+        asyncio.get_running_loop().call_later(1.0, os._exit, 0)
+        return {"erasing": True, "cannot_remove": erase.CANNOT}
 
     @r.put("/api/limits")
     def put_limits(data: Limits):
