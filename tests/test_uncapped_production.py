@@ -2,7 +2,7 @@
 
 The `application_budget` setting ({"max_seconds": null}) removes the wall-clock deadline: an old first start no longer
 blocks the job, runs carry no `application_deadline` (their own runner budget ends them), and the three-start limit
-still stops retry storms. Without the setting the 480 s cap is unchanged.
+still stops retry storms. Without the setting it is the same (2026-11-01): the default had never run in production.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -26,7 +26,15 @@ def seed(service, starts):
         return job.id
 
 
-def test_default_keeps_the_eight_minute_cap(service):
+def test_no_setting_means_no_lifetime_cap(service):
+    job_id = seed(service, 1)
+    with service.db.session() as s:
+        assert max_seconds(s) is None
+        assert require_allowance(s, job_id) == (None, None)
+
+
+def test_a_saved_cap_still_holds(service):
+    service.db.set_setting("application_budget", {"max_seconds": 480})
     job_id = seed(service, 1)
     with service.db.session() as s:
         assert max_seconds(s) == 480
