@@ -10,7 +10,7 @@ from jobpilot.features.resumes.compiler import compile_pdf
 from jobpilot.features.resumes.editor import Bullet, Entry, ResumeDoc, Section
 from jobpilot.features.resumes.modes import Draft, check_rules, draft_leaks
 from jobpilot.features.resumes.rules import bullet_window
-from jobpilot.features.resumes.validate import check_typography, font_runs
+from jobpilot.features.resumes.validate import check_typography, font_runs, parse_check
 
 LONG = "Built a reporting pipeline in SQL and Python that replaced a manual spreadsheet process for the finance team"
 OTHER = "Reviewed monthly close variances with the controller and documented every adjustment for the external audit"
@@ -250,6 +250,45 @@ def test_an_overflow_is_reported_plainly_and_nothing_is_dropped():
     report = check_rules(doc, doc, pdf=built.pdf)
     assert report["pages"] > 1 and report["ok"]
     assert [w["code"] for w in report["warnings"]] == ["overflow"]
+
+
+def _with_bullets(*texts):
+    doc = source()
+    sec(doc, "experience").entries[0].bullets = [Bullet(id=f"b{i}", text=t) for i, t in enumerate(texts)]
+    return doc
+
+
+SAME_OPENING = "Built a reporting pipeline in SQL and Python for the "
+THREE = (SAME_OPENING + "finance team, replacing a manual spreadsheet", OTHER, SAME_OPENING + "sales team, replacing a shared weekly export file")
+
+
+@pytest.mark.skipif(not shutil.which("pdflatex"), reason="needs TeX")
+def test_two_bullets_opening_the_same_way_read_in_order():
+    """Each bullet was found from the start of the text, so a later bullet sharing the first one's opening landed back on it and read as out of order."""
+    doc = _with_bullets(*THREE)
+    built = asyncio.run(compile_pdf(editor.render(doc, editor.tailored_style())))
+    assert built.ok
+    items = {i["label"]: i for i in parse_check(built.pdf, doc)["items"]}
+    assert items["Bullets read top to bottom"]["ok"], items["Bullets read top to bottom"]
+
+
+@pytest.mark.skipif(not shutil.which("pdflatex"), reason="needs TeX")
+def test_bullets_really_out_of_order_still_fail():
+    doc = _with_bullets(*THREE)
+    built = asyncio.run(compile_pdf(editor.render(doc, editor.tailored_style())))
+    assert built.ok
+    shuffled = _with_bullets(THREE[1], THREE[0], THREE[2])
+    items = {i["label"]: i for i in parse_check(built.pdf, shuffled)["items"]}
+    assert not items["Bullets read top to bottom"]["ok"]
+
+
+@pytest.mark.skipif(not shutil.which("pdflatex"), reason="needs TeX")
+def test_a_bullet_missing_from_the_pdf_is_named_as_missing():
+    built = asyncio.run(compile_pdf(editor.render(_with_bullets(THREE[0]), editor.tailored_style())))
+    assert built.ok
+    items = {i["label"]: i for i in parse_check(built.pdf, _with_bullets(THREE[0], OTHER))["items"]}
+    assert not items["Bullets read top to bottom"]["ok"]
+    assert "1 bullet(s) not found" in items["Bullets read top to bottom"]["detail"]
 
 
 def test_the_picker_shows_aggressive_as_coming_soon_until_it_registers():

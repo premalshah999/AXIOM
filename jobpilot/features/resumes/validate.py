@@ -182,7 +182,8 @@ def parse_check(pdf: bytes, doc) -> dict:
     for s in doc.sections:
         if s.include and (s.entries or s.text.strip()):
             item(f'"{s.title}" reads as its own heading', squash(s.title) in lines)
-    positions, in_order = [], True
+    # Each bullet is looked for after the one before it. From the start of the text, two bullets that open the same way both land on the first.
+    at, missing, in_order = 0, 0, True
     for s in doc.sections:
         if not s.include:
             continue
@@ -190,12 +191,16 @@ def parse_check(pdf: bytes, doc) -> dict:
             if not e.include:
                 continue
             for b in e.bullets:
-                if b.include and b.text.strip():
-                    at = flat.find(squash(plain(b.text))[:32])
-                    positions.append(at)
-    missing = sum(1 for p in positions if p < 0)
-    found = [p for p in positions if p >= 0]
-    in_order = found == sorted(found)
+                if not (b.include and b.text.strip()):
+                    continue
+                needle = squash(plain(b.text))[:32]
+                found = flat.find(needle, at)
+                if found >= 0:
+                    at = found + len(needle)
+                elif needle in flat:
+                    in_order = False
+                else:
+                    missing += 1
     item("Bullets read top to bottom", in_order and not missing, f"{missing} bullet(s) not found" if missing else "")
     dates = [e.dates for s in doc.sections if s.include for e in s.entries if e.include and e.dates.strip()]
     item("Dates are intact", all(squash(d) in flat for d in dates))
