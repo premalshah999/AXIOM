@@ -169,7 +169,7 @@ class SharedChromium:
         if not Path(path).exists():
             pytest.skip("Install Chromium: playwright install chromium")
         self.browser = await self.playwright.chromium.launch(
-            executable_path=path, headless=True, args=["--no-sandbox"]
+            executable_path=path, headless=True, args=["--no-sandbox", "--use-mock-keychain"]
         )
         return self.browser
 
