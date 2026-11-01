@@ -64,8 +64,9 @@ async def test_a_named_platform_keeps_the_custom_sites_own_sender_rule(service):
     job = {"url": "https://apply.clearcompany.example.test/acme?jobId=1", "ats": "clearcompany"}
     rule = await service.mail.ensure_rule(job, "alex@example.test")
     assert rule["sender_domains"] == ["example.test"]
-    # A platform with its own driver and no sender family still gets none.
-    assert await service.mail.ensure_rule({**job, "ats": "ashby", "url": "https://jobs.ashbyhq.com/acme/1"}, "alex@example.test") is None
+    # A label that is neither a custom-like site nor a platform with a sender family still gets none. (Ashby had none when this
+    # was written; f631a23 gave every driven platform its senders, so a career-site vendor stands in.)
+    assert await service.mail.ensure_rule({**job, "ats": "phenom", "url": "https://careers.example.test/acme/1"}, "alex@example.test") is None
 
 
 # ----- what a page shows ------------------------------------------------------------------------------------------

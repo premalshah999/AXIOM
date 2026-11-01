@@ -34,7 +34,7 @@ async def test_adapter_stops_before_classification_filling_or_model_recovery():
     obs = observation()
     adapter = object.__new__(Adapter)
     adapter.e = SimpleNamespace(result=None, form=SimpleNamespace(
-        settle=AsyncMock(), scan=AsyncMock(return_value=obs)))
+        settle=AsyncMock(), resume_gate=AsyncMock(return_value=False), scan=AsyncMock(return_value=obs)))
     adapter.job={'url':JOB}
     adapter.committed=False
     adapter.dismiss_overlays=AsyncMock()

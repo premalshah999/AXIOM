@@ -206,7 +206,7 @@ async def test_the_adapter_hands_the_run_over_each_step():
     adapter = object.__new__(Adapter)
     follow = AsyncMock(return_value="greenhouse")
     adapter.e = SimpleNamespace(
-        result=None, form=SimpleNamespace(settle=AsyncMock(), scan=AsyncMock(return_value=obs)),
+        result=None, form=SimpleNamespace(settle=AsyncMock(), resume_gate=AsyncMock(return_value=False), scan=AsyncMock(return_value=obs)),
         refresh_expired_entry=AsyncMock(return_value=False), follow_embedded=follow,
     )
     adapter.id, adapter.job, adapter.committed = "custom", {"url": obs["url"], "id": "j"}, False
