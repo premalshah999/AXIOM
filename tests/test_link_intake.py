@@ -163,3 +163,39 @@ async def test_a_link_sent_on_telegram_is_the_owners_pick_not_a_fit_ranking(serv
     await telegram._handle_update(service, update("/apply https://jobs.lever.co/acme"))
     assert len(asked) == 1 and "list of jobs" in calls.of("sendMessage")[-1]["text"]
 
+
+
+def test_a_career_sites_page_label_is_not_a_job_title():
+    from jobpilot.posting_identity import placeholder_title
+    from jobpilot.schemas import job_title
+
+    for junk in ("Job Details", "Career Portal", "Jobs - ExampleSoft", "Data Engineer Job Details | ExampleSoft", "Careers | Join Us | ExampleSoft", "Data Engineer | ExampleSoft Careers"):
+        assert placeholder_title(junk), junk
+    for real in ("Data Engineer", "Software Engineer - Early Career", "Engineer, Early Careers - EMEA", "Analyst - Work From Home", "Careers Advisor"):
+        assert not placeholder_title(real), real
+    # iCIMS puts the field label before the title in its listing links and on its job pages.
+    assert job_title("Job Posting Title Quantitative Engineer") == "Quantitative Engineer"
+
+
+async def test_a_page_without_structured_data_does_not_give_the_job_its_page_title(service, monkeypatch):
+    from support_http import seed_job
+
+    from jobpilot import discovery
+
+    job_id = seed_job(service, 1)
+    with service.db.exclusive() as s:
+        row = s.get(Job, job_id)
+        row.title, row.company, row.description = "", "", ""
+
+    async def no_api(*args):
+        return None
+
+    async def page(url, **kwargs):
+        return "<html><head><title>Job Details | ExampleSoft</title></head><body><p>" + "Build data pipelines. " * 30 + "</p></body></html>", url
+
+    monkeypatch.setattr(discovery, "posting_api_text", no_api)
+    monkeypatch.setattr(discovery, "fetch", page)
+    await discovery.enrich(service.db, service.config, job_id)
+    with service.db.session() as s:
+        row = s.get(Job, job_id)
+        assert row.title == "" and "data pipelines" in row.description

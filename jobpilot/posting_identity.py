@@ -125,8 +125,20 @@ def placeholder_company(value, url):
     return bool(HOSTNAME.fullmatch(value)) and _site(value) == _site(urlsplit(url or "").hostname)
 
 
+# A page's <title> is not the job's: career sites title every page "Job Details", "Career Portal" or "<role> | <Employer>
+# Careers" (Atlas Copco, Capgemini, Citi, 2026-10). Such a title names no role, so a structured-data title may replace it.
+PAGE_LABEL = r"(?:jobs?|careers?|career (?:site|portal|opportunities)|job (?:details?|postings?|listings?|descriptions?)|current opportunities|open positions|search results?|apply|home)"
+GENERIC_TITLE = re.compile(PAGE_LABEL, re.I)
+# Inside "<part> | <part>": a part that is only a page label, or ends in one ("Job Details", "<Employer> Careers"; not "Early Career").
+PAGE_TITLE_PART = re.compile(rf"{PAGE_LABEL}|.*\bjob details?|.*(?<!early\s)\bcareers", re.I)
+
+
 def placeholder_title(value):
-    return not (value or "").strip() or bool(UNTITLED.fullmatch(value.strip()))
+    text = (value or "").strip()
+    if not text or UNTITLED.fullmatch(text) or GENERIC_TITLE.fullmatch(text):
+        return True
+    parts = [part.strip() for part in re.split(r"\s+[|\u2013\u2014-]\s+", text) if part.strip()]
+    return len(parts) > 1 and any(PAGE_TITLE_PART.fullmatch(part) for part in parts)
 
 
 def save(db, job_id, found):
