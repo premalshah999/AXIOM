@@ -97,11 +97,20 @@ export function LiveWork({
   foot?: ReactNode;
 }) {
   const now = useNow(1000);
+  const idle = Math.max(0, limit - busy);
+  const said = limit ? `${busy} busy, ${idle} idle` : "No slots are configured";
   return (
     <section className="ax-window ov-live" aria-label="Live work">
       <header className="ov-live-head">
-        <h2>Applying now</h2>
-        {checking && <p>Checking…</p>}
+        <h2>Live work</h2>
+        {limit > 0 && (
+          <span className="ov-cap" aria-hidden="true">
+            {Array.from({ length: limit }, (_, i) => (
+              <i key={i} className={i < busy ? "is-on" : ""} />
+            ))}
+          </span>
+        )}
+        <p>{checking ? "Checking…" : said}</p>
       </header>
       {rows.length + parked.length > 0 ? (
         <>
