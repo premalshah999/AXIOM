@@ -25,6 +25,7 @@ FAILED = "tailoring_failed"
 STALE = "tailoring_stale"
 BROKEN = "tailoring_rules"
 UNCONFIRMED = "tailoring_unconfirmed"
+STARTED = frozenset({"queued", "running", "submitting", "waiting_browser", "confirmed", "submission_unknown", "already_applied"})
 _TASKS: dict[str, asyncio.Task] = {}
 
 
@@ -69,9 +70,13 @@ def choose(db, job_id: str, mode: str | None) -> dict | None:
     from ...db import Job
 
     with db.exclusive() as s:
-        if s.get(Job, job_id) is None:
+        job = s.get(Job, job_id)
+        if job is None:
             raise ValueError("Job not found")
         row = s.get(RsTailorChoice, job_id)
+        if job.status in STARTED:
+            # The resume is already chosen: a run has it, or it was sent. Saying otherwise here would be a lie about what the employer got.
+            raise LookupError("This application has already started, so its resume can't change now.")
         if mode in (None, "", "off"):
             if row is not None:
                 s.delete(row)
@@ -281,6 +286,22 @@ def approve(db, config, job_id: str, artifact_id: str) -> dict:
         result = {"artifact_id": artifact.id, "pdf_sha": artifact.pdf_sha, "approved_at": choice.approved_at}
     wake(db, job_id)
     return result
+
+
+WAITING_WORDS = {
+    "preparing": "Preparing the tailored resume.",
+    "review": "Waiting for you to review the tailored resume.",
+    "failed": "The tailored resume couldn't be made. Open the job to try again.",
+}
+
+
+def waiting_words(db, job_ids: list[str]) -> dict:
+    """What each of these jobs is really waiting on, where that's its tailored resume. Queue's "Waiting on" column says this, and the switch being off means nothing's awaited."""
+    if not job_ids:
+        return {}
+    with db.session() as s:
+        rows = s.execute(select(RsTailorChoice.job_id, RsTailorChoice.state).where(RsTailorChoice.job_id.in_(job_ids), RsTailorChoice.state.in_(list(WAITING_WORDS)))).all()
+    return {job_id: WAITING_WORDS[state] for job_id, state in rows}
 
 
 def many(db, job_ids: list[str]) -> dict:

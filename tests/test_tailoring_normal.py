@@ -276,6 +276,29 @@ def test_off_by_default(service):
         assert choice.artifact_for_queue(s, s.get(Job, "j1"), "submit") is None
 
 
+@pytest.mark.parametrize("status", ["queued", "running", "confirmed", "submission_unknown"])
+def test_the_choice_cant_change_once_the_application_has_started(client, service, status):
+    add_job(service)
+    with service.db.exclusive() as s:
+        s.get(Job, "j1").status = status
+    answer = client.put("/api/v2/resumes/tailor/job/j1", json={"mode": "normal"})
+    assert answer.status_code == 409 and "already started" in answer.json()["detail"]
+    assert choice.get_choice(service.db, "j1") is None
+
+
+def test_queue_says_a_job_waits_on_its_tailored_resume(service):
+    add_job(service)
+    assert choice.waiting_words(service.db, ["j1"]) == {}
+    choice.choose(service.db, "j1", "normal")
+    assert "Preparing" in choice.waiting_words(service.db, ["j1"])["j1"]
+    with service.db.exclusive() as s:
+        s.get(RsTailorChoice, "j1").state = "review"
+    assert "review" in choice.waiting_words(service.db, ["j1"])["j1"]
+    with service.db.exclusive() as s:
+        s.get(RsTailorChoice, "j1").state = "approved"
+    assert choice.waiting_words(service.db, ["j1"]) == {}
+
+
 def test_a_mode_that_isnt_registered_cant_be_chosen(service):
     add_job(service)
     if modes.get("aggressive") is None:

@@ -247,6 +247,24 @@ export function TailorChoice({ jobId, known, modes, compact, onChange }: { jobId
   );
 }
 
+/** Choosing before a job exists, as when adding a link: the same options as TailorChoice, held by the caller. */
+export function HowToApply({ value, onChange, disabled }: { value: string; onChange: (mode: string) => void; disabled?: boolean }) {
+  const modes = usePoll<{ modes: Mode[] }>((signal) => api("/v2/resumes/tailor/modes", "GET", undefined, signal), 120000);
+  return (
+    <label className="tl-choice-pick">
+      <span className="ax-label">How to apply</span>
+      <select className="ax-control ax-input" value={value} disabled={disabled || !modes.data} onChange={(e) => onChange(e.target.value)}>
+        <option value="off">Apply</option>
+        {(modes.data?.modes || []).map((m) => (
+          <option key={m.id} value={m.id} disabled={!m.available}>
+            {`Apply with tailored resume: ${m.label}${m.available ? "" : " (coming soon)"}`}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 /** The Settings switch. On by default. */
 export function TailorApprovalRow() {
   const settings = usePoll<{ approval: boolean }>((signal) => api("/v2/resumes/tailor/settings", "GET", undefined, signal), 60000);
