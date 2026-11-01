@@ -1,7 +1,7 @@
 #!/bin/sh
 # Deploy the current checkout to the running installation without interrupting an application.
 #
-#   scripts/deploy.sh            refuse if any application is queued, running or submitting
+#   scripts/deploy.sh            refuse if any application is running or submitting (a queued one waits out the hold)
 #   scripts/deploy.sh --wait     wait (up to 30 minutes) for the active applications to finish first
 #
 # Order: hold new dispatch -> confirm no application is active -> build -> recreate the app -> wait for health ->
@@ -19,7 +19,7 @@ hold() {
   printf "update settings set value=(value::jsonb||jsonb_build_object('stage','%s','reason','%s','updated_at',now()))::json where key='execution_v2_deployment_hold';\n" "$1" "deploy $(git rev-parse --short HEAD)" | psql >/dev/null
 }
 active() {
-  echo "select count(*) from runs where state in ('queued','running','submitting');" | psql
+  echo "select count(*) from runs where state in ('running','submitting');" | psql
 }
 
 hold draining

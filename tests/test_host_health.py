@@ -459,6 +459,56 @@ async def test_a_queued_run_stays_queued_when_the_server_is_stopping(service):
         assert run.state == "queued" and run.started_at is None
 
 
+async def test_a_release_hold_keeps_a_queued_run_from_starting_and_it_starts_when_the_hold_lifts(service, monkeypatch):
+    """2026-11-01: a release set the hold, saw nothing running and stopped the app, while a run already queued started in between
+    and was cut. The hold was read by admission and the retries, never by the claim itself."""
+    from jobpilot.service import execution as service_module
+
+    service.db.set_setting("control", {"paused": False, "auto_submit": True})
+    service.db.set_setting("execution_v2_deployment_hold", {"stage": "draining"})
+    with service.db.exclusive() as s:
+        s.add(Job(id="held", identity="held", url="https://careers.example.test/job/3", ats="oracle"))
+        s.add(Run(id="held-run", job_id="held", mode="submit", state="queued", packet={}))
+    slept = []
+
+    async def lift_the_hold_after_a_wait(seconds):
+        slept.append(seconds)
+        with service.db.exclusive() as s:
+            row = s.get(Run, "held-run")
+            assert row.state == "queued" and row.started_at is None
+            row.state = "paused"  # Nothing was claimed under the hold: the proof, and the end of this fixture's loop.
+
+    monkeypatch.setattr(service_module, "asyncio", SimpleNamespace(sleep=lift_the_hold_after_a_wait))
+    await service._execute_owned("held-run")
+    assert slept == [5]
+
+
+async def test_a_continuation_with_an_emailed_code_is_not_held_back_by_a_release(service, monkeypatch):
+    """An emailed code expires, and the release waits for this run as for any other that is under way."""
+    from jobpilot.service import execution as service_module
+
+    service.db.set_setting("control", {"paused": False, "auto_submit": True})
+    service.db.set_setting("execution_v2_deployment_hold", {"stage": "draining"})
+    with service.db.exclusive() as s:
+        s.add(Job(id="code", identity="code", url="https://careers.example.test/job/4", ats="oracle"))
+        s.add(Run(id="code-run", job_id="code", mode="submit", state="queued", packet={"email_wait_resume": True}))
+
+    class Claimed(Exception):
+        pass
+
+    def stop_at_the_engine(*_):
+        raise Claimed
+
+    monkeypatch.setattr("jobpilot.pipeline_comparison.engine_for", stop_at_the_engine)
+    monkeypatch.setattr(service, "check_cooldown", lambda *_: None)
+    try:
+        await service._execute_owned("code-run")
+    except Claimed:
+        pass
+    with service.db.session() as s:
+        assert s.get(Run, "code-run").started_at is not None  # claimed under the hold
+
+
 def test_runtime_health_reports_the_host_gates(client, service):
     host_health.begin_drain()
     body = client.get("/api/runtime-health").json()

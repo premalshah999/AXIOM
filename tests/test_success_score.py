@@ -101,6 +101,20 @@ def test_a_failure_pulls_the_number_down_and_never_rounds_up_to_the_target(servi
     assert wd["final_pct"] == 89.7 and wd["meets_target"] is False
 
 
+def test_a_stop_of_the_app_is_not_the_jobs_first_try(service):
+    """Six runs of one night's restart read as failed first tries (2026-11-01): they sent nothing, and each job resumed for free."""
+    cut = "Worker interrupted before submission; draft recovery scheduled"
+    seed(service, {
+        "resumed": ("workday", [("waiting_browser", cut, 2), ("confirmed", "", 1)], False),
+        "resumed_failed": ("workday", [("waiting_browser", cut, 2), ("failed", "", 1)], False),
+        "only_cut": ("workday", [("waiting_browser", cut, 1)], False),
+    })
+    with service.db.session() as s:
+        wd = row(success(s, 7, now=NOW), "workday")
+    assert wd["tried"] == 3 and wd["confirmed"] == 1
+    assert wd["first_try_pct"] == 33.3  # the resumed run was its job's first try, and it confirmed
+
+
 def test_the_window_decides_what_counts(service):
     seed(service, {"a": ("ashby", [("confirmed", "", 1)], False), "b": ("ashby", [("confirmed", "", 20)], False)})
     with service.db.session() as s:

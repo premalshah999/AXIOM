@@ -30,6 +30,7 @@ APPLY = re.compile(
     r"(?:\s*[>›→»])?$",
     re.I,
 )
+INTEREST = re.compile(r"i'?m interested", re.I)
 NOT_APPLY = re.compile(r"linkedin|indeed|seek\b|glassdoor|google|facebook|refer|share|save job|alert", re.I)
 NEXT = re.compile(
     r"^(?:next|continue|save (?:and|&) continue|save (?:and|&) next|next step|proceed|continue to (?:next step|"
@@ -851,7 +852,10 @@ class Adapter:
         if not hits:
             return None
         preferred = [b for b in hits if b["automation_id"] in self.apply_ids]
-        return (preferred or hits)[0]
+        # "I'm interested" is how some sites word Apply, and how a recruiting chat words its first question. It is the way
+        # in only when nothing on the page says Apply: first in the page, the chat's button won (2026-10-31).
+        plain = [b for b in hits if not INTEREST.search(b["label"] or b["aria_label"])]
+        return (preferred or plain or hits)[0]
 
     def code_fields(self, obs):
         from ..email_browser import autocomplete_code_field

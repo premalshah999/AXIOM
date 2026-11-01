@@ -10,7 +10,8 @@ measured with (scratchpad/agents/land/score.sql), so this endpoint and that quer
 - already applied: some run found the employer's own "already applied" (or a duplicate of a confirmed link), never confirmed;
 - owner only: the last run is waiting on something only the owner can make (references, supervisors, a video, a work sample);
 - eligible: tried, minus closed, minus already applied, minus owner only (a closed job that was confirmed anyway stays in);
-- final: confirmed at any point in the window, over the eligible jobs; first try: confirmed by the job's first run.
+- final: confirmed at any point in the window, over the eligible jobs; first try: confirmed by the job's first run, not counting
+  a run a stop of the app interrupted before anything was sent: that was no try, and its job resumes for free.
 """
 
 import re
@@ -20,6 +21,7 @@ from math import floor
 from sqlalchemy import select
 
 from ..db import Job, Run
+from ..host_health import INTERRUPTED
 
 TARGET = 90  # percent, per platform with volume and overall (the owner's goal)
 VOLUME = 8  # a platform with fewer tried jobs says too little to hold to the target
@@ -47,10 +49,14 @@ def jobs_in_window(session, cutoff):
         j = jobs.setdefault(job_id, {"ats": ats, "ok": False, "dup": False, "first": None})
         j["ok"] |= state == "confirmed"
         j["dup"] |= state == "already_applied"
-        if j["first"] is None and state != "dry_run_passed":
+        # Six of a night's 24 stopped runs were one restart of the app (2026-11-01): each read as a job's failed first try.
+        if j["first"] is None and state != "dry_run_passed" and (reason or "") != INTERRUPTED:
             j["first"] = state
         j["last"], j["why"] = state, reason or ""
-    # A job whose only runs were dry runs was never tried.
+    # A job whose only runs were dry runs was never tried; one only interrupted has its retry coming, and counts as tried.
+    for j in jobs.values():
+        if j["first"] is None and j["last"] != "dry_run_passed":
+            j["first"] = j["last"]
     return [j for j in jobs.values() if j["first"] is not None]
 
 
