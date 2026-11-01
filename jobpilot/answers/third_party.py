@@ -99,6 +99,8 @@ def other_person_detail(f):
     return (
         f.get("type") in {"text", "textarea", "email", "tel"}
         and not SOURCE_QUESTION.search(label)
+        # A follow-up whose parent question is answered No is "N/A" by the conditional rule, not a question for the owner.
+        and str((f.get("related_question") or {}).get("value") or "").strip().lower() not in {"no", "false"}
         and len(label) < 200
         and bool(OTHER_PERSON_CUE.search(label))
         and bool(ASKS_PERSON_DETAIL.search(label))
