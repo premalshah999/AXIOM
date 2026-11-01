@@ -18,6 +18,8 @@ from . import provider_health
 
 _deadline = ContextVar("model_deadline", default=None)
 _request_sent = ContextVar("model_request_sent", default=None)
+# Which attempt of a call this request is: 0 first; a retry after a timeout or a lost connection asks the next host.
+_host_attempt = ContextVar("model_host_attempt", default=0)
 
 
 # The service tiers the OpenAI SDK's ChatCompletion accepts (plus none).
@@ -310,6 +312,11 @@ class MeteredTransport(httpx.AsyncBaseTransport):
                 if self.config.openrouter_fallback_hosts:
                     # The other offered hosts of the same model, cheapest output first, only when the chosen one fails.
                     order += sorted((h for h in OPENROUTER_HOSTS if h not in order), key=lambda h: OPENROUTER_HOSTS[h][1])
+                    # A request that timed out may have met a stuck host (the cached prefix is only warm on the chosen one,
+                    # so this costs a few hundredths of a cent). The retry asks the next host first; OpenRouter's own
+                    # failover cannot see a client-side timeout.
+                    turn = _host_attempt.get() % len(order)
+                    order = order[turn:] + order[:turn]
                 args["provider"] = {"order": order, "allow_fallbacks": bool(self.config.openrouter_allow_fallbacks)}
         elif self.thinking in {"enabled", "disabled"} and not use_openai:
             args["thinking"] = {"type": self.thinking}
@@ -548,29 +555,54 @@ async def structured(*args, **kwargs):
     return result
 
 
+# Retries a run may spend in a row without one model call succeeding in between, and in all. Two parallel answer batches
+# that both timed out used the whole budget of two, so the next lone timeout ended the run although every call around it
+# worked (13 of the 17 runs that stopped "model provider unavailable" on 2026-10-31 had spent the budget; the retries that did
+# run succeeded). A success proves the provider answers, so it starts the count again; the total keeps a bad hour bounded.
+RETRY_STREAK = 2
+RETRY_TOTAL = 6
+_retry_streak: dict[str, int] = {}
+# A lost connection is usually the machine's own network coming back; a retry in a quarter second meets the same wall.
+CONNECTION_BACKOFF = 2.0
+
+
 async def _structured_with_retry(db, run_id, args, kwargs):
+    """Up to two retries of a call, on the next host, while the run's failures are isolated."""
     from sqlalchemy import func
 
-    for attempt in range(2):
+    attempt = 0
+    while True:
+        token = _host_attempt.set(attempt)
         try:
-            return await _structured(*args, **kwargs)
+            result = await _structured(*args, **kwargs)
         except Exception as exc:
-            transient = AnswerModelTimeout.caused_by(exc) or AnswerModelConnectionError.caused_by(exc)
-            if attempt or not transient:
+            connection = AnswerModelConnectionError.caused_by(exc)
+            if attempt >= (2 if run_id else 1) or not (connection or AnswerModelTimeout.caused_by(exc)):
                 raise
             if run_id:
                 with db.exclusive() as session:
                     used = session.scalar(select(func.count()).select_from(Event).where(
                         Event.run_id == run_id, Event.kind == "model_timeout_retry"
                     ))
-                    if used >= 2:
+                    streak = _retry_streak.get(run_id, 0)
+                    if used >= RETRY_TOTAL or streak >= RETRY_STREAK:
                         raise
+                    if len(_retry_streak) > 1000:
+                        _retry_streak.clear()
+                    _retry_streak[run_id] = streak + 1
                     session.add(Event(
                         run_id=run_id, kind="model_timeout_retry",
                         message="Retrying an isolated model transport failure",
-                        data={"attempt": used + 1, "category": "connection" if AnswerModelConnectionError.caused_by(exc) else "timeout"},
+                        data={"attempt": used + 1, "category": "connection" if connection else "timeout"},
                     ))
-            await asyncio.sleep(0.25)
+            attempt += 1
+            await asyncio.sleep(CONNECTION_BACKOFF if connection else 0.25)
+        else:
+            if run_id:
+                _retry_streak.pop(run_id, None)
+            return result
+        finally:
+            _host_attempt.reset(token)
 
 
 def unreadable_reply(exc):
