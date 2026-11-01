@@ -40,6 +40,8 @@ BROWSER_OUTAGE = (
 # A deadline timeout while the host's event loop was running late (host_health.host_overloaded_result): the clock ran
 # out because the machine was overloaded, not because of the form. 70 runs on 2026-10-18/19 each lost one of three starts.
 HOST_OVERLOADED = "The worker host was overloaded"
+# The disk or its quota was full when a run began or saved a page (host_health.disk_full_result): nothing was sent.
+DISK_FULL = "The disk is full"
 REGISTRATION_COOLDOWN = "A registration was already sent for this account"  # adapters.base.create_limit_result
 NOTHING_SENT = (
     "Another application kept the same email sender busy",
@@ -50,6 +52,7 @@ NOTHING_SENT = (
     "Stopped by you before anything was sent",  # stop.STOPPED
     "A platform bot check paused",  # bot_wall.PAUSED
     HOST_OVERLOADED,
+    DISK_FULL,
     REGISTRATION_COOLDOWN,
 )
 

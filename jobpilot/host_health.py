@@ -24,15 +24,17 @@ off; `loaded_p95` and `overloaded_p95` (seconds) retune them. The monitor mirror
 """
 
 import asyncio
+import errno
 import math
 import shutil
 import threading
 import time
 from collections import deque
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import NamedTuple
 
-from .application_budget import BROWSER_OUTAGE, HOST_OVERLOADED, NOTHING_SENT_STATES
+from .application_budget import BROWSER_OUTAGE, DISK_FULL, HOST_OVERLOADED, NOTHING_SENT_STATES
 from .db import Setting
 
 SAMPLE_SECONDS = 0.5
@@ -77,25 +79,42 @@ DISK_CHECK_SECONDS = 30.0
 
 
 class DiskWatch:
-    """Free space where runs and the database are kept, read at most every half minute: every gate check asks."""
+    """Free space where runs and the database are kept, read at most every half minute: every gate check asks.
+
+    The data folder's `runs` can be a link to another disk or volume (a quota, an external drive): that one is read too, and
+    the tighter of the two counts. A small volume's floor is a tenth of its size, so a 2 GB floor never shuts a 1 GB volume
+    for good. A write that failed for want of space (`note_full`) holds new starts for the same half minute without waiting
+    for the next reading."""
 
     def __init__(self):
-        self.path, self.free, self.at = None, None, 0.0
+        self.path, self.free, self.floor, self.at = None, None, DISK_MIN_FREE, 0.0
 
     def watch(self, path):
-        self.path, self.free, self.at = path, None, 0.0
+        self.path, self.free, self.floor, self.at = path, None, DISK_MIN_FREE, 0.0
+
+    def note_full(self):
+        self.free, self.at = 0, time.monotonic()
+
+    def read(self):
+        """(free bytes, floor) of the volume with the least room above its floor, or (None, floor) when none can be read."""
+        found = []
+        for where in (self.path, Path(self.path) / "runs"):
+            try:
+                usage = shutil.disk_usage(where)
+            except OSError:
+                continue  # Unreadable says nothing about the disk.
+            total = getattr(usage, "total", None)
+            found.append((usage.free, min(DISK_MIN_FREE, total // 10) if total else DISK_MIN_FREE))
+        return min(found, key=lambda one: one[0] - one[1]) if found else (None, DISK_MIN_FREE)
 
     def low(self):
         if self.path is None:
             return None
         current = time.monotonic()
         if self.free is None or current - self.at >= DISK_CHECK_SECONDS:
-            try:
-                self.free = shutil.disk_usage(self.path).free
-            except OSError:
-                self.free = None  # Unreadable says nothing about the disk.
+            self.free, self.floor = self.read()
             self.at = current
-        return self.free if self.free is not None and self.free < DISK_MIN_FREE else None
+        return self.free if self.free is not None and self.free < self.floor else None
 
 
 disk = DiskWatch()
@@ -364,6 +383,41 @@ def note_browser(session, *, state, reason, started_at, at=None):
         row.value = value
     else:
         session.add(Setting(key=OUTAGE_KEY, value=value))
+
+
+DISK_FULL_ERRNOS = {errno.ENOSPC, errno.EDQUOT}
+
+
+def disk_full(exc):
+    """True when `exc`, or what it was raised from, is a write that failed because the disk or its quota was full."""
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, OSError) and exc.errno in DISK_FULL_ERRNOS:
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
+def disk_full_result(committed):
+    """The run's result when the disk filled under it. Before the commit nothing was sent: it waits for space like any other
+    outage of the machine, without spending a start or a repair. Once the commit was under way it is an unknown submission
+    and is never sent again. A full disk used to end 47 runs in a minute as "Worker error: OSError", and each job as
+    "Couldn't apply" after four attempts (soak, 2026-11-01)."""
+    disk.note_full()
+    if committed:
+        return {
+            "state": "submission_unknown",
+            "reason": "The disk filled while the application was being sent; whether the employer received it is unknown, "
+            "so it is not sent again",
+            "recovery_cause": "",
+        }
+    return {
+        "state": "waiting_browser",
+        "reason": DISK_FULL + ", so this application did not start. Nothing was sent; it is tried again when there is space",
+        "recovery_cause": "host_overloaded",
+        "blocker_type": "site_transient",
+    }
 
 
 def host_overloaded_result(result, *, run_state, started_at, ended_at=None, load=None):
