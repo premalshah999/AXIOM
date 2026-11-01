@@ -2788,14 +2788,24 @@ class Adapter:
         # every run that retried it walked the account toward a lockout. The main password is the next candidate, then a reset.
         said_now = " ".join([*obs.get("errors", []), str(obs.get("text", ""))])
         failures = int(record.get("sign_in_failures") or 0)
+
+        def login_context(creds):
+            # What is typed into the login boxes, hashed. A refusal belongs to the identifier it was typed with: the same
+            # password under a changed configured username is a fresh attempt, not a retype of the refused one.
+            typed = [self.login_value(f, creds) for f in obs["fields"] if self.is_login_field(f)]
+            return hashlib.sha256("\0".join(typed).encode()).hexdigest()
+
+        def refusal_key(creds):
+            return hashlib.sha256((self.accounts.credential_fingerprint(url, creds) + "\0" + login_context(creds)).encode()).hexdigest()
+
         if mode == "sign_in" and not own:
             refused = {fingerprint for fingerprint, _ in self.accounts.store.rejected(url)}
-            fp = self.accounts.credential_fingerprint(url, credentials)
+            fp = refusal_key(credentials)
             if fp in refused:
                 if (
                     alternate
                     and not using_alternate
-                    and self.accounts.credential_fingerprint(url, alternate) not in refused
+                    and refusal_key(alternate) not in refused
                     and password_rules.may_try_again(failures, said_now)
                 ):
                     self.attempts[alternate_key] += 1
@@ -2811,8 +2821,7 @@ class Adapter:
         # Only skip a recently and explicitly rejected login for a known account. The identifier is included in
         # the opaque context so changing a configured username permits a fresh attempt. Legacy records lack this
         # context and are not assumed to refer to the identifier currently shown on the page.
-        identifiers = [self.login_value(f, credentials) for f in obs["fields"] if self.is_login_field(f)]
-        context = hashlib.sha256("\0".join(identifiers).encode()).hexdigest()
+        context = login_context(credentials)
         try:
             rejection_age = (datetime.now(UTC) - datetime.fromisoformat(record.get("rejected_at", ""))).total_seconds()
         except (ValueError, TypeError):
@@ -2982,7 +2991,8 @@ class Adapter:
             )
             unknown = record.get("state") == "password_unknown" or unanswered_reset
             fingerprint = self.accounts.credential_fingerprint(url, credentials)
-            kept = [list(item) for item in self.accounts.store.rejected(url) if item[0] != fingerprint]
+            refusal = hashlib.sha256((fingerprint + "\0" + context).encode()).hexdigest()
+            kept = [list(item) for item in self.accounts.store.rejected(url) if item[0] != refusal]
             self.accounts.mark(
                 url,
                 "password_unknown" if unknown else "credentials_rejected",
@@ -2990,7 +3000,7 @@ class Adapter:
                 rejected_credentials=fingerprint,
                 rejected_login_context=context,
                 rejected_at=now(),
-                rejected_fingerprints=[*kept, [fingerprint, time.time()]][-6:],
+                rejected_fingerprints=[*kept, [refusal, time.time()]][-6:],
                 sign_in_failures=failures + 1,
                 **({"password_unknown_at": now()} if unanswered_reset else {}),
             )
