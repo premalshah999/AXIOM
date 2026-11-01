@@ -49,7 +49,9 @@ def platform_link_allowed(link_origin, ats):
 # Multi-tenant ATS sender domains. Mail from them is attributed to one employer only by tenant
 # identity (Workday names the tenant in the sender, e.g. mimecast@myworkday.com) or, when the
 # message names no tenant, by the shared-sender lease that begin() holds for one run at a time.
-TENANT_SENDERS = {"myworkday.com", "otp.workday.com"}
+# iCIMS's account and acknowledgement mail comes from <tenant>+autoreply@talent.icims.com: "talent" read as another employer's
+# tenant label, so every code from it was refused as `tenant` for every employer (found on an empty database, 2026-11-01).
+TENANT_SENDERS = {"myworkday.com", "otp.workday.com", "talent.icims.com"}
 
 
 TENANT_SUFFIXES = ("oraclecloud.com", "icims.com", "taleo.net", "successfactors.com", "eightfold.ai")
@@ -128,6 +130,19 @@ EMPLOYER_SENDER_FAMILIES = {
     "jobvite",
     "phenom",
     "custom",
+    # Production's Lever, Ashby and Paylocity employers mail from their own domains too (recruiting-noreply@<employer>).
+    "lever",
+    "ashby",
+    "workable",
+    "bamboohr",
+    "jazzhr",
+    "breezy",
+    "recruitee",
+    "teamtailor",
+    "personio",
+    "rippling",
+    "paylocity",
+    "ukg",
 }
 
 
@@ -392,6 +407,22 @@ KNOWN_SENDERS = {
     "adp": ["adp.com"],
     # Dayforce ID (dfid.dayforcehcm.com) registration and sign-in codes.
     "dayforce": ["dayforcehcm.com", "dayforce.com"],
+    # Platforms with no family here had no sender rule at all: no window could open for them, so a code, link or reset they
+    # mailed was never looked for, and the page said "No trusted sender is known" (found on an empty database, 2026-11-01).
+    # The owner's few Lever, Ashby and Workable rules had been typed or discovered by hand. Domains are the ones production's
+    # acknowledgements came from (no-reply@hire.lever.co, no-reply@ashbyhq.com, noreply@candidates.workablemail.com).
+    "lever": ["lever.co"],
+    "ashby": ["ashbyhq.com"],
+    "workable": ["workablemail.com", "workable.com"],
+    "bamboohr": ["bamboohr.com"],
+    "jazzhr": ["applytojob.com", "jazzhr.com"],
+    "breezy": ["breezy.hr"],
+    "recruitee": ["recruitee.com"],
+    "teamtailor": ["teamtailor.com"],
+    "personio": ["personio.de", "personio.com"],
+    "rippling": ["rippling.com", "rippling-ats.com"],
+    "paylocity": ["paylocity.com"],
+    "ukg": ["ultipro.com", "ukg.com", "ukg.net"],
 }
 
 
@@ -404,7 +435,9 @@ SHARED_SENDER_ATS = {"oracle", "icims", "successfactors"}
 
 
 def authenticated_sender(receiving_auth, domain):
-    if not re.search(r"\bdmarc=pass\b", receiving_auth, re.I):
+    # dmarc=bestguesspass: the domain publishes no DMARC record and its DKIM or SPF aligns, which is what a DMARC pass would
+    # check. Plenty of small employers' domains have no record; only Google's own result is read here (extract_message).
+    if not re.search(r"\bdmarc=(?:pass|bestguesspass)\b", receiving_auth, re.I):
         return False
     if re.search(r"\bheader\.from=" + re.escape(domain) + r"(?:\s|;|$)", receiving_auth, re.I):
         return True

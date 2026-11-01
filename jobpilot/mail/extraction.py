@@ -148,7 +148,8 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
         received = int(message.get("internalDate", "0")) / 1000
     except (ValueError, TypeError, OverflowError):
         return reject("invalid_message")
-    if received < challenge["since"] or received > challenge["expires"]:
+    # Gmail's INTERNALDATE has whole seconds: a mail delivered in the same second a window opened read as older than it.
+    if received < int(challenge["since"]) or received > challenge["expires"]:
         return reject("request_window")
     headers = message.get("payload", {}).get("headers", [])
     values = {}

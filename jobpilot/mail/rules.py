@@ -22,11 +22,16 @@ from .senders import tenant_tokens
 
 
 def connected_mailbox(session, recipient):
-    """The connected mailbox that receives this address, a dotted or tagged alias included (email_alias.mailbox_key)."""
+    """The connected mailbox that receives this address, a dotted or tagged alias included (email_alias.mailbox_key). A person
+    applying as a school or work address that forwards to the one Gmail they connected has mail there under the address they
+    applied with, and no rule, no window and no search existed for them on any platform (2026-11-01). With one mailbox
+    connected it is the place to look; extract_message still takes only mail addressed to the applicant. Several mailboxes
+    and none of them this address: nothing says which, so none."""
     from ..email_alias import same_mailbox
 
-    boxes = session.scalars(select(Mailbox).where(Mailbox.state == "connected"))
-    return next((box for box in boxes if same_mailbox(box.email, recipient)), None)
+    boxes = list(session.scalars(select(Mailbox).where(Mailbox.state == "connected")))
+    exact = next((box for box in boxes if same_mailbox(box.email, recipient)), None)
+    return exact or (boxes[0] if len(boxes) == 1 else None)
 
 
 class RulesMixin:
