@@ -277,18 +277,24 @@ FIRST_TIME = re.compile(
     re.I,
 )
 CREATE_LINK = re.compile(
-    r"^(?:create (?:an? |your |my )?(?:new )?(?:candidate |applicant )?(?:account|profile)|sign up|register|"
+    r"^(?:create (?:an? |your |my )?(?:new )?(?:candidate |applicant |job ?seeker )?(?:account|profile|login)|"
+    r"sign up(?: (?:now|here|today|for an account))?|register(?: (?:now|here|today|with us|for an account|as a new user))?|"
     r"new user|join(?: now)?|new candidate|don'?t have an account\??.{0,20}|create account)[!.]?$",
     # Deloitte's Avature: "Create profile!" (2026-10-26). Textron's Taleo: "Create a New Account" (2026-10-29), which
     # the pattern missed: the one registration after an unanswered reset was never opened, and the reset was repeated.
+    # JobDiva's portal (2026-10-30) offered "Register With Us" as its only way to an account.
     re.I,
 )
 SIGNIN_LINK = re.compile(
-    r"^(?:sign in|log ?in|already have an account\??.{0,20}|returning (?:user|candidate)|existing (?:user|candidate))$",
+    r"^(?:sign in(?: (?:now|here|instead))?|log ?in(?: (?:now|here|instead))?|already have an account\??.{0,20}|"
+    r"returning (?:user|candidate|applicant)(?: (?:log ?in|sign ?in))?|existing (?:user|candidate))[!.]?$",
     re.I,
 )
+# NC State's own career site (2026-10-29) offered "Forgot your username or password?", which "forgot your password" missed.
 FORGOT = re.compile(
-    r"forgot (?:your )?password|reset (?:your )?password|can'?t sign in|trouble signing in", re.I
+    r"forgot(?:ten)? (?:your )?(?:user ?name (?:or|and|/) )?password|reset (?:your )?password|"
+    r"\b(?:can'?t|cannot|unable to) (?:sign|log) ?in|trouble (?:signing|logging) in|need help (?:signing|logging) in",
+    re.I,
 )
 # A code step's own "send" control: "Get code" (ByteDance), "Send code", "Send verification code", "Request a code".
 SEND_CODE = re.compile(
