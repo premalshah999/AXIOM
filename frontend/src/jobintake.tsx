@@ -13,9 +13,13 @@ export const OPEN_JOB_LINK = "applypilot:add-job-link";
 
 type LinkResult = { url: string; job_id?: string; state: string; message?: string };
 
-// Every http(s) link in what was pasted: one per line, comma- or space-separated, or inside other text.
-const LINKS = /https?:\/\/[^\s,<>"']+/gi;
-const linksIn = (text: string) => [...new Set((text.match(LINKS) || []).map((u) => u.replace(/[.,;)]+$/, "")))];
+// Every http(s) link in what was pasted: one per line, comma- or space-separated, or inside other text. A comma belongs to the
+// link unless another link follows it: career sites put one in the path (/job/Nashville,-TN-Engineer/123), and a pasted link cut
+// there opened the city's page instead of the posting.
+const LINKS = /https?:\/\/[^\s<>"']+/gi;
+const linksIn = (text: string) => [
+  ...new Set((text.match(LINKS) || []).flatMap((m) => m.split(/,(?=https?:\/\/)/i)).map((u) => u.replace(/[.,;)]+$/, ""))),
+];
 const MAX_LINKS = 25;
 
 /**
