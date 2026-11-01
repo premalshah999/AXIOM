@@ -53,7 +53,10 @@ async def lifespan(app):
     identity_task = None
     if config.enable_workers:
         identity_task = asyncio.create_task(fill_board_identity(db))
+    warm_task = asyncio.create_task(warm_reads(service))
     yield
+    warm_task.cancel()
+    await asyncio.gather(warm_task, return_exceptions=True)
     if identity_task:
         identity_task.cancel()
         await asyncio.gather(identity_task, return_exceptions=True)
@@ -100,6 +103,24 @@ async def lifespan(app):
     await asyncio.gather(*pending_notifications, return_exceptions=True)
     db.flush_events()  # A remote database's batched events: the last of them go before the pool does.
     db.engine.dispose()
+
+
+async def warm_reads(service, delay=5):
+    """Read what the first Jobs and Overview visit would otherwise wait for, once the app is up (2026-11-01: /api/startable
+    was 15 s the first time under load, and /api/jobs 5-20 s). Both are remembered for a minute, so a visit finds them read."""
+    await asyncio.sleep(delay)
+    from ..outlook import given_up
+    from ..startable import reading
+
+    def read():
+        with service.db.session() as s:
+            given_up(s)
+        reading(service).get(service)
+
+    try:
+        await asyncio.to_thread(read)
+    except Exception:
+        pass  # A visit reads it itself.
 
 
 async def keep_telegram(service, interval=15):
