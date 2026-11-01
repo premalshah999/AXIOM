@@ -850,6 +850,7 @@ class Supervisor:
                     if older.exists():
                         older.replace(path.with_name(f"{name}.{n + 1}"))
                 shutil.copyfile(path, path.with_name(f"{name}.1"))
+                path.with_name(f"{name}.1").chmod(0o600)  # A copy takes the umask's 644; the logs hold employer names and answers.
                 os.truncate(path, 0)  # The child holds an O_APPEND descriptor, which simply carries on from zero.
             except OSError:
                 continue

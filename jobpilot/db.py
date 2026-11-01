@@ -24,6 +24,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.sql.functions import FunctionElement
 from sqlalchemy.types import TypeDecorator
 
+from .redaction import redact, redact_data
 from .schemas import job_title
 
 
@@ -447,6 +448,8 @@ class Database:
         return call(*args, **kwargs)
 
     def event(self, run_id, kind, message, data=None):
+        # A key echoed in a service's error text, or a page's own text, must not outlive the run in its log.
+        message, data = redact(message), redact_data(data) if data else data
         if self.events:
             self.events.add(run_id, kind, message, data, now())  # Stamped now: the row is written a moment later.
             if kind in DURABLE_EVENTS:

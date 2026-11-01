@@ -23,6 +23,7 @@ from .models import AnswerModelUnavailable, BudgetExceeded
 from .answers import UNOFFERED_SOURCE, Resolver
 from .ats import EMBED_JS, LABEL_ONLY, REGISTRY, classify_embedded, detect, unsettled
 from .posting_identity import IDENTITY_JS, identity, placeholder_title, save as save_identity
+from .redaction import redact
 from .email_browser import EmailBrowser, redacted_url
 from .failure_reports import clean
 from .forms import AUTH, ENTRY, FINAL, STALE_CHOICE, FormSession, NetworkMonitor, ResumeAttachmentError
@@ -3182,7 +3183,11 @@ class BrowserEngine:
             page = self.form.page
             await page.screenshot(path=str(folder / f"{name}.jpg"), type="jpeg", quality=45, timeout=3000)
             html = await page.content()
-            (folder / f"{name}.html").write_text(html[:3_000_000])
+            # A site can echo the password this app typed into a hidden field or a script (found in saved pages of three runs,
+            # 2026-11-01): the saved copy keeps the page and loses the value.
+            (folder / f"{name}.html").write_text(
+                redact(html[:3_000_000], extra=(self.config.application_password, self.config.icims_login))
+            )
         except Exception:
             pass
 

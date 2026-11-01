@@ -14,6 +14,7 @@ from sqlalchemy.orm import aliased, defer
 
 from .answers import normalize
 from .db import Event, Job, Review, Run, Setting, now
+from .redaction import redact
 
 HELP = (
     "✈️ AXIOM\nYour application companion\n\n"
@@ -322,7 +323,7 @@ class ConversationAction(BaseModel):
 def conversation_text(text, limit=2000):
     """Keep useful conversation context without retaining pasted credentials."""
     text = str(text)
-    if re.search(
+    if redact(text) != text or re.search(
         r"\bsk-[a-zA-Z0-9_-]{12,}|\b(?:password|api[_ -]?key|app[_ -]?token|otp|verification code)\s*[:=]\s*\S+",
         text,
         re.I,
@@ -775,7 +776,7 @@ async def send_help(service, run_id, payload, *, question=None, review_key=None,
     picture = current_help_bytes(service, run_id, question=question, review_key=review_key, field_id=field_id)
     if picture is None:
         return await api(service.config, "sendMessage", payload)
-    text = payload["text"]
+    text = redact(payload["text"])
     fits = len(text) <= 1000
     data = {"chat_id": service.config.telegram_user_id, "caption": short_caption(text)}
     if fits and payload.get("reply_markup"):
@@ -1226,6 +1227,9 @@ async def api(config, method, payload):
         from .telegram_workers import MENU as WORKER_MENU
 
         payload = {**payload, "reply_markup": WORKER_MENU}
+    if method in {"sendMessage", "editMessageText", "sendPhoto"}:
+        # Nothing that looks like a key leaves this computer, whatever built the text (an error from a service, a page's words).
+        payload = {k: redact(v) if k in {"text", "caption"} else v for k, v in payload.items()}
     async with httpx.AsyncClient(timeout=35 if method == "getUpdates" else 8) as client:
         response = await client.post(
             f"https://api.telegram.org/bot{config.telegram_bot_token}/{method}", json=payload

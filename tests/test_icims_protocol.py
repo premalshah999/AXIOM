@@ -30,7 +30,7 @@ def test_a_date_in_three_controls_is_named_by_protocol_not_by_its_printed_labels
 def test_a_signed_in_profile_keeps_its_saved_login():
     # Schwab's signed-in candidate profile shows the saved login and a masked password under "Create a login".
     fields = [
-        field("Login", "PersonProfileFields.Login", value="premashah1734895"),
+        field("Login", "PersonProfileFields.Login", value="exampleuser100200"),
         field("Password", "PersonProfileFields.Password", value="********", type_="password"),
         field("Password (Re-enter)", "PersonProfileFields.Password_Confirm", value="********", type_="password"),
         field("Email", "PersonProfileFields.Email", value="a@example.com", type_="email"),
@@ -85,7 +85,7 @@ async def test_the_saved_login_needs_no_verified_answer(page, tmp_path):
 
     url = "https://career-schwab.icims.com/jobs/1/engineer/candidate"
     html = ("<html><body><a href='#'>Log Out</a><label>Login<input name='PersonProfileFields.Login' required "
-            "value='saved1734895'></label><input type=submit value='Update Profile'></body></html>")
+            "value='saved100200'></label><input type=submit value='Update Profile'></body></html>")
 
     async def serve(route):
         await route.fulfill(body=html, content_type="text/html")
