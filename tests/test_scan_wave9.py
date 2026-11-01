@@ -106,3 +106,29 @@ async def test_a_whatsapp_consent_beside_the_phone_is_its_own_question(page):
     labels = [f["label"] for f in data["fields"]]
     assert "I consent to receiving WhatsApp messages" in labels
     assert labels.count("Phone Number") == 1
+
+
+ADP_TWO = """<form>
+<p>Are you a current employee?</p>
+<div role=radiogroup><label><input type=radio name=emp value=y>Yes</label><label><input type=radio name=emp value=n checked>No</label></div>
+<div id=host2></div>
+</form>
+<script>
+const host = document.createElement('sdf-select-simple');
+host.setAttribute('aria-label', 'Add response.');
+const root = host.attachShadow({mode: 'open'});
+root.innerHTML = '<label>Please indicate which type of device you are using to apply.</label><span>Select</span>';
+for (const t of ['Computer/Laptop', 'Mobile Phone']) {
+  const item = document.createElement('sdf-select-item'); item.setAttribute('label', t); item.textContent = t; host.appendChild(item);
+}
+document.getElementById('host2').appendChild(host);
+</script>"""
+
+
+async def test_a_pick_list_prints_its_own_question_before_the_text_above_it_counts(page):
+    """Midco's ADP prescreen (2026-10-31): the device question's text lives in the pick list; the text above it was the
+    employee question just answered, and the device pick list was labelled with that."""
+    await page.set_content(ADP_TWO)
+    data = await page.main_frame.evaluate(SCAN)
+    picks = [f for f in data["fields"] if f["type"] == "combobox"]
+    assert [f["label"] for f in picks] == ["Please indicate which type of device you are using to apply."]

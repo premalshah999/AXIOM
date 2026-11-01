@@ -392,3 +392,31 @@ async def test_an_unchanged_sign_in_form_with_forgot_password_resets_through_the
     flow.recover_sign_in = recover
     assert await flow.handle()
     assert calls == ["The employer kept its sign-in form after the saved login was sent"]
+
+
+async def test_the_page_is_settled_after_recover_opens_the_sign_up_route(service):
+    """Farmers (SuccessFactors, 2026-11-01): recover() clicked "Create an account" and returned; the flow typed the next
+    sign-in into the page that click was still leaving, so the sign-up it had just opened was never filled."""
+    obs = {
+        "fields": _fields("Password"),
+        "controls": [{"id": "signin", "label": "Sign In"}, {"id": "create", "label": "Create an account"}],
+        "errors": ["Invalid email address or password."],
+        "text": "",
+    }
+    flow, form, scope = _flow(service, obs)
+    order = []
+
+    class Adapter:
+        async def recover(self, _obs, _detail):
+            order.append("recover")
+            return None
+
+    async def settle(timeout=6):
+        order.append("settle")
+
+    form.settle = settle
+    flow.e.fallback_mail_adapter = Adapter()
+    flow.e.emit = lambda *a, **k: None
+    flow.e.result = None
+    assert await flow.recover_sign_in(scope, "refused")
+    assert order == ["recover", "settle"]

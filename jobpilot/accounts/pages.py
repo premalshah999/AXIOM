@@ -82,9 +82,10 @@ LOGIN_IDENTIFIER = re.compile(
 def login_identifier(field):
     """An account form's email or user-name input. SuccessFactors sign-in labels it "Valid Email"
     (Capgemini) or "Email Address:" (EY); left unfilled, the employer rejected the login and cleared
-    the password, and the run looped on the sign-in page (2026-10-15)."""
+    the password, and the run looped on the sign-in page (2026-10-15). Taleo prints the required mark as a lone dot, so
+    its box is labelled "User Name ." (Textron 2026-11-01: never typed, "Please provide a user name and a password")."""
     return field["type"] == "email" or bool(
-        LOGIN_IDENTIFIER.fullmatch(re.sub(r"[\s:*✱]+$", "", field["label"]))
+        LOGIN_IDENTIFIER.fullmatch(re.sub(r"[\s:*✱.]+$", "", field["label"]))
     )
 
 

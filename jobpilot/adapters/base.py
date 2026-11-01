@@ -47,11 +47,39 @@ SITE_FILTER = re.compile(
 )
 
 
+# The page a guest application answers when the employer already holds the email.
+GUEST_EMAIL_EXISTS = re.compile(
+    r"e-?mail(?: address)?[^\n]{0,80}?\balready (?:exists|registered|in use)\b[^.\n]{0,80}\bguest\b", re.I
+)
+# A posting's own comment box and video upload (SuccessFactors: "Write a reply..." and "Upload Video" beside Apply now).
+POSTING_WIDGET = re.compile(r"^(?:write|leave|add|post) an? (?:reply|comment)\b|^(?:upload )?(?:a )?video\W*$", re.I)
+
+
 def site_filter(field):
     """A job page's own search box or filter, not a question of the application."""
     if field.get("required") or field.get("type") == "file":
         return False
     return bool(field.get("search_box")) or bool(SITE_FILTER.search(" ".join(str(field.get("label") or "").split())))
+
+
+# An address that is the application rather than its posting.
+APPLICATION_ADDRESS = re.compile(r"job_application|/apply(?:/|$|\?)|/application(?:/|$|\?)|/candidate(?:/|$|\?)", re.I)
+
+
+def posting_widget(fields):
+    """Every field beside an Apply button is the job page's own: a search box or filter, a comment box or video upload,
+    or an optional file input that is the page's "match your resume" tool. Read as the application form, these postings
+    went to the form handler, which found nothing to fill (Eightfold: Micron, PayPal; Microsoft, NVIDIA, Simplify, and
+    SuccessFactors' Optimum and Nestle, live pages 2026-11-01). A required field, or any other question, is the form."""
+    if any(f.get("required") for f in fields):
+        return False
+    if all(f.get("type") == "file" for f in fields):
+        return True
+    return all(
+        site_filter(f)
+        or POSTING_WIDGET.search(" ".join(str(f.get("label") or "").split()))
+        for f in fields
+    )
 
 
 def confirmation_wording(text, committed):
@@ -693,6 +721,13 @@ class Adapter:
         top = [b for b in best if score(b) == score(best[0])]
         return top[-1]  # bottom navigation when duplicated top/bottom
 
+    def applying(self, obs):
+        """The application is under way, so a lone upload is its resume step, not the posting's "match your resume" tool, and
+        an "Apply" beside it may be the submit. SuccessFactors' application page holds only "Resume/CV" and "Apply" once its
+        profile rows are read-only (2026-11-01): pressing it as a job page's Apply would send it without the resume."""
+        url = str(obs.get("url") or getattr(getattr(self, "e", None), "page", None) and self.page.url or "")
+        return bool(self.attempts["apply"]) or bool(APPLICATION_ADDRESS.search(url))
+
     def find_final(self, obs):
         hits = [
             b
@@ -1005,7 +1040,12 @@ class Adapter:
             and (self.find_next(obs) or self.buttons(obs, AUTH_BUTTON))
         ):
             return Step.EMAIL_ENTRY
-        if meaningful and self.find_apply(obs) and all(site_filter(f) for f in meaningful):
+        if (
+            meaningful
+            and self.find_apply(obs)
+            and posting_widget(meaningful)
+            and not (all(f["type"] == "file" for f in meaningful) and self.applying(obs))
+        ):
             # Fields beside an Apply button are the job page's own search and filters: "Search for jobs by title or keyword"
             # (70 runs), "I am looking for" and "Where" (36), "Find Jobs" (17), a language picker. Read as the form, these
             # postings were never applied to, and 8.5% of such runs confirmed (2026-10-25..31).
@@ -1872,6 +1912,16 @@ class Adapter:
         )
 
     async def on_unknown(self, obs):
+        cancel = [b for b in obs["controls"] if re.fullmatch(r"cancel|go back|back", b["label"].strip(), re.I)]
+        if GUEST_EMAIL_EXISTS.search(obs.get("text", "")) and len(cancel) == 1:
+            # Textron's Taleo (2026-11-01): the guest route answered "The email address provided already exists and cannot
+            # be used to create a guest submission" and offered Send Email or Cancel. Read as an unknown page, the model
+            # took 30 decisions through the site's job search. The employer holds this email: the guest route is spent
+            # (attempts["guest"]) and Cancel returns to its sign-in, where the account steps take over.
+            self.attempts["guest"] += 1
+            self.emit("account", "The employer already holds this email, so its guest application is closed; back to its sign-in")
+            await self.click(cancel[0], auth=True)
+            return None
         return {"fallback": True, "reason": "Unrecognized page"}
 
     # ----- actions ------------------------------------------------------------------------------
