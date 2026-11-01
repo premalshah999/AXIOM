@@ -53,6 +53,7 @@ markers = [
   "unit: no browser, database or service wiring (the default)",
   "integration: needs the database, the Service or the API (service, client, app and prepared fixtures)",
   "browser: drives a real headless Chromium (page fixture); excluded from the fast gate",
+  "gallery: a real trap on a local fake employer, through the real engine end to end (tests/gallery); the release gate runs these",
   "regression: pins a failure that happened; its docstring cites the incident and its date",
 ]
 
