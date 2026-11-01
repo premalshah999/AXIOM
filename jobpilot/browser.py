@@ -2537,7 +2537,7 @@ class BrowserEngine:
             and response.status >= 400
             and request.method in {"POST", "PUT", "PATCH"}
             and request.resource_type in {"document", "xhr", "fetch"}
-            and origin(response.url) == origin(self.job["url"])
+            and origin(response.url) in self.application_origins()
         ):
             try:
                 asyncio.get_running_loop()
@@ -2545,6 +2545,18 @@ class BrowserEngine:
                 self.refusal_event(response)
             else:
                 asyncio.ensure_future(self.record_refusal(response))
+
+    def application_origins(self):
+        """Where the application's own writes go: the job's origin and the page's. Qualcomm and AARP (2026-10) list
+        the job on an Eightfold host but apply on their own domain, so their 400 "You have already applied" (from
+        careers.qualcomm.com) was never read and the run ended waiting_browser instead of already_applied."""
+        found = {origin(self.job["url"])}
+        try:
+            found.add(origin(self.page.url))
+        except Exception:  # No page yet, or a closed one.
+            pass
+        found.discard("")
+        return found
 
     async def record_refusal(self, response):
         """The employer's HTTP refusal of a commit write, with what it said. Eightfold answered PayPal's and

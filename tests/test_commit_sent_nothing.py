@@ -189,3 +189,36 @@ async def test_eightfold_telemetry_cannot_mask_the_application_response(status, 
 async def test_arbitrary_log_suffix_is_not_assumed_to_be_telemetry():
     request = {"method": "POST", "host": "careers.example.test", "path": "/applicationlog", "status": 200}
     assert await BrowserEngine.commit_sent_nothing(engine(requests=[request])) is False
+
+
+async def test_a_refusal_from_the_employers_own_apply_domain_is_read():
+    """Qualcomm (Eightfold, 2026-10-29, two runs): the job is listed on the platform's host but the application runs on
+    the employer's own domain, whose 400 "You have already applied to this position." was never read (the origin test
+    only matched the listing's host), so the runs ended waiting_browser instead of already_applied."""
+    import asyncio
+
+    engine = object.__new__(BrowserEngine)
+    engine.armed, engine.emit = True, (lambda *a, **k: None)
+    engine.job = {"url": "https://acme.eightfold.example/careers/job/1"}
+    engine.page = SimpleNamespace(url="https://careers.acme.example/careers/apply?pid=1")
+    engine.form = SimpleNamespace()
+
+    async def text():
+        return '{"message": "You have already applied to this position."}'
+
+    request = SimpleNamespace(method="POST", resource_type="xhr")
+    refused = SimpleNamespace(url="https://careers.acme.example/api/application/v2/submit", status=400,
+                              request=request, text=text)
+    BrowserEngine.submission_response(engine, refused)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert engine.refused_as_already_applied()["state"] == "already_applied"
+    # A third party's refusal is still not the application's.
+    other = object.__new__(BrowserEngine)
+    other.armed, other.emit, other.job, other.page = True, (lambda *a, **k: None), engine.job, engine.page
+    other.form = SimpleNamespace()
+    pixel = SimpleNamespace(url="https://px.example.test/collect", status=400, request=request, text=text)
+    BrowserEngine.submission_response(other, pixel)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert other.refused_as_already_applied() is None
