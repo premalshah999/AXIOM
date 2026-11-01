@@ -49,7 +49,7 @@ export function BatchView() {
   return (
     <div className="ax-page ov-page">
       <DotPatterns />
-      <Hero work={work} applications={applications} />
+      <Hero work={work} applications={applications} models={health.data?.models} />
       <FirstRun mail={mail.data} />
       <Live work={work} checking={!health.data && !work.known} />
       <div className="ov-columns">
@@ -141,7 +141,7 @@ function useWorking(mail: MailStatus | null, workers?: ApplicationWorkers) {
 type WorkingState = ReturnType<typeof useWorking>;
 
 // ---------- the top: today's count, the state and progress, what waits on you, and the key ----------
-function Hero({ work, applications }: { work: WorkingState; applications: Success[] | null }) {
+function Hero({ work, applications, models }: { work: WorkingState; applications: Success[] | null; models?: RuntimeHealth["models"] }) {
   const { snapshot, counts, link, refresh, go } = useWorkspace();
   const { pending, run } = useAction();
   const now = useNow();
@@ -156,6 +156,8 @@ function Hero({ work, applications }: { work: WorkingState; applications: Succes
   const [goal, setGoal] = useDraft("batch-target", counts.jobs || snapshot.jobs.length ? 100 : 25);
   const workers = snapshot.config.workers_enabled;
   const noResume = snapshot.resumes.length === 0;
+  const noKey = !snapshot.config.mimo;
+  const [confirmStart, setConfirmStart] = useState<number | null>(null);
   const paused = snapshot.control.paused;
   const panel = panelState(snapshot, link.lost);
   const stopped = paused || (!rt.intake_enabled && rt.intake_reason === "Paused");
@@ -200,10 +202,13 @@ function Hero({ work, applications }: { work: WorkingState; applications: Succes
       className="ov-key"
       onSubmit={(e) => {
         e.preventDefault();
-        begin(Math.max(1, Math.min(500, Math.round(goal || 25))));
+        const value = Math.max(1, Math.min(500, Math.round(goal || 25)));
+        // A batch sends on its own, which turns "Let me review first" off. Said before it happens, not found out afterwards.
+        if (!snapshot.control.auto_submit) setConfirmStart(value);
+        else begin(value);
       }}
     >
-      <MasterKey type="submit" word="Start" icon="start" aria-label="Start applying" busy={pending === "start"} disabled={pending !== null || noResume} />
+      <MasterKey type="submit" word="Start" icon="start" aria-label="Start applying" busy={pending === "start"} disabled={pending !== null || noResume || noKey} />
       <label className="ov-target">
         <span>Apply until</span>
         <input type="number" min={1} max={500} step={1} required value={goal} onChange={(e) => setGoal(Number(e.target.value))} aria-describedby="target-hint" />
@@ -303,6 +308,46 @@ function Hero({ work, applications }: { work: WorkingState; applications: Succes
         </a>
         {key}
       </section>
+      {confirmStart !== null && (
+        <Dialog
+          open
+          title="Start applying for you?"
+          onClose={() => setConfirmStart(null)}
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setConfirmStart(null)}>
+                Not yet
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  const value = confirmStart;
+                  setConfirmStart(null);
+                  void begin(value);
+                }}
+              >
+                Send for me
+              </Button>
+            </>
+          }
+        >
+          You chose to review each application first. Starting this turns that off: AXIOM will find jobs and send applications once every required
+          answer is verified, without asking. To keep reviewing, press Not yet and pick jobs yourself on the Jobs page.
+        </Dialog>
+      )}
+      {workers && noKey && !active && (
+        <Notice
+          tone="warn"
+          action={
+            <button type="button" className="ax-link" onClick={() => go({ view: "settings", tab: "connections" })}>
+              Add your AI key
+            </button>
+          }
+        >
+          AXIOM can't read job pages or write answers until you add an AI key.
+        </Notice>
+      )}
+      <ProviderNotice models={models} go={go} />
       {!workers && (
         <Notice tone="warn">Applying is disabled in this installation's configuration, so a batch can't run. Enable workers on the server and restart.</Notice>
       )}
@@ -319,6 +364,29 @@ function Hero({ work, applications }: { work: WorkingState; applications: Succes
         </Notice>
       )}
     </>
+  );
+}
+
+// An AI account that ran out of credit looks like "nothing is happening" from the outside. Said once, plainly, with the way out.
+function ProviderNotice({ models, go }: { models?: RuntimeHealth["models"]; go: ReturnType<typeof useWorkspace>["go"] }) {
+  const down = Object.values(models || {}).find((m) => m && (m.state === "cooldown" || m.state === "recovering"));
+  if (!down) return null;
+  const credit = down.last_error === "quota_exhausted";
+  return (
+    <Notice
+      tone="warn"
+      action={
+        credit ? (
+          <button type="button" className="ax-link" onClick={() => go({ view: "settings", tab: "connections" })}>
+            AI settings
+          </button>
+        ) : undefined
+      }
+    >
+      {credit
+        ? "Your AI account is out of credit, so AXIOM has paused applying. Add credit with your AI provider and it carries on by itself: it checks again every half hour."
+        : "The AI service isn't answering, so AXIOM is waiting a few minutes before it tries again. Nothing is lost."}
+    </Notice>
   );
 }
 

@@ -3,7 +3,6 @@ import { ArrowLeft, ArrowRight, Check as Tick, FileText, Mail, SlidersHorizontal
 import { api, ApiError } from "./api";
 import { routeUrl } from "./context";
 import { Wordmark } from "./shell/Brand";
-import { DatabaseChoice } from "./database";
 import { SwitchRow } from "./setup-kit";
 import { YesNo } from "./qform";
 import { Button, Dropzone, ErrorLine, External, Input, Loading, Monogram, Pill, Segmented, Select } from "./ui/index";
@@ -20,7 +19,7 @@ import "./styles/onboarding.css";
 // resumes where it stopped. The first screen of a new installation: it has to read as finished.
 // ---------------------------------------------------------------------------
 
-type StepId = "welcome" | "data" | "resume" | "profile" | "authorization" | "preferences" | "automation" | "connections" | "ready";
+type StepId = "welcome" | "connections" | "resume" | "profile" | "authorization" | "preferences" | "automation" | "connections" | "ready";
 // `server` is the id the backend stores (ONBOARDING_STEPS); steps the server has no id of its own for share a neighbour's.
 // `name` labels the step in the progress line, `minutes` is what it usually takes (the "about N min left" is their sum),
 // `skip` is the words on the button that moves on without doing it.
@@ -35,12 +34,15 @@ const STEPS: Step[] = [
     minutes: 0,
   },
   {
-    id: "data",
-    name: "Data",
-    title: "Where your data lives",
-    lead: "Your profile, jobs and answers are kept in a database. Most people never change this.",
+    id: "connections",
+    name: "Connect",
+    title: "Connect AI and Gmail",
+    lead: "AXIOM needs an AI key to read job pages and write answers, and your Gmail to read the codes employers email. Both stay on this Mac.",
+    // The AI key comes before the resume because reading the resume is the first thing that uses it. It shares the welcome's saved
+    // step, so a guide closed here reopens at the resume.
     server: "resume",
-    minutes: 0.25,
+    minutes: 3,
+    skip: "Set up later",
   },
   {
     id: "resume",
@@ -82,15 +84,6 @@ const STEPS: Step[] = [
     lead: "What it may do without asking. Each of these can be changed later in Settings.",
     server: "permissions",
     minutes: 0.5,
-  },
-  {
-    id: "connections",
-    name: "Connections",
-    title: "Connect AI and your inbox",
-    lead: "AXIOM uses AI to read job pages and write answers, and your inbox for the codes employers email. This takes about two minutes.",
-    server: "permissions",
-    minutes: 0.5,
-    skip: "Set up later",
   },
   {
     id: "ready",
@@ -666,8 +659,14 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
             </header>
             <div className="ax-ob-body" key={current.id}>
               {current.id === "welcome" && <WelcomeStep />}
-              {current.id === "data" && <DatabaseStep />}
-              {current.id === "resume" && <ResumeStep draft={draft} setDraft={(fn) => setPeople(fn)} />}
+                            {current.id === "resume" && (
+                <ResumeStep
+                  draft={draft}
+                  setDraft={(fn) => setPeople(fn)}
+                  modelReady={linked.model ? linked.model.model_ready : null}
+                  connect={() => go(STEPS.findIndex((s) => s.id === "connections"))}
+                />
+              )}
               {current.id === "profile" && <ContactStep draft={draft} setTop={setTop} setAddress={setAddress} />}
               {current.id === "authorization" && <AuthorizationStep draft={draft} setTop={setTop} setFact={setFact} />}
               {current.id === "preferences" && <PreferencesStep draft={draft} setTop={setTop} setFact={setFact} />}
@@ -725,6 +724,7 @@ type SetFact = (key: string, value: unknown) => void;
 
 // ---------- Welcome ----------
 const PLAN = [
+  { icon: Sparkles, title: "Connect your AI and Gmail", line: "An AI key from OpenRouter and a Gmail address. Setup shows you how to get both." },
   { icon: FileText, title: "Add your resume", line: "We read it once and fill in most of what follows." },
   { icon: UserRound, title: "Confirm your details", line: "Contact, work eligibility and the roles you want." },
   { icon: SlidersHorizontal, title: "Choose how much AXIOM does", line: "Send applications for you, or let you review each one first." },
@@ -754,15 +754,13 @@ function WelcomeStep() {
   );
 }
 
-// ---------- Data ----------
-// Local is the default and needs nothing from anyone: DatabaseChoice (database.tsx) says so in a sentence until someone asks to
-// change it, so Continue never waits on it.
-function DatabaseStep() {
-  return <DatabaseChoice />;
-}
-
 // ---------- Resume ----------
-function ResumeStep({ draft, setDraft }: StepProps & { setDraft: (fn: (d: Draft) => Draft) => void }) {
+function ResumeStep({
+  draft,
+  setDraft,
+  modelReady,
+  connect,
+}: StepProps & { setDraft: (fn: (d: Draft) => Draft) => void; modelReady: boolean | null; connect: () => void }) {
   const [resumes, setResumes] = useState<{ id: string; name: string }[] | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [state, setState] = useState<"idle" | "uploading" | "reading" | "done" | "error">("idle");
@@ -787,7 +785,13 @@ function ResumeStep({ draft, setDraft }: StepProps & { setDraft: (fn: (d: Draft)
       setMessage(parts.length ? "Found " + parts.join(", ") + ". You'll check them on the next steps." : "Resume read.");
     } catch (e) {
       setState("error");
-      setMessage(`${(e as Error).message} Your resume is saved; you can fill in the next steps by hand.`);
+      // The server's words for a missing key name a settings file; here the fix is one step back.
+      const raw = (e as Error).message;
+      setMessage(
+        /No API key/i.test(raw)
+          ? "AXIOM needs your AI key to read the resume. Your resume is saved: connect the key, or type your details on the next steps."
+          : `${raw} Your resume is saved; you can fill in the next steps by hand.`,
+      );
     }
   }
 
@@ -829,11 +833,24 @@ function ResumeStep({ draft, setDraft }: StepProps & { setDraft: (fn: (d: Draft)
         label="Resume PDF"
         disabled={busy}
       />
+      {modelReady === false && state === "idle" && (
+        <p className="ax-hint">
+          Reading a resume needs your AI key, which isn't connected yet.{" "}
+          <button type="button" className="ax-link" onClick={connect}>
+            Connect it
+          </button>
+        </p>
+      )}
       {busy && <Loading label={message} />}
       {!busy && message && (
         <p className={state === "error" ? "ax-error" : "ax-ob-note"} role={state === "error" ? "alert" : "status"}>
           {state === "done" && <Tick size={14} aria-hidden="true" />}
-          {message}
+          {message}{" "}
+          {state === "error" && /AI key/.test(message) && (
+            <button type="button" className="ax-link" onClick={connect}>
+              Connect it
+            </button>
+          )}
         </p>
       )}
       {!file && resumes && resumes.length > 0 && (
@@ -1428,10 +1445,11 @@ function ConnectionsStep({ linked, email, refresh }: { linked: Linked; email: st
       "model",
       async () => {
         await api("/connections", "PUT", { values: { llm_provider: "openrouter", openrouter_api_key: code.trim() } });
-        const tried = await api<{ ok: boolean }>("/connections/openrouter_api_key/test", "POST");
+        const tried = await api<{ ok: boolean; message?: string }>("/connections/openrouter_api_key/test", "POST");
         if (!tried.ok) {
           await api("/connections", "PUT", { values: { openrouter_api_key: "" } });
-          throw new Error("That key didn't work. Check you copied all of it, and that your OpenRouter account has credit.");
+          // The service's own answer when there is one (out of credit, refused, unreachable): "didn't work" fits none of them.
+          throw new Error(tried.message || "That key didn't work. Check you copied all of it, and that your OpenRouter account has credit.");
         }
         setCode("");
       },

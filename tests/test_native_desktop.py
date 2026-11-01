@@ -662,3 +662,86 @@ def test_state_written_by_a_supervisor_is_what_the_window_reads(tmp_path):
     state = read_state(cfg)
     for key in ("pid", "lstart", "phase", "reason", "active", "sleep_prevented", "power", "children"):
         assert key in state, f"desktop/AXIOM.m reads {key}"
+
+
+# ---- help: diagnostics, updates and a copy that stopped part way (wave 10, plug) -----------------------------------------
+
+
+def test_scrub_keeps_what_helps_and_drops_what_identifies(layout):
+    home = str(layout.home)
+    text = (
+        f"2026-11-01 opened {home}/Library/Logs/AXIOM/app.log for alex@example.test\n"
+        "GET https://jobs.example.test/apply/12345?session=abc123 failed, call +1 555 010 0100\n"
+        "key sk-or-v1-0123456789abcdef0123456789abcdef used\n"
+        "Authorization: Bearer 0123456789\n"
+        "the supervisor restarted worker 2 times"
+    )
+    out = desktop.scrub(text, home)
+    assert "alex@example.test" not in out and "[email]" in out
+    assert home not in out and "~/Library/Logs" in out
+    assert "abc123" not in out and "https://jobs.example.test/..." in out
+    assert "555 010 0100" not in out
+    assert "sk-or-v1" not in out
+    assert "Bearer" not in out and "left out" in out
+    assert "restarted worker 2 times" in out
+    assert desktop.scrub("2026-11-01 00:26:36 Opened (pid 31226).") == "2026-11-01 00:26:36 Opened (pid 31226)."
+
+
+def test_diagnostics_states_the_facts_and_never_the_secrets(layout, tmp_path):
+    (layout.bundle / "Contents").mkdir(parents=True, exist_ok=True)
+    (layout.bundle / "Contents" / "Info.plist").write_bytes(plistlib.dumps({"CFBundleShortVersionString": "1.2.3", "CFBundleVersion": "abc1234"}))
+    layout.native.mkdir(parents=True)
+    layout.logs.mkdir(parents=True)
+    (layout.native / "state.json").write_text(json.dumps({
+        "phase": "running", "active": 2, "power": {"battery": True, "percent": 61},
+        "children": {"worker": {"state": "up", "restarts": 1, "message": "ok"}},
+    }))
+    (layout.native / "window.json").write_text(json.dumps({"token": "TOPSECRETTOKEN0123456789abcdef", "chrome_source": "installed"}))
+    (layout.logs / "window.log").write_text("Opened.\nThe dashboard loaded 6.1 s after the window opened.\n")
+    (layout.logs / "app.log").write_text("INFO fine\nERROR could not read mail for alex@example.test\n")
+    text = desktop.diagnostics(layout, database=lambda sql: "failed|3" if "group by 1" in sql else "confirmed|5")
+    assert "AXIOM 1.2.3 (build abc1234)" in text
+    assert "Applications in progress: 2" in text and "battery, 61%" in text
+    assert "worker: up, restarted 1x" in text
+    assert "confirmed|5" in text and "failed|3" in text
+    assert "dashboard loaded" in text
+    assert "TOPSECRET" not in text and "alex@example.test" not in text and "INFO fine" not in text
+    assert "[email]" in text
+
+
+def test_newer_version_compares_numbers_not_text():
+    assert desktop.newer_version("1.0.0", "v1.0.1") and desktop.newer_version("1.9", "1.10.0")
+    assert not desktop.newer_version("1.2.0", "1.2.0") and not desktop.newer_version("1.2.0", "") and not desktop.newer_version("1.2.0", "v1.1.9")
+
+
+def test_update_check_offers_only_a_github_page_and_never_downloads(layout):
+    (layout.bundle / "Contents").mkdir(parents=True, exist_ok=True)
+    (layout.bundle / "Contents" / "Info.plist").write_bytes(plistlib.dumps({"CFBundleShortVersionString": "1.0.0"}))
+    newer = desktop.check_update(layout, fetch=lambda: {"tag_name": "v1.1.0", "html_url": "https://github.com/premalshah999/AXIOM/releases/tag/v1.1.0"})
+    assert newer["newer"] and newer["latest"] == "1.1.0" and newer["url"].startswith("https://github.com/")
+    hostile = desktop.check_update(layout, fetch=lambda: {"tag_name": "v9", "html_url": "file:///Applications/Other.app"})
+    assert hostile["newer"] and hostile["url"] == desktop.RELEASE_PAGE
+    same = desktop.check_update(layout, fetch=lambda: {"tag_name": "1.0.0", "html_url": ""})
+    assert not same["newer"] and not same["error"]
+
+    def offline():
+        raise OSError("no route")
+
+    assert "Could not reach" in desktop.check_update(layout, fetch=offline)["error"]
+
+
+def test_an_incomplete_copy_is_told_from_a_whole_one(tmp_path):
+    resources = tmp_path / "Resources"
+    (resources / "python" / "lib").mkdir(parents=True)
+    (resources / "python" / "lib" / "importlib.py").write_text("x" * 40)
+    (resources / "app").mkdir()
+    (resources / "app" / "run.py").write_text("print(1)")
+    (resources / "app" / "link").symlink_to("run.py")
+    assert desktop.write_install_manifest(resources) == 3
+    assert desktop.install_problem(resources) == ""
+    (resources / "python" / "lib" / "importlib.py").unlink()  # What a drag cut short leaves: a folder without its files.
+    assert "1 of 3 files are missing or damaged, such as python/lib/importlib.py" == desktop.install_problem(resources)
+    (resources / "python" / "lib" / "importlib.py").write_text("short")
+    assert "importlib.py" in desktop.install_problem(resources), "a file cut short is damaged too"
+    (resources / "install-manifest.txt").unlink()
+    assert "manifest" in desktop.install_problem(resources)

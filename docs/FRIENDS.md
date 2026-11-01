@@ -1,0 +1,38 @@
+# Giving AXIOM to a friend
+
+AXIOM is not signed with an Apple Developer ID yet, so the first open takes a few clicks in System Settings. The same steps are in a
+text file inside the disk image, beside the app and the Applications folder: `desktop/dmg-readme.txt`.
+
+## Message to paste
+
+> Here is AXIOM: it finds jobs that fit you and applies for you. Download AXIOM.dmg from the link, open it, and drag AXIOM onto
+> Applications (use Finder, not Terminal).
+>
+> The first time you open it, the Mac says "Apple could not verify AXIOM". That is normal: I haven't paid Apple to approve it.
+> Click Done. Then open the Apple menu, System Settings, Privacy & Security, scroll down to Security, and click Open Anyway next to
+> "AXIOM was blocked". Enter your Mac password, then open AXIOM again and click Open if it asks. You only do this once.
+>
+> You need a Mac with Apple silicon on macOS 15 or newer, a Gmail account, and an AI key from openrouter.ai (AXIOM walks you through
+> both; you pay OpenRouter directly, a few dollars goes a long way). If anything goes wrong, choose Help, Copy Diagnostics in AXIOM
+> and paste it to me. It has no passwords, keys or emails in it.
+
+## What was and was not checked
+
+- `spctl --assess` on the built app says `rejected` (ad-hoc signed): so Gatekeeper will stop it, as above. Checked on macOS 15.2.
+- The click path (Done, Privacy & Security, Open Anyway, password, Open) is Apple's documented one for macOS 15. Nobody has walked it on a
+  second Mac here. The wording of the last confirmation may differ.
+- A file that never came through a browser or AirDrop (a USB stick) carries no quarantine mark, and opens with no warning at all.
+
+## Publishing an update
+
+The app asks GitHub once a day for the newest release (`https://api.github.com/repos/premalshah999/AXIOM/releases/latest`). Publish the
+disk image as a release named for the version (`v1.1.0`); the number must be larger than `version` in `pyproject.toml` at build time. A
+friend then sees "AXIOM 1.1.0 is available" with a button that opens the release page, and Help, Check for Updates does the same on
+request. The app never downloads or replaces itself: the friend drags the new version over the old one, and their data stays.
+
+## When a copy is incomplete
+
+`desktop/build.sh` writes `Resources/install-manifest.txt` (every file and its size). At each start the window checks it, and a copy
+that stopped part way shows "AXIOM was not copied completely" with what to do, instead of a Python error. A drag in Finder is the
+supported way to install; the 2026-11-01 failure came from a script in a terminal, which macOS may treat as a program modifying an app
+(App Management). That cause is not proven.

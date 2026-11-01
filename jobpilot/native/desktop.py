@@ -23,12 +23,13 @@ import sys
 import tempfile
 import time
 import traceback
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import release
+from . import pg, release
 from .env import ROOT, NativeError, load, prepare
 from .supervisor import port_in_use, process_start, read_state, stop_chrome_holding, stop_leftovers, supervisor_alive
 
@@ -490,6 +491,178 @@ def _detach(layout):
     os.close(null)
 
 
+# ---- help: what a friend sends the owner, and whether a newer AXIOM exists ---------------------------------------------
+
+
+RELEASES_API = "https://api.github.com/repos/premalshah999/AXIOM/releases/latest"
+RELEASE_PAGE = "https://github.com/premalshah999/AXIOM/releases/"
+# A line mentioning one of these is dropped whole: its value could be a key, a password or a cookie.
+SECRET_WORDS = re.compile(r"pass(?:word|code)|secret|token|api[_-]?key|authorization|cookie|bearer|credential", re.I)
+
+
+def scrub(text, home=""):
+    """Safe to paste into a message: no keys, no email addresses, no phone numbers, no page addresses past the site's name,
+    no folder names of the person's Mac. What this cannot know is whether a sentence is private, so callers keep to logs of
+    AXIOM's own (never mail, never answers) and say what is left in."""
+    out = []
+    for line in str(text).splitlines():
+        if SECRET_WORDS.search(line):
+            out.append("[a line that mentions a key or password was left out]")
+            continue
+        if home:
+            line = line.replace(home, "~")
+        line = re.sub(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", "[email]", line)
+        line = re.sub(r"(https?)://([^/\s\"'<>)]+)[^\s\"'<>)]*", r"\1://\2/...", line)
+        # A log line's own date and time look like a phone number to this pattern, and are what the reader needs.
+        stamps = re.findall(r"\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2}:\d{2})?", line)
+        for k, stamp in enumerate(stamps):
+            line = line.replace(stamp, f"\x00{k}\x00", 1)
+        line = re.sub(r"\+?\d[\d\s().-]{8,}\d", "[number]", line)
+        for k, stamp in enumerate(stamps):
+            line = line.replace(f"\x00{k}\x00", stamp, 1)
+        line = re.sub(r"\b[A-Za-z0-9_-]{24,}\b", "[long code]", line)
+        out.append(line)
+    return "\n".join(out)
+
+
+def tail(path, lines, keep=None):
+    try:
+        found = Path(path).read_text(errors="replace").splitlines()
+    except OSError:
+        return []
+    if keep:
+        found = [line for line in found if keep.search(line)]
+    return found[-lines:]
+
+
+def app_version(layout):
+    try:
+        info = plistlib.loads((layout.bundle / "Contents" / "Info.plist").read_bytes())
+    except (OSError, ValueError, plistlib.InvalidFileException):
+        return "", ""
+    return str(info.get("CFBundleShortVersionString", "")), str(info.get("CFBundleVersion", ""))
+
+
+def diagnostics(layout, database=None):
+    """One block of plain text a friend can paste to whoever sent them AXIOM. `database` is a function from SQL to its text
+    answer (None when the database is not up); only counts and the kinds of reasons leave it, never a name, answer or mail."""
+    version, build = app_version(layout)
+    home = str(layout.home)
+    state = read_json(layout.native / "state.json")
+    free = shutil.disk_usage(layout.support if layout.support.exists() else layout.home).free
+    lines = [
+        "AXIOM diagnostics",
+        "No passwords, keys, email addresses or mail are included. Websites of employers can appear.",
+        "",
+        f"AXIOM {version or '?'} (build {build or '?'})",
+        f"macOS {platform.mac_ver()[0] or '?'} on {platform.machine()}, {physical_memory_gb():.0f} GB memory, {free / 1024**3:.0f} GB free disk",
+        f"Installed at {scrub(layout.bundle, home)}",
+        f"Chrome: {read_json(layout.window_file).get('chrome_source') or 'not chosen yet'}",
+        "",
+        f"State: {state.get('phase') or 'not running'}"
+        + (f" ({scrub(state.get('reason'), home)})" if state.get("reason") else ""),
+    ]
+    if state.get("phase") == "running":
+        lines.append(f"Applications in progress: {state.get('active') if state.get('active') is not None else 'unknown'}")
+    power = state.get("power")
+    if isinstance(power, dict):
+        lines.append(f"Power: {'battery' if power.get('battery') else 'plugged in'}, {power.get('percent', '?')}%")
+    for name, child in (state.get("children") or {}).items():
+        extra = f", restarted {child['restarts']}x" if child.get("restarts") else ""
+        lines.append(f"  {name}: {child.get('state')}{extra} {scrub(child.get('message') or '', home)}".rstrip())
+    if database:
+        try:
+            counts = database("select state, count(*) from runs group by state order by 2 desc")
+            reasons = database(
+                "select left(reason, 140), count(*) from runs where state not in ('confirmed','queued','running','submitting') "
+                "and reason <> '' group by 1 order by 2 desc limit 8"
+            )
+            lines += ["", "Applications by state (state|count):", scrub(counts or "none yet", home)]
+            if reasons:
+                lines += ["Most common reasons one did not go out (reason|count):", scrub(reasons, home)]
+        except (OSError, subprocess.SubprocessError, NativeError):
+            lines += ["", "The database did not answer."]
+    for title, name, keep in (
+        ("Window", "window.log", None),
+        ("Start and stop", "supervisor.log", None),
+        ("Problems the app noted", "app.log", re.compile(r"ERROR|WARN|Traceback|Error:|failed|stopped", re.I)),
+    ):
+        found = tail(layout.logs / name, 40, keep)
+        if found:
+            lines += ["", f"--- {title} (last {len(found)} lines)", scrub("\n".join(found), home)]
+    return "\n".join(lines) + "\n"
+
+
+def newer_version(current, latest):
+    def key(text):
+        return tuple(int(n) for n in re.findall(r"\d+", str(text))[:4])
+
+    return bool(key(latest)) and key(latest) > key(current)
+
+
+def check_update(layout, fetch=None):
+    """Whether a newer AXIOM has been published, and the page to get it from. Never downloads or replaces anything: the person
+    opens the page, and drags the new version over the old one as the first time. `fetch` is the HTTP call, for tests."""
+    current, _ = app_version(layout)
+    answer = {"current": current, "latest": "", "url": "", "newer": False, "error": ""}
+    try:
+        if fetch is None:
+            request = urllib.request.Request(RELEASES_API, headers={"Accept": "application/vnd.github+json", "User-Agent": "AXIOM"})
+
+            def fetch():
+                with urllib.request.urlopen(request, timeout=15) as response:
+                    return json.load(response)
+
+        release = fetch()
+    except urllib.error.HTTPError as exc:
+        answer["error"] = "" if exc.code == 404 else f"The release page answered {exc.code}."  # 404: nothing published yet.
+        return answer
+    except (OSError, ValueError) as exc:
+        answer["error"] = f"Could not reach github.com ({type(exc).__name__})."
+        return answer
+    latest = str(release.get("tag_name") or "").lstrip("vV") if isinstance(release, dict) else ""
+    url = str(release.get("html_url") or "") if isinstance(release, dict) else ""
+    # Only ever offer a page on GitHub: the answer is data, and the window opens whatever address it is given.
+    if not url.startswith("https://github.com/"):
+        url = RELEASE_PAGE
+    answer.update(latest=latest, url=url, newer=newer_version(current, latest))
+    return answer
+
+
+def write_install_manifest(resources):
+    """Every file under Resources and its size, one per line, written when the app is built. The window checks it at each start:
+    a copy that stopped part way (the Mac refused one file, or a drag was cancelled) is told apart from a program that is broken."""
+    resources = Path(resources)
+    manifest = resources / "install-manifest.txt"
+    manifest.unlink(missing_ok=True)
+    lines = []
+    for folder, names, files in os.walk(resources):
+        for name in sorted(files) + [n for n in names if os.path.islink(os.path.join(folder, n))]:
+            path = os.path.join(folder, name)
+            lines.append(f"{os.lstat(path).st_size}\t{os.path.relpath(path, resources)}")
+    manifest.write_text("\n".join(sorted(lines, key=lambda l: l.split("\t", 1)[1])) + "\n")
+    return len(lines)
+
+
+def install_problem(resources):
+    """'' when the manifest's every file is here at its size, else what is missing. The window does the same in Objective-C,
+    because a copy missing Python's own files cannot run this one."""
+    resources = Path(resources)
+    try:
+        wanted = (resources / "install-manifest.txt").read_text().splitlines()
+    except OSError:
+        return "install-manifest.txt is missing"
+    bad = []
+    for line in wanted:
+        size, _, relative = line.partition("\t")
+        try:
+            if os.lstat(resources / relative).st_size != int(size):
+                bad.append(relative)
+        except (OSError, ValueError):
+            bad.append(relative)
+    return f"{len(bad)} of {len(wanted)} files are missing or damaged, such as {bad[0]}" if bad else ""
+
+
 # ---- the rest of `axiom`, with this environment ----------------------------------------------------------------------
 
 
@@ -499,6 +672,20 @@ def existing_environment(layout):
     if not ports:
         raise NativeError("AXIOM has not been opened yet. Open it once first.")
     return environment(layout, ports, read_json(layout.window_file).get("chrome", ""))
+
+
+def print_diagnostics(layout):
+    """Works with AXIOM stopped or broken, which is when it is wanted: the database is asked only if it answers."""
+    database = None
+    try:
+        os.environ.update(existing_environment(layout))
+        cfg = prepare(load())
+        if port_in_use(cfg.pg_port):
+            database = lambda sql: pg.psql(layout.pg_bin, cfg, sql, timeout=5, check=False)  # noqa: E731
+    except (NativeError, OSError, ValueError):
+        pass
+    print(diagnostics(layout, database), end="")
+    return 0
 
 
 def main(argv=None):
@@ -512,6 +699,11 @@ def main(argv=None):
             if argv[1:] in (["on"], ["off"]):
                 set_login_item(layout, argv[1] == "on")
             print("on" if layout.login_item.exists() else "off")
+            return 0
+        if command == "diagnostics":
+            return print_diagnostics(layout)
+        if command == "update-check":
+            print(json.dumps(check_update(layout)))
             return 0
         if command == "move-in":
             from . import movein

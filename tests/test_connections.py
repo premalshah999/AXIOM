@@ -44,3 +44,34 @@ def test_invalid_values_are_refused(tmp_path, update, message):
 async def test_an_unset_key_tests_as_missing(tmp_path):
     result = await connections.test(config(tmp_path), "twocaptcha_api_key")
     assert result == {"ok": False, "message": "Nothing is saved for this yet."}
+
+
+class _Reply:
+    def __init__(self, status, body):
+        self.status_code, self._body = status, body
+
+    def json(self):
+        return self._body
+
+
+def _answering(monkeypatch, status, body):
+    class Client:
+        def __init__(self, *a, **k): ...
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, *a, **k): return _Reply(status, body)
+
+    monkeypatch.setattr(connections.httpx, "AsyncClient", Client)
+
+
+async def test_an_openrouter_key_with_no_credit_says_so_in_words(tmp_path, monkeypatch):
+    """A friend's first run (2026-11-01): the key is accepted, then every application fails at its first model question."""
+    cfg = config(tmp_path)
+    cfg.openrouter_api_key = "sk-or-v1-synthetic"
+    _answering(monkeypatch, 200, {"data": {"limit_remaining": 0}})
+    result = await connections.test(cfg, "openrouter_api_key")
+    assert result["ok"] is False and "out of credit" in result["message"]
+    _answering(monkeypatch, 200, {"data": {"limit_remaining": None}})  # No spending limit: nothing to say.
+    assert (await connections.test(cfg, "openrouter_api_key"))["ok"] is True
+    _answering(monkeypatch, 200, {"data": {"limit_remaining": 4.2}})
+    assert (await connections.test(cfg, "openrouter_api_key"))["ok"] is True
