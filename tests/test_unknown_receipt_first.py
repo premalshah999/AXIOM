@@ -57,6 +57,16 @@ def test_a_check_of_an_older_run_a_stale_check_or_one_inside_the_receipt_wait_do
     assert not unknown_resubmit_allowed(Session(checked(80)), [run()], NOW)  # Made 10 minutes after the run ended.
 
 
+def test_a_twin_listing_triaged_as_submitted_stops_the_resubmission_whichever_run_comes_first():
+    """Admission reads the runs of every listing of a posting. The final page said "thank you" under the twin's id, and the
+    gate looked only at the first uncertain run's job."""
+    session = Session(checked(10))
+    session.rows["unknown_triage:j2"] = {"verdict": "submitted"}
+    runs = [run(run_id="r1", job_id="j1"), run(minutes_ago=100, run_id="r2", job_id="j2")]
+    assert not unknown_resubmit_allowed(session, runs, NOW)
+    assert not unknown_resubmit_allowed(session, runs[::-1], NOW)
+
+
 async def test_the_queue_refuses_an_uncertain_job_nobody_checked_the_mailbox_for(service):
     """Every caller (the autopilot, a resume, a recovery retry, an owner click) is admitted by the same function."""
     service.db.set_setting("unknown_resubmit_policy", {"enabled": True})
