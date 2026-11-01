@@ -1,5 +1,10 @@
 // Plain formatting helpers shared by every page: no markup, no styles.
 export const words = (s: string) => s.replaceAll("_", " ");
+/** What to do with a file a resume box can't take: most people's resume is a Word file, and "wrong file type" helps nobody. */
+export const resumeFileRefusal = (file: File) =>
+  /\.(docx?|pages|odt|rtf|txt)$/i.test(file.name)
+    ? `AXIOM needs a PDF of your resume. Open ${file.name} and choose File, then Save As or Export, then PDF, and add that file.`
+    : `${file.name} isn't a PDF. Add your resume as a PDF.`;
 export const shortId = (id: string) => id.slice(0, 8);
 export const plural = (n: number, one: string, many = one + "s") =>
   `${n.toLocaleString()} ${n === 1 ? one : many}`;

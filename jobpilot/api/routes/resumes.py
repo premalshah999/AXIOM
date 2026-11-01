@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from pypdf import PdfReader
 from sqlalchemy import func, select
 
-from ...db import Resume, Run, record
+from ...db import Resume, Run, now, record
 from ...service import ACTIVE
 
 
@@ -29,10 +29,13 @@ def router(service) -> APIRouter:
             ]
 
     @r.post("/api/resumes")
-    async def upload_resume(file: UploadFile = File(...), name: str = Form(...), roles: str = Form("")):
+    async def upload_resume(file: UploadFile = File(...), name: str = Form(...), roles: str = Form(""), reuse: bool = False):
         content = await file.read(5 * 1024 * 1024 + 1)
-        if len(content) > 5 * 1024 * 1024 or not content.startswith(b"%PDF-"):
-            raise ValueError("Upload a PDF no larger than 5 MB")
+        if len(content) > 5 * 1024 * 1024:
+            raise ValueError("This file is over 5 MB. Save a smaller PDF of your resume and add that.")
+        if not content.startswith(b"%PDF-"):
+            # A Word file renamed .pdf, usually.
+            raise ValueError("This file isn't really a PDF. Open your resume and choose File, then Save As or Export, then PDF, and add that file.")
         if not name.strip() or len(name) > 120 or len(roles) > 2000:
             raise ValueError("Give this resume a short name and role tags")
         try:
@@ -41,16 +44,24 @@ def router(service) -> APIRouter:
                 raise ValueError()
             text = "\n".join(page.extract_text() or "" for page in reader.pages)[:40000]
         except Exception:
-            raise ValueError("The PDF is encrypted, damaged, or longer than 20 pages") from None
+            raise ValueError("This PDF is locked, damaged, or longer than 20 pages. Save your resume as a new PDF and add that.") from None
         if len(text.strip()) < 30:
-            raise ValueError("The PDF needs extractable text for classification. Export a text-based PDF.")
+            raise ValueError(
+                "This PDF is a picture of your resume, so AXIOM can't read the words. Open the original in Word, Pages or "
+                "Google Docs, choose File, then Save As or Download, then PDF, and add that file."
+            )
         sha = hashlib.sha256(content).hexdigest()
         filename = sha + ".pdf"
         with db.exclusive() as s:
-            if s.scalar(select(Resume.id).where(Resume.sha256 == sha)):
-                raise ValueError("This exact resume is already uploaded")
+            same = s.scalar(select(Resume).where(Resume.sha256 == sha))
+            if same and reuse:
+                # The setup guide: the same file again, after a failed read or a guide closed half way, is that resume.
+                result = record(same)
+                return {k: v for k, v in result.items() if k not in {"text", "filename"}}
+            if same:
+                raise ValueError("You've already added this resume.")
             if s.scalar(select(func.count()).select_from(Resume).where(Resume.demo.is_(False))) >= 10:
-                raise ValueError("Keep up to 10 resume variants. Remove an unused variant first.")
+                raise ValueError("You can keep up to 10 resumes. Remove one first.")
             path = config.data_dir / "resumes" / filename
             path.write_bytes(content)
             path.chmod(0o600)
@@ -74,6 +85,16 @@ def router(service) -> APIRouter:
                 raise HTTPException(404)
             path = config.data_dir / "resumes" / row.filename
         return FileResponse(path, media_type="application/pdf", filename="resume.pdf")
+
+    @r.post("/api/resumes/{resume_id}/prefer")
+    def prefer_resume(resume_id: str):
+        """Make this the resume applications attach when a job has not chosen another: the newest one (latest_resume_id)."""
+        with db.exclusive() as s:
+            row = s.get(Resume, resume_id)
+            if not row:
+                raise HTTPException(404)
+            row.created_at = now()
+        return {"preferred": True}
 
     @r.delete("/api/resumes/{resume_id}")
     def delete_resume(resume_id: str):
