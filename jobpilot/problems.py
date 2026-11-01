@@ -128,6 +128,23 @@ def recent(session, days=7, page=1, size=50, kind="", now=None, runs_dir=None):
     return {"rows": rows, "total": total, "page": number, "pages": pages, "size": size, "days": days}
 
 
+def next_for_job(session, job_id, now=None):
+    """{word, kind, sentence, at} for a job's newest attempt: the one answer the job panel and the problems list both give, from
+    the same function. word is the five-word vocabulary ("failed" = the app has given up), kind/sentence/at say what happens next
+    and, where known, when. None for a job with no attempt."""
+    from .api.pipeline import words_of
+
+    now = now or datetime.now(UTC)
+    columns = (Run.id, Run.job_id, Run.state, Run.reason, Run.created_at, Run.finished_at, Job.title, Job.company, Job.url, Job.ats, Job.location)
+    row = session.execute(
+        select(*columns).join(Job, Job.id == Run.job_id).where(Run.job_id == job_id).order_by(Run.created_at.desc(), Run.id.desc()).limit(1)
+    ).first()
+    if row is None:
+        return None
+    described = _describe(session, [row], now, words_of)[0]
+    return {"word": words_of(session, [job_id]).get(job_id, "not"), **described["next"]}
+
+
 def _describe(session, picked, now, words_of):
     if not picked:
         return []

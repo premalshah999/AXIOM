@@ -102,6 +102,14 @@ def router(service) -> APIRouter:
                 )
         return result
 
+    @r.get("/api/jobs/{job_id}/outlook")
+    def job_outlook(job_id: str):
+        """Whether the app is still trying, and when its next try is where that is known (problems.next_for_job)."""
+        from ...problems import next_for_job
+
+        with db.session() as s:
+            return next_for_job(s, job_id) or {"word": "not", "kind": "", "sentence": "", "at": ""}
+
     @r.get("/api/jobs/{job_id}")
     def get_job(job_id: str):
         with db.session() as s:
