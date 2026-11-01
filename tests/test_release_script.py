@@ -68,7 +68,8 @@ def scene(tmp_path, monkeypatch):
 
     monkeypatch.setattr(release, "run", run)
     rel = release.Release(release.options(["--app", str(app), "--work", str(work), "--drain-seconds", "1"]))
-    rel.preflight = rel.gate = rel.build = lambda: None
+    rel.preflight = rel.gate = rel.build = rel.replay = lambda: None
+    rel.corpus = lambda *a, **k: None
     rel.head = "abc123"
     rel.new_engine = "execution-v2-new"
     rel.verify_copy = lambda: None

@@ -12,7 +12,8 @@ Every stage's real exit status decides what happens next, never a pipe's (a red 
 The order is the point:
 
   preflight   right commit, clean tree, disk room, nothing half done, no earlier hold of someone else's to clobber
-  gate        scripts/dev/gate.sh release: the fast suite, then the gallery of real traps through the real engine
+  gate        scripts/dev/gate.sh release: the fast suite, then the gallery of real traps through the real engine; then, where this
+              computer has a private corpus, what this commit reads differently on real saved pages (reported, never blocking)
   build       desktop/build.sh
   verified    a complete copy outside the install location: signature, every file at its size, Python imports, and the copy's own
               engine applying to a local site. Writing into /Applications can be refused part way (2026-11-01), so nothing is
@@ -41,7 +42,7 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,6 +52,7 @@ DRAIN_SECONDS = 1200  # 95% of confirmed applications took under 570 s and 99% u
 POLL_SECONDS = 5
 START_SECONDS = 120
 QUIT_SECONDS = 60
+HOLD_RESTORE_SECONDS = 90
 IN_FLIGHT = "select count(*) from runs where state in ('running','submitting')"
 COMMITTING = "select count(*) from runs where state = 'submitting'"
 HOLD_VALUE = "select value::text from settings where key = 'execution_v2_deployment_hold'"
@@ -73,7 +75,7 @@ class Log:
     def say(self, text):
         line = f"[{time.monotonic() - self.began:6.0f}s] {text}"
         print(line, flush=True)
-        self.file.write(f"{datetime.now(UTC).isoformat(timespec='seconds')} {text}\n")
+        self.file.write(f"{datetime.now(timezone.utc).isoformat(timespec='seconds')} {text}\n")
         self.file.flush()
 
 
@@ -194,6 +196,26 @@ class Release:
             raise Failed(f"The gate exited {done.returncode}. See {output}\n" + "\n".join(failures), 2)
         self.say(f"gate passed in {time.monotonic() - began:.0f} s")
 
+    def corpus(self, command, *args, timeout=600):
+        """The private replay of real saved pages (scripts/dev/replay_corpus.py), when this computer has a corpus. It informs and never
+        blocks: a change is the thing to read, not a failure, and an installation without saved pages has nothing to say."""
+        venv = Path(os.environ.get("UV_PROJECT_ENVIRONMENT") or ROOT / ".venv")
+        runner = ROOT / "scripts" / "dev" / "replay_corpus.py"
+        if not (venv / "bin" / "python").exists() or not (Path(os.environ.get("AXIOM_CORPUS_DIR", "~/.cache/axiom-corpus")).expanduser() / "baseline.json").exists():
+            return None
+        try:
+            return run(["taskpolicy", "-b", "nice", "-n", "19", venv / "bin" / "python", "-I", runner, command, *args], timeout=timeout)
+        except subprocess.TimeoutExpired:
+            self.say(f"the corpus replay did not finish in {timeout} s; going on without it")
+            return None
+
+    def replay(self):
+        done = self.corpus("compare")
+        if done is None:
+            return
+        lines = done.stdout.strip().splitlines()
+        self.say("real pages: " + (lines[0] if lines else "no answer") + (" (full list: replay_corpus's last-compare.txt)" if done.returncode == 3 else ""))
+
     # ---- build -------------------------------------------------------------------------------------------------------
 
     def build(self):
@@ -268,16 +290,21 @@ class Release:
         """Back to exactly what it was. A hold someone set before this release is theirs to lift."""
         if not self.holding:
             return
-        if self.hold_before:
-            value = self.hold_before.replace("'", "''")
-            done = app.command("psql", "-XAt", "-c", f"update settings set value = '{value}'::json where key = 'execution_v2_deployment_hold'")
-        else:
-            done = app.command("hold", "off")
-        if done.returncode:
-            self.say(f"WARNING: the hold could not be restored: {(done.stderr or '')[-200:]}. Run: axiom hold off")
-            return
-        self.holding = False
-        self.say("hold restored")
+        value = (self.hold_before or "").replace("'", "''")
+        deadline = time.monotonic() + HOLD_RESTORE_SECONDS  # The database may just be coming back, after a refused stop or a rollback.
+        while True:
+            if value:
+                done = app.command("psql", "-XAt", "-c", f"update settings set value = '{value}'::json where key = 'execution_v2_deployment_hold'")
+            else:
+                done = app.command("hold", "off")
+            if done.returncode == 0:
+                self.holding = False
+                self.say("hold restored")
+                return
+            if time.monotonic() >= deadline:
+                self.say(f"WARNING: the hold could not be restored: {(done.stderr or '')[-200:]}. Nothing can start until: axiom hold off")
+                return
+            time.sleep(2)
 
     def drain(self):
         """Wait for what a stop could cut. Queued runs wait out the hold holding no browser, and start after it (service/execution.py)."""
@@ -327,7 +354,7 @@ class Release:
         return False
 
     def swap(self):
-        self.stopped_at = datetime.now(UTC).isoformat()
+        self.stopped_at = datetime.now(timezone.utc).isoformat()
         if not self.stop(self.app):
             run(["open", self.app.app])
             raise Failed("The running app did not stop, so nothing was replaced. It has been asked to carry on.", 5)
@@ -340,7 +367,7 @@ class Release:
             run(["open", self.app.app])
             raise Failed(f"The swap was refused ({exc}); the old build is back in place", 5) from exc
         self.swapped = True
-        self.started_at = datetime.now(UTC).isoformat()
+        self.started_at = datetime.now(timezone.utc).isoformat()
         self.say(f"swapped; the previous build is at {self.previous.app}")
         run(["open", self.app.app], check=True)
 
@@ -382,6 +409,7 @@ class Release:
     def ship(self):
         self.preflight()
         self.gate()
+        self.replay()
         self.build()
         self.verify_copy()
         if self.options.until == "verified":
@@ -408,6 +436,8 @@ class Release:
             self.restore_hold(self.app if self.app.exists() else self.previous)
         if not self.options.dmg and self.dmg.exists():
             shutil.move(str(self.dmg), self.work / "AXIOM.shipped.dmg")  # What was installed, for anyone else to install.
+        self.corpus("collect")  # Pages are deleted after 7 days: keep some of this week's, and read them with what just shipped.
+        self.corpus("baseline")
         self.say(f"shipped {self.head}: engine {self.new_engine}")
         return 0
 
