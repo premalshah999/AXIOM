@@ -607,12 +607,22 @@ def test_real_shared_pipeline_accepts_approved_projects_and_pins_exact_pdf(servi
 
 
 @needs_tex
-def test_unconfirmed_preview_is_blocked_by_current_shared_runner(service):
+@pytest.mark.parametrize("approval", [True, False])
+def test_unconfirmed_preview_reaches_review_but_cannot_be_approved_or_sent(service, approval):
+    from jobpilot.admission import QueueBlocked
+
     add_job(service)
     choice.choose(service.db, "ag-job", "aggressive")
-    choice.set_approval(service.db, False)
+    choice.set_approval(service.db, approval)
     result = asyncio.run(choice.run(service.db, service.config, "ag-job", model=stub()))
-    assert result["state"] == "failed"
-    assert result["error"]["code"] == "rules"
-    # This is an explicit integration gap, not a successful application path.
-    assert "confirmed" in result["error"]["detail"]
+    assert result["state"] == "review"
+    with service.db.session() as s:
+        artifact = s.get(RsArtifact, result["artifact_id"])
+        assert artifact.validation["preview_rules"]["ok"]
+        assert not artifact.validation["rules"]["ok"]
+        assert all(p.title in artifact.text for p in proposals())
+        with pytest.raises(QueueBlocked) as blocked:
+            choice.artifact_for_queue(s, s.get(Job, "ag-job"), "submit")
+        assert blocked.value.code == choice.UNCONFIRMED
+    with pytest.raises(ValueError, match="Approve"):
+        choice.approve(service.db, service.config, "ag-job", result["artifact_id"])

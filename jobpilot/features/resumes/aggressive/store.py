@@ -124,6 +124,17 @@ def _change(db, workspace_id, revision, mutate):
             raise LookupError("Project drafts not found")
         if row.revision != revision:
             raise ValueError("These drafts changed. Reload before saving your choice.")
+        # Serialize changes with queue admission. A started application has
+        # already pinned its file and cannot switch projects under that run.
+        from ....db import Job
+        from ..choice import STARTED
+        from ..tables import RsArtifact, RsTailorChoice
+
+        artifacts = s.scalars(select(RsArtifact).where(RsArtifact.validation["report"]["workspace_id"].as_string() == workspace_id)).all()
+        ids = [artifact.id for artifact in artifacts]
+        choices = s.scalars(select(RsTailorChoice).where(RsTailorChoice.artifact_id.in_(ids))).all() if ids else []
+        if any((job := s.get(Job, item.job_id)) is not None and job.status in STARTED for item in choices):
+            raise ValueError("This application has already started, so its projects can't change now.")
         payload = copy.deepcopy(row.payload)
         mutate(payload)
         changed = s.execute(
@@ -133,6 +144,13 @@ def _change(db, workspace_id, revision, mutate):
         )
         if changed.rowcount != 1:
             raise ValueError("These drafts changed. Reload before saving your choice.")
+        for artifact in artifacts:
+            # Cache pointers may move; the historical document, PDF and hash do
+            # not. A stale workspace must never reuse the old generation cache.
+            artifact.cache_key += f":projects:{revision + 1}:{artifact.id}"
+        for item in choices:
+            item.state, item.updated_at = "review", now()
+            item.approved_artifact_id = item.approved_sha = item.approved_at = item.approved_how = None
         s.expire(row)
         return view(row)
 

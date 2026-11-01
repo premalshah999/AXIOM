@@ -32,10 +32,10 @@ export type DraftWorkspace = {
 
 const path = (id: string) => `/v2/resumes/aggressive/${encodeURIComponent(id)}`;
 
-/** Embed in the tailoring screen with report.workspace_id. onChanged should
- * invalidate the current artifact and rebuild with fresh=true, then require
- * approval of that new PDF. This component never approves an application. */
-export function AggressiveDrafts({ workspaceId, onChanged }: { workspaceId: string; onChanged?: () => void }) {
+/** The server invalidates approval on each project change. Refresh the parent
+ * view after mutations; Update project PDF creates a new file without AI.
+ * This component never approves an application. */
+export function AggressiveDrafts({ workspaceId, jobId, needsUpdate, disabled, onChanged }: { workspaceId: string; jobId?: string; needsUpdate?: boolean; disabled?: boolean; onChanged?: () => void }) {
   const [data, setData] = useState<DraftWorkspace | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -50,7 +50,7 @@ export function AggressiveDrafts({ workspaceId, onChanged }: { workspaceId: stri
   }, [workspaceId]);
 
   async function change(endpoint: string, method: string, body: unknown, optimistic?: Partial<DraftWorkspace>) {
-    if (!data || busy) return;
+    if (!data || busy || disabled) return;
     const previous = data;
     setBusy(true);
     setError("");
@@ -72,6 +72,16 @@ export function AggressiveDrafts({ workspaceId, onChanged }: { workspaceId: stri
   function choose(selected: string[], removed: string[]) {
     return change("/choices", "PUT", { selected_drafts: selected, removed_projects: removed, revision: data!.revision }, { selected_drafts: selected, removed_projects: removed });
   }
+  async function updatePdf() {
+    if (!data || !jobId || busy || disabled) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api(`${path(data.id)}/refresh`, "POST", { job_id: jobId, revision: data.revision });
+      onChanged?.();
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  }
   if (!data) return <div className="ag-drafts" aria-live="polite">{error ? <p role="alert">{error}</p> : <p>Loading project drafts…</p>}</div>;
   const originals = data.source_doc.sections.filter(s => s.include && s.kind === "projects").flatMap(s => s.entries.filter(e => e.include));
   const unapproved = data.drafts.filter(d => data.selected_drafts.includes(d.id) && !d.confirmed).length;
@@ -84,25 +94,26 @@ export function AggressiveDrafts({ workspaceId, onChanged }: { workspaceId: stri
       ? `${unapproved} selected project${unapproved === 1 ? " needs" : "s need"} your approval before applications.`
       : "Project choices saved. Review and approve the final PDF before applying."}</p>
     {error && <p className="ag-error" role="alert">{error}</p>}
+    {needsUpdate && <div className="ag-heading"><p>Project choices changed. Update the PDF, then review it before applying. This uses no AI.</p><Button disabled={busy || disabled} onClick={updatePdf}>Update project PDF</Button></div>}
     {data.report?.overflow_message && <p className="ag-error">{data.report.overflow_message}</p>}
     <details className="ag-brief"><summary>What this job needs</summary>
       <p>{data.brief.product}</p><ol>{data.brief.proof_points.map(p => <li key={p}>{p}</li>)}</ol>
       <p>{data.brief.seniority}</p><p>{data.brief.real_stack.join(", ")}</p>
     </details>
-    <div className="ag-heading"><h3>Generated drafts</h3><Button disabled={busy} onClick={() => choose([], [])}>Use only my original projects</Button></div>
+    <div className="ag-heading"><h3>Generated drafts</h3><Button disabled={busy || disabled} onClick={() => choose([], [])}>Use only my original projects</Button></div>
     <div className="ag-projects">{data.drafts.map(d => <article key={d.id} className="ag-project">
-      <label className="ag-choice"><input type="checkbox" checked={data.selected_drafts.includes(d.id)} disabled={busy}
+      <label className="ag-choice"><input type="checkbox" checked={data.selected_drafts.includes(d.id)} disabled={busy || disabled}
         onChange={e => choose(e.target.checked ? [...data.selected_drafts, d.id] : data.selected_drafts.filter(id => id !== d.id), data.removed_projects)} />
         <span>{d.title}</span></label>
       <p className="ag-meta">{d.confirmed ? "Approved project" : "Draft · Not built yet"} · {d.archetype}</p>
       <ul>{d.bullets.map((b, i) => <li key={i}>{b}</li>)}</ul>
       <details><summary>How to build it</summary><ol>{d.build_plan.map((s, i) => <li key={i}>{s}</li>)}</ol></details>
       {!d.confirmed && <div className="ag-approve"><p>Approve this exact project content for your resume.</p>
-        <Button disabled={busy} onClick={() => change(`/drafts/${encodeURIComponent(d.id)}/approve`, "POST", { approved: true, revision: data.revision })}>Approve project</Button></div>}
+        <Button disabled={busy || disabled} onClick={() => change(`/drafts/${encodeURIComponent(d.id)}/approve`, "POST", { approved: true, revision: data.revision })}>Approve project</Button></div>}
     </article>)}</div>
     <h3>Your original projects</h3>
     {originals.length ? originals.map(p => <article key={p.id} className="ag-project">
-      <label className="ag-choice"><input type="checkbox" disabled={busy} checked={!data.removed_projects.includes(p.id)}
+      <label className="ag-choice"><input type="checkbox" disabled={busy || disabled} checked={!data.removed_projects.includes(p.id)}
         onChange={e => choose(data.selected_drafts, e.target.checked ? data.removed_projects.filter(id => id !== p.id) : [...data.removed_projects, p.id])} />
         <span>{p.heading}</span></label>
       <ul>{p.bullets.filter(b => b.include).map(b => <li key={b.id}>{b.text}</li>)}</ul>

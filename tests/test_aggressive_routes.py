@@ -3,15 +3,12 @@
 import asyncio
 
 from jobpilot.features.resumes.aggressive import store
-from jobpilot.features.resumes.aggressive.router import router
 from jobpilot.features.resumes.aggressive.schema import Brief
 from test_aggressive_pipeline import JOB, PROFILE, context, needs_tex, proposals
 
 
 def setup_workspace(app, service, tmp_path):
-    # The production factory finishes with a GET catch-all for the SPA. The
-    # feature router has to mount ahead of that fallback.
-    app.router.routes[0:0] = router(service).routes
+    # Use the production factory's mount, including its security middleware.
     source, ctx = context(tmp_path, db=service.db)
     brief = asyncio.run(ctx.model(Brief, "", "{}"))
     return store.create(service.db, JOB, source, PROFILE, proposals(), brief)

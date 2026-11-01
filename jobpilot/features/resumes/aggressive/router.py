@@ -1,11 +1,12 @@
 """Draft review endpoints. Mount router(service) alongside the shared router.
 
-These routes only change Aggressive-owned data. They never approve an artifact
-or enqueue an application; those actions remain in the shared approval flow.
+Project updates invalidate approval and can create a new review artifact. These
+routes never approve or enqueue an application; the shared flow handles that.
 """
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 
 from ..compiler import compile_pdf
 from ..editor import ResumeDoc, Style, render, tailored_style
@@ -15,6 +16,11 @@ from ..validate import parse_check
 from . import store
 from .pipeline import with_projects
 from .schema import Choice, Confirmation
+
+
+class RefreshInput(BaseModel):
+    job_id: str
+    revision: int = Field(ge=0)
 
 
 async def preview(db, workspace_id, *, compile_fn=compile_pdf):
@@ -73,6 +79,17 @@ def router(service):
     @r.post("/{workspace_id}/drafts/{draft_id}/approve")
     def approve(workspace_id: str, draft_id: str, confirmation: Confirmation):
         return handle(store.confirm, db, workspace_id, draft_id, confirmation)
+
+    @r.post("/{workspace_id}/refresh")
+    async def refresh(workspace_id: str, data: RefreshInput):
+        from .integration import refresh as update_pdf
+
+        try:
+            return await update_pdf(service, data.job_id, workspace_id, data.revision)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from None
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(409, str(exc)) from None
 
     @r.get("/{workspace_id}/preview.pdf")
     async def pdf(workspace_id: str):

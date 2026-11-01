@@ -24,16 +24,11 @@ REPO = Path(__file__).resolve().parents[1]
 
 def serve(port, static_root, data_dir):
     import uvicorn
-    from fastapi import File, UploadFile
     from fastapi.responses import FileResponse
     from jobpilot.api import create_app
     from jobpilot.config import Settings
     from jobpilot.db import Job, Resume, Run
-    from jobpilot.execution_services import pin_resume
     from jobpilot.schemas import Profile
-    from jobpilot.features.resumes import choice
-    from jobpilot.features.resumes.aggressive.pipeline import run
-    from jobpilot.features.resumes.aggressive.router import router
     from jobpilot.features.resumes.compiler import compile_pdf
     from jobpilot.features.resumes.editor import render, tailored_style
     from test_aggressive_pipeline import JOB, PROFILE, add_job, context, stub
@@ -59,6 +54,10 @@ def serve(port, static_root, data_dir):
     ).prepare()
     app = create_app(config)
     service = app.state.service
+    from jobpilot.features.knowledge import writing
+
+    generation_model = stub()
+    writing.configured_model = lambda *_args, **_kwargs: generation_model
     # A separate, public local employer: the real application worker needs no
     # authentication to it. This thread inherits the server's empty CWD/env.
     from email.parser import BytesParser
@@ -107,26 +106,8 @@ def serve(port, static_root, data_dir):
         with service.db.exclusive() as session:
             session.get(Job, "ag-job").url = local_job["url"]
             session.get(Resume, "source").sha256 = source.sha
-        result = await run(local_job, source, profile, ctx)
-        return {"workspace_id": result.report["workspace_id"]}
-
-    @app.post("/api/aggressive-test/artifact")
-    async def artifact():
-        choice.choose(service.db, "ag-job", "aggressive")
-        result = await choice.run(service.db, config, "ag-job", model=stub(), fresh=True)
-        if result["state"] != "review":
-            return result
-        approved = choice.approve(service.db, config, "ag-job", result["artifact_id"])
-        with service.db.exclusive() as session:
-            packet, _ = pin_resume(
-                session,
-                config,
-                session.get(Job, "ag-job"),
-                session.get(Resume, "source"),
-                profile,
-                result["artifact_id"],
-            )
-        return {"state": "approved", **approved, "path": packet["resume_path"]}
+        service.db.set_setting("control", {"paused": True, "auto_submit": True})
+        return {"job_id": "ag-job"}
 
     @app.post("/api/aggressive-test/execute")
     async def execute():
@@ -147,13 +128,9 @@ def serve(port, static_root, data_dir):
             }
         return {**result, "applications": employer.applications()}
 
-    @app.post("/api/aggressive-test/upload")
-    async def upload(file: UploadFile = File()):
-        return {"sha256": hashlib.sha256(await file.read()).hexdigest()}
-
     @app.get("/api/aggressive-test/health")
     def health():
-        return {"ok": True}
+        return {"ok": True, "generation_calls": len(generation_model.calls)}
 
     @app.get("/aggressive-test")
     def ui():
@@ -164,8 +141,11 @@ def serve(port, static_root, data_dir):
     # Feature/test routes mount before the main app's SPA fallback.
     last_routes = app.router.routes[test_start:]
     del app.router.routes[test_start:]
-    app.router.routes[0:0] = [*router(service).routes, *last_routes]
-    app.mount("/aggressive-assets", StaticFiles(directory=Path(static_root)))
+    app.router.routes[0:0] = last_routes
+    # Build and serve the real frontend, leaving the checkout's bundled assets
+    # untouched. Its production feature router is already mounted by create_app.
+    app.router.routes[:] = [route for route in app.router.routes if getattr(route, "path", None) != "/assets"]
+    app.mount("/assets", StaticFiles(directory=Path(static_root) / "assets"))
     asset_route = app.router.routes.pop()
     app.router.routes.insert(0, asset_route)
     try:
@@ -181,24 +161,6 @@ def build_ui(tmp_path):
         pytest.skip("Needs the checkout's frontend dependencies and node")
     harness = tmp_path / "ui"
     harness.mkdir()
-    entry = """import React from 'react';
-import {createRoot} from 'react-dom/client';
-import {AggressiveDrafts} from COMPONENT;
-import TOKENS;
-import BASE;
-import BUTTONS;
-const id = new URLSearchParams(location.search).get('workspace');
-createRoot(document.getElementById('root')).render(<AggressiveDrafts workspaceId={id} />);
-""".replace("COMPONENT", json.dumps(str(frontend / "src/aggressive/Drafts.tsx")))
-    entry = (
-        entry.replace("TOKENS", json.dumps(str(frontend / "src/styles/tokens.css")))
-        .replace("BASE", json.dumps(str(frontend / "src/styles/base.css")))
-        .replace("BUTTONS", json.dumps(str(frontend / "src/styles/components.css")))
-    )
-    (harness / "entry.tsx").write_text(entry)
-    (harness / "index.html").write_text(
-        '<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Project review</title><div id="root" style="max-width:900px;margin:24px auto;padding:16px"></div><script type="module" src="/entry.tsx"></script></html>'
-    )
     config = harness / "vite.config.mjs"
     config.write_text(
         "import {defineConfig} from "
@@ -206,12 +168,14 @@ createRoot(document.getElementById('root')).render(<AggressiveDrafts workspaceId
         + ";\nimport react from "
         + json.dumps(str(deps / "@vitejs/plugin-react/dist/index.js"))
         + ";\nexport default defineConfig({root:"
-        + json.dumps(str(harness))
-        + ", envDir:false, base:'/aggressive-assets/', plugins:[react()], resolve:{alias:{react:"
+        + json.dumps(str(frontend))
+        + ", envDir:false, base:'/', plugins:[react()], resolve:{alias:{react:"
         + json.dumps(str(deps / "react"))
         + ",'react-dom':"
         + json.dumps(str(deps / "react-dom"))
-        + "}},build:{outDir:'dist'}});"
+        + "}},build:{outDir:"
+        + json.dumps(str(harness / "dist"))
+        + ",emptyOutDir:true}});"
     )
     clean_env = {"HOME": os.environ["HOME"], "PATH": os.environ["PATH"]}
     result = subprocess.run(
@@ -273,20 +237,45 @@ async def test_drafts_approval_original_switch_and_exact_upload(page, tmp_path):
         await page.context.set_extra_http_headers(headers)
         response = await page.request.post(url + "/api/aggressive-test/generate", data={})
         assert response.ok, await response.text()
-        workspace = (await response.json())["workspace_id"]
-        await page.goto(url + "/aggressive-test?workspace=" + workspace)
-        await page.get_by_role("heading", name="Choose your projects").wait_for()
-        assert await page.get_by_role("button", name="Approve project", exact=True).count() == 3
-        assert "3 selected projects need" in await page.get_by_role("status").inner_text()
-        pdf = await page.request.get(url + f"/api/v2/resumes/aggressive/{workspace}/preview.pdf")
-        assert pdf.ok and pdf.headers["x-project-approval-required"] == "true"
-        # A selected draft blocks the real shared runner, even with approval off.
-        blocked = await page.request.post(url + "/api/aggressive-test/artifact", data={})
-        assert (await blocked.json())["state"] == "failed"
-        await page.get_by_role("button", name="Use only my original projects").click()
-        await page.wait_for_function(
-            "() => document.querySelector('[role=status]')?.textContent.includes('Project choices saved')"
+        legal = await (await page.request.get(url + "/api/legal")).json()
+        assert (
+            await page.request.post(
+                url + "/api/legal/accept", data={"version": legal["version"], "adult": True}
+            )
+        ).ok
+        await page.add_init_script("localStorage.setItem('applypilot:guide-later', '1')")
+        chosen = await page.request.put(
+            url + "/api/v2/resumes/tailor/job/ag-job", data={"mode": "aggressive"}
         )
+        assert chosen.ok, await chosen.text()
+        await page.goto(url + "/aggressive-test?view=tailor&tailor=ag-job")
+        await page.get_by_role("heading", name="Choose your projects").wait_for()
+
+        async def current():
+            return await (await page.request.get(url + "/api/v2/resumes/tailor/job/ag-job")).json()
+
+        initial = await current()
+        approval = page.get_by_role("button", name="Approve and apply", exact=True)
+        assert await approval.is_disabled()
+        assert await page.get_by_role("button", name="Approve project", exact=True).count() == 3
+        assert "3 selected projects need" in await page.locator(".ag-status").inner_text()
+        pdf = await page.request.get(url + f"/api/v2/resumes/artifacts/{initial['artifact']['id']}/pdf")
+        assert pdf.ok
+        blocked = await page.request.post(
+            url + "/api/v2/resumes/tailor/job/ag-job/approve",
+            data={"artifact_id": initial["artifact"]["id"], "apply": False},
+        )
+        assert blocked.status == 409
+        generation_calls = (await (await page.request.get(url + "/api/aggressive-test/health")).json())[
+            "generation_calls"
+        ]
+        assert generation_calls == 4
+        await page.get_by_role("button", name="Use only my original projects").click()
+        await page.get_by_role("button", name="Update project PDF", exact=True).click()
+        await page.wait_for_function("() => !document.querySelector('.tl-actions button')?.disabled")
+        original = await current()
+        assert original["rules"]["ok"] and not original["drafts"]
+        assert original["cost"]["calls"] == 0
         checks = page.locator(".ag-projects input[type=checkbox]")
         for i in range(3):
             assert not await checks.nth(i).is_checked()
@@ -300,26 +289,26 @@ async def test_drafts_approval_original_switch_and_exact_upload(page, tmp_path):
                 "() => document.querySelector('[aria-label=\"Aggressive project drafts\"]')?.getAttribute('aria-busy') === 'false'"
             )
         assert await page.get_by_role("button", name="Approve project", exact=True).count() == 0
-        approved = await page.request.post(url + "/api/aggressive-test/artifact", data={})
-        result = await approved.json()
-        assert result["state"] == "approved", result
-        # Upload the exact path pinned by AXIOM's execution boundary to a local
-        # multipart form, then compare the received bytes with approved_sha.
-        await page.set_content(
-            '<form><input name="file" type="file"><button type="submit">Submit application</button></form>'
-        )
-        await page.locator('input[type="file"]').set_input_files(result["path"])
-        received = await page.evaluate(
-            """async () => { const response = await fetch('/api/aggressive-test/upload', {method:'POST', headers:{Authorization:'Bearer aggressive-test-token'}, body:new FormData(document.querySelector('form'))}); return await response.json(); }"""
-        )
-        assert received["sha256"] == result["pdf_sha"]
+        await page.get_by_role("button", name="Update project PDF", exact=True).click()
+        await page.wait_for_function("() => !document.querySelector('.tl-actions button')?.disabled")
+        await approval.click()
+        await page.get_by_role("button", name="Approved", exact=True).wait_for()
+        result = await current()
+        assert result["choice"]["approved_artifact_id"] == result["artifact"]["id"]
+        assert (await (await page.request.get(url + "/api/aggressive-test/health")).json())[
+            "generation_calls"
+        ] == generation_calls
         executed = await page.request.post(url + "/api/aggressive-test/execute", data={}, timeout=120000)
         assert executed.ok, await executed.text()
         outcome = await executed.json()
         assert outcome["state"] == "confirmed", outcome
         assert outcome["model_calls"] == 0, outcome
         assert len(outcome["applications"]) == 1, outcome
-        assert outcome["applications"][0]["resume__sha256"] == outcome["packet_sha"] == result["pdf_sha"]
+        assert (
+            outcome["applications"][0]["resume__sha256"]
+            == outcome["packet_sha"]
+            == result["artifact"]["pdf_sha"]
+        )
         assert outcome["applications"][0]["resume"] == "Alex_Example_Resume.pdf"
     finally:
         process.terminate()

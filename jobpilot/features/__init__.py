@@ -17,3 +17,6 @@ def install(app, service):
     create_tables(service.db.engine)  # additive: creates missing kn_/rs_/dc_ tables only
     for module in (knowledge, resumes, discovery):
         app.include_router(module.router(service))
+    from .resumes.aggressive.router import router as aggressive_router
+
+    app.include_router(aggressive_router(service))

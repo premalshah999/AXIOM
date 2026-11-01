@@ -1,8 +1,8 @@
 """Resume 2 Steps 1–7 through AXIOM's model, compiler and shared rules.
 
 Unconfirmed projects belong in the PREVIEW, per the owner's spec. check_rules
-still marks that document unsendable. The shared artifact runner currently
-rejects such previews; see HANDOFF.md for its small integration change.
+still marks that document unsendable. The shared artifact runner stores the
+preview for review and checks the send decision separately.
 """
 
 import json
@@ -341,6 +341,8 @@ async def run(job, source, profile, ctx):
         style=result["style"],
         allowed_skills=allowed,
         added_projects=[store.entry(d) for d in selected if store.confirmed(d)],
+        preview_projects=[store.entry(d) for d in selected if not store.confirmed(d)],
+        removed_projects=workspace["removed_projects"],
         drafts=[
             Draft(id=d["id"], title=d["title"], bullets=d["bullets"])
             for d in selected
