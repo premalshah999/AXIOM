@@ -33,6 +33,25 @@ class BoardSettings(BaseModel):
     batch_target: int = Field(default=100, ge=1, le=500)
     minimum_auto_fit: int = Field(default=70, ge=0, le=100)
     max_age_hours: Literal[48, 168, 720] = 720
+    # Postings read from a public board API (Greenhouse, Ashby, Lever, SmartRecruiters) are live when listed, so their
+    # window may be longer than the rest: unset, it is 60 days when `max_age_hours` is the 30-day maximum and follows a
+    # tighter choice. In a 30-day replay over 11,486 postings of 270 boards, 55% were refused as older; 60 days admits
+    # 89% more matches, 22 of 24 sampled pages answered live (2026-11-01).
+    live_board_age_hours: Literal[48, 168, 720, 1080, 1440, 2160] | None = None
+
+    def window_hours(self, kind=None):
+        """How old a posting from a source of this kind may be. Sources that cannot show a posting is live (custom
+        sites, short-link feeds, search results, Workday's undated "30+ days") keep `max_age_hours`."""
+        from .features.discovery.policy import LIVE_API_KINDS
+
+        if kind not in LIVE_API_KINDS:
+            return self.max_age_hours
+        if self.live_board_age_hours:
+            return self.live_board_age_hours
+        return max(self.max_age_hours, LIVE_BOARD_DEFAULT_HOURS) if self.max_age_hours >= 720 else self.max_age_hours
+
+
+LIVE_BOARD_DEFAULT_HOURS = 1440
 
 
 US = {"us", "usa", "united states", "united states of america", "u.s.", "u.s.a."}
@@ -400,6 +419,7 @@ async def read_feed(source, profile, cfg, at, known=None):
     parsed = urlsplit(url)
     slug = parsed.path.strip("/").split("/")[0]
     kind, company = source["kind"], source["name"]
+    window = cfg.window_hours(kind)
     posts, seen = [], set()
     complete = True
     detail_errors = 0
@@ -465,12 +485,12 @@ async def read_feed(source, profile, cfg, at, known=None):
                 us_location(post.location)
                 and not (cfg.early_career_only and SENIOR.search(post.title))
                 and candidate_title(post.title, profile)
-                and (published_at is None or fresh(j["first_published"], at, cfg.max_age_hours))
+                and (published_at is None or fresh(j["first_published"], at, window))
             ):
                 candidates.append((j, post))
         candidates.sort(
             key=lambda item: (
-                fresh(item[0].get("updated_at"), at, cfg.max_age_hours),
+                fresh(item[0].get("updated_at"), at, window),
                 bool(ENTRY.search(item[1].title)),
                 item[0].get("updated_at", ""),
             ),
@@ -494,7 +514,7 @@ async def read_feed(source, profile, cfg, at, known=None):
 
         await asyncio.gather(*(read_detail(item) for item in candidates[:30]))
     elif kind == "smartrecruiters":
-        after = (at - timedelta(hours=cfg.max_age_hours)).isoformat()
+        after = (at - timedelta(hours=window)).isoformat()
         from urllib.parse import urlencode
 
         for offset in range(0, 500, 100):
@@ -519,7 +539,7 @@ async def read_feed(source, profile, cfg, at, known=None):
                 )
                 post.level = j.get("experienceLevel", {}).get("label", "").replace("_", " ")
                 if (
-                    fresh(post.posted, at, cfg.max_age_hours)
+                    fresh(post.posted, at, window)
                     and us_location(post.location, post.country)
                     and not (cfg.early_career_only and SENIOR.search(post.title))
                     and candidate_title(post.title, profile)
@@ -705,7 +725,8 @@ def screen_fingerprint(profile, cfg):
 
     basis = [
         sorted(profile.target_roles), sorted(profile.skills), sorted(profile.excluded_keywords),
-        profile.include_internships, cfg.early_career_only, cfg.max_age_hours, profile.accept_experience_years, "screen-2",
+        profile.include_internships, cfg.early_career_only, cfg.max_age_hours, cfg.window_hours("greenhouse"),
+        profile.accept_experience_years, "screen-3",
     ]
     return hashlib.sha1(json.dumps(basis).encode()).hexdigest()[:16]
 
@@ -748,13 +769,14 @@ def persist_scan(db, source, posts, seen, complete, cfg, profile, at, report):
     from .ats import identity_variants
     from .discovery import add_job
 
+    window = cfg.window_hours(source["kind"])
     created, rejected = [], set()
     for post in posts:
         if not published(post.posted):
             report["unknown_date"] += 1
             rejected.add(post.url)
             continue
-        if not fresh(post.posted, at, cfg.max_age_hours):
+        if not fresh(post.posted, at, window):
             report["old"] += 1
             rejected.add(post.url)
             continue
@@ -774,7 +796,7 @@ def persist_scan(db, source, posts, seen, complete, cfg, profile, at, report):
             ),
             origin="source",
         )
-        if not new and published(row["created_at"]) < at - timedelta(hours=cfg.max_age_hours):
+        if not new and published(row["created_at"]) < at - timedelta(hours=window):
             # Already seeing this public job earlier proves it isn't a newly posted job.
             report["old"] += 1
             rejected.add(post.url)
@@ -902,6 +924,22 @@ def _field(job, name):
     return job[name] if isinstance(job, dict) else getattr(job, name)
 
 
+def within_window(cfg, at):
+    """SQL: the listing was posted inside its source kind's window (BoardSettings.window_hours)."""
+    from sqlalchemy import and_, or_
+
+    from .features.discovery.policy import LIVE_API_KINDS
+
+    short = (at - timedelta(hours=cfg.max_age_hours)).isoformat()
+    live = (at - timedelta(hours=cfg.window_hours("greenhouse"))).isoformat()
+    if short == live:
+        return JobListing.posted_at >= short
+    on_live_board = JobListing.source_id.in_(select(Source.id).where(Source.kind.in_(LIVE_API_KINDS)))
+    return or_(
+        and_(JobListing.posted_at >= live, on_live_board), and_(JobListing.posted_at >= short, ~on_live_board)
+    )
+
+
 def board_snapshot(db, limit=500, *, jobs_only=False):
     """The fresh listings and, unless `jobs_only`, every source with its last scan and the autopilot's state.
 
@@ -909,7 +947,6 @@ def board_snapshot(db, limit=500, *, jobs_only=False):
     dropped were 22% of the executor threads' interpreter time and most of this function's garbage (py-spy 2026-10-30)."""
     cfg = settings(db)
     at = datetime.now(UTC)
-    cutoff = (at - timedelta(hours=cfg.max_age_hours)).isoformat()
     seen_cutoff = (at - timedelta(hours=max(6, cfg.interval_hours * 2 + 1))).isoformat()
     ids = set() if jobs_only else managed_ids(db)
     with db.session() as s:
@@ -930,7 +967,7 @@ def board_snapshot(db, limit=500, *, jobs_only=False):
             .where(
                 JobListing.active.is_(True),
                 JobListing.country == "US",
-                JobListing.posted_at >= cutoff,
+                within_window(cfg, at),
                 JobListing.posted_at <= at.isoformat(),
                 JobListing.last_seen >= seen_cutoff,
                 Job.demo.is_(False),

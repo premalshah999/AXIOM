@@ -258,7 +258,8 @@ def test_the_autopilots_board_read_leaves_sources_and_scans_alone(service):
     finally:
         stop()
     assert listed in {job["id"] for job in light["jobs"]} and set(light) == {"settings", "jobs"}
-    assert not [q for q in seen if "FROM sources" in q or "job_board_scan" in q]
+    # The window's one subquery names the live-board source ids inside the listings read; no source row is loaded.
+    assert not [q for q in seen if ("FROM sources" in q and "sources.kind IN" not in q) or "job_board_scan" in q]
     seen, stop = statements(service)
     try:
         full = board_snapshot(service.db, limit=None)

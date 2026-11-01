@@ -17,6 +17,8 @@ POLICY_VERSION = "discovery-v2-posting-paths"
 
 class DiscoveryPolicy(BaseModel):
     max_age_days: int = Field(default=30, ge=1, le=30)
+    # The window for listings read from a public board API that lists only live postings (LIVE_API_KINDS).
+    live_max_age_days: int = Field(default=60, ge=1, le=90)
     early_career_only: bool = False
     us_only: bool = True
     minimum_fit: int = Field(default=70, ge=0, le=100)
@@ -29,6 +31,11 @@ class DiscoveryPolicy(BaseModel):
     source_backoff_minutes: int = Field(default=15, ge=1)
     source_backoff_max_hours: int = Field(default=24, ge=1)
     classify_retry_minutes: int = Field(default=20, ge=1)
+
+
+# Boards whose public API lists only postings that are open now: an old posting there is usually still open, so it may
+# keep a longer window than a custom site, a short-link feed or a search result, none of which can show it is live.
+LIVE_API_KINDS = frozenset({"greenhouse", "ashby", "lever", "smartrecruiters"})
 
 
 # ---------- posting time ----------
@@ -56,12 +63,13 @@ def posting_time(posted: str | None, basis: str, first_seen: str | None):
     return None, "unknown"
 
 
-def fresh(posted, basis, first_seen, policy: DiscoveryPolicy, at=None):
+def fresh(posted, basis, first_seen, policy: DiscoveryPolicy, at=None, kind=None):
     at = at or datetime.now(UTC)
+    days = policy.live_max_age_days if kind in LIVE_API_KINDS else policy.max_age_days
     instant, kind = posting_time(posted, basis, first_seen)
     if kind not in {"verified", "inferred"} or instant is None:
         return False, kind
-    return at - timedelta(days=policy.max_age_days) <= instant <= at + timedelta(hours=14), kind
+    return at - timedelta(days=days) <= instant <= at + timedelta(hours=14), kind
 
 
 # ---------- hard gates (no model) ----------
