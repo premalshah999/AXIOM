@@ -337,13 +337,15 @@ def router(service) -> APIRouter:
     @r.get("/master")
     def master_status():
         row = master_mod.current_master(db)
+        from ...execution_services import resume_policy
+
         approved = master_mod.current_master(db, approved_only=True)
         source, _ = master_mod.source_pdf(db, config)
         return {
             "master": master_mod.master_view(row),
             "approved_id": approved.id if approved else None,
             "source": {"id": source["id"], "name": source["name"]} if source else None,
-            "policy": db.get_setting("application_resume_policy", {}) or {"mode": "tailored"},
+            "policy": resume_policy(db),
         }
 
     @r.put("/policy")
@@ -357,7 +359,9 @@ def router(service) -> APIRouter:
         current = db.get_setting("application_resume_policy", {}) or {}
         resume_id = data.resume_id or current.get("resume_id") or current.get("source_resume_id")
         with db.session() as s:
-            row = s.get(Resume, resume_id) if resume_id else s.scalar(select(Resume).where(Resume.demo.is_(False)))
+            row = s.get(Resume, resume_id) if resume_id else s.scalar(
+                select(Resume).where(Resume.demo.is_(False)).order_by(Resume.created_at.desc()).limit(1)
+            )
             if row is None or row.demo:
                 raise HTTPException(409, "Upload a resume first.")
             resume_id = row.id

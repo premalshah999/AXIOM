@@ -169,6 +169,55 @@ def us_location(location, country=""):
     return bool(US_PLACE.search(location or "") or US_REGION.search(location or ""))
 
 
+NO_PARTICULAR_PLACE = re.compile(
+    r"\b(?:anywhere|nationwide|all locations?|any location|open to (?:any|all)|united states|usa|u\.s\.a?\.?|us)\b", re.I
+)
+STATE_NAMES = {name.casefold(): code for code, name in US_STATES.items()}
+
+
+def _place(text):
+    """(city, state code) of "Denver, CO", "Denver, Colorado", "Colorado" or "CO", with None for the part it does not name."""
+    text = re.sub(r"\s+", " ", re.sub(r"\b(?:hybrid|on-?site|in[- ]office|metro(?:politan)?(?: area)?|area|greater)\b", " ", str(text or ""), flags=re.I)).strip(" ,-–—()")
+    parts = [p.strip() for p in text.split(",") if p.strip()]
+    if len(parts) > 1 and parts[-1].casefold() in US:
+        parts.pop()  # "Austin, TX, United States".
+    if not parts:
+        return None, None
+    last = parts[-1]
+    state = last.upper() if last.upper() in US_STATES and (len(parts) > 1 or last.isupper()) else STATE_NAMES.get(last.casefold())
+    if not state:
+        return text.casefold(), None
+    return (parts[0].casefold() if len(parts) > 1 else None), state
+
+
+def outside_target_locations(profile, location):
+    """Whether a posting names only places the applicant did not ask for. A profile's target locations reached only the
+    ranker's prompt, whose instructions favour relocation: someone in one city looking only there would be applied to across
+    the country and then answer that they will not relocate. Every confirmed application so far came from a profile set to
+    "anywhere", so this never showed (2026-11-01). Same state counts as near enough, since a metro area crosses city names;
+    a remote post, a place this cannot read ("2 Locations") and an applicant willing to relocate stay with the ranker."""
+    from .answer_context import boolean
+
+    targets = [str(t).strip() for t in getattr(profile, "target_locations", None) or [] if str(t).strip()]
+    if not targets or any(NO_PARTICULAR_PLACE.search(t) for t in targets):
+        return False
+    if boolean((getattr(profile, "facts", None) or {}).get("willing_to_relocate")) is True:
+        return False
+    wanted = [_place(t) for t in targets if not re.search(r"\bremote\b", t, re.I)]
+    if not wanted:
+        return False  # Remote only: whether a post can be done remotely is the ranker's reading of the whole posting.
+    pieces = [p for p in re.split(r"\s*(?:;|\||\s/\s)\s*", str(location or "")) if p.strip()]
+    if not pieces or re.search(r"\bremote\b", str(location), re.I):
+        return False
+    for piece in pieces:
+        city, state = _place(piece)
+        if not state:
+            return False
+        if any((want_state and want_state == state) or (want_city and want_city == city) for want_city, want_state in wanted):
+            return False
+    return True
+
+
 def role_matches(title, description, profile):
     if any(re.search(r"\b" + re.escape(x) + r"\b", title, re.I) for x in profile.excluded_keywords if x):
         return False
@@ -314,8 +363,14 @@ def screen(post, profile, settings):
         context = post.description[max(0, match.start() - 70) : match.end() + 50]
         if not re.search(r"preferred|nice.to.have|bonus|ideally", context, re.I):
             years.append(int(match["low"]))
-    if years and min(years) > 3:
-        return None, "experience"
+    limit = max(3, int(getattr(profile, "accept_experience_years", 0) or 0))
+    if years and min(years) > limit:
+        # Only a profile that asked for early-career work: this refused every posting above three years for everyone, so
+        # an applicant with eight years of experience could never be matched with a role at their own level (2026-11-01).
+        # Everyone else's posting goes on to the ranking, which reads the requirement against their own history.
+        if settings.early_career_only:
+            return None, "experience"
+        return ("Experienced", f"Posting asks for {min(years)} or more years of experience"), None
     entry = bool(ENTRY.search(post.title) or ENTRY.search(post.level))
     new_grad = bool(re.search(r"new[ -]?grad|recent graduate|university[ -]?grad", post.title, re.I))
     description_entry = re.search(
@@ -323,13 +378,13 @@ def screen(post, profile, settings):
         post.description,
         re.I,
     )
-    if not entry and not (years and min(years) <= 3) and not description_entry:
+    if not entry and not (years and min(years) <= limit) and not description_entry:
         if settings.early_career_only and not accepts_unstated_experience(profile, post):
             return None, "experience_unspecified"
         return ("Experience unspecified", "Relevant role; verify career level before applying"), None
     level = "New grad" if new_grad else "Early career"
     reason = (
-        "Explicit new grad / early career posting" if entry else "Posting accepts up to 3 years of experience"
+        "Explicit new grad / early career posting" if entry else f"Posting accepts up to {limit} years of experience"
     )
     return (level, reason), None
 

@@ -601,27 +601,39 @@ class PollingMixin:
         return domains
 
     async def heal_mailbox(self):
-        """Reconnect a .env Gmail mailbox marked reconnect_required once Gmail accepts its login again (checked at
-        most every five minutes). A transient refusal at wake-up left verification off for five hours (2026-10-22)."""
+        """Reconnect a Gmail mailbox marked reconnect_required once Gmail accepts its login again (checked at most every five
+        minutes per mailbox). A transient refusal at wake-up left verification off for five hours (2026-10-22). This healed only
+        a mailbox in .env, which is the one installation that has it; one connected in the app, as everyone else's is, stayed
+        off until someone noticed the Email page (2026-11-01). A Google sign-in has no password to try and stays as it is."""
         from ..db import Mailbox
         from ..gmail_imap import login_ok
 
-        address = (self.config.gmail_address or "").strip().lower()
-        password = "".join((self.config.gmail_app_password or "").split())
-        if not address or not password:
-            return False
+        env_address = (self.config.gmail_address or "").strip().lower()
+        recently = datetime.fromtimestamp(time.time() - 300, UTC).isoformat()
         with self.db.session() as s:
-            box = s.scalar(select(Mailbox).where(Mailbox.email == address, Mailbox.state == "reconnect_required"))
-            if box is None or (box.checked_at or "") > datetime.fromtimestamp(time.time() - 300, UTC).isoformat():
-                return False
-            box_id = box.id
-        healed = await asyncio.to_thread(login_ok, address, password)
-        with self.db.exclusive() as s:
-            if box := s.get(Mailbox, box_id):
-                box.checked_at = datetime.now(UTC).isoformat()
-                if healed:
-                    box.state, box.error = "connected", ""
-        return healed
+            due = [
+                (box.id, box.email, box.credentials)
+                for box in s.scalars(select(Mailbox).where(Mailbox.state == "reconnect_required"))
+                if (box.checked_at or "") <= recently
+            ]
+        healed_any = False
+        for box_id, address, sealed in due:
+            try:
+                saved = self.vault.open(sealed) or {}
+            except Exception:
+                saved = {}
+            password = saved.get("app_password") or (self.config.gmail_app_password if address == env_address else "")
+            password = "".join(str(password or "").split())
+            if not password:
+                continue
+            healed = await asyncio.to_thread(login_ok, address, password)
+            with self.db.exclusive() as s:
+                if box := s.get(Mailbox, box_id):
+                    box.checked_at = datetime.now(UTC).isoformat()
+                    if healed:
+                        box.state, box.error = "connected", ""
+            healed_any = healed_any or healed
+        return healed_any
 
     async def replies_pass(self, check):
         try:

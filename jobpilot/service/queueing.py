@@ -521,7 +521,11 @@ class QueueingMixin:
 
             master = master_policy(self.db) if not job.demo else None
             if master:
-                chosen = s.get(Resume, master.get("resume_id", ""))
+                from ..execution_services import default_resume
+
+                # A saved policy names its resume; with no saved choice the job's own pick or the newest upload is sent.
+                wanted = master.get("resume_id")
+                chosen = s.get(Resume, wanted) if wanted else default_resume(s, preferred=chosen)
                 resume_artifact_id = None
             if not chosen:
                 raise ValueError("Choose an uploaded resume or classify the job first")
@@ -535,7 +539,15 @@ class QueueingMixin:
                 for role in ("answers", "navigator"):
                     role_config = for_role(self.db, self.config, role)
                     if not role_config.llm_api_key:
-                        raise ValueError(missing_key_message(role_config.llm_provider))
+                        # A wait, not a verdict on the job. A plain refusal counted as "ruled out by the posting's
+                        # requirements": a batch started before the key was pasted wrote off every Ready job for good
+                        # (found on an empty database, 2026-11-01).
+                        raise QueueBlocked(
+                            missing_key_message(role_config.llm_provider),
+                            outcome="deferred",
+                            code="no_model_key",
+                            not_before=temporary_time(),
+                        )
             if mode == "submit" and not job.demo:
                 control = s.get(Setting, "control").value
                 if not control.get("auto_submit"):
@@ -577,7 +589,7 @@ class QueueingMixin:
                 and mode == "submit"
                 and not (continuation and continuation.packet.get("resume_artifact_id"))
             ):
-                from ..execution_services import enabled
+                from ..execution_services import enabled, tailoring_kept_source
                 from ..features.resumes.tables import RsArtifact
                 from ..features.resumes.pipeline import CURRENT_POLICIES, file_intact
                 from ..features.resumes.evidence import profile_digest as resume_profile_digest
@@ -598,14 +610,15 @@ class QueueingMixin:
                         .order_by(RsArtifact.finished_at.desc())
                     )
                     artifact = next((a for a in artifacts if file_intact(self.config.data_dir, a)), None)
-                    if not artifact:
+                    kept_source = not artifact and tailoring_kept_source(self.db, job.id, self.config.data_dir)
+                    if not artifact and not kept_source:
                         raise QueueBlocked(
                             "Preparing a tailored resume; the application will resume when ready",
                             outcome="deferred",
                             code="tailoring_pending",
                             not_before=temporary_time(),
                         )
-                    resume_artifact_id = artifact.id
+                    resume_artifact_id = artifact.id if artifact else None
 
             if master:
                 artifact_packet = {"resume_policy": "master"}

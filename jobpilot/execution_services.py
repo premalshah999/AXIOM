@@ -17,12 +17,44 @@ from .admission import QueueBlocked
 
 
 def enabled(db):
-    return bool(db.get_setting("execution_services", {}).get("enabled"))
+    """The integrated path every confirmed application took: discovery's feeds, purpose-written answers, gated cover letters.
+    Only the first autopilot start wrote this row, so until then a new installation swept no feeds and wrote its answers and
+    letters the old way (2026-11-01). On unless a row turns it off."""
+    return bool((db.get_setting("execution_services", {}) or {"enabled": True}).get("enabled"))
+
+
+# What employers receive until the applicant chooses otherwise: the resume they uploaded, as it is. The missing row used to
+# read as "tailored", and tailoring starts from an approved master nobody has yet: on an empty database every job waited on
+# "Preparing a tailored resume" for ever and an autopilot batch applied to nothing (2026-11-01). Every one of the 3,172
+# confirmed applications ran under a row saying "master", set by hand on 2026-10-07, so nothing ever showed it. Tailoring
+# stays what the owner turns on, which needs an approved master (features/resumes/router.py).
+DEFAULT_RESUME_POLICY = {"mode": "master", "resume_id": "", "automatic_tailoring": False, "source": "default"}
+
+
+def resume_policy(db):
+    return db.get_setting("application_resume_policy", {}) or DEFAULT_RESUME_POLICY
 
 
 def master_policy(db):
-    policy = db.get_setting("application_resume_policy", {})
+    policy = resume_policy(db)
     return policy if policy.get("mode") == "master" else None
+
+
+def default_resume(session, *, preferred=None):
+    """The resume a master policy that names none sends: the one already chosen for this job, else the newest upload."""
+    from .db import Resume
+
+    return preferred or session.scalar(
+        select(Resume).where(Resume.demo.is_(False)).order_by(Resume.created_at.desc()).limit(1)
+    )
+
+
+def tailoring_kept_source(db, job_id, data_dir=None):
+    """Tailoring has finished with this job and no tailored PDF is coming: it has no approved master, or the blind comparison
+    kept the master. The job applies with the source PDF, as preparation_state says; waiting for an artifact here never ended."""
+    from .features.resumes.pipeline import preparation_state
+
+    return preparation_state(db, job_id, data_dir) == "use_master"
 
 
 def ready_for_job(db, job_id, data_dir=None):

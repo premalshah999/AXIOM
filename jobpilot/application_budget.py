@@ -6,9 +6,11 @@ deployments and verification continuations share the same eight minutes.
 An owner-approved `application_budget_reset:<job>` setting ({"at": ISO time, "reason": ...}) ignores
 the starts before its time, e.g. runs spent while the ATS itself was down for maintenance.
 
-The wall-clock cap is the `application_budget` setting ({"max_seconds": n or null}); without the setting it is
-480 s. Production runs uncapped (owner, 2026-10-18: the cap was for monitored rollouts): each run then ends at its
-own runner budget, and the start limit still applies.
+The wall-clock cap is the `application_budget` setting ({"max_seconds": n or null}); without the setting there is none
+(owner, 2026-10-18: the cap was for monitored rollouts): each run ends at its own runner budget, and the start limit still
+applies. It used to default to 480 s, which only a row written by hand switched off: of the 3,179 confirmed applications
+on the one database that had it, 979 succeeded on a run started more than eight minutes after the job's first start
+(2026-11-01), and a new installation would have refused every one of those retries.
 
 A start that ended before anything reached the employer because of the app itself (a sibling held the shared email
 sender, the browser or the model provider was unavailable, a deployment interrupted the worker) does not count toward
@@ -111,7 +113,7 @@ def max_seconds(session):
     """The lifetime wall-clock cap in seconds, or None when the owner runs production uncapped."""
     row = session.get(Setting, SETTING)
     if row is None:
-        return MAX_SECONDS
+        return None
     value = (row.value or {}).get("max_seconds", MAX_SECONDS)
     return None if value in (None, 0, "") else int(value)
 

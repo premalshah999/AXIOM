@@ -73,8 +73,8 @@ platform behind a company career site. The platform then selects the flow:
 
 | Flow | Platforms | Budget |
 |---|---|---|
-| Guided single-page flow (`AGENT_FIRST`) | Greenhouse, Lever, Ashby, SmartRecruiters, Workable, BambooHR | `APPLICATION_TIMEOUT` (180 s) |
-| Deterministic adapter (`adapters.REGISTRY`) | Workday, Oracle, iCIMS, Taleo, SuccessFactors, Eightfold | `MULTIPAGE_TIMEOUT` (480 s) |
+| Guided single-page flow (`AGENT_FIRST`) | Greenhouse, Lever, Ashby, SmartRecruiters, Workable, BambooHR | `APPLICATION_TIMEOUT` (600 s) |
+| Deterministic adapter (`adapters.REGISTRY`) | Workday, Oracle, iCIMS, Taleo, SuccessFactors, Eightfold | `MULTIPAGE_TIMEOUT` (900 s) |
 | Generic multi-page adapter, falling back to the guided flow | ADP, Avature, Jobvite, Dayforce, UKG and any unrecognised career site | `MULTIPAGE_TIMEOUT` |
 
 A worker is a browser owner (a slot), not a platform: any ATS worker runs whichever flow its job needs, one writer per job.

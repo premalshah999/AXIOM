@@ -115,6 +115,14 @@ const OPEN_AT: Record<string, StepId> = {
 
 type Draft = Profile;
 
+// Shown and switchable on the permissions step, on by default like the other recommended choices. Without them every form that
+// needs an exact day for a month-only date, or offers no listed source, stopped to ask: a new person met what the owner had
+// long since answered once (2026-11-01). AXIOM really does find its jobs on employers' sites, job boards and web searches.
+const ROUTINE_ANSWERS: NonNullable<Profile["answer_rules"]> = {
+  history_day: "first",
+  source_order: ["company website", "job board", "internet search"],
+};
+
 const EMPTY_PROFILE: Draft = {
   name: "",
   email: "",
@@ -153,6 +161,9 @@ const EMPTY_PROFILE: Draft = {
   accept_all_application_terms: false,
   accept_required_marketing: false,
   autonomous: false,
+  admit_by_title: false,
+  accept_experience_years: 0,
+  answer_rules: ROUTINE_ANSWERS,
 };
 
 // ---------- facts ----------
@@ -194,6 +205,8 @@ function withDefaults(profile: Partial<Draft>): Draft {
   for (const key of ["phone_country_code", "phone_type", "application_source"] as const)
     if (!String(draft[key] || "").trim()) draft[key] = EMPTY_PROFILE[key];
   if (!draft.address.country.trim()) draft.address.country = EMPTY_PROFILE.address.country;
+  // The server's empty rules mean nobody chose yet: show the recommended ones, which this step saves once confirmed.
+  if (!Object.keys(draft.answer_rules || {}).length) draft.answer_rules = ROUTINE_ANSWERS;
   // The authorization step shows the residence prefilled; save what it shows.
   if (!String(foldFacts(draft.facts).country_of_residence || "").trim()) draft.facts.country_of_residence = draft.address.country;
   return draft;
@@ -1372,6 +1385,17 @@ function AutomationStep({
             checked={!draft.accept_required_marketing}
             onChange={() => setTop("accept_required_marketing", !draft.accept_required_marketing)}
           />
+          <SwitchRow
+            label="Use the 1st when a form needs an exact day"
+            note="Recommended. Resumes list months, and some forms require a day for employment and education dates. Off: those applications stop and ask you."
+            checked={draft.answer_rules?.history_day === "first"}
+            onChange={() =>
+              setTop("answer_rules", {
+                ...draft.answer_rules,
+                history_day: draft.answer_rules?.history_day === "first" ? "" : "first",
+              })
+            }
+          />
         </div>
       </Section>
       <Section title="Finding jobs">
@@ -1381,6 +1405,12 @@ function AutomationStep({
             note="AXIOM discovers jobs, ranks them against your profile, and applies without asking each time."
             checked={draft.autonomous}
             onChange={() => setTop("autonomous", !draft.autonomous)}
+          />
+          <SwitchRow
+            label="Also apply to my target roles below the minimum score"
+            note="The score can undervalue a role you named outright. On: a posting whose title is one of your target roles qualifies whatever its score. Roles named only by a broad word, like Developer, don't count."
+            checked={!!draft.admit_by_title}
+            onChange={() => setTop("admit_by_title", !draft.admit_by_title)}
           />
         </div>
         {draft.autonomous && (
@@ -1396,8 +1426,21 @@ function AutomationStep({
           />
         )}
         <Select
+          label="Roles that ask for more experience than I have"
+          hint="Many postings ask for a few years and still hire below that. This counts as met when the work is in your field."
+          value={String(draft.accept_experience_years || 0)}
+          onChange={(e) => setTop("accept_experience_years", Number(e.target.value))}
+        >
+          <option value="0">Judge them against my own experience</option>
+          {[1, 2, 3, 5].map((years) => (
+            <option key={years} value={String(years)}>
+              Apply when they ask for up to {years} {years === 1 ? "year" : "years"}
+            </option>
+          ))}
+        </Select>
+        <Select
           label="“How did you hear about us?”"
-          hint="Used when the form offers this option; otherwise the closest one."
+          hint="Used when the form offers this option; otherwise its company website, job board or internet search option."
           value={source}
           onChange={(e) => setTop("application_source", e.target.value)}
         >

@@ -780,6 +780,14 @@ def admission_revision(db, cfg):
         # readmit_by_threshold's upper bound: lowering the profile's fit must revisit the jobs it ranked skipped.
         "minimum_fit": db.get_setting("profile", {}).get("minimum_fit"),
     }
+    # Only places that restrict anything: a job refused as outside them comes back when they change.
+    from .jobboard import NO_PARTICULAR_PLACE
+
+    profile = db.get_setting("profile", {}) or {}
+    places = [str(p) for p in profile.get("target_locations") or [] if str(p).strip()]
+    if places and not any(NO_PARTICULAR_PLACE.search(p) for p in places):
+        policy["target_locations"] = sorted(places)
+        policy["willing_to_relocate"] = (profile.get("facts") or {}).get("willing_to_relocate")
     return hashlib.sha256(json.dumps(policy, sort_keys=True).encode()).hexdigest()[:16]
 
 
@@ -875,6 +883,10 @@ def screen_job(db, cfg, owner_profile, job, busy, *, board_ids, integrated, use_
         if target_roles and not role_fits(current.title, target_roles):
             # Ranked before the profile's roles changed (2026-10-17); its search filters apply here too.
             raise ValueError("Outside the profile's target roles: " + current.title[:120])
+        from .jobboard import outside_target_locations
+
+        if outside_target_locations(owner_profile, current.location):
+            raise ValueError("Outside your target locations: " + (current.location or "")[:120])
         employer = employer_partition(current)
         if employer in busy:
             return "busy", employer, None  # Reconsider later; another employer can use this slot.
@@ -910,11 +922,15 @@ def screen_job(db, cfg, owner_profile, job, busy, *, board_ids, integrated, use_
             raise ValueError(reason)
     if use_master:
         return "ok", employer, None
-    from .execution_services import ready_for_job
+    from .execution_services import ready_for_job, tailoring_kept_source
 
     artifact = ready_for_job(db, jid, data_dir)
+    if artifact:
+        return "ok", employer, artifact.artifact_id
+    if tailoring_kept_source(db, jid, data_dir):
+        return "ok", employer, None
     # Tailoring owns its own durable queue; no browser slot is held.
-    return ("ok", employer, artifact.artifact_id) if artifact else ("tailoring", employer, None)
+    return "tailoring", employer, None
 
 
 async def tick(service):

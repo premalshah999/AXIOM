@@ -54,6 +54,16 @@ def router(service) -> APIRouter:
             for key in owned_fact_keys() & set(stored_facts) - set(facts):
                 facts[key] = stored_facts[key]
             value["facts"] = facts
+            # One number on the screen, "Minimum match score: jobs below this are skipped", and two settings behind it: the
+            # autopilot read the job board's minimum_auto_fit, which nothing on the guide sets. A score of 65 with the guide
+            # at 60 read Ready and was refused "below the unattended threshold 70", and every higher choice was ignored
+            # (2026-11-01). Moving the profile's moves the board's; Discovery's own form can still set it apart.
+            if value.get("minimum_fit") != stored.get("minimum_fit"):
+                board = s.get(Setting, "job_board_settings")
+                if board:
+                    board.value = {**board.value, "minimum_auto_fit": value.get("minimum_fit")}
+                else:
+                    s.add(Setting(key="job_board_settings", value={"minimum_auto_fit": value.get("minimum_fit")}))
             if row:
                 # Learned answers are server-owned (reviews, Telegram, /api/knowledge): a stale
                 # dashboard copy can neither drop new answers nor restore corrected/forgotten ones.
