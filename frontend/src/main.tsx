@@ -1,5 +1,6 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { LegalGate } from "./legal";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/components.css";
@@ -237,6 +238,7 @@ function App() {
 
   if (setupGuide === "needed")
     return (
+      <LegalGate>
       <div className="ax-screen">
         <Suspense fallback={<Loading label="Opening the setup guide…" />}>
           <Onboarding
@@ -253,6 +255,7 @@ function App() {
           />
         </Suspense>
       </div>
+      </LegalGate>
     );
 
   if (!workspace)
@@ -279,6 +282,7 @@ function App() {
   const soon = ALL_ITEMS.find((i) => i.route.view === route.view && i.soon);
 
   return (
+    <LegalGate>
     <ToastContext.Provider value={notify}>
       <WorkspaceContext.Provider value={workspace}>
         <Shell
@@ -350,6 +354,7 @@ function App() {
         <ToastStack toasts={toasts} onDismiss={(id) => setToasts((list) => list.filter((x) => x.id !== id))} />
       </WorkspaceContext.Provider>
     </ToastContext.Provider>
+    </LegalGate>
   );
 }
 

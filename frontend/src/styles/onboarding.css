@@ -675,3 +675,14 @@ button.ax-ob-choice:hover {
     align-items: stretch;
   }
 }
+
+/* The Terms and Privacy text, read inside the app. */
+.ax-legal-text {
+  max-height: 60vh;
+  margin: 0;
+  overflow: auto;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: var(--text-meta);
+  white-space: pre-wrap;
+}

@@ -31,6 +31,11 @@ class Erase(BaseModel):
     confirm: str = Field(default="", max_length=100)
 
 
+class LegalAccept(BaseModel):
+    version: str = Field(max_length=60)
+    adult: bool = False
+
+
 class ConnectionsUpdate(BaseModel):
     """Values to save in Setup > Connections; a blank value clears that saved value."""
 
@@ -115,6 +120,22 @@ def router(service) -> APIRouter:
         db.flush_events()  # os._exit skips the exit hook that would write a remote database's batched events.
         asyncio.get_running_loop().call_later(1.0, os._exit, 0)
         return {"restarting": True}
+
+    @r.get("/api/legal")
+    def legal_status():
+        """Whether the Terms and Privacy Policy of this version were accepted, and their text."""
+        from ... import legal
+
+        return {**legal.status(db), "terms": legal.text("terms"), "privacy": legal.text("privacy")}
+
+    @r.post("/api/legal/accept")
+    def legal_accept(data: LegalAccept):
+        from ... import legal
+
+        try:
+            return legal.accept(db, data.version, data.adult)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
 
     @r.get("/api/system/erase")
     def erase_status():

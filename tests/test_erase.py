@@ -90,3 +90,17 @@ def test_the_supervisor_starts_nothing_but_postgres_while_the_eraser_lives(tmp_p
     for c in kids:
         sup.tick_child(c, 100.0)
     assert started == ["postgres", "postgres", "app"]
+
+
+def test_legal_acceptance_is_per_version_and_needs_the_adult_box(client, service):
+    from jobpilot import legal
+
+    first = client.get("/api/legal").json()
+    assert first["accepted"] is False and first["version"] == legal.VERSION
+    assert legal.VERSION in first["terms"] and legal.VERSION in first["privacy"]  # the packaged texts carry the version they are accepted as
+    assert client.post("/api/legal/accept", json={"version": legal.VERSION, "adult": False}).status_code == 422
+    assert client.post("/api/legal/accept", json={"version": "old", "adult": True}).status_code == 422
+    assert client.post("/api/legal/accept", json={"version": legal.VERSION, "adult": True}).json()["accepted"] is True
+    assert service.db.get_setting("legal_acceptance")["version"] == legal.VERSION
+    service.db.set_setting("legal_acceptance", {"version": "older", "accepted_at": "x"})  # a new version asks again
+    assert client.get("/api/legal").json()["accepted"] is False
