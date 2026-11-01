@@ -45,7 +45,23 @@ ROTATE_SECONDS = 30.0
 BACKUP_CHECK_SECONDS = 300.0
 LOG_BYTES, LOG_KEEP = 10 * 1024 * 1024, 3  # compose.yaml's json-file limits.
 CHROME_GRACE, POSTGRES_GRACE, CHROME_WAIT = 10.0, 30.0, 30.0
-ACTIVE_RUNS = "select count(*) from runs where state in ('queued','running','submitting')"
+# Queued work during the owner's Stop is not "in progress": it held the Mac awake and made Quit and the battery warning say
+# applications were running while nothing was (jobpilot/stop.py).
+STOPPED = "exists (select 1 from settings c where c.key = 'control' and c.value->>'paused' = 'true')"
+ACTIVE_RUNS = (
+    "select count(*) from runs where state in ('running','submitting') "
+    f"or (state = 'queued' and not {STOPPED})"
+)
+# What Quit says it is waiting on. One line of JSON each, read with psql: this process stays small and imports no database code.
+WORK = (
+    "select json_build_object('running', count(*) filter (where state = 'running'), "
+    "'submitting', count(*) filter (where state = 'submitting'), 'queued', count(*) filter (where state = 'queued'), "
+    f"'stopped', {STOPPED}) from runs where state in ('queued','running','submitting')"
+)
+FINISHING = (
+    "select coalesce(json_agg(json_build_object('company', j.company)), '[]') "
+    "from runs r join jobs j on j.id = r.job_id where r.state = 'submitting'"
+)
 # A batch between applications still searches and ranks, and starts the next job when one appears.
 BATCH_RUNNING = (
     "select count(*) from settings where key = 'job_board_autopilot' and value->>'state' = 'active' "
@@ -252,6 +268,9 @@ class Supervisor:
         self.caffeinate = None
         self.active = None
         self.last_active = None
+        self.work = {}
+        self.finishing = []
+        self.stop_now = False
         self.power = {}
         self.next_tick = {}
         self.written = 0.0
@@ -411,6 +430,7 @@ class Supervisor:
         for sig in (signal.SIGTERM, signal.SIGINT):
             signal.signal(sig, self.on_stop)
         signal.signal(signal.SIGHUP, self.on_restart)
+        signal.signal(signal.SIGUSR1, self.on_stop_now)
         try:
             stop_leftovers(self.cfg, previous, say=self.say)
             self.preflight()
@@ -444,6 +464,11 @@ class Supervisor:
 
     def on_stop(self, *_):
         self.stop_reason = self.stop_reason or "Stopped by request."
+
+    def on_stop_now(self, *_):
+        """The owner, on Quit's screen: do not wait for the final submit step. Said to them plainly first: its result is then
+        unknown, and the next start records it so (workers.recover_interrupted); it is never sent twice."""
+        self.stop_now = True
 
     def on_restart(self, *_):
         self.restart_requested = True
@@ -664,6 +689,7 @@ class Supervisor:
             except (OSError, ValueError, subprocess.TimeoutExpired):
                 count = None
         self.active = count
+        self.work = self.read_json(WORK, {}) if count else {}
         if count or (count == 0 and self.batch_running()):
             self.last_active = now
         running = bool(self.caffeinate and self.caffeinate.poll() is None)
@@ -681,6 +707,14 @@ class Supervisor:
             self.caffeinate.wait()
             self.caffeinate = None
             self.say("Nothing active for a while: idle sleep is allowed again.")
+
+    def read_json(self, query, empty):
+        """A one-line JSON answer from psql, or `empty`: what Quit says is never worth failing over."""
+        try:
+            parsed = json.loads(pg.psql(self.pg_bin, self.cfg, query, timeout=5, check=False) or "null")
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            return empty
+        return parsed if isinstance(parsed, type(empty)) else empty
 
     def batch_running(self):
         """A running batch on mains keeps the Mac awake with nothing in flight: allowed to sleep at 02:28, it found and
@@ -766,8 +800,20 @@ class Supervisor:
         child.stopping = False
         child.request_stop(now=time.monotonic())
         final = False
+        seen = 0.0
         while child.proc.poll() is None:
             now = time.monotonic()
+            if child.service and child.grace > 30 and now - seen >= 1.0:
+                # The app is draining, the database still answers: what the window says it waits for, with what is left of
+                # the drain (its grace is the drain plus 30 s to exit).
+                seen = now
+                left = max(0, round(child.kill_at - now - 30))
+                self.finishing = [{**row, "seconds_left": left} for row in self.read_json(FINISHING, [])]
+                self.write_state(force=True)
+            if self.stop_now and child.service and not final:
+                self.say(f"Asked not to wait: stopping {child.name} now.")
+                self.stop_now = False
+                child.kill_at = now
             if now >= child.kill_at:
                 if final:
                     self.say(f"{child.name} (pid {pid}) is still running; killing it.")
@@ -782,6 +828,7 @@ class Supervisor:
             time.sleep(0.25)
         child.reap_group(pid)
         child.proc, child.state, child.stopping, child.lstart = None, "down", False, ""
+        self.finishing = []
 
     # ---- state ------------------------------------------------------------------------------------------------------
 
@@ -800,6 +847,8 @@ class Supervisor:
             "began_at": self.began_at,
             "timings": self.timings,
             "active": self.active,
+            "work": self.work,
+            "finishing": self.finishing,
             "sleep_prevented": bool(self.caffeinate and self.caffeinate.poll() is None),
             "power": self.power,
             "stop_order": [c.name for c in reversed(in_dependency_order(self.children or []))],
