@@ -998,7 +998,9 @@ class Adapter:
             # Workday's step names only "Take Assessment", and the application goes no further without it: a person opens it to see
             # what it is (Smithfield 2026-10-31, where the model had to find it). on_assessment reads what it opened.
             if control.get("automation_id") == "inlineAssessmentButton":
-                return control
+                # A step that names a test of the applicant themself (a coding or skills assessment) is left to them.
+                text = obs.get("text", "")
+                return None if PERSONAL_TEST.search(text) and not TAX_CREDIT.search(text) else control
             if (
                 control.get("partner")  # Oracle's inline partner button, named by its block when it has no text
                 or re.fullmatch(LAUNCHER, label, re.I)
@@ -1871,8 +1873,11 @@ class Adapter:
             if await self.await_assessment_record(after):
                 return None
             # The application asks for its questionnaire; opening it is the only way on (again=True: once more if it was opened before).
-            if ASSESSMENT_DEMAND.search(" ".join(str(e) for e in after.get("errors", []))) and await self.launch_assessment(after, again=True):
-                return None
+            if ASSESSMENT_DEMAND.search(" ".join(str(e) for e in after.get("errors", []))):
+                if await self.launch_assessment(after, again=True):
+                    return None
+                if PERSONAL_TEST.search(after.get("text", "")) and not TAX_CREDIT.search(after.get("text", "")):
+                    return {"state": "closed", "reason": PERSONAL_TEST_REASON, "blocker_type": "personal_test"}
             # Server-side validation: answer what it flagged, then try once more.
             if after["errors"] or any(f["error"] for f in after["fields"]):
                 repaired = await self.repair(after)
