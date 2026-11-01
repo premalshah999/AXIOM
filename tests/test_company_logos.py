@@ -132,6 +132,8 @@ class Net:
         found = self.pages.get(url)
         if isinstance(found, Exception):
             raise found
+        if isinstance(found, tuple):  # (body, the address it ended on after a redirect)
+            return found
         return (found, url) if found else None
 
 
@@ -426,12 +428,12 @@ def test_an_svg_wordmark_is_wide_but_welcome_when_nothing_square_exists():
     assert logos.judge(wide, logos.MIN_EDGE, wide_ok=True)[:2] == ("svg", "wide")
 
 
-STRUCTURED = """<script type="application/ld+json">{"@type":"JobPosting","hiringOrganization":{"@type":"Organization","name":"%s","sameAs":"https://www.acme.example.test/","logo":"https://cdn.example.test/acme/logo.png"}}</script>"""
+STRUCTURED = """<script type="application/ld+json">{"@type":"JobPosting","hiringOrganization":{"@type":"Organization","name":"%s","sameAs":"https://www.acmelabs.test/","logo":"https://cdn.example.test/acme/logo.png"}}</script>"""
 
 
 def test_a_postings_structured_data_vouches_for_the_logo_and_site_only_under_the_companys_own_name():
     mine = STRUCTURED % "Acme Inc."
-    assert logos.employer_logos(mine, "https://jobs.example.test/1", "Acme") == (["https://cdn.example.test/acme/logo.png"], ["example.test"])
+    assert logos.employer_logos(mine, "https://jobs.example.test/1", "Acme") == (["https://cdn.example.test/acme/logo.png"], ["acmelabs.test"])
     # A page whose organization is another company (an aggregator, a parent, a client) vouches for nothing.
     assert logos.employer_logos(STRUCTURED % "Other Holdings", "https://jobs.example.test/1", "Acme") == ([], [])
     assert logos.employer_logos(STRUCTURED % "Acme", "https://jobs.example.test/1", "Zeta") == ([], [])
@@ -447,10 +449,10 @@ def test_a_share_image_named_logo_counts_only_on_an_address_that_names_the_compa
 
 
 async def test_a_company_site_the_posting_declares_is_vouched_for_without_a_guess(net):
-    page = (STRUCTURED % "Zeta Labs").encode()
-    url = "https://jobs.example.test/zeta/1"
-    net({url: page, "https://example.test/": b"", "https://example.test/apple-touch-icon.png": png(180, 180)})
-    # "example.test" is not the company's name, so no address could vouch for it; the posting's own structured data does.
+    page = (STRUCTURED % "Zeta Labs").replace("acmelabs.test", "zetalabs.test").encode()
+    url = "https://jobs.example.test/job/1"
+    net({url: page, "https://zetalabs.test/": b"", "https://zetalabs.test/apple-touch-icon.png": png(180, 180)})
+    # Nothing in the job's own address names the company; the posting's own structured data does.
     assert await logos.find("Zeta Labs", [url]) == (png(180, 180), "png")
 
 
@@ -461,3 +463,43 @@ async def test_the_page_is_read_without_a_full_html_parse(net, monkeypatch):
     sys.modules.pop("bs4", None)
     monkeypatch.setitem(sys.modules, "bs4", None)  # an import of it now fails: the logo path must not need it
     assert await logos.find("Acme", [POSTING]) == (png(128, 128), "png")
+
+
+async def test_a_guessed_address_that_sends_the_visitor_to_another_site_is_not_the_company(net):
+    # superapp.com led to a LinkedIn page titled "SuperApp | LinkedIn" and the company was shown with LinkedIn's icon (2026-11-01).
+    page = b"<html><head><title>Acme | LinkedIn</title></head></html>"
+    net({"https://acme.com/": (page, "https://www.linkedin.com/company/acme")})
+    async with httpx.AsyncClient() as client:
+        assert await logos._verified(client, "acme.com", "Acme") is False
+    net({"https://acme.com/": (HOME, "https://www.acme.com/en/")})
+    async with httpx.AsyncClient() as client:
+        assert await logos._verified(client, "acme.com", "Acme") is True
+
+
+def test_a_logo_drawn_in_white_is_not_kept_for_a_light_tile():
+    pytest.importorskip("PIL")
+    import io
+
+    from PIL import Image
+
+    white = Image.new("RGBA", (200, 60), (0, 0, 0, 0))
+    for x in range(20, 180):
+        for y in range(20, 40):
+            white.putpixel((x, y), (255, 255, 255, 255))
+    out = io.BytesIO()
+    white.save(out, "PNG")
+    assert logos.shrink(out.getvalue(), "png") is None  # a header logo for a dark page: invisible on the plate
+    assert logos.shrink(real_png((200, 200)), "png") is not None
+    assert logos.judge(b'<svg viewBox="0 0 10 10"><path fill="#FFFFFF" d="M0 0h10v10z"/></svg>', logos.MIN_EDGE) is None
+    assert logos.judge(b'<svg viewBox="0 0 10 10"><path fill="#fff"/><path d="M0 0"/></svg>', logos.MIN_EDGE)
+
+
+@pytest.mark.parametrize("site", ["https://acme.breezy.hr", "https://www.paylocity.com/", "https://careers.phenompeople.com", "https://www.unrelated-co.test"])
+def test_a_postings_site_that_is_its_systems_or_unrelated_to_the_company_is_not_the_companys(site):
+    page = (STRUCTURED % "Acme").replace("https://www.acmelabs.test/", site)
+    assert logos.employer_logos(page, "https://acme.breezy.hr/p/1", "Acme")[1] == []
+
+
+def test_a_postings_site_that_contains_the_companys_name_is_the_companys():
+    page = (STRUCTURED % "Handshake").replace("https://www.acmelabs.test/", "https://joinhandshake.com/")
+    assert logos.employer_logos(page, "https://jobs.ashbyhq.com/handshake/1", "Handshake")[1] == ["joinhandshake.com"]

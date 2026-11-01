@@ -238,13 +238,28 @@ def svg_aspect(body):
     return w / h if w > 0 and h > 0 else None
 
 
+def svg_white(body):
+    """True when every colour an SVG declares is white or none, and no shape is left to the default black: a logo drawn for a dark
+    page, invisible on the tile's light plate (GM Financial's header logo, 2026-11-01)."""
+    text = body.decode("utf-8", "replace")
+    colors = re.findall(r"(?:fill|stroke|stop-color)\s*[:=]\s*[\"']?\s*(#[0-9a-f]{3,8}\b|rgba?\([^)]*\)|[a-z]+)", text, re.I)
+    colors = [c.lower().replace(" ", "") for c in colors if c.lower() not in ("none", "currentcolor", "inherit", "transparent")]
+    if not colors or any(c not in ("#fff", "#ffffff", "#ffffffff", "white", "rgb(255,255,255)") for c in colors):
+        return False
+    root = re.search(r"<svg\b[^>]*>", text, re.I)
+    if root and re.search(r"\bfill\s*[:=]", root.group(0)):
+        return True  # inherited by every shape
+    shapes = len(re.findall(r"<(?:path|rect|circle|ellipse|polygon|polyline)\b", text, re.I))
+    return len(re.findall(r"\bfill\s*[:=]", text)) >= shapes
+
+
 def judge(body, minimum, wide_ok=False):
     """(extension, shape, short edge) for an image worth a tile: shape is "square" or, when wide_ok, "wide"; else None."""
     if not body:
         return None
     if body[:400].lstrip()[:1] == b"<":
         ratio = svg_aspect(body)
-        if not ratio:
+        if not ratio or svg_white(body):
             return None
         ratio = max(ratio, 1 / ratio)
         return ("svg", "square" if ratio <= MAX_ASPECT else "wide", 0) if ratio <= (MAX_WIDE if wide_ok else MAX_ASPECT) else None
@@ -264,6 +279,17 @@ def judge(body, minimum, wide_ok=False):
     return None
 
 
+def _inked(im):
+    """False for an image with nothing to see on a light plate: every visible pixel is near white (a logo drawn in white for a
+    dark page, 2026-11-01)."""
+    seen = ink = 0
+    for r, g, b, a in im.get_flattened_data() if hasattr(im, "get_flattened_data") else im.getdata():
+        if a > 40:
+            seen += 1
+            ink += min(r, g, b) < 225
+    return seen > 0 and ink / seen >= 0.01
+
+
 def shrink(body, ext):
     """(bytes, extension) of the image as a tile draws it: no larger than MAX_EDGE, as WebP. An SVG, or an image this machine
     has no library to read, is kept as it is when it is small enough, else None."""
@@ -277,6 +303,8 @@ def shrink(body, ext):
             im = im.convert("RGBA")
             if max(im.size) > MAX_EDGE:
                 im.thumbnail((MAX_EDGE, MAX_EDGE), Image.Resampling.LANCZOS)
+            if not _inked(im):
+                return None
             out = io.BytesIO()
             im.save(out, "WEBP", lossless=True, quality=90, method=4)
             return out.getvalue(), "webp"
@@ -356,6 +384,20 @@ def organizations(html):
     return found
 
 
+def _platform(domain):
+    """The web address belongs to a system that hosts postings for many employers, not to one of them."""
+    host = f"www.{domain}"
+    return bool(TENANT_IN_HOST.search(host) or TENANT_IN_PATH.search(host) or OTHER_SYSTEMS.search(host))
+
+
+def _related(domain, company):
+    """The address's name is the company's, or contains it ("joinhandshake.com" for Handshake): what a page's structured data
+    must show before its site is taken for the company's. A job page of a system that hosts many employers names the system's own
+    address as the organization's site (breezy.hr, paylocity.com, phenompeople.com: five companies showed Breezy's icon, 2026-11-01)."""
+    label, name = _squash(domain.split(".")[0]), _squash(LEGAL.sub(" ", str(company or "")))
+    return not _platform(domain) and (_same(label, company) or (len(name) >= 5 and name in label) or (len(label) >= 5 and label in _squash(company)))
+
+
 def employer_logos(html, base, company):
     """(logo addresses, web addresses) a page vouches for as `company`'s: its system's employer assets, the structured-data logo
     and site of an organization with the company's name, and a share image named "logo" on an address that names the company."""
@@ -367,7 +409,7 @@ def employer_logos(html, base, company):
         if org.get("logo"):
             assets.append(urljoin(base, org["logo"]))
         if site := _registered((urlsplit(urljoin(base, org.get("site", ""))).hostname or "").lower()):
-            if DOMAIN.fullmatch(site) and not OTHER_SYSTEMS.search(site):
+            if DOMAIN.fullmatch(site) and _related(site, company):
                 sites.append(site)
     for name, tag in _tags(html):
         if name == "meta" and (tag.get("property") or tag.get("name") or "").lower() in ("og:image", "twitter:image") and tag.get("content"):
@@ -432,7 +474,7 @@ async def _from_site(client, domain):
         assets, others = declared(got[0].decode("utf-8", "replace"), got[1])
         # Only an icon on the company's own address or its content network; a page can link anything.
         candidates = [u for u in others if _registered(urlsplit(u).hostname or "") == _registered(urlsplit(got[1]).hostname or "")]
-    candidates.append(f"https://{domain}/apple-touch-icon.png")
+    candidates += [f"https://{domain}/apple-touch-icon.png", f"https://{domain}/favicon.ico"]  # a site with no <link> still has these
     for url in dict.fromkeys(candidates):
         if found := await _image(client, url, MIN_EDGE):
             return found
@@ -470,6 +512,12 @@ async def _verified(client, domain, company):
     """A guessed address is the company's only when its home page names the company in its title and is not a parked page."""
     got = await _get(client, f"https://{domain}/", MAX_PAGE_BYTES, page=True)
     if not got:
+        return False
+    # A guessed address that sends the visitor to another site is that site's page (superapp.com led to a LinkedIn page titled
+    # with the company's name and borrowed LinkedIn's icon): it is the company's only if it ends on the same registered
+    # domain or one that itself names the company.
+    final = _registered((urlsplit(got[1]).hostname or "").lower())
+    if final != _registered(domain) and (OTHER_SYSTEMS.search(final) or not _same(final.split(".")[0], company)):
         return False
     page = got[0][:MAX_PAGE_BYTES].decode("utf-8", "replace")
     title = re.search(r"<title[^>]*>(.*?)</title>", page, re.I | re.S)
