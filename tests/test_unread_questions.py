@@ -85,7 +85,7 @@ def test_what_no_answer_completes_is_marked(question, kind_, hard):
     assert reason and is_hard is hard
     shown = oq.present({"id": "r1", "question": question, "options": [], "context": context, "reason": ""})
     assert shown["cannot_automate"] == reason
-    assert shown["kind"] == ("cannot_automate" if hard else "upload")
+    assert shown["kind"] == ("cannot_automate" if hard else "text" if kind_ == "text" else "upload")
 
 
 def test_a_polar_question_about_video_interviews_is_still_a_question():

@@ -177,7 +177,7 @@ async def watch(service, engine, execution, run_id):
             continue
         execution.cancel()
         while True:
-            await asyncio.sleep(CANCEL_AGAIN_SECONDS)
+            await asyncio.wait({execution}, timeout=CANCEL_AGAIN_SECONDS)
             if execution.done():
                 return
             execution.cancel()
