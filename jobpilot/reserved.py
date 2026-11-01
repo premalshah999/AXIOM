@@ -104,7 +104,7 @@ class Section(BaseModel):
 
 
 class Rules(BaseModel):
-    """The owner's reserved employers (setting `reserved_employers`). Off unless the owner turns it on in Jobs ›
+    """The owner's reserved employers (setting `reserved_employers`). Off unless the owner turns it on in Needs you ›
     Reserved (owner 2026-10-28: "no blockages till I tell you")."""
 
     enabled: bool = False
@@ -337,7 +337,7 @@ def require_approval(session, job):
     if found := held_match(session, job):
         raise QueueBlocked(
             f"{found.employer} is a reserved employer ({found.label}). Nothing is applied there until you approve "
-            "this job in Jobs › Reserved.",
+            "this job in Needs you.",
             outcome="protected",
             code=CODE,
         )

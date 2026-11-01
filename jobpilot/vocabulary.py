@@ -62,7 +62,7 @@ SENTENCES = {
     "cancelled": "Stopped before anything was sent.",
     "skipped": "Skipped. Nothing was sent.",
     "closed": "The posting is closed or no longer available.",
-    "paused": "Paused by you.",
+    "paused": "You took it out of the queue. It stays out until you put it back.",
     "reserved": "A reserved employer. It applies only after you approve it.",
     "retry": "It stopped on a problem and will try again on its own.",
     "gave_up": "The app has stopped trying.",

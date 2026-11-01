@@ -129,3 +129,13 @@ export function approveReserved(jobId: string, apply = true): Promise<ApproveRes
 export function approveOverLimit(jobId: string): Promise<ApplyResult> {
   return api<ApplyResult>(`/jobs/${jobId}/approve-over-limit`, "POST");
 }
+
+export type QueueMove = { job_id: string; state: string; message: string };
+/** Move a job to the front of the queue, or put it there. Nothing starts here: the dispatcher starts it in its turn. */
+export const moveToFront = (jobId: string) => api<QueueMove>(`/queue/${jobId}/front`, "POST");
+/** Put a job from the board in the queue, as your own pick. */
+export const addToQueue = (jobId: string) => api<QueueMove>(`/queue/${jobId}/add`, "POST");
+/** Take a job out of the queue until you put it back. */
+export const removeFromQueue = (jobId: string) => api<{ removed: boolean }>(`/queue/${jobId}`, "DELETE");
+/** Put a job you removed back in the queue. */
+export const backInQueue = (jobId: string) => api<QueueMove>(`/queue/${jobId}/back`, "POST");

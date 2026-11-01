@@ -1,22 +1,17 @@
-import { CheckCheck, CopyCheck, Download, ExternalLink, FileCheck2, FileMinus, FileText, FilterX, Globe, LayoutDashboard, MailCheck, SearchX, ShieldCheck, UserCheck, type LucideIcon } from "lucide-react";
+import { CheckCheck, CopyCheck, Download, ExternalLink, FileCheck2, FileMinus, FileText, FilterX, Globe, LayoutDashboard, MailCheck, SearchX, UserCheck, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useDraft, useNow, usePoll } from "./hooks";
-import { confirmedToday } from "./identity/state";
 import { evidenceLabel, PROOF } from "./model";
-import type { JobRow } from "./model";
-import { usePipelinePage } from "./pipeline";
 import { Pagination, usePagination } from "./pagination";
 import type { Archived, Proof, Replies, Success } from "./types";
 import { ArchiveList } from "./archive";
-import { useSelection } from "./bulk";
-import { RowActions } from "./jobactions";
-import { PipelineBulk } from "./pipelinebulk";
-import { TopActions, TopLine } from "./shell/Shell";
+import { HistoryList } from "./history";
+import { TopActions } from "./shell/Shell";
 import { ago, jobWords, platformName, stamp } from "./format";
 import { Button, Empty, Listbox, RouteTabs, Table, Tooltip, type Column } from "./ui/index";
-import { JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
+import { JobCell, LoadError, Note, SearchBox } from "./worktools";
 import "./styles/applications.css";
 
 // The two things a row proves: when it was sent and what proved it. Both are in the row, the receipt is one click away (the job's
@@ -135,12 +130,12 @@ function Proof({ r }: { r: Success }) {
 // Only a web link opens from here; anything else a posting might hold is not a page to send the person to.
 const webLink = (url: string) => (/^https?:\/\//i.test(url) ? url : "");
 
-const TABS = ["confirmed", "archive"];
+const TABS = ["confirmed", "failed", "not", "archive"];
 
-// Applications: what was sent. Confirmed is the ledger (proof on every row); Unconfirmed holds submissions with no receipt, protected
-// from any retry; Archive keeps earlier failures. Discovered and the started list are under Jobs.
+// Applications: what happened, one row per job. Applied is the ledger (proof on every row); Couldn't apply says why the app gave up;
+// Not applying says why a job won't be applied to; Archive keeps earlier failures and removed jobs. Each number opens that many rows.
 export function LedgerView() {
-  const { route } = useWorkspace();
+  const { route, counts } = useWorkspace();
   const tab = TABS.includes(route.tab || "") ? route.tab! : "confirmed";
   // Read here so the tabs can say how many there are before they are opened.
   const ledger = usePoll<{ applications: Success[] }>((signal) => api("/successful-applications", "GET", undefined, signal), 60000);
@@ -148,19 +143,22 @@ export function LedgerView() {
   const tabs = [
     // Applied: the employer has it. The same number as Overview and the Jobs page (jobpilot/api/pipeline.py confirmed_jobs).
     { id: "confirmed", label: "Applied", count: ledger.data?.applications.length },
-    { id: "archive", label: "Archive" },
+    { id: "failed", label: "Couldn't apply", count: counts.words?.failed },
+    { id: "not", label: "Not applying", count: counts.words?.not },
+    { id: "archive", label: "Archive", count: archive.data?.applications.length },
   ];
   return (
     <div className="ax-page ax-page-fill">
       <RouteTabs view="ledger" tabs={tabs} label="Applications" current={tab} />
       {tab === "confirmed" && <Confirmed ledger={ledger} />}
+      {(tab === "failed" || tab === "not") && <HistoryList key={tab} word={tab} />}
       {tab === "archive" && <ArchiveList archive={archive} />}
     </div>
   );
 }
 
 function Confirmed({ ledger }: { ledger: ReturnType<typeof usePoll<{ applications: Success[] }>> }) {
-  const { route, go, counts, openJob } = useWorkspace();
+  const { route, go, openJob } = useWorkspace();
   const now = useNow(60000);
   const [q, setQuery] = useDraft("ledger-query", "");
   const [evidence, setEvidence] = useDraft<Evidence>("ledger-evidence", "all");
@@ -207,8 +205,6 @@ function Confirmed({ ledger }: { ledger: ReturnType<typeof usePoll<{ application
     setPlatform("all");
   };
   const paging = usePagination(shown, [q, evidence, period, platform, onlyReplies].join("|"), 25);
-  const today = confirmedToday(all, now).length;
-  const unconfirmed = counts.groups.unconfirmed || 0;
 
   const columns: Column<Success>[] = [
     {
@@ -343,7 +339,7 @@ function Confirmed({ ledger }: { ledger: ReturnType<typeof usePoll<{ application
               title="No confirmed applications yet"
               hint="An application appears here once the employer's page or an email from the employer proves it was received, with the time it was sent."
               action={
-                <Button size="sm" onClick={() => go({ view: "batch" })}>
+                <Button size="sm" onClick={() => go({ view: "queue" })}>
                   See what is running
                 </Button>
               }

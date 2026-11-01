@@ -2,7 +2,7 @@
 // overflow menu; the job drawer shows the one action as a button and the rest under More. Every action goes through the
 // same endpoint as before, so every server-side guard still decides (owner 2026-10-29: no red Delete button on every row).
 import { ChevronDown } from "lucide-react";
-import { api, applyJob, approveReserved, PREPARING, queueJob } from "./api";
+import { addToQueue, api, approveOverLimit, approveReserved, backInQueue, moveToFront, PREPARING, queueJob, removeFromQueue } from "./api";
 import { useWorkspace } from "./context";
 import { useAction } from "./hooks";
 import { appliedState, COMMITTED, RETRYABLE, STATES, stateInfo, type JobRow } from "./model";
@@ -59,16 +59,6 @@ function useJobActions(row: JobRow, detailed = false) {
       },
       (r) => r?.message,
     );
-  const applyNow = () =>
-    run(
-      "apply",
-      async () => {
-        const r = await applyJob(row.job.id);
-        settle(r);
-        return r;
-      },
-      (r) => r?.message,
-    );
   // A reserved employer's job: the owner's approval, then the same start as Apply.
   const approve = () =>
     run(
@@ -84,11 +74,31 @@ function useJobActions(row: JobRow, detailed = false) {
     run(
       "withdraw",
       async () => {
-        const result = await api<{ removed: boolean }>(`/queue/${row.job.id}`, "DELETE");
+        const result = await removeFromQueue(row.job.id);
         void refresh();
         return result;
       },
-      "Removed from the queue.",
+      "Removed from the queue. It stays out until you put it back.",
+    );
+  const front = () =>
+    run(
+      "front",
+      async () => {
+        const result = await moveToFront(row.job.id);
+        void refresh();
+        return result;
+      },
+      (r) => r?.message,
+    );
+  const putBack = () =>
+    run(
+      "back",
+      async () => {
+        const result = await backInQueue(row.job.id);
+        void refresh();
+        return result;
+      },
+      (r) => r?.message,
     );
   const verdict = (submitted: boolean) =>
     run(
@@ -110,9 +120,10 @@ function useJobActions(row: JobRow, detailed = false) {
       { id: "unsent", label: "Mark not sent", run: () => verdict(false) },
     );
   else if (state === "reserved") acts.push({ id: "approve", label: "Approve and apply", tone: "primary", lead: true, run: approve });
-  else if (state === "pending:waiting") acts.push({ id: "withdraw", label: "Remove from queue", run: withdraw });
-  else if (state === "paused" || state === "job:paused") acts.push({ id: "resume", label: "Resume", tone: "primary", run: () => control("resume") });
-  else if (state === "resumed") acts.push({ id: "apply", label: "Apply", tone: "primary", run: applyNow });
+  else if (state === "pending:waiting") acts.push({ id: "front", label: "Move to the front", tone: "primary", run: front }, { id: "withdraw", label: "Remove from the queue", run: withdraw });
+  else if (state === "job:paused" || (state === "paused" && !run_)) acts.push({ id: "back", label: "Put back in the queue", tone: "primary", lead: true, run: putBack });
+  else if (state === "paused") acts.push({ id: "resume", label: "Resume", tone: "primary", run: () => control("resume") });
+  else if (state === "resumed") acts.push({ id: "add", label: "Put back in the queue", tone: "primary", run: () => run("add", async () => { const r = await addToQueue(row.job.id); void refresh(); return r; }, (r) => r?.message) });
   else if (state !== "pausing" && run_ && (run_.state === "queued" || run_.state === "running"))
     acts.push({ id: "pause", label: "Pause", run: () => control("pause") });
   else if (needs && !detailed) acts.push({ id: "answer", label: "Answer", lead: true, run: () => openJob(row.job.id, run_?.id) });
@@ -175,20 +186,20 @@ export function RowActions({ row, promote }: { row: JobRow; promote?: string }) 
 
 // A job with no attempt yet. One click applies (owner, 2026-10-18): no reason to type and no separate ranking step. The
 // server approves the job and starts it, or keeps the request until a worker, pacing or a shared email sender allows it.
-function useStartActions(row: JobRow, started: boolean) {
-  const { snapshot, refresh, markJobs } = useWorkspace();
+function useStartActions(row: JobRow, started: boolean, place?: { position: number } | null, hold?: { code: string } | null) {
+  const { snapshot, refresh } = useWorkspace();
   const { pending, run } = useAction();
   const job = row.job;
   const ready = job.status === "ready";
   if (started || row.state === "job:paused" || row.state === "pending:waiting" || row.state === "reserved" || snapshot.resumes.length === 0)
     return { acts: [] as Act[], pending };
-  const applyNow = () =>
+  // A job the posting itself rules out: the queue would only refuse it when its turn came.
+  const ruledOut = /^(?:an )?explicit hiring restriction/i.test(job.reason || "");
+  const line = (id: string, go: () => Promise<{ message?: string }>) =>
     run(
-      "submit",
+      id,
       async () => {
-        const r = await applyJob(job.id);
-        // Reads as queued (or waiting) at once; the lists confirm with their next read.
-        markJobs([job.id], appliedState(r.state));
+        const r = await go();
         void refresh();
         return r;
       },
@@ -214,7 +225,14 @@ function useStartActions(row: JobRow, started: boolean) {
       },
       (r) => r && `Ranked ${r.score}/100 · ${r.eligible ? "eligible" : "below your minimum; Apply still works"}.`,
     );
-  const acts: Act[] = [{ id: "submit", label: ready ? "Apply now" : "Apply", tone: "primary", run: applyNow }];
+  const acts: Act[] = [];
+  if (place)
+    acts.push(
+      ...(place.position > 1 ? [{ id: "front", label: "Move to the front", tone: "primary" as const, run: () => line("front", () => moveToFront(job.id)) }] : []),
+      { id: "remove", label: "Remove from the queue", run: () => line("remove", async () => ({ ...(await removeFromQueue(job.id)), message: "Removed from the queue. It stays out until you put it back." })) },
+    );
+  else if (hold?.code === "employer_limit") acts.push({ id: "approve", label: "Approve and apply", tone: "primary", run: () => line("approve", () => approveOverLimit(job.id)) });
+  else if (!ruledOut && hold?.code !== "reserved") acts.push({ id: "add", label: "Add to the queue", tone: "primary", run: () => line("add", () => addToQueue(job.id)) });
   if (ready) acts.push({ id: "dry_run", label: "Dry run", run: dryRun });
   acts.push({ id: "rank", label: job.score == null ? "Rank" : "Rank again", run: rank });
   return { acts, pending };
@@ -224,9 +242,9 @@ function useStartActions(row: JobRow, started: boolean) {
  * The job drawer's action: the one thing to do as a button, everything else under More. A question on screen is the
  * action for a job that needs an answer, so it gets no second button.
  */
-export function DrawerActions({ row, started, asking }: { row: JobRow; started: boolean; asking?: boolean }) {
+export function DrawerActions({ row, started, asking, place, hold }: { row: JobRow; started: boolean; asking?: boolean; place?: { position: number } | null; hold?: { code: string } | null }) {
   const base = useJobActions(row, true);
-  const start = useStartActions(row, started);
+  const start = useStartActions(row, started, place, hold);
   const busy = base.busy || start.pending !== null;
   const pending = base.pending ?? start.pending;
   const all = [...start.acts, ...base.acts];

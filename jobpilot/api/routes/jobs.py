@@ -125,6 +125,7 @@ def router(service) -> APIRouter:
             # A reserved employer (FAANG, MANGO, the Big Four): the panel offers the owner's approval (2026-10-27).
             found = match(s, row)
             reserved = {**found.as_dict(), "approved": approved(s, job_id)} if found else None
+        from ...queue_order import position_of
         from ...startable import reading
 
         control = db.get_setting("job_control:" + job_id, {})
@@ -142,7 +143,19 @@ def router(service) -> APIRouter:
             "reserved": reserved,
             # Why a Ready job will not start, and what happens next (startable.py; only what was read, never a read here).
             "hold": ((reading(service).peek() or {}).get("jobs") or {}).get(job_id),
+            # Its place in the line, from the latest plan (queue_order.py; never a read here).
+            "queue": position_of(service, job_id),
         }
+
+    @r.get("/api/jobs/{job_id}/posting")
+    def job_posting(job_id: str):
+        """The posting behind the job panel: its text, where it was found and the employer's own link."""
+        from ...board_view import posting
+
+        found = posting(db, job_id)
+        if found is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return found
 
     def logo_postings(company):
         with db.session() as s:

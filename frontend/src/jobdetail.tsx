@@ -13,8 +13,8 @@ import {
   type JobRow,
 } from "./model";
 import { groupQuestions, QuestionCard } from "./questions";
-import type { Detail, Hold, Job, JobRequest, Reserved, Run } from "./types";
-import { day, jobWords, plainReason, platformName, plural, seconds, shortId, shownFit, stamp, words } from "./format";
+import type { Detail, Hold, Job, JobPosting, JobRequest, QueuePlace, Reserved, Run } from "./types";
+import { ago, jobWords, plainReason, platformName, plural, seconds, shortId, shownFit, stamp, words } from "./format";
 import { Button, Drawer, Monogram, Panel, Select, Skeleton, Textarea } from "./ui/index";
 import { Facts, Notice, StatusPill } from "./worktools";
 
@@ -40,12 +40,15 @@ export function JobPanel({
     request?: JobRequest | null;
     reserved?: Reserved | null;
     hold?: Hold | null;
+    queue?: QueuePlace | null;
   }>(
     (signal) => api(`/jobs/${jobId}`, "GET", undefined, signal),
-    60000,
+    30000,
     [jobId, version],
     !workspaceRow,
   );
+  // The posting's own words, its date and where it was found: the same on every row's panel.
+  const posting = usePoll<JobPosting>((signal) => api(`/jobs/${jobId}/posting`, "GET", undefined, signal), 600000, [jobId]);
   // Every attempt of this job from the server (the snapshot no longer carries run history).
   const attempts = usePoll<{ runs: Run[] }>(
     (signal) => api(`/runs?job_id=${encodeURIComponent(jobId)}`, "GET", undefined, signal),
@@ -89,12 +92,14 @@ export function JobPanel({
   const latest = !runId || runId === row?.run?.id;
   const words = job ? jobWords(job) : null;
   const company = words?.company ?? "Application record";
-  const actions = row && (!selectedRun || latest) ? <DrawerActions row={row} started={!!selectedRun} asking={!!row.reviews.length} /> : null;
+  const place = historical.data?.queue;
+  const held = historical.data?.hold;
+  const actions = row && (!selectedRun || latest) ? <DrawerActions row={row} started={!!selectedRun} asking={!!row.reviews.length} place={place} hold={held} /> : null;
   return (
-    <Drawer open onClose={close} title={company} sub={words ? (words.unread ? [words.role, words.hint].filter(Boolean).join(" · ") : words.role) : undefined} lead={job ? <Monogram name={company} size="lg" employer /> : undefined} width={640}>
+    <Drawer open onClose={close} title={company} sub={words ? (words.unread ? [words.role, words.hint].filter(Boolean).join(" · ") : words.role) : undefined} lead={job ? <Monogram name={company} url={job.url} size="lg" employer /> : undefined} width={640}>
       <div className="ax-stack">
         {job ? (
-          <JobSummary row={row!} />
+          <JobSummary row={row!} posting={posting.data} />
         ) : (
           <p className="ax-note">This job isn't in the current list (it may be archived or older history). Its recorded attempt is shown below.</p>
         )}
@@ -102,7 +107,13 @@ export function JobPanel({
         {selectedRun ? (
           <RunSection key={selectedRun} runId={selectedRun} row={row} runs={runs} latest={latest} actions={actions} />
         ) : (
-          row && <NotStarted row={row} actions={actions} hold={historical.data?.hold} />
+          row && <NotStarted row={row} actions={actions} hold={held} place={place} />
+        )}
+        {job && posting.data?.text && (
+          <details className="ax-fold" open={!selectedRun || undefined}>
+            <summary>The posting</summary>
+            <div className="dr-posting">{posting.data.text}</div>
+          </details>
         )}
         {job && (
           <Suspense fallback={null}>
@@ -115,20 +126,22 @@ export function JobPanel({
   );
 }
 
-/** Where, what platform, how good a fit, and the way to the posting. */
-function JobSummary({ row }: { row: JobRow }) {
+/** Where, what platform, when it was posted and where from, how good a fit, and the way to the posting. */
+function JobSummary({ row, posting }: { row: JobRow; posting?: JobPosting | null }) {
   const { job } = row;
+  const at = posting?.posted_at || job.created_at;
   return (
     <p className="dr-meta">
       <span>{job.location || "Location not listed"}</span>
       <span>{platformName(job.ats)}</span>
-      {job.created_at && <span title={stamp(job.created_at)}>Found {day(job.created_at)}</span>}
+      {at && <span title={stamp(at)}>{posting?.dated ? "Posted" : "Found"} {ago(at)}</span>}
+      {posting?.source && <span>{posting.source}</span>}
       {shownFit(job) != null && (
         <span>
           Fit <span className="mono">{shownFit(job)}</span>
         </span>
       )}
-      <a className="ax-more-link" href={job.url} target="_blank" rel="noreferrer noopener">
+      <a className="ax-more-link" href={posting?.link || job.url} target="_blank" rel="noreferrer noopener">
         Open posting
         <ExternalLink size={13} aria-hidden="true" />
         <span className="sr-only"> (opens in a new tab)</span>
@@ -158,8 +171,32 @@ function Technical({ jobId }: { jobId: string }) {
   );
 }
 
+// What happens to this job next, in one sentence, from where it stands. Every row's panel says it the same way.
+function nextStep(state: string, paused: boolean, place?: QueuePlace | null, hold?: Hold | null) {
+  if (hold) return hold.next;
+  const when = paused ? "Applying is paused, so it starts after you resume." : "It starts by itself when a worker is free.";
+  if (place) return `Number ${place.position} of ${place.total} in the queue. ${when}${place.wait ? " " + place.wait : ""}`;
+  if (state === "running") return "It finishes by itself, and appears under Applications with the outcome.";
+  if (state === "submitting") return "It is being sent. It can't be stopped now.";
+  if (state === "queued" || state === "pending:waiting" || state === "pending:preparing") return when;
+  if (state === "waiting_email") return "It continues when the employer's email arrives.";
+  if (state === "gave_up") return "The app won't try again by itself. Add it to the queue for one fresh try.";
+  if (state === "reserved") return "It starts after you approve it.";
+  if (state === "job:new") return "When the check is done, it joins the queue if it fits.";
+  if (state === "job:ready") return "It joins the queue on the next check of what can start.";
+  if (state === "job:review" || state === "job:skipped") return "It won't start by itself. Adding it to the queue applies anyway, unless the posting rules you out.";
+  if (state === "job:paused" || state === "paused" || state === "resumed") return "It stays out of the queue until you put it back.";
+  const group = stateInfo(state).group;
+  if (group === "repair") return "The app tries again by itself; there is no fixed time.";
+  if (group === "needs") return "It continues as soon as you answer.";
+  if (group === "unconfirmed") return "It is never sent twice. Check your email, or confirm it yourself.";
+  if (group === "done") return "Nothing more to do. Replies arrive by email.";
+  return "Nothing more happens to this job.";
+}
+
 /** The status first, in words, with what to do next inside it. */
-function StatusBlock({ state, reason, earlier, hold, children }: { state: string; reason?: string; earlier?: string; hold?: Hold | null; children?: React.ReactNode }) {
+function StatusBlock({ state, reason, earlier, hold, place, children }: { state: string; reason?: string; earlier?: string; hold?: Hold | null; place?: QueuePlace | null; children?: React.ReactNode }) {
+  const { snapshot } = useWorkspace();
   const info = stateInfo(state);
   return (
     <section className="dr-status" aria-label="Status">
@@ -168,7 +205,8 @@ function StatusBlock({ state, reason, earlier, hold, children }: { state: string
         {hold ? <StatusPill state={state} label="Held" tone="hold" /> : <StatusPill state={state} />}
       </p>
       {(hold ? hold.reason : info.explain) && <p className="dr-status-why">{hold ? hold.reason : info.explain}</p>}
-      {(hold ? hold.next : reason) && <p className="dr-status-reason">{hold ? hold.next : reason}</p>}
+      {!hold && reason && <p className="dr-status-reason">{reason}</p>}
+      {!earlier && <p className="dr-next">{nextStep(state, snapshot.control.paused, place, hold)}</p>}
       {children}
     </section>
   );
@@ -473,12 +511,13 @@ function DetailBody({ detail, state, runs, runId, open }: { detail: Detail; stat
 }
 
 // A job with no attempt yet: why it is where it is. Its actions (Apply now, Dry run, Rank) come in under More.
-function NotStarted({ row, actions, hold }: { row: JobRow; actions: React.ReactNode; hold?: Hold | null }) {
+function NotStarted({ row, actions, hold, place }: { row: JobRow; actions: React.ReactNode; hold?: Hold | null; place?: QueuePlace | null }) {
   const job = row.job;
   return (
     <StatusBlock
       state={row.state}
       hold={row.state === "job:ready" ? hold : undefined}
+      place={place}
       reason={plainReason(row.state === "pending:waiting" && row.request?.reason ? row.request.reason : job.reason)}
     >
       {actions}

@@ -1,7 +1,7 @@
-// Jobs › Over employer limit: jobs the autopilot holds only because their employer already has as many applications as the user's
+// Needs you › Over employer limit: jobs the autopilot holds only because their employer already has as many applications as the user's
 // limit (Settings). The limit stays; the jobs wait here for the user, as a reserved employer's do (owner, 2026-11-01: "per employer
 // limit stays as 25, or add them to a new section, like reserved, so I can approve"). Approve is the user's own Apply: it skips the
-// cap and no other guard. The tab shows only while something is in it, with the same number as the rows it opens.
+// cap and no other guard. The entry shows only while something is in it, with the same number as the rows it opens.
 import { useEffect, useMemo, useState } from "react";
 import { SearchX, ShieldCheck } from "lucide-react";
 import { api, approveOverLimit } from "./api";
@@ -11,7 +11,6 @@ import { Pagination, type Paging } from "./pagination";
 import type { OverLimitPage, OverLimitRow } from "./types";
 import { jobWords, plural } from "./format";
 import { Button, Empty, Table, type Column } from "./ui/index";
-import { TopLine } from "./shell/Shell";
 import { ConfirmButton, JobCell, LoadError, Note, SearchBox } from "./worktools";
 
 type AllResult = { approved: number; remaining: number; summary: Record<string, number>; results: { message?: string; outcome: string }[] };
@@ -111,11 +110,14 @@ export function OverLimitJobs() {
   const total = data?.count ?? 0;
   return (
     <>
-      <TopLine>
-        {total > 0
-          ? `${plural(total, "job")} at employers that have reached your limit${limit != null ? ` of ${limit} applications` : ""}. AXIOM will not apply to these by itself. Approve applies to one now; the limit stays as it is.`
-          : "Jobs whose employer has reached your limit wait here for your approval."}
-      </TopLine>
+      <header className="nd-card-head">
+        <h2 className="nd-q">Over your employer limit</h2>
+        <p className="nd-meta">
+          {total > 0
+            ? `${plural(total, "job")} at employers that have reached your limit${limit != null ? ` of ${limit} applications` : ""}. AXIOM will not apply to these by itself. Approve puts one in line now; the limit stays as it is.`
+            : "Jobs whose employer has reached your limit wait here for your approval."}
+        </p>
+      </header>
       <div className="ax-toolbar">
         <SearchBox value={query} onChange={setQuery} label="Search jobs over the employer limit" placeholder="Company or role" />
         {total > 0 && (
@@ -134,7 +136,6 @@ export function OverLimitJobs() {
       </div>
       {list.error && data && <LoadError error={list.error} retry={list.refresh} />}
       <Table
-        fill
         label="Jobs over the employer limit"
         columns={columns}
         rows={rows}

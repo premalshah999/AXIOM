@@ -145,21 +145,21 @@ export const STATES: Record<string, StateInfo> = {
   },
   // Jobs with no application attempt yet (Job.status).
   "job:new": {
-    label: "To apply",
+    label: "Checking fit",
     tone: "idle",
     group: "new",
     explain:
-      "Found. It is checked against your profile by itself.",
+      "Found. It is being checked against your profile.",
   },
   "job:ready": {
-    label: "To apply",
+    label: "In queue",
     tone: "idle",
     group: "new",
     explain:
-      "A match for your profile. A running batch applies to it by itself.",
+      "A match for your profile.",
   },
   "job:review": {
-    label: "To apply",
+    label: "Found",
     tone: "ask",
     group: "new",
     explain:

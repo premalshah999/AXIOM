@@ -1,4 +1,4 @@
-// Jobs › Reserved: FAANG, MANGO and the Big Four apply only with the owner's approval (owner, 2026-10-27: "make a
+// Needs you › Reserved employers: FAANG, MANGO and the Big Four apply only with the owner's approval (owner, 2026-10-27: "make a
 // different section for FAANG, MANGO, Big four consulting, and these scrapers should not apply before my permission").
 // Their jobs are found and ranked as usual and wait here, one section at a time; Approve starts one exactly as Apply
 // does, and Approve all lifts the hold on a whole section so the autopilot applies to the ones that fit.
@@ -12,11 +12,10 @@ import type { ReservedEmployer, ReservedPage, ReservedRules } from "./types";
 import { ago, jobWords, plural } from "./format";
 import { ShieldCheck, SearchX } from "lucide-react";
 import { Button, Check, Drawer, Empty, Table, Textarea, type Column } from "./ui/index";
-import { TopActions, TopLine } from "./shell/Shell";
 import { Chips, ConfirmButton, JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
 
 export function ReservedJobs() {
-  const { route, go, version, marks, markJobs, refresh, openJob } = useWorkspace();
+  const { route, version, marks, markJobs, refresh, openJob } = useWorkspace();
   const { pending, run } = useAction();
   const now = useNow(30000);
   const [query, setQuery] = useDraft("reserved-query", "");
@@ -24,7 +23,8 @@ export function ReservedJobs() {
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(25);
   const [editing, setEditing] = useState(false);
-  const section = route.filter || "";
+  const [picked, setPicked] = useState(route.filter && route.filter !== "reserved" && route.filter !== "over" ? route.filter : "");
+  const section = picked;
   useEffect(() => {
     const timer = window.setTimeout(() => setQ(query.trim()), 250);
     return () => window.clearTimeout(timer);
@@ -144,25 +144,26 @@ export function ReservedJobs() {
 
   return (
     <>
-      <TopActions>
-        <Button onClick={() => setEditing(true)} disabled={!data}>
-          Edit employers
-        </Button>
-      </TopActions>
-      {data && (
-        <TopLine>
-          {data.enabled
-            ? `Employers that wait for your approval: ${plural(waiting, "job")} held.${current && current.employers.length > 0 ? ` ${current.label}: ${current.employers.slice(0, 6).join(", ")}${current.employers.length > 6 ? ` and ${current.employers.length - 6} more` : ""}.` : ""}`
-            : "Reserved employers are off: every employer is applied to as usual."}
-        </TopLine>
-      )}
+      <header className="nd-card-head">
+        <h2 className="nd-q">Reserved employers</h2>
+        {data && (
+          <p className="nd-meta">
+            {data.enabled
+              ? `Employers that wait for your approval: ${plural(waiting, "job")} held.${current && current.employers.length > 0 ? ` ${current.label}: ${current.employers.slice(0, 6).join(", ")}${current.employers.length > 6 ? ` and ${current.employers.length - 6} more` : ""}.` : ""}`
+              : "Reserved employers are off: every employer is applied to as usual."}{" "}
+            <button type="button" className="ax-link" disabled={!data} onClick={() => setEditing(true)}>
+              Edit employers
+            </button>
+          </p>
+        )}
+      </header>
       {data && data.enabled && data.sections.length > 0 && (
         <div className="ax-toolbar">
           <Chips
             label="Section"
             value={data.section}
             items={data.sections.map((s) => ({ id: s.id, label: s.label, count: s.held }))}
-            onChange={(id) => go({ view: "jobs", tab: "reserved", filter: id })}
+            onChange={setPicked}
           />
           <SearchBox value={query} onChange={setQuery} label="Search reserved jobs" placeholder="Company, role or location" />
           {current && current.held > 0 && (
@@ -183,7 +184,6 @@ export function ReservedJobs() {
       {list.error && data && <LoadError error={list.error} retry={list.refresh} />}
       {(!data || data.enabled) && (
         <Table
-          fill
           label="Reserved employers"
           columns={columns}
           rows={rows}

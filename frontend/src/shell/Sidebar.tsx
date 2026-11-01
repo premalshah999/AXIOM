@@ -88,8 +88,8 @@ export function Sidebar({ route, go, needs, status, who, onSearch, onSignOut }: 
   );
 }
 
-// The four places a phone goes most; everything else is under More.
-const TABS = ["overview", "jobs", "needs", "applications"];
+// The places a phone goes most; everything else is under More.
+const TABS = ["overview", "queue", "board", "needs"];
 
 /** Under 900px: a slim bar above (logo, live status, search) and a tab bar below, with the rest of the pages in a More sheet. */
 export function PhoneBar({ go, status, onSearch }: { go: (route: Route) => void; status: Status; onSearch: () => void }) {

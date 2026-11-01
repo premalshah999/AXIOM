@@ -767,6 +767,14 @@ def dispatch_priority(job, priority="new_grad_first"):
     return (tier, score, job.get("posted_at") or "")
 
 
+def dispatch_order(jobs, priority="new_grad_first"):
+    """The order the dispatcher tries ready jobs, and the one Queue shows (queue_order.py): the priority first, ties by new-grad
+    postings then the newest. Both sorts keep the list's own order among equals, so the board's order still breaks exact ties."""
+    ordered = sorted(jobs, key=lambda j: (j.get("career_level") == "New grad", j.get("posted_at") or ""), reverse=True)
+    ordered.sort(key=lambda j: dispatch_priority(j, priority), reverse=True)
+    return ordered
+
+
 def admission_revision(db, cfg):
     """Only policy that can change a Ready job's admission, without applicant facts."""
     from .application_pacing import COMPANY_LIMIT, LIMIT_KEY
@@ -1099,7 +1107,6 @@ async def tick(service):
 
         owner_profile = Profile.model_validate(db.get_setting("profile", {}) or {})
         priority, target_roles = owner_profile.job_priority, owner_profile.target_roles
-        jobs.sort(key=lambda j: (j["career_level"] == "New grad", j["posted_at"]), reverse=True)
         if not room:
             persist_batch(db, batch)
             return
@@ -1120,8 +1127,7 @@ async def tick(service):
             due_work = await prepare_due(service)
         # Dispatch ready jobs first. A slow or malformed ranking response cannot
         # block already classified work from using the independent browser slots.
-        jobs = list(candidates)
-        jobs.sort(key=lambda j: dispatch_priority(j, priority), reverse=True)
+        jobs = dispatch_order(candidates, priority)
         with db.session() as s:
             occupied_employers = set(capacity(s, service.config.workers).employers)
         queued_now = 0

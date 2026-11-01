@@ -146,7 +146,7 @@ async def test_queue_admission_holds_a_reserved_job_until_the_owner_approves_it(
         with pytest.raises(QueueBlocked) as held:
             await service.queue("amzn", "submit", owner_pick=owner_pick)
         assert (held.value.code, held.value.outcome) == ("reserved_employer", "protected")
-    assert "Amazon" in str(held.value) and "Jobs › Reserved" in str(held.value)
+    assert "Amazon" in str(held.value) and "Needs you" in str(held.value)
     with service.db.session() as s:
         assert s.get(Setting, "owner_pick:amzn") is None  # a refused click leaves nothing behind
     with pytest.raises(QueueBlocked) as dry:
@@ -184,7 +184,7 @@ def test_the_owners_apply_click_is_refused_with_where_to_approve(client, service
     service.db.set_setting("control", {"auto_submit": True})
     add_job(service)
     answer = client.post("/api/jobs/amzn/apply", json={})
-    assert answer.status_code == 400 and "Jobs › Reserved" in answer.json()["detail"]
+    assert answer.status_code == 400 and "Needs you" in answer.json()["detail"]
 
 
 async def test_approving_one_job_applies_through_the_one_click_path(client, service, monkeypatch):
