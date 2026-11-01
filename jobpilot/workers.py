@@ -461,6 +461,10 @@ async def start(service):
     for run_id in pending:
         await dispatch(run_id)
     try:
+        await requeue_orphaned_scans(service)
+    except Exception:
+        pass  # The next start looks again; nothing else depends on it.
+    try:
         # Open questions the owner has meanwhile answered for another job, worded the same (no model call).
         await service.settle_open_questions()
     except Exception:
@@ -540,6 +544,47 @@ async def retire_obsolete_deliveries(service):
         "queue_version_recovery",
         {"at": now(), "engine_version": version, "retired": len(obsolete), "sources_due": len(source_ids)},
     )
+
+
+def orphaned_scans(flags, live):
+    """Boards whose scan flag says queued or running while no workflow is waiting or running for them."""
+    return sorted(sid for sid, flag in flags.items() if flag.get("state") in {"queued", "running"} and sid not in live)
+
+
+async def requeue_orphaned_scans(service):
+    """A board scan flagged queued or running with no workflow behind it: a new build retires the old build's waiting scans,
+    and a crash drops a running one, but the flag stayed. The Job board kept saying "Searching…" at 568 of 680 for six hours,
+    "Search now" skipped those boards as already in line, and nothing ran them while unranked jobs kept discovery paused
+    (an update during a new install's first search, clean-install run 2026-11-01). They go back in line."""
+    from sqlalchemy import select as pick
+
+    from .db import Setting
+
+    live, offset = set(), 0
+    while True:
+        rows = await DBOS.list_workflows_async(
+            status=["ENQUEUED", "PENDING"], queue_name=["discovery"], limit=1000, offset=offset, load_input=True, load_output=False
+        )
+        live.update(str((row.input or {}).get("args", ("",))[0]) for row in rows if row.name == "source_workflow" and (row.input or {}).get("args"))
+        if len(rows) < 1000:
+            break
+        offset += len(rows)
+
+    def flags():
+        with service.db.session() as s:
+            return {
+                key.removeprefix("job_board_scan:"): value
+                for key, value in s.execute(pick(Setting.key, Setting.value).where(Setting.key.startswith("job_board_scan:", autoescape=True)))
+            }
+
+    for sid in orphaned_scans(await asyncio.to_thread(flags), live):
+        try:
+            service.db.set_setting("job_board_scan:" + sid, {"state": "queued", "started_at": now()})
+            await enqueue_source(sid)
+        except Exception:
+            service.db.set_setting(
+                "job_board_scan:" + sid, {"state": "error", "started_at": now(), "error": "Could not queue this source"}
+            )
 
 
 async def enqueue_source(source_id):

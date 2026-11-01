@@ -1752,9 +1752,11 @@ class Adapter:
             return None  # The loop sees the same step again and retries or defers.
         self.finish_mail("verified", "Website accepted the verification code")
         store = getattr(self.accounts, "store", None)
-        if store and store.state(self.page.url) in {"created_locally", "signing_in"}:
+        if store and store.state(self.page.url) in {"created_locally", "signing_in", "verification_pending"}:
             # SAP's passcode completes account creation (2026-10-16): later runs must sign in,
-            # not press Create again for an account that now exists.
+            # not press Create again for an account that now exists. A sign-up that asked for the code was left as
+            # "verification_pending" after the code worked, and Settings kept saying "Needs email verification" beside a
+            # confirmed application (clean-install run, 2026-11-01).
             self.accounts.mark(self.page.url, "authenticated")
         self.emit("email_verified", "Entered the emailed verification code")
 

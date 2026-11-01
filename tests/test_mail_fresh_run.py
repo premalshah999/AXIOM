@@ -380,6 +380,12 @@ async def test_a_new_install_receives_and_uses_the_mail(client, service, imap, p
                                 "state": outcome["state"], "reason": outcome["reason"][:160], "sent": site.sent,
                                 "runs": outcome.get("runs"), "challenges": [c[:2] for c in challenges], "rules": len(rules)}) + "\n")
     assert kind in site.used, why
+    if kind == "code":
+        # The code that worked finished the account: Settings must not go on saying it needs email verification.
+        from jobpilot.accounts.store import AccountStore
+
+        states = {AccountStore(service, ME).state(PLATFORMS[platform]["url"])}
+        assert states <= {"authenticated"}, (platform, states)
 
 
 @pytest.mark.parametrize("platform", ["icims", "oracle"])

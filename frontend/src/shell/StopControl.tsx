@@ -119,6 +119,10 @@ export function StopLine({ control }: { control: StopControl }) {
 /** For a screen outside the frame (the setup guide reopened while a batch runs). */
 export function StopFloating() {
   const control = useStopControl();
+  const { status } = control;
+  // Nothing to stop on a new install: the button used to sit on top of "Finish later" for everyone's first screen (2026-11-01).
+  const busy = status ? status.running + status.submitting + status.queued + status.waiting > 0 : false;
+  if (!control.problem && !status?.stopped && !busy) return null;
   return (
     <div className="ax-stop-float">
       <StopButton control={control} />

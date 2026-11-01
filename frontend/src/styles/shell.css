@@ -390,7 +390,8 @@
 }
 .ax-stop-float {
   position: fixed;
-  top: var(--space-3);
+  /* Below the guide's header, where "Finish later" is. */
+  top: calc(64px + var(--space-2));
   right: var(--space-3);
   z-index: 50;
   display: flex;
