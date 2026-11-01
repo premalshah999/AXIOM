@@ -1,0 +1,209 @@
+"""What can start: the never-tried Ready jobs, sorted into those the dispatcher will start and those it holds, with the reason.
+
+2026-11-01 05:20 UTC: nothing running, one queued, 62 never-tried Ready jobs, about 4 startable (24 at the employer cap, 18
+internships, 11 for the owner's approval, 9 outside the target roles). The screens still said "Ready" and "between
+applications, the next one starts as soon as a job is ready" with eight of nine runners idle.
+
+The screening is the dispatcher's own, not a second copy: `autopilot.screen_job` (platform focus, target roles, fit, the
+posting's age, the discovery gate, the tailored resume), `service.queueing.fit_blocker` (internships, seniority),
+`reserved.held_ids` and `application_pacing.require_company_limit` (the employer cap). What the dispatcher itself last
+recorded for a job that no check here can reproduce (an archived or duplicate posting, an employer's restriction) is read
+from the batch's `rejections`. Read on a worker thread and remembered for a minute: the shared event loop never waits for it.
+"""
+
+import threading
+import time
+from datetime import UTC, datetime
+
+from sqlalchemy import select
+
+from .admission import QueueBlocked, attempted_job_ids
+from .db import Job, Setting
+
+TTL = 60  # seconds a reading is reused; a stale one is served while the next is read
+
+# code -> (phrase for a count in the runner line, what happens next). Order is the order the runner line lists them in.
+HOLDS = {
+    "employer_limit": ("at the employer limit", "It starts only if that employer's count drops or you raise the limit in Settings."),
+    "internship": ("internships", "Internships are skipped. Turn on internships in your profile to allow them."),
+    "reserved": ("waiting for your approval", "It starts after you approve it in Jobs › Reserved."),
+    "role": ("outside your target roles", "It starts if you add the role to your profile's target roles."),
+    "fit": ("below your minimum fit", "It starts if you lower the minimum fit, or Apply to it yourself."),
+    "seniority": ("too senior for your early-career setting", "It stays held while early-career roles only is on."),
+    "focus": ("on a platform you set aside", "It starts when you take the platform out of your platform focus."),
+    "gate": ("not a match for your search rules", "It is not retried: the posting itself does not fit the rules."),
+    "aged": ("no longer fresh", "It is left alone: the posting is older than your window or no longer on its board."),
+    "protected": ("already applied to", "Applying again would duplicate an application, so it is never started."),
+    "excluded": ("ruled out by the posting's requirements", "It is not retried: the posting's own requirements rule you out."),
+}
+# Plain words for the discovery gate's codes (features/discovery/policy.gate).
+GATE_WORDS = {
+    "generic_careers_page": "The link is a general careers page, not one job.",
+    "closed": "The posting says it is closed.",
+    "non_us_or_unknown": "The posting is outside the United States or has no clear place.",
+    "seniority": "The posting is for a senior role.",
+    "experience_required": "The posting asks for more years of experience than your limit.",
+}
+
+
+def classify(message):
+    """(code, plain sentence) for a refusal the dispatcher's screen raised."""
+    text = str(message)
+    if text.startswith("Outside the profile's target roles"):
+        title = text.split(": ", 1)[1].strip() if ": " in text else ""
+        return "role", f"Outside your target roles ({title})." if title else "Outside your target roles."
+    if "below the unattended threshold" in text:
+        return "fit", text.replace("Resume fit", "Fit").replace("the unattended threshold", "your minimum for automatic applications")
+    if text.startswith("Posting aged out"):
+        return "aged", "The posting is older than your search window or no longer on its board."
+    if text in GATE_WORDS:
+        return ("seniority" if text == "seniority" else "gate"), GATE_WORDS[text]
+    return "excluded", text[:240]
+
+
+def read(service):
+    """One reading, on the calling (worker) thread: {"ready", "startable", "waiting", "held": [...], "jobs": {id: {...}}}."""
+    from .autopilot import screen_job, unlisted_ready
+    from .execution_services import enabled as services_enabled, master_policy
+    from .jobboard import board_snapshot, settings
+    from .reserved import held_ids
+    from .schemas import Profile
+    from .service.queueing import fit_blocker
+
+    db = service.db
+    cfg = settings(db)
+    profile = Profile.model_validate(db.get_setting("profile", {}) or {})
+    with db.session() as s:
+        rows = list(
+            s.execute(select(Job.id, Job.title, Job.company, Job.url, Job.ats, Job.status, Job.score, Job.created_at, Job.location).where(
+                Job.status == "ready", Job.demo.is_(False)
+            ))
+        )
+        attempted = attempted_job_ids(s, [r.id for r in rows])
+        marks = {
+            row.key: (row.value or {}).get("state")
+            for row in s.scalars(select(Setting).where(Setting.key.startswith("job_control:", autoescape=True)))
+        }
+        requested = {k.removeprefix("owner_apply:") for k in s.scalars(select(Setting.key).where(Setting.key.startswith("owner_apply:", autoescape=True)))}
+    ready = [
+        r for r in rows
+        if r.id not in attempted and r.id not in requested and marks.get("job_control:" + r.id) not in {"paused", "deleted"}
+    ]
+    board = board_snapshot(db, limit=None, jobs_only=True)["jobs"]
+    listed = {j["id"]: j for j in board}
+    extra = {j["id"]: j for j in unlisted_ready(db, cfg, set(listed))}
+    # Pasted links have no board listing; the dispatcher lists them itself (autopilot.tick, "manual").
+    manual = {r.id for r in ready if db.get_setting("job_origin:" + r.id, {}).get("kind") == "manual"}
+    board_ids = set(listed) | set(extra) | manual
+    integrated, use_master = services_enabled(db), bool(master_policy(db))
+    reserved = held_ids(db)
+    rejections = db.get_setting("job_board_autopilot", {}).get("rejections") or {}
+    board_settings = db.get_setting("job_board_settings", {}) or {}
+    data_dir = service.config.data_dir
+    jobs, tally = {}, {}
+    startable = waiting = 0
+    from .application_pacing import require_company_limit
+
+    for r in ready:
+        job = listed.get(r.id) or extra.get(r.id) or {
+            "id": r.id, "title": r.title, "company": r.company, "location": r.location, "country": "",
+            "ats": r.ats, "status": r.status, "score": r.score, "posted_at": r.created_at or "", "career_level": "",
+        }
+        verdict = None  # (code, sentence)
+        if r.id in reserved:
+            verdict = ("reserved", "A reserved employer: nothing is applied there until you approve this job.")
+        else:
+            try:
+                state, _, _ = screen_job(
+                    db, cfg, profile, job, frozenset(),
+                    board_ids=board_ids, integrated=integrated, use_master=use_master, data_dir=data_dir,
+                )
+            except ValueError as exc:
+                verdict = classify(exc)
+            else:
+                if state == "previous":
+                    continue
+                if state == "focus":
+                    verdict = ("focus", "Its platform is set aside in your platform focus.")
+                elif state in {"busy", "tailoring"}:
+                    waiting += 1  # starts by itself: another application there is running, or its resume is being prepared
+        if verdict is None and (blocker := fit_blocker(profile, board_settings, r.title)):
+            code = {"internship": "internship", "seniority": "seniority", "target_role": "role"}.get(blocker[1], "excluded")
+            verdict = (code, blocker[0] + ".")
+        if verdict is None:
+            with db.session() as s:
+                try:
+                    require_company_limit(s, s.get(Job, r.id))
+                except QueueBlocked as exc:
+                    verdict = ("employer_limit", str(exc))
+        if verdict is None and (why := rejections.get(r.id)) and why.get("outcome") in {"excluded", "protected"}:
+            verdict = ("protected" if why["outcome"] == "protected" else "excluded", str(why.get("reason", ""))[:240])
+        if verdict is None:
+            startable += 1
+            continue
+        code, sentence = verdict
+        jobs[r.id] = {"code": code, "reason": sentence, "next": HOLDS.get(code, HOLDS["excluded"])[1]}
+        tally[code] = tally.get(code, 0) + 1
+    held = [{"code": c, "count": tally[c], "phrase": HOLDS[c][0]} for c in HOLDS if tally.get(c)]
+    return {
+        "at": datetime.now(UTC).isoformat(),
+        "ready": len(jobs) + startable,
+        "startable": startable,
+        "waiting": waiting,
+        "held": held,
+        "jobs": jobs,
+        "idle": idle_line(startable, held),
+    }
+
+
+def idle_line(startable, held):
+    """Why runners sit idle, in one sentence, from the same tally: None when something can start."""
+    if startable:
+        return None
+    if not held:
+        return "Nothing is ready to apply to yet. Discovery is still finding and ranking jobs."
+    parts = [f"{h['count']:,} {h['phrase']}" for h in held[:4]]
+    more = sum(h["count"] for h in held[4:])
+    return "Nothing to run: " + ", ".join(parts) + (f", {more:,} for other reasons" if more else "") + "."
+
+
+class Reading:
+    """The latest reading, shared by every request; one thread reads at a time."""
+
+    def __init__(self):
+        self.value, self.at, self.busy = None, 0.0, threading.Lock()
+
+    def get(self, service):
+        age = time.monotonic() - self.at
+        if self.value is not None and age < TTL:
+            return self.value
+        if self.value is not None:
+            # Stale: serve it now, read again in the background.
+            if self.busy.acquire(blocking=False):
+                threading.Thread(target=self._fill, args=(service,), name="startable-read", daemon=True).start()
+            return self.value
+        with self.busy:  # the first reading: the one caller waits, the rest wait behind it
+            if self.value is None:
+                self._load(service)
+        return self.value
+
+    def _load(self, service):
+        self.value, self.at = read(service), time.monotonic()
+
+    def _fill(self, service):
+        try:
+            self._load(service)
+        except Exception:
+            self.at = time.monotonic() - TTL / 2  # try again in half a minute, serve the old reading meanwhile
+        finally:
+            self.busy.release()
+
+    def peek(self):
+        """The reading if there is one: never reads."""
+        return self.value
+
+
+def reading(service):
+    if not hasattr(service, "startable_reading"):
+        service.startable_reading = Reading()
+    return service.startable_reading

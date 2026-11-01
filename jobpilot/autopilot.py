@@ -12,7 +12,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import defer
 
 from .db import Budget, Job, Run, Source, Setting, latest_runs, now
-from .discovery import rank_batch
+from .discovery import rank_batch, title_admits
 from .jobboard import FITS, FOREIGN, LOCKED, board_snapshot, fit_of, settings
 from .service import ACTIVE
 from .admission import active_runs, attempted_job_ids, capacity, employer_partition, outcome_for
@@ -851,9 +851,69 @@ def unlisted_ready(db, cfg, listed):
     ]
 
 
-async def tick(service):
-    from .discovery import title_admits
+def screen_job(db, cfg, owner_profile, job, busy, *, board_ids, integrated, use_master, data_dir):
+    """The job's admission screen, on a worker thread: its row, the profile's roles, fit, the discovery gate and
+    the tailored resume. Every step used to read the database on the event loop that drives the browsers, once per
+    job, for each of the ~1,100 Ready jobs a reconsideration window brings back (2026-10-29).
+    Returns ("previous" | "focus" | "busy" | "tailoring", employer, None) or ("ok", employer, artifact_id);
+    a rejection raises ValueError."""
+    jid = job["id"]
+    target_roles = owner_profile.target_roles
+    with db.session() as s:
+        if attempted_job_ids(s, [jid]):
+            return "previous", None, None
+        current = s.get(Job, jid)
+        # Owner focus: platforms set aside for now are not dispatched.
+        if current.ats in set(db.get_setting("ats_focus", {}).get("exclude", [])):
+            return "focus", None, None
+        from .features.discovery.roles import matching_role
 
+        if target_roles and not matching_role(current.title, target_roles):
+            # Ranked before the profile's roles changed (2026-10-17); its search filters apply here too.
+            raise ValueError("Outside the profile's target roles: " + current.title[:120])
+        employer = employer_partition(current)
+        if employer in busy:
+            return "busy", employer, None  # Reconsider later; another employer can use this slot.
+        if current.status != "ready":
+            raise ValueError(current.reason or "Resume fit did not meet your saved criteria")
+        if (current.score or 0) < cfg.minimum_auto_fit and not title_admits(
+            owner_profile, current.title, current.reason
+        ):
+            raise ValueError(
+                f"Resume fit {current.score or 0}/100 is below the unattended threshold {cfg.minimum_auto_fit}"
+            )
+        # The board these jobs came from, refreshed whenever it is read again below: a job the second read
+        # added was refused "aged out" by the first read's list (2026-10-29).
+        if jid not in board_ids:
+            raise ValueError("Posting aged out before submission")
+        if not integrated:
+            return "ok", employer, None
+        from .features.discovery import gate, policy_for
+
+        data = {
+            **job,
+            "url": current.url,
+            "title": current.title,
+            "location": current.location,
+            "description": current.description,
+        }
+        if not data.get("country"):
+            # A posting with no listing says only "Remote" or "2 Locations": no place is not a foreign place. The
+            # ranker and the board import already screened it; only a stated foreign location refuses it, as the
+            # owner's own Apply does (22 Ready jobs were refused non_us_or_unknown for good, 2026-10-29).
+            data["country"] = "" if FOREIGN.search(current.location or "") else "US"
+        if reason := gate(data, policy_for(db)):
+            raise ValueError(reason)
+    if use_master:
+        return "ok", employer, None
+    from .execution_services import ready_for_job
+
+    artifact = ready_for_job(db, jid, data_dir)
+    # Tailoring owns its own durable queue; no browser slot is held.
+    return ("ok", employer, artifact.artifact_id) if artifact else ("tailoring", employer, None)
+
+
+async def tick(service):
     db, cfg = service.db, settings(service.db)
     control = db.get_setting("control", {})
     if (
@@ -1048,64 +1108,11 @@ async def tick(service):
         rooms = {"custom": custom_room, "normal": normal_room}
 
         def screen(job, busy):
-            """The job's admission screen, on a worker thread: its row, the profile's roles, fit, the discovery gate and
-            the tailored resume. Every step used to read the database on the event loop that drives the browsers, once per
-            job, for each of the ~1,100 Ready jobs a reconsideration window brings back (2026-10-29).
-            Returns ("previous" | "focus" | "busy" | "tailoring", employer, None) or ("ok", employer, artifact_id);
-            a rejection raises ValueError."""
-            jid = job["id"]
-            with db.session() as s:
-                if attempted_job_ids(s, [jid]):
-                    return "previous", None, None
-                current = s.get(Job, jid)
-                # Owner focus: platforms set aside for now are not dispatched.
-                if current.ats in set(db.get_setting("ats_focus", {}).get("exclude", [])):
-                    return "focus", None, None
-                from .features.discovery.roles import matching_role
-
-                if target_roles and not matching_role(current.title, target_roles):
-                    # Ranked before the profile's roles changed (2026-10-17); its search filters apply here too.
-                    raise ValueError("Outside the profile's target roles: " + current.title[:120])
-                employer = employer_partition(current)
-                if employer in busy:
-                    return "busy", employer, None  # Reconsider later; another employer can use this slot.
-                if current.status != "ready":
-                    raise ValueError(current.reason or "Resume fit did not meet your saved criteria")
-                if (current.score or 0) < cfg.minimum_auto_fit and not title_admits(
-                    owner_profile, current.title, current.reason
-                ):
-                    raise ValueError(
-                        f"Resume fit {current.score or 0}/100 is below the unattended threshold {cfg.minimum_auto_fit}"
-                    )
-                # The board these jobs came from, refreshed whenever it is read again below: a job the second read
-                # added was refused "aged out" by the first read's list (2026-10-29).
-                if jid not in board_ids:
-                    raise ValueError("Posting aged out before submission")
-                if not integrated:
-                    return "ok", employer, None
-                from .features.discovery import gate, policy_for
-
-                data = {
-                    **job,
-                    "url": current.url,
-                    "title": current.title,
-                    "location": current.location,
-                    "description": current.description,
-                }
-                if not data.get("country"):
-                    # A posting with no listing says only "Remote" or "2 Locations": no place is not a foreign place. The
-                    # ranker and the board import already screened it; only a stated foreign location refuses it, as the
-                    # owner's own Apply does (22 Ready jobs were refused non_us_or_unknown for good, 2026-10-29).
-                    data["country"] = "" if FOREIGN.search(current.location or "") else "US"
-                if reason := gate(data, policy_for(db)):
-                    raise ValueError(reason)
-            if use_master:
-                return "ok", employer, None
-            from .execution_services import ready_for_job
-
-            artifact = ready_for_job(db, jid, service.config.data_dir)
-            # Tailoring owns its own durable queue; no browser slot is held.
-            return ("ok", employer, artifact.artifact_id) if artifact else ("tailoring", employer, None)
+            """screen_job with this tick's state; it runs on a worker thread (see there)."""
+            return screen_job(
+                db, cfg, owner_profile, job, busy,
+                board_ids=board_ids, integrated=integrated, use_master=use_master, data_dir=service.config.data_dir,
+            )
 
         async def dispatch_ready(jobs):
             nonlocal queued_now

@@ -105,6 +105,14 @@ def router(service) -> APIRouter:
             raise HTTPException(409, "Application workers are disabled")
         return {**await start_autonomous(service, data.target), "runtime": batch_snapshot(service)}
 
+    @r.get("/api/startable")
+    def startable():
+        """Ready jobs that can start, and for the rest why not (startable.py). A `def` route: it reads on a worker thread."""
+        from ...startable import reading
+
+        value = reading(service).get(service)
+        return {key: item for key, item in value.items() if key != "jobs"}
+
     @r.get("/api/job-board")
     def snapshot(
         include_sources: bool = True,
@@ -124,10 +132,16 @@ def router(service) -> APIRouter:
         # Why the batch has not started a job (autopilot.remember_rejection): only for a job nothing has been done to
         # yet, so the Discovered list answers "why isn't this applying?" without opening the job (2026-10-29).
         rejections = db.get_setting("job_board_autopilot", {}).get("rejections") or {}
+        from ...startable import reading
+
+        # A Ready job the dispatcher will not start says why (startable.read; never read here, only what was read).
+        holds = (reading(service).peek() or {}).get("jobs", {})
         for job in board["jobs"]:
             job["reserved"] = job["id"] in held
             if (why := rejections.get(job["id"])) and unapplied(job):
                 job["rejection"] = why
+            if (hold := holds.get(job["id"])) and job["status"] == "ready":
+                job["hold"] = hold
         board["source_count"] = len(board["sources"])
         board["source_health"] = source_health(db, board["sources"])
         if not include_sources:
