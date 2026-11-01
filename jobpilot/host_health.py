@@ -15,6 +15,9 @@ both ask for it, so a gate cannot be bypassed by a run that was queued earlier.
   four, up to fifteen; the first start after the pause is the probe that decides (`note_browser`).
 * **The server is stopping** (a deploy). Nothing new starts and no application may begin its commit
   (`ServerDraining`); `Service.drain` waits for the commits already in flight.
+* **The disk is nearly full.** Each run saves pages and screenshots, and PostgreSQL stops when it cannot write. Nothing
+  watched this (2026-11-01): a Mac that filled up would stop mid-commit, with the state of a submission unknown. Under
+  `DISK_MIN_FREE` nothing new starts, and it says why; the applications already running finish.
 
 Owner switch, no redeploy: the `host_load` setting `{"enabled": false}` turns the load gate and the free-timeout rule
 off; `loaded_p95` and `overloaded_p95` (seconds) retune them. The monitor mirrors its state to `host_load_state`.
@@ -22,6 +25,7 @@ off; `loaded_p95` and `overloaded_p95` (seconds) retune them. The monitor mirror
 
 import asyncio
 import math
+import shutil
 import threading
 import time
 from collections import deque
@@ -66,6 +70,35 @@ DEADLINE_CAUSES = {"operation_timeout", "control_timeout"}
 
 INTERRUPTED = "Worker interrupted before submission; draft recovery scheduled"
 DRAIN_POLL_SECONDS = 1.0
+
+
+DISK_MIN_FREE = 2 * 1024**3
+DISK_CHECK_SECONDS = 30.0
+
+
+class DiskWatch:
+    """Free space where runs and the database are kept, read at most every half minute: every gate check asks."""
+
+    def __init__(self):
+        self.path, self.free, self.at = None, None, 0.0
+
+    def watch(self, path):
+        self.path, self.free, self.at = path, None, 0.0
+
+    def low(self):
+        if self.path is None:
+            return None
+        current = time.monotonic()
+        if self.free is None or current - self.at >= DISK_CHECK_SECONDS:
+            try:
+                self.free = shutil.disk_usage(self.path).free
+            except OSError:
+                self.free = None  # Unreadable says nothing about the disk.
+            self.at = current
+        return self.free if self.free is not None and self.free < DISK_MIN_FREE else None
+
+
+disk = DiskWatch()
 
 
 class Gate(NamedTuple):
@@ -263,6 +296,13 @@ def check(workers, *, db=None, session=None, load=None, at=None):
     """The tightest gate on new work right now. `db` or an open `session` reads the browser circuit."""
     if draining():
         return Gate(0, "draining", "The server is restarting; applications start again afterwards")
+    if (free := disk.low()) is not None:
+        return Gate(
+            0,
+            "disk_low",
+            f"Only {free / 1024**3:.1f} GB of disk is free. New applications wait until more than "
+            f"{DISK_MIN_FREE // 1024**3} GB is free; running ones finish",
+        )
     now = at or datetime.now(UTC)
     gates = []
     outage = _read(OUTAGE_KEY, db, session)
@@ -362,6 +402,7 @@ def snapshot(db=None):
     return {
         **monitor.snapshot(),
         "draining": draining(),
+        "disk_low_bytes_free": disk.low(),
         "browser_failures_in_a_row": int(outage.get("failures") or 0),
         "browser_paused_until": outage.get("until") if int(outage.get("failures") or 0) >= OUTAGE_AFTER else None,
     }
