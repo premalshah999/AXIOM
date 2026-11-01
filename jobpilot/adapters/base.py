@@ -18,7 +18,7 @@ from playwright.async_api import Error as PlaywrightError
 from ..service import Service
 from ..accounts import Accounts
 from ..captcha_observation import ARM_JS
-from ..forms import AUTH, FINAL, LAUNCHER, SURVEY_DONE
+from ..forms import AUTH, COOKIE_NOTICE, FINAL, LAUNCHER, SURVEY_DONE
 from ..privacy import acknowledge_privacy_notice, dismiss_cookies
 from ..mail_errors import MailPending, code_inline_wait
 
@@ -41,7 +41,7 @@ NEXT = re.compile(
 SITE_FILTER = re.compile(
     r"\bsearch\b|\bkeywords?\b|\blooking for\b|\bfind (?:a )?jobs?\b|^(?:what|where)\W*$|"
     r"^(?:all )?(?:locations?|countr(?:y|ies)|categor(?:y|ies)|departments?|teams?|languages?|english|español|français|deutsch)\W*$|"
-    r"^job (?:category|type|function|family|field|level|location|title)\W*$|^(?:studio|business unit|career area|work type)\b|"
+    r"^job (?:category|type|function|family|field|level|location|title)\W*$|^(?:enter )?job title(?: or location)?\W*$|^(?:studio|business unit|career area|work type)\b|"
     r"^(?:skip to|settingsselector|choose (?:a )?language|select (?:a )?language|video progress|volume)\b",
     re.I,
 )
@@ -111,13 +111,6 @@ AUTH_AGREEMENT = re.compile(
     re.I,
 )
 AUTH_MARKETING = re.compile(r"newsletter|marketing|promotion|job alerts?|text messages?|\bsms\b|talent community", re.I)
-# A cookie banner announced as a dialog is never the page's step (ZincFive's ADP sign-in, 2026-10-27: the banner's
-# "manage your preferences" link and "x" hid the email box and Continue, and three runs stopped on "only a privacy
-# dialog with Close").
-COOKIE_NOTICE = re.compile(
-    r"\bcookies?\b.{0,240}\b(?:privacy|preferences|statement|policy|consent|settings)\b|\bcookie (?:settings|preferences)\b",
-    re.I | re.S,
-)
 # A tax-credit (WOTC) questionnaire the application requires: Workday's "Take Assessment" step (ADP for Rentokil,
 # TaxCreditCo for Tyson Foods), Oracle's "Tax Credits" section (EY for Community Health Systems, Deloitte for Caesars).
 # AT&T's Workday step says only "This information is for tax purposes and will not be shared with AT&T" (2026-10-27).
