@@ -63,6 +63,14 @@ def router(service) -> APIRouter:
     @r.post("/api/jobs")
     async def import_job(data: JobInput):
         await public_url(data.url, config.allow_private_urls)
+        from ...link_intake import prepare
+
+        link, problem = await prepare(data.url, config.allow_private_urls)
+        if problem:
+            raise ValueError(problem)
+        if link != data.url:
+            await public_url(link, config.allow_private_urls)
+            data = data.model_copy(update={"url": link})
         # The insert, the profile read and ranking stay off the event loop the browser owners share.
         row, created = await asyncio.to_thread(add_job, db, data, origin="manual")
         result = {"job": row, "created": created}
