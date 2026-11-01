@@ -102,6 +102,11 @@ def unwrap(url):
     return url
 
 
+# A bare careers address, on any site: the page lists jobs and is not one. A query may carry the posting (?gh_jid=123), so only
+# a link with none reads this way.
+CAREERS_HOME = re.compile(r"careers?|jobs?|join(?:-us)?|work-with-us|opportunities|openings|job-openings|open-positions|vacancies", re.I)
+
+
 def listing_kind(url):
     """A sentence naming what this link is when it is a company's list of jobs or a search page rather than one posting, for
     the platforms whose posting links are told apart from their list links by shape; else ''."""
@@ -111,6 +116,11 @@ def listing_kind(url):
     host, path = (parts.hostname or "").lower(), parts.path or ""
     segments = [s for s in path.split("/") if s]
     query = dict(parse_qsl(parts.query))
+    if not query and not parts.fragment:
+        if not segments:
+            return "a careers page" if re.match(r"(?:careers?|jobs?)\.", host) else "a company's home page"
+        if len(segments) == 1 and CAREERS_HOME.fullmatch(segments[0]):
+            return "a careers page"
     if oracle_job_catalog(url) or (
         host.endswith(".oraclecloud.com")
         and re.fullmatch(r"/hcmUI/CandidateExperience/[^/]+/sites/[^/]+/?", path, re.I)
@@ -165,6 +175,36 @@ def board_problem(name):
     )
 
 
+# network.public_url's refusals, which also guard source fetches and are matched by their wording there, for someone pasting a link.
+URL_REFUSALS = {
+    "Only public http(s) URLs are supported": "That isn't a web link. Copy the whole address from your browser, starting with https://.",
+    "The URL hostname could not be resolved": "There's no website at that address. Check you copied all of the link.",
+    "Private, loopback and metadata-service URLs are blocked": "That link points inside this computer or a private network, so AXIOM can't apply there.",
+}
+
+
+async def opens(link, allow_private=False):
+    """A sentence when the employer's own page says the link is dead, else ''. 404 and 410 are what ranking already closes a
+    posting on (discovery.posting_gone); anything else (a 403 to a plain client, a slow site, no answer) says nothing about
+    the job, and the application's own browser finds out. Without this a dead link sat in the queue, then read as a failure."""
+    from httpx import ConnectError, HTTPStatusError
+
+    from .network import fetch
+
+    try:
+        await asyncio.wait_for(fetch(link, allow_private=allow_private), READ_SECONDS)
+    except HTTPStatusError as exc:
+        if exc.response.status_code in {404, 410}:
+            return "This job's page is gone: the employer's site says it no longer exists. Nothing was added."
+    except ConnectError as exc:
+        # The name resolving to nothing, in a browser's words. Refused or reset connections can be a site's bot guard: not here.
+        if "nodename" in str(exc) or "Name or service" in str(exc):
+            return "There's no website at that address. Check you copied all of the link."
+    except Exception:  # noqa: BLE001 - whatever else went wrong reading it, the link may still be fine in a browser.
+        pass
+    return ""
+
+
 async def prepare(url, allow_private=False):
     """(link, problem) for a pasted link: the posting link to save (a wrapper unwrapped, a board page followed to the
     employer's apply page), or a plain sentence saying why it cannot be applied to and what to do."""
@@ -184,4 +224,6 @@ async def prepare(url, allow_private=False):
         return link, (
             f"This link opens {kind}, not one job posting. Open the job you want and paste the link from that job's own page."
         )
+    if problem := await opens(link, allow_private):
+        return link, problem
     return link, ""
