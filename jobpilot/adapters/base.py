@@ -277,18 +277,24 @@ FIRST_TIME = re.compile(
     re.I,
 )
 CREATE_LINK = re.compile(
-    r"^(?:create (?:an? |your |my )?(?:new )?(?:candidate |applicant )?(?:account|profile)|sign up|register|"
+    r"^(?:create (?:an? |your |my )?(?:new )?(?:candidate |applicant |job ?seeker )?(?:account|profile|login)|"
+    r"sign up(?: (?:now|here|today|for an account))?|register(?: (?:now|here|today|with us|for an account|as a new user))?|"
     r"new user|join(?: now)?|new candidate|don'?t have an account\??.{0,20}|create account)[!.]?$",
     # Deloitte's Avature: "Create profile!" (2026-10-26). Textron's Taleo: "Create a New Account" (2026-10-29), which
     # the pattern missed: the one registration after an unanswered reset was never opened, and the reset was repeated.
+    # JobDiva's portal (2026-10-30) offered "Register With Us" as its only way to an account.
     re.I,
 )
 SIGNIN_LINK = re.compile(
-    r"^(?:sign in|log ?in|already have an account\??.{0,20}|returning (?:user|candidate)|existing (?:user|candidate))$",
+    r"^(?:sign in(?: (?:now|here|instead))?|log ?in(?: (?:now|here|instead))?|already have an account\??.{0,20}|"
+    r"returning (?:user|candidate|applicant)(?: (?:log ?in|sign ?in))?|existing (?:user|candidate))[!.]?$",
     re.I,
 )
+# NC State's own career site (2026-10-29) offered "Forgot your username or password?", which "forgot your password" missed.
 FORGOT = re.compile(
-    r"forgot (?:your )?password|reset (?:your )?password|can'?t sign in|trouble signing in", re.I
+    r"forgot(?:ten)? (?:your )?(?:user ?name (?:or|and|/) )?password|reset (?:your )?password|"
+    r"\b(?:can'?t|cannot|unable to) (?:sign|log) ?in|trouble (?:signing|logging) in|need help (?:signing|logging) in",
+    re.I,
 )
 # A code step's own "send" control: "Get code" (ByteDance), "Send code", "Send verification code", "Request a code".
 SEND_CODE = re.compile(
@@ -364,6 +370,42 @@ RESET_UNLOCKS = re.compile(
     r"blocked after (?:multiple|several|too many) consecutive (?:log.?in|sign.?in) attempts",
     re.I,
 )
+# A sign-in lock the site lifts by itself after a wait. Every further attempt only extends it: Amazon (2026-10-27) answered
+# "Sorry, you can't log in right now due to unsuccessful login attempts" and fourteen more sign-ins followed over two hours.
+SIGNIN_LOCKOUT = re.compile(
+    r"can'?t (?:log|sign) ?in right now|(?:due to|after) (?:\w+ )?(?:unsuccessful|failed) (?:log.?in|sign.?in) attempts|"
+    r"too many (?:failed |unsuccessful |sign.?in |login )?(?:attempts|tries)|temporarily (?:locked|disabled|blocked)|"
+    r"try again (?:in|after) \d+ (?:minutes?|hours?)",
+    re.I,
+)
+CONDITIONAL = re.compile(r"\b(?:will be|would be|may be|might be|can be|could be|will lock|may lock|if you|if there|after \d+|more than \d+)\b", re.I)
+LOCKOUT_SECONDS = 60 * 60  # when the page names no wait
+WAIT_NAMED = re.compile(r"\b(\d+)\s*(minutes?|hours?)\b", re.I)
+
+
+def lockout_wait(said):
+    """Seconds to leave this employer alone: the wait the page names plus a margin, else an hour; never under ten
+    minutes or over a day."""
+    named = WAIT_NAMED.search(said or "")
+    if not named:
+        return LOCKOUT_SECONDS
+    seconds = int(named[1]) * (3600 if named[2].lower().startswith("h") else 60) + 300
+    return max(600, min(seconds, 24 * 3600))
+
+
+def lockout_result(said):
+    """The run's result when the site has locked sign-in for a while: no attempt at this employer until the wait passes."""
+    return {
+        "state": "waiting_browser",
+        "blocker_type": "site_transient",
+        "recoverable": True,
+        "recovery_cause": "site_temporary",
+        "site_cooldown_seconds": lockout_wait(said),
+        "reason": "The employer's sign-in is locked after failed attempts (" + " ".join(str(said).split())[:120] + "); "
+        "no further attempt is made at this employer until the wait has passed",
+    }
+
+
 PASSWORD_RULES = re.compile(
     r"password (?:must|should|needs to|requirements)|at least \d+ characters|must contain|not meet.{0,40}requirements",
     re.I,
@@ -626,7 +668,15 @@ class Adapter:
         self.e.emit(kind, message, data)
 
     def site_lock(self, obs):
-        """A result when the page says the site has locked this applicant out for a while, else None."""
+        """A result when the page says the site has locked this applicant out for a while, else None. A lock a password
+        reset lifts (RESET_UNLOCKS) is the account flow's to recover."""
+        if found := notice(obs, SIGNIN_LOCKOUT):
+            if RESET_UNLOCKS.search(" ".join(obs.get("errors", [])) + " " + str(obs.get("text", ""))):
+                return None
+            if CONDITIONAL.search(found.string):  # "Accounts are locked after 5 failed attempts" is a policy, not a lock
+                return None
+            self.release_mail()  # Nothing more can be sent during the lock; free the shared sender.
+            return lockout_result(found.string[max(0, found.start() - 60) : found.end() + 40])
         return None
 
     def defer(self, reason, reviews=None, state="needs_review", *, blocker_type=None):
@@ -1131,6 +1181,8 @@ class Adapter:
                 return {"handoff": moved}
             # Modal precedence: an open dialog is the current step; act only on its controls.
             obs = self.dialog_view(obs) or obs
+            if not self.committed and (locked := self.site_lock(obs)):
+                return locked
             step = self.classify_page(obs)
             if step != Step.EMAIL_ENTRY:
                 self.pending_auth_transition_source = None
@@ -2642,6 +2694,8 @@ class Adapter:
                 # 2026-10-24..27). Parked as "locked", every later run met the same block and nothing ever reset it.
                 self.emit("auth", "The employer unblocks the account through a password reset; resetting it")
                 return await self.recover(fresh, detail)
+            if SIGNIN_LOCKOUT.search(said) or SIGNIN_LOCKOUT.search(str(detail)):
+                return lockout_result(str(detail) or said)
             return self.defer(
                 "The employer locked the account after failed sign-ins: " + detail,
                 state="waiting_browser",

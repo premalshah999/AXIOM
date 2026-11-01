@@ -101,7 +101,7 @@ class QueueingMixin:
         # step held five jobs for five hours after its fix, 2026-10-27; owner: nothing in Repairing is held).
         if (
             circuit
-            and circuit.value.get("engine") == engine_version()
+            and circuit.value.get("engine", engine_version()) == engine_version()  # no build recorded: a wait the site imposed
             and datetime.fromisoformat(circuit.value["until"]) > datetime.now(UTC)
         ):
             raise QueueBlocked(
