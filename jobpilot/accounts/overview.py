@@ -65,7 +65,7 @@ def detail(status: str, record: dict, retry: bool) -> str:
         return "The employer refused the saved password and no reset reached the mailbox. " + FIX_IT
     if status == "reset_pending":
         return (
-            "ApplyPilot asked the employer for a password reset email. If it doesn't arrive, reset the password "
+            "AXIOM asked the employer for a password reset email. If it doesn't arrive, reset the password "
             "yourself and save it here."
         )
     if status == "locked":

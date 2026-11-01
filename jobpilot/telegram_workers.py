@@ -153,7 +153,7 @@ def worker_status(service):
         rows.append(
             {
                 "slot": slot,
-                "name": f"ApplyPilot Worker {slot}",
+                "name": f"AXIOM Worker {slot}",
                 "configured": slot in slots,
                 "state": health.get("state", "configured" if slot in slots else "not_configured"),
                 "reason": (
@@ -247,7 +247,7 @@ async def _route(service, update, telegram, choices, manage):
     if cmd in {"/help"}:
         return await send(
             service,
-            f"ApplyPilot Worker {service.telegram_worker_slot}\n/status · /job · /pause · /resume · /retry · /delete · /query\nReply to a question or screenshot to control exactly that application. Use the main bot for batches and global settings.",
+            f"AXIOM Worker {service.telegram_worker_slot}\n/status · /job · /pause · /resume · /retry · /delete · /query\nReply to a question or screenshot to control exactly that application. Use the main bot for batches and global settings.",
         )
     # An unknown replied message must never fall through to a different current job.
     job_id = telegram.message_job(service, message)
