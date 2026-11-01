@@ -36,7 +36,7 @@ async def test_a_stalled_sign_in_widget_document_does_not_hold_the_wait(page):
     from jobpilot.forms import NetworkMonitor
 
     form.page, form.network = page, NetworkMonitor(page)
-    await page.goto("https://ats.example.test/apply")
+    await page.goto("https://ats.example.test/apply", wait_until="domcontentloaded")  # the widget's frame never finishes loading
     await page.wait_for_function("document.querySelector('iframe')")
     await asyncio.sleep(0.6)  # the widget's POST has been sent and is unanswered
     assert not form.network.inflight, "the widget's document counted as the application's own traffic"
@@ -61,9 +61,33 @@ async def test_a_page_document_of_the_application_still_holds_the_wait(page):
         return await route.abort()
 
     await page.route("https://ats.example.test/**", handler)
-    await page.goto("https://ats.example.test/apply")
+    await page.goto("https://ats.example.test/apply", wait_until="domcontentloaded")
     monitor = NetworkMonitor(page)
     await page.evaluate("() => { const f = document.createElement('form'); f.method = 'post'; f.action = '/candidate'; f.target = 'f'; document.body.append(f); f.submit(); }")
     await asyncio.sleep(0.6)
     assert monitor.inflight and not monitor.quiet(0.3)
     release.set()
+
+
+def test_only_widget_hosts_are_ignored_as_documents_never_a_postings_own_address():
+    """BEACON_REQUEST also matches any address with "snowplow" in its path, for fetches; a document at such an address is an
+    employer's own page (a role named Snowplow), so a document is ignored only on the hosts that are never the application."""
+    from jobpilot.forms import NetworkMonitor
+
+    class Target:
+        def on(self, *_):
+            pass
+
+    class Request:
+        def __init__(self, url):
+            self.url, self.resource_type = url, "document"
+
+    def counted(url):
+        monitor = NetworkMonitor(Target())
+        monitor._start(Request(url))
+        return bool(monitor.inflight)
+
+    assert not counted("https://www.linkedin.com/talentwidgets/apply-with-linkedin")
+    assert not counted("https://mon-va.byteoversea.com/monitor_browser/collect/batch/")
+    assert counted("https://jobs.example.test/careers/snowplow-data-engineer")
+    assert counted("https://ats.example.test/jobs/1/apply")

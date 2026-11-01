@@ -83,6 +83,13 @@ BEACON_REQUEST = re.compile(
     r"|[^/]*\.tiktokv\.com/monitor_browser/|www\.google\.com/measurement/)",
     re.I,
 )
+# The widgets and monitors that load as a frame's document (a form POSTed into an iframe is a "document" to the browser).
+# Only hosts that are never the application: BEACON_REQUEST's "snowplow" path rule could match a posting's own address.
+BEACON_DOCUMENT = re.compile(
+    r"^(?:www\.linkedin\.com/(?:talentwidgets/|li/track)|[^/]*\.(?:tiktokv|byteoversea)\.com/monitor_browser/"
+    r"|www\.google\.com/measurement/)",
+    re.I,
+)
 CONTROL_RECOVERY_SECONDS = 30
 
 # Unnumbered rows that repeat per work-history entry. SAP's SuccessFactors application page
@@ -1059,9 +1066,10 @@ class NetworkMonitor:
         # counts every document at any age held each readiness wait to its deadline: Workday's "Apply with LinkedIn"
         # held 1,592 waits for 8,120 s in a week (2.3 h, 12 s per Workday application, 2026-11-01). A beacon host is
         # never the application, whatever the request calls itself.
-        if BEACON_REQUEST.search(host + parts.path) or (
-            request.resource_type != "document" and any(host == d or host.endswith("." + d) for d in telemetry)
-        ):
+        if request.resource_type == "document":
+            if BEACON_DOCUMENT.search(host + parts.path):
+                return
+        elif BEACON_REQUEST.search(host + parts.path) or any(host == d or host.endswith("." + d) for d in telemetry):
             return
         if request.resource_type in {"xhr", "fetch", "document"}:
             self.inflight[request] = time.monotonic()
