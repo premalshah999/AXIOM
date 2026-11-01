@@ -55,7 +55,7 @@ GUARD = r"""(() => {
     const control=e.submitter || e.target?.__jpAllowedControl;
     const text=label(control);
     if(!window.__jpArmed && !permitted(control)
-       && (final(text) || !/next|continue|save|review|sign in|log in/i.test(text))){
+       && (final(text) || !/next|continue|save|review|sign ?in|log ?in/i.test(text))){
       e.preventDefault();e.stopImmediatePropagation();
     }
   },true);
@@ -569,7 +569,7 @@ COMMIT_INPUT_GRACE_SECONDS = 1.5
 COMMIT_WATCH_SECONDS = 3
 # Controls whose disabled state means the page has an unfinished requirement.
 STEP_ACTION = re.compile(
-    r"^\s*(?:next|continue|save (?:and|&) continue|submit(?: application)?|apply|sign in|log in|create account|register)\s*$",
+    r"^\s*(?:next|continue|save (?:and|&) continue|submit(?: application)?|apply|sign ?in|log ?in|create account|register)\s*$",
     re.I,
 )
 # Messages the field scan cannot attribute: toasts, alerts, live regions and component shadow roots.
@@ -929,6 +929,20 @@ def navigation_supported_answers(form, obs):
     return answers
 
 
+def model_controls(controls, limit=80, per_label=3):
+    """The controls a decision sees: a page's repeats (a skills box's 71 "x" remove buttons, a result list's "Apply"
+    rows) each show `per_label` times, so they cannot fill the cap and push the page's own Continue past it. Lenovo's
+    Avature form (2026-11-01, run 2eedceda) listed 9 header links and 71 chip buttons, never its Continue, and the
+    model clicked "Skip to content" until recovery stopped. Document order is kept."""
+    seen, shown = {}, []
+    for control in controls:
+        key = (control.get("label"), control.get("section", ""), control.get("group", ""))
+        seen[key] = seen.get(key, 0) + 1
+        if seen[key] <= per_label:
+            shown.append(control)
+    return shown[:limit]
+
+
 def navigation_observation(obs):
     """Navigation needs page structure, not duplicated profile/answer context."""
 
@@ -985,7 +999,7 @@ def navigation_observation(obs):
                 "slot": b.get("slot", 0),
                 "disabled": b.get("disabled", False),
             }
-            for b in obs["controls"][:80]
+            for b in model_controls(obs["controls"])
         ],
         "dialogs": [
             {
@@ -3057,7 +3071,7 @@ class BrowserEngine:
             ],
             "controls": [
                 {"label": b["label"][:80], "automation_id": b.get("automation_id", "")}
-                for b in obs["controls"][:80]
+                for b in model_controls(obs["controls"])
             ],
         }
         if metadata_only:
@@ -4938,6 +4952,21 @@ class BrowserEngine:
 
         label = str(target.get("label") or "a control")[:120]
         problems = "; ".join(dict.fromkeys(clean(str(p)) for p in (getattr(self.form, "last_problems", None) or [])[:2]))
+        if not problems:
+            # The last result's own words, not "no action reached it": Lenovo's Avature Continue was "covered", and a
+            # mailto link's click ran and changed nothing (2026-11-01), which that text said neither of.
+            for item in reversed(getattr(self.form, "failed_strategies", {}).get("__navigation_outcomes__", [])):
+                try:
+                    last = json.loads(item.get("outcome", ""))
+                except (ValueError, TypeError):
+                    continue
+                if isinstance(last, dict) and last.get("executed") is not None:
+                    problems = clean(
+                        str(last.get("reason") or last.get("failure_category") or "")
+                        if last.get("executed") is False
+                        else "the click ran and the page did not change"
+                    )
+                    break
         self.emit(
             "navigation_stalled",
             "Recovery stopped on a control whose last results all failed",
