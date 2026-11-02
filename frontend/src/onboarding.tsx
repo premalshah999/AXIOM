@@ -428,7 +428,7 @@ function mergeExtract(draft: Draft, x: Partial<Draft>, before: Partial<Draft> | 
   }
   // The Contact step has a field for the country code: a resume's "+1 (555) 010-0100" would otherwise send "+1" twice.
   const code = (next.phone_country_code || "").trim();
-  if (code && next.phone !== draft.phone && next.phone.trim().startsWith(code)) next.phone = next.phone.trim().slice(code.length).replace(/^[\s.()-]+/, "");
+  if (code && next.phone !== draft.phone && next.phone.trim().startsWith(code)) next.phone = next.phone.trim().slice(code.length).replace(/^[\s.-]+/, "");
   // The resume lists "Austin, TX": the Contact step asks for city and state, so hand it those instead of leaving them blank.
   const place = /^\s*([^,]+),\s*([A-Z]{2})(?:\s+(\d{5}(?:-\d{4})?))?\s*(?:,|$)/.exec(x.location || "");
   if (place && US_STATES.has(place[2]!) && !next.address.city.trim() && !next.address.state.trim())
