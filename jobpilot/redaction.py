@@ -55,12 +55,13 @@ _labelled_common = None  # The compiled pattern for `_common` behind a credentia
 SHORTEST = 4
 # Below this a value is common text whatever it is made of.
 SHORT = 8
-# A single word is common up to here. A mailbox app password is 16 letters in one run, and no ordinary word is that long.
+# A single word (`full-time` is one) is common up to here. A mailbox app password is 16 letters in one run, and no ordinary word is
+# that long.
 WORD_LENGTH = 16
 # Several words (a job title), or digits with separators (a date, a phone number), are common up to here.
 PHRASE_LENGTH = 24
-ONE_WORD = re.compile(r"[^\W\d_]+")
-WORDS = re.compile(r"[^\W\d_]+(?:[ '-]+[^\W\d_]+)*|[\d ./-]+")
+ONE_WORD = re.compile(r"[^\W\d_]+(?:['-][^\W\d_]+)*")
+WORDS = re.compile(r"[^\W\d_]+(?:['-][^\W\d_]+)*(?: +[^\W\d_]+(?:['-][^\W\d_]+)*)+|[\d ./-]+")
 APP_PASSWORD = re.compile(r"[a-z]{4}(?: [a-z]{4}){3}")  # How Gmail shows one.
 LABEL = r"(?:(?:[a-z]+[_ -])?passw(?:or)?d|passcode|pwd|secret|(?:[a-z]+[_ -])?token|api[_ -]?key|credentials?)"
 
