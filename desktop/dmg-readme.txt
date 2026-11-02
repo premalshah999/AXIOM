@@ -48,4 +48,4 @@ IF SOMETHING GOES WRONG
 TO REMOVE AXIOM
 
 Quit it, drag it from Applications to the Bin, and follow Settings,
-Your account, Delete my data first if you want your data gone too.
+Your account, Delete everything first if you want your data gone too.

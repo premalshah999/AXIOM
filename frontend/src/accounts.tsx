@@ -272,7 +272,7 @@ export function AccountSettings() {
 
 /** How AXIOM signs in and what it relies on: kept out of the way, because it only matters when something is wrong. */
 function HowItSignsIn({ summary }: { summary: AccountSummary | null }) {
-  const { snapshot } = useWorkspace();
+  const { snapshot, refresh } = useWorkspace();
   const { pending, run } = useAction();
   const cfg = snapshot.config || ({} as typeof snapshot.config);
   const problems = summary?.password_problems || [];
@@ -295,13 +295,13 @@ function HowItSignsIn({ summary }: { summary: AccountSummary | null }) {
             ],
           ]}
         />
-        <MainPassword />
+        <MainPassword onChange={refresh} />
         {problems.length > 0 && (
           <div className="ax-notice is-warn">
             <span>Some portals may reject the shared password: {problems.join("; ")}.</span>
           </div>
         )}
-        <Actions start note={!cfg.imap ? "Add the Gmail address and app password under Connections." : undefined}>
+        <Actions start note={!cfg.imap ? "Connect your Gmail under Settings › Mailbox." : undefined}>
           <Button
             size="sm"
             loading={pending === "imap"}

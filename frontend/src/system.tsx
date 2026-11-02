@@ -345,7 +345,12 @@ function AgentControls() {
     (AGENT_HELPERS.some(({ key }) => draft.enabled[key] !== saved!.enabled[key]) ||
       draft.models.answers !== saved!.models.answers ||
       draft.models.navigator !== saved!.models.navigator);
-  const unavailable = !!current && usable && (!available("answers") || !available("navigator"));
+  // Only a newly chosen model needs its key: turning a helper on or off works before any key is saved.
+  const unavailable =
+    !!current &&
+    usable &&
+    ((current.models.answers !== saved!.models.answers && !available("answers")) ||
+      (current.models.navigator !== saved!.models.navigator && !available("navigator")));
   const save = () => {
     if (!current || !changed || unavailable || pending) return;
     run(
@@ -459,6 +464,9 @@ export function AdvancedSettings() {
         </Panel>
       </section>
       <AgentControls />
+      <Panel title="Company logos">
+        <ConnectionFields names={["company_logos"]} />
+      </Panel>
       <Platforms />
     </>
   );
