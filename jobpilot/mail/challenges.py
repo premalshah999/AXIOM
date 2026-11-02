@@ -36,6 +36,8 @@ RESET_SENT_EARLY_SECONDS = 30
 # after its 20-minute window, Fresenius' 2 min 14 s, Barclays' activation 2 min 38 s (2026-10-29/31).
 LATE_MAIL_VALIDITY = 3600
 SHARED_RESET_SENDERS = {"icims.com", "successfactors.com", "successfactors.eu", "sapsf.com", "sapsf.eu"}
+# Why a request was cancelled when nobody finished with its mail: the browser went away, or a newer attempt took over.
+INTERRUPTIONS = ("Browser attempt", "A newer attempt")
 
 
 class ChallengesMixin:
@@ -284,8 +286,6 @@ class ChallengesMixin:
                     "request_id": previous.id,
                     "generation": (meta.value if meta else {}).get("generation", 1),
                 }
-            if kept := self.revive(s, run, rule, recipient, kind, current):
-                return kept
             if self.sender_blocker(s, rule, run_id, kind, current):
                 raise ValueError("Another application is verifying with this sender; retry after it finishes")
             # A legacy supplied timestamp cannot backdate a new request. Observed
@@ -364,40 +364,51 @@ class ChallengesMixin:
             )
             return {**record(c), "request_id": c.id, "generation": generation, "late_window": late is not None}
 
-    def revive(self, s, run, rule, recipient, kind, current):
-        """The mail an interrupted attempt of this same application was handed and did not use, once.
+    def reclaim(self, run_id, rule, recipient):
+        """The reset link or temporary password an interrupted attempt of this same application was handed and did not use,
+        once. A reset is the one mail the next attempt cannot ask for again: the cooldown holds it off for hours, so the run
+        waited them out with the working link lost, and the kept mail is the newest the employer sent.
+
+        Never at begin(): a window opens just before a click that asks the employer for mail, and a stale code or link served
+        there hides the fresh one (the search looks only for a pending window) and types a dead code, which locks Oracle's
+        verification. Codes and verification links are not kept: the next attempt gets a fresh one at the same click.
 
         Only the same job, address and employer rule; only while its hold (MATCH_HOLD_SECONDS, set when it matched) lasts;
-        never for an application that already went through; never twice, so a code the site rejected is not offered again.
-        It starts the next attempt without asking the employer for another mail."""
-        for row in s.scalars(
-            select(MailChallenge)
-            .where(
-                MailChallenge.rule_id == rule["id"],
-                MailChallenge.recipient == recipient.lower(),
-                MailChallenge.state == "cancelled",
-                MailChallenge.payload != "",
-                MailChallenge.expires > current,
-            )
-            .order_by(MailChallenge.since.desc())
-        ):
-            if kind != "auto" and row.kind not in {"auto", kind}:
-                continue
-            meta = s.get(Setting, "mail_request:" + row.id)
-            source = s.get(Run, row.run_id)
-            if (
-                (meta and meta.value.get("revived"))
-                or not source
-                or source.job_id != run.job_id
-                or source.state in {"confirmed", "already_applied", "submission_unknown"}
+        never for an application that already went through; never twice."""
+        current = time.time()
+        with self.db.exclusive() as s:
+            run = s.get(Run, run_id)
+            if not run or run.state not in {"running", "submitting"} or self.window_deadline(run, current + 60) <= current:
+                return None
+            if s.scalar(select(MailChallenge.id).where(MailChallenge.run_id == run_id, MailChallenge.state.in_(LIVE)).limit(1)):
+                return None
+            for row in s.scalars(
+                select(MailChallenge)
+                .where(
+                    MailChallenge.rule_id == rule["id"],
+                    MailChallenge.recipient == recipient.lower(),
+                    MailChallenge.kind == "password_reset",
+                    MailChallenge.state == "cancelled",
+                    MailChallenge.payload != "",
+                    MailChallenge.expires > current,
+                )
+                .order_by(MailChallenge.since.desc())
             ):
-                continue
-            row.run_id, row.state, row.reason = run.id, "matched", "A claimed email was kept for this application's next attempt"
-            row.expires = self.window_deadline(run, max(row.expires, current + 60))
-            generation = (meta.value if meta else {}).get("generation", 1)
-            if meta:
-                meta.value = {**meta.value, "revived": True, "matched_at": current}
-            return {**record(row), "request_id": row.id, "generation": generation}
+                meta = s.get(Setting, "mail_request:" + row.id)
+                source = s.get(Run, row.run_id)
+                if (
+                    (meta and meta.value.get("revived"))
+                    or not source
+                    or source.job_id != run.job_id
+                    or source.state in {"confirmed", "already_applied", "submission_unknown"}
+                ):
+                    continue
+                row.run_id, row.state, row.reason = run.id, "matched", "A claimed email was kept for this application's next attempt"
+                row.expires = self.window_deadline(run, max(row.expires, current + 60))
+                generation = (meta.value if meta else {}).get("generation", 1)
+                if meta:
+                    meta.value = {**meta.value, "revived": True, "matched_at": current}
+                return {**record(row), "request_id": row.id, "generation": generation}
         return None
 
     @staticmethod
@@ -435,10 +446,12 @@ class ChallengesMixin:
     def outcome(self, challenge_id, state, reason=""):
         with self.db.exclusive() as s:
             if (c := s.get(MailChallenge, challenge_id)) and c.state in LIVE:
-                # An interruption after the handoff (the browser closed, the app quit, the run was replaced) keeps the sealed
-                # mail for this application's next attempt (revive): the message is consumed, so no search can find it again,
-                # and asking the employer again voids it. A verified, failed or expired request keeps nothing.
-                kept = c.payload if c.state == "consumed" and state == "cancelled" else ""
+                # An interruption after the handoff (the browser closed, the run was replaced) keeps a reset's sealed mail for
+                # this application's next attempt (reclaim): the message is consumed, so no search can find it again, and the
+                # cooldown holds off another request. A verified, failed or expired request keeps nothing, nor does one the
+                # applicant cancelled or a step that said it needed no mail.
+                interrupted = state == "cancelled" and reason.startswith(INTERRUPTIONS)
+                kept = c.payload if c.state == "consumed" and interrupted else ""
                 c.state, c.reason, c.payload = state, reason[:200], kept
                 # A consumed continuation must not keep pointing at its terminal
                 # request when the website requires a fresh bounded resend.
@@ -466,8 +479,11 @@ class ChallengesMixin:
                 c.state, c.payload, c.reason = "cancelled", "", "Application no longer owns this verification"
                 return None
             token = self.vault.open(c.payload)
-            # The sealed mail stays until the request ends (outcome, expiry): the browser can still be interrupted before it
-            # uses what it was handed. Nothing reads a consumed request's payload (summary leaves it out).
+            # A reset's link or temporary password stays sealed until the request ends (outcome, expiry): the browser can
+            # still be interrupted before it uses what it was handed (reclaim). Everything else is gone at the handoff.
+            # Nothing reads a consumed request's payload (summary leaves it out).
+            if not (c.kind == "password_reset" and (token or {}).get("kind") in {"link", "password"}):
+                c.payload = ""
             c.state, c.reason = "consumed", "Matched email handed to its application owner"
             return token
 

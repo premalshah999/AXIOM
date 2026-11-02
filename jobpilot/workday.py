@@ -702,6 +702,9 @@ class WorkdayAuth:
             and 0 < time.time() - pending_since < e.config.mail_durable_wait_seconds
         )
         self.recovery_attempted = True
+        if not resume_reset and (kept := mail.reclaim(e.run_id, rule, e.form.resolver.profile.email)):
+            # An interrupted attempt held this reset's link and never used it: another request would void it.
+            resumed_request, resume_reset = kept["id"], True
         if not resume_reset:
             forgot = page.get_by_text("Forgot your password?", exact=True)
             if await forgot.count() != 1:

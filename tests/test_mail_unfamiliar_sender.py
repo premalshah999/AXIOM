@@ -11,7 +11,7 @@ import time
 import httpx
 import pytest
 
-from jobpilot.db import Event, Job, MailChallenge, MailRule, Run, now
+from jobpilot.db import Event, Job, MailChallenge, MailRule
 from jobpilot.mail import RuleInput
 from jobpilot.mail.polling import employer_only_host
 from support_mail import seed
@@ -19,11 +19,11 @@ from support_mail import seed
 ME = "alex@example.test"
 
 
-def mail(origin, *, kind="password_reset", sender="noreply@mailer.acme-hr.test", auth="dmarc=pass", message_id="m1"):
+def mail(origin, *, kind="password_reset", sender="noreply@mailer.acme-hr.test", auth="dmarc=pass", message_id="m1", path=None):
     domain = sender.rpartition("@")[2]
     reset = kind == "password_reset"
     subject = "Reset your password" if reset else "Verify your email"
-    link = origin + ("/password/reset?t=abc123def456" if reset else "/verify?t=abc123def456")
+    link = origin + (path or ("/password/reset?t=abc123def456" if reset else "/verify?t=abc123def456"))
     body = f"To {subject.lower()}, open this link: {link}"
     return {
         "id": message_id,
@@ -94,7 +94,67 @@ async def test_the_search_asks_for_reset_wording_beside_the_listed_senders(servi
     queries = []
     serve(service, mail("https://careers.acme.test"), queries)
     await service.mail.poll_once()
-    assert any("from:acme.test" in q and "subject:reset" in q for q in queries), queries
+    assert any("from:acme.test" in q for q in queries), queries
+    assert any("subject:reset" in q and "subject:password" in q and "subject:activation" in q for q in queries), queries
+
+
+async def test_a_busy_mailbox_of_worded_mail_never_fails_the_window(service):
+    """The wording is searched beside the sender search: past its page it reads the newest, and the window stays open."""
+    rule, challenge = await window(service, ats="custom", origin="https://careers.acme.test")
+    message = mail("https://careers.acme.test")
+
+    def route(request):
+        if request.url.path.endswith("/messages"):
+            worded = "subject:" in request.url.params["q"]
+            return httpx.Response(200, json={"messages": [{"id": "m1"}] if worded else [], **({"nextPageToken": "more"} if worded else {})})
+        return httpx.Response(200, json=message)
+
+    service.mail.transport = httpx.MockTransport(route)
+    state, domains = await polled(service, rule, challenge)
+    assert state == "matched" and "mailer.acme-hr.test" in domains
+
+
+async def test_a_tracker_or_shared_host_link_proves_nothing(service):
+    """A career site that is iCIMS underneath: the mail's valid link can be iCIMS's tracker, once its sender is known. It is
+    not this employer's origin, so it proves nothing about a sender nobody listed."""
+    rule, challenge = await window(service, ats="custom", origin="https://careers.acme.test", kind="link", domains=("acme.test", "icims.com"))
+    serve(service, mail("https://tracking.icims.com", kind="link"), [])
+    state, domains = await polled(service, rule, challenge)
+    assert state == "pending" and "mailer.acme-hr.test" not in domains
+
+
+async def test_a_public_mail_domain_is_never_learned(service):
+    rule, challenge = await window(service, ats="custom", origin="https://careers.acme.test")
+    serve(service, mail("https://careers.acme.test", sender="someone@gmail.com"), [])
+    state, domains = await polled(service, rule, challenge)
+    assert state == "pending" and "gmail.com" not in domains
+
+
+async def test_a_link_to_a_posting_on_the_site_is_no_proof(service):
+    """A job alert from another domain, worded "confirm", linking to the employer's own posting."""
+    rule, challenge = await window(service, ats="custom", origin="https://careers.acme.test", kind="link")
+    serve(service, mail("https://careers.acme.test", kind="link", path="/jobs/1234"), [])
+    state, domains = await polled(service, rule, challenge)
+    assert state == "pending" and "mailer.acme-hr.test" not in domains
+
+
+async def test_a_host_that_turns_out_to_serve_another_employer_proves_nothing(service):
+    origin = "https://portal.example-ats.test"
+    rule, challenge = await window(service, ats="custom", origin=origin)
+    with service.db.exclusive() as s:
+        s.add(Job(id="c" * 32, identity="c" * 32, url=origin + "/other/1", ats="custom", company="Globex", title="Clerk", status="discovered"))
+    serve(service, mail(origin), [])
+    state, domains = await polled(service, rule, challenge)
+    assert state == "pending" and "mailer.acme-hr.test" not in domains
+
+
+async def test_another_posting_of_the_same_employer_does_not_stop_it(service):
+    origin = "https://careers.acme.test"
+    rule, challenge = await window(service, ats="custom", origin=origin)
+    with service.db.exclusive() as s:
+        s.add(Job(id="c" * 32, identity="c" * 32, url=origin + "/jobs/2", ats="custom", company="ACME", title="Clerk", status="discovered"))
+    serve(service, mail(origin), [])
+    assert (await polled(service, rule, challenge))[0] == "matched"
 
 
 async def test_a_link_to_another_origin_is_not_taken_whoever_sent_it(service):
@@ -140,6 +200,13 @@ async def test_a_code_window_never_learns_a_sender_from_a_link(service):
         # A "custom" site that is really a platform's host is not the employer's own.
         ("custom", "https://jobs.lever.co/acme/1b2c3d4e-0000-4000-8000-000000000001", False),
         ("custom", "", False),
+        ("custom", "ftp://careers.acme.test/jobs/1", False),
+        # The platform's own front door: many employers on one host.
+        ("eightfold", "https://app.eightfold.ai/careers/job/687?domain=acme.test", False),
+        ("taleo", "https://www.taleo.net/careersection/ext/jobdetail.ftl?job=1", False),
+        # A short link or a shared portal is nobody's own.
+        ("custom", "https://go.vansh.nyc/AB", False),
+        ("custom", "https://recruiting.paylocity.com/Recruiting/Jobs/Details/1", False),
     ],
 )
 def test_only_a_host_one_employer_owns_can_prove_a_sender(ats, url, expected):
