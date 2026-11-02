@@ -73,6 +73,8 @@ without a session `/api/snapshot` answers 401. If the dashboard reports that its
 
 **If the window dies.** A force-quit or a crash must not leave an engine submitting real applications with nothing on screen, so the supervisor notices within five seconds and drains as usual (`tick_owner`). A window opened meanwhile waits for it, then starts. A checkout install sets no owner, and outlives its terminal.
 
+**A full disk.** The supervisor keeps going without its log and state file, restarts what crashes, and stops everything in order when asked. If the database gives up for lack of room, or a start finds under 200 MB free, the window says "This Mac's disk is full" rather than a status code: it looks at the disk itself, because the supervisor may not have been able to write why it stopped.
+
 **Sleep and battery.** The supervisor's `caffeinate` holds idle sleep while applications run and for five minutes after. Nothing holds a closed lid or an empty battery, so the app warns once when it is applying on battery, and the Status menu says so for as long as it lasts.
 
 **Backups.** The supervisor copies the database once a day to `~/axiom-backups/axiom-auto-<date>.dump`, private to the user, and keeps the newest seven; it skips a copy rather than fill the disk, and a copy made by hand is never removed. `axiom status` shows the newest. To put one back: `axiom stop`, then `axiom restore <file>`, which first copies what the database holds now. Only the database is in these files: the data folder's `mail-key` seals the saved passwords inside it, so a restore onto a new Mac needs that file too.

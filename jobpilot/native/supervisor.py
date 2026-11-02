@@ -28,6 +28,7 @@ import signal
 import subprocess
 import sys
 import time
+import traceback
 from urllib.parse import urlsplit
 
 from . import backups, pg, release, services
@@ -47,6 +48,9 @@ ROTATE_SECONDS = 30.0
 BACKUP_CHECK_SECONDS = 300.0
 CHROME_UPDATE_SECONDS = 300.0
 LOG_BYTES, LOG_KEEP = 10 * 1024 * 1024, 3  # compose.yaml's json-file limits.
+# Under this nothing here can be relied on to write: not the database's log, the state file or this process's own log.
+DISK_FULL_BYTES = 200 * 1024 * 1024
+DISK_FULL = "This Mac's disk is full, so AXIOM stopped. Your work is safe. Free some space, then open AXIOM again."
 CHROME_GRACE, POSTGRES_GRACE, CHROME_WAIT = 10.0, 30.0, 30.0
 # Queued work during the owner's Stop is not "in progress": it held the Mac awake and made Quit and the battery warning say
 # applications were running while nothing was (jobpilot/stop.py).
@@ -91,7 +95,7 @@ def http_ok(url, timeout=3.0):
     try:
         connection.request("GET", parts.path or "/")
         return connection.getresponse().status == 200
-    except OSError:
+    except (OSError, http.client.HTTPException):  # Something else on the port, or a server cut off mid-answer.
         return False
     finally:
         connection.close()
@@ -117,14 +121,47 @@ def same_process(pid, started):
     return bool(pid and started) and process_start(pid) == started
 
 
+def certainly_gone(pid, started):
+    """True only when this process has ended or its pid now belongs to another. `same_process` answers no as well when `ps` itself
+    failed, which a Mac just awake or out of processes can do, and that must not read as the window having closed."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        pass  # It exists, and is someone else's: `ps` says when it began.
+    try:
+        found = process_start(pid)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return bool(found) and found != started
+
+
+def disk_full(path):
+    try:
+        return shutil.disk_usage(path).free < DISK_FULL_BYTES
+    except OSError:
+        return False
+
+
+def _say(line):
+    """To the log, which a full disk refuses. What cannot be logged must never be what stops the supervisor."""
+    try:
+        print(time.strftime("%Y-%m-%d %H:%M:%S ") + line, flush=True)
+    except OSError:
+        pass
+
+
 def power_status():
-    """{'battery': bool, 'percent': int, 'remaining': '0:50'}, or {} where pmset does not exist."""
+    """{'battery': bool, 'percent': int, 'remaining': '0:50'}, or {} where pmset does not exist or did not answer."""
     if not shutil.which("pmset"):
         return {}
     try:
         out = subprocess.run(["pmset", "-g", "batt"], capture_output=True, text=True, timeout=5).stdout
     except (OSError, subprocess.TimeoutExpired):
         return {}
+    if "drawing from" not in out:
+        return {}  # No answer is not "on mains": see tick_power.
     level = re.search(r"(\d+)%", out)
     remaining = re.search(r"(\d+:\d+) remaining", out)
     return {
@@ -267,10 +304,18 @@ class Child:
             if self.log:
                 os.close(out)
         self.started = time.monotonic()
-        self.lstart = process_start(self.proc.pid)
+        # Before anything else that can fail: this process is running now, and a child still marked down would be started twice.
+        self.state, self.message = "starting", ""
+        self.note_start()
         if self.profile:
             self.binary, self.version = argv[0], chrome_version(argv[0])
-        self.state, self.message = "starting", ""
+
+    def note_start(self):
+        """When it began, for `axiom stop` after a dead supervisor. A `ps` that fails now is asked again on the next tick."""
+        try:
+            self.lstart = process_start(self.proc.pid)
+        except (OSError, subprocess.SubprocessError):
+            self.lstart = ""
 
     def signal(self, sig):
         """To the process, not its group. The app must drain with Playwright's driver still alive: under Compose too the
@@ -322,7 +367,7 @@ def in_dependency_order(children):
 class Supervisor:
     def __init__(self, cfg, children=None, *, say=None):
         self.cfg = cfg
-        self.say = say or (lambda line: print(time.strftime("%Y-%m-%d %H:%M:%S ") + line, flush=True))
+        self.say = say or _say
         self.pg_bin = None
         self.children = children
         self.phase = "starting"
@@ -505,11 +550,19 @@ class Supervisor:
             self.children = self.children or self.plan()
             self.write_state(force=True)
             while not self.stop_reason:
-                self.tick(time.monotonic())
+                try:
+                    self.tick(time.monotonic())
+                except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                    # A full disk, or a `ps` or `psql` that took too long on a Mac just awake. Stopping over one would cost whatever
+                    # is being applied to; the next tick asks again.
+                    self.say(f"A check failed and will be tried again ({type(exc).__name__}: {str(exc)[:200]}).")
                 time.sleep(1.0)
         except NativeError as exc:
             self.failure = self.stop_reason = str(exc)
             self.say(f"Not starting: {exc}")
+        except Exception as exc:  # A bug here. The stop below still drains, and the window has to be told it was not a plain stop.
+            self.failure = self.stop_reason = f"AXIOM's supervisor hit a problem ({type(exc).__name__}). Your work is safe. Try again."
+            self.say(f"The supervisor hit a problem: {traceback.format_exc()}")
         finally:
             self.shutdown()
         if self.reexec and not self.failure:
@@ -654,6 +707,8 @@ class Supervisor:
     def tick_child(self, child, now):
         if child.proc is not None and child.proc.poll() is not None:
             self.on_exit(child, now)
+        if child.proc is not None and not child.lstart:
+            child.note_start()
         if child.stopping and child.kill_at and now >= child.kill_at:
             self.say(f"{child.name} did not stop within {child.grace:.0f} s; sending signal {int(child.final_signal)}.")
             child.signal(child.final_signal)
@@ -676,7 +731,7 @@ class Supervisor:
         ):
             try:
                 child.spawn()
-            except (NativeError, OSError) as exc:
+            except (NativeError, OSError, subprocess.SubprocessError) as exc:
                 self.on_spawn_failure(child, str(exc), now)
 
     def ready_for(self, child, now):
@@ -742,7 +797,7 @@ class Supervisor:
         child.state, child.message = "failed", message
         self.say(message)
         if child.required:
-            self.failure = self.stop_reason = message
+            self.failure = self.stop_reason = DISK_FULL if disk_full(self.cfg.data_dir) else message
 
     def tick_phase(self, now):
         """Up means every service is: there is one thing to open, and it is ready when all of it is."""
@@ -760,7 +815,7 @@ class Supervisor:
         submitting real applications with nothing on screen, so its loss is a normal, draining stop. `scripts/axiom` sets
         no owner: production outlives its terminal."""
         pid, started = self.cfg.get("AXIOM_OWNER_PID"), self.cfg.get("AXIOM_OWNER_LSTART")
-        if pid and not same_process(int(pid), started):
+        if pid and certainly_gone(int(pid), started):
             self.stop_reason = self.stop_reason or "The AXIOM window went away, so AXIOM stopped safely."
 
     # ---- the Mac: sleep, power, health, logs ----------------------------------------------------------------------------
@@ -775,7 +830,7 @@ class Supervisor:
             try:
                 raw = pg.psql(self.pg_bin, self.cfg, ACTIVE_RUNS, timeout=5, check=False)
                 count = int(raw) if raw not in (None, "") else None
-            except (OSError, ValueError, subprocess.TimeoutExpired):
+            except (OSError, ValueError, NativeError, subprocess.TimeoutExpired):
                 count = None
         self.active = count
         self.work = self.read_json(WORK, {}) if count else {}
@@ -800,8 +855,8 @@ class Supervisor:
     def read_json(self, query, empty):
         """A one-line JSON answer from psql, or `empty`: what Quit says is never worth failing over."""
         try:
-            parsed = json.loads(pg.psql(self.pg_bin, self.cfg, query, timeout=5, check=False) or "null")
-        except (OSError, ValueError, subprocess.TimeoutExpired):
+            parsed = json.loads(pg.psql(self.pg_bin, self.cfg, query, timeout=5, check=False) or "null") if self.pg_bin else None
+        except (OSError, ValueError, NativeError, subprocess.TimeoutExpired):
             return empty
         return parsed if isinstance(parsed, type(empty)) else empty
 
@@ -812,11 +867,13 @@ class Supervisor:
             return False
         try:
             return int(pg.psql(self.pg_bin, self.cfg, BATCH_RUNNING, timeout=5, check=False) or 0) > 0
-        except (OSError, ValueError, subprocess.TimeoutExpired):
+        except (OSError, ValueError, NativeError, subprocess.TimeoutExpired):
             return False
 
     def tick_power(self):
         power = power_status()
+        if not power and self.power:
+            return  # pmset did not answer, as on a Mac just awake. Read as mains, the window would warn about the battery all over again.
         if power.get("battery") and not self.power.get("battery"):
             self.say(f"Running on battery ({power.get('percent')}%). The Mac sleeps when the lid closes or it runs out.")
         elif self.power.get("battery") and power and not power.get("battery"):
@@ -866,7 +923,10 @@ class Supervisor:
             if child.proc:
                 if child.service and child.grace > 30:
                     self.say(f"Stopping {child.name}: it drains for up to {child.grace:.0f} s while commits finish.")
-                self.stop_and_wait(child)
+                try:
+                    self.stop_and_wait(child)
+                except Exception as exc:  # Whatever went wrong watching this one, the next must still be stopped, in order.
+                    self.say(f"Stopping {child.name} failed ({type(exc).__name__}); moving on to what it depends on.")
         self.stop_relaunched_chromes()
         if self.caffeinate and self.caffeinate.poll() is None:
             self.caffeinate.terminate()
@@ -961,9 +1021,14 @@ class Supervisor:
             },
         }
         temporary = self.cfg.state_file.with_suffix(".tmp")
-        temporary.write_text(json.dumps(state))
-        temporary.chmod(0o600)
-        temporary.replace(self.cfg.state_file)
+        try:
+            temporary.write_text(json.dumps(state))
+            temporary.chmod(0o600)
+            temporary.replace(self.cfg.state_file)
+        except OSError as exc:
+            # A full disk. The last whole file stays for the window, and a stop must carry on: it has services to drain.
+            self.say(f"The state file could not be written ({type(exc).__name__}).")
+            temporary.unlink(missing_ok=True)
 
 
 def read_state(cfg):
@@ -1046,7 +1111,10 @@ def stop_process(pid, sig, grace, started):
             break
         time.sleep(0.5)
     else:
-        os.kill(pid, signal.SIGKILL if sig != signal.SIGINT else signal.SIGQUIT)
+        try:
+            os.kill(pid, signal.SIGKILL if sig != signal.SIGINT else signal.SIGQUIT)
+        except ProcessLookupError:
+            pass  # It ended at the last moment.
         time.sleep(1)
     try:
         os.killpg(pid, signal.SIGKILL)
