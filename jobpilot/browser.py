@@ -2921,6 +2921,8 @@ class BrowserEngine:
             # The observed ATS owns the account and verification mail. Keeping
             # a short-link host here selects that host's unrelated sender rule.
             self.job.update(url=url or self.page.url, ats=target)
+        if verifier := getattr(self, "email_verification", None):
+            verifier.rebind()  # the job, its verifier and the saved platform change together
         self.persist_observed_ats(target)
 
     def starting_label(self, job):
