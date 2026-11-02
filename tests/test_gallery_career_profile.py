@@ -44,3 +44,31 @@ def test_a_close_button_that_names_its_dialog_closes_it(label):
 @pytest.mark.parametrize("label", ["Sign up", "Close my account", "Close account dialogue", "Submit"])
 def test_other_controls_do_not_close_a_dialog(label):
     assert not is_dismiss_control({"label": label})
+
+
+def link_box(service, required=False, **links):
+    from jobpilot.answers import Resolver
+    from jobpilot.schemas import Profile
+
+    box = {"id": "w", "label": "Website (Examples: LinkedIn, GitHub, portfolio)", "type": "text", "options": [], "required": required}
+    return Resolver(Profile(**links), service.db, service.config).local(box)
+
+
+def test_a_link_box_that_lists_examples_takes_a_saved_link(service):
+    assert link_box(service, website="https://alex.example.test", linkedin="https://www.linkedin.com/in/alex-example").value == "https://alex.example.test"
+    assert link_box(service, linkedin="https://www.linkedin.com/in/alex-example").value.endswith("alex-example")
+    assert link_box(service, github="https://github.com/alex-example").value.endswith("alex-example")
+
+
+def test_a_link_box_with_no_saved_link_needs_no_model(service):
+    assert link_box(service).disposition == "skip"
+    assert link_box(service, required=True).disposition == "review"
+
+
+def test_brackets_that_name_no_such_site_do_not_borrow_its_link(service):
+    from jobpilot.answers import Resolver
+    from jobpilot.schemas import Profile
+
+    box = {"id": "w", "label": "Website (optional)", "type": "text", "options": []}
+    answer = Resolver(Profile(linkedin="https://www.linkedin.com/in/alex-example"), service.db, service.config).local(box)
+    assert answer.disposition == "skip" and not answer.value

@@ -1150,6 +1150,20 @@ class LocalRulesMixin:
                 known = str(saved).removeprefix("https://").removeprefix("http://").rstrip("/")
                 if known and current.casefold() == known.casefold():
                     return self._ans(f, saved, ["profile:" + attr])
+        link_box = re.sub(r"\s*\([^()]*\)[\s*✱:]*$", "", str(f.get("label") or ""))
+        if not options and f.get("type") in {"text", "url"} and link_box != f.get("label") and normalize(link_box) in CONTACT["website"]:
+            # "Website (Examples: LinkedIn, GitHub, portfolio)" (Meta, 2026-11-01): the box takes the saved website or a link the brackets name, and
+            # with none saved there is nothing for a model to find: it was asked three times about an optional box.
+            named = [attr for attr, word in (("linkedin", "linked ?in"), ("github", "git ?hub")) if re.search(word, label)]
+            for attr in ("website", *named):
+                if (saved := getattr(p, attr)) and (a := self._ans(f, saved, ["profile:" + attr])):
+                    return a
+            return Answer(
+                field_id=f["id"],
+                disposition="review" if f.get("required") else "skip",
+                reason="No link is saved for this box",
+                blocker_type="missing_fact",
+            )
         for attr, labels in CONTACT.items():
             email_prompt = attr == "email" and (
                 re.fullmatch(r"(?:(?:enter|type)(?: your)? |your )?email(?: address)?", label)

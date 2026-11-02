@@ -2255,7 +2255,29 @@ class Adapter:
             ],
         )
 
+    @staticmethod
+    def blank_page(obs):
+        return not (obs["fields"] or obs["controls"] or str(obs.get("text") or "").strip())
+
+    async def wait_for_blank_page(self):
+        """True once a page with nothing on it has drawn itself. A redirect can commit an empty document that fills in seconds later; asked about it, the
+        model reasons over nothing, and it is paid for (a run with no model stopped here on a page that was about to show its form)."""
+        from ..browser import OBSERVATION_WAIT_SECONDS
+
+        deadline = time.monotonic() + OBSERVATION_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            await asyncio.sleep(1)
+            try:
+                await self.form.settle(timeout=2)
+                if not self.blank_page(await self.form.scan()):
+                    return True
+            except PlaywrightError:
+                pass  # The document is being replaced; the next read sees the new one.
+        return False
+
     async def on_unknown(self, obs):
+        if not self.committed and self.blank_page(obs) and await self.wait_for_blank_page():
+            return None  # The main loop reads the page again and classifies what it drew.
         cancel = [b for b in obs["controls"] if re.fullmatch(r"cancel|go back|back", b["label"].strip(), re.I)]
         if GUEST_EMAIL_EXISTS.search(obs.get("text", "")) and len(cancel) == 1:
             # Textron's Taleo (2026-11-01): the guest route answered "The email address provided already exists and cannot

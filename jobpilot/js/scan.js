@@ -52,6 +52,12 @@
   const ownsFile = (box, el) => !!box && ![...box.querySelectorAll('input:not([type=hidden]),select,textarea,[role=combobox],[role=radiogroup]')]
     .some(other => other !== el && !other.contains(el) && !el.contains(other));
   const REQUEST = /^(?:please\s+)?(?:share|describe|explain|tell us|provide|list|enter|include|detail|indicate|specify|summari[sz]e|write|add)\b/i;
+  // What a select prints beside its own input is not its question: "Please select" before a choice, the choice after it (a question in a plain block
+  // above such a select read "Please select", was taken for optional and left empty on a form that was then sent).
+  const SELECT_PROMPT = /^(?:please\s+)?(?:select|choose|pick)(?:\s+(?:an?|one|your))?(?:\s+(?:option|answer|value|one))?\s*(?:\.\.\.|…)?\W*$/i;
+  const SELECT_SHOWN = /placeholder|select(?:ed)?[-_]*(?:item|value)|single[-_]*value|selection[-_]*(?:item|rendered)/i;
+  const selectOwnText = (n, el) => el.matches('[role=combobox],[aria-haspopup]:not([aria-haspopup=false])')
+    && ((typeof n.className === 'string' && SELECT_SHOWN.test(n.className)) || SELECT_PROMPT.test(clean(n.textContent)));
   const nearby = el => {
     let node = el;
     // Rippling nests a custom question's control 5-6 levels below the div that
@@ -63,7 +69,7 @@
       if ((depth >= 3 || el.type === 'file') && [...node.querySelectorAll(CONTROL)].some(x => x !== el && !el.contains(x) && !x.contains(el))) break;
       let prev = node.previousElementSibling;
       while (prev && (!visible(prev) || prev.matches('script,style'))) prev = prev.previousElementSibling;
-      if (prev && !prev.matches('input,select,textarea,button') && !prev.querySelector('input,select,textarea,button')) {
+      if (prev && !prev.matches('input,select,textarea,button') && !prev.querySelector('input,select,textarea,button') && !selectOwnText(prev, el)) {
         const t = textOf(prev);
         // A long question is still the question when it ends asking one: Collier Aerospace's Rippling citizenship
         // radio group (2026-10-27) read "field-44" behind 330 characters of context ending "...through US citizenship?".
@@ -1322,7 +1328,8 @@
       if (PLACEHOLDER_VALUE.test(clean(value))) value = '';
     } else if (type === 'combobox' && !value && widget !== 'select2-multiselect') {
       // react-select keeps the chosen value outside the input.
-      const chosen = el.closest('[class*=__control],[aria-haspopup=listbox]')?.querySelectorAll('[class*=__single-value],[class*=__multi-value__label],[class*=input-select-input-single-value]') || [];
+      // Others print it in a sibling of the search input's box (a "__selector" holding a "__selectItem"; TikTok's work-authorization menus, 2026-11-01).
+      const chosen = el.closest('[class*=__control],[aria-haspopup=listbox],[class*="__selector "],[class$="__selector"]')?.querySelectorAll('[class*=__single-value],[class*=__multi-value__label],[class*=input-select-input-single-value],[class*=__selectItem]') || [];
       // Paylocity's empty select prints its prompt ("Select a state") in the same single-value box.
       value = [...chosen].filter(x => !(x.matches('[class*=input-select-input-single-value]') && GENERIC_PLACEHOLDER.test(clean(x.textContent))))
         .map(x => clean(x.textContent)).filter(Boolean).join(', ');

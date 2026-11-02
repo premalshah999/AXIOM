@@ -3497,10 +3497,15 @@ async def combobox(
             // Paylocity's select shows its pick in a box beside its input, which it empties (Commence, 2026-11-01): the pick read as not taken.
             const shown=e.closest('[aria-haspopup=listbox]')?.querySelectorAll('[class*=input-select-input-single-value]');
             if(shown?.length===1 && shown[0].textContent.trim() && !e.value)return shown[0].textContent.trim();
+            const item=e.closest('[class*="__selector "],[class$="__selector"]')?.querySelectorAll('[class*=__selectItem]');
+            if(item?.length===1 && item[0].textContent.trim() && !e.value)return item[0].textContent.trim();
             return e.value || '';
         }""")
             if editable
             else await el.evaluate("""e=>{
+            // A read-only search input stays empty and its pick shows in the box beside it (TikTok's work-authorization menus, 2026-11-01).
+            const item=e.closest('[class*="__selector "],[class$="__selector"]')?.querySelectorAll('[class*=__selectItem]');
+            if(e.tagName==='INPUT' && !e.value && item?.length===1 && item[0].textContent.trim())return item[0].textContent.trim();
             const content=n=>{
                 if(n.nodeType===Node.TEXT_NODE)return n.textContent||'';
                 if(n.nodeType!==Node.ELEMENT_NODE)return '';
