@@ -26,6 +26,23 @@ def address_location_option(options, address):
     return unique[0] if len(unique) == 1 else None
 
 
+def address_state_option(options, address):
+    """A box that lists regions as "State, Country" (Ashby's "Where are you currently based? Please specify the state", n8n 2026-11-01):
+    the applicant's own state in the applicant's own country, never a same-named region of another country ("Maryland, Liberia")."""
+    from ..widgets import _alias_group, norm
+
+    if not (address.state and address.country):
+        return None
+    states = _alias_group(address.state) | {norm(address.state)}
+    countries = _alias_group(address.country) | {norm(address.country)}
+    named = [
+        option
+        for option in options
+        if len(parts := [norm(part) for part in option.split(",")]) == 2 and parts[0] in states and parts[1] in countries
+    ]
+    return named[0] if len(set(named)) == 1 else None
+
+
 def address_country_option(options, address):
     """A box that lists countries only: the applicant's own country, never a city or another country."""
     from ..widgets import _alias_group, norm
