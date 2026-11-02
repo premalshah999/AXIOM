@@ -91,7 +91,7 @@ def _env(work: str, binary: str) -> dict:
 async def compile_pdf(tex: str, *, timeout: float = 40, runs: int = 2, concurrency: int = 2) -> Compiled:
     binary = shutil.which("pdflatex")
     if not binary:
-        return Compiled(False, None, "compiler_missing", False, "pdflatex is not installed on this host")
+        return Compiled(False, None, "compiler_missing", False, "The part of AXIOM that makes PDFs is missing from this Mac. Install AXIOM again.")
     async with slots(concurrency):
         work = tempfile.mkdtemp(prefix="ap-tex-")
         try:

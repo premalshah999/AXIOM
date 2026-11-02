@@ -424,6 +424,8 @@ def router(service) -> APIRouter:
             return await master_mod.import_master(db, config, configured_model(db, config))
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
+        except Exception as exc:  # A model that wouldn't answer, or a reply no schema can read: said in words, not as a server error.
+            raise HTTPException(409, choice.plain_failure({"code": "tailoring_error", "detail": str(exc) or type(exc).__name__})["message"]) from None
 
     @r.put("/master")
     async def master_save(data: MasterSave):
