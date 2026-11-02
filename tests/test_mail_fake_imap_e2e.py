@@ -51,6 +51,17 @@ def use_imap(service):
         )
 
 
+async def sweep_from_now(mail):
+    """One mailbox sweep that starts after this call, so it reads what the test just wrote. poll_once returns at once while
+    another sweep holds the lock (on purpose: a browser owner must not line up behind it), and the poller task below is in one
+    nearly all the time: on a loaded Mac two poll_once calls in a row both returned without reading anything and the window
+    still read "pending" (2026-11-01). Wait out the sweep in flight, then start one: nothing else can run between the release
+    and poll_once's look at the lock, so this is never skipped, and no sleep is involved."""
+    async with mail.poll_lock:
+        pass
+    await mail.poll_once()
+
+
 def later(seconds, fn, *args, **kwargs):
     timer = threading.Timer(seconds, lambda: fn(*args, **kwargs))
     timer.start()
@@ -116,8 +127,7 @@ async def test_a_code_that_never_comes_parks_the_run_and_the_window_ends_empty_n
         with service.db.exclusive() as s:
             row = s.get(MailChallenge, challenge_id)
             row.expires = time.time() - 1
-        await service.mail.poll_once()
-        await service.mail.poll_once()
+        await sweep_from_now(service.mail)
         with service.db.session() as s:
             row = s.get(MailChallenge, challenge_id)
             assert row.state == "expired" and "deadline ended" in row.reason
@@ -155,7 +165,7 @@ async def test_two_runs_at_one_sender_the_second_waits_in_the_queue_then_gets_it
     timer = later(1.0, code_mail, imap, "222222")
     poller = asyncio.create_task(service.mail.poll())
     try:
-        token = await service.mail.wait(held["id"], max_wait_seconds=10)
+        token = await service.mail.wait(held["id"], max_wait_seconds=60)  # returns when the code matches
         assert token["value"] == "222222"
         service.mail.outcome(held["id"], "verified", "Website accepted the verification code")
         with service.db.session() as s:

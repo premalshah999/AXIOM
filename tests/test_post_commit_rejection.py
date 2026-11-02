@@ -47,6 +47,14 @@ class FastAsyncio:
 WORKDAY_URL = "https://acme.wd1.myworkdayjobs.com/en-US/ext/job/x/Analyst_1"
 
 
+@pytest.fixture(autouse=True)
+def the_look_at_the_page_finishes(monkeypatch):
+    """The app bounds its one look after a commit at 3 s, and a look that runs out is doubt, never a confirmation. These tests
+    read what the look decided, so it gets to finish: beside nine workers it ran out and returned None, which failed the test of
+    a real receipt (2026-11-01) and would have passed the test that a stale receipt is refused without reading the page."""
+    monkeypatch.setattr(browser, "POST_COMMIT_LOOK_SECONDS", 30)
+
+
 async def serve(page, url, body):
     async def route(request):
         await request.fulfill(status=200, content_type="text/html", body=body)
@@ -211,9 +219,7 @@ async def test_rejection_gains_inline_errors_beside_a_banner_that_names_other_fi
         "<input type=email></label><label>Password<input type=password></label></div>",
     ],
 )
-async def test_workday_submitted_dialog_is_proof_after_a_commit_exit(page, service, tmp_path, body, monkeypatch):
-    # The look is bounded at 3 s in the app; a Mac running a release beside nine workers needed more (2026-11-01).
-    monkeypatch.setattr("jobpilot.browser.POST_COMMIT_LOOK_SECONDS", 30)
+async def test_workday_submitted_dialog_is_proof_after_a_commit_exit(page, service, tmp_path, body):
     resolver = Resolver(
         Profile(),
         service.db,

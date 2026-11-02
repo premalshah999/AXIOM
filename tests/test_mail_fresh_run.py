@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
+import httpx
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -31,6 +32,7 @@ from jobpilot import browser as browser_module, gmail_imap
 from jobpilot.company_sites import allow
 from jobpilot.db import Event, Job, MailChallenge, MailRule, Resume, Run
 from jobpilot.discovery import add_job
+from jobpilot.host_health import is_browser_outage
 from jobpilot.schemas import JobInput
 from mail_formats import KINDS, ME, PLATFORMS, deliver, fresh_code
 from test_mail_fresh_install import link_for, onboard
@@ -40,6 +42,7 @@ RUN_SECONDS = float(os.environ.get("MAILFRESH_RUN_SECONDS", "300"))  # a ceiling
 # A real employer's mail takes seconds: longer than the three seconds a run waits in the browser for a link, so the run parks,
 # the mail matches, and the run comes back. That is the path real link and reset mail takes.
 DELAY = float(os.environ.get("MAILFRESH_DELAY", "8"))
+OUTAGE_RETRIES = 2
 CHOICES = os.environ.get("MAILFRESH_ONLY", "")
 CASES = [
     (p, k)
@@ -278,7 +281,36 @@ async def start_chrome(temp, port):
             break
         await asyncio.sleep(0.1)
     with open(portfile) as f:
-        return process, f"http://127.0.0.1:{f.read().splitlines()[0]}"
+        address = f"http://127.0.0.1:{f.read().splitlines()[0]}"
+    await chrome_opens_a_tab(address)
+    return process, address
+
+
+async def chrome_opens_a_tab(address):
+    """In the app the worker Chrome has been up for minutes when a run attaches. Here it is seconds old: it writes its port file
+    before it can answer, and a run that attached then on a loaded Mac ended "AXIOM's browser wasn't ready" having sent nothing
+    (dayforce-code, 2026-11-01). The test starts when Chrome has answered and opened a tab, not after some number of seconds."""
+    deadline = time.monotonic() + RUN_SECONDS
+    async with httpx.AsyncClient(timeout=30, trust_env=False, headers={"Host": "localhost"}) as client:
+        while True:
+            try:
+                tab = await client.put(address + "/json/new?about:blank")
+                tab.raise_for_status()
+                await client.get(address + "/json/close/" + tab.json()["id"])
+                return
+            except (httpx.HTTPError, OSError, ValueError, KeyError):
+                if time.monotonic() >= deadline:
+                    raise
+                await asyncio.sleep(0.1)
+
+
+def outage(service, job_id):
+    """The job's last run ended "AXIOM's browser wasn't ready": nothing was sent, and the app tries again by itself. The autopilot
+    that does that isn't running here, so the test presses Apply again, at most OUTAGE_RETRIES times; the third outage in a row
+    pauses the app's starts (host_health.note_browser), so a browser that never comes up still fails the test."""
+    with service.db.session() as s:
+        last = s.scalars(select(Run).where(Run.job_id == job_id).order_by(Run.created_at.desc()).limit(1)).first()
+        return bool(last and is_browser_outage(last.state, last.reason))
 
 
 async def one_run(client, service, imap, platform, kind, *, delay=DELAY, profile=None):
@@ -332,12 +364,17 @@ async def one_run(client, service, imap, platform, kind, *, delay=DELAY, profile
         result = await apply(service, job["id"])  # The Apply button.
         outcome["applied"] = str(result)[:120]
         deadline = time.monotonic() + RUN_SECONDS
+        retries = OUTAGE_RETRIES
         while time.monotonic() < deadline:
             await asyncio.sleep(0.25)  # a poll of the database, not a pace: the run ends within a quarter second of finishing
             with service.db.session() as s:
                 states = [r.state for r in s.scalars(select(Run).where(Run.job_id == job["id"]))]
             live = any(x in {"queued", "running", "submitting"} for x in states) or tasks
             parked = states and states[-1] in {"waiting_email"}
+            if not live and retries and outage(service, job["id"]):
+                retries -= 1
+                await apply(service, job["id"])
+                continue
             if kind in site.used and not live:
                 break
             if states and not live and not parked:
@@ -441,11 +478,16 @@ async def test_two_employers_on_one_shared_sender_in_two_real_runs_each_type_the
         for job_id in jobs:
             await apply(service, job_id)
         deadline = time.monotonic() + RUN_SECONDS
+        retries = dict.fromkeys(jobs, OUTAGE_RETRIES)
         while time.monotonic() < deadline and not ("code" in first.used and "code" in second.used):
             await asyncio.sleep(1)
             # A platform that runs one application at a time defers the second: the autopilot starts it when its turn comes.
             with service.db.session() as s:
                 waiting = [j for j in jobs if not s.scalar(select(Run.id).where(Run.job_id == j).limit(1))]
+            for job_id in jobs:
+                if retries[job_id] and outage(service, job_id):
+                    retries[job_id] -= 1
+                    waiting.append(job_id)
             for job_id in waiting:
                 await apply(service, job_id)
     finally:
