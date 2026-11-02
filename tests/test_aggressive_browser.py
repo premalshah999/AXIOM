@@ -116,6 +116,9 @@ def serve(port, static_root, data_dir):
 
         service.dispatch = dispatch
         service.db.set_setting("control", {"paused": False, "auto_submit": True})
+        from jobpilot.company_sites import allow
+
+        allow(service.db, ["ag-job"])  # A local page reads as a company's own site: the owner's click sends it.
         queued = await service.queue("ag-job", "submit", "source", owner_pick=True)
         await asyncio.wait_for(service.execute(queued["id"]), 90)
         with service.db.session() as session:

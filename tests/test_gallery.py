@@ -16,6 +16,7 @@ from pypdf import PdfWriter
 from sqlalchemy import select
 
 from jobpilot.db import Event, Job, Resume, Run
+from jobpilot.company_sites import allow
 from jobpilot.discovery import add_job
 from jobpilot.schemas import JobInput
 
@@ -64,6 +65,7 @@ async def run_scenario(service, scenario, mode="submit"):
                                           location="Remote", description="A synthetic posting."))
     with service.db.exclusive() as s:
         s.get(Job, job["id"]).status = "ready"  # What ranking leaves a job in.
+    allow(service.db, [job["id"]])  # A local page reads as a company's own site: the owner's click sends it.
     try:
         run = await service.queue(job["id"], mode, resume_id, owner_pick=True)
         await asyncio.wait_for(service.execute(run["id"]), RUN_SECONDS)
