@@ -6057,7 +6057,16 @@ class FormSession:
                 await locator.evaluate("e => { e.value = '' }", timeout=5000)
             except PlaywrightError:
                 pass  # A replaced input is found again by the next attempt's set_input_files.
-            await locator.set_input_files(str(self.resume_path), timeout=15000)
+            try:
+                await locator.set_input_files(str(self.resume_path), timeout=15000)
+            except PlaywrightTimeoutError:
+                # The widget drops its input once it lists a file (clear_resume_input), so a later pass finds none: 5 runs
+                # of 16 "Browser control failed at forms.py:5784/5788" were this 15 s timeout (2026-10-31/11-01). Listed
+                # means the upload worked; otherwise another pass or the form's own upload check says what is missing.
+                if await self.greenhouse_resume_listed():
+                    return
+                await self.page.wait_for_timeout(1500)
+                continue
             if await self.greenhouse_resume_listed():
                 return
             await self.page.wait_for_timeout(1500)
