@@ -41,8 +41,11 @@ def read_marker(cfg):
 
 def record(cfg, **values):
     path = marker(cfg)
-    path.write_text(json.dumps({"at": time.time(), **values}))
-    path.chmod(0o600)
+    try:
+        path.write_text(json.dumps({"at": time.time(), **values}))
+        path.chmod(0o600)
+    except OSError:
+        pass  # A full disk is why it is being recorded, often. `due` then asks again, which costs a look at the disk.
 
 
 def copies(where=None):
