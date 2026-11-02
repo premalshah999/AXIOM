@@ -7193,7 +7193,7 @@ class FormSession:
                         "evidence": text[max(0, match.start() - 20) : match.end() + 200], "missing_fields": []}
             from .employer_limit import application_cap
 
-            if cap := application_cap(tail):
+            if cap := application_cap(tail, refused=True):
                 # The employer's own application limit (Benchling, Aurora, OpenAI on Ashby): nothing was accepted.
                 return {"type": "explicit_rejection_page", "url": self.page.url, "category": "employer_limit",
                         "cap": cap, "evidence": text[max(0, match.start() - 20) : match.end() + 300],

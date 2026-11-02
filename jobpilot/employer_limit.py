@@ -55,6 +55,13 @@ APPLICATION_LIMIT = re.compile(
     re.I,
 )
 
+# Wording that is a limit only on a page that refused a submission (a posting's own policy note may say it too).
+# Ashby, "We couldn't submit your application": "Example has set specific limits on how often and how many roles you can
+# apply for." Five jobs of one employer were each tried, refused and tried again 3 hours later (2026-11-01).
+REFUSAL_LIMIT = re.compile(
+    r"\b(?:has|have) (?:set|put|placed|imposed) (?:\w+ ){0,2}limits? on how (?:often|many)\b[^.]{0,80}\bapply\b", re.I
+)
+
 _WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
 _COUNT = r"(?P<n>\d+|" + "|".join(_WORDS) + r")"
 _UNITS = {"day": 1, "week": 7, "month": 30, "year": 365}
@@ -139,12 +146,12 @@ def window_days(text):
     return None
 
 
-def application_cap(text, at=None):
+def application_cap(text, at=None, refused=False):
     """{"limit", "days"[, "until"]} when the text is the employer's limit, else None. Any field may be unknown: "You've
     reached the application limit" alone is a limit with no number and no date, and `wait_until` chooses the wait."""
     text = text or ""
     stated = next((found for pattern in APPLICATION_CAP if (found := pattern.search(text))), None)
-    if not stated and not APPLICATION_LIMIT.search(text):
+    if not stated and not APPLICATION_LIMIT.search(text) and not (refused and REFUSAL_LIMIT.search(text)):
         return None
     cap = {"limit": _number(stated["n"]) if stated else None, "days": window_days(text)}
     if until := period_end(text, at):
