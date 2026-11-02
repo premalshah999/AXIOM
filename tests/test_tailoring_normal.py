@@ -336,7 +336,7 @@ def test_each_line_is_told_what_it_can_honestly_gain_and_a_line_with_nothing_isn
     doc.sections[0].entries[0].bullets.append(Bullet(id="b2", text="Trained at the front desk during a staff shortage last winter"))
     rows, rest = normal.rewrite_rows(doc, keywords_for(posting, NURSE))
     assert [r["id"] for r in rows] == ["b1"] and rest == ["Trained at the front desk during a staff shortage last winter"]
-    assert rows[0]["say_as"] == ["medication administration", "patient care"] and rows[0]["lead_with"] == ["Epic"]
+    assert rows[0]["say_as"] == ["medication administration"] and rows[0]["lead_with"] == ["Epic"]  # It says "patients", but no care.
     assert "Kubernetes" not in json.dumps(rows)
 
 
@@ -355,29 +355,31 @@ def test_a_term_is_offered_on_two_lines_at_most_and_the_reply_stays_under_its_ca
 
 def test_a_described_term_lands_and_is_what_raises_the_score():
     posting = "Requirements\nExperience with medication administration and Kubernetes."
-    good = "Performed medication administration and documented every dose in Epic for up to 6 patients on surgical unit"
-    doc = one_bullet(NURSE + " today")
+    line = "Administered medications and documented every single dose in Epic for up to 6 patients on a busy surgical unit"
+    good = "Led medication administration and documented every dose in Epic for up to 6 patients on a busy surgical unit"
+    doc = one_bullet(line)
     keywords = keywords_for(posting, doc_plain(doc))
     assert next(k for k in keywords if k["term"] == "medication administration")["status"] == "needed"
     changes, refused = normal.apply_bullets(doc, [normal.PlanBullet(id="b1", text=good)], keywords)
     assert not refused and changes
-    assert ats.score(ats.terms(posting, ""), doc_plain(doc), "")["score"] > ats.score(ats.terms(posting, ""), NURSE, "")["score"]
+    assert ats.score(ats.terms(posting, ""), doc_plain(doc), "")["score"] > ats.score(ats.terms(posting, ""), line, "")["score"]
 
 
 @pytest.mark.parametrize(
     "attempt,why",
     [
-        ("Administered medications and documented every dose in Epic with Kubernetes for 6 patients on a unit", "claims Kubernetes"),  # Nothing supports it.
-        ("Administered medications and documented every dose in Epic and Tableau for up to 6 patients on a unit", "Tableau"),  # True elsewhere, not on this line.
+        ("Administered medications, documented each dose in Epic on Kubernetes for up to 6 patients on a unit", "Kubernetes"),  # Nothing supports it.
+        ("Administered medications, documented each dose in Epic and Tableau for up to 6 patients on a unit", "Tableau"),  # True elsewhere, not on this line.
+        ("Administered medications for infection control, documented each dose in Epic for up to 6 patients", "claims infection control"),  # No capital for claims.py to see.
         ("Administered medications and documented every dose in Epic for up to 9 patients on a surgical unit", "unsupported number"),
-        ("Administered medications and documented every dose in the system for up to 6 patients on a surgical unit", "drops Epic"),
+        ("Administered medications and documented every dose in a chart for up to 6 patients on a surgical unit", "drops Epic"),
         ("Administered medications and documented every dose in Epic for several patients on a surgical floor", "drops 6"),
-        ("Cleared the backlog of old invoices and managed the budget in Epic for up to 6 people at the front desk", "loses too much"),
+        ("Reviewed old invoices and documented every dose in Epic for up to 6 people at the surgical front desk", "loses too much"),
     ],
 )
 def test_a_rewrite_that_adds_or_loses_a_fact_is_refused_for_that_reason(attempt, why):
     doc = one_bullet(NURSE)
-    keywords = ats.score(ats.terms("Requirements\nExperience with Kubernetes and Tableau.", ""), NURSE, NURSE + " Tableau")["keywords"]
+    keywords = ats.score(ats.terms("Requirements\nExperience with Kubernetes, Tableau and infection control.", ""), NURSE, NURSE + " Tableau")["keywords"]
     changes, refused = normal.apply_bullets(doc, [normal.PlanBullet(id="b1", text=attempt)], keywords)
     assert not changes and why in refused[0]["reason"], refused
     assert doc.sections[0].entries[0].bullets[0].text == NURSE
@@ -403,9 +405,10 @@ def test_far_over_isnt_a_slip_so_its_articles_stay_for_the_repair():
 
 
 def test_the_repair_gets_the_real_numbers_and_the_lines_own_terms():
-    long = NURSE + " and more"
+    long = NURSE.replace(" a ", " ") + " and then some more"
     _, refused = normal.apply_bullets(one_bullet(NURSE), [normal.PlanBullet(id="b1", text=long)], [])
-    assert f"it has {len(long)} characters" in refused[0]["reason"] and "cut at least 9" in refused[0]["reason"]
+    over = len(long) - len(NURSE)
+    assert refused[0]["attempt"] == long and f"it has {len(long)} characters" in refused[0]["reason"] and f"cut at least {over}" in refused[0]["reason"]
     _, short = normal.apply_bullets(one_bullet(NURSE), [normal.PlanBullet(id="b1", text=NURSE[:80])], [])
     assert f"add at least {normal.bullet_window(NURSE)[0] - len(NURSE[:80].strip())}" in short[0]["reason"]
     row = json.loads(normal.repair_prompt(refused, keywords_for("Requirements\nExperience with medication administration and Epic.", NURSE)))["bullets"][0]

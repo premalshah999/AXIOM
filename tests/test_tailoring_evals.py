@@ -98,25 +98,27 @@ def hostile(posting):
 
 
 def _trim(text: str, until: int) -> str:
-    """How a model pays for a term: little words first, last ones first, then words off the end that aren't figures or names."""
+    """How a model pays for a term: little words first, last ones first, then other plain words. Never a figure or a name."""
     while len(text) > until:
         hits = list(re.finditer(r"(?<![\w/-])(?:the|an?) ", text))
         if not hits:
             break
         text = text[: hits[-1].start()] + text[hits[-1].end() :]
     words = text.split()
-    while len(" ".join(words)) > until and len(words) > 3 and not re.search(r"[A-Z0-9]", words[-1]):
-        words.pop()
+    for i in range(len(words) - 1, 1, -1):
+        if len(" ".join(words)) <= until:
+            break
+        if words[i].isalpha() and words[i] == words[i].lower() and words[i] not in {"and", "to", "of", "by", "for", "in", "on", "with", "from"}:
+            del words[i]
     return " ".join(words).rstrip(",;")
 
 
 def _worked_in(text: str, say_as: list[str], lead_with: list[str]) -> str:
-    """A line as a fast model rewrites it: the job's term near the start, the words it replaces gone, every figure and name kept. It reads well enough, and it usually runs long."""
+    """A line as a fast model rewrites it: the job's term near the start, the words it replaces gone, every figure and name kept, and usually too long."""
     first, rest = text.split(" ", 1)
     if say_as:
         term = say_as[0]
         roots = {normal.stem(w) for w in re.findall(r"[a-z]+", term)}
-        opening = "Handled" if normal.stem(first) in roots else first
         kept = []
         for word in rest.split():
             root = normal.stem(re.sub(r"\W", "", word))
@@ -124,17 +126,22 @@ def _worked_in(text: str, say_as: list[str], lead_with: list[str]) -> str:
                 roots.discard(root)
                 continue
             kept.append(word)
-        return f"{opening} {term} {' '.join(kept)}"
+        if normal.stem(first) in roots:
+            return f"Handled {term} {' '.join(kept)}"
+        return f"For {term}, {first.lower()} {' '.join(kept)}"
     for term in lead_with:
         found = re.search(ats.pattern_for(term), rest, re.I | re.A)
         if found:
             before = re.sub(r"\b(?:in|with|using|on|and|via)\s*$", "", rest[: found.start()])
-            return re.sub(r"\s+([,;.])", r"\1", re.sub(r"\s{2,}", " ", f"{first} {found.group(0)} {before}{rest[found.end() :]}")).strip()
+            body = re.sub(r"\s+([,;.])", r"\1", re.sub(r"\s{2,}", " ", f"{before}{rest[found.end() :]}")).strip()
+            return f"Using {found.group(0)}, {first.lower()} {body}"
     return text
 
 
 def sloppy(posting):
     """A real model on a real resume: mostly honest, near its character limits rather than inside them, and now and then it reaches for something the line doesn't say."""
+    turn = sum(map(ord, posting["title"]))  # Which line slips differs by posting, because most postings offer only a line or two.
+    seen = {}
 
     def lie(row, i, data):
         other = [t for t in data["summary_terms"] if t not in row["say_as"] + row["lead_with"]]
@@ -148,19 +155,19 @@ def sloppy(posting):
             lines = []
             for i, row in enumerate(data["bullets"]):
                 text = _worked_in(row["text"], row["say_as"], row["lead_with"])
-                slip = i % 6
+                slip = (i + turn) % 6
                 if slip == 4:
-                    text = lie(row, i // 6, data)
+                    text = lie(row, turn, data)
                 elif slip == 2:
                     text = _trim(text, row["min_chars"] - 3)  # Cut too hard.
                 else:
-                    text = _trim(text, row["max_chars"] + (3, 9, 0, 0, 0, 18)[slip])
+                    text = _trim(text, row["max_chars"] + (3, 9, 0, -2, 0, 18)[slip])
                 lines.append(normal.PlanBullet(id=row["id"], text=text))
-            title = data["roles"][0].split(" at ")[0]
+            title = seen["title"] = data["roles"][0].split(" at ")[0]
             terms = data["summary_terms"][:3]
             evidence = (data["bullets"] and data["bullets"][0]["text"]) or (data["also_on_resume"] or [""])[0]
             summary = (f"{title} working with {', '.join(terms)}. " if terms else f"{title}. ") + _trim(evidence, 150).rstrip(".") + "."
-            if len(posting["title"]) % 3 == 0:
+            if turn % 3 == 0:
                 summary = summary.replace(title, posting["title"], 1)  # It flatters them with the job's own title.
             return normal.NormalPlan(summary=summary, bullets=lines, skills_to_add=[*terms, "Kubernetes"])
         if output_type is normal.BulletRepair:
@@ -168,18 +175,18 @@ def sloppy(posting):
             for i, row in enumerate(data["bullets"]):
                 source, why = row["source"], row["refused_because"]
                 say = [t for t in row["may_use"] if not ats.matches(ats.pattern_for(t), source)]
-                if i % 5 == 4:
+                if (i + turn) % 7 == 6:
                     continue  # It gives up on some, and their originals stay.
                 if "cut at least" in why:
-                    text = _trim(row["attempt"], row["max_chars"] + (2 if i % 4 == 3 else -1))  # One in four is still a little over.
-                elif i % 3 == 2:
+                    text = _trim(row["attempt"], row["max_chars"] + (2 if (i + turn) % 4 == 3 else -1))  # One in four is still a little over.
+                elif (i + turn) % 5 == 4:
                     text = source[:-14] + " with COBOL"  # It lies again, and that's the end of it.
                 else:
                     text = _trim(_worked_in(source, say, row["may_use"]), row["max_chars"] - 1)
                 lines.append(normal.PlanBullet(id=row["id"], text=text))
             return normal.BulletRepair(bullets=lines)
         if output_type is normal.SummaryRepair:
-            return normal.SummaryRepair(summary=f"{data['history'].splitlines()[0]} with experience in {', '.join(data['summary_terms'][:2]) or 'this field'}.")
+            return normal.SummaryRepair(summary=f"{seen['title']} with experience in {', '.join(data['summary_terms'][:2]) or 'this field'}.")
         return output_type()
 
     return model
@@ -249,7 +256,7 @@ def test_a_model_that_misses_limits_by_a_little_still_lands_its_honest_edits(tmp
         after = ats.score(ctx.ats_terms, doc_plain(result.doc), " ".join([doc_plain(doc), ctx.evidence.vocabulary]))["score"]
         assert after >= before
         risen += after > before
-    assert offered >= 15, offered  # What the postings can honestly offer on these resumes; if this falls, bullets stopped being offered.
+    assert offered >= 12, offered  # What these short postings can honestly offer on these resumes. If it falls, bullets stopped being offered.
     assert changed >= offered * 0.6, (changed, offered)
     assert risen >= 5, risen
 

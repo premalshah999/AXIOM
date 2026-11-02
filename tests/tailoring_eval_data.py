@@ -150,6 +150,16 @@ POSTINGS = [
 assert len(POSTINGS) == 20
 
 
+# A profile usually says a little more than the one resume does: real skills this resume left off.
+_ALSO_IN_PROFILE = {
+    "Alex Example": ["Looker", "A/B testing", "Data Modeling"],
+    "Sam Sample": ["HIPAA", "Infection Control", "Telemetry"],
+    "Jordan Placeholder": ["NetSuite", "Vendor Management", "Budgeting"],
+    "Riley Testcase": ["HubSpot", "SEO", "Copywriting"],
+    "Casey Fixture": ["PostgreSQL", "AWS", "CI/CD"],
+}
+
+
 def profile_of(doc: ResumeDoc) -> dict:
     skills = []
     for s in doc.sections:
@@ -161,4 +171,4 @@ def profile_of(doc: ResumeDoc) -> dict:
         if s.kind == "experience":
             for e in s.entries:
                 work.append({"company": e.subheading, "title": e.heading, "start": e.dates[:7], "description": "\n".join("- " + b.text for b in e.bullets)})
-    return {"name": doc.name, "email": doc.contact[0], "skills": skills, "work": work}
+    return {"name": doc.name, "email": doc.contact[0], "skills": [*skills, *_ALSO_IN_PROFILE.get(doc.name, [])], "work": work}
