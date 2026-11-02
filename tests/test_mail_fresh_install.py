@@ -331,3 +331,31 @@ def test_a_run_its_mail_released_is_not_spaced_as_a_new_application(service):
         woken = {"id": "n", "packet": {"email_wait_resume": {"challenge_id": "c"}}}
         assert not may_start(s, row, fresh)
         assert may_start(s, row, woken)
+
+
+async def test_a_code_sent_just_before_the_adapter_arms_is_accepted(client, service, imap):
+    """The adapter's request time (the click that sent the mail, during navigation) must reach the window: a fast sender's
+    code arrives seconds before the adapter arms, and a window opened "now" never saw it."""
+    service.config.mail_poll_seconds = 0.1
+    spec = PLATFORMS["greenhouse"]
+    onboard(client)
+    job, run = start_run(service, spec["url"], spec["ats"], spec["company"])
+    with service.db.exclusive() as s:
+        s.get(Run, run["id"]).started_at = "2020-01-01T00:00:00+00:00"
+    clicked = time.time() - 5
+    code = deliver(imap, "greenhouse", "code", code=fresh_code(), when=time.time() - 2)
+    challenge = await service.inbox.arm(run["id"], job, ME, "code", since=clicked)
+    assert challenge["since"] <= clicked + 0.001
+    assert (await service.inbox.wait(challenge, max_wait_seconds=4))["value"] == code
+
+
+async def test_a_code_from_before_the_request_is_still_rejected(client, service, imap):
+    service.config.mail_poll_seconds = 0.1
+    spec = PLATFORMS["greenhouse"]
+    onboard(client)
+    job, run = start_run(service, spec["url"], spec["ats"], spec["company"])
+    deliver(imap, "greenhouse", "code", code=fresh_code(), when=time.time() - 300)  # a previous run's code
+    challenge = await service.inbox.arm(run["id"], job, ME, "code", since=time.time() - 900)
+    assert time.time() - challenge["since"] <= 31  # bounded, never the whole run
+    with pytest.raises(Exception):
+        await service.inbox.wait(challenge, max_wait_seconds=2)
