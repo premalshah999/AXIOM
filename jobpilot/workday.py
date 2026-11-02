@@ -12,7 +12,7 @@ from .ats import detect
 from .db import Setting, now
 from .mail import origin
 from .mail_errors import MailPending
-from .accounts import AccountStore
+from .accounts import AccountStore, password_rules
 
 # A not-found page that the employer's own search can neither confirm nor deny (it errored, timed out, or answered with
 # something unreadable) never closes a posting: the job is tried again later, and after this many distinct runs it stops
@@ -258,6 +258,8 @@ class WorkdayAuth:
         self.responses = []
         self.watching = False
         self.page_recoveries = 0
+        self.own_password = False  # This run fell back to a random password after the employer refused the main one.
+        self.main_tried = False  # This run tried the main password after the saved one was refused.
 
     def account_key(self):
         e = self.engine
@@ -296,6 +298,10 @@ class WorkdayAuth:
 
     def shared_credentials(self):
         return AccountStore(self.engine.service, self.engine.form.resolver.profile.email).shared()
+
+    def random_password(self, said, refused):
+        """A random password that meets what the page states, for an employer that refused the main one (password_rules)."""
+        return AccountStore(self.engine.service, self.engine.form.resolver.profile.email).fallback(said, tried=[refused])
 
     async def clear(self):
         for field in self.secrets:
@@ -826,6 +832,18 @@ class WorkdayAuth:
             for _ in range(60):
                 await asyncio.sleep(0.25)
                 body = await page.locator("body").inner_text()
+                error = await self.auth_error()
+                if error and not self.own_password and password_rules.refused(error):
+                    # The main password is the first choice. A page that refuses it (rules, "different from your previous 3
+                    # passwords") gets a random one that meets what it states, saved below only once it is accepted.
+                    self.own_password = True
+                    credentials = {**credentials, "password": self.random_password(error + " " + body, credentials["password"])}
+                    e.emit("account", "The employer refused the main password; using a random one that meets its rules")
+                    for field in await fields.all():
+                        self.secrets.append(await field.element_handle())
+                        await self.enter(field, credentials["password"])
+                    await self.click(visible[0], auth_submit=True)
+                    continue
                 if re.search(
                     r"password (?:has been|was) (?:successfully )?(?:changed|reset)|"
                     r"password (?:reset|change) (?:was )?successful|"
@@ -1150,6 +1168,29 @@ class WorkdayAuth:
                         if await link.count():
                             await self.click(link)
                             await asyncio.sleep(0.5)
+                        continue
+                    if action == "create" and not self.own_password and password_rules.refused(error):
+                        # The main password was the first choice; this employer gets a random one that meets what its page
+                        # states, kept for it alone and saved before the second Create, as the first was.
+                        self.own_password = True
+                        login = stored or self.shared_credentials()
+                        said = error + " " + await page.locator("body").inner_text()
+                        self.save_credentials({**login, "password": self.random_password(said, login["password"])}, "created_locally")
+                        e.emit("account", "The employer refused the main password; creating the account with a random one that meets its rules")
+                        continue
+                    main = e.service.config.application_password
+                    if (
+                        action == "sign_in"
+                        and WRONG.search(error)
+                        and stored
+                        and main
+                        and stored["password"] != main
+                        and not self.main_tried
+                    ):
+                        # The saved password was refused: the main one is the next candidate, before any reset.
+                        self.main_tried = True
+                        self.save_credentials({**stored, "password": main}, self.account_state or "exists")
+                        e.emit("account", "The saved password was refused; trying the main password")
                         continue
                     if UNVERIFIED.search(error) and not self.activated:
                         if self.created_at is None:

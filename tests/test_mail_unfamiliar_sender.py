@@ -201,6 +201,9 @@ async def test_a_code_window_never_learns_a_sender_from_a_link(service):
         ("custom", "https://jobs.lever.co/acme/1b2c3d4e-0000-4000-8000-000000000001", False),
         ("custom", "", False),
         ("custom", "ftp://careers.acme.test/jobs/1", False),
+        # An employer's own host is its own whichever platform runs behind it.
+        ("avature", "https://jobs.acme.test/en_US/careers/JobDetail/Analyst/1", True),
+        ("eightfold", "https://apply.careers.acme.test/careers/job/1", True),
         # The platform's own front door: many employers on one host.
         ("eightfold", "https://app.eightfold.ai/careers/job/687?domain=acme.test", False),
         ("taleo", "https://www.taleo.net/careersection/ext/jobdetail.ftl?job=1", False),

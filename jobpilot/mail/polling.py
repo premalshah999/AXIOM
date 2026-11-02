@@ -75,11 +75,18 @@ LEARNING_SUBJECTS = {
 }
 
 
+def own_site(host):
+    """A host no platform in the registry owns: the employer's own career site, whatever platform runs behind it (jobs.ea.com is
+    Avature, apply.careers.microsoft.com is Eightfold)."""
+    from ..ats import REGISTRY
+
+    return not any(host == d or host.endswith("." + d) for platform in REGISTRY for d in platform.domains)
+
+
 def employer_only_host(ats, url):
     """Whether this posting's host is used by this employer alone: a platform tenant's own host, or the employer's own career
-    site (a host no platform in the registry owns). A short link or a shared portal is nobody's own."""
+    site. A short link or a shared portal is nobody's own."""
     from ..admission import SHARED_LINK_HOSTS, SHARED_PORTAL_HOSTS
-    from ..ats import detect
 
     try:
         parts = urlsplit(url or "")
@@ -88,14 +95,14 @@ def employer_only_host(ats, url):
         return False
     if parts.scheme not in {"https", "http"} or not host or host in SHARED_LINK_HOSTS | SHARED_PORTAL_HOSTS:
         return False
-    if ats == "custom":
-        return detect(url).id == "custom"
+    if own_site(host):
+        return True
     pattern = TENANT_HOSTS.get(ats)
     return bool(pattern and pattern.fullmatch(host)) and host.split(".")[0] not in NOT_A_TENANT
 
 
 def another_employer_on_site(session, job, url):
-    """A job of another company on this very origin: a "custom" host the registry does not know and several employers use.
+    """A job of another company on this very origin: a career-site host the registry does not know and several employers use.
     Its links say nothing about whose mail it is. A wrong application needs a second job in this database, so looking there
     closes the case on any install."""
 
@@ -105,6 +112,21 @@ def another_employer_on_site(session, job, url):
     mine = squashed(job.company)
     others = session.scalars(select(Job.company).where(Job.url.like(origin(url) + "/%"), Job.id != job.id).distinct())
     return any(squashed(name) and squashed(name) != mine for name in others)
+
+
+def can_learn_sender(session, job, posting, rule, kind):
+    """Whether a link in this window can prove a sender nobody listed (employer_step): only on the posting's own origin, on a
+    host that belongs to this employer alone. Never a code window: a code has no origin to check."""
+    if not job or not rule or kind not in {"link", "password_reset"}:
+        return False
+    try:
+        return bool(
+            employer_only_host(job.ats, posting)
+            and origin(posting) == rule.get("employer_origin")
+            and not (own_site((urlsplit(posting).hostname or "").lower()) and another_employer_on_site(session, job, posting))
+        )
+    except ValueError:
+        return False
 
 
 def employer_step(link, employer_origin):
@@ -316,13 +338,7 @@ class PollingMixin:
                     # exactly the origin only this employer uses can prove that sender; a host shared by many employers
                     # cannot (employer_only_host).
                     posting = self.posting_url(job.url, s) if job else ""
-                    c["sender_learning"] = bool(
-                        job
-                        and c["kind"] in {"link", "password_reset"}
-                        and employer_only_host(job.ats, posting)
-                        and origin(posting) == (rule or {}).get("employer_origin")
-                        and not (job.ats == "custom" and another_employer_on_site(s, job, posting))
-                    )
+                    c["sender_learning"] = can_learn_sender(s, job, posting, rule, c["kind"])
                 if not rule:
                     self.outcome(c["id"], "cancelled", "Verification rule was removed or disabled")
                     continue
