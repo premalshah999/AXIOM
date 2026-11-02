@@ -373,3 +373,27 @@
   color: var(--ink-2);
   font-size: var(--text-meta);
 }
+
+/* What a job in line waits on: the whole sentence in its column, and under the job where the column doesn't fit. */
+.qu-wait {
+  display: block;
+  white-space: normal;
+  color: var(--ink-3);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+.qu-wait-small {
+  display: none;
+}
+@media (max-width: 860px) {
+  .qu-wait-small {
+    display: block;
+    flex-basis: 100%;
+    white-space: normal;
+  }
+}
+.qu-asks {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}

@@ -65,7 +65,10 @@ def current(service, leave=frozenset()):
     db = service.db
     data = board(service).ready(service)
     cfg = settings(db)
-    said = {"mode": mode(db), "size": cfg.review_size, "at": now()}
+    from .queue_order import dispatching
+
+    # `dispatching`: automatic applying is on and its batch is running. Over (its goal reached, or yesterday's), only a batch accepted here starts.
+    said = {"mode": mode(db), "dispatching": dispatching(db), "size": cfg.review_size, "at": now()}
     if data is None:
         return {**said, "planning": True, "id": "", "rows": [], "more": 0, "checking": 0, "searching": False}
     rows = {r["id"]: r for r in data["rows"]}

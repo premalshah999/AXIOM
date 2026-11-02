@@ -112,6 +112,21 @@ def _get(row, name, default=None):
     return row.get(name, default) if isinstance(row, dict) else getattr(row, name, default)
 
 
+def platform_room(session, ats):
+    """How many more applications this platform takes right now by require_ats_admission's numbers: None when it sets no limit. One
+    with a gap between starts takes one, and then the gap holds the rest."""
+    limit = ats_limit(session, ats)
+    room = None if limit is None else max(0, limit - _ats_active(session, ats, None, ["queued", "running", "submitting"]))
+    if ats in START_GAPS:
+        return 1 if room is None else min(1, room)
+    return room
+
+
+def platform_words(ats):
+    """A platform's name as a person writes it."""
+    return {"smartrecruiters": "SmartRecruiters", "icims": "iCIMS", "adp": "ADP", "successfactors": "SuccessFactors"}.get(ats, (ats or "This platform").title())
+
+
 def _exempt(job, run):
     # A run its employer's mail released holds that mail and has not started anything new. Spaced as a new application, Ashby's
     # 150 s and Workable's 600 s gaps kept a matched reset waiting, and a matched code can expire in that time (2026-11-01).

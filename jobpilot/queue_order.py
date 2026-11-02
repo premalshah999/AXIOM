@@ -92,7 +92,7 @@ def dispatching(db):
 
 def plan(service, value=None):
     """Up next, in order, with why each one waits. Reads on the calling (worker) thread."""
-    from .admission import capacity
+    from .admission import attempted_job_ids, capacity
     from .db import Job, Run, Setting, now
     from .owner_apply import KEY, request_order
     from .pipeline_comparison import CUSTOM, NORMAL, pool_capacity
@@ -124,6 +124,10 @@ def plan(service, value=None):
         occupied = set(capacity(s, config.workers).employers)
     requests = [(job_id, v) for job_id, v in waiting if job_id in rows and job_id not in started]
     asked = {job_id for job_id, _ in requests}
+    # The reading is up to a minute old and this replays every few seconds: a job that has started since is under Applying now, not
+    # also in line behind itself (seen 2026-11-02: Up next 20 with the first three already running).
+    with db.session() as s:
+        gone = attempted_job_ids(s, value.get("ids", []))
 
     def request_item(job_id, request):
         row = rows[job_id]
@@ -131,7 +135,7 @@ def plan(service, value=None):
             {
                 "id": job_id, "title": row.title, "company": row.company, "location": row.location, "url": row.url, "ats": row.ats,
                 "score": row.score, "status": row.status, "posted_at": row.created_at or "", "career_level": "",
-                "front": bool(request.get("front")), "reason": request.get("reason", ""), "not_before": request.get("not_before", ""),
+                "front": bool(request.get("front")), "reason": request.get("reason", ""), "not_before": request.get("not_before", ""), "code": request.get("code", ""),
             },
             "front" if request.get("front") else "retry" if job_id in attempted else "request",
         )
@@ -146,41 +150,126 @@ def plan(service, value=None):
     # The line is what the dispatcher will start. With automatic applying off, or its target reached, it starts only what was asked
     # for: 70 jobs read "In queue" here with no way to queue them and no worker coming for them (2026-11-01).
     automatic = dispatching(db)
-    fresh = [_item(value["details"][jid], "auto") for jid in value.get("ids", []) if jid not in asked and jid in value.get("details", {})] if automatic else []
+    fresh = [_item(value["details"][jid], "auto") for jid in value.get("ids", []) if jid not in asked and jid not in gone and jid in value.get("details", {})] if automatic else []
     retries = [request_item(j, v) for j, v in ordered if retry(j, v) and (v.get("not_before") or "") <= moment]
     later = [request_item(j, v) for j, v in ordered if (v.get("not_before") or "") > moment]
+    # What the person queued and the platform's pace turned away waits on that pace like the rest of the line: 70 accepted Ashby jobs each
+    # hold a `not_before` from their last refusal, and they are why the workers are free.
+    turned_away = [item for item in later if item.get("code") == "ats_pacing"]
+    later = [item for item in later if item.get("code") != "ats_pacing"]
     preparing = [item for item in fresh if item.get("tailoring")]
+    fresh = [item for item in fresh if not item.get("tailoring")]
     # Held by the platform's own pace (one at a time, a pause between starts): a free worker does not take these now, so they are
     # neither "the next free worker" nor counted in the exact picks. They say why and when instead (2026-11-02: workers sat idle
-    # behind a line of Ashby jobs and the page promised each one the next free worker).
-    paced = [item for item in fresh if item.get("paced") and not item.get("tailoring")]
-    fresh = [item for item in fresh if not item.get("tailoring") and not item.get("paced")]
-    picks, stuck = replay([*now_asked, *fresh, *retries], rooms, occupied, [(employer, "normal") for employer in sorted(occupied)])
+    # behind a line of Ashby jobs and the page promised each one the next free worker). Read now, not from the minute-old reading, and
+    # for what the person asked for too, in line order: of ten Ashby jobs with nothing running, one can start.
+    pace = Pace(db)
+    paced, taking = [], []
+    for item in [*now_asked, *fresh, *retries]:
+        held = pace.of(item)
+        if held:
+            paced.append({**item, "paced": held})
+        else:
+            taking.append(item)
+    for item in turned_away:
+        paced.append({**item, "paced": pace.of(item) or {"until": item["not_before"], "reason": _later_words(item), "timed": True}})
+    picks, stuck = replay(taking, rooms, occupied, [(employer, "normal") for employer in sorted(occupied)])
     free = sum(max(0, n) for n in rooms.values())
     custom_off = not topology.custom
-    out = []
+    # What the person moved to the front stays at the front, saying what its platform makes it wait for: "Moved to the front" with the row
+    # sitting behind the others read as a button that did nothing.
+    first = [item for item in paced if item["kind"] == "front"]
+    paced = [item for item in paced if item["kind"] != "front"]
+    out = [{**item, "wait": item["paced"]["reason"]} for item in first]
     for item, delayed in picks:
         out.append({**item, "wait": _wait(item, delayed)})
     for item in stuck:
         out.append({**item, "wait": "Company-site applications are off in Settings, so this one waits." if custom_off and item["lane"] == "custom" else "Waiting for a worker."})
-    for item in sorted(paced, key=lambda i: i["paced"].get("until") or ""):
+    for item in sorted(paced, key=lambda i: i["paced"].get("until") or "9"):
         out.append({**item, "wait": item["paced"]["reason"]})
     for item in preparing:
         out.append({**item, "wait": "Preparing a tailored resume first. It joins the line when that is ready."})
     for item in later:
-        out.append({**item, "wait": item.get("reason") or "Waiting before it is tried again."})
+        out.append({**item, "wait": _later_words(item)})
     for position, item in enumerate(out, 1):
         item["position"] = position
+    from .application_pacing import START_GAPS, ats_limit, platform_words
+
+    held_back = [*first, *paced]
+    per_platform = {}
+    for item in held_back:
+        per_platform[item["ats"]] = per_platform.get(item["ats"], 0) + 1
+    with db.session() as s:
+        paced_by = [
+            {"name": platform_words(ats), "count": count, "gap": START_GAPS.get(ats, 0), "limit": ats_limit(s, ats)}
+            for ats, count in sorted(per_platform.items(), key=lambda kv: -kv[1])
+        ]
     return {
         "at": datetime.now(UTC).isoformat(),
         "next": out,
         "positions": {item["id"]: item["position"] for item in out},
         # How many of the first rows are exact while nothing changes: what a free worker takes on the next pass.
-        "exact": min(free, len(picks)),
+        "exact": len(first) + min(free, len(picks)),
         "free": free,
+        "rooms": rooms,
+        # What can take a worker the moment one looks: not behind a busy employer, a full lane or a platform's pace (waiting.py).
+        "startable_now": sum(1 for _, delayed in picks if not delayed),
+        "paced": len(held_back),
+        "paced_by": paced_by,
+        # When the next one held by a known time can start. None known: it starts when the one under way ends.
+        "next_due": min([*(item["paced"]["until"] for item in held_back if item["paced"].get("timed") and item["paced"].get("until")), *(item["not_before"] for item in later)], default=""),
+        # What else holds the rest of the line, for the sentence at its top (waiting.py).
+        "later": len(later),
+        "preparing": len(preparing),
+        "employer_waits": sum(1 for _, delayed in picks if delayed == "employer"),
+        "lane_waits": sum(1 for _, delayed in picks if delayed == "lane") + len(stuck),
         "decides": decides(profile.job_priority, automatic),
         "reading": value,
     }
+
+
+def _later_words(item):
+    """Why a request waits for a time. A platform's pace is the engine's own wording in `reason` ("1 icims application(s) already queued
+    or active"), so it is said again in the words the rest of the line uses."""
+    if item.get("code") == "ats_pacing":
+        from .application_pacing import platform_words
+
+        return f"{platform_words(item['ats'])} takes a limited number of applications at a time. This one tries again shortly."
+    return item.get("reason") or "Waiting before it is tried again."
+
+
+class Pace:
+    """What each platform's own pace holds right now, walked in line order. The platform's limit and gap are one reading per platform
+    for one plan; a site limit (Oracle: one per employer site) is the job's own."""
+
+    def __init__(self, db):
+        self.db, self.held, self.room, self.behind = db, {}, {}, {}
+
+    def of(self, item):
+        """{"until", "reason"} when the platform's pace holds this job, else None. A job the platform has room for takes that room."""
+        from .application_pacing import SITE_LIMITS, platform_room
+        from .startable import pace_behind, pacing_wait
+
+        ats = item["ats"]
+        key = item["id"] if ats in SITE_LIMITS else ats
+        if key not in self.held:
+            self.held[key] = pacing_wait(self.db, item["id"], ats)
+        if self.held[key]:
+            return self._behind(ats, self.held[key], pace_behind)
+        if ats not in self.room:
+            with self.db.session() as s:
+                self.room[ats] = platform_room(s, ats)
+        if self.room[ats] is None:
+            return None
+        if self.room[ats] > 0:
+            self.room[ats] -= 1
+            return None
+        return self._behind(ats, {"until": ""}, pace_behind)
+
+    def _behind(self, ats, first, words):
+        ahead = self.behind.get(ats, 0)
+        self.behind[ats] = ahead + 1
+        return first if first.get("reason") and not ahead else words(ats, first, ahead)
 
 
 def _wait(item, delayed):
@@ -219,6 +308,23 @@ class Plans:
         if (self.value is None or time.monotonic() - self.at >= TTL) and self.busy.acquire(blocking=False):
             threading.Thread(target=self._fill, args=(service,), name="queue-plan", daemon=True).start()
         return self.value
+
+    def recent(self, service, within=30):
+        """For what only needs the gist (Overview's sentence, every few seconds): the latest plan, replayed in the background once it is
+        `within` seconds old, so a plain poll doesn't replay the whole line each time."""
+        if self.value is None or time.monotonic() - self.at >= within:
+            return self.ready(service)
+        return self.value
+
+    def current(self, service, within=20):
+        """For the Queue's own page, on a worker thread. A plan nobody has read for a while is from before whatever happened since: the
+        first read after Start showed "Nothing is in line" over 20 jobs. A cold start still paints at once and asks again."""
+        if self.value is not None and time.monotonic() - self.at >= within:
+            try:
+                return self.now(service)
+            except Exception:
+                logging.getLogger(__name__).exception("The Queue could not be planned")  # The last plan is still the best answer.
+        return self.ready(service)
 
     def now(self, service):
         """Replay now, on the calling worker thread: the user just moved something and the next read must show it."""

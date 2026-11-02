@@ -14,7 +14,8 @@ import { Pagination, type Paging } from "./pagination";
 import { TopActions, TopLine } from "./shell/Shell";
 import type { HeldPage, HeldRow, QueueItem, QueuePage, QueueRetry, QueueRunning } from "./types";
 import { Button, Empty, Listbox, Monogram, Skeleton, Table, type Column } from "./ui/index";
-import { ConfirmButton, JobCell, LoadError, Note, RowMenu, type MenuAction } from "./worktools";
+import { ConfirmButton, JobCell, LoadError, Note, Notice, RowMenu, type MenuAction } from "./worktools";
+import { WhyAction, WhyAsks, whyLine } from "./whywaiting";
 import "./styles/queue.css";
 
 const webLink = (url: string) => (/^https?:\/\//i.test(url) ? url : "");
@@ -108,9 +109,12 @@ export function QueueView() {
           Add a link
         </Button>
       </TopActions>
-      {q && <TopLine><StatusLine q={q} onSettings={() => go({ view: "settings", tab: "applying" })} /></TopLine>}
+      {q && <TopLine><StatusLine q={q} /></TopLine>}
       {queue.error && !q && <LoadError error={queue.error} retry={queue.refresh} />}
       {!q && !queue.error && <Skeleton rows={8} />}
+      {!!q?.why?.ask && <Notice tone="info" action={<span className="qu-asks"><WhyAsks ask={q.why.ask} /></span>}>{q.why.ask.says}</Notice>}
+      {!!q?.why?.battery && <Notice tone="warn">{q.why.battery}</Notice>}
+      {!!q?.why?.slow && <Notice tone="info">{q.why.slow}</Notice>}
       {q && (
         <>
           <Running q={q} paused={snapshot.control.paused} />
@@ -157,32 +161,29 @@ export function QueueView() {
   );
 }
 
-// The one sentence under the title: running or not, and why not.
-function StatusLine({ q, onSettings }: { q: QueuePage; onSettings: () => void }) {
+// The one sentence under the title: running or not, and why not (jobpilot/waiting.py, the answer Overview shows too).
+function StatusLine({ q }: { q: QueuePage }) {
   const running = q.running.filter((r) => r.state !== "queued").length;
-  if (q.paused)
+  const why = q.why?.reason;
+  if (why)
     return (
       <>
-        Paused. Nothing starts until you resume{q.running.length ? `, and ${plural(q.running.length, "application")} already under way finish${q.running.length === 1 ? "es" : ""}` : ""}.
+        {running > 0 && !why.blocking ? `Applying to ${plural(running, "job")} now. ` : ""}
+        {whyLine(why)} <WhyAction reason={why} />
       </>
     );
-  if (q.stopped) return <>{q.stopped}</>;
-  if (!q.auto_submit)
-    return (
-      <>
-        Sending is off in Settings, so nothing starts{q.total ? ` and these ${plural(q.total, "job")} wait` : ""}.{" "}
-        <button type="button" className="ax-link" onClick={onSettings}>
-          Open Settings
-        </button>
-      </>
-    );
-  if (running) return <>Applying to {plural(running, "job")} now. The next one starts as soon as a worker is free.</>;
-  if (!q.total) return q.dispatching === false ? <>Nothing is in line. Only jobs you queue start, one click on the Job board or a batch you accept.</> : <>Nothing is in line right now.</>;
+  if (running) {
+    // Regular workers are all busy, and the page shows others idle: those never take a regular new job.
+    const kept = q.workers.normal_free === 0 ? q.workers.specialist + q.workers.custom : 0;
+    return <>Applying to {plural(running, "job")} now. The next one starts as soon as a worker is free.{kept && q.total ? ` ${plural(kept, "other worker")} ${kept === 1 ? "is" : "are"} kept for company sites and hard retries.` : ""}</>;
+  }
+  if (!q.total) return <>Nothing is in line right now.</>;
   return <>Nothing is running this moment. The next job starts within a few seconds.</>;
 }
 
 // ---------- applying now ----------
 const LOOKS: Record<string, string> = { queued: "Waiting for a free worker", waiting_email: "Waiting on an emailed code" };
+const STOPPED_LOOK = "Waits until you press Resume";
 
 function Running({ q, paused }: { q: QueuePage; paused: boolean }) {
   const { openJob, refresh } = useWorkspace();
@@ -236,7 +237,7 @@ function Running({ q, paused }: { q: QueuePage; paused: boolean }) {
         <ol className="qu-live">
           {rows.map((r: QueueRunning) => {
             const words = jobWords(r);
-            const doing = ((r.state === "queued" && r.gate) || LOOKS[r.state]) ?? progressOf(r.state, r.phase ? progressFrom([{ kind: r.phase }]) : null).doing;
+            const doing = (r.state === "queued" && paused ? STOPPED_LOOK : (r.state === "queued" && r.gate) || LOOKS[r.state]) ?? progressOf(r.state, r.phase ? progressFrom([{ kind: r.phase }]) : null).doing;
             const elapsed = r.since ? (now - new Date(r.since).getTime()) / 1000 : 0;
             const pausable = r.state === "running" || r.state === "queued";
             return (
@@ -299,7 +300,7 @@ function Running({ q, paused }: { q: QueuePage; paused: boolean }) {
         </ol>
         </div>
       ) : (
-        <p className="qu-none">{paused ? "Nothing is running. Applying is paused." : "Nothing is running right now."}</p>
+        <p className="qu-none">{paused ? "Nothing is running. Applying is stopped." : "Nothing is running right now."}</p>
       )}
     </section>
   );
@@ -330,6 +331,8 @@ function NextTable({
   bulk: React.ReactNode;
 }) {
   const { openJob } = useWorkspace();
+  // Every job in line says what it waits on (the server fills it for every row).
+  const waitsOn = (i: QueueItem) => i.wait;
   const columns: Column<QueueItem>[] = useMemo(
     () => [
       { key: "at", header: <span title="Its place in the line">#</span>, num: true, cell: (i) => <span className="qu-pos mono">{i.position}</span> },
@@ -346,6 +349,7 @@ function NextTable({
               <>
                 {shownFit(i) != null && <span className="mono">Fit {shownFit(i)}</span>}
                 {i.location && <span>{i.location}</span>}
+                <span className="qu-wait-small">{waitsOn(i)}</span>
               </>
             }
           />
@@ -353,7 +357,7 @@ function NextTable({
       },
       { key: "where", header: "Location", hideBelow: 860, width: 150, truncate: true, cell: (i) => <Note>{i.location || "Not listed"}</Note> },
       { key: "fit", header: "Fit", num: true, hideBelow: 600, cell: (i) => (shownFit(i) == null ? "—" : shownFit(i)) },
-      { key: "why", header: "Waiting on", hideBelow: 860, width: 300, truncate: true, cell: (i) => <Note title={i.wait}>{i.wait || (i.position <= q.exact ? "The next free worker." : "")}</Note> },
+      { key: "why", header: "Waiting on", hideBelow: 860, width: 300, wrap: true, cell: (i) => <span className="qu-wait">{waitsOn(i)}</span> },
       { key: "platform", header: "Platform", hideBelow: 860, cell: (i) => <Note>{platformName(i.ats)}</Note> },
       {
         key: "act",
@@ -388,7 +392,7 @@ function NextTable({
         },
       },
     ],
-    [openJob, onFront, onRemove, pending, q.exact],
+    [openJob, onFront, onRemove, pending],
   );
   if (planning) return <Skeleton rows={6} />;
   return (

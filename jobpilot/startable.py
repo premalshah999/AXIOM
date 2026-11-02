@@ -72,9 +72,18 @@ def span_words(seconds):
     return f"about {hours} hour{'' if hours == 1 else 's'}"
 
 
+def gap_words(seconds):
+    """A platform's fixed gap, exact, because it is a rule and not an estimate: "2.5 minutes", "10 minutes" (span_words rounded 150 s to 2)."""
+    minutes = seconds / 60
+    text = f"{minutes:g}"
+    return f"{text} minute{'' if text == '1' else 's'}"
+
+
 def pace_sentence(ats, exc, now_ts=None):
     """Why a job the dispatcher would otherwise start waits on its platform's pace, and when it is due, in plain words."""
-    name = {"smartrecruiters": "SmartRecruiters", "icims": "iCIMS", "adp": "ADP", "successfactors": "SuccessFactors"}.get(ats, (ats or "This platform").title())
+    from .application_pacing import platform_words
+
+    name = platform_words(ats)
     detail = exc.detail or {}
     try:
         due = datetime.fromisoformat(exc.not_before).timestamp() - (now_ts or time.time()) if exc.not_before else 60
@@ -84,7 +93,7 @@ def pace_sentence(ats, exc, now_ts=None):
     kind = detail.get("pace")
     if kind == "gap":
         gap = detail.get("seconds", 0)
-        return f"{name} takes one application at a time, {span_words(gap).removeprefix('about ')} apart, so employers there are not flooded. {when}"
+        return f"{name} takes one application at a time, {gap_words(gap)} apart, so employers there are not flooded. {when}"
     if kind == "throttle":
         return f"{name} refused the last application as too many, so new ones wait until it accepts again. {when}"
     if kind == "limit":
@@ -107,8 +116,32 @@ def pacing_wait(db, job_id, ats):
             require_ats_admission(s, s.get(Job, job_id), owner_pick=True)
         except QueueBlocked as exc:
             if exc.code == "ats_pacing":
-                return {"until": exc.not_before or "", "reason": pace_sentence(ats, exc)}
+                # `timed`: `until` is when it can start. Otherwise it is only when the dispatcher looks again: it starts when the one under way ends.
+                kind = (exc.detail or {}).get("pace")
+                return {"until": exc.not_before or "", "reason": pace_sentence(ats, exc), "timed": kind in {"gap", "throttle"}}
     return None
+
+
+def pace_behind(ats, first, ahead):
+    """A job behind others on a platform that takes them one at a time, or a few at a time: when its turn comes is an estimate, so it
+    says how many are ahead. `first`: the pace of the job at the front, `ahead`: how many wait before this one."""
+    from .application_pacing import START_GAPS, platform_words
+
+    name = platform_words(ats)
+    gap = START_GAPS.get(ats)
+    if gap:
+        try:
+            base = max(0.0, datetime.fromisoformat(first["until"]).timestamp() - time.time()) if first.get("until") else 0.0
+        except ValueError:
+            base = 0.0
+        due = base + gap * (ahead + (0 if first.get("until") else 1))
+        return {
+            "until": datetime.fromtimestamp(time.time() + due, UTC).isoformat(),
+            "reason": f"{name} takes one application at a time, {gap_words(gap)} apart, so employers there are not flooded. It is due in {span_words(due)}.",
+            "timed": True,
+        }
+    behind = f"after the {ahead + 1:,} ahead of it there" if ahead else "after the one ahead of it there"
+    return {"until": "", "reason": f"{name} takes a limited number of applications at a time. It starts {behind}."}
 
 
 def classify(message):
@@ -242,10 +275,8 @@ def read(service):
             verdict = ("protected" if why["outcome"] == "protected" else "excluded", str(why.get("reason", ""))[:240])
         if verdict is None:
             can.append(r.id)
-            pace = pacing_wait(db, r.id, r.ats)
-            # What Queue needs: the fields the dispatcher sorts on, and the job's employer and lane.
+            # What Queue needs: the fields the dispatcher sorts on, and the job's employer and lane. Pace is the plan's to read (queue_order.Pace).
             details[r.id] = {
-                **({"paced": pace} if pace else {}),
                 "id": r.id, "title": r.title, "company": r.company, "location": job.get("location") or r.location, "url": r.url, "ats": r.ats,
                 "score": r.score, "status": r.status, "posted_at": job.get("posted_at") or "", "career_level": job.get("career_level") or "",
                 "tailoring": state == "tailoring",

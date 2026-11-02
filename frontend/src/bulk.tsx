@@ -127,6 +127,7 @@ const WAITS_FOR: Record<string, string> = {
   provider_unavailable: "the model provider",
   deployment_hold: "the deployment hold to end",
   company_limit: "the employer limit",
+  daily_limit: "today's limit to reset",
 };
 
 // What happened to the last "Apply to selected": refusals one by one (they need a look), waits summed up by what

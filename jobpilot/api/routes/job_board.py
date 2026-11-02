@@ -1,6 +1,7 @@
 """Authenticated job board routes; manual application clicks use normal queue protections."""
 
 import asyncio
+import logging
 import re
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -155,7 +156,21 @@ def router(service) -> APIRouter:
             if (cached := settings()) is not config:
                 connections.apply(cached)
             apply_daily_limit(db, config.daily_application_limit)
-        return {**await start_autonomous(service, data.target), "runtime": batch_snapshot(service)}
+        answer = {**await start_autonomous(service, data.target), "runtime": batch_snapshot(service)}
+
+        def lists_follow():
+            """Queue, Job board and Best matches read the start at once: the line is what the dispatcher now starts by itself."""
+            from ...board_view import board
+            from ...queue_order import plans
+
+            plans(service).now(service)
+            board(service).stale()
+
+        try:
+            await asyncio.to_thread(lists_follow)
+        except Exception:  # The batch has started. The lists catch up on their next poll.
+            logging.getLogger(__name__).exception("The lists could not follow a start")
+        return answer
 
     @r.get("/api/startable")
     def startable():

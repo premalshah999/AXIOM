@@ -464,6 +464,17 @@ class QueueingMixin:
                         raise stopped
                 # A matched email continues the attempt that waited for it (service.reviews); it is not a retry.
                 require_allowance(s, job_id, aliases=aliases, new_attempt=not email_continuation)
+                if not job.demo and not email_continuation and not recovery_source_run:
+                    from ..waiting import sent_today
+
+                    # A new start can't go out today: reserve_submission would refuse it at the last step, after a whole form.
+                    if sent_today(s, self.config) >= self.config.daily_application_limit:
+                        raise QueueBlocked(
+                            "Today's limit of applications is used, so this starts after midnight, or when you raise the limit",
+                            outcome="deferred",
+                            code="daily_limit",
+                            not_before=(datetime.now(UTC) + timedelta(seconds=60)).isoformat(),
+                        )
                 from ..application_pacing import require_company_limit, require_ats_admission
 
                 if not owner_pick and not email_continuation:

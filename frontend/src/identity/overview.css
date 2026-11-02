@@ -473,6 +473,16 @@ button.ov-who:hover b {
   font: inherit;
   cursor: pointer;
 }
+/* A way to act named in a sentence: it reads as a link at rest. */
+.ov-foot-link.is-act {
+  color: var(--window-ink);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.ov-foot-link.is-act + .ov-foot-link.is-act {
+  margin-left: var(--space-3);
+}
 .ov-foot-link:hover {
   color: var(--window-ink);
   text-decoration: underline;
