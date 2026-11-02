@@ -174,9 +174,12 @@ async def run(job, source, profile, ctx):
     history = store.recent(ctx.db, job)
     data = payload(source, profile, ctx, hard, brief, history, allowed)
     plan = sanitize_plan(await ask(Plan, prompts.WRITE, data))
+    plan.proposals = quality.normalize_proposals(plan.proposals)
     forbidden = [r for r in ctx.ats_source.get("keywords", []) if r.get("status") == "needed"]
     real, refused = quality.apply_revision(source.doc, plan, allowed, hard, forbidden)
-    issues = quality.proposal_issues(plan.proposals, history, hard)
+    posting = job["description"]
+    issues = quality.proposal_issues(plan.proposals, history, posting)
+    dropped = []
     if refused or issues:
         attempts.append({"stage": "generation", "refused_edits": refused, "proposal_issues": issues})
         plan = sanitize_plan(
@@ -186,10 +189,12 @@ async def run(job, source, profile, ctx):
                 {**data, "previous_plan": plan.model_dump(), "issues": issues, "refused_edits": refused},
             )
         )
+        plan.proposals = quality.normalize_proposals(plan.proposals)
         real, refused = quality.apply_revision(source.doc, plan, allowed, hard, forbidden)
-        issues = quality.proposal_issues(plan.proposals, history, hard)
-        if issues:
-            raise RuntimeError("project_quality: " + "; ".join(issues[:4]))
+        if quality.proposal_issues(plan.proposals, history, posting):
+            # Only the drafts that pass every check go on: with none left, the real projects carry the resume.
+            plan.proposals, dropped = quality.keep_sound(plan.proposals, history, posting)
+            attempts.append({"stage": "drafts_left_out", "drafts": dropped})
     # Refused factual/length edits stay at source. They never bypass the guard.
     workspace = store.create(ctx.db, job, source, profile, plan.proposals, brief)
     doc, selected = with_projects(real, workspace)
@@ -218,11 +223,12 @@ async def run(job, source, profile, ctx):
             },
         )
         revised_workspace = workspace
-        if revision.proposals:
+        if len(revision.proposals) == 3 and len(workspace["drafts"]) == 3:
             # Sanitize before re-running every proposal gate. The original
             # draft's bullet count is the fixed budget for critique edits.
             revised = sanitize_plan(Plan(proposals=revision.proposals)).proposals
-            proposal_errors = quality.proposal_issues(revised, history, hard)
+            revised = quality.normalize_proposals(revised)
+            proposal_errors = quality.proposal_issues(revised, history, posting)
             if [len(p.bullets) for p in revised] != [len(p["bullets"]) for p in workspace["drafts"]]:
                 proposal_errors.append("Critique changes a draft project's bullet count")
             if proposal_errors:
@@ -297,6 +303,7 @@ async def run(job, source, profile, ctx):
         "quality": quality_report,
         "deterministic_repairs": attempts,
         "refused_edits": refused,
+        "drafts_left_out": dropped,
         "critique": critique.model_dump(),
         "critique_text": json.dumps(critique.model_dump(), ensure_ascii=False, indent=2),
         "critique_fixes_applied": fix_applied,

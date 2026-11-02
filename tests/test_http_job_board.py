@@ -72,7 +72,7 @@ def test_scan_and_batch_need_workers(client):
 
 def test_the_batch_target_is_bounded(client):
     assert client.post("/api/job-board/autopilot/start", json={"target": 0}).status_code == 422
-    assert client.post("/api/job-board/autopilot/start", json={"target": 501}).status_code == 422
+    assert client.post("/api/job-board/autopilot/start", json={"target": 1001}).status_code == 422
 
 
 def test_a_new_install_with_roles_searches_without_being_asked(service):

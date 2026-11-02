@@ -126,7 +126,7 @@ def source_from_link(text):
 
 
 class BatchStart(BaseModel):
-    target: int = Field(default=100, ge=1, le=500)
+    target: int = Field(default=100, ge=1, le=1000)
     # The answer to the Start dialog's account-and-terms question (apply_permissions.py): "allow" turns them on, "decline" turns them off.
     permissions: Literal["allow", "decline"] | None = None
 
