@@ -638,6 +638,18 @@ FINAL = re.compile(
     r"|\babsenden\b|bewerbung (?:abschicken|einreichen)|envoyer ma candidature|\bsoumettre\b",
     re.IGNORECASE,
 )
+# Phenom's application wizard: each step's forward button is id="next" and reads "Next Step"; the last one, on an address naming its review
+# step (&stepname=applicationReview), is atm-id="submit-button" and reads "Continue". Its label says nothing, so it was clicked as a step and its
+# reCAPTCHA token delivered as a step's, and the callback of that token is what posts the application (Humana, 2026-11-01: posted unarmed, and the
+# run ended as "the click timed out, nothing sent" with the button disabled by the send). The platform's mark and the address together.
+REVIEW_ADDRESS = re.compile(r"[?&]step(?:name)?=[^&#]*review", re.I)
+
+
+def final_by_marking(control, url):
+    """A forward-worded control that the application's own markup and address say is its submit."""
+    return str(control.get("atm_id") or "").casefold() == "submit-button" and bool(REVIEW_ADDRESS.search(str(url or "")))
+
+
 # SuccessFactors application pages (classic career site, the candidate portal wizard, Career Site
 # Builder's apply route). Their bare "Apply" is the application submit, never the posting's "Apply now".
 SF_APPLICATION_PAGE = re.compile(
@@ -5606,7 +5618,7 @@ class FormSession:
         final = [
             b
             for b in self.buttons.values()
-            if FINAL.search(b["label"])
+            if (FINAL.search(b["label"]) or final_by_marking(b, self.page.url))
             and not NOT_FINAL_SUBMIT.search(b["label"])
             and len(b["label"].split()) <= 6
             and not b.get("stepper")  # Dayforce's progress step "Submit" is not the button
@@ -6388,7 +6400,7 @@ class FormSession:
             )
         )
         if (
-            FINAL.search(button["label"])
+            (FINAL.search(button["label"]) or final_by_marking(button, self.page.url))
             and not auth_control
             and not account_form
             and not posting_link

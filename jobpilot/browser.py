@@ -26,8 +26,8 @@ from .posting_identity import IDENTITY_JS, identity, placeholder_title, save as 
 from .redaction import redact
 from .email_browser import EmailBrowser, redacted_url
 from .failure_reports import clean
-from .forms import AUTH, ENTRY, FINAL, STALE_CHOICE, FormSession, NetworkMonitor, ResumeAttachmentError
-from .db import Event, Job, Run
+from .forms import AUTH, ENTRY, FINAL, REVIEW_ADDRESS, STALE_CHOICE, FormSession, NetworkMonitor, ResumeAttachmentError, final_by_marking
+from .db import Event, Job, Run, now
 from .mail import origin
 from .sensitive_ids import stop_if_sensitive
 from .workday import same_posting_page
@@ -366,9 +366,9 @@ def unavailable_posting_redirect(source, destination):
 
 def received_application_page(page_url, job_url):
     """The employer's own "your application was received" address for THIS posting: a success status and the posting's own id on a
-    thank-you path (Humana's Phenom site, 2026-11-01: /us/en/applythankyou?status=success&jobSeqNo=HUMHUMUSR434028EXTERNALENUS, "One
-    Last Step! ... creating your Candidate Home Account"). Its Workday sign-in that follows only makes an account to watch the status; the
-    application itself was posted before it. True only when the address names this posting."""
+    thank-you path (Humana's Phenom site, 2026-11-01: /us/en/applythankyou?status=success&jobSeqNo=HUMHUMUSR434028EXTERNALENUS&jobId=R-434028,
+    "One Last Step! ... creating your Candidate Home Account"). Its Workday sign-in that follows only makes an account to watch the status; the
+    application itself was posted before it. True only when the address names this posting, as a whole id in the posting's address."""
     try:
         parts = urlsplit(page_url or "")
         query = {k.lower(): v for k, v in parse_qsl(parts.query)}
@@ -376,8 +376,10 @@ def received_application_page(page_url, job_url):
         return False
     if not re.search(r"/(?:apply-?)?thank-?you/?$", parts.path, re.I) or (query.get("status") or "").lower() != "success":
         return False
-    ident = query.get("jobseqno") or ""
-    return len(ident) >= 8 and ident.lower() in (job_url or "").lower()
+    return any(
+        len(ident) >= 5 and re.search(rf"(?<![a-z0-9]){re.escape(ident)}(?![a-z0-9])", job_url or "", re.I)
+        for ident in (query.get("jobseqno") or "", query.get("jobid") or "")
+    )
 
 
 def unavailable_posting_response(response):
@@ -611,6 +613,9 @@ NOTHING_SENT_SECONDS = 60
 COMMIT_INPUT_GRACE_SECONDS = 1.5
 # Each read of the page for the witness. A page too busy to answer is doubt: the click stays uncertain.
 COMMIT_WATCH_SECONDS = 3
+# How long a commit waits for a token's callback to start the send before pressing the button itself.
+COMMIT_TOKEN_SECONDS = 4
+RECEIVED_REASON = "The employer's own page for this posting shows the application went through, so it was not sent again"
 # Controls whose disabled state means the page has an unfinished requirement.
 STEP_ACTION = re.compile(
     r"^\s*(?:next|continue|save (?:and|&) continue|submit(?: application)?|apply|sign ?in|log ?in|create account|register)\s*$",
@@ -1564,14 +1569,10 @@ class BrowserEngine:
                 landing_response = await self.open_application_route(page, embedded, saved_state)
                 entry_url = self.application_entry_url = embedded
                 self.emit("ats_handoff", "The employer's Ashby board is off; opened the form its own site embeds")
-            if reopened_route and received_application_page(page.url, job["url"]):
-                # The saved route is the employer's own receipt page for this posting: an earlier attempt posted the application
+            if received_application_page(page.url, job["url"]):
+                # The tab or saved route is the employer's own receipt page for this posting: an earlier attempt posted the application
                 # (its tab timed out after the post). Signing in to the employer's candidate site would only start a second one.
-                self.result = {
-                    "state": "submission_unknown",
-                    "reason": "The employer's page says this application was received; it was not sent again. Its email receipt will confirm it",
-                }
-                self.emit("received_page", "The employer's own thank-you page for this posting is open; nothing was resent")
+                self.result = self.received_application()
                 return self.result
             if not reopened_route and (kind := unavailable_posting_response(landing_response)):
                 self.result = {"state": "closed", "reason": UNAVAILABLE_POSTING[kind]}
@@ -2021,6 +2022,7 @@ class BrowserEngine:
                 self.result = confirmed
             return self.result
         finally:
+            self.settle_on_receipt_page()
             if getattr(self, "result", None) and hasattr(self, "form"):
                 self.result["browser_checkpoint"] = self.form.checkpoint_state(
                     self.run_record["packet"]["resume_sha"]
@@ -3718,6 +3720,9 @@ class BrowserEngine:
             return wall
         if not hasattr(self, "captcha"):
             return None
+        if getattr(self, "commit_token_sent", False) or (not self.armed and await self.token_would_send()):
+            # Sent by a token's callback, or about to be (commit_by_token): never a token outside the commit, never a second one.
+            return None
         adapter = adapter or getattr(self, "fallback_mail_adapter", None)
         before_url = self.page.url
         before = await self.form.scan() if adapter and adapter.inbox.live(adapter.challenge) else None
@@ -4462,8 +4467,13 @@ class BrowserEngine:
         self.commit_requests, self.commit_tracking, self.commit_inflight, self.refusal_said = [], 0, set(), []
         self.commit_url = getattr(self.page, "url", "")
         watch = await self.watch_commit_click(final[0]["id"], before, before_rejection)
+        sent = await self.commit_by_token(final[0])
+        if isinstance(sent, dict):
+            await self.commit_not_delivered(final[0], RuntimeError("The security check was not solved"))
+            return sent  # Unsolved: no token reached the page, so nothing was sent.
         try:
-            await control.click(timeout=10000)
+            if not sent:
+                await control.click(timeout=10000)
         except PlaywrightError as exc:
             if not await self.commit_click_undelivered(watch):
                 raise
@@ -4551,6 +4561,79 @@ class BrowserEngine:
         except Exception:
             return False
         return not (receipt and receipt != watch["proof"]) and not (rejection and rejection != watch["rejection"])
+
+    def received_application(self):
+        """The run's result on the employer's own receipt address for this posting (received_application_page). Recorded so that no path sends
+        it again: unknown_resubmit_allowed, which every queue goes through, refuses a job triaged as submitted, and the page's "One Last
+        Step!" has none of the words the resubmit's own check reads, so the installation's resubmit policy would have sent it again."""
+        self.db.set_setting(
+            "unknown_triage:" + self.job["id"],
+            {"verdict": "submitted", "run_id": self.run_id, "at": now(), "source": "the employer's own thank-you page for this posting"},
+        )
+        self.emit("received_page", "The employer's own thank-you page for this posting is open; nothing was sent again")
+        return {"state": "submission_unknown", "reason": RECEIVED_REASON}
+
+    def settle_on_receipt_page(self):
+        """However the run ended (a click that timed out because the send had disabled its button, Humana 2026-11-01), a tab on the receipt
+        address means the employer has the application: the result says so, in place, because the caller holds this same dict."""
+        result = getattr(self, "result", None)
+        if not result or result.get("reason") == RECEIVED_REASON or result.get("state") in {
+            "confirmed", "already_applied", "closed", "stopped", "cancelled", "dry_run_passed",
+        }:
+            return
+        try:
+            page = getattr(getattr(self, "form", None), "page", None) or getattr(self, "page", None)
+            if page is None or not received_application_page(page.url, self.job["url"]):
+                return
+            settled = self.received_application()
+        except Exception:  # A page or database that is gone: the run's own result stands.
+            return
+        for key in ("recovery_cause", "blocker_type", "recoverable", "waiting_kind", "wait_handle"):
+            result.pop(key, None)
+        result.update(settled)
+
+    async def token_would_send(self):
+        """This page's own markup says its forward control is the application's submit (forms.final_by_marking), and its reCAPTCHA token's
+        callback is what presses it: delivering that token is the commit, so it waits for the commit."""
+        form = getattr(self, "form", None)
+        url = str(getattr(getattr(form, "page", None), "url", "") or "")
+        if form is None or not REVIEW_ADDRESS.search(url):
+            return False
+        try:
+            controls = (await form.scan()).get("controls", [])
+        except (PlaywrightError, ValueError):
+            return False
+        return any(final_by_marking(control, url) for control in controls)
+
+    async def commit_by_token(self, control):
+        """The commit on such a page, armed. A dict: the check stayed unsolved, nothing was delivered, nothing was sent. True: the callback
+        started the send and no click may follow it (the button is disabled by then; a second token is a second post: Humana's review
+        step saw three). None: not such a page, or the token moved nothing: the ordinary click."""
+        if getattr(self, "commit_token_sent", False):
+            return True
+        if not final_by_marking(control, getattr(getattr(self.form, "page", None), "url", "")):
+            return None
+        delivered = getattr(self.captcha, "token_delivered_at", {})
+        before = max(delivered.values(), default=0)
+        if challenge := await self.browser_challenge():
+            return challenge
+        if max(delivered.values(), default=0) <= before:
+            return None  # This step asked for no token: the button is the way.
+        self.commit_token_sent = True
+        url = self.form.page.url
+        locator = self.form.locator(control["id"])
+        deadline = time.monotonic() + COMMIT_TOKEN_SECONDS
+        while time.monotonic() < deadline:
+            if getattr(self, "commit_inflight", None) or getattr(self, "commit_requests", None) or self.form.page.url != url:
+                return True
+            try:
+                if await locator.is_disabled(timeout=500):
+                    return True
+            except PlaywrightError:
+                return True  # The control went with the page it was on.
+            await asyncio.sleep(0.2)
+        self.commit_token_sent = False  # Nothing moved: the page waits for its button.
+        return None
 
     async def commit_not_delivered(self, control, exc):
         """End a commit whose click never reached the page: disarmed, its reservation back, repairable like any other
@@ -5375,6 +5458,9 @@ class BrowserEngine:
             obs = await self.recover_empty_observation(obs)
             from .browser_contracts import missing_posting_notice
 
+            if received_application_page(obs.get("url"), self.job["url"]):
+                self.result = self.received_application()
+                return
             if not self.armed and missing_posting_notice(obs, self.job["url"]):
                 self.result = {"state": "closed", "reason": "The employer reports that the requested posting could not be found"}
                 return

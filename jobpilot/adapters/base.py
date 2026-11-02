@@ -18,7 +18,7 @@ from playwright.async_api import Error as PlaywrightError
 from ..service import Service
 from ..accounts import Accounts, password_rules
 from ..captcha_observation import ARM_JS
-from ..forms import AUTH, COOKIE_NOTICE, FINAL, LAUNCHER, SURVEY_DONE
+from ..forms import AUTH, COOKIE_NOTICE, FINAL, LAUNCHER, SURVEY_DONE, final_by_marking
 from ..privacy import acknowledge_privacy_notice, dismiss_cookies
 from ..employer_limit import APPLICATION_LIMIT, application_cap
 from ..mail_errors import MailPending, code_inline_wait
@@ -889,6 +889,7 @@ class Adapter:
             b
             for b in self.buttons(obs, NEXT, self.next_ids)
             if not self.final.search(b["label"])
+            and not final_by_marking(b, obs.get("url"))
             and not re.search(r"^back|previous|cancel|save (?:as )?draft", b["label"], re.I)
             and not (pagination and b["label"].strip().lower() == "next page")
         ]
@@ -918,7 +919,7 @@ class Adapter:
         hits = [
             b
             for b in obs["controls"]
-            if self.final.search(b["label"])
+            if (self.final.search(b["label"]) or final_by_marking(b, obs.get("url")))
             and not b.get("stepper")  # Dayforce's progress step "Submit" is not the button (2026-10-16)
             and not re.search(
                 r"code|search|feedback|question|draft|resume only|cancel|request|privacy|cookie",
@@ -1401,8 +1402,12 @@ class Adapter:
                 if challenge := await self.solve_captcha():
                     return challenge
             obs = await self.form.scan()
+            from ..browser import received_application_page
             from ..browser_contracts import missing_posting_notice
 
+            if received_application_page(obs.get("url"), self.job["url"]):
+                # Whoever got here, the employer has this application: its "Continue" only leads to an account to watch the status.
+                return self.e.received_application()
             if not self.committed and missing_posting_notice(obs, self.job["url"]):
                 return await self.on_closed(obs)
             from ..account_identity import stop_if_identity_conflict
@@ -2477,9 +2482,16 @@ class Adapter:
         self.e.commit_url = getattr(self.page, "url", "")
         witness = getattr(self.e, "watch_commit_click", None)
         watch = await witness(final["id"], self.before_commit) if witness else None
+        by_token = getattr(self.e, "commit_by_token", None)
+        sent = await by_token(final) if by_token else None
+        if isinstance(sent, dict):
+            self.committed = False
+            await self.e.commit_not_delivered(final, RuntimeError("The security check was not solved"))
+            return sent  # Unsolved: no token reached the page, so nothing was sent.
         try:
             try:
-                await self.form.click(final["id"], step_control=True)
+                if not sent:
+                    await self.form.click(final["id"], step_control=True)
             except ValueError as exc:
                 # JPMorgan Oracle 2026-10-14: the captcha callback re-rendered the page and the final
                 # control id went stale. That refusal happens before any click, so re-observe the one

@@ -493,8 +493,13 @@ async def _repair_run(service, run_id):
         ):
             service.reconcile(run_id, True, "Repair agent read the final page: " + quote[:300])
             outcome = "confirmed"
-        elif plan.submission == "not_submitted" and not CONFIRMATION.search(outline) and re.search(
-            r"\bsubmit\b", outline, re.I
+        elif (
+            plan.submission == "not_submitted"
+            and not CONFIRMATION.search(outline)
+            and re.search(r"\bsubmit\b", outline, re.I)
+            # The employer's own receipt address or its final page already settled it as sent (unknown_triage): a model's reading of
+            # "One Last Step!" must not reopen it for a second application.
+            and (service.db.get_setting("unknown_triage:" + job_id, {}) or {}).get("verdict") != "submitted"
         ):
             service.reconcile(run_id, False, "Repair agent read the final page: the unsent form is still shown")
             outcome = "not_submitted"
