@@ -8,7 +8,8 @@ from ..mail import origin
 
 # sapsf.eu: SAP's newer EU data centres (Wipro's career55.sapsf.eu, 2026-10-27: its passcode box was refused as "an
 # unexpected website" after the code mail had matched).
-SF_HOSTS = (".successfactors.com", ".successfactors.eu", ".sapsf.com", ".sapsf.eu")
+# ns2cloud.com: SAP's government cloud (L3Harris's career-hcm20.ns2cloud.com, 2026-10-25), also in AUTH_HOSTS.
+SF_HOSTS = (".successfactors.com", ".successfactors.eu", ".sapsf.com", ".sapsf.eu", ".ns2cloud.com")
 
 
 def sf_company(url):
