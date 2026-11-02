@@ -864,9 +864,11 @@ EDITOR_COMMIT = re.compile(r"\s*(?:update|save)\s*", re.I)
 
 
 def is_dismiss_control(button):
-    """Recognize explicit dismissal labels on a currently observed button."""
+    """Recognize explicit dismissal labels on a currently observed button. A close button is often named after what it closes:
+    Meta's "Close Sign up for Career Profile dialog" stood over the application, and the navigator asked to close it nine times
+    and was refused each time (2026-11-01)."""
     return bool(re.fullmatch(
-        r"\s*(?:close(?:\s+(?:menu|dialog|modal|popup))?|cancel|dismiss|not now|no thanks|×)\s*",
+        r"\s*(?:close(?:\s+(?:menu|dialog|modal|popup))?|close\s+.{1,80}\s+(?:menu|dialog|modal|popup)|cancel|dismiss|not now|no thanks|×)\s*",
         button.get("label") or "", re.I,
     ))
 
