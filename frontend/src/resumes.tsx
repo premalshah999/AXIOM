@@ -298,6 +298,7 @@ function SetupPath({ data, name, refresh }: { data: MasterStatus; name?: string;
             <p>
               <b>{pct(v.coverage)}</b> of {v.source_words ?? "its"} words match
               {v.added_ratio ? `, ${pct(v.added_ratio)} added` : ""}.
+              {!!v.picture_pages?.length && ` Page ${v.picture_pages.join(", ")} of your PDF is a picture, so its words aren't in this copy.`}
               {v.render_fill && v.source_fill && (
                 <>
                   {" "}
