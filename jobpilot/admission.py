@@ -46,6 +46,9 @@ SHARED_LINK_HOSTS = {
     "go.vansh.nyc", "bit.ly", "lnkd.in", "tinyurl.com", "t.co", "ow.ly", "buff.ly", "rebrand.ly", "cutt.ly",
     "short.gy", "simplify.jobs", "jobright.ai",
 }
+# Career portals that serve many employers from one host with no employer in the address (Paylocity's job pages are
+# /Recruiting/Jobs/Details/<id>). The company names the employer; these are not redirect hosts, so not SHORTENER_HOSTS.
+SHARED_PORTAL_HOSTS = {"recruiting.paylocity.com"}
 
 
 def requisition_twins(session, job_id, urls):
@@ -75,6 +78,9 @@ def employer_partition(job):
         # other as employer_busy, one at a time across all workers (2026-10-29). The employer is the company.
         company = re.sub(r"\s+", " ", str(get("company", "") or "")).strip().casefold()
         return host + "/" + (company or parsed.path.strip("/").lower())
+    if host in SHARED_PORTAL_HOSTS:
+        company = re.sub(r"\s+", " ", str(get("company", "") or "")).strip().casefold()
+        return host + "/" + company if company else host
     parts = parsed.path.strip("/").split("/")
     ats = get("ats", "custom")
     if ats in {"greenhouse", "lever", "ashby", "smartrecruiters", "rippling"} and parts[0] and detect(get("url", "")).id == ats:
