@@ -177,11 +177,18 @@ const DEVELOPER =
   /errors\.pydantic\.dev|for further information visit|\bvalidation errors? for\b|\binput should be\b|traceback|stack ?trace|\bpython -m\b|\bjobpilot\b|\bapplypilot\b|\bblocker\b|\bobservation\b|\bfill (?:reports?|results?|tool)\b|\bpage-wide fill\b|\brepair instruction\b|\bowned-page\b|\brevision \d+\b|\bcontrol failure\b|\bquality repair\b|\[(?:URL|email|number|secret) omitted\]|\brecovery budget\b|\bexecution budget\b|\bdraft restarts?\b|\bworker host\b/i;
 const DEVELOPER_CASED =
   /\[type=\w+|\b\w+\.py\b|\b(?:[A-Z][a-z]+)+(?:Error|Exception)\b|\bException\b|\bNoneType\b|\b(?:Locator|Page|BrowserContext|ElementHandle|Frame)\.[a-z_]+|\bpage\.\w+\(|\bTimeout \d+ ?ms\b|\b\d+ ?ms exceeded\b|\bf\d-[a-z0-9]+(?:-[a-z0-9]+)*\b|\b[a-z]+(?:_[a-z0-9]+)+\b|\b[a-z]\w*=\S+|\bdata-[a-z-]+\b|\bCDP\b|\bDOM\b|Cannot read propert|is not a function|is not defined|Unexpected token|Failed to fetch|Load failed|NetworkError/;
-export const isDeveloperText = (text?: string | null) => !!text && (DEVELOPER.test(text) || DEVELOPER_CASED.test(text));
+const EMAIL = /[\w.+-]+@[\w.-]+/g;
+// A bracketed link in a sentence is only noise: the sentence stands without it.
+const BRACKETED_LINK = /\s*\((?:[^()]*https?:\/\/[^()]*|\[URL omitted\])\)|\s*(?:at |on )?https?:\/\/\S+|\s*(?:at |on )?\[URL omitted\]/gi;
+export const isDeveloperText = (text?: string | null) => {
+  // An address with an underscore in it is somebody's address.
+  const words = (text || "").replace(EMAIL, "");
+  return !!words && (DEVELOPER.test(words) || DEVELOPER_CASED.test(words));
+};
 export const PROBLEM = "Something went wrong on AXIOM's side. Try again.";
 /** An error's words on a screen: a sentence the app wrote stands, anything only the code's authors can read becomes a plain one. */
 export const plainError = (text?: string | null) => {
-  const said = (text || "").replace(/^[a-z]+(?:_[a-z0-9]+)+:\s*/, "");
+  const said = (text || "").replace(/^[a-z]+(?:_[a-z0-9]+)+:\s*/, "").replace(BRACKETED_LINK, "");
   return !said || isDeveloperText(said) ? PROBLEM : said;
 };
 
@@ -206,13 +213,15 @@ export function plainReason(text?: string | null, stuck = "AXIOM got stuck on th
   s = s
     .replace(/^Repair agent:\s*/i, "")
     .replace(/\s*\([^()]*\bf\d-[a-z0-9]+-[a-z0-9]+[^()]*\)|\s*\bf\d-[a-z0-9]+-[a-z0-9]+\b/gi, "")
-    .replace(/\s*\((?:[^()]*https?:\/\/[^()]*|\[URL omitted\])\)|\s*(?:at |on )?https?:\/\/\S+|\s*(?:at |on )?\[URL omitted\]/gi, "")
+    .replace(BRACKETED_LINK, "")
     .replace(/;?\s*(?:the job was removed under the owner rule|jobs that ask are dropped)?\s*\(?\bowner rule\)?\s*$/i, "")
     .replace(/\bcomboboxes\b/gi, "menus")
     .replace(/\bcombobox\b/gi, "menu")
     .trim();
   if (isDeveloperText(s)) {
-    const first = (s.split(/(?<=[.!?])\s|;\s|\s\|\s/)[0] || "").trim();
+    // No lookbehind: a Mac's older webview refuses the whole script over one.
+    const clause = (s.split(/;\s|\s\|\s/)[0] || "").trim();
+    const first = (/^.+?[.!?](?=\s|$)/.exec(clause)?.[0] || clause).trim();
     if (first && !isDeveloperText(first)) return first.charAt(0).toUpperCase() + first.slice(1);
     if (/auth_required|employer sign-in|sign-in must/i.test(text || "")) return "The employer's sign-in did not finish.";
     if (/resume_attached|resume attachment|resume file upload/i.test(text || "")) return "The site would not take the resume.";

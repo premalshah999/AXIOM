@@ -397,6 +397,10 @@ def test_library_errors_and_crashes_become_plain_words(app, config, service, mon
     assert vocabulary.plain_error("Choose one of the offered answers") == "Choose one of the offered answers"
     assert vocabulary.plain_error("no_model: Add your AI key in Settings > Connections") == "Add your AI key in Settings > Connections"
     assert vocabulary.plain_error(RAW[0]) == "Email isn't valid."
+    # A refusal naming a posting by its link, or a person by their address, keeps its words.
+    said = 'This posting was already applied to as "Analyst" at Acme (https://jobs.example.test/1?gh_jid=2).'
+    assert vocabulary.plain_error(said) == 'This posting was already applied to as "Analyst" at Acme.'
+    assert not vocabulary.is_developer_text("An account for first_last@example.test already exists.")
 
 
 def test_the_job_page_gets_plain_reports_and_a_plain_activity_and_the_record_keeps_the_rest(client, service):
@@ -440,6 +444,8 @@ def test_a_video_the_form_requires_says_so_and_offers_no_answer_box():
 def test_no_screen_prints_a_stored_reason_or_a_raw_record_as_it_stands():
     """Every stored reason goes through plainReason on its way to a screen, and an engine record is a download, not a page."""
     source = Path(__file__).resolve().parents[1] / "frontend" / "src"
+    # A regular expression an older webview can't parse stops the whole script before anything shows.
+    assert "(?<" not in (source / "format.ts").read_text()
     for path in source.rglob("*.tsx"):
         text = path.read_text()
         assert not re.search(r">\s*\{[\w.?!]*\.reason\}\s*<", text), path

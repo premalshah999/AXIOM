@@ -109,8 +109,12 @@ def _without_internals(text):
     return text.strip()
 
 
+_EMAIL = re.compile(r"[\w.+-]+@[\w.-]+")
+
+
 def is_developer_text(text):
-    return bool(DEVELOPER.search(str(text or "")))
+    # An address with an underscore in it is somebody's address.
+    return bool(DEVELOPER.search(_EMAIL.sub("", str(text or ""))))
 
 
 # A validator's report as text, which is what `HTTPException(422, str(exc))` in a route hands on: its first field, its words and its type.
@@ -124,6 +128,8 @@ def plain_error(text):
         return plain_validation([{"loc": found["field"].split("."), "msg": found["msg"], "type": found["type"]}])
     # "no_model: Add your AI key in Settings": a code for the program in front of the sentence for the person.
     text = re.sub(r"^[a-z]+(?:_[a-z0-9]+)+:\s*", "", " ".join(text.split()))
+    # A posting's link in a refusal ("already applied to as X (https://...?gh_jid=1)") is no reason to lose the refusal.
+    text = _BRACKETED_LINK.sub("", text)
     return PROBLEM if not text or is_developer_text(text) else text
 
 
