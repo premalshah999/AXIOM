@@ -41,7 +41,7 @@ def test_a_row_says_not_queued_and_its_number_opens_the_queue():
 
 def test_an_empty_board_says_why_and_what_to_do():
     board = read("jobboard.tsx")
-    for words in ("No search has run yet", "Tell AXIOM which roles you want", "No good fits right now", "Show everything found"):
+    for words in ("No search has run yet", "Tell AXIOM which roles you want", "No good matches right now", "Show everything found"):
         assert words in board, words
 
 
