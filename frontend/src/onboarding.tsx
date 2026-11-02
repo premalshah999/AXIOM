@@ -405,14 +405,27 @@ function stepProblem(step: StepId, d: Draft): string {
   return "";
 }
 
-function mergeExtract(draft: Draft, x: Partial<Draft>): Draft {
+// What the last resume read gave, so reading a different resume replaces it rather than stacking on top (work and schooling are only
+// filled when empty; without this, choosing another resume left the first one's jobs in place under a message saying the new
+// ones were found). Entries the person has since edited no longer match, so they are kept.
+let lastRead: Partial<Draft> | null = null;
+const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+function mergeExtract(draft: Draft, x: Partial<Draft>, before: Partial<Draft> | null): Draft {
   const next = { ...draft };
-  for (const key of ["first_name", "last_name", "email", "phone", "location", "linkedin", "github", "website"] as const)
-    if (!String(next[key] || "").trim() && x[key]) next[key] = x[key] as string;
-  if (!next.work.length && x.work?.length) next.work = x.work as WorkEntry[];
-  if (!next.education.length && x.education?.length) next.education = x.education as EducationEntry[];
-  if (x.skills?.length) next.skills = Array.from(new Set([...(next.skills || []), ...x.skills]));
-  if (!next.name.trim()) next.name = [next.first_name, next.last_name].filter(Boolean).join(" ");
+  for (const key of ["first_name", "last_name", "email", "phone", "location", "linkedin", "github", "website"] as const) {
+    const unchanged = before && String(next[key] || "") === String(before[key] || "");
+    if ((!String(next[key] || "").trim() || unchanged) && x[key]) next[key] = x[key] as string;
+  }
+  if (x.work?.length && (!next.work.length || (before && same(next.work, before.work)))) next.work = x.work as WorkEntry[];
+  if (x.education?.length && (!next.education.length || (before && same(next.education, before.education))))
+    next.education = x.education as EducationEntry[];
+  if (x.skills?.length) {
+    const old = new Set(before?.skills ?? []);
+    next.skills = Array.from(new Set([...(next.skills || []).filter((k) => !old.has(k)), ...x.skills]));
+  }
+  if (!next.name.trim() || (before && next.name === [before.first_name, before.last_name].filter(Boolean).join(" ")))
+    next.name = [next.first_name, next.last_name].filter(Boolean).join(" ");
   return next;
 }
 
@@ -808,7 +821,9 @@ function ResumeStep({
       // Applications attach the newest resume unless a job chose another; picking one here makes it that one.
       await api(`/resumes/${encodeURIComponent(resumeId)}/prefer`, "POST").catch(() => null);
       const extracted = await api<Partial<Draft>>("/profile/extract?resume_id=" + encodeURIComponent(resumeId), "POST");
-      setDraft((d) => mergeExtract(d, extracted));
+      const before = lastRead;
+      lastRead = extracted;
+      setDraft((d) => mergeExtract(d, extracted, before));
       setState("done");
       const parts = [
         extracted.work?.length ? `${extracted.work.length} role${extracted.work.length === 1 ? "" : "s"}` : "",
