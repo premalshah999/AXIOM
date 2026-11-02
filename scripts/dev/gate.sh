@@ -11,7 +11,8 @@
 #   scripts/dev/gate.sh browser   every browser test, one at a time, for changes to the engine: long, run it on mains power,
 #                                 and read the slowest-tests table it ends with (the full run is not part of every release)
 #
-# Through pytest-locked.sh, at background priority, like every test run on this machine.
+# Through pytest-locked.sh, at background priority, like every test run on this machine. Keep the lid open and the Mac on mains: a sleeping
+# Mac stops a run where it stands, and what was in flight fails on its own timeouts on waking (a smoke run sat 7 h 27 min that way, 2026-11-02).
 set -u
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$root" || exit 2

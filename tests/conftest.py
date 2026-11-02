@@ -285,10 +285,18 @@ def pytest_collection_modifyitems(config, items):
         config.smoke_unnamed = sorted(unnamed)
 
 
+RUN_BEGAN = (time.time(), time.monotonic())
+
+
 def pytest_terminal_summary(terminalreporter, config):
-    """A guard renamed or moved would otherwise leave the smoke list without a word."""
+    """A guard renamed or moved would otherwise leave the smoke list without a word. A Mac that slept stopped the run where it stood, and
+    what was in flight ran out its timeouts on waking: a smoke run sat 7 h 27 min behind a closed lid on battery and looked hung, and its
+    failures looked real (2026-11-02). The monotonic clock doesn't count sleep and the wall clock does, so the run can say so."""
     for file, text in getattr(config, "smoke_unnamed", []):
         terminalreporter.write_line(f"tests/smoke_tests.txt names no test: {file}{'::' + text if text else ''}", yellow=True)
+    slept = (time.time() - RUN_BEGAN[0]) - (time.monotonic() - RUN_BEGAN[1])
+    if slept > 60:
+        terminalreporter.write_line(f"The Mac slept {slept / 60:.0f} minutes during this run: a failure above may be its timeouts running out across the sleep.", yellow=True)
 
 
 @pytest.fixture(autouse=True)
