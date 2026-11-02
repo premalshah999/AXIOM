@@ -14,8 +14,9 @@ Rules, each from the reference pipeline's hard-won checks or from how parsers ma
   equal-opportunity text never drive a keyword.
 - The posting's own spelling is what's shown (`CI/CD`, not `CI` and `CD`). Matching tolerates case, plurals and hyphens; an alias only
   counts both ways when it's the same thing (RAG, Retrieval-Augmented Generation).
-- A missing term is one of two things: `available`, the applicant's own history says it; `needed`, nothing they gave us says it. A
-  `needed` term is never inserted anywhere, by anyone, and the UI says "you'd need this".
+- A missing term is one of two things: `available`, the applicant's own history says it; `needed`, nothing they gave us says it in those
+  words. A `needed` term is never inserted anywhere, by anyone, and the UI says "you'd need this". The one way it reaches a resume is
+  when a bullet already says it in other forms of its own words, "Administered medications" for "medication administration" (normal.py).
 - Coverage is advisory. 60-70% of requirement terms is a natural resume; chasing 100% is how stuffing happens.
 
 Every term carries a `pattern` that Python and the browser run identically, so the screen rescores on each keystroke without a request
