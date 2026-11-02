@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -452,6 +453,147 @@ def test_one_quality_repair_then_rerun_gates(tmp_path):
     assert result.report["deterministic_repairs"][0]["proposal_issues"]
 
 
+def test_a_bullet_names_its_input_however_the_sentence_words_it():
+    assert quality.names_input("Build a planner from FCC broadband records for field crews.", "FCC Broadband Data Collection records")
+    assert quality.names_input("Compare filings from SEC EDGAR by quarter.", "SEC EDGAR")
+    assert not quality.names_input("Build a planner from public records for field crews.", "FCC Broadband Data Collection records")
+
+
+def test_a_tool_counts_anywhere_in_the_posting_in_its_phrase_or_all_its_words():
+    posting = "Preferred: dbt. Build reporting tools. Experience with statistical models."
+    assert quality.in_posting(posting, "dbt")
+    assert quality.in_posting(posting, "statistical models")
+    assert quality.in_posting(posting, "models statistical")
+    assert not quality.in_posting(posting, "Kubernetes")
+    assert not quality.in_posting(posting, "statistical Kubernetes")
+
+
+def test_shape_is_settled_by_code_order_proof_points_and_one_third_bullet():
+    ps = proposals()
+    ps[0].proof_point, ps[1].proof_point, ps[2].proof_point = 2, 2, 0
+    ps[0].bullets = [*ps[0].bullets[:2], "Check the export against the source."]
+    ps[1].bullets = [*ps[1].bullets[:2], "Check the export against the source."]
+    fixed = quality.normalize_proposals(ps)
+    assert [p.proof_point for p in fixed] == [0, 1, 2]
+    assert sorted(len(p.bullets) for p in fixed) == [2, 2, 3]
+    assert quality.proposal_issues(fixed, [], POSTING) == []
+
+
+@pytest.mark.parametrize(
+    "written, reads",
+    [
+        ("Will build a FastAPI identity service from OWASP data.", "Builds a FastAPI identity service from OWASP data."),
+        ("Will weigh token validation, and will report test coverage.", "Weighs token validation, and reports test coverage."),
+        ("Build a Python report browser using NYC Open Data.", "Builds a Python report browser using NYC Open Data."),
+        ("Compare query results, then will also apply a fix.", "Compares query results, then applies a fix."),
+        ("FastAPI identity service that issues session cookies.", "FastAPI identity service that issues session cookies."),
+        ("Handles partial failures with bounded retries.", "Handles partial failures with bounded retries."),
+    ],
+)
+def test_a_draft_reads_as_a_description_not_a_to_do_list(written, reads):
+    assert quality.describe(written) == reads
+
+
+def test_rewording_never_turns_a_draft_into_finished_work():
+    ps = proposals()
+    ps[0].bullets[0] = "Will build a public explorer from NYC Open Data, and will save 94.7% of review time."
+    fixed = quality.normalize_proposals(ps)
+    problems = quality.proposal_problems(fixed[0], [], POSTING)
+    assert any("unmeasured" in w for w in problems)  # an invented number still fails, however it is worded
+    ps = proposals()
+    ps[0].bullets[0] = "Built and shipped a public explorer from NYC Open Data."
+    assert any("completed work" in w for w in quality.proposal_problems(quality.normalize_proposals(ps)[0], [], POSTING))
+
+
+def test_a_tailored_page_is_tight_at_the_owners_sizes():
+    style = editor.tailored_style(editor.Style())
+    assert {style.margin_top, style.margin_bottom, style.margin_left, style.margin_right} == {0.25}
+    assert (style.section_gap, style.entry_gap, style.bullet_gap) == (3, 1, 0)
+    assert style.name_size == 16.0 and style.font_size == 9.0
+
+
+def test_the_long_replies_get_room_and_others_keep_the_default():
+    from jobpilot.features.knowledge.writing import LONG_REPLIES
+
+    assert LONG_REPLIES["Imported"][0] >= 8000 and LONG_REPLIES["Imported"][1] >= 120
+    assert "Answer" not in LONG_REPLIES and "Brief" not in LONG_REPLIES
+
+
+def test_a_draft_figure_is_allowed_only_as_a_stated_target():
+    ps = proposals()
+    ps[0].bullets[0] = "Public record explorer built on NYC Open Data for readers [target: p95 under 200 ms]."
+    assert quality.proposal_problems(ps[0], [], POSTING) == []
+    ps[0].bullets[0] = "Public record explorer on NYC Open Data with p95 under 200 ms."  # stated as fact
+    assert any("unmeasured" in w for w in quality.proposal_problems(ps[0], [], POSTING))
+    ps[0].bullets[0] = "Public record explorer on NYC Open Data [p95 under 200 ms]."  # brackets that don't say target
+    assert any("unmeasured" in w for w in quality.proposal_problems(ps[0], [], POSTING))
+    ps[0].bullets[0] = "Public record explorer on NYC Open Data [target: 95% parsed], cutting review time by 40%."
+    assert any("unmeasured" in w for w in quality.proposal_problems(ps[0], [], POSTING))
+    ps[0].bullets = [
+        "Public record explorer on NYC Open Data [target: 95% parsed].",
+        "Handles missing fields without dropping rows [target: under 1% lost].",
+    ]
+    assert any("one headline metric" in w for w in quality.proposal_problems(ps[0], [], POSTING))
+
+
+async def test_choosing_a_mode_again_retries_a_stored_failure(monkeypatch):
+    from types import SimpleNamespace
+
+    calls = []
+
+    async def prepare(db, config, job_id, *, mode, model, fresh, **kw):
+        calls.append(fresh)
+        return SimpleNamespace(status="failed", cached=not fresh, artifact=None, error=None)
+
+    async def read(*a, **k):
+        return None
+
+    monkeypatch.setattr(choice.pipeline, "prepare_resume", prepare)
+    monkeypatch.setattr(choice, "read_posting", read)
+    monkeypatch.setattr(choice, "get_choice", lambda db, job_id: SimpleNamespace(mode="aggressive"))
+    monkeypatch.setattr(choice, "_record", lambda *a, **k: None)
+    await choice.run(None, None, "job")
+    assert calls == [False, True]
+
+
+def test_keep_sound_never_keeps_a_draft_that_fails_a_truth_check():
+    ps = proposals()
+    ps[0].bullets[0] = "Built and shipped a public explorer from NYC Open Data."  # claims finished work
+    ps[1].bullets[0] += " Saved 94.7% of review time."  # an unmeasured metric
+    kept, dropped = quality.keep_sound(ps, [], POSTING)
+    assert [p.title for p in kept] == [ps[2].title]
+    assert [d["title"] for d in dropped] == [ps[0].title, ps[1].title]
+    assert any("completed work" in w for w in dropped[0]["problems"])
+    assert any("unmeasured" in w for w in dropped[1]["problems"])
+
+
+@needs_tex
+def test_a_draft_that_still_fails_is_left_out_and_the_tailoring_finishes(tmp_path):
+    bad = plan()
+    bad.proposals[1].bullets[0] = "Built and shipped a public explorer from SEC EDGAR for review teams."
+    model = stub(initial=bad, repair=bad)
+    source, ctx = context(tmp_path, model=model)
+    result = asyncio.run(run(JOB, source, PROFILE, ctx))
+    title = bad.proposals[1].title
+    assert [d["title"] for d in result.report["drafts_left_out"]] == [title]
+    assert title not in parse_check(result.pdf_path.read_bytes(), result.doc)["text"]
+    assert len(result.preview_projects) == 2
+
+
+@needs_tex
+def test_with_no_sound_draft_the_real_projects_carry_the_resume(tmp_path):
+    bad = plan()
+    for p in bad.proposals:
+        p.bullets[0] = "Built and shipped " + p.bullets[0]
+    model = stub(initial=bad, repair=bad)
+    source, ctx = context(tmp_path, model=model)
+    result = asyncio.run(run(JOB, source, PROFILE, ctx))
+    assert len(result.report["drafts_left_out"]) == 3
+    assert result.preview_projects == []
+    assert result.report["requires_project_approval"] is False
+    assert Path(result.pdf_path).exists()
+
+
 @needs_tex
 def test_critique_can_fix_pending_generated_projects(tmp_path):
     revised = proposals()
@@ -462,7 +604,7 @@ def test_critique_can_fix_pending_generated_projects(tmp_path):
     source, ctx = context(tmp_path, model=model)
     result = asyncio.run(run(JOB, source, PROFILE, ctx))
     assert result.report["critique_fixes_applied"]
-    assert revised[0].bullets[1] in result.drafts[0].bullets
+    assert quality.describe(revised[0].bullets[1]) in result.drafts[0].bullets
     assert result.report["workspace_revision"] == 1
 
 

@@ -1215,6 +1215,17 @@ class Adapter:
                 for b in obs["controls"]
             )
             new_password = any(f.get("autocomplete") == "new-password" for f in passwords)
+            if (
+                not create_path
+                and not any(f["required"] for f in passwords)
+                and any(f["type"] == "file" for f in fields)
+                and len([f for f in meaningful if f["type"] not in {"password", "file"}]) >= 3
+                and any(self.final.search(b["label"]) for b in obs["controls"])
+            ):
+                # One application with an optional "create an account" section inside it (Meta, 2026-11-01): the page holds the
+                # application's own resume and fields and a final Submit, and no password is required. It is the form, not an
+                # account step; the optional password boxes stay empty and Submit goes through the normal review.
+                return Step.FORM
             return (
                 Step.CREATE_ACCOUNT
                 if len(passwords) >= 2 or create_path or (create_control and new_password)
@@ -3322,7 +3333,11 @@ class Adapter:
                 return "locked", LOCKED.search(errors).group()
             # SuccessFactors' sign-in page asks "Already have an account?"; read as a refusal, Boehringer's sign-in
             # went to a password reset (2026-10-16).
-            if exists := EXISTS.search(re.sub(r"already have an account\s*\?", " ", errors, flags=re.I)):
+            # The same words are a choice on a sign-up form ("Use a password / Already have an account"): only the page's own
+            # errors can say the account exists by them, not its text (Meta, 2026-11-01).
+            said = re.sub(r"already have an account\s*\??", " ", errors, flags=re.I) if not obs["errors"] else re.sub(
+                r"already have an account\s*\?", " ", errors, flags=re.I)
+            if exists := EXISTS.search(said):
                 return "exists", exists.group()
             if obs["errors"] and PASSWORD_RULES.search(errors):
                 return "password_rules", obs["errors"][0][:200]

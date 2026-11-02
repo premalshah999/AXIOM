@@ -122,8 +122,8 @@ async def start_autonomous(service, target=100, refresh_sources=True):
 
     if not service.dispatch:
         raise ValueError("Application workers are disabled")
-    if not 1 <= target <= 500:
-        raise ValueError("Choose a batch target from 1 to 500")
+    if not 1 <= target <= 1000:
+        raise ValueError("Choose a batch target from 1 to 1000")
     db = service.db
     control = db.get_setting("control", {})
     if control.get("paused"):
