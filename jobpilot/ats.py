@@ -507,6 +507,12 @@ def url_platform(url):
         return "greenhouse"
     if re.fullmatch(UUID, query.get("ashby_jid", ""), re.I):
         return "ashby"
+    # Portal paths no other platform uses: Eightfold's candidate site on an employer domain (Microsoft, NVIDIA: /careers/job/
+    # and an 11+ digit position id) and Avature's unprefixed JobDetail page (Two Sigma: /careers/JobDetail/<slug>/<id>).
+    if re.fullmatch(r"/careers/job/\d{11,}/?", parts.path or "", re.I):
+        return "eightfold"
+    if re.fullmatch(r"/[A-Za-z0-9_-]+/JobDetail/[^/]+/\d+/?", parts.path or ""):
+        return "avature"
     return None
 
 
