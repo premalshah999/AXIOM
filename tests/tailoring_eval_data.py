@@ -22,33 +22,36 @@ def _doc(name, roles, school, degree, skills, projects=()):
     return ResumeDoc(name=name, contact=[f"{name.split()[0].lower()}@example.test", "+1 202 555 0100"], sections=sections)
 
 
+# Written the way people really write them: uneven lengths, a figure on most lines, a tool list here and there, some with a final period and some without.
 RESUMES = {
     "analyst": _doc(
         "Alex Example",
         [
             ("Data Analyst", "ExampleSoft", "06/2021 - Present", [
-                "Built a reporting pipeline in SQL and Python that replaced a manual spreadsheet process for the finance team",
-                "Designed dashboards in Tableau that show weekly revenue by region, used by twelve account managers",
-                "Reviewed monthly close variances with the controller and documented each adjustment for the external audit",
+                "Built an automated reporting pipeline in SQL and Python that replaced a manual spreadsheet process for the finance team, cutting month-end report preparation from 3 days to 4 hours.",
+                "Designed Tableau dashboards showing weekly revenue by region and account, adopted by 12 account managers and reviewed in every Monday pipeline meeting",
+                "Reviewed monthly close variances with the controller and documented each adjustment for the external audit; no audit findings in FY2023.",
+                "Partnered with sales ops to clean 40K+ CRM records, removing duplicates and standardizing account names across US and EU regions",
             ]),
             ("Analytics Intern", "Sample Labs", "06/2020 - 08/2020", [
-                "Cleaned survey data in pandas and wrote a short report on response bias for the research team",
-                "Automated a weekly export with a Python script, which saved the lab about two hours a week",
+                "Cleaned survey data in pandas and wrote a short report on response bias for the research team.",
+                "Automated a weekly export with a Python script, saving the lab about 2 hours a week",
             ]),
         ],
         "Example University",
         "B.S., Statistics",
         "Languages: Python, SQL\nTools: Tableau, Excel, pandas",
-        [("InvoiceCheck", ["Wrote a command line tool in Python that checks invoices against purchase orders every night"])],
+        [("InvoiceCheck", ["Wrote a command line tool in Python that checks invoices against purchase orders every night and emails a list of mismatches to the accounts team"])],
     ),
     "nurse": _doc(
         "Sam Sample",
         [
             ("Registered Nurse", "Sample General Hospital", "07/2020 - Present", [
-                "Cared for up to six patients per shift on a medical-surgical unit, including post-operative recovery",
-                "Administered medications and documented every dose and assessment in Epic during each shift",
+                "Cared for up to 6 patients per shift on a 32-bed medical-surgical unit, including post-operative recovery and wound care.",
+                "Administered medications and documented every dose and assessment in Epic during each shift, with zero reportable charting errors in 2023",
                 "Taught discharge plans to patients and families, and followed up on questions by telephone the next day",
-                "Precepted three new graduate nurses through their first ten weeks on the unit",
+                "Precepted 3 new graduate nurses through their first 10 weeks on the unit",
+                "Served on the unit's falls prevention committee and helped reduce patient falls by 18% over 2 quarters.",
             ]),
         ],
         "Sample College of Nursing",
@@ -59,9 +62,9 @@ RESUMES = {
         "Jordan Placeholder",
         [
             ("Staff Accountant", "Example Manufacturing Co.", "01/2021 - Present", [
-                "Prepared month-end journal entries and account reconciliations for a four-entity manufacturing group",
-                "Reduced the close from eight days to five by standardizing accrual schedules in Excel",
-                "Supported the annual external audit by preparing lead sheets and answering auditor requests",
+                "Prepared month-end journal entries and account reconciliations for a 4-entity manufacturing group with $85M in annual revenue",
+                "Reduced the close from 8 days to 5 by standardizing accrual schedules in Excel and moving approvals to a shared checklist.",
+                "Supported the annual external audit by preparing lead sheets and answering auditor requests, with no material adjustments in the last 2 years",
             ]),
             ("Accounting Clerk", "Sample Supply LLC", "06/2019 - 12/2020", [
                 "Processed about 300 vendor invoices a month in QuickBooks and resolved payment disputes with suppliers",
@@ -76,13 +79,13 @@ RESUMES = {
         "Riley Testcase",
         [
             ("Marketing Coordinator", "Example Outdoor Goods", "03/2022 - Present", [
-                "Planned and sent weekly email campaigns in Mailchimp to a list of about 40,000 customers",
-                "Wrote product pages and blog posts, and tracked organic traffic in Google Analytics each month",
-                "Ran paid social campaigns on Meta with a monthly budget of 8,000 dollars and reported results to the director",
+                "Planned and sent weekly email campaigns in Mailchimp to a list of about 40,000 customers, lifting average open rate from 18% to 24% over 2 quarters",
+                "Wrote product pages and blog posts, and tracked organic traffic in Google Analytics each month for the director's report",
+                "Ran paid social campaigns on Meta with a monthly budget of $8,000 and reported results to the director.",
             ]),
             ("Marketing Assistant", "Sample Events", "05/2020 - 02/2022", [
-                "Scheduled social media posts and answered customer comments across three brand accounts",
-                "Coordinated logistics for twelve trade shows, including booth materials and shipping",
+                "Scheduled social media posts and answered customer comments across 3 brand accounts",
+                "Coordinated logistics for 12 trade shows, including booth materials, shipping and on-site staffing",
             ]),
         ],
         "Sample University",
@@ -93,10 +96,10 @@ RESUMES = {
         "Casey Fixture",
         [
             ("Software Engineer", "ExampleSoft", "08/2020 - Present", [
-                "Built REST APIs in Python and FastAPI for the billing service, used by four internal teams",
-                "Moved nightly batch jobs to Airflow and added alerting, which ended most of the manual restarts",
+                "Built REST APIs in Python and FastAPI for the billing service, used by 4 internal teams and handling about 2M requests a day",
+                "Moved nightly batch jobs to Airflow and added alerting, which ended most of the manual restarts and cut failed runs by 60%",
                 "Reduced p95 latency on the invoice endpoint from 1.8 seconds to 400 milliseconds by adding a Redis cache",
-                "Wrote integration tests with pytest and ran them in GitHub Actions on every pull request",
+                "Wrote integration tests with pytest and ran them in GitHub Actions on every pull request, raising coverage from 52% to 81%.",
             ]),
         ],
         "Example Institute of Technology",

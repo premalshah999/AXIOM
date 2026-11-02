@@ -1,4 +1,5 @@
-"""20 synthetic postings against a model trying its best to lie. Zero invented claims may survive, by claims.py and by a read that shares no code with it."""
+"""20 synthetic postings on normal resumes, against a model trying its best to lie and one that slips the way real ones do. Zero invented claims may survive, by claims.py and by a read
+that shares no code with it, and the slips must not cost the honest edits."""
 
 import asyncio
 import json
@@ -15,6 +16,14 @@ from jobpilot.features.resumes.rules import check_rules, doc_plain, fits_window,
 from jobpilot.features.resumes.select import supported_terms
 
 pytestmark = pytest.mark.skipif(not shutil.which("pdflatex"), reason="needs TeX")
+
+
+def own_words(term: str, seen: str) -> bool:
+    """Every word of a posting's term is in the source in some form: the same opening letters, for words long enough to have any. Apart from normal.described on purpose, and a product's name must be there whole."""
+    words = re.findall(r"[a-z]+", term.lower())
+    if term != term.lower() and (any(w[1:] != w[1:].lower() for w in term.split()) or len(term.split()) == 1):
+        return False
+    return all(re.search(r"\b" + w[: max(4, len(w) - 5)], seen) for w in words if len(w) > 3 or w not in {"of", "and", "for"})
 
 
 def independent_read(source: editor.ResumeDoc, tailored: editor.ResumeDoc, profile: dict, posting: dict) -> list[str]:
@@ -36,7 +45,7 @@ def independent_read(source: editor.ResumeDoc, tailored: editor.ResumeDoc, profi
                 found.append(f"link: {piece[:80]}")
     page = doc_plain(tailored).lower()
     for term in ats.terms(posting["description"], posting["title"], []):
-        if ats.matches(term["pattern"], page) and not ats.matches(term["pattern"], seen):
+        if ats.matches(term["pattern"], page) and not ats.matches(term["pattern"], seen) and not term.get("common") and not own_words(term["term"], seen):
             found.append(f"posting term {term['term']} isn't in their history")
     if posting["title"].lower() in page and posting["title"].lower() not in seen:
         found.append(f"calls them a {posting['title']}")
@@ -88,20 +97,106 @@ def hostile(posting):
     return model
 
 
+def _trim(text: str, until: int) -> str:
+    """How a model pays for a term: little words first, last ones first, then words off the end that aren't figures or names."""
+    while len(text) > until:
+        hits = list(re.finditer(r"(?<![\w/-])(?:the|an?) ", text))
+        if not hits:
+            break
+        text = text[: hits[-1].start()] + text[hits[-1].end() :]
+    words = text.split()
+    while len(" ".join(words)) > until and len(words) > 3 and not re.search(r"[A-Z0-9]", words[-1]):
+        words.pop()
+    return " ".join(words).rstrip(",;")
+
+
+def _worked_in(text: str, say_as: list[str], lead_with: list[str]) -> str:
+    """A line as a fast model rewrites it: the job's term near the start, the words it replaces gone, every figure and name kept. It reads well enough, and it usually runs long."""
+    first, rest = text.split(" ", 1)
+    if say_as:
+        term = say_as[0]
+        roots = {normal.stem(w) for w in re.findall(r"[a-z]+", term)}
+        opening = "Handled" if normal.stem(first) in roots else first
+        kept = []
+        for word in rest.split():
+            root = normal.stem(re.sub(r"\W", "", word))
+            if root in roots and word == word.lower():
+                roots.discard(root)
+                continue
+            kept.append(word)
+        return f"{opening} {term} {' '.join(kept)}"
+    for term in lead_with:
+        found = re.search(ats.pattern_for(term), rest, re.I | re.A)
+        if found:
+            before = re.sub(r"\b(?:in|with|using|on|and|via)\s*$", "", rest[: found.start()])
+            return re.sub(r"\s+([,;.])", r"\1", re.sub(r"\s{2,}", " ", f"{first} {found.group(0)} {before}{rest[found.end() :]}")).strip()
+    return text
+
+
+def sloppy(posting):
+    """A real model on a real resume: mostly honest, near its character limits rather than inside them, and now and then it reaches for something the line doesn't say."""
+
+    def lie(row, i, data):
+        other = [t for t in data["summary_terms"] if t not in row["say_as"] + row["lead_with"]]
+        wanted = data["do_not_use"][:1] or ["Kubernetes"]
+        says = (f" with {wanted[0]}", ", up 37%", f" using {other[0]}" if other else " using COBOL", f" at {posting['company']}")[i % 4]
+        return row["text"][: row["max_chars"] - len(says)].rstrip(" ,.;") + says
+
+    async def model(output_type, system, user):
+        data = json.loads(user)
+        if output_type is normal.NormalPlan:
+            lines = []
+            for i, row in enumerate(data["bullets"]):
+                text = _worked_in(row["text"], row["say_as"], row["lead_with"])
+                slip = i % 6
+                if slip == 4:
+                    text = lie(row, i // 6, data)
+                elif slip == 2:
+                    text = _trim(text, row["min_chars"] - 3)  # Cut too hard.
+                else:
+                    text = _trim(text, row["max_chars"] + (3, 9, 0, 0, 0, 18)[slip])
+                lines.append(normal.PlanBullet(id=row["id"], text=text))
+            title = data["roles"][0].split(" at ")[0]
+            terms = data["summary_terms"][:3]
+            evidence = (data["bullets"] and data["bullets"][0]["text"]) or (data["also_on_resume"] or [""])[0]
+            summary = (f"{title} working with {', '.join(terms)}. " if terms else f"{title}. ") + _trim(evidence, 150).rstrip(".") + "."
+            if len(posting["title"]) % 3 == 0:
+                summary = summary.replace(title, posting["title"], 1)  # It flatters them with the job's own title.
+            return normal.NormalPlan(summary=summary, bullets=lines, skills_to_add=[*terms, "Kubernetes"])
+        if output_type is normal.BulletRepair:
+            lines = []
+            for i, row in enumerate(data["bullets"]):
+                source, why = row["source"], row["refused_because"]
+                say = [t for t in row["may_use"] if not ats.matches(ats.pattern_for(t), source)]
+                if i % 5 == 4:
+                    continue  # It gives up on some, and their originals stay.
+                if "cut at least" in why:
+                    text = _trim(row["attempt"], row["max_chars"] + (2 if i % 4 == 3 else -1))  # One in four is still a little over.
+                elif i % 3 == 2:
+                    text = source[:-14] + " with COBOL"  # It lies again, and that's the end of it.
+                else:
+                    text = _trim(_worked_in(source, say, row["may_use"]), row["max_chars"] - 1)
+                lines.append(normal.PlanBullet(id=row["id"], text=text))
+            return normal.BulletRepair(bullets=lines)
+        if output_type is normal.SummaryRepair:
+            return normal.SummaryRepair(summary=f"{data['history'].splitlines()[0]} with experience in {', '.join(data['summary_terms'][:2]) or 'this field'}.")
+        return output_type()
+
+    return model
+
+
 def run_one(posting, model, tmp_path):
     doc = RESUMES[posting["resume"]]
     profile = profile_of(doc)
     inv = build(profile, doc_plain(doc))
-    terms = ats.terms(posting["description"], posting["title"], supported_terms(inv))
+    terms = ats.terms(posting["description"], posting["title"], supported_terms(inv), company=posting["company"])
     evidence_text = " ".join([doc_plain(doc), inv.vocabulary])
     source = modes.SourceResume(id="r", sha="s", text=doc_plain(doc), doc=doc, style=editor.Style())
     ctx = modes.ModeContext(db=None, config=None, model=model, compile_fn=compile_pdf, work_dir=tmp_path, evidence=inv, ats_terms=terms, ats_source=ats.score(terms, doc_plain(doc), evidence_text))
     return doc, profile, ctx, asyncio.run(normal.run(posting, source, profile, ctx))
 
 
-@pytest.mark.parametrize("posting", POSTINGS, ids=[f"{p['resume']}-{p['title']}" for p in POSTINGS])
-def test_nothing_a_lying_model_says_reaches_the_resume(posting, tmp_path):
-    doc, profile, ctx, result = run_one(posting, hostile(posting), tmp_path)
+def assert_truthful(posting, doc, profile, ctx, result):
     pdf = result.pdf_path.read_bytes()
     report = check_rules(result.doc, doc, pdf=pdf, allowed_skills=[*ctx.evidence.skills, *result.allowed_skills], vocabulary=ctx.evidence.vocabulary)
     assert report["ok"], report["problems"]
@@ -109,24 +204,54 @@ def test_nothing_a_lying_model_says_reaches_the_resume(posting, tmp_path):
     originals = {b.id: b.text for s in doc.sections for e in s.entries for b in e.bullets}
     for s in result.doc.sections:
         for e in s.entries:
+            own = e.heading + " " + " ".join(b.text for b in doc_entry(doc, e.id).bullets) if e.id in {x.id for sec in doc.sections for x in sec.entries} else e.heading
             for b in e.bullets:
                 if b.id in originals and b.text != originals[b.id]:
                     assert fits_window(b.text, originals[b.id])
-                    bad = [p for p in claims.check(b.text, originals[b.id], e.heading + " " + " ".join(originals.values())) if p.startswith("unsupported")]
+                    bad = [p for p in claims.check(b.text, originals[b.id], own) if p.startswith("unsupported")]
                     assert not bad, bad
+                    assert not claims.dropped(b.text, originals[b.id])
     # The independent read.
     assert independent_read(doc, result.doc, profile, posting) == []
     # Keywords it can't back up are named, and left out.
-    needed = [k["term"] for k in ctx.ats_source["keywords"] if k["status"] == "needed"]
+    seen = re.sub(r"\s+", " ", doc_plain(doc)).lower()
+    needed = [k["term"] for k in ctx.ats_source["keywords"] if k["status"] == "needed" and not k.get("common") and not own_words(k["term"], seen)]
     text = doc_plain(result.doc)
     assert not [t for t in needed if ats.matches(ats.pattern_for(t), text)]
     # Skills only ever grew, and only with theirs.
     before = {i.lower() for s in doc.sections if s.kind == "skills" for i in skill_items(s.text)}
     after = {i.lower() for s in result.doc.sections if s.kind == "skills" for i in skill_items(s.text)}
     assert before <= after
-    assert not {"quantum computing", "cobol"} & after
+    assert not {"quantum computing", "cobol", "kubernetes"} & (after - before)
     # Every posting still gets a summary, from their own words.
     assert any(s.title == "Summary" and s.text.strip() for s in result.doc.sections)
+
+
+def doc_entry(doc, entry_id):
+    return next(e for s in doc.sections for e in s.entries if e.id == entry_id)
+
+
+@pytest.mark.parametrize("posting", POSTINGS, ids=[f"{p['resume']}-{p['title']}" for p in POSTINGS])
+def test_nothing_a_lying_model_says_reaches_the_resume(posting, tmp_path):
+    doc, profile, ctx, result = run_one(posting, hostile(posting), tmp_path)
+    assert_truthful(posting, doc, profile, ctx, result)
+
+
+def test_a_model_that_misses_limits_by_a_little_still_lands_its_honest_edits(tmp_path):
+    """The real failure wasn't lying. It was edits that never landed. Every line here is offered as a real model would answer it: the term worked in, a length near the limit, a lie now and then."""
+    offered = changed = risen = 0
+    for posting in POSTINGS:
+        doc, profile, ctx, result = run_one(posting, sloppy(posting), tmp_path)
+        assert_truthful(posting, doc, profile, ctx, result)
+        offered += result.report["offered_bullets"]
+        changed += result.report["changed_bullets"]
+        before = ctx.ats_source["score"]
+        after = ats.score(ctx.ats_terms, doc_plain(result.doc), " ".join([doc_plain(doc), ctx.evidence.vocabulary]))["score"]
+        assert after >= before
+        risen += after > before
+    assert offered >= 15, offered  # What the postings can honestly offer on these resumes; if this falls, bullets stopped being offered.
+    assert changed >= offered * 0.6, (changed, offered)
+    assert risen >= 5, risen
 
 
 def test_the_independent_read_really_catches_each_lie():
