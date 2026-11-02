@@ -192,6 +192,7 @@ MAP = {
     "api/routes/demo.py":                ("control:gateway/routes/demo.py", ""),
     "api/routes/frontend.py":            ("control:gateway/routes/frontend.py", ""),
     "api/routes/health.py":              ("control:gateway/routes/health.py", ""),
+    "api/routes/license.py":             ("control:gateway/routes/license.py", ""),
     "api/routes/job_board.py":           ("control:gateway/routes/job_board.py", "Proxies to discovery /v1"),
     "api/routes/jobs.py":                ("control:gateway/routes/jobs.py", ""),
     "api/routes/knowledge.py":           ("control:gateway/routes/knowledge.py", ""),

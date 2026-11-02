@@ -354,7 +354,7 @@ def claim_blockers(service, monkeypatch):
                 assert run.started_at is None  # Nothing was claimed under the expired key.
                 run.state = "paused"  # The end of this fixture's loop.
 
-    monkeypatch.setattr(service_module, "asyncio", SimpleNamespace(sleep=end_after_a_wait))
+    monkeypatch.setattr(service_module, "asyncio", SimpleNamespace(**{**vars(asyncio), "sleep": end_after_a_wait}))
     return Claimed, slept
 
 
