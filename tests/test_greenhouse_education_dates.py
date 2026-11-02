@@ -42,3 +42,15 @@ def test_a_form_with_a_work_block_nearer_keeps_its_own_dates(service):
     ]
     mark_history_rows(fields)
     assert "history_row" not in {f["id"]: f for f in fields}["wm"] or {f["id"]: f for f in fields}["wm"]["history_row"]["kind"] != "education"
+
+
+def test_the_whole_block_comes_from_one_degree_in_either_profile_order(service):
+    master = EducationEntry(school="Example University", degree="Master's Degree", field_of_study="Computer Science", end="2026-05")
+    bachelor = EducationEntry(school="Sample College", degree="Bachelor's Degree", field_of_study="Physics", end="2023-05")
+    for order in ([master, bachelor], [bachelor, master]):
+        resolver = Resolver(Profile(education=order), service.db, service.config, job={"ats": "greenhouse", "url": "https://example.test/job"})
+        fields = block()
+        mark_history_rows(fields)
+        got = {f["id"]: getattr(resolver.local(f), "value", None) for f in fields}
+        assert got["d"] == "Master's Degree" and got["m"] == "Computer Science", got
+        assert (got["em"], got["ey"]) == ("May", "2026"), got

@@ -547,9 +547,15 @@ def mark_history_rows(fields):
         # Greenhouse's education block names no school: Degree, Discipline, "End date month", "End date year" (Quantifind,
         # 2026-11-01). Its dates are the highest degree's, as for a single school above; left unplaced they went to the
         # applicant although the resume holds the graduation date.
-        for f in fields:
-            if EDUCATION_DATE_PART.fullmatch(clean(f)) and block(f) == "education":
-                f["history_row"] = {"kind": "education", "index": "highest"}
+        parts = [f for f in fields if EDUCATION_DATE_PART.fullmatch(clean(f)) and block(f) == "education"]
+        for f in parts:
+            f["history_row"] = {"kind": "education", "index": "highest"}
+        if parts:
+            # The whole block is one entry: Degree and Discipline beside those dates are the same highest degree's. Left to the
+            # first profile entry they sent a Bachelor's with a Master's graduation date when the profile lists Bachelor first.
+            for f in fields:
+                if re.fullmatch(r"(?:degree(?: type| level)?|discipline|major|field of study|area of study)", clean(f), re.I) and block(f) == "education":
+                    f["history_row"] = {"kind": "education", "index": "highest"}
     # A date no row claims (another block's "Start Date") makes that label ambiguous: it is not placed at all.
     matched.update({attr: ([f for f in v if block(f) == "work"] if all(block(f) for f in v) else [])
                     for attr, v in dates.items()})
@@ -1846,6 +1852,16 @@ class FormSession:
             await asyncio.sleep(0.25)
         return False
 
+    def note_survey(self, state):
+        """This application's survey outcome for the answer rules: "launched" when the run opened the tax-credit survey, "finished" once the run
+        came back from it. A resolver without the attribute (a test double) simply has no record."""
+        if state == "launched" and getattr(self.resolver, "survey", "") == "finished":
+            return
+        try:
+            self.resolver.survey = state
+        except AttributeError:
+            pass
+
     def assessment_tab_returned(self):
         """The launched survey's tab now shows the application's own host: its last link was the way back."""
         origin = getattr(self, "assessment_origin", "")
@@ -1862,6 +1878,7 @@ class FormSession:
         if not url or not self.on_questionnaire():
             return False
         self.survey_finished = True
+        self.note_survey("finished")
         await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
         self.emit("survey_returned", "Returned to the application after the tax-credit questionnaire")
         await self.settle(timeout=8)
@@ -1879,6 +1896,7 @@ class FormSession:
         survey = self.page
         self.page = openers.pop()
         self.survey_finished = True
+        self.note_survey("finished")
         if not survey.is_closed():
             try:
                 await survey.close()
@@ -6412,6 +6430,7 @@ class FormSession:
             # Workday's may open it in a tab. Either way the run comes back here when it is finished.
             self.assessment_origin = urlsplit(opener.url).hostname or ""
             self.assessment_return = opener.url
+            self.note_survey("launched")
         # A "Submit" that this guard allowed for a profile/account popup or a tax-credit
         # launcher must also pass the page's own click guard, or the click is silently
         # cancelled (Starbucks "Create your profile": the agent clicked Submit for minutes).

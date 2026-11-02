@@ -62,3 +62,27 @@ def test_start_turns_on_account_and_terms_permissions_only_when_the_dialog_allow
     assert client.post("/api/job-board/autopilot/start", json={"target": 20, "permissions": "allow"}).status_code == 200
     assert flags() == []
     assert service.db.get_setting("profile")["first_name"] == "Alex"
+
+
+def test_no_dont_make_accounts_turns_off_every_permission_it_declines(client, service, monkeypatch):
+    from jobpilot import apply_permissions
+    from jobpilot.schemas import Profile
+
+    async def started(service, target):
+        return {"batch": autopilot.start_batch(service.db, target)}
+
+    monkeypatch.setattr(autopilot, "start_autonomous", started)
+    monkeypatch.setattr(autopilot, "batch_snapshot", lambda service: {})
+    service.dispatch = object()
+    on = lambda: {n: service.db.get_setting("profile")[n] for n in apply_permissions.FLAGS}  # noqa: E731
+    mixed = {"first_name": "Alex", "allow_account_creation": True, "accept_all_application_terms": False, "allow_application_consents": True}
+    service.db.set_setting("profile", mixed)
+    # Not yet is the dialog closing: it never calls the route, and a start without an answer changes nothing.
+    assert client.post("/api/job-board/autopilot/start", json={"target": 20}).status_code == 200
+    assert service.db.get_setting("profile") == mixed
+    for before in (mixed, {n: True for n in apply_permissions.FLAGS}, {n: False for n in apply_permissions.FLAGS}):
+        service.db.set_setting("profile", {"first_name": "Alex", **before})
+        assert client.post("/api/job-board/autopilot/start", json={"target": 20, "permissions": "decline"}).status_code == 200
+        assert on() == {n: False for n in apply_permissions.FLAGS}
+        assert not Profile.model_validate(service.db.get_setting("profile")).allow_account_creation
+        assert service.db.get_setting("profile")["first_name"] == "Alex"
