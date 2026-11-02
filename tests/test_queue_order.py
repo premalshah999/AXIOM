@@ -163,3 +163,36 @@ def test_jobs_held_by_the_platforms_own_pace_say_why_and_when_and_are_not_promis
         assert "Ashby takes one application at a time" in waits[jid] and "It is due in about" in waits[jid]
     assert [i["id"] for i in value["next"]][0] == "g1"
     assert value["exact"] == 1  # only the Greenhouse job is what a free worker takes now
+
+
+@pytest.mark.asyncio
+async def test_a_full_pool_stops_only_its_own_requests_and_a_permanent_refusal_keeps_its_reason(service):
+    """owner_apply.due broke out of every remembered request when one pool was full, and dropped a permanent refusal without a word."""
+    from jobpilot.admission import QueueBlocked
+
+    setup(service)
+    gh1 = ready(service, "g1", "Alpha", ats="greenhouse")
+    gh2 = ready(service, "g2", "Beta", ats="greenhouse")
+    site = ready(service, "s1", "Gamma", ats="custom")
+    closed = ready(service, "c1", "Delta", ats="greenhouse")
+    for n, jid in enumerate((closed, gh1, gh2, site)):  # the order they were asked in
+        service.db.set_setting(owner_apply.KEY + jid, {"at": f"2026-11-01T00:00:0{n}+00:00", "not_before": "2026-11-01T00:00:00+00:00"})
+    seen = []
+
+    async def queue(job_id, mode, owner_pick=False):
+        seen.append(job_id)
+        if job_id == gh1:
+            raise QueueBlocked("This worker pool is busy", outcome="deferred", code="worker_capacity")
+        if job_id == closed:
+            raise QueueBlocked("The posting is closed.", outcome="excluded", code="closed")
+        return {"id": "run-" + job_id}
+
+    service.queue = queue
+    started = await owner_apply.due(service, 10)
+    assert gh2 not in seen  # the normal pool is full: its other requests are not asked
+    assert site in seen and started >= 1  # the company-site pool is not
+    held = service.db.get_setting(owner_apply.REFUSED + closed)
+    assert "closed" in held["reason"]
+    assert service.db.get_setting(owner_apply.KEY + closed, None) is None
+    value = startable.read(service)
+    assert "closed" in value["jobs"][closed]["reason"].lower() and value["jobs"][closed]["code"] == "excluded"

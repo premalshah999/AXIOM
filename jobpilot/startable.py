@@ -152,6 +152,11 @@ def read(service):
             for row in s.scalars(select(Setting).where(Setting.key.startswith("job_control:", autoescape=True)))
         }
         requested = {k.removeprefix("owner_apply:") for k in s.scalars(select(Setting.key).where(Setting.key.startswith("owner_apply:", autoescape=True)))}
+        # An Apply click the dispatcher refused for good keeps its reason (owner_apply._refuse).
+        refused = {
+            row.key.removeprefix("owner_apply_refused:"): row.value or {}
+            for row in s.scalars(select(Setting).where(Setting.key.startswith("owner_apply_refused:", autoescape=True)))
+        }
     from .company_sites import KEY as CHOSEN, is_company_site
 
     with db.session() as s:
@@ -231,6 +236,8 @@ def read(service):
                         more = {"count": count, "limit": cap}
                     else:  # The employer's own stated cap: its rule, not the user's setting; no approval lifts it.
                         verdict = ("employer_cap", str(exc))
+        if verdict is None and (why := refused.get(r.id)) and why.get("reason"):
+            verdict = ("protected" if why.get("outcome") == "protected" else "excluded", "You asked for this one, but it was refused: " + str(why["reason"])[:200])
         if verdict is None and (why := rejections.get(r.id)) and why.get("outcome") in {"excluded", "protected"}:
             verdict = ("protected" if why["outcome"] == "protected" else "excluded", str(why.get("reason", ""))[:240])
         if verdict is None:
