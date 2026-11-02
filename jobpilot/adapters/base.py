@@ -1313,6 +1313,11 @@ class Adapter:
 
             if not self.committed and missing_posting_notice(obs, self.job["url"]):
                 return await self.on_closed(obs)
+            stay = getattr(self.e, "stay_on_posting", None)
+            if stay and not self.committed and await stay(obs):
+                if getattr(self.e, "result", None):
+                    return self.e.result
+                continue
             from ..account_identity import stop_if_identity_conflict
 
             if await stop_if_identity_conflict(self.e, obs):
@@ -2588,6 +2593,7 @@ class Adapter:
         if (
             self.committed
             or self.attempts["reopen"]
+            or getattr(getattr(self.e, "posting_watch", None), "sent_like", False)  # Going back could send it twice.
             or any(f.get("required") for f in fields)
             or self.find_final(obs)
             or self.find_next(obs)

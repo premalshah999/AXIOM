@@ -23,6 +23,14 @@ from .models import AnswerModelUnavailable, BudgetExceeded
 from .answers import UNOFFERED_SOURCE, Resolver
 from .ats import EMBED_JS, LABEL_ONLY, REGISTRY, classify_embedded, detect, unsettled
 from .posting_identity import IDENTITY_JS, identity, placeholder_title, save as save_identity
+from .posting_match import (
+    PostingWatch,
+    acknowledges_application,
+    could_carry_application,
+    other_posting_address,
+    role_heading,
+    unrelated_posting_number,
+)
 from .redaction import redact
 from .email_browser import EmailBrowser, redacted_url
 from .failure_reports import clean
@@ -1636,6 +1644,14 @@ class BrowserEngine:
                 resume_artifact_id=run["packet"].get("resume_artifact_id"),
             )
             self.form = FormSession(page, resolver, resume, self.emit)
+            # A reopened route did not walk here from the job's own address, so what it shows isn't taken on trust. A kept tab did: its
+            # form may be numbered its own way, and sending it back would lose a draft or a code on its way.
+            self.posting_watch = self.form.posting_watch = PostingWatch(
+                job,
+                opened_fresh=not reopened_route,
+                entry_url=getattr(self, "application_entry_url", ""),
+                landing=not resumed and not reopened_route,
+            )
             if run["packet"].get("owner_hands"):
                 self.form.owner_hands = True  # Take over's hand-back: the page's values are the owner's (forms.adopt_owner_values)
             self.form.on_checkpoint = self.checkpoint_draft
@@ -2296,6 +2312,14 @@ class BrowserEngine:
     def desktop_resume_route(self, saved):
         state = self.desktop_resume_state(saved) or {}
         packet = self.run_record.get("packet", {})
+        route = state.get("url", "")
+        if route and not saved.get("armed"):
+            # A saved page of another posting is no way back into this one: restart from the job's own address. A form numbered its
+            # own way can't be told from that here, and its mail wait keeps its page.
+            if other_posting_address(self.job["url"], route) or (
+                not packet.get("email_wait_resume") and unrelated_posting_number([self.job["url"]], route)
+            ):
+                return None
         if (
             self.job.get("ats") == "oracle"
             and "/apply/" in urlsplit(state.get("url", "")).path
@@ -2641,10 +2665,12 @@ class BrowserEngine:
 
     def commit_write(self, request):
         """A write during the commit that could carry the application: not tracking, analytics or noise."""
+        return self.armed and self.real_write(request)
+
+    def real_write(self, request):
         parts = urlsplit(request.url)
         return (
-            self.armed
-            and request.method in {"POST", "PUT", "PATCH"}
+            request.method in {"POST", "PUT", "PATCH"}
             and request.resource_type in {"document", "xhr", "fetch"}
             and not COMMIT_TRACKING.search(parts.path)
             and not COMMIT_NOISE.search(parts.hostname or "")
@@ -2670,6 +2696,8 @@ class BrowserEngine:
         getattr(self, "commit_inflight", set()).discard(id(request))
         if not self.armed and request.method == "POST" and request.resource_type == "document":
             self.form_post(response)
+        if not self.armed and request.method in {"POST", "PUT", "PATCH"}:
+            self.note_possible_send(request, response)
         if self.armed and request.method in {"POST", "PUT", "PATCH"} and request.resource_type in {
             "document",
             "xhr",
@@ -2761,6 +2789,19 @@ class BrowserEngine:
                 {"requests": self.commit_requests, "tracking_calls": self.commit_tracking},
             )
             self.commit_requests, self.commit_tracking = [], 0
+
+    def note_possible_send(self, request, response):
+        """A write out of a form that holds answers may be the application itself, whatever its button was called (posting_match)."""
+        watch, form = getattr(self, "posting_watch", None), getattr(self, "form", None)
+        if watch is None or watch.sent_like or form is None or response.status >= 400 or not self.real_write(request):
+            return
+        if not (form.ledger or form.uploaded or getattr(form, "resume_on_file", False)):
+            return
+        try:
+            body = request.post_data_buffer
+        except Exception:
+            body = b""  # Chrome withholds bodies that carry file bytes.
+        watch.sent_like = could_carry_application(request.url, body)
 
     def form_post(self, response):
         """A step's form submission before the commit: where it went, the status, and the form's field names and
@@ -4013,12 +4054,88 @@ class BrowserEngine:
         self.result = candidate
         return "", False
 
+    def posting_stop(self, reason):
+        """Stop this attempt with nothing sent. No recovery can help: the browser only ever goes back to the job's own address."""
+        return {"state": "waiting_browser", "reason": reason, "blocker_type": "control_failure", "recoverable": False}
+
+    def watching_posting(self):
+        packet = (getattr(self, "run_record", None) or {}).get("packet") or {}
+        watch = getattr(self, "posting_watch", None)
+        return None if watch is None or self.armed or packet.get("verification_only") or self.steering() else watch
+
+    async def stay_on_posting(self, obs):
+        """While a run works on a job it never browses to another. A career home, a job list or another posting isn't this job: the
+        only move from one is back to the job's own address, and when that doesn't help the run stops with nothing sent. A saved
+        route bounced to a career home, and the navigator opened another role from its list and applied to it (2026-11-01; five
+        more in the stored receipts). True when the page moved or a result was set: the caller reads the page again or ends."""
+        watch = self.watching_posting()
+        if watch is None:
+            return False
+        verdict = watch.judge((getattr(self.form, "page", None) or self.page).url, obs)
+        if verdict.kind == "ok":
+            watch.just_returned = False
+            return False
+        self.emit("posting_guard", "This page isn't the job's own posting", {"kind": verdict.kind, "why": verdict.why[:200]})
+        # This guard must never send an application twice. A step's Continue can be the employer's real submit, with nothing armed, and
+        # its receipt can sit on a page like this: going back would open Apply again. So what the page says comes first, then whether
+        # anything may have gone out, and only a run that has sent nothing is ever taken back.
+        if acknowledged := await self.page_acknowledged():
+            self.result = acknowledged
+            return True
+        if acknowledges_application(obs.get("text")):
+            return False
+        if watch.sent_like:
+            if verdict.kind == "other_posting":
+                self.result = {
+                    "state": "submission_unknown",
+                    "reason": f"A form was sent, and then {verdict.why}. It isn't sent again",
+                    "blocker_type": "other_posting",
+                    "receipt": {"type": "possible_send", "other_posting": True},
+                }
+                return True
+            return False  # Stays on the page, as it would without this guard. Other postings' links stay closed, and so does the commit.
+        if watch.just_returned or watch.returns >= 3 or not getattr(self, "application_entry_url", ""):
+            self.result = self.posting_stop("The employer's site didn't open this posting; nothing was sent")
+            return True
+        watch.returns += 1
+        watch.just_returned = watch.trail = watch.landing = True
+        try:
+            await self.return_to_job()
+            self.form.reset_document_verification()  # A new document verifies its own fields and upload before it can be sent.
+        except PlaywrightError:
+            self.result = self.posting_stop("The employer's site didn't open this posting; nothing was sent")
+        return True
+
+    async def other_posting_at_commit(self):
+        """The last look before anything can be sent: the page in front of the submit belongs to this job, or nothing goes. An id,
+        structured data or a form heading must say so plainly; a page that states nothing is not held back for that."""
+        watch = self.watching_posting()
+        if watch is None:
+            return None
+        page = getattr(self.form, "page", None) or self.page
+        stated, headings = "", []
+        try:
+            stated = identity(await page.evaluate(IDENTITY_JS)).get("title", "")
+            headings = await page.evaluate("() => [...document.querySelectorAll('h1,h2')].slice(0, 6).map(e => e.innerText)")
+            if not stated:
+                main = await page.evaluate("() => [...document.querySelectorAll('h1')].slice(0, 4).map(e => e.innerText)")
+                stated = role_heading(self.job.get("title"), main, self.job.get("company") or "")
+        except Exception:
+            pass  # Identity that can't be read blocks nothing.
+        why = watch.other_posting(page.url, {"headings": headings}, stated)
+        if not why:
+            return None
+        self.emit("posting_guard", "Stopped before the final submit: another posting", {"kind": "commit", "why": why[:200]})
+        return self.posting_stop(f"Not submitted: {why}; nothing was sent")
+
     async def try_reserve_commit(self):
         """None when the commit is reserved, else the result that ends this attempt with nothing submitted.
 
         A server stop is a free, immediate resume after the restart (host_health.refused_commit_result)."""
         from .host_health import refused_commit_result
 
+        if stop := await self.other_posting_at_commit():
+            return stop
         try:
             await self.reserve_commit()
         except ValueError as exc:
@@ -5351,6 +5468,11 @@ class BrowserEngine:
             if not self.armed and missing_posting_notice(obs, self.job["url"]):
                 self.result = {"state": "closed", "reason": "The employer reports that the requested posting could not be found"}
                 return
+            if await self.stay_on_posting(obs):
+                continue  # Read the page again; a stop set the result and ends at the loop's top.
+            if (watch := self.watching_posting()) is not None:
+                # The model is not offered another posting's link; forms.click refuses one if it names it anyway.
+                obs = {**obs, "controls": [c for c in obs["controls"] if not watch.other_posting_link(c.get("href"), obs["url"], c.get("label"))]}
             obs = await self.await_successfactors_handoff(obs)
             if self.result:
                 return

@@ -601,3 +601,16 @@ async def test_a_titled_acknowledgement_is_not_ambiguous_with_another_employers_
     assert (await check_receipts(service.mail))["emails_confirmed"] == 1
     with service.db.session() as s:
         assert s.get(Run, ours).state == "confirmed" and s.get(Run, other).state == "submission_unknown"
+
+
+async def test_a_thank_you_mail_cant_confirm_a_run_that_reached_another_posting(service, monkeypatch):
+    """The page named another role, so the run is unknown. The same mail confirms an ordinary unknown run (the test above)."""
+    at = datetime.now(UTC) - timedelta(minutes=5)
+    rid = seed(service, 1, state="submission_unknown", start=at)[0]
+    with service.db.session() as s:
+        s.get(Run, rid).receipt = {"other_posting": True}
+    msg = receipt("ack", at + timedelta(minutes=1), "We received your application to Example for the Engineer position.")
+    mailbox_provider(monkeypatch, service, [msg])
+    assert (await check_receipts(service.mail))["emails_confirmed"] == 0
+    with service.db.session() as s:
+        assert s.get(Run, rid).state == "submission_unknown"
