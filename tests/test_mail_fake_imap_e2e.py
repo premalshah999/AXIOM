@@ -36,6 +36,9 @@ def imap(monkeypatch):
     server, box = fake_imap.start()
     port = server.server_address[1]
     monkeypatch.setattr(imaplib, "IMAP4_SSL", lambda host, p, **kw: imaplib.IMAP4("127.0.0.1", port, timeout=kw.get("timeout")))
+    # How long a run waits in the browser for a code that comes: paid only by one that never does, and the test of that sets its own.
+    # The app's 30 s ran out on a starved Mac with the mail already in the box.
+    monkeypatch.setattr("jobpilot.email_browser.code_inline_wait", lambda ats: 300)
     for cache in (gmail_imap._clients, gmail_imap._where, gmail_imap._identity):
         cache.clear()
     yield box
