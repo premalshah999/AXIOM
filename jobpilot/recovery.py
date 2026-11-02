@@ -10,6 +10,7 @@ from sqlalchemy import select
 from .application_budget import BROWSER_OUTAGE, HOST_OVERLOADED, nothing_sent
 from .db import Event, Job, Review, Run, Setting, now
 from .admission import employer_partition, outcome_for
+from .pipeline_comparison import escalated
 from .specialist import handoff_threshold, handoff_trigger
 
 CAUSES = {
@@ -143,7 +144,7 @@ def automatic_attempts(session, job_id):
     return sum(
         bool(
             run.packet.get("source_run_id")
-            and run.packet.get("worker_pool", "normal") != "specialist"
+            and not escalated(run)
             and not run.packet.get("email_wait_resume")
             and run.packet.get("recovery_continuation_cause") != "worker_interrupted"
             # Waiting behind a sibling's email, a dead Chrome or an overloaded host sent nothing; not a repair attempt.
@@ -156,7 +157,7 @@ def automatic_attempts(session, job_id):
 def specialist_attempts(session, job_id):
     """A committed specialist run consumes capacity even before its browser starts."""
     return sum(
-        run.packet.get("worker_pool") == "specialist"
+        escalated(run)
         and run.mode == "submit"
         and not run.packet.get("verification_only")
         and not run.packet.get("email_wait_resume")
@@ -312,7 +313,8 @@ def _eligible_specialist_history(session, run, result):
         cause = result.get("recovery_cause") if other.id == run.id else other.packet.get("recovery_cause")
         blocker = result.get("blocker_type") if other.id == run.id else other.packet.get("blocker_type")
         if (
-            other.packet.get("worker_pool", "normal") == "normal"
+            other.packet.get("worker_pool", "normal") in {"normal", "custom"}
+            and not escalated(other)
             and other.state in {"waiting_browser", "timed_out", "failed"}
             and cause in SPECIALIST_CAUSES
             and blocker in SPECIALIST_BLOCKERS
@@ -389,7 +391,7 @@ def schedule_version_repairs(service):
                 or not run.packet.get("profile", {}).get("autonomous")
                 or not run.packet.get("engine_version")
                 or run.packet["engine_version"] == version
-                or run.packet.get("worker_pool") == "specialist"
+                or escalated(run)
                 or run.packet.get("specialist_escalation", {}).get("eligible")
                 or not (
                     run.packet.get("blocker_type")
@@ -535,14 +537,14 @@ def schedule_recovery(session, config, run, result):
         and previous.get("source_run_id") != run.id
     )
     exhausted = attempts >= limit
-    from .pipeline_comparison import SPECIALIST, pool_for
+    from .pipeline_comparison import SPECIALIST, STRATEGY_ESCALATED, custom_site
 
     hard_attempts = specialist_attempts(session, run.job_id)
     hard_limit = config.specialist_attempts
     eligible = _eligible_specialist_history(session, run, result)
     ats = (session.get(Job, run.job_id) or Job()).ats or ""
     needed = handoff_threshold(config, ats, cause)
-    handoff = pool_for(run) == SPECIALIST or (needed is not None and len(eligible) >= needed)
+    handoff = escalated(run) or (needed is not None and len(eligible) >= needed)
     if handoff and eligible:
         checkpoint = result.get("browser_checkpoint") or run.packet.get("browser_checkpoint", {})
         envelope = {
@@ -574,7 +576,8 @@ def schedule_recovery(session, config, run, result):
             "attempt_limit": limit,
             "specialist_attempts": hard_attempts,
             "specialist_attempt_limit": hard_limit,
-            "worker_pool": SPECIALIST,
+            # The lane a custom site stays in is its own; only the strategy changes (pipeline_comparison).
+            **({"strategy": STRATEGY_ESCALATED} if custom_site(session.get(Job, run.job_id)) else {"worker_pool": SPECIALIST}),
             "failure_signature": signature,
             "failure_engine_version": run.packet.get("engine_version"),
             "scheduled": hard_attempts < hard_limit,
@@ -587,7 +590,7 @@ def schedule_recovery(session, config, run, result):
         else:
             session.add(Setting(key=key, value=value))
         return
-    if pool_for(run) == SPECIALIST:
+    if escalated(run):
         # Losing eligibility cannot silently send a difficult draft back to normal
         # retries or reset its independent attempt limit.
         value = {
@@ -785,7 +788,7 @@ async def retry_due(service):
                     raise QueueBlocked("Recovery job no longer exists", code="not_found")
                 if job.ats in set(service.db.get_setting("ats_focus", {}).get("exclude", [])):
                     continue  # Owner focus: this platform is set aside for now.
-                from .pipeline_comparison import assign_pool, pool_capacity
+                from .pipeline_comparison import STRATEGY_ESCALATED, assign_pool, assign_strategy, pool_capacity
 
                 source = s.get(Run, recovery["source_run_id"])
                 from .application_budget import require_allowance
@@ -796,7 +799,8 @@ async def retry_due(service):
                 pool = assign_pool(s, job, source)
                 if not pool_capacity(s, pool, service.config.topology).available:
                     continue  # A full pool must not stop due drafts in the other pool.
-                if (pool == SPECIALIST and recovery.get("cause") != "worker_interrupted"
+                if ((pool == SPECIALIST or assign_strategy(job, source) == STRATEGY_ESCALATED)
+                        and recovery.get("cause") != "worker_interrupted"
                         and specialist_attempts(s, job_id) >= service.config.specialist_attempts):
                     continue
                 employer = employer_partition(job)

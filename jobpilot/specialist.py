@@ -13,7 +13,7 @@ The specialist then gets SPECIALIST_BUDGET_MULTIPLIER (default 1.5) times the wa
 token cap of an ATS worker, and at most SPECIALIST_ATTEMPTS attempts.
 """
 
-from .pipeline_comparison import SPECIALIST, normalize_ats
+from .pipeline_comparison import CUSTOM_ESCALATED, SPECIALIST, custom_site, normalize_ats
 
 STALLED = "navigation_stalled"
 
@@ -25,7 +25,8 @@ def hard_ats(config):
 
 def handoff_threshold(config, ats, cause):
     """ATS-worker failures after which this job goes to a specialist, or None when there are no specialists."""
-    if config.specialist_workers < 1:
+    # A custom site escalates in its own lane (pipeline_comparison.STRATEGY_ESCALATED): it needs no specialist worker.
+    if config.specialist_workers < 1 and not custom_site({"ats": ats}):
         return None
     if normalize_ats(ats) in hard_ats(config) or (config.specialist_on_stall and cause == STALLED):
         return 1
@@ -44,7 +45,7 @@ def handoff_trigger(config, ats, cause, failures):
     return "repeated_failure"
 
 
-def routing_note(assigned, ran_in, source_packet):
+def routing_note(assigned, ran_in, source_packet, strategy="standard"):
     """What a run's queued event says about its worker pool, so every handoff (or a handoff that did not happen)
     can be explained from the run's timeline: the trigger, the failures before it, and a busy specialist pool."""
     note = {"pool": ran_in}
@@ -57,9 +58,18 @@ def routing_note(assigned, ran_in, source_packet):
             note["specialist_fallback"] = (
                 "The specialist workers were busy, so this run used an ATS worker with the regular budget"
             )
+    elif strategy == "escalated":
+        escalation = (source_packet or {}).get("specialist_escalation") or {}
+        note["strategy"] = "escalated"
+        note["specialist_trigger"] = escalation.get("trigger") or "unrecorded"
+        note["after_failures"] = len(escalation.get("normal_failure_run_ids") or [])
+        note["failure_cause"] = escalation.get("cause")
     return note
 
 
 def pool_boost(config, pool):
-    """Budget multiplier for a worker pool: specialists get more, ATS workers exactly what is configured."""
+    """Budget multiplier for a run's budget class (pipeline_comparison.budget_class): specialists get more, ATS workers
+    exactly what is configured, and an escalated custom site CUSTOM_ESCALATION_MULTIPLIER (1: no larger than any other run)."""
+    if pool == CUSTOM_ESCALATED:
+        return config.custom_escalation_multiplier
     return config.specialist_budget_multiplier if pool == SPECIALIST else 1.0

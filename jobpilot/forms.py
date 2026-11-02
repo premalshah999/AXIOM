@@ -798,6 +798,9 @@ OFFSCREEN_FRAME_JS = """e => {
 # iframe's src ("/jobs/login?step=email&h-captcha-response=P1_..."); that query read as a CAPTCHA frame dropped Noblis's
 # whole profile from uploads and page evidence, so the renamed resume never verified and every pass uploaded it again
 # (2026-10-26..27). CAPTCHA frames name their provider in the host or path.
+# A visible frame at least this large (px, about 200 x 200) is part of the application, not a badge or a tracking pixel:
+# when it cannot be read the page is not fully observed (see FormEngine._scan).
+APPLICATION_FRAME_MIN_AREA = 40_000
 FRAME_IDENTITY_JS = "e=>[e.title,e.id,(e.src||'').split(/[?#]/)[0].slice(0,200)].join(' ')"
 DEPENDENT_TYPES = {"radio", "radiogroup", "select", "dropdown", "pills", "checkbox", "combobox", "prompt"}
 
@@ -2034,6 +2037,7 @@ class FormSession:
         frame_errors = []
         options = []
         for n, frame in enumerate(self.page.frames):
+            substantive = False  # a frame this large that cannot be read leaves the observation incomplete
             try:
                 if frame != self.page.main_frame:
                     if frame.is_detached() or PROVIDER_FRAME.search(frame.url or ""):
@@ -2048,6 +2052,8 @@ class FormSession:
                         continue
                     if not await owner.is_visible() or await owner.evaluate(OFFSCREEN_FRAME_JS):
                         continue
+                    box = await owner.bounding_box()
+                    substantive = bool(box and box["width"] * box["height"] >= APPLICATION_FRAME_MIN_AREA)
                 if observed_frames >= MAX_FRAMES:
                     break
                 observed_frames += 1
@@ -2076,7 +2082,9 @@ class FormSession:
                 ):
                     raise ValueError("scanner_payload")
             except Exception as exc:
-                frame_errors.append({"frame": n, "error_type": type(exc).__name__})
+                frame_errors.append(
+                    {"frame": n, "error_type": type(exc).__name__, **({"application_frame": True} if substantive else {})}
+                )
                 continue
             successful_frames += 1
             texts.append(data["text"])
@@ -2260,7 +2268,10 @@ class FormSession:
             "options": options,
             "owner_id": self.owner_id,
             "scan_success": bool(successful_frames),
-            "observation_failure": not bool(successful_frames),
+            # A readable page beside an application frame that could not be read is not the whole application: its
+            # required fields may be in the frame (GSI's Paycom form, CODEX_DIAGNOSTICS_FOLLOWUP). Verification and the
+            # model-visible observation both treat it as a failed read, never as an empty or complete form.
+            "observation_failure": not bool(successful_frames) or any(e.get("application_frame") for e in frame_errors),
             "frame_errors": frame_errors,
         }
         revision_hash = fingerprint(obs, revision=True)
@@ -2273,15 +2284,18 @@ class FormSession:
         if not successful_frames and self.page.is_closed():
             # A crashed or closed tab never recovers in place; fail fast so the run is retried.
             raise BrowserTabClosed("The application tab was closed")
-        if successful_frames:
+        if obs["observation_failure"]:
+            if not getattr(self, "_scan_failure_reported", False):
+                self._scan_failure_reported = True
+                self.emit(
+                    "observation_failure",
+                    "No application document could be inspected"
+                    if not successful_frames
+                    else "An application frame could not be inspected",
+                    {"frame_errors": frame_errors},
+                )
+        else:
             self._scan_failure_reported = False
-        elif not getattr(self, "_scan_failure_reported", False):
-            self._scan_failure_reported = True
-            self.emit(
-                "observation_failure",
-                "No application document could be inspected",
-                {"frame_errors": frame_errors},
-            )
         return obs
 
     def reset_document_verification(self):

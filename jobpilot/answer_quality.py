@@ -82,10 +82,11 @@ def advice_budget(config, run, reserve=2):
     agents keep them. The cap is the run's own (a specialist's is larger, SPECIALIST_BUDGET_MULTIPLIER)."""
     if run is None:
         return True
+    from .pipeline_comparison import budget_class
     from .tiers import call_limit
 
     packet = run.packet or {}
-    return run.model_calls < call_limit(config, packet.get("runner_tier", 1), packet.get("worker_pool")) - reserve
+    return run.model_calls < call_limit(config, packet.get("runner_tier", 1), budget_class(packet)) - reserve
 
 
 def money_range(text):
