@@ -333,7 +333,7 @@ async def one_run(client, service, imap, platform, kind, *, delay=DELAY, profile
         outcome["applied"] = str(result)[:120]
         deadline = time.monotonic() + RUN_SECONDS
         while time.monotonic() < deadline:
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.25)  # a poll of the database, not a pace: the run ends within a quarter second of finishing
             with service.db.session() as s:
                 states = [r.state for r in s.scalars(select(Run).where(Run.job_id == job["id"]))]
             live = any(x in {"queued", "running", "submitting"} for x in states) or tasks
@@ -442,7 +442,7 @@ async def test_two_employers_on_one_shared_sender_in_two_real_runs_each_type_the
             await apply(service, job_id)
         deadline = time.monotonic() + RUN_SECONDS
         while time.monotonic() < deadline and not ("code" in first.used and "code" in second.used):
-            await asyncio.sleep(3)
+            await asyncio.sleep(1)
             # A platform that runs one application at a time defers the second: the autopilot starts it when its turn comes.
             with service.db.session() as s:
                 waiting = [j for j in jobs if not s.scalar(select(Run.id).where(Run.job_id == j).limit(1))]
