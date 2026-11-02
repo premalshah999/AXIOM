@@ -77,7 +77,10 @@ FORM_SCHOOL = {
 # The Forms module's repeating employer rows (OSF HealthCare's "Application_iForm", 2026-10-27) prefix every name with a
 # 0-based row: icims_0_EmpName ... icims_4_EmpDescription, icims_2_EmpStart_Month. Captions read "EmpName", "Month" or
 # nothing, no row was a history row, and the third row's description went to the owner.
-FORM_ROW = re.compile(r"^icims_(?P<row>\d+)_(?P<name>Emp[A-Za-z]+)(?:_(?P<part>Month|Date|Year))?$")
+FORM_ROW = re.compile(
+    r"^icims_(?P<row>\d+)_(?P<name>Emp[A-Za-z]+|current_employer_name_sync|curr_jobtitle_sync|curr_(?:start|end)_date_sync)"
+    r"(?:_(?P<part>Month|Date|Year))?$"
+)
 FORM_ROW_LABELS = {
     "empname": "Employer Name",
     "empadd": "Street Address",
@@ -94,6 +97,12 @@ FORM_ROW_LABELS = {
     "empreasonleaving": "Reason for Leaving",
     "empstart": "Start Date",
     "empend": "End Date",
+    # Ring Power's application (2026-11-01) numbers its employer rows the same way with "_sync" names; the dates printed
+    # only "Month" and "Day" and went to the applicant as questions.
+    "current_employer_name_sync": "Employer Name",
+    "curr_jobtitle_sync": "Job Title",
+    "curr_start_date_sync": "Start Date",
+    "curr_end_date_sync": "End Date",
 }
 # Form-module dates: icims_f_<base>_Month / _Date / _Year ("Emp1From", "DateAvailableToStart").
 FORM_DATE = re.compile(r"^icims_f_(?P<base>[A-Za-z][A-Za-z0-9]*)_(?P<part>Month|Date|Year)$")

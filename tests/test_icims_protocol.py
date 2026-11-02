@@ -238,3 +238,34 @@ def test_the_forms_modules_repeating_employer_rows_are_history_rows(service):
     description = resolver.local(by_name["icims_2_EmpDescription"])
     assert description.value == "Built pipeline 2." and description.evidence_ids == ["profile:work.2.description"]
     assert resolver.local(by_name["icims_2_EmpName"]).value == "Acme 2"
+
+
+def test_sync_named_employer_rows_are_history_rows(service):
+    """Ring Power (2026-11-01): rows named icims_<row>_curr_start_date_sync_Month printed only "Month" and "Day"; three of
+    them went to the applicant as questions although the profile holds each role's dates."""
+    from jobpilot.answers import Resolver
+    from jobpilot.schemas import Profile, WorkEntry
+
+    iform = "https://example.icims.com/forms?module=Forms&action=showForm&form=employment_application"
+    fields = []
+    for row in range(2):
+        fields += [
+            field("Current Employer Name Sync", f"icims_{row}_current_employer_name_sync", frame_url=iform),
+            field("Curr Jobtitle Sync", f"icims_{row}_curr_jobtitle_sync", frame_url=iform),
+            field("Month", f"icims_{row}_curr_end_date_sync_Month", type_="select", frame_url=iform),
+            field("Day", f"icims_{row}_curr_end_date_sync_Date", type_="select", frame_url=iform),
+            field("Year", f"icims_{row}_curr_end_date_sync_Year", frame_url=iform),
+        ]
+    apply(fields, [])
+    named = {f["name"]: (f["label"], f.get("group", "")) for f in fields}
+    assert named["icims_1_curr_end_date_sync_Month"] == ("End Date Month", "Work Experience 2")
+    assert named["icims_1_current_employer_name_sync"] == ("Employer Name", "Work Experience 2")
+
+    work = [WorkEntry(company=f"Acme {i}", title="Engineer", start=f"202{4 - i}-07", end=f"202{5 - i}-06") for i in range(2)]
+    resolver = Resolver(Profile(work=work), service.db, service.config,
+                        job={"ats": "icims", "url": "https://example.icims.com/jobs/1/job"})
+    by_name = {f["name"]: {**f, "id": f["name"], "required": True, "valid": True, "section": "",
+                           "options": ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"] if f["type"] == "select" else []}
+               for f in fields}
+    assert resolver.local(by_name["icims_1_curr_end_date_sync_Year"]).value == "2025"
+    assert resolver.local(by_name["icims_1_curr_end_date_sync_Month"]).value == "Jun"
