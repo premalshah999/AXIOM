@@ -9,7 +9,7 @@ opened the wrong page. Each now unwraps, follows the board once, or stops with a
 import pytest
 
 from jobpilot.db import Job
-from jobpilot.link_intake import board_name, employer_link, listing_kind, prepare, unwrap
+from jobpilot.link_intake import board_name, employer_link, listing_kind, opens as real_opens, prepare, unwrap
 
 POSTING = "https://careers.example.test/job/ABC123/Data-Engineer?utm_source=board&ss=paid"
 WRAPPED = (
@@ -275,6 +275,8 @@ def test_only_a_page_we_can_read_that_plainly_is_no_job_is_refused(page, link, r
 
 
 async def test_a_pasted_article_stops_before_any_job_exists_and_a_posting_goes_through(monkeypatch):
+    monkeypatch.setattr("jobpilot.link_intake.opens", real_opens)  # conftest leaves every other test's made-up hosts unread
+
     async def article(url, allow_private=False):
         return ARTICLE, url
 
