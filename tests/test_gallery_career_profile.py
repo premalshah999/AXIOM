@@ -24,8 +24,6 @@ async def test_the_engine_submits_this_page(service, scenario):
     for name, value in scenario.expect.items():
         assert received[-1].get(name) == value, f"{name}: {received[-1].get(name)!r}\n{why}"
     assert received[-1].get("resume__bytes"), why
-    if scenario.name.startswith("a_create_account"):
-        assert any(where == "/account/details" for where, _ in site.posts), why
     for path in scenario.never:
         assert path not in site.hits, f"{path} must never be touched\n{why}"
     assert outcome["model_calls"] == 0, why

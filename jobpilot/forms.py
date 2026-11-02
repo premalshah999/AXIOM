@@ -599,26 +599,6 @@ class BrowserTabClosed(PlaywrightError):
     """The page under this owner is gone (closed tab or crashed renderer)."""
 
 
-# A pure account-creation control that is a web component outside its form: its click reaches the form through one unrendered submit button inside it (UKG's
-# ukg-button form="...", 2026-11-01), which the page guard rightly refuses, so "Create account" did nothing on six runs. The engine, which already judged this control an
-# account action and not a submission, marks that one button for this one click. Only a form the control names and does not sit in, with no file input, one such
-# button, and no final-submit words on it. The page guard is unchanged: a hidden button nobody marked is still cancelled, and every other control's click stays as it was.
-MARK_BOUND_PROXY = r"""el => {
-  const host=el.getRootNode().host||el, id=el.getAttribute('form')||host.getAttribute('form');
-  const form=id && !el.closest('form') && !host.closest('form') && el.ownerDocument.getElementById(id);
-  if(!form || form.tagName!=='FORM' || form.querySelector('input[type=file]')) return false;
-  const hidden=[...form.querySelectorAll('button[type=submit],input[type=submit]')].filter(b=>!b.getClientRects().length);
-  if(hidden.length!==1) return false;
-  const proxy=hidden[0], label=(proxy.innerText||proxy.value||proxy.getAttribute('aria-label')||'').trim();
-  if(/\bsubmit\b|send (?:my )?application|complete (?:my )?application|finish application|\babsenden\b|bewerbung (?:abschicken|einreichen)|envoyer ma candidature|\bsoumettre\b/i.test(label)) return false;
-  proxy.dataset.jpAuthControl='true';proxy.dataset.jpControlLabel=label;proxy.dataset.jpFinalAuth='false';
-  el.__jpBoundProxy=proxy;
-  return true;
-}"""
-UNMARK_BOUND_PROXY = r"""el => {
-  const proxy=el.__jpBoundProxy;
-  if(proxy){delete proxy.dataset.jpAuthControl;delete proxy.dataset.jpControlLabel;delete proxy.dataset.jpFinalAuth;delete el.__jpBoundProxy}
-}"""
 ACCOUNT_CREATE = re.compile(
     r"(?:create|register) (?:a |an |my |your |new )?(?:candidate )?(?:account|profile)|register(?: now)?|sign up|join now",
     re.I,
@@ -6491,7 +6471,6 @@ class FormSession:
                 )
             )
         )
-        proxied = False
         if permitted:
             try:
                 # A re-rendered control is stale; waiting 30 s for its old element ended runs on Oracle job pages as
@@ -6514,8 +6493,6 @@ class FormSession:
             if not marked:
                 opener.remove_listener("popup", on_popup)
                 raise ValueError("Control became a final submission; inspect again")
-            if account and not self.application_form_here(control_id):
-                proxied = await el.evaluate(MARK_BOUND_PROXY)
         try:
             new_tab = await el.evaluate("e => !!e.closest('a[target=_blank],a[target=_new]')")
         except Exception:
@@ -6557,11 +6534,6 @@ class FormSession:
                 await opener.wait_for_timeout(200)
         finally:
             opener.remove_listener("popup", on_popup)
-            if proxied:
-                try:
-                    await el.evaluate(UNMARK_BOUND_PROXY)
-                except Exception:
-                    pass
             if permitted:
                 try:
                     await el.evaluate(

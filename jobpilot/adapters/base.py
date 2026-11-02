@@ -19,7 +19,7 @@ from ..service import Service
 from ..accounts import Accounts, password_rules
 from ..accounts.pages import optional_account_section
 from ..captcha_observation import ARM_JS
-from ..forms import ACCOUNT_CREATE, AUTH, COOKIE_NOTICE, FINAL, LAUNCHER, SURVEY_DONE
+from ..forms import AUTH, COOKIE_NOTICE, FINAL, LAUNCHER, SURVEY_DONE
 from ..privacy import acknowledge_privacy_notice, dismiss_cookies
 from ..employer_limit import APPLICATION_LIMIT, application_cap
 from ..mail_errors import MailPending, code_inline_wait
@@ -1892,17 +1892,6 @@ class Adapter:
             return await self.on_review(obs, report)
         if not nxt:
             if await self.leave_site_page(obs):
-                return None
-            # A page that only asks for a name and phone to set up the account, whose one way on is "Create account" (UKG's "Almost there!", 2026-11-01).
-            creates = [b for b in obs["controls"] if ACCOUNT_CREATE.fullmatch(b["label"].strip()) and not b.get("href")]
-            if (
-                len(creates) == 1
-                and self.accounts.may_create
-                and self.attempts["create_step"] == 0
-                and not any(f["type"] == "file" for f in obs["fields"])
-            ):
-                self.attempts["create_step"] += 1
-                await self.click(creates[0], step=True)
                 return None
             return {"fallback": True, "reason": "No way forward from this page"}
         # Review each step while its controls are still editable. Reviewing only

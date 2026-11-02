@@ -101,47 +101,6 @@ date_range = Scenario(
             "auth": "Yes", "visa": "No", "company": "Example Labs", "school": "Example University"},
 )
 
-# ---- a web component's button outside its form ---------------------------------------------------------------------------
-
-_PROXY_BUTTON = """<script>
-class ExampleButton extends HTMLElement {
-  static get observedAttributes(){return ['disabled']}
-  connectedCallback(){
-    if(!this.shadowRoot){const root=this.attachShadow({mode:'open'});root.innerHTML='<button part="b" style="padding:10px 22px;background:#174f47;color:#fff;border:0;border-radius:20px"><slot></slot></button>';
-      root.querySelector('button').addEventListener('click',e=>{if(this.hasAttribute('disabled')){e.stopImmediatePropagation();return}this.proxy?.click()})}
-    const f=document.getElementById(this.getAttribute('form'));
-    if(f&&!this.proxy){this.proxy=document.createElement('button');this.proxy.type=this.getAttribute('type')||'button';this.proxy.value='undefined';this.proxy.style.display='none';f.append(this.proxy)}
-    this.paint()}
-  attributeChangedCallback(){this.paint()}
-  paint(){const b=this.shadowRoot?.querySelector('button');if(b){b.disabled=this.hasAttribute('disabled');b.style.background=this.hasAttribute('disabled')?'#ccc':'#174f47'}}
-}
-customElements.define('example-button',ExampleButton);
-const check=()=>{const ok=['first','last','phone'].every(n=>document.getElementById(n).value.trim());const b=document.getElementById('create');ok?b.removeAttribute('disabled'):b.setAttribute('disabled','')};
-document.querySelectorAll('#details input').forEach(i=>{i.addEventListener('input',check);i.addEventListener('blur',check)});
-document.getElementById('details').addEventListener('submit',async e=>{e.preventDefault();
-  const r=await fetch('/account/details',{method:'POST',body:new URLSearchParams(new FormData(e.target))});
-  if(r.ok)location.href='/apply/1'});
-check();
-</script>"""
-
-web_component_button = Scenario(
-    "a_create_account_button_outside_its_form",
-    "UKG (2026-11-01): \"Almost there!\" takes a name and phone, and its Create account is a web component outside the form, which clicks a hidden button inside it. The "
-    "engine's own submit guard cancelled that submit, so the click did nothing on six runs, and nothing said why.",
-    {"/jobs/1": page("Software Engineer", POSTING + '<p><a class="apply" href="/account/details">Apply for this job</a></p>'),
-     "/account/details": lambda request: (302, "/apply/1") if request.method == "POST" else page(
-         "Almost there", """<h2>Almost there!</h2><p>Please provide your name to set up your account</p><form method="POST" id="details" novalidate>
-         <label for="first">First name *</label><input id="first" name="first" required><label for="last">Last name *</label><input id="last" name="last" required>
-         <label for="phone">Phone number *</label><input id="phone" name="phone" type="tel" required>
-         <label><input type="checkbox" name="sms" style="display:inline;width:auto"> I want to receive recruiting-related SMS messages and by checking this box I agree to the terms</label></form>
-         <example-button id="create" type="submit" form="details" disabled> &nbsp; Create account</example-button>""" + _PROXY_BUTTON),
-     "/apply/1": page("Apply", "<h1>Apply: Software Engineer</h1>" + form(NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD, '<p><button id="send" type="submit">Submit application</button></p>')),
-     "/submit/1": THANKS},
-    facts={"phone": "2025550100"},
-    profile={"phone": "2025550100"},
-    terms=True,
-)
-
 # ---- a page that commits empty and draws itself a moment later ------------------------------------------------------------
 
 slow_blank = Scenario(
@@ -157,4 +116,4 @@ slow_blank = Scenario(
      "/submit/1": THANKS},
 )
 
-SCENARIOS = [date_range, web_component_button, slow_blank]
+SCENARIOS = [date_range, slow_blank]
