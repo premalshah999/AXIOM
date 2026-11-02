@@ -272,12 +272,15 @@ function Tags({
   placeholder,
   label,
   suggestions = [],
+  commaAdds = true,
 }: {
   values: string[];
   onChange: (v: string[]) => void;
   placeholder: string;
   label: string;
   suggestions?: string[];
+  /** A place is written "Austin, TX": there a comma is part of the name. */
+  commaAdds?: boolean;
 }) {
   const [text, setText] = useState("");
   const add = (v: string) => {
@@ -294,7 +297,7 @@ function Tags({
         placeholder={placeholder}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === ",") {
+          if (e.key === "Enter" || (commaAdds && e.key === ",")) {
             e.preventDefault();
             add(text);
           }
@@ -902,6 +905,8 @@ function ResumeStep({
       setCautions(row.warnings ?? []);
       await read(row.id);
     } catch (e) {
+      // Refused: the drop area is ready for another file at once, and the words stay.
+      setFile(null);
       setReadId("");
       setState("error");
       setMessage((e as Error).message);
@@ -1223,6 +1228,7 @@ function PreferencesStep({ draft, setTop, setFact }: StepProps & { setTop: SetTo
           onChange={(v) => setTop("target_locations", v)}
           placeholder="City, state, or Remote"
           suggestions={anywhere ? ["Remote"] : ["Anywhere in the USA", "Remote"]}
+          commaAdds={false}
         />
         <div className="ax-ob-list">
           <Question label="Are you willing to relocate?">

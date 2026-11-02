@@ -24,7 +24,7 @@ from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy import select
 
 from .._store import new_id, now
@@ -97,9 +97,14 @@ def unread_words(exc) -> str:
 
 def different_words(verification: dict) -> str:
     """What differs between a stored copy and the PDF, in the words a person reads when tailoring stops for it."""
-    share = int((verification.get("coverage") or 0) * 100)
-    missing = ", ".join((verification.get("missing") or [])[:6])
-    return f"AXIOM's copy of your resume doesn't match your PDF: {share}% of its words came through" + (f", and it is missing {missing}" if missing else "") + "."
+    words = []
+    if (verification.get("coverage") or 0) < 0.985:
+        missing = ", ".join((verification.get("missing") or [])[:6])
+        words.append(f"{int((verification.get('coverage') or 0) * 100)}% of its words came through" + (f", and it is missing {missing}" if missing else ""))
+    if (verification.get("added_ratio") or 0) > 0.015:
+        added = ", ".join((verification.get("added") or [])[:6])
+        words.append("it has words your PDF doesn't" + (f", such as {added}" if added else ""))
+    return "AXIOM's copy of your resume doesn't match your PDF: " + (" and ".join(words) or "it was never checked word for word") + "."
 
 
 def tokens(text: str) -> Counter:
@@ -246,6 +251,12 @@ def readable_text(reader) -> str:
     return plain
 
 
+def _side_by_side(layout: str) -> bool:
+    """Most lines have a wide gap in the middle. In one column only the lines with dates at the right do."""
+    lines = [line.strip() for line in layout.splitlines() if line.strip()]
+    return len(lines) >= 10 and sum(bool(re.search(r"\S {4,}\S", line)) for line in lines) > 0.5 * len(lines)
+
+
 def picture_pages(reader) -> list[int]:
     """Pages that hold an image and almost no words: a scan, with at most a scanner's footer on it. Numbered from 1."""
     pages = []
@@ -266,9 +277,12 @@ def layout_text(pdf: bytes | None, fallback: str) -> str:
     try:
         reader = PdfReader(io.BytesIO(pdf))
         # The layout reading glues words together on those same PDFs ("builtindexing"), so it isn't what the model reads there.
-        if one_word_per_line("\n".join(p.extract_text() or "" for p in reader.pages)):
+        plain = "\n".join(p.extract_text() or "" for p in reader.pages)
+        if one_word_per_line(plain):
             return _rebuilt_lines(reader) or fallback
-        return "\n".join(p.extract_text(extraction_mode="layout") or "" for p in reader.pages)
+        layout = "\n".join(p.extract_text(extraction_mode="layout") or "" for p in reader.pages)
+        # Two columns side by side read across each other in the layout reading; the plain one gives each column whole.
+        return plain if _side_by_side(layout) else layout
     except Exception:
         return fallback
 
@@ -319,9 +333,18 @@ def _normalize(imported: Imported) -> ResumeDoc:
                 "text": _words(s.get("text")),
             }
         )
-    return ResumeDoc.model_validate(
-        {"name": imported.name, "contact": imported.contact, "sections": sections}
-    )
+    # A contact line split into more items than a header holds is still those words: the rest share the last item.
+    contact = imported.contact if len(imported.contact) <= 8 else [*imported.contact[:7], " | ".join(imported.contact[7:])]
+    try:
+        return ResumeDoc.model_validate({"name": imported.name, "contact": contact, "sections": sections})
+    except ValidationError as exc:
+        # The validator's own text ("List should have at most...") is no use to a person. Which part, in their resume's words, is.
+        where = next((e["loc"] for e in exc.errors()), ())
+        title = sections[where[1]]["title"] if len(where) > 1 and where[0] == "sections" and isinstance(where[1], int) and where[1] < len(sections) else ""
+        raise ValueError(
+            f"Part of your resume{f', under {title},' if title else ''} is longer than AXIOM's copy of a resume can hold, so it can't be copied word for word. "
+            "Add a shorter version in Resumes, or use plain Apply, which sends your PDF as it is."
+        ) from None
 
 
 def current_master(db, approved_only=False) -> RsMaster | None:

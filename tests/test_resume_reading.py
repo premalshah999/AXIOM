@@ -307,6 +307,52 @@ def test_a_copy_written_in_a_looser_shape_is_still_those_words():
     assert doc.contact == ["alex@example.test"]
 
 
+def test_a_contact_line_of_many_items_keeps_every_word():
+    copy = {**whole_copy(), "contact": [f"link{i}.example.test" for i in range(12)]}
+    doc = master._normalize(master.Imported(**copy))
+    assert len(doc.contact) == 8 and "link11.example.test" in doc.contact[-1]
+
+
+def test_a_long_section_of_plain_lines_fits():
+    copy = whole_copy()
+    copy["sections"].append({"title": "PUBLICATIONS", "kind": "text", "text": "A paper on transit records. " * 200, "entries": []})
+    assert master._normalize(master.Imported(**copy)).sections[-1].title == "PUBLICATIONS"
+
+
+def test_more_than_a_copy_can_hold_is_said_in_a_persons_words(service):
+    resume = resume_row(service, text_pdf())
+    copy = whole_copy()
+    copy["sections"][0]["entries"][0]["bullets"] = [{"text": f"bullet {i}"} for i in range(30)]
+    with pytest.raises(ValueError) as refused:
+        asyncio.run(master.import_master(service.db, service.config, counting(copy), resume["id"]))
+    assert "under EXPERIENCE" in str(refused.value) and "validation" not in str(refused.value)
+
+
+def test_two_columns_go_to_the_model_whole():
+    out = io.BytesIO()
+    page = canvas.Canvas(out)
+    left = [f"Reworked telemetry pipeline number {i} serving" for i in range(14)]
+    right = [f"Quartz Atlas project {i} built" for i in range(14)]
+    for x, column in ((40, left), (380, right)):
+        for i, line in enumerate(column):
+            page.drawString(x, 760 - i * 14, line)
+    page.save()
+    text = master.layout_text(out.getvalue(), "")
+    assert "\n".join(left) in text and "\n".join(right) in text
+
+
+def test_one_column_with_dates_at_the_right_keeps_its_layout():
+    out = io.BytesIO()
+    page = canvas.Canvas(out)
+    for i in range(14):
+        page.drawString(40, 760 - i * 14, f"Reworked telemetry pipeline number {i} serving warehouse clients")
+    page.drawString(40, 560, "Widget Engineer at Zephyr Dynamics")
+    page.drawString(480, 560, "Jan 2020 - Dec 2021")
+    page.save()
+    text = master.layout_text(out.getvalue(), "")
+    assert "Dynamics   " in text
+
+
 # ---------- what counts as the same words ----------
 def copy_doc(**changes):
     return ResumeDoc.model_validate(master._normalize(master.Imported(**{**whole_copy(), **changes})).model_dump())
@@ -398,6 +444,11 @@ def test_a_copy_that_differs_names_what_is_missing_and_where_to_go(service):
     result = asyncio.run(pipeline.prepare_resume(service.db, service.config, "j1", mode="normal", model=counting(short)))
     assert_stopped(result, "doesn't match your PDF", "Open Resumes", "plain Apply")
     assert any(word in result.error.detail for word in ("quartz", "atlas", "geospatial"))
+
+
+def test_a_copy_with_added_words_says_that_rather_than_that_all_came_through():
+    words = master.different_words({"coverage": 1.0, "added_ratio": 0.2, "missing": [], "added": ["kubernetes", "terraform"]})
+    assert "kubernetes" in words and "came through" not in words
 
 
 def test_the_same_pdf_isnt_paid_for_twice_unless_the_person_asks(service):
