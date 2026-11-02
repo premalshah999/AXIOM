@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import time
 from io import BytesIO
 from pathlib import Path
 
@@ -17,6 +18,14 @@ from jobpilot.config import Settings
 from jobpilot.db import Database
 from jobpilot.features._store import create_tables
 from jobpilot.service import Service
+
+
+# The app runs with TZ=UTC (native/env.py), so its naive date.today() is the UTC date. A test that computes "today" on a
+# developer's Mac in New York would expect a different day for five hours every evening (test_sf_ui5_date, 2026-11-01).
+# Pin the test process to what production sees, before anything reads a clock; child processes inherit it.
+os.environ["TZ"] = "UTC"
+if hasattr(time, "tzset"):
+    time.tzset()
 
 
 @pytest.fixture(autouse=True)
