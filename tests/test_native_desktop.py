@@ -760,3 +760,7 @@ def test_discovery_is_never_limited_to_one_board_at_a_time(layout):
     layout.env_file.write_text(mine)
     desktop.ensure_config(layout)
     assert layout.env_file.read_text() == mine
+
+
+def test_the_mac_app_requires_the_windows_session_to_create_the_account(layout):
+    assert desktop.environment(layout)["SIGNUP_NEEDS_SESSION"] == "true"

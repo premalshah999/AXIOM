@@ -55,15 +55,25 @@ _labelled_common = None  # The compiled pattern for `_common` behind a credentia
 SHORTEST = 4
 # Below this a value is common text whatever it is made of.
 SHORT = 8
-# Words (with spaces, hyphens or apostrophes between them) or plain digits are common up to here. A mailbox app password is 16 letters.
+# A single word is common up to here. A mailbox app password is 16 letters in one run, and no ordinary word is that long.
 WORD_LENGTH = 16
+# Several words (a job title), or digits with separators (a date, a phone number), are common up to here.
+PHRASE_LENGTH = 24
+ONE_WORD = re.compile(r"[^\W\d_]+")
 WORDS = re.compile(r"[^\W\d_]+(?:[ '-]+[^\W\d_]+)*|[\d ./-]+")
+APP_PASSWORD = re.compile(r"[a-z]{4}(?: [a-z]{4}){3}")  # How Gmail shows one.
 LABEL = r"(?:(?:[a-z]+[_ -])?passw(?:or)?d|passcode|pwd|secret|(?:[a-z]+[_ -])?token|api[_ -]?key|credentials?)"
 
 
 def common_value(value):
     """True when a secret could also be everyday text: a short one, or one that is only words or only digits."""
-    return len(value) < SHORT or (len(value) < WORD_LENGTH and bool(WORDS.fullmatch(value)))
+    if len(value) < SHORT:
+        return True
+    if APP_PASSWORD.fullmatch(value):
+        return False
+    if ONE_WORD.fullmatch(value):
+        return len(value) < WORD_LENGTH
+    return len(value) < PHRASE_LENGTH and bool(WORDS.fullmatch(value))
 
 
 def forms(value):

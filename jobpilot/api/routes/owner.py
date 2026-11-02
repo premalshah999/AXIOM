@@ -45,7 +45,7 @@ NO_PASSWORD = (
 
 
 def router(service, sessions, throttle) -> APIRouter:
-    db = service.db
+    db, config = service.db, service.config
     r = APIRouter()
 
     def signed_in(request: Request) -> bool:

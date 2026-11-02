@@ -391,3 +391,17 @@ def test_onboarding_state_is_saved(client):
         client.put("/api/onboarding", json={"step": "review", "completed": True}).json()["completed"] is True
     )
     assert client.put("/api/onboarding", json={"step": "nonsense"}).status_code == 400
+
+
+def test_the_mac_apps_empty_installation_can_be_claimed_only_with_the_windows_session(app, config, client):
+    # The window signs in with the access token before it shows anything. Any other process on this computer has no session.
+    config.signup_needs_session = True
+    web = anonymous(app, config)
+    status = web.get("/api/account").json()
+    assert status["signup_allowed"] is False and status["installation"] == "fresh"
+    refused = web.post("/api/account/signup", json=OWNER)
+    assert refused.status_code == 403 and "access token" in refused.json()["detail"]
+    assert web.get("/api/account").json()["exists"] is False
+    assert web.post("/api/login", json={"token": config.app_token, "keep": True}).status_code == 200
+    assert web.get("/api/account").json()["signup_allowed"] is True
+    assert web.post("/api/account/signup", json=OWNER).status_code == 200

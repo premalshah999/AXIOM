@@ -524,11 +524,14 @@ def scrub(text, home=""):
     """Safe to paste into a message: no keys, no email addresses, no phone numbers, no page addresses past the site's name,
     no folder names of the person's Mac. What this cannot know is whether a sentence is private, so callers keep to logs of
     AXIOM's own (never mail, never answers) and say what is left in."""
+    from ..redaction import redact
+
     out = []
     for line in str(text).splitlines():
         if SECRET_WORDS.search(line):
             out.append("[a line that mentions a key or password was left out]")
             continue
+        line = redact(line, loose=True)
         if home:
             line = line.replace(home, "~")
         line = re.sub(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", "[email]", line)
@@ -694,12 +697,31 @@ def existing_environment(layout):
     return environment(layout, ports, read_json(layout.window_file).get("chrome", ""))
 
 
+def remember_secrets(cfg):
+    """A short-lived process has opened nothing, so a password with no tell-tale shape would pass `scrub`: the installation's own
+    settings and the keys saved in the app are registered first. Best effort: diagnostics are wanted most when things are broken."""
+    from ..redaction import register
+
+    register(value for name, value in cfg.values.items() if re.search(r"key|token|passw|secret|login", name, re.I) and isinstance(value, str))
+    try:
+        from .. import connections
+
+        register(value for name, value in connections.stored(cfg).items() if connections.kind(name) == "secret")
+    except Exception:
+        pass
+    try:
+        register([(cfg.data_dir / "access-token").read_text().strip()])
+    except OSError:
+        pass
+
+
 def print_diagnostics(layout):
     """Works with AXIOM stopped or broken, which is when it is wanted: the database is asked only if it answers."""
     database = None
     try:
         os.environ.update(existing_environment(layout))
         cfg = prepare(load())
+        remember_secrets(cfg)
         if port_in_use(cfg.pg_port):
             database = lambda sql: pg.psql(layout.pg_bin, cfg, sql, timeout=5, check=False)  # noqa: E731
     except (NativeError, OSError, ValueError):

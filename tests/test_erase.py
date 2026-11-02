@@ -140,3 +140,64 @@ def test_legal_acceptance_is_per_version_and_needs_the_adult_box(client, service
     assert service.db.get_setting("legal_acceptance")["version"] == legal.VERSION
     service.db.set_setting("legal_acceptance", {"version": "older", "accepted_at": "x"})  # a new version asks again
     assert client.get("/api/legal").json()["accepted"] is False
+
+
+def test_the_mac_apps_settings_file_keeps_only_what_is_about_this_machine(tmp_path):
+    settings = tmp_path / ".env"
+    settings.write_text(
+        "# Written by AXIOM\nPOSTGRES_PASSWORD=keep-me\nTIMEZONE=UTC\nNORMAL_WORKERS=3\nAXIOM_PG_PORT=5\nAPP_TOKEN=keep-too\n"
+        "DEEPSEEK_API_KEY=synthetic\nTELEGRAM_BOT_TOKEN=synthetic\nAPPLICATION_PASSWORD=synthetic\nACCOUNT_EMAIL=someone@example.invalid\n"
+    )
+    settings.chmod(0o600)
+    assert erase.forget_settings({"AXIOM_CONFIG_DIR": str(tmp_path)}, say=lambda _: None) == []
+    text = settings.read_text()
+    assert all(k in text for k in ("POSTGRES_PASSWORD=keep-me", "TIMEZONE", "NORMAL_WORKERS", "AXIOM_PG_PORT", "APP_TOKEN=keep-too"))
+    assert not any(k in text for k in ("DEEPSEEK", "TELEGRAM", "APPLICATION_PASSWORD", "example.invalid"))
+    assert settings.stat().st_mode & 0o077 == 0
+
+
+def test_a_checkouts_settings_file_is_left_alone(tmp_path):
+    settings = tmp_path / ".env"
+    settings.write_text("DEEPSEEK_API_KEY=synthetic\n")
+    assert erase.forget_settings({}, say=lambda _: None) == []
+    assert "DEEPSEEK" in settings.read_text()
+
+
+def test_the_screen_says_copies_outside_axiom_stay():
+    assert any("Time Machine" in line for line in erase.CANNOT)
+
+
+def test_a_real_postgresql_loses_every_table_and_the_write_ahead_log_that_held_the_rows(tmp_path):
+    """SQLite's file simply goes, so only this shows the feature tables (facts, answers, tailored resumes) and pg_wal."""
+    from sqlalchemy import inspect, text
+    from support_pg import ScratchServer, find_bin
+
+    from jobpilot.db import Database
+    from jobpilot.features._store import FeatureBase, create_tables
+
+    bin_dir = find_bin()
+    if not bin_dir:
+        pytest.skip("PostgreSQL 17 is not installed")
+    server = ScratchServer(bin_dir, tmp_path / "pg").start()
+    try:
+        url = server.url(server.create_database())
+        db = Database(url)
+        create_tables(db.engine)
+        assert FeatureBase.metadata.tables
+        marker = "Synthetic-Answer-Marker-" + os.urandom(6).hex()
+        db.set_setting("profile", {"name": marker})
+        with db.engine.begin() as connection:
+            connection.execute(text("CREATE TABLE left_by_an_older_version (x text)"))
+            connection.execute(text("INSERT INTO left_by_an_older_version VALUES (:m)"), {"m": marker})
+        db.engine.dispose()
+        wal = next(server.directory.rglob("pg_wal"))
+        held = lambda: any(marker.encode() in p.read_bytes() for p in wal.iterdir() if p.is_file())  # noqa: E731
+        assert held(), "the proof needs the rows in the log first"
+        erase.wipe_database(url, lambda _: None)
+        fresh = Database(url)
+        left = set(inspect(fresh.engine).get_table_names())
+        fresh.engine.dispose()
+        assert not left & (set(FeatureBase.metadata.tables) | {"left_by_an_older_version"})
+        assert not held()
+    finally:
+        server.stop()
