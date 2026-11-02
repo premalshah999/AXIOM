@@ -358,3 +358,29 @@ async def test_the_tab_cleanup_leaves_a_held_tab_alone_and_closes_it_once_releas
         assert result["closed"] >= 1 and not await world.tab(expect=False), result
     finally:
         await world.close()
+
+
+async def test_done_after_the_tab_was_closed_keeps_nothing_by_hand(service):
+    """Done, continue hands back only the page the person saw. With the tab gone, what they typed there is gone too: the run opens the
+    application again and asks, rather than treating whatever is on the new page as their answer."""
+    world, before = await taken_over(service)
+    try:
+        job_id = world.job_id
+        await steer.start(service, job_id)
+        assert await until(lambda: steer.record(service.db, job_id).get("phase") == "yours" and not world.live(), 150), world.runs(job_id)
+
+        async def by_hand_then_close(page):
+            await page.fill("#q", "functional, by hand")
+            await page.close()
+
+        await as_the_owner(world, by_hand_then_close)
+        assert not await world.tab(expect=False)
+        await steer.finish(service, job_id, "done")
+        stopped = await until(lambda: world.runs(job_id)[-1][0] not in {"queued", "running", "submitting"} and not world.live(), 150)
+        assert stopped, world.runs(job_id)
+        assert not world.site.received, world.site.received
+        with service.db.session() as s:
+            kept = [e.message for e in s.scalars(select(Event).where(Event.kind == "owner_values")) if e.message.startswith("Kept")]
+        assert not kept, kept
+    finally:
+        await world.close()

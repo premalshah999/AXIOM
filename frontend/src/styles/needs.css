@@ -671,6 +671,12 @@ button.nd-asking:hover strong {
   border-bottom: 0;
   padding-left: var(--space-2);
 }
+.nd-rowline:has(.nd-row[aria-current]) {
+  background: var(--active);
+}
+.nd-rowline:has(.nd-row[aria-current]) .nd-row {
+  background: transparent;
+}
 .nd-pick {
   display: flex;
   flex: none;
