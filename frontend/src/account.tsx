@@ -934,7 +934,7 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
         title="Recovery codes"
         note={
           !codes
-            ? "None yet. Without them, a forgotten password needs the access token or the host command."
+            ? "None yet. Without them, a forgotten password can only be reset with this installation's access token."
             : `${codes.left} of ${codes.total} unused${codes.created_at ? `, created ${day(codes.created_at)}` : ""}. Each resets a forgotten password once.`
         }
       >
@@ -953,7 +953,7 @@ function SignedInAccount({ status, reload }: { status: AccountStatus; reload: ()
           />
         </li>
       )}
-      <SettingRow title="This device" note={`${browserSession(status)}. Applications keep running on the server.`}>
+      <SettingRow title="This device" note={`${browserSession(status)}. Applications keep running in AXIOM.`}>
         <Button
           disabled={pending !== null}
           onClick={() =>
