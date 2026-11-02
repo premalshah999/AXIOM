@@ -115,6 +115,9 @@ function App() {
         if (!current) return;
         setAuth(s.signed_in ? "in" : "out");
         if (s.signed_in) setWho({ name: s.name, email: s.email });
+        // No session on arrival, as after Delete everything: the Mac window listens for this and signs itself in. A browser just stays
+        // on the sign-in screen it was going to show.
+        else signedOut();
         if (s.signed_in && s.onboarding)
           setSetupGuide((g) => (g === "unknown" ? (s.onboarding!.completed ? "done" : unfinished()) : g));
       })

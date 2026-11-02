@@ -1,5 +1,7 @@
 """Settings › every saved value: refused in plain words when out of range, kept after a restart, and read by the engine."""
 
+from pathlib import Path
+
 import pytest
 
 from jobpilot import connections
@@ -175,3 +177,32 @@ def test_a_time_zone_that_is_not_one_is_refused_over_http(client):
     answer = client.put("/api/connections", json={"values": {"timezone": "New York"}})
     assert answer.status_code == 400 and "America/New_York" in answer.json()["detail"]
     assert client.get("/api/snapshot?include_sources=false").status_code == 200
+
+
+FRONTEND = Path(__file__).resolve().parent.parent / "frontend" / "src"
+
+
+def test_the_overview_limit_reaches_what_the_server_allows():
+    """The field said 1 to 1000 and quietly saved 500."""
+    from jobpilot.config import Settings as S
+
+    most = next(m.le for m in S.model_fields["daily_application_limit"].metadata if hasattr(m, "le"))
+    source = (FRONTEND / "batch.tsx").read_text()
+    assert f"MAX_DAILY_LIMIT = {most}" in source and "Math.min(500" not in source
+
+
+def test_profile_rules_keep_what_the_page_has_no_field_for():
+    """history_day (the setup guide), travel_choice and employment_countries went back to their defaults on any rule change."""
+    source = (FRONTEND / "profile-rules.tsx").read_text()
+    body = source[source.index("export function rulesWithDefaults"):]
+    assert "...saved," in body[: body.index("education: saved.education")]
+
+
+def test_a_saved_rule_the_page_cannot_show_survives_a_profile_save(client):
+    """The server's side of the same promise: what is sent back is what is kept."""
+    profile = client.get("/api/profile").json()
+    rules = {"history_day": "first", "travel_choice": "maximum", "employment_countries": ["United States"]}
+    profile["answer_rules"] = {**(profile.get("answer_rules") or {}), **rules}
+    assert client.put("/api/profile", json=profile).status_code == 200
+    saved = client.get("/api/profile").json()["answer_rules"]
+    assert {k: saved[k] for k in rules} == rules

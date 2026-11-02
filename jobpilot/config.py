@@ -200,7 +200,8 @@ class Settings(BaseSettings):
     gmail_app_password: str = ""
     mail_encryption_key: str = ""
     mail_poll_seconds: float = Field(default=3, ge=0.1, le=60)
-    mail_wait_seconds: int = Field(default=90, ge=5, le=300)
+    # What every confirmed application waited (it was set only in one .env); a code later than this parks the run and frees its browser.
+    mail_wait_seconds: int = Field(default=120, ge=5, le=300)
     # Persisted waits release their browser slot; delivery need not happen in
     # the short synchronous polling window. Never renew this limit on retry.
     mail_durable_wait_seconds: int = Field(default=1200, ge=300, le=1800)
