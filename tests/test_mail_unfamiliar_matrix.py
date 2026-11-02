@@ -29,7 +29,7 @@ async def test_a_link_from_an_unfamiliar_sender_is_matched_only_on_a_host_one_em
     time.sleep(1.1)
     link = link_for(spec, kind)
     deliver(imap, platform, kind, link=link, from_=UNFAMILIAR)
-    if employer_only_host(spec["ats"], spec["url"]) and platform != "icims":
+    if employer_only_host(spec["ats"], spec["url"]):
         token = await service.inbox.wait(challenge, max_wait_seconds=4)
         assert token and token["value"] == link
     else:
