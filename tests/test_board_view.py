@@ -44,8 +44,8 @@ def test_blank_closed_and_gone_rows_never_reach_the_board(service):
     listing(service, "closed", company="Gamma Example", status="closed")
     listing(service, "taken-down", company="Delta Example", active=False)
     got = rows(service, fit="all")
-    assert [r["id"] for r in got["rows"]] == [good]
-    assert got["hidden"]["blank"] == 2
+    assert {r["id"]: r["company"] for r in got["rows"]} == {good: "Alpha Example", "blank-company": "Company not listed"}
+    assert got["hidden"]["blank"] == 1
 
 
 def test_a_job_with_a_run_is_not_on_the_board(service):

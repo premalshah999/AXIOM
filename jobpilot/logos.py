@@ -654,8 +654,8 @@ class Shelf:
         """Queues a company to be looked up unless it is known or already waiting. `lookup(company)` gives its postings as
         [(url, description)] and runs in a thread."""
         key = key_for(company)
-        if not key or key in self.waiting or self.state(key) or len(self.waiting) >= self.LIMIT:
-            return
+        if not key or company == "Company not listed" or key in self.waiting or self.state(key) or len(self.waiting) >= self.LIMIT:
+            return  # "Company not listed" is a row's words for no name: there is no company to look up.
         if self.queue is None:
             self.queue = asyncio.Queue()
         self.waiting.add(key)

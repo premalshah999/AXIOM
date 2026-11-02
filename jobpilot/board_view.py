@@ -4,8 +4,9 @@ is confusing ... make the job board good and legit"; 2026-10-30: "too sketchy an
 Every row is one posting: a real title and company, its place, the date the employer or a list gave (or plainly "found"), where it
 came from, the employer's own link, and one line saying why it fits or doesn't. Listings come from the same read the dispatcher
 uses (jobboard.board_snapshot: active, in the US, inside the window, seen lately), and what will happen to a row comes from the same
-reading and plan (startable.py, queue_order.py), so In queue #4 here is number 4 on the Queue. Left out for good: a blank title or
-company, a closed or aged-out posting, a general careers page, one already applied to. The same posting under two links is one row.
+reading and plan (startable.py, queue_order.py), so In queue #4 here is number 4 on the Queue. Left out for good: a blank title, a
+closed or aged-out posting, a general careers page, one already applied to. The same posting under two links is one row. A posting
+whose employer is not known yet says "Company not listed" (board_names.py), and an internal id never reaches a row.
 """
 
 import re
@@ -13,6 +14,7 @@ import logging
 import threading
 import time
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlsplit
 
 from sqlalchemy import func, select
 
@@ -101,6 +103,8 @@ def title_key(title):
 def key_of(job):
     """One posting whatever link or list it came under: the employer, the title without its labels, and the place."""
     company, location = (" ".join((job.get(k) or "").casefold().split()) for k in ("company", "location"))
+    if company == "company not listed":
+        company = urlsplit(job.get("url") or "").hostname or company  # Two employers without a name are not one employer.
     return company, title_key(job.get("title")) or " ".join((job.get("title") or "").casefold().split()), location
 
 
@@ -138,7 +142,9 @@ def levels_of(db, listed):
 
 def collect(service):
     """Every row the board can show, cleaned and classified, with what will happen to each. Reads on a worker thread."""
+    from .board_names import NOT_LISTED
     from .jobboard import LOCKED, board_snapshot, settings as board_settings, us_places
+    from .posting_identity import placeholder_company
     from .queue_order import plans
     from .schemas import Profile
     from .service.queueing import fit_blocker
@@ -195,9 +201,11 @@ def collect(service):
             hidden["closed"] += 1
             continue
         title, company = " ".join((job.get("title") or "").split()), " ".join((job.get("company") or "").split())
-        if not title or not company:
+        if not title:
             hidden["blank"] += 1
             continue
+        # A real posting whose employer is not known yet: the row says so, and read_blank_titles reads it from the posting.
+        company = NOT_LISTED if placeholder_company(company, job["url"]) else company
         hold = holds.get(jid)
         code = (hold or {}).get("code", "")
         if code in {"aged", "protected"} or (code == "gate" and "general careers page" in hold["reason"]) or (code == "gate" and "closed" in hold["reason"]):
@@ -392,7 +400,7 @@ def companies_to_warm(service, limit=LOGO_AHEAD):
     if not data:
         return []
     ranked = sorted((row for row in data["rows"] if row["fit"] == "match"), key=lambda r: (-(r["score"] if r["score"] is not None else -1), r["id"]))
-    return list(dict.fromkeys(row["company"] for row in ranked))[:limit]
+    return list(dict.fromkeys(row["company"] for row in ranked if row["company"] != "Company not listed"))[:limit]
 
 
 def warm_logos(service, companies):

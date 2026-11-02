@@ -412,6 +412,15 @@ def is_managed(db, source_id):
     return source_id in managed_ids(db)
 
 
+def _hiring_organization(obj, url):
+    """The employer a posting's own structured data names, if it is a name."""
+    from .posting_identity import placeholder_company
+
+    org = obj.get("hiringOrganization")
+    name = " ".join(str((org.get("name") if isinstance(org, dict) else org) or "").split())[:300]
+    return "" if placeholder_company(name, url) else name
+
+
 async def document_post(url, company):
     body, final = await fetch(url)
     soup = BeautifulSoup(body, "html.parser")
@@ -446,7 +455,7 @@ async def document_post(url, company):
                     return Posting(
                         final,
                         obj.get("title", ""),
-                        company,
+                        company or _hiring_organization(obj, final),
                         loc or "United States",
                         text(obj.get("description")),
                         str(country),
@@ -462,7 +471,7 @@ async def document_post(url, company):
                 return Posting(
                     final,
                     obj.get("title", ""),
-                    company,
+                    company or _hiring_organization(obj, final),
                     "Remote — United States",
                     text(obj.get("description")),
                     "US",
@@ -542,6 +551,7 @@ async def read_feed(source, profile, cfg, at, known=None):
         data = await get(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs")
         candidates = []
         for j in data.get("jobs", []):
+            source["stated_name"] = source.get("stated_name") or j.get("company_name") or ""  # board_names.save_stated
             link = f"https://job-boards.greenhouse.io/{slug}/jobs/{j['id']}"
             seen.add(link)
             post = Posting(link, j["title"], company, j.get("location", {}).get("name", ""))
@@ -594,10 +604,12 @@ async def read_feed(source, profile, cfg, at, known=None):
                 link = f"https://jobs.smartrecruiters.com/{slug}/{j['id']}"
                 seen.add(link)
                 loc = j.get("location", {})
+                stated = (j.get("company") or {}).get("name") or ""
+                source["stated_name"] = source.get("stated_name") or stated  # board_names.save_stated
                 post = Posting(
                     link,
                     j["name"],
-                    company,
+                    stated or company,
                     ", ".join(str(loc[k]) for k in ("city", "region", "country") if loc.get(k)),
                     country=loc.get("country", ""),
                     posted=j.get("releasedDate"),
@@ -967,7 +979,11 @@ async def scrape_source(source, db, config):
         async def known(links):
             return set(await asyncio.to_thread(listed_links, db, links)) | skip.intersection(links)
 
+        from .board_names import named, save_stated
+
+        source = await named(source, db, fetch)  # The employer its postings are read under: the board's real name, never its slug or id.
         posts, seen, complete, errors = await read_feed(source, profile, cfg, at, known)
+        await asyncio.to_thread(save_stated, db, source)
         report.update(checked=len(seen), detail_errors=errors, read=len(posts))
         created, rejected = await asyncio.to_thread(
             persist_scan, db, source, posts, seen, complete, cfg, profile, at, report
@@ -1289,6 +1305,8 @@ CATALOG = {
         "quora",
         "mercor",
         ("Grow Therapy", "https://jobs.ashbyhq.com/grow-therapy"),
+        # Its organisation's own name on Ashby is this id; the board states its site, shield.ai.
+        ("Shield AI", "https://jobs.ashbyhq.com/f7d8749a-72d6-407c-bf98-292ea630c73a"),
     ],
     "greenhouse": [
         "stripe",
@@ -1369,6 +1387,9 @@ def setup_sources(db, cfg=None):
     cfg = cfg or settings(db)
     if cfg.interval_hours not in {1, 2, 3, 6}:
         raise ValueError("Choose a 1, 2, 3 or 6 hour refresh interval")
+    from .board_names import rename_board_jobs
+    from .posting_identity import placeholder_company
+
     ids = managed_ids(db)
     owner_disabled = set(db.get_setting(OWNER_DISABLED_KEY, {}).get("ids", []))
     with db.exclusive() as s:
@@ -1432,6 +1453,9 @@ def setup_sources(db, cfg=None):
                 row = s.scalar(select(Source).where(Source.url == url))
                 if row and row.id not in ids:
                     continue  # Preserve separately configured sources and their policies.
+                if row and row.name != name and placeholder_company(row.name, url) and not placeholder_company(name, url):
+                    rename_board_jobs(s, row.id, row.name, name)  # The catalog knows a board an earlier build saved under its id.
+                    row.name = name
                 if not row:
                     row = Source(
                         name=name,
@@ -1473,6 +1497,8 @@ def add_managed_sources(db, entries):
     """Add (kind, name, url) boards as managed sources, scanned from the next tick; returns how many were new.
     Existing sources (any URL spelling of the same board, also within `entries`) are left alone, and a retired board
     is never re-added."""
+    from .posting_identity import INTERNAL_ID
+
     cfg = settings(db)
     retired = {"https://job-boards.greenhouse.io/" + slug for slug in ["snowflake", "confluent", "rippling", "aetion"]}
     retired |= {"https://jobs.lever.co/" + slug for slug in ["netflix", "viking", "welocalize"]}
@@ -1484,7 +1510,7 @@ def add_managed_sources(db, entries):
             if key in have or url in retired:
                 continue
             row = Source(
-                name=name[:200] or url,
+                name=("" if INTERNAL_ID.fullmatch(name or "") else name[:200]) or url,
                 kind=kind,
                 url=url,
                 cron=f"0 */{cfg.interval_hours} * * *",

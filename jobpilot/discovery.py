@@ -318,7 +318,11 @@ async def application_entry(url):
 
 
 def add_job(db, data: JobInput, demo=False, origin="unknown"):
+    from .posting_identity import placeholder_company
+
     url, identity = canonicalize(data.url)
+    if data.company and placeholder_company(data.company, url):
+        data = data.model_copy(update={"company": ""})  # An id or a hostname is no employer: it is read from the posting (read_blank_titles).
     with db.exclusive() as s:
         existing = s.scalar(select(Job).where(Job.identity == identity))
         if not existing:
@@ -500,10 +504,11 @@ async def enrich(db, config, job_id):
         }
     if not details.get("company"):
         # Only what the page states about its one posting (microdata, an ATS's page props): see posting_identity.
-        from .posting_identity import identity, page_inputs
+        from .posting_identity import identity, page_inputs, placeholder_company
 
         try:
-            details["company"] = identity(page_inputs(html)).get("company", "")
+            stated = identity(page_inputs(html)).get("company", "")
+            details["company"] = "" if placeholder_company(stated, url) else stated
         except Exception:  # noqa: BLE001 - unreadable markup is no evidence.
             pass
     with db.session() as s:
