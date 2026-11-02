@@ -18,9 +18,9 @@ import re
 from datetime import UTC, datetime, timedelta
 from math import floor
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from ..db import Job, Run
+from ..db import Event, Job, Run
 from ..host_health import INTERRUPTED
 
 TARGET = 90  # percent, per platform with volume and overall (the owner's goal)
@@ -43,20 +43,48 @@ def pct(part, whole):
     return floor(1000 * part / whole) / 10 if whole else None
 
 
+# The proof pages an employer shows for an application that is already on file (workday.py, forms.py).
+EXISTING_FLAGS = ("existing_application_notice", "reconciled_existing_submission")
+
+
+def first_commits(session, job_ids):
+    """{job id: created_at of the job's earliest run that began a commit}: AXIOM's own recorded attempts at the job."""
+    if not job_ids:
+        return {}
+    return dict(
+        session.execute(
+            select(Run.job_id, func.min(Run.created_at))
+            .join(Event, Event.run_id == Run.id)
+            .where(Event.kind == "submitting", Run.job_id.in_(job_ids))
+            .group_by(Run.job_id)
+        ).all()
+    )
+
+
 def jobs_in_window(session, cutoff):
     """{job id: facts} for every job with a run created since `cutoff`: the platform, whether any run confirmed or found the
-    job already applied, the state of the first real run and the state and reason of the last."""
+    job already applied, the state of the first real run and the state and reason of the last.
+
+    A run confirmed by the employer's "already applied" page counts as a submission only when AXIOM's own earlier attempt at the
+    job began a commit; otherwise the application was not ours and the job is already applied (2026-11-01: 64 of 74 such
+    confirmations had no commit of ours behind them). Stored results are not rewritten; only this count reads them so."""
     rows = session.execute(
-        select(Run.job_id, Job.ats, Run.state, Run.reason, Run.created_at)
+        select(Run.job_id, Job.ats, Run.state, Run.reason, Run.created_at,
+               *(Run.receipt[flag].as_string() for flag in EXISTING_FLAGS))
         .join(Job, Job.id == Run.job_id)
         .where(Run.created_at >= cutoff, Job.demo.is_(False))
         .order_by(Run.job_id, Run.created_at, Run.id)
-    )
+    ).all()
+    flagged = {r[0] for r in rows if r[2] == "confirmed" and any(v not in (None, "false", "null") for v in r[5:])}
+    owned = first_commits(session, flagged)
     jobs = {}
-    for job_id, ats, state, reason, _ in rows:
-        j = jobs.setdefault(job_id, {"ats": ats, "ok": False, "dup": False, "first": None})
+    for job_id, ats, state, reason, created, *flags in rows:
+        j = jobs.setdefault(job_id, {"ats": ats, "ok": False, "dup": False, "ghost": False, "first": None})
+        if state == "confirmed" and any(v not in (None, "false", "null") for v in flags):
+            if job_id not in owned or owned[job_id] > created:
+                state, j["ghost"] = "already_applied", True
         j["ok"] |= state == "confirmed"
-        j["dup"] |= state == "already_applied"
+        j["dup"] |= state == "already_applied" and not j["ghost"]
         # Six of a night's 24 stopped runs were one restart of the app (2026-11-01): each read as a job's failed first try.
         if j["first"] is None and state != "dry_run_passed" and (reason or "") != INTERRUPTED:
             j["first"] = state
@@ -65,6 +93,8 @@ def jobs_in_window(session, cutoff):
     for j in jobs.values():
         if j["first"] is None and j["last"] != "dry_run_passed":
             j["first"] = j["last"]
+        # An existing application that was not ours is "already applied" unless some run of ours confirmed the job.
+        j["dup"] |= j["ghost"] and not j["ok"]
     return [j for j in jobs.values() if j["first"] is not None]
 
 

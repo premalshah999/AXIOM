@@ -194,7 +194,7 @@ function automation(rt: AutopilotRuntime, paused: boolean, sched: SchedulerHealt
   const progress = done > goal ? `${done} confirmed, target ${goal}` : `${done} of ${goal} confirmed`;
   if (sched.degraded) return { tone: "bad" as const, text: "Needs a restart", note: "Automation is degraded." };
   if (paused) return { tone: "warn" as const, text: "Stopped", note: "Nothing starts until you press Resume applications." };
-  if (rt.state === "complete") return { tone: "neutral" as const, text: "Target reached", note: progress };
+  if (rt.state === "complete") return { tone: "neutral" as const, text: "Daily limit reached", note: `${progress}. Press Start tomorrow to apply again.` };
   if (rt.intake_enabled)
     return { tone: "ok" as const, text: "Running", note: workers ? `${progress}, ${plural(workers, "worker")}` : progress };
   if (rt.state === "active") return { tone: "warn" as const, text: "Held", note: rt.intake_reason || progress };

@@ -199,7 +199,7 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
     lost: ["bad", "Connection lost", `Showing data from ${ago(link.updatedAt, now)}; retrying.`],
     restart: ["bad", "Needs a restart", "Automation has stopped responding. Restart it to keep applying."],
     paused: ["info", "Stopped", "Nothing starts until you press Resume. Progress is kept."],
-    complete: ["info", "Target reached"],
+    complete: ["info", "Daily limit reached", "Press Start tomorrow to apply again."],
     running: ["info", n ? `Applying to ${plural(n, "job")} right now` : ready.data?.startable === 0 ? "Nothing to run right now" : "Applying, between jobs"],
     held: ["info", "Waiting to start", (rt.intake_reason || "New applications are not starting").replace(/\.$/, "") + "."],
     none: n
@@ -531,7 +531,7 @@ function Live({ work, checking }: { work: WorkingState; checking: boolean }) {
     lost: "Can't see what's running until the connection is back.",
     restart: "Nothing new starts until automation restarts.",
     paused: "Nothing is running. Resume to start the next application.",
-    complete: "Nothing is running. AXIOM reached your target.",
+    complete: "Nothing is running. AXIOM reached today's limit. Press Start tomorrow to continue.",
     running: "Between applications.",
     held: "Nothing is running. New applications are waiting to start.",
     none: "Nothing is running. Applications appear here with the step they're on.",

@@ -178,6 +178,17 @@ async def start_autonomous(service, target=100, refresh_sources=True):
     }
 
 
+def counting_from(started_at, timezone):
+    """When this batch's goal starts counting: the batch's start or the person's midnight, whichever is later.
+
+    The goal is the daily limit, so 20 confirmations yesterday and 5 today are 5 toward today's limit (the tick counted
+    everything since the batch started and completed the batch while the screen said "a day")."""
+    midnight = (
+        datetime.now(ZoneInfo(timezone)).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC).isoformat()
+    )
+    return max(started_at or "", midnight)
+
+
 def confirmed_since(session, started_at):
     """Distinct non-demo jobs with a confirmed, evidence-settled run created at or after `started_at`, any origin."""
     if not started_at:
@@ -230,6 +241,7 @@ def batch_snapshot(service):
                     .where(
                         Run.job_id.in_(owned_jobs),
                         Run.state == "confirmed",
+                        Run.created_at >= counting_from(batch.get("started_at"), service.config.timezone),
                         Run.receipt["evidence_reconciliation"].as_string().is_distinct_from("pending"),
                     )
                 )
@@ -237,7 +249,7 @@ def batch_snapshot(service):
         # Goal progress is every distinct job confirmed since the batch started, whoever started it: the owner's
         # Apply, bulk Apply and apply-many runs are never in run_ids, so the batch showed 220 while 300+ were
         # confirmed and the owner could not tell whether the goal was met (2026-10-29).
-        confirmed_all = confirmed | confirmed_since(s, batch.get("started_at"))
+        confirmed_all = confirmed | confirmed_since(s, batch.get("started_at") and counting_from(batch.get("started_at"), service.config.timezone))
         batch_jobs = set(latest)
         controls = {
             row.key.removeprefix("job_control:"): row.value.get("state")
@@ -1030,6 +1042,7 @@ async def tick(service):
             return
         # The goal is the daily limit, whichever screen or file set it last.
         batch["target"] = service.config.daily_application_limit
+        since = counting_from(batch.get("started_at"), service.config.timezone)
         with db.session() as s:
             owned_jobs = select(Run.job_id).where(Run.id.in_(batch["run_ids"]))
             # Every confirmation since the batch started counts toward its goal, whoever started it (Apply, bulk
@@ -1040,11 +1053,12 @@ async def tick(service):
                         select(Run.job_id).distinct().where(
                             Run.job_id.in_(owned_jobs),
                             Run.state == "confirmed",
+                            Run.created_at >= since,
                             Run.receipt["evidence_reconciliation"].as_string().is_distinct_from("pending"),
                         )
                     )
                 )
-                | confirmed_since(s, batch.get("started_at"))
+                | confirmed_since(s, batch.get("started_at") and since)
             )
             # A count: the whole rows (packets and descriptions) were read here every 15 s only to be counted.
             active = s.scalar(
@@ -1067,7 +1081,11 @@ async def tick(service):
             )
         batch.update(confirmed=confirmed, last_tick=now())
         if confirmed >= batch["target"]:
-            batch.update(state="complete", finished_at=now())
+            # Today's limit is met. The batch ends; tomorrow needs another Start (the screen says so).
+            batch.update(
+                state="complete", finished_at=now(),
+                finished_day=datetime.now(ZoneInfo(service.config.timezone)).date().isoformat(),
+            )
             persist_batch(db, batch)
             return
         from .provider_health import dispatch_gate

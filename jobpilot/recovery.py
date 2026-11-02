@@ -92,6 +92,10 @@ LOCAL_RETRY_DELAY_SECONDS = 30
 # Waits on the employer's mail: the run the person started continues once its mail or sender is free. Nothing here is a new
 # decision to apply, so the "apply on its own" switch, off on a new install, has no say.
 MAIL_CAUSES = {"email_matched", "sender_busy", "reset_cooldown"}
+# Every wait that sent nothing continues the same approved application: a crash or update, a missing browser, a model outage,
+# an overloaded host, plus the mail waits. A new install has the switch off (consent leaves `autonomous` false), and these
+# were stranded as "recovery scheduled" with nothing scheduled. A repair (the engine changing what it does) stays behind it.
+CONTINUATION_CAUSES = MAIL_CAUSES | {"worker_interrupted", "browser_unavailable", "provider_unavailable", "host_overloaded"}
 SPECIALIST_CAUSES = {
     "control_timeout",
     "operation_timeout",
@@ -475,7 +479,7 @@ def schedule_recovery(session, config, run, result):
         or run.state not in {"waiting_browser", "timed_out"}
         or run.mode != "submit"
         or not run.packet.get("match_approved")
-        or not (run.packet.get("profile", {}).get("autonomous") or cause in MAIL_CAUSES)
+        or not (run.packet.get("profile", {}).get("autonomous") or cause in CONTINUATION_CAUSES)
         or not config.recovery_max_attempts
     ):
         return

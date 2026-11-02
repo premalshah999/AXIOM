@@ -217,19 +217,23 @@ class FlowGatesMixin:
 
             from ..db import Job, Run
 
+            from .tenants import account_tenant
+
+            # One host serves many employers (a SuccessFactors data centre, the government cloud): only an application at
+            # this employer's own tenant proves this employer's account.
+            tenant = account_tenant(job["url"], job["url"])
             with self.e.service.db.session() as s:
-                self._applied = bool(
-                    s.scalar(
-                        select(Run.id)
-                        .join(Job, Job.id == Run.job_id)
-                        .where(
-                            Job.ats == "successfactors",
-                            Job.url.startswith(origin(job["url"]) + "/", autoescape=True),
-                            Run.state.in_(["confirmed", "already_applied"]),
-                        )
-                        .limit(1)
+                urls = s.scalars(
+                    select(Job.url)
+                    .join(Run, Run.job_id == Job.id)
+                    .where(
+                        Job.ats == "successfactors",
+                        Job.url.startswith(origin(job["url"]) + "/", autoescape=True),
+                        Run.state.in_(["confirmed", "already_applied"]),
                     )
                 )
+                # A host with no tenant of its own to name (an employer's own career site) is the employer.
+                self._applied = tenant != "unresolved_shared_tenant" and any(account_tenant(url, url) == tenant for url in urls)
         return self._applied
 
     async def recover_sign_in(self, scope, detail):
