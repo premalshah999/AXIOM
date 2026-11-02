@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
 import { useAction, useNow, usePoll } from "./hooks";
+import { ConsentWords } from "./permissions";
 import { DayChart, DotPatterns } from "./identity/DayChart";
 import { LiveWork, type LiveRow } from "./identity/LiveWork";
 import { MasterKey } from "./identity/MasterKey";
@@ -183,6 +184,9 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
   const noResume = snapshot.resumes.length === 0;
   const noKey = !snapshot.config.mimo;
   const [confirmStart, setConfirmStart] = useState<number | null>(null);
+  // Account creation and accepting terms are the person's call (onboarding asks the same question): Start asks again when they are off.
+  const profile = snapshot.profile;
+  const permitted = !!(profile?.allow_account_creation && profile?.accept_all_application_terms && profile?.allow_application_consents);
   const paused = snapshot.control.paused;
   const panel = panelState(snapshot, link.lost);
   const ready = usePoll<Startable>((signal) => api("/startable", "GET", undefined, signal), 30000, [version]);
@@ -204,11 +208,11 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
   };
   const [tone, sentence, sub] = said[panel];
 
-  const begin = (value: number) =>
+  const begin = (value: number, permissions?: "allow" | "decline") =>
     run(
       "start",
       async () => {
-        const result = await api("/job-board/autopilot/start", "POST", { target: value });
+        const result = await api("/job-board/autopilot/start", "POST", { target: value, ...(permissions ? { permissions } : {}) });
         await refresh();
         return result;
       },
@@ -261,7 +265,7 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
         e.preventDefault();
         const value = Math.max(1, Math.min(500, Math.round(goal || limit)));
         // A batch sends on its own, which turns "Let me review first" off. Said before it happens, not found out afterwards.
-        if (!snapshot.control.auto_submit || reviewing) setConfirmStart(value);
+        if (!snapshot.control.auto_submit || reviewing || !permitted) setConfirmStart(value);
         else begin(value);
       }}
     >
@@ -369,12 +373,23 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
               <Button variant="ghost" onClick={() => setConfirmStart(null)}>
                 Not yet
               </Button>
+              {!permitted && (
+                <Button
+                  onClick={() => {
+                    const value = confirmStart;
+                    setConfirmStart(null);
+                    void begin(value, "decline");
+                  }}
+                >
+                  No, don't make accounts
+                </Button>
+              )}
               <Button
                 variant="primary"
                 onClick={() => {
                   const value = confirmStart;
                   setConfirmStart(null);
-                  void begin(value);
+                  void begin(value, permitted ? undefined : "allow");
                 }}
               >
                 Send for me
@@ -384,6 +399,15 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
         >
           {reviewing ? "You review each batch before anything is queued. Starting this switches to applying automatically" : "You chose not to send yet. Starting this turns sending on"}: AXIOM will find jobs and send each application once
           every required answer is checked, without asking you first. To keep control, press Not yet{reviewing ? " and review a batch." : " and pick jobs yourself on the Job board."}
+          {!permitted && (
+            <>
+              <ConsentWords />
+              <p>
+                Send for me turns these on. No, don't make accounts starts without them: applications at employers that need an account or
+                accepted terms then stop and wait for you.
+              </p>
+            </>
+          )}
         </Dialog>
       )}
       {workers && noKey && !active && (

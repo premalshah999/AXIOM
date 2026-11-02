@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { ConsentWords } from "./permissions";
 import { ArrowLeft, ArrowRight, Check as Tick, FileText, Mail, SlidersHorizontal, Sparkles, UserRound, X } from "lucide-react";
 import { api, ApiError } from "./api";
 import { routeUrl } from "./context";
@@ -1345,17 +1346,6 @@ function IdentityStep({ draft, setTop, setFact }: StepProps & { setTop: SetTop; 
 // ---------- Automation: what AXIOM may do without asking ----------
 const SOURCES = ["LinkedIn", "Company website", "Indeed", "Handshake", "Glassdoor"];
 
-// What "Send them for me" allows, in the words the owner reads once, at the choice. The same words are in docs/FRIENDS.md: keep them together.
-export const CONSENT_LEAD = "By choosing this you allow AXIOM to:";
-export const CONSENT_ITEMS = [
-  "create accounts at employers, in your name",
-  "accept their terms and privacy notices in your name",
-  "answer their questions from your profile",
-  "use your own AI key and your own email to do it",
-  "submit each application without asking you first",
-];
-export const CONSENT_CLOSE = "It is on you to check that this is OK with you, and with each employer's rules. You can pause or stop sending at any time.";
-
 function AutomationStep({
   draft,
   setTop,
@@ -1408,15 +1398,7 @@ function AutomationStep({
             ))}
           </div>
           {submit === true && (
-            <div className="ax-ob-consent" role="note">
-              <p>{CONSENT_LEAD}</p>
-              <ul>
-                {CONSENT_ITEMS.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-              <p>{CONSENT_CLOSE}</p>
-            </div>
+            <ConsentWords />
           )}
         </Section>
       )}
