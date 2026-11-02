@@ -9,8 +9,9 @@ import { SignInSettings } from "./account";
 import { ConnectionSettings } from "./connections";
 import { DatabaseSettings } from "./database";
 import { DiscoverySettings } from "./discovery";
+import { LicenseSettings, useLicense } from "./license";
 import { MailSettings } from "./mail";
-import { PAGE_TABS } from "./shell/nav";
+import { settingsTabs } from "./shell/nav";
 import { AdvancedSettings, ApplyingSettings } from "./system";
 import "./styles/settings.css";
 
@@ -36,6 +37,7 @@ const SECTIONS: Record<string, ComponentType> = {
   applying: ApplyingSettings,
   accounts: AccountSettings,
   account: SignInSettings,
+  license: LicenseSettings,
   database: DatabaseSection,
   system: AdvancedSettings,
 };
@@ -45,7 +47,8 @@ const RULE_BEFORE = "account";
 
 export function SettingsView() {
   const { route, go } = useWorkspace();
-  const tabs = PAGE_TABS.settings!;
+  const { status } = useLicense();
+  const tabs = settingsTabs(!!status?.required);
   const tab = tabs.some((t) => t.id === route.tab) ? route.tab! : tabs[0]!.id;
   const Section = SECTIONS[tab] ?? ConnectionSettings;
   // On a phone the list of sections scrolls sideways: keep the open one in view.

@@ -96,6 +96,14 @@ export const PAGE_TABS: Partial<Record<View, TabItem[]>> = {
   ],
 };
 
+/** Settings' sections. The license key is one of them only in a build that asks for a key (license.tsx). */
+export function settingsTabs(licensed: boolean): TabItem[] {
+  const tabs = PAGE_TABS.settings!;
+  if (!licensed) return tabs;
+  const after = tabs.findIndex((t) => t.id === "account") + 1;
+  return [...tabs.slice(0, after), { id: "license", label: "License key" }, ...tabs.slice(after)];
+}
+
 /** Whether `item` is where `route` is. Routes are canonical, so one page is lit per view; the editor belongs to Resumes. */
 export function isActive(item: NavItem, route: Route): boolean {
   return item.route.view === (route.view === "editor" ? "resumes" : route.view === "tailor" ? "queue" : route.view);
