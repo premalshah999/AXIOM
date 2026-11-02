@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 from email.utils import getaddresses
 from urllib.parse import urlsplit
 import base64
+from datetime import datetime
 import re
 from .helpers import origin
 from .senders import CLICK_TRACKERS
@@ -418,9 +419,26 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
         and names(challenge.get("tenant_tokens"))
         and not any(names(peer) for peer in challenge.get("peer_tokens") or [])
     )
+    # The request window may look back before this challenge was armed (a fast sender's mail lands before the page is read),
+    # but a neutral sender's code from that stretch could be a sibling application's whose window is gone (cancelled, so
+    # no longer among the open windows): such mail must name this employer and none of the open peers'.
+    pre_arm = False
+    try:
+        armed = challenge.get("created_at")
+        if armed is not None:
+            pre_arm = received < int(
+                armed if isinstance(armed, (int, float)) else datetime.fromisoformat(str(armed)).timestamp()
+            )
+    except (ValueError, TypeError, OverflowError):
+        pre_arm = True  # an unreadable arming time cannot prove the mail came after it
+    employer_named = names(challenge.get("tenant_tokens")) and not any(
+        names(peer) for peer in challenge.get("peer_tokens") or []
+    )
+    unattributed_before_request = unbranded_sender and pre_arm and not employer_named
     unbranded_cue = bool(UNBRANDED_CODE_CUE.search(text))
     unbranded_ok = bool(
-        challenge.get("open_windows") is not None
+        not unattributed_before_request
+        and challenge.get("open_windows") is not None
         and challenge["kind"] in {"code", "auto"}
         and (single_window or attributed)
         and unbranded_cue
@@ -431,6 +449,8 @@ def extract_message(message, rule, challenge, *, identity_only=False, diagnostic
         and any(ch.isdigit() for ch in next(iter(codes)))
     )
     if unbranded_sender and not unbranded_ok:
+        if unattributed_before_request and unbranded_cue:
+            return reject("unbranded_before_request")
         return reject("unbranded_ambiguous" if unbranded_cue and not single_window else "sender")
     # A shared Greenhouse sender identifies the platform, not the employer.
     # Require the employer's whole name in the inline mail before considering
