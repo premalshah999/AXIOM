@@ -130,7 +130,8 @@ def router(service) -> APIRouter:
         from ...db import Resume
 
         with db.session() as s:
-            resume = s.scalar(select(Resume).where(Resume.demo.is_(False)))
+            # The newest, as tailoring and the queue read it: with two uploads, an unordered read could list the wrong one's history.
+            resume = s.scalar(select(Resume).where(Resume.demo.is_(False)).order_by(Resume.created_at.desc()).limit(1))
             text = resume.text if resume else ""
         inv = evidence.build(db.get_setting("profile", {}) or {}, text)
         return {
@@ -149,7 +150,7 @@ def router(service) -> APIRouter:
         from ...db import Resume
 
         with db.session() as s:
-            row = s.scalar(select(Resume).where(Resume.demo.is_(False)))
+            row = s.scalar(select(Resume).where(Resume.demo.is_(False)).order_by(Resume.created_at.desc()).limit(1))
             return (row.id, row.sha256, row.text or "") if row else ("", "", "")
 
     def tex_for(data: EditorInput) -> str:

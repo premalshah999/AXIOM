@@ -33,7 +33,7 @@ async def preview(db, workspace_id, *, compile_fn=compile_pdf):
     fitted = await fit(doc, style, compile_fn)
     compiled = fitted["compiled"]
     if not compiled.ok:
-        raise ValueError(f"{compiled.code}: {compiled.detail}")
+        raise ValueError("This preview couldn't be made into a PDF. Try again, or tailor this job again.")
     parsed = parse_check(compiled.pdf, doc)
     rules = check_rules(
         doc,

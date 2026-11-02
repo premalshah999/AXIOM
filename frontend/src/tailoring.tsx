@@ -375,7 +375,7 @@ export function TailorView() {
       ) : view.doc && view.source_doc && view.artifact ? (
         <Review key={view.artifact.id} view={view} onView={setView} onChanged={() => refresh.current()} notice={notice} setNotice={setNotice} />
       ) : (
-        <NotChosen view={view} />
+        <NotChosen view={view} onChanged={() => refresh.current()} />
       )}
     </div>
   );
@@ -544,12 +544,28 @@ function Posting({ text, rows }: { text: string; rows: Keyword[] }) {
   );
 }
 
-function NotChosen({ view }: { view: View }) {
+function NotChosen({ view, onChanged }: { view: View; onChanged: () => Promise<void> | void }) {
+  const { go } = useWorkspace();
+  const { pending, run } = useAction();
   const live = useMemo(() => liveScore(view.ats.keywords, ""), [view.ats.keywords]);
   const rows = view.ats.keywords;
   return (
     <div className="tl-columns">
       <div className="tl-col">
+        {view.choice && (
+          // A version this screen can't open (made by an older build): a way on, not a page with nothing to press.
+          <div className="tl-failed">
+            <p>This job's tailored resume can't be opened here. Tailor it again to review it.</p>
+            <Button variant="primary" loading={pending === "again"} disabled={pending !== null || view.started} onClick={() => run("again", async () => { await api(`${path(view.job.id)}/retry`, "POST"); await onChanged(); })}>
+              Tailor again
+            </Button>
+          </div>
+        )}
+        {!view.resume_name && (
+          <p className="ax-note">
+            <button type="button" className="ax-link" onClick={() => go({ view: "resumes", tailor: undefined } as Parameters<typeof go>[0])}>Add your resume</button> to apply to this job or tailor it.
+          </p>
+        )}
         <ScoreBar score={view.ats.score} source={null} keywords={rows} tiers={scoreTiers(rows, live.tiers)}>
           <p className="ax-note">{view.ats.disclaimer}</p>
         </ScoreBar>

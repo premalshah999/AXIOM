@@ -226,11 +226,11 @@ async def read_posting(db, config, job_id: str) -> None:
             log.info("posting read failed for %s: %s", job_id, type(exc).__name__)
 
 
-def _record(db, job_id, mode, **fields) -> None:
+def _record(db, job_id, mode=None, **fields) -> None:
     """The result of a build of `mode`. If the person has since chosen another mode, this one isn't their answer: it would show under the wrong name."""
     with db.exclusive() as s:
         row = s.get(RsTailorChoice, job_id)
-        if row is None or row.mode != mode:
+        if row is None or (mode and row.mode != mode):
             return
         for k, v in fields.items():
             setattr(row, k, v)
@@ -281,6 +281,22 @@ def source_for(session, job):
     rid = wanted or getattr(job, "resume_id", None)
     resume = session.get(Resume, rid) if rid else None
     return resume or session.scalar(select(Resume).where(Resume.demo.is_(False)).order_by(Resume.created_at.desc()).limit(1))
+
+
+def reclaim(db, job_id: str) -> bool:
+    """Asked when the screen reads a job: a build nobody holds any more (the app restarted, the Mac slept). The autopilot's tick does this too, but it needn't be running for a job someone is looking at."""
+    if job_id in _TASKS:
+        return False
+    at = datetime.now(UTC).isoformat()
+    row = get_choice(db, job_id)
+    if row is None or row.state != "preparing" or (row.lease_until and row.lease_until >= at):
+        return False
+    with db.exclusive() as s:
+        row = s.get(RsTailorChoice, job_id)
+        if row is None or row.state != "preparing" or (row.lease_until and row.lease_until >= at):
+            return False
+        row.lease_until = lease()
+    return True
 
 
 def artifact_current(session, row: RsArtifact, job) -> bool:

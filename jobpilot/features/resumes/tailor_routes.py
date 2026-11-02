@@ -261,8 +261,10 @@ def add(r, service) -> None:
         return {"choices": done}
 
     @r.get("/tailor/job/{job_id}")
-    def tailor_job(job_id: str):
-        return view(db, config, job_id)
+    async def tailor_job(job_id: str):
+        if await asyncio.to_thread(choice.reclaim, db, job_id):
+            choice.start(db, config, job_id)
+        return await asyncio.to_thread(view, db, config, job_id)
 
     @r.put("/tailor/job/{job_id}")
     async def choose_for_job(job_id: str, data: ChoiceInput):

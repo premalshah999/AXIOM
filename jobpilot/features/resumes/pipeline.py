@@ -512,8 +512,10 @@ def current_identity(db, job_id: str):
         job = s.get(Job, job_id)
         if not job:
             return None
-        source = s.get(Resume, job.resume_id) if job.resume_id else None
-        source = source or s.scalar(select(Resume).where(Resume.demo.is_(False)))
+        from .choice import source_for
+
+        # The one a tailored version is built from and the queue sends, so an edit saved for this job isn't out of date the moment it's saved.
+        source = source_for(s, job)
         if not source:
             return None
         return {
