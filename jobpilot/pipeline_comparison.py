@@ -337,8 +337,10 @@ def worker_context(job_ats, pool=NORMAL):
             " Difficult-flow owner: continue the preserved unsubmitted checkpoint. Read prior observations, "
             "attempted strategies and postconditions before choosing a materially different supported "
             "approach. Diagnose the actual rejected field or control instead of restarting or repeating "
-            "an unchanged action. Required unknown facts and unavailable external services remain typed "
-            "waits; do not manufacture answers or bypass website validation."
+            "an unchanged action. A different approach is a different way through this posting's own "
+            "application: never open, browse to or apply to another posting, however similar; when this "
+            "posting's application cannot be reached, choose help. Required unknown facts and unavailable "
+            "external services remain typed waits; do not manufacture answers or bypass website validation."
         )
     return context.strip()
 

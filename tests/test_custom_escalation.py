@@ -4,7 +4,7 @@ Every fixture takes its worker lane from the real router (assign_pool), never a 
 normal-pool history for a custom job, a state the router cannot produce.
 """
 
-from jobpilot.db import Job, Run
+from jobpilot.db import Job, Run, Setting
 from jobpilot.pipeline_comparison import (
     CUSTOM,
     CUSTOM_ESCALATED,
@@ -16,6 +16,7 @@ from jobpilot.pipeline_comparison import (
     budget_class,
     escalated,
     routed_budget,
+    worker_context,
 )
 from jobpilot.recovery import automatic_attempts, schedule_recovery, specialist_attempts
 from jobpilot.specialist import handoff_threshold, pool_boost, routing_note
@@ -184,6 +185,57 @@ def test_the_budget_class_is_read_from_the_packet_every_caller_holds(service):
     assert budget_class({"worker_pool": CUSTOM}) == CUSTOM
     assert budget_class({}) == "normal"
     assert budget_class(None) == "normal"
+
+
+def test_an_escalated_run_is_told_to_stay_on_its_own_posting():
+    # A real run applied to another role after browsing from a career home page (2026-11-01). "A materially different
+    # approach" must not read as permission for that, on either escalated lane; the normal context has no such phrase.
+    for pool in (CUSTOM_ESCALATED, SPECIALIST):
+        text = worker_context("custom", pool)
+        assert "materially different" in text
+        assert "never open, browse to or apply to another posting" in text
+    assert "materially different" not in worker_context("custom", CUSTOM)
+
+
+def test_only_the_recovery_counters_and_the_prompt_read_the_strategy():
+    # What an escalated run may do differently is exactly: its attempt allowance, the failed strategies it is shown, the
+    # sentence above and a budget the owner must raise. Nothing about navigation, controls or commits reads the strategy.
+    from pathlib import Path
+
+    import jobpilot
+
+    root = Path(jobpilot.__file__).parent
+    readers = set()
+    for file in root.rglob("*.py"):
+        text = file.read_text()
+        if any(word in text for word in ("budget_class(", "escalated(", 'get("strategy")', "assign_strategy(", "STRATEGY_ESCALATED")):
+            readers.add(file.relative_to(root).as_posix())
+    assert readers <= {
+        "answer_quality.py",  # the advice call budget (budget_class)
+        "browser.py",  # the time budget and the worker context (budget_class)
+        "models.py",  # the model-call budget (budget_class)
+        "pipeline_comparison.py",
+        "recovery.py",
+        "service/execution.py",  # the run timeout (budget_class)
+        "service/queueing.py",
+    }
+
+
+def test_a_posting_guard_stop_never_escalates(service):
+    # A run the posting guard stopped has nothing another run could fix: the site did not open this posting.
+    add_job(service, "j-stop", "custom")
+    failed_run(service, "j-stop", "s1")
+    failed_run(service, "j-stop", "s2", source="s1")
+    result = {
+        "state": "waiting_browser",
+        "reason": "The employer's site didn't open this posting; nothing was sent",
+        "blocker_type": "control_failure",
+        "recoverable": False,
+    }
+    with service.db.session() as s:
+        schedule_recovery(s, service.config, s.get(Run, "s2"), result)
+    with service.db.session() as s:
+        assert s.get(Setting, "draft_recovery:j-stop") is None
 
 
 def test_the_queued_event_names_the_custom_escalation():
