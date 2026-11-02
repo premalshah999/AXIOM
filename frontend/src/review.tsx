@@ -91,17 +91,17 @@ export function ReviewView() {
             </span>
             <span className="bd-meta-line">{r.line}</span>
             <span className="bd-meta">
-              <span className="mono">Fit {r.score}</span>
+              <span className="mono">Match {r.score}</span>
               <span>{r.dated ? `Posted ${ago(r.posted_at, now)}` : `Found ${ago(r.posted_at, now)}`}</span>
             </span>
           </button>
         </div>
       ),
     },
-    { key: "fit", header: "Fit", num: true, hideBelow: 600, cell: (r) => r.score },
+    { key: "fit", header: "Match", num: true, hideBelow: 600, cell: (r) => r.score },
     {
       key: "why",
-      header: "Why it fits",
+      header: "Why it matches",
       hideBelow: 600,
       width: 360,
       truncate: true,

@@ -80,14 +80,14 @@ export function OverLimitJobs() {
             onOpen={() => openJob(r.id)}
             meta={
               <>
-                {r.score != null && <span className="mono">Fit {r.score}</span>}
+                {r.score != null && <span className="mono">Match {r.score}</span>}
                 <span>{`Has ${plural(r.hold.count, "application")}; limit ${r.hold.limit}`}</span>
               </>
             }
           />
         ),
       },
-      { key: "fit", header: "Fit", hideBelow: 600, num: true, cell: (r) => r.score ?? "—" },
+      { key: "fit", header: "Match", hideBelow: 600, num: true, cell: (r) => r.score ?? "—" },
       { key: "why", header: "Employer's applications", hideBelow: 600, truncate: true, width: 340, cell: (r) => <Note title={r.hold.reason}>{`Already has ${plural(r.hold.count, "application")}; your limit is ${r.hold.limit}.`}</Note> },
       {
         key: "act",

@@ -120,7 +120,7 @@ def classify(message):
     if text.startswith("Outside your target locations"):
         return "location", text + "."
     if "below the unattended threshold" in text:
-        return "fit", text.replace("Resume fit", "Fit").replace("the unattended threshold", "your minimum for automatic applications")
+        return "fit", text.replace("Resume fit", "Match").replace("the unattended threshold", "your minimum for automatic applications")
     if text.startswith("Posting aged out"):
         return "aged", "The posting is older than your search window or no longer on its board."
     if text in GATE_WORDS:

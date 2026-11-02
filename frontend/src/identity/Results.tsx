@@ -20,20 +20,20 @@ function FunnelPanel({ data, error, retry, confirmed }: { data: Funnel | null; e
   const stages: { label: string; n: number; help: string; to: AnyRoute; lit?: boolean }[] = data
     ? [
         { label: "Found", n: data.discovered, help: "Every posting AXIOM has found, all time. The Job board lists the open ones.", to: { view: "board" } },
-        { label: "Good fit", n: data.eligible, help: "Passed the fit check, or you picked it yourself.", to: { view: "board" } },
+        { label: "Good match", n: data.eligible, help: "Scored at least your How close a match number, or you picked it yourself.", to: { view: "board" } },
         { label: "Tried", n: data.applied, help: "An application was started. Some are still running and some did not go through; the ones the employer confirmed are under Applications.", to: { view: "ledger" } },
         { label: "Confirmed", n: confirmed ?? 0, help: "Proven by the employer's confirmation page or an email from the employer.", to: { view: "ledger" }, lit: true },
       ]
     : [];
   const top = Math.max(1, ...stages.map((s) => s.n));
   return (
-    <Panel title="From discovered to confirmed">
+    <Panel title="From found to confirmed">
       {error && !data ? (
         <ErrorLine error={error} retry={retry} />
       ) : !data ? (
         <Skeleton rows={4} mono={false} />
       ) : data.discovered === 0 ? (
-        <Empty compact title="Nothing found yet" hint="Once discovery finds jobs, this shows how many reach each stage." />
+        <Empty compact title="Nothing found yet" hint="Once AXIOM finds jobs, this shows how many reach each stage." />
       ) : (
         <>
           <ol className="ov-funnel">

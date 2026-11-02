@@ -759,7 +759,7 @@ function FirstRun({ mail }: { mail: MailStatus | null }) {
     {
       done: p.target_roles.length > 0,
       title: "What to look for",
-      detail: p.target_roles.length ? `${p.target_roles.join(", ")} · ${p.target_locations.join(", ") || "Anywhere in the USA"}` : "Choose the roles discovery searches for.",
+      detail: p.target_roles.length ? `${p.target_roles.join(", ")} · ${p.target_locations.join(", ") || "Anywhere in the USA"}` : "Choose the roles AXIOM looks for.",
       action: "Adjust",
       onClick: () => go({ view: "profile", tab: "experience", filter: "preferences" }),
     },

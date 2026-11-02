@@ -878,7 +878,7 @@ function ResumeStep({
       const parts = [
         extracted.work?.length ? `${extracted.work.length} role${extracted.work.length === 1 ? "" : "s"}` : "",
         extracted.education?.length ? `${extracted.education.length} school${extracted.education.length === 1 ? "" : "s"}` : "",
-        extracted.skills?.length ? `${extracted.skills.length} skills` : "",
+        extracted.skills?.length ? `${extracted.skills.length} skill${extracted.skills.length === 1 ? "" : "s"}` : "",
       ].filter(Boolean);
       const after = kept
         ? " Your list below already had entries of your own, so it stays as it is. Remove anything you don't want."
