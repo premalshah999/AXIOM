@@ -2257,7 +2257,7 @@ class Adapter:
 
     @staticmethod
     def blank_page(obs):
-        return not (obs["fields"] or obs["controls"] or str(obs.get("text") or "").strip())
+        return not (obs.get("fields") or obs.get("controls") or str(obs.get("text") or "").strip())
 
     async def wait_for_blank_page(self):
         """True once a page with nothing on it has drawn itself. A redirect can commit an empty document that fills in seconds later; asked about it, the
@@ -2276,7 +2276,7 @@ class Adapter:
         return False
 
     async def on_unknown(self, obs):
-        if not self.committed and self.blank_page(obs) and await self.wait_for_blank_page():
+        if self.blank_page(obs) and not self.committed and await self.wait_for_blank_page():
             return None  # The main loop reads the page again and classifies what it drew.
         cancel = [b for b in obs["controls"] if re.fullmatch(r"cancel|go back|back", b["label"].strip(), re.I)]
         if GUEST_EMAIL_EXISTS.search(obs.get("text", "")) and len(cancel) == 1:
