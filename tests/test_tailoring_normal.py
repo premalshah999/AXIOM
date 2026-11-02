@@ -153,6 +153,46 @@ def test_a_short_flattened_posting_splits_too_and_a_sentence_isnt_a_name():
     assert "Tableau Knowledge of GAAP" not in found
 
 
+# The shape of a real posting that read as 30 "required" terms such as employment, protected, follow and its own employer, with Python and SQL pushed off the list.
+RUN_ON = """Who We Are:
+Northwind is the partner for supply chain automation.
+What You'll Do:
+Build applications and workflows using APIs, data and code.
+You May Be a Great Fit If
+You can write code in a language such as Python, JavaScript, or TypeScript and want to continue developing your engineering skills.
+You have some familiarity with APIs, SQL or data structures, Git, testing, and debugging.
+Experience
+A typical candidate has one to three years of relevant experience, from full-time employment or internships.
+Helpful, but Not Required
+Familiarity with vector databases, embedding models, or evaluation tools.
+What Success Looks Like
+Earn the trust of teammates through follow-through and curiosity, building, leading and follow-up at Northwind and Northwind teams.
+Why You'll Love Working at Northwind:
+Discretionary Time Off for all employees. Industry leading health, vision, and dental benefits.
+Learn more at northwind.example and follow Northwind on LinkedIn.
+All qualified applicants will receive consideration for employment without regard to race, color, religion, sex, sexual orientation, gender identity, national origin, age, disability or protected veteran status, or any other legally protected basis.
+"""
+
+
+def test_a_run_on_posting_keeps_its_real_terms_and_drops_the_legal_text_and_the_employer():
+    rows = {t["term"].lower(): t for t in ats.terms(RUN_ON, "Builder", company="Northwind")}
+    assert {"python", "javascript", "typescript", "sql", "git", "debugging", "data structures"} <= set(rows)
+    assert rows["python"]["tier"] == "required" and rows["vector databases"]["tier"] == "preferred"
+    assert not set(rows) & {"northwind", "employment", "protected", "follow", "linkedin", "dental", "building", "leading"}
+    assert not [t for t in rows if "your" in t or "want" in t]
+
+
+def test_a_word_only_repetition_made_a_term_is_marked_common():
+    rows = {t["term"]: t for t in ats.terms("Requirements\nExperience with Python. Great reasoning, clear reasoning, careful reasoning.", "")}
+    assert rows["reasoning"]["common"] is True
+    assert not rows["Python"].get("common")
+
+
+def test_the_same_word_in_the_plural_is_one_term():
+    rows = [t["term"].lower() for t in ats.terms("Requirements\nExperience with evaluation.\nDuties\nBuild evaluations and test them.", "")]
+    assert rows.count("evaluation") == 1 and "evaluations" not in rows
+
+
 def test_the_score_is_the_weighted_share_and_says_what_a_missing_term_is():
     rows = [
         {"term": "Python", "pattern": ats.pattern_for("Python"), "tier": "required", "weight": 3},

@@ -193,7 +193,7 @@ async def _build_mode(db, config, job, resume, profile, source_tuple, spec, mode
 
     doc, style, origin = source_tuple
     inv = evidence.build(profile, resume["text"])
-    terms = ats.terms(job["description"], job["title"], supported_terms(inv))
+    terms = ats.terms(job["description"], job["title"], supported_terms(inv), company=job.get("company", ""))
     evidence_text = " ".join([doc_plain(doc), resume["text"] or "", inv.vocabulary or ""])
     ats_source = ats.score(terms, doc_plain(doc), evidence_text)
     source = modes.SourceResume(id=resume["id"], sha=resume["sha"], text=resume["text"], doc=doc, style=style, origin=origin)
