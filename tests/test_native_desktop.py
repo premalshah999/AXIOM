@@ -357,7 +357,7 @@ def holding(profile):
     profile.mkdir(parents=True, exist_ok=True)
     process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", f"--user-data-dir={profile}"])
     os.symlink(f"somehost-{process.pid}", profile / "SingletonLock")
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 30  # until the command line is visible; a loaded Mac starts a Python slowly
     while time.monotonic() < deadline and f"--user-data-dir={profile}" not in subprocess.run(
         ["ps", "-o", "command=", "-p", str(process.pid)], capture_output=True, text=True
     ).stdout:
