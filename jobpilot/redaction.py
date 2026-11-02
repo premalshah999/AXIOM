@@ -10,6 +10,7 @@ the Telegram filter's `sk-` rule written for another provider, and nothing maske
 `password:` / `token=` style labels, for log lines and diagnostics, where a label with a value is almost always a credential.
 """
 
+import json
 import re
 
 MARK = "[secret]"
@@ -20,7 +21,8 @@ FORMATS = re.compile(
     r"|\bAIza[0-9A-Za-z_-]{30,}"
     r"|\bxox[abprs]-[A-Za-z0-9-]{10,}"
     r"|\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"
-    r"|\b\d{8,10}:[A-Za-z0-9_-]{30,}"  # Telegram bot token
+    # A Telegram bot token, also where its address puts it: api.telegram.org/bot123456789:AA... has no word boundary before the digits.
+    r"|(?<![0-9])\d{8,10}:[A-Za-z0-9_-]{30,}"
     r"|\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"  # a JWT
     r"|-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)"
     r"|(?<![A-Za-z0-9_=-])[A-Za-z0-9_-]{43}=(?![A-Za-z0-9=])"  # a Fernet key, as DATA_DIR/mail-key holds
@@ -42,6 +44,7 @@ _ordered = ()  # `_known`, longest first, so a value that contains another is ma
 def register(values):
     """Remember exact secret values to remove from now on (values shorter than 6 characters are too common to mask)."""
     global _ordered
+    before = len(_known)
     for value in values:
         value = str(value or "").strip()
         if len(value) >= 6:
@@ -49,7 +52,26 @@ def register(values):
             # A mailbox app password is shown with spaces and typed without.
             if " " in value:
                 _known.add(value.replace(" ", ""))
-    _ordered = tuple(sorted(_known, key=len, reverse=True))
+    if len(_known) != before:  # Called on every credential read: sort only when something is new.
+        _ordered = tuple(sorted(_known, key=len, reverse=True))
+
+
+# A key in a sealed credential that names a secret (an app password, a token, an employer password).
+CREDENTIAL_KEY = re.compile(r"pass|token|secret|key|credential|verifier", re.I)
+
+
+def register_credentials(value):
+    """Register the secret strings of a credential (the flat dict a mailbox or an employer account is sealed with). Nested values
+    are a site's own saved session, not ours, and are left out so that the list stays as long as the accounts are."""
+    if not isinstance(value, dict):
+        return
+    register([item for key, item in value.items() if isinstance(item, str) and len(item) <= 512 and CREDENTIAL_KEY.search(str(key))])
+
+
+def register_config(config):
+    """Register the secrets `config` holds. Without this only key-shaped text was ever masked: a mailbox app password, the
+    access token and a password typed in by the owner have no shape, and nothing called `register` (2026-11-01 review)."""
+    register(known_from(config))
 
 
 def known_from(config):
@@ -82,8 +104,9 @@ def redact_data(value, depth=0):
     """The same for the strings inside a JSON-shaped value (an event's data)."""
     if isinstance(value, str):
         return redact(value)
-    if depth > 4:
-        return value
+    if depth > 12:
+        # Too deep to walk: masked as text rather than stored untouched (a nested value used to skip masking past depth 4).
+        return redact(json.dumps(value, default=str)) if isinstance(value, (dict, list)) else value
     if isinstance(value, dict):
         return {k: redact_data(v, depth + 1) for k, v in value.items()}
     if isinstance(value, list):

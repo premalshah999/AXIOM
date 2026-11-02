@@ -1186,11 +1186,12 @@ const ERASES = [
   "your profile, resumes, answers and every saved application page",
   "the jobs, queue and history",
   "the accounts and passwords AXIOM saved, your AI key and the mailbox connection",
-  "the cached Chrome profile and the automatic database backups",
+  "the cached Chrome profile, the database backups and the logs",
 ];
 const CANNOT_REMOVE = [
   "Applications already sent. The employers have them.",
   "Accounts AXIOM created at employers. Close them on the employers' sites; their emails to you stay in your own mailbox.",
+  "Your AI key and your Gmail app password. They still work at the services that issued them: revoke them there.",
 ];
 
 /** Delete everything: stops work, removes the data and leaves the app as on its first run. Typed confirmation, and no undo. */

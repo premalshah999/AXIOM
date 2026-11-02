@@ -7,8 +7,9 @@ exits. The Mac app's supervisor starts nothing while the marker names a living e
 as on a first run; without a supervisor, whoever starts the app next finds it empty.
 
 What goes: the database (every table, and the workflow history), the data folder's files (saved pages, resumes, sessions, the
-saved keys and the key that seals them, the database choice), the worker and twin Chrome profiles, and the database copies in the
-backup folder. What stays, because the installation cannot start without it and it holds nothing about the owner: the cluster's
+saved keys and the key that seals them, the database choice), the worker and twin Chrome profiles, the database copies in the
+backup folder, and the logs (they name employers and questions; the running programs keep their files open, so those are emptied
+rather than deleted). What stays, because the installation cannot start without it and it holds nothing about the owner: the cluster's
 own folder, the supervisor's folder, and the access token this window signs in with. What cannot be removed from here is in
 CANNOT, and the screen says it in the same words.
 """
@@ -29,10 +30,10 @@ MARKER = "erasing.json"
 # Installation scaffolding inside the data folder: the empty database cluster, the supervisor's own state and releases, the
 # token the window signs in with, and an index hint. None of it holds anything about the owner.
 KEEP = {"postgres", "native", "access-token", ".metadata_never_index", MARKER}
-BACKUP_PREFIX = "axiom-"
 CANNOT = [
     "Applications already sent. The employers have them.",
     "Accounts AXIOM created at employers. Close them on the employers' sites; their emails to you stay in your own mailbox.",
+    "Your AI key and your Gmail app password. They still work at the services that issued them: revoke them there.",
 ]
 
 
@@ -40,6 +41,36 @@ def backup_folder(environ=None):
     """Where database copies are kept; AXIOM_BACKUP_DIR moves it (tests use it, so that no test touches the real folder)."""
     environ = os.environ if environ is None else environ
     return Path(environ.get("AXIOM_BACKUP_DIR") or Path.home() / "axiom-backups")
+
+
+def log_folders(config=None, environ=None):
+    """Where the Mac app and the supervisor write their logs: AXIOM_LOG_DIR (the app sets it to ~/Library/Logs/AXIOM)."""
+    environ = os.environ if environ is None else environ
+    found = set()
+    if config is not None:
+        found.add(Path(config.data_dir) / "native" / "logs")  # Where the supervisor logs without the Mac app.
+    if environ.get("AXIOM_LOG_DIR"):
+        found.add(Path(environ["AXIOM_LOG_DIR"]).expanduser())
+    return sorted(found)
+
+
+def clear_logs(folder, say=None):
+    """Empty the logs in `folder` and delete their rotated copies. A log is truncated in place, not deleted: the supervisor and the
+    services hold it open for appending and would go on writing into a file nobody can see. The eraser's own log stays."""
+    problems = []
+    for path in sorted(Path(folder).glob("*")) if Path(folder).is_dir() else []:
+        if path.name == log_path().name or path.is_dir() or path.is_symlink():
+            continue
+        try:
+            if path.suffix == ".log":
+                os.truncate(path, 0)
+            elif ".log." in path.name:
+                path.unlink()
+        except OSError:
+            problems.append(path.name)
+            if say:
+                say(f"Could not empty {path}.")
+    return problems
 
 
 def marker(data_dir):
@@ -163,7 +194,7 @@ def profiles(config):
     return sorted(found)
 
 
-def run(config, *, after_pid=0, say=print, backups=None):
+def run(config, *, after_pid=0, say=print, backups=None, logs=None):
     """Delete everything, in this order: wait for the application to be gone, close the Chromes, empty the database, the files, the
     copies. Returns a list of what could not be removed (empty when all went)."""
     problems = []
@@ -197,13 +228,17 @@ def run(config, *, after_pid=0, say=print, backups=None):
         remove(state / name)
     folder = Path(backups) if backups else backup_folder()
     if folder.exists():
-        for copy in folder.glob(BACKUP_PREFIX + "*.dump"):
+        # Every database copy in AXIOM's own folder, whatever it was called: a copy made by hand (`axiom backup name.dump`) holds
+        # the same employer passwords and answers.
+        for copy in [*folder.glob("*.dump"), *folder.glob("*.dump.partial")]:
             if not remove(copy, say):
                 problems.append(copy.name)
         try:
             folder.rmdir()  # Only when nothing else of the owner's is in it.
         except OSError:
             pass
+    for where in [Path(logs)] if logs else log_folders(config):
+        problems += clear_logs(where, say)
     say("Done." if not problems else "Done, except: " + ", ".join(problems))
     return problems
 

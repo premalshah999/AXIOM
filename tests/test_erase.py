@@ -15,6 +15,13 @@ from jobpilot.native.supervisor import Child, Supervisor
 from tests.test_native_database_choice import installation, no_postgres_binaries  # noqa: F401
 
 
+@pytest.fixture(autouse=True)
+def logs_of_the_test(tmp_path, monkeypatch):
+    """The eraser empties the logs: a test must never reach the real folder (the installed app sets AXIOM_LOG_DIR)."""
+    monkeypatch.setenv("AXIOM_LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setenv("AXIOM_BACKUP_DIR", str(tmp_path / "copies"))
+
+
 def populated(tmp_path):
     data = tmp_path / "data"
     for name in ("runs/r1/steps", "resumes", "sessions", "desktop-browser/Default", "twin-browser", "archive", "migration", "native", "postgres"):
@@ -38,6 +45,35 @@ def test_everything_goes_and_only_scaffolding_stays(tmp_path):
     assert (data / "postgres" / "PG_VERSION").exists() and (data / "native" / "state.json").exists()
     # The copies go, a stranger's file does not, and the folder stays because it is not empty.
     assert [p.name for p in backups.iterdir()] == ["someone-elses.txt"]
+
+
+def test_logs_are_emptied_in_place_and_every_database_copy_goes(tmp_path):
+    config, data, backups = populated(tmp_path)
+    (backups / "pre-compact-20261030.dump").write_text("d")  # made by hand, under another name: the same data
+    (backups / "axiom-20261101.dump.partial").write_text("d")
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "app.log").write_text("applied to Acme: answered the salary question\n")
+    (logs / "app.log.1").write_text("older\n")
+    (logs / erase.log_path().name).write_text("12:00:00 Done.\n")
+    (data / "native" / "logs").mkdir()
+    (data / "native" / "logs" / "worker.log").write_text("Acme\n")
+    held = open(logs / "app.log", "a")  # the supervisor holds its log open for appending
+    try:
+        assert erase.run(config, say=lambda _: None, backups=backups) == []
+        held.write("after\n")
+        held.flush()
+    finally:
+        held.close()
+    assert (logs / "app.log").read_text() == "after\n"  # emptied, still the file the program writes to
+    assert not (logs / "app.log.1").exists()
+    assert (logs / erase.log_path().name).read_text() == "12:00:00 Done.\n"
+    assert (data / "native" / "logs" / "worker.log").read_text() == ""
+    assert [p.name for p in backups.iterdir()] == ["someone-elses.txt"]
+
+
+def test_the_screen_says_the_keys_stay_valid_at_their_services():
+    assert any("AI key" in line and "revoke" in line for line in erase.CANNOT)
 
 
 def test_an_empty_backup_folder_is_removed_with_its_last_copy(tmp_path):

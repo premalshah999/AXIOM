@@ -341,6 +341,9 @@ class Settings(BaseSettings):
                 with os.fdopen(fd, "w") as f:
                     f.write(secrets.token_urlsafe(32))
             self.app_token = token_file.read_text().strip()
+        from .redaction import register_config
+
+        register_config(self)  # Events, Telegram and saved pages mask these exact values from now on.
         from . import db as database
         from .storage.choice import apply as apply_database_choice
 

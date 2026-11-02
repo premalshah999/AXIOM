@@ -160,6 +160,9 @@ def apply(config, live=False):
         except ValueError:
             value = typed(name, env[name]) if env.get(name) not in (None, "") else getattr(config, name)
         object.__setattr__(config, name, value)
+    from .redaction import register_config
+
+    register_config(config)  # The keys saved in the app are secrets too, whatever their shape.
     return config
 
 
