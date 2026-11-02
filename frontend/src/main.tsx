@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { LegalGate } from "./legal";
 import "./styles/tokens.css";
@@ -31,7 +31,7 @@ import { Wordmark } from "./shell/Brand";
 import { CommandPalette } from "./shell/CommandPalette";
 import { ComingSoon } from "./shell/ComingSoon";
 import { ALL_ITEMS, titleFor } from "./shell/nav";
-import { Button, Loading, ToastStack } from "./ui/index";
+import { Button, Dialog, Loading, ToastStack } from "./ui/index";
 import { BatchView } from "./batch";
 import { BoardView } from "./jobboard";
 import { LedgerView } from "./ledger";
@@ -41,6 +41,7 @@ import { JobPanel } from "./jobdetail";
 import { AddJobDialog } from "./jobintake";
 import type { AccountStatus } from "./account";
 import { guideLater } from "./guide";
+import { hasUnsaved, useLeaveWarning } from "./shell/unsaved";
 
 // Profile, Resumes, Settings, the resume editor, sign-in and the setup guide are most of the dashboard's code and are rarely open:
 // they load when shown, so Batch and Jobs paint from a smaller bundle (2026-10-23).
@@ -100,11 +101,25 @@ function App() {
     };
   }, []);
 
-  const go = useCallback((raw: AnyRoute) => {
-    const next = canonical(raw);
+  useLeaveWarning();
+  // Where you are, for the one question below: moving to another page or Settings section with unsaved changes asks first.
+  const here = useRef(route);
+  here.current = route;
+  const [leaving, setLeaving] = useState<Route | null>(null);
+  const move = useCallback((next: Route) => {
     history.pushState(null, "", routeUrl(next));
     setRoute(next);
   }, []);
+  const go = useCallback(
+    (raw: AnyRoute) => {
+      const next = canonical(raw);
+      const now = here.current;
+      // Opening a job's panel or changing a filter stays on the page; only a different page or section loses the form.
+      if (hasUnsaved() && (next.view !== now.view || next.tab !== now.tab)) setLeaving(next);
+      else move(next);
+    },
+    [move],
+  );
 
   // Ask the public account endpoint first, so a signed-out visit shows sign-in without a failed request.
   useEffect(() => {
@@ -359,6 +374,27 @@ function App() {
           />
         )}
         <AddJobDialog />
+        <Dialog
+          open={leaving !== null}
+          onClose={() => setLeaving(null)}
+          title="Leave without saving?"
+          sub="You changed something on this page and didn't save it. If you leave now, the change is lost."
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => {
+                if (leaving) move(leaving);
+                setLeaving(null);
+              }}>
+                Leave and lose the change
+              </Button>
+              <Button variant="primary" onClick={() => setLeaving(null)}>
+                Keep editing
+              </Button>
+            </>
+          }
+        >
+          <p className="ax-hint">Press Save at the bottom of the page to keep it.</p>
+        </Dialog>
         <CommandPalette open={palette} onClose={() => setPalette(false)} />
         <ToastStack toasts={toasts} onDismiss={(id) => setToasts((list) => list.filter((x) => x.id !== id))} />
       </WorkspaceContext.Provider>
