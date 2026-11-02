@@ -175,6 +175,17 @@ def test_the_escalated_custom_budget_is_no_larger_unless_the_owner_raises_it(ser
     assert budget_class({"worker_pool": CUSTOM}) == CUSTOM and budget_class({}) == "normal"
 
 
+def test_the_budget_class_is_read_from_the_packet_every_caller_holds(service):
+    # The browser, the model meter, the advice budget and the run timeout all hand it a packet, never a run: reading a
+    # "packet" key inside the packet sized every specialist's budget as a normal run's and dropped its worker context.
+    config = service.config.model_copy(update={"specialist_budget_multiplier": 1.5})
+    assert budget_class({"worker_pool": SPECIALIST}) == SPECIALIST
+    assert pool_boost(config, budget_class({"worker_pool": SPECIALIST})) == 1.5
+    assert budget_class({"worker_pool": CUSTOM}) == CUSTOM
+    assert budget_class({}) == "normal"
+    assert budget_class(None) == "normal"
+
+
 def test_the_queued_event_names_the_custom_escalation():
     note = routing_note(
         CUSTOM,

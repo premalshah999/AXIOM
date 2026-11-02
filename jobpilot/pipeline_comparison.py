@@ -66,9 +66,10 @@ def escalated(run):
     return packet.get("worker_pool") == SPECIALIST or packet.get("strategy") == STRATEGY_ESCALATED
 
 
-def budget_class(run):
-    """What the run's time, model-call and token budget is sized by: its lane, or CUSTOM_ESCALATED for a custom site."""
-    packet = _packet(run)
+def budget_class(packet):
+    """What a run's time, model-call and token budget is sized by, from its packet (not the run): its lane, or
+    CUSTOM_ESCALATED for a custom site."""
+    packet = packet or {}
     if packet.get("strategy") == STRATEGY_ESCALATED and packet.get("worker_pool") == CUSTOM:
         return CUSTOM_ESCALATED
     return packet.get("worker_pool", NORMAL)
