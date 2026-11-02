@@ -45,6 +45,7 @@ HOLDS = {
     "twin": ("the same posting under another link", "The copy ahead of it in the queue is the one applied to."),
 }
 EMPLOYER_STOPS = {"employer_cap", "loop_guard", "employer_wait"}
+RESERVED_LINE = "A reserved employer: nothing is applied there until you approve this job."
 # Plain words for the discovery gate's codes (features/discovery/policy.gate).
 GATE_WORDS = {
     "generic_careers_page": "The link is a general careers page, not one job.",
@@ -194,7 +195,7 @@ def read(service):
         }
         verdict, more, state = None, {}, ""  # verdict: (code, sentence)
         if r.id in reserved:
-            verdict = ("reserved", "A reserved employer: nothing is applied there until you approve this job.")
+            verdict = ("reserved", RESERVED_LINE)
         else:
             try:
                 state, _, _ = screen_job(
@@ -385,6 +386,10 @@ def without(value, job_ids):
         return value
     jobs = {j: h for j, h in value["jobs"].items() if j not in gone}
     ids = [j for j in value.get("ids", []) if j not in gone]
+    return _counted(value, jobs, ids)
+
+
+def _counted(value, jobs, ids):
     tally = {}
     for h in jobs.values():
         tally[h["code"]] = tally.get(h["code"], 0) + 1
@@ -395,12 +400,23 @@ def without(value, job_ids):
     }
 
 
+def with_holds(value, held_ids):
+    """The reading as a change to the reserved list leaves it, every count following. A job the list now holds waits for approval. A job it
+    no longer holds leaves the held list until the next reading screens it: nothing here says it can start, so a released job never joins
+    the line unscreened."""
+    jobs = {j: h for j, h in value["jobs"].items() if h["code"] != "reserved" or j in held_ids}
+    caught = {j for j in (*value.get("ids", ()), *jobs) if j in held_ids}
+    jobs.update({j: {"code": "reserved", "reason": RESERVED_LINE, "next": HOLDS["reserved"][1]} for j in caught})
+    return _counted(value, jobs, [j for j in value.get("ids", ()) if j not in caught])
+
+
 class Reading:
     """The latest reading, shared by every request; one thread reads at a time."""
 
     def __init__(self):
         self.value, self.at, self.busy = None, 0.0, threading.Lock()
         self.guard, self.dropped = threading.Lock(), {}
+        self.changes = 0  # counts changes to the reserved list: a reading begun before the last one is out of date when it ends
 
     def get(self, service):
         age = time.monotonic() - self.at
@@ -417,10 +433,13 @@ class Reading:
         return self.value
 
     def _load(self, service):
+        changes = self.changes
         value = read(service)
         with self.guard:
             now = time.monotonic()
             self.dropped = {j: at for j, at in self.dropped.items() if now - at < 120}
+            if changes != self.changes and self.value is not None:
+                return  # The list changed under this read: what holds_changed said stands until the read that follows it.
             self.value, self.at = without(value, self.dropped), now
 
     def _fill(self, service):
@@ -440,6 +459,14 @@ class Reading:
             if self.value is not None:
                 self.value = without(self.value, job_ids)
                 self.at = 0.0  # stale: the next get() serves this and reads again in the background
+
+    def holds_changed(self, held_ids):
+        """The reserved list changed: say so on the reading already in hand, without screening every Ready job again (seconds to a
+        minute, which a click on Reserve waited for)."""
+        with self.guard:
+            self.changes += 1
+            if self.value is not None:
+                self.value = with_holds(self.value, held_ids)
 
     def reload(self, service):
         """Read again now, on the calling thread: the user's own change (a reservation, an approval) must show on the next read, not

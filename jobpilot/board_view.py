@@ -291,15 +291,57 @@ def collect(service):
     }
 
 
+def with_holds(value, service, positions):
+    """The board as a change to the reserved list leaves it: each row's reservation, and what follows from it, without cleaning the board
+    again. A row in line stays in line. A row released takes the state its job's status gives until the next read."""
+    from .db import Job
+    from .reserved import held, matcher
+
+    db = service.db
+    with db.session() as s:
+        holding, reserving = set(held(s)), matcher(s)
+        released = [r["id"] for rows in (value["rows"], value["sites"]) for r in rows if r["approval"] == "reserved" and r["id"] not in holding]
+        jobs = {row.id: row for row in s.execute(select(Job.id, Job.status, Job.reason).where(Job.id.in_(released)))} if released else {}
+
+    def changed(row):
+        found = reserving(row["company"], row["url"])
+        new = {**row, "reserved": found.employer if found else ""}
+        if row["id"] in positions:
+            return new
+        if row["id"] in holding:
+            return {**new, "state": "approval", "fit": "match", "position": None, "approval": "reserved", "can_add": False,
+                    "line": "A reserved employer: nothing is applied there until you approve this job."}
+        job = jobs.get(row["id"])
+        if job is None:
+            return new
+        restricted = _restricted(job.reason)
+        if job.status == "skipped":
+            state, fit, sentence = "below", "other", _line(job.reason, row["source"]) or "Below your minimum fit."
+        elif job.status == "new":
+            state, fit, sentence = "checking", "match", "Found, and still being checked against your profile."
+        else:
+            state, fit, sentence = "ready", "match", _line(job.reason, row["source"])
+        return {**new, "state": state, "fit": fit, "line": sentence[:400], "approval": "", "can_add": not restricted}
+
+    return {**value, "rows": [changed(r) for r in value["rows"]], "sites": [changed(r) for r in value["sites"]]}
+
+
 class Board:
     """The latest cleaned board, shared by every poll."""
 
     def __init__(self):
         self.value, self.at, self.busy = None, 0.0, threading.Lock()
+        self.changes = 0  # counts changes to the reserved list: a board read begun before the last one is out of date when it ends
+
+    def _store(self, service):
+        changes = self.changes
+        value = collect(service)
+        if changes == self.changes or self.value is None:
+            self.value, self.at = value, time.monotonic()
 
     def _fill(self, service):
         try:
-            self.value, self.at = collect(service), time.monotonic()
+            self._store(service)
         except Exception:
             # Said, not swallowed: a read that always failed left a fresh install on a loading screen for good (2026-11-01).
             logging.getLogger(__name__).exception("The job board could not be read")
@@ -320,7 +362,13 @@ class Board:
     def reload(self, service):
         """Clean the board again now, on the calling thread (the user changed what holds a job)."""
         with self.busy:
-            self.value, self.at = collect(service), time.monotonic()
+            self._store(service)
+
+    def holds_changed(self, service, positions=()):
+        """The reserved list changed: say so on the rows already read, at once, and leave cleaning the board to the read that follows."""
+        self.changes += 1
+        if self.value is not None:
+            self.value = with_holds(self.value, service, positions)
 
 
 def board(service):

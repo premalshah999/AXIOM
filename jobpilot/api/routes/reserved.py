@@ -6,6 +6,9 @@ not to, applies at once through the owner's one-click Apply. Approving a whole s
 then join the pipeline like any other employer's, and the autopilot applies to the ones that fit the profile.
 """
 
+import logging
+import threading
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -30,6 +33,38 @@ class ApproveAll(BaseModel):
     section: str | None = Field(default=None, max_length=32)
 
 
+_REREAD = threading.Lock()
+
+
+def reread(service):
+    """Read the lists again in the background, on one thread: clicks while it reads ask for one more pass, not one thread each."""
+    with _REREAD:
+        if getattr(service, "lists_reread", None) is not None:
+            service.lists_reread = True
+            return
+        service.lists_reread = False
+
+    def work():
+        from ...board_view import board
+        from ...queue_order import plans
+        from ...startable import reading
+
+        while True:
+            try:
+                reading(service).reload(service)
+                plans(service).now(service)
+                board(service).reload(service)
+            except Exception:
+                logging.getLogger(__name__).exception("The lists could not be read again after a reservation changed")
+            with _REREAD:
+                if not service.lists_reread:
+                    service.lists_reread = None
+                    return
+                service.lists_reread = False
+
+    threading.Thread(target=work, name="lists-reread", daemon=True).start()
+
+
 def router(service) -> APIRouter:
     db = service.db
     r = APIRouter()
@@ -41,20 +76,22 @@ def router(service) -> APIRouter:
         return result
 
     def refreshed():
-        """Every list that reads the holds (the dispatcher's reading, the Queue's plan, the Job board) reads them again now: each reuses
-        its last read for seconds to a minute, and a reservation the user just made or lifted must show on the next look."""
-        import logging
-
+        """Every list that reads the holds (the dispatcher's reading, the Queue's plan, the Job board) says the change at once, and reads
+        again on a background thread. Reading them all again here made a click on Reserve wait 4 to 17 seconds on a real board (screening every
+        Ready job one by one), though a reservation changes only that company's rows. Nothing can start meanwhile: admission and the
+        dispatcher's screen read the list itself (reserved.require_approval)."""
         from ...board_view import board
         from ...queue_order import plans
         from ...startable import reading
 
         try:
-            reading(service).reload(service)
-            plans(service).now(service)
-            board(service).reload(service)
+            reading(service).holds_changed(reserved.held_ids(db))
+            planner = plans(service)
+            plan = planner.peek() and planner.now(service)
+            board(service).holds_changed(service, plan["positions"] if plan else ())
         except Exception:
-            logging.getLogger(__name__).exception("The lists could not be read again after a reservation changed")
+            logging.getLogger(__name__).exception("The lists could not take a reservation change")
+        reread(service)
 
     @r.get("/api/reserved")
     def listing(section: str = "", q: str = "", page: int = 1, size: int = 25):
