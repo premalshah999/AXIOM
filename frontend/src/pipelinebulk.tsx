@@ -9,28 +9,46 @@ import { plural } from "./format";
 import { Button } from "./ui/index";
 import { ConfirmButton } from "./worktools";
 
-// Act on ticked jobs: a page or every match (up to 200), then retry, pause, confirm or remove them together. Each job
-// goes through the same endpoint as its own menu item, so every guard still decides each one.
-export function PipelineBulk({
-  selection,
-  rows,
-  filter,
-  query,
-  total,
-}: {
-  selection: Selection;
-  rows: JobRow[];
-  filter: Group | Word | "all";
-  query: string;
-  total: number;
-}) {
-  const { markJobs, refresh } = useWorkspace();
+// Every match on any page, a page at a time from the server. Job id -> its latest run, for every row seen here (Confirm needs the run).
+export function useSelectMatching(selection: Selection, rows: JobRow[], filter: Group | Word | "all", query: string, total: number) {
   const { pending, run } = useAction();
-  // Job id -> its latest run, for every row seen here (Confirm needs the run).
   const [known, setKnown] = useState<Record<string, string | undefined>>({});
   useEffect(() => {
     setKnown((k) => ({ ...k, ...Object.fromEntries(rows.map((r) => [r.job.id, r.run?.id])) }));
   }, [rows]);
+  const selectAll = () =>
+    run(
+      "select",
+      async () => {
+        const found: { job: { id: string }; run?: { id: string } | null }[] = [];
+        for (let page = 1; found.length < Math.min(total, selection.limit); page += 1) {
+          const params = new URLSearchParams({ group: filter, q: query, page: String(page), size: "200" });
+          const part = await api<{ rows: { job: { id: string }; run?: { id: string } | null }[] }>(`/jobs?${params}`);
+          found.push(...part.rows);
+          if (part.rows.length < 200) break;
+        }
+        setKnown((k) => ({ ...k, ...Object.fromEntries(found.map((r) => [r.job.id, r.run?.id])) }));
+        selection.replace(new Set(found.map((r) => r.job.id)));
+      },
+    );
+  return { known, selectAll, selecting: pending === "select" };
+}
+
+// Act on ticked jobs: retry, pause, confirm or remove them together. Each job goes through the same endpoint as its own menu item, so
+// every guard still decides each one.
+export function PipelineBulk({
+  selection,
+  rows,
+  filter,
+  known,
+}: {
+  selection: Selection;
+  rows: JobRow[];
+  filter: Group | Word | "all";
+  known: Record<string, string | undefined>;
+}) {
+  const { markJobs, refresh } = useWorkspace();
+  const { pending, run } = useAction();
   const n = selection.ids.length;
   const busy = pending !== null;
   const each = async (ids: string[], one: (id: string) => Promise<unknown>) => {
@@ -46,18 +64,6 @@ export function PipelineBulk({
     selection.clear();
     void refresh();
   };
-  const selectMatching = () =>
-    run(
-      "select",
-      async () => {
-        const params = new URLSearchParams({ group: filter, q: query, page: "1", size: "200" });
-        const page = await api<{ rows: { job: { id: string }; run?: { id: string } | null }[] }>(`/jobs?${params}`);
-        setKnown((k) => ({ ...k, ...Object.fromEntries(page.rows.map((r) => [r.job.id, r.run?.id])) }));
-        selection.setMany(page.rows.map((r) => r.job.id), true);
-        return page.rows.length;
-      },
-      (count) => (count ? `Selected ${plural(count, "job")}.` : undefined),
-    );
   const retry = () =>
     run(
       "retry",
@@ -110,11 +116,6 @@ export function PipelineBulk({
     );
   return (
     <>
-      {total > rows.length && (
-        <Button size="sm" variant="ghost" disabled={busy} loading={pending === "select"} onClick={selectMatching}>
-          {total > 200 ? "Select the first 200" : `Select all ${total.toLocaleString()}`}
-        </Button>
-      )}
       {(filter === "unconfirmed" || rows.some((r) => r.run?.state === "submission_unknown")) && (
         <>
           <Button size="sm" variant="primary" disabled={busy} loading={pending === "confirm"} onClick={() => verdict(true)}>
@@ -125,9 +126,14 @@ export function PipelineBulk({
           </Button>
         </>
       )}
-      <Button size="sm" disabled={busy} loading={pending === "retry"} onClick={retry}>
-        Retry
-      </Button>
+      <ConfirmButton
+        label="Retry"
+        question={`Apply to ${plural(n, "job")} again? AXIOM sends a real application to each, in its turn. One already sent is never sent twice.`}
+        confirmLabel="Retry"
+        loading={pending === "retry"}
+        disabled={busy && pending !== "retry"}
+        onConfirm={retry}
+      />
       <Button size="sm" disabled={busy} loading={pending === "pause"} onClick={pause}>
         Pause
       </Button>

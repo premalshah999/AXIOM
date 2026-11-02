@@ -36,6 +36,7 @@ import { BatchView } from "./batch";
 import { BoardView } from "./jobboard";
 import { LedgerView } from "./ledger";
 import { QueueView } from "./queue";
+import { ReviewView } from "./review";
 import { JobPanel } from "./jobdetail";
 import { AddJobDialog } from "./jobintake";
 import type { AccountStatus } from "./account";
@@ -334,6 +335,7 @@ function App() {
           }
         >
           {route.view === "batch" && <BatchView />}
+          {route.view === "review" && <ReviewView />}
           {route.view === "queue" && <QueueView />}
           {route.view === "board" && <BoardView />}
           {route.view === "ledger" && <LedgerView />}

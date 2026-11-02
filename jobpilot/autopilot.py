@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import re
 import sys
 import time
@@ -816,6 +817,34 @@ async def owner_requests_only(service):
     return await due(service, room)
 
 
+# Ranked jobs waiting for review before ranking pauses: a person who hasn't looked for a week shouldn't pay to rank a week of postings.
+REVIEW_POOL = 200
+
+
+async def rank_for_review(service, cfg):
+    """With automatic applying off the dispatcher starts nothing by itself, but a review batch and Best matches still need jobs ranked.
+    Ranking lived only further down the tick, so an install with automatic applying off left every job on "Checking fit" for good
+    (2026-11-01). Nothing is sent here, and no tailored resume is asked for. The ranking queue dedups, so a tick costs one read."""
+    from .execution_services import enabled as services_enabled
+    from .features.discovery import discover_due, policy_for
+    from .workers import enqueue_classification
+
+    db = service.db
+    if not cfg.enabled or not services_enabled(db):
+        return
+    try:
+        with db.session() as s:
+            waiting = s.scalar(select(func.count()).select_from(Job).where(Job.status == "ready", Job.demo.is_(False), Job.id.not_in(select(Run.job_id))))
+            if waiting >= REVIEW_POOL:
+                return
+            attempted = attempted_job_ids(s)
+        policy = policy_for(db).model_copy(update={"owners": service.config.workers})
+        due = await asyncio.to_thread(discover_due, db, policy)
+        await enqueue_classification(classification_ids(due, attempted))
+    except Exception as exc:  # The next tick asks again; ranking must not stop what the tick has already done.
+        logging.getLogger(__name__).warning("Ranking for review did not run: %s", type(exc).__name__)
+
+
 def classification_ids(due_work, attempted, limit=None):
     """The planner's unclassified inventory to rank next, minus jobs already attempted.
 
@@ -957,11 +986,11 @@ def screen_job(db, cfg, owner_profile, job, busy, *, board_ids, integrated, use_
 async def tick(service):
     db, cfg = service.db, settings(service.db)
     control = db.get_setting("control", {})
-    if (
-        control.get("paused")
-        or not control.get("auto_submit")
-        or not service.dispatch
-    ):
+    if control.get("paused") or not service.dispatch:
+        return
+    if not control.get("auto_submit"):
+        if not cfg.auto_apply:
+            await rank_for_review(service, cfg)
         return
     if not hasattr(service, "autopilot_lock"):
         service.autopilot_lock = asyncio.Lock()
@@ -970,6 +999,7 @@ async def tick(service):
         # or a busy mail sender was promised "it starts on its own" and never did (2026-10-21).
         async with service.autopilot_lock:
             await owner_requests_only(service)
+        await rank_for_review(service, cfg)
         return
     async with service.autopilot_lock:
         batch = db.get_setting("job_board_autopilot") or start_batch(db, cfg.batch_target)

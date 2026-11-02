@@ -1,13 +1,14 @@
 // Job board: which real, open postings the app found, and why each one fits or doesn't (owner, 2026-11-01: "make the job board good
 // and legit"). Pages, filters and exact counts come from the server (GET /api/board, jobpilot/board_view.py), the same reading the
 // Queue is made from, so In queue 4 here is number 4 there. Closed, stale and duplicate rows never reach it.
-import { ExternalLink, FilterX, Plus, Radar, RefreshCw, SearchX, ShieldCheck } from "lucide-react";
+import { ExternalLink, FilterX, ListChecks, Plus, Radar, RefreshCw, SearchX, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { addToQueue, api, moveToFront } from "./api";
-import { useSelection } from "./bulk";
+import { addManyToQueue, addToQueue, api, frontManyInQueue, moveToFront, type QueueMany } from "./api";
+import { ApplyChoice } from "./applychoice";
+import { ConfirmQueue, Refused, useSelection } from "./bulk";
 import { useWorkspace } from "./context";
 import { ago, platformName, plural, stamp } from "./format";
-import { useAction, useDraft, useNow, usePoll } from "./hooks";
+import { useAction, useDraft, useNow, usePoll, useRowActions } from "./hooks";
 import { OPEN_JOB_LINK } from "./jobintake";
 import { Pagination, type Paging } from "./pagination";
 import { TopActions, TopLine } from "./shell/Shell";
@@ -27,7 +28,8 @@ type Sort = (typeof SORTS)[number]["value"];
 type Fit = "match" | "other" | "all";
 
 // A row's place in one short phrase, the same word it has on every other screen.
-function StateCell({ r }: { r: BoardRow }) {
+function StateCell({ r, asked }: { r: BoardRow; asked?: boolean }) {
+  if (asked && r.state !== "queue") return <span className="bd-state">In queue</span>;
   if (r.state === "queue")
     return (
       <span className="bd-state">
@@ -94,7 +96,16 @@ export function BoardView() {
     return () => window.clearTimeout(timer);
   }, [planning, b, reread]);
   const rows = useMemo(() => b?.rows ?? [], [b]);
-  const selection = useSelection();
+  // A whole Select all: the server takes this many in one request (nothing starts until each job's turn).
+  const selection = useSelection(5000);
+  // What the filters show changed, so what was selected under them no longer means the same rows.
+  useEffect(() => selection.clear(), [q, fit, role, level, company, place, posted, platform, grouped]); // eslint-disable-line react-hooks/exhaustive-deps
+  const rowActs = useRowActions();
+  // A row reads as in line the moment Queue is pressed; the next read of the board confirms it, or a refusal puts it back.
+  const [asked, setAsked] = useState<ReadonlyMap<string, number>>(() => new Map());
+  const inLine = (r: BoardRow) => r.state === "queue" || (asked.get(r.id) ?? 0) > Date.now() - 30000;
+  const [asking, setAsking] = useState<"add" | "front" | null>(null);
+  const [refused, setRefused] = useState<QueueMany["refused"]>([]);
   const paging: Paging = { items: rows, total: b?.total ?? 0, page: b?.page ?? page, pages: b?.pages ?? 1, size, initialSize: 25, setPage, setSize };
   const filtered = !!q || fit !== "match" || role !== "all" || level !== "all" || company !== "all" || place !== "all" || posted !== "all" || platform !== "all";
   const clear = () => {
@@ -117,20 +128,38 @@ export function BoardView() {
   const again = async () => {
     await board.refresh();
     void refresh();
+    // The server is reading the board again behind that answer: the numbers settle on the read after it, not fifteen seconds later.
+    window.setTimeout(() => void board.refresh(), 2500);
   };
-  const add = (r: BoardRow) => run("add:" + r.id, async () => { const out = await addToQueue(r.id); await again(); return out; }, (out) => out?.message);
-  const front = (r: BoardRow) => run("add:" + r.id, async () => { const out = await moveToFront(r.id); await again(); return out; }, (out) => out?.message);
-  const addSelected = () =>
+  const add = async (r: BoardRow) => {
+    setAsked((m) => new Map(m).set(r.id, Date.now()));
+    const out = await rowActs.act("add:" + r.id, () => addToQueue(r.id), (x) => x.message);
+    if (!out) setAsked((m) => { const next = new Map(m); next.delete(r.id); return next; });
+    void again();
+  };
+  const front = (r: BoardRow) => rowActs.act("add:" + r.id, async () => { const out = await moveToFront(r.id); void again(); return out; }, (out) => out.message);
+  const addSelected = (to: "add" | "front") =>
     run(
       "many",
       async () => {
-        const out = await api<{ added: number; refused: number }>("/queue/add-many", "POST", { job_ids: selection.ids });
+        const ids = [...selection.ids];
+        const out = await (to === "front" ? frontManyInQueue([...ids].reverse()) : addManyToQueue(ids));
         selection.clear();
+        setRefused(out.refused);
+        const failed = new Set(out.refused.map((x) => x.job_id));
+        setAsked((m) => { const next = new Map(m); for (const id of ids) if (!failed.has(id)) next.set(id, Date.now()); return next; });
         await again();
         return out;
       },
-      (out) => out && `${plural(out.added, "job")} added to the queue.${out.refused ? ` ${out.refused} could not be added.` : ""}`,
+      (out) => out.message,
     );
+  const selectAll = () =>
+    run("select", async () => {
+      const params = new URLSearchParams(key);
+      params.set("want", "ids");
+      const out = await api<{ ids: string[] }>(`/board?${params}`);
+      selection.replace(new Set(out.ids));
+    });
   const reserve = (r: BoardRow) =>
     run(
       "reserve:" + r.id,
@@ -206,7 +235,7 @@ export function BoardView() {
             {r.score != null && <span className="mono">Fit {r.score}</span>}
             <span>{r.dated ? ago(r.posted_at, now) : `Found ${ago(r.posted_at, now)}`}</span>
             <span>{platformName(r.ats)}</span>
-            <StateCell r={r} />
+            <StateCell r={r} asked={inLine(r)} />
           </span>
         </button>
         {r.more > 0 && (
@@ -239,7 +268,7 @@ export function BoardView() {
       ),
     },
     { key: "when", header: "Posted, and where from", hideBelow: 860, cell: (r) => <When r={r} now={now} /> },
-    { key: "state", header: "Status", hideBelow: 600, cell: (r) => <StateCell r={r} /> },
+    { key: "state", header: "Status", hideBelow: 600, cell: (r) => <StateCell r={r} asked={inLine(r)} /> },
     {
       key: "act",
       header: <span className="sr-only">Posting and queue</span>,
@@ -249,8 +278,9 @@ export function BoardView() {
         const link = webLink(r.url);
         return (
           <div className="ax-act" onClick={(e) => e.stopPropagation()}>
+            <ApplyChoice jobId={r.id} />
             {r.state === "queue" && r.position !== 1 && (
-              <Button size="sm" className="ax-lead" disabled={pending !== null} loading={pending === "add:" + r.id} onClick={() => front(r)}>
+              <Button size="sm" className="ax-lead" loading={rowActs.busy.has("add:" + r.id)} onClick={() => void front(r)}>
                 To front
               </Button>
             )}
@@ -259,11 +289,13 @@ export function BoardView() {
                 Review
               </Button>
             )}
-            {r.can_add && (
-              <Button size="sm" className="ax-lead" disabled={pending !== null} loading={pending === "add:" + r.id} icon={<Plus size={13} aria-hidden="true" />} onClick={() => add(r)}>
+            {r.can_add && r.state !== "queue" && (inLine(r) ? (
+              <span className="bd-state bd-queued">In queue</span>
+            ) : (
+              <Button size="sm" className="ax-lead" icon={<Plus size={13} aria-hidden="true" />} onClick={() => void add(r)}>
                 Queue
               </Button>
-            )}
+            ))}
             <Button
               size="sm"
               variant="ghost"
@@ -327,6 +359,11 @@ export function BoardView() {
         </form>
       </Dialog>
       <TopActions>
+        {snapshot.config.apply_mode !== "auto" && (
+          <Button variant="secondary" icon={<ListChecks size={15} aria-hidden="true" />} onClick={() => go({ view: "review" })}>
+            Review a batch
+          </Button>
+        )}
         <Button variant="secondary" icon={<Plus size={15} aria-hidden="true" />} onClick={() => window.dispatchEvent(new Event(OPEN_JOB_LINK))}>
           Add a link
         </Button>
@@ -389,6 +426,7 @@ export function BoardView() {
         </div>
       </div>
       {board.error && b && <LoadError error={board.error} retry={board.refresh} />}
+      <Refused refused={refused} onClose={() => setRefused([])} />
       <Table
         fill
         label="Job board"
@@ -397,17 +435,23 @@ export function BoardView() {
         rowKey={(r) => r.id}
         onRowClick={(r) => openJob(r.id)}
         selected={selection.chosen}
-        onSelectedChange={rows.some((r) => r.can_add) ? selection.replace : undefined}
-        canSelect={(r) => r.can_add}
+        onSelectedChange={selection.replace}
+        canSelect={(r) => r.can_add || r.state === "queue"}
+        selectAll={b && !planning ? { count: b.selectable, run: selectAll, busy: pending === "select" } : undefined}
         rowLabel={(r) => `${r.title} at ${r.company}`}
         loading={(!b || planning) && !board.error}
         error={board.error && !b ? <LoadError error={board.error} retry={board.refresh} /> : undefined}
         busy={!!b && b.key !== key}
         footer={paging.total > 0 ? <Pagination paging={paging} label="Job board pages" /> : undefined}
         bulk={
-          <Button variant="primary" size="sm" loading={pending === "many"} disabled={pending !== null} onClick={addSelected}>
-            {`Add to queue (${selection.ids.length})`}
-          </Button>
+          <>
+            <Button variant="primary" size="sm" loading={pending === "many"} disabled={pending !== null} onClick={() => setAsking("add")}>
+              {`Add to queue (${selection.ids.length.toLocaleString()})`}
+            </Button>
+            <Button size="sm" disabled={pending !== null} onClick={() => setAsking("front")}>
+              To front
+            </Button>
+          </>
         }
         empty={
           <Empty
@@ -417,6 +461,17 @@ export function BoardView() {
             action={filtered ? <Button size="sm" onClick={clear}>Clear the filters</Button> : undefined}
           />
         }
+      />
+      <ConfirmQueue
+        open={asking !== null}
+        count={selection.ids.length}
+        title={asking === "front" ? `Move ${plural(selection.ids.length, "job")} to the front?` : undefined}
+        onClose={() => setAsking(null)}
+        onConfirm={() => {
+          const to = asking ?? "add";
+          setAsking(null);
+          void addSelected(to);
+        }}
       />
     </div>
   );

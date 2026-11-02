@@ -135,6 +135,11 @@ export type QueueMove = { job_id: string; state: string; message: string };
 export const moveToFront = (jobId: string) => api<QueueMove>(`/queue/${jobId}/front`, "POST");
 /** Put a job from the board in the queue, as your own pick. */
 export const addToQueue = (jobId: string) => api<QueueMove>(`/queue/${jobId}/add`, "POST");
+/** What became of several jobs asked for at once: refusals come back one by one, each with its sentence (owner_apply.enqueue_many). */
+export type QueueMany = { added: number; already: number; refused: { job_id: string; company: string; title: string; reason: string }[]; message: string };
+export const addManyToQueue = (jobIds: string[]) => api<QueueMany>("/queue/add-many", "POST", { job_ids: jobIds });
+export const frontManyInQueue = (jobIds: string[]) => api<QueueMany>("/queue/front-many", "POST", { job_ids: jobIds });
+export const removeManyFromQueue = (jobIds: string[]) => api<{ removed: number; not_in_line: number }>("/queue/remove-many", "POST", { job_ids: jobIds });
 /** Take a job out of the queue until you put it back. */
 export const removeFromQueue = (jobId: string) => api<{ removed: boolean }>(`/queue/${jobId}`, "DELETE");
 /** Put a job you removed back in the queue. */

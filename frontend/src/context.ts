@@ -5,6 +5,7 @@ import type { Counts, Snapshot } from "./types";
 // The pages (batch is Overview, ledger is Applications), the resume editor and the coming-soon pages.
 export type View =
   | "batch"
+  | "review"
   | "queue"
   | "board"
   | "needs"
@@ -31,6 +32,7 @@ export type AnyRoute = Omit<Route, "view"> & { view: View | "setup" | "jobs" };
 
 const VIEWS: View[] = [
   "batch",
+  "review",
   "queue",
   "board",
   "needs",

@@ -217,6 +217,8 @@ def build_snapshot(service, include_sources: bool):
             "model_provider": config.llm_provider,
             "demo": config.enable_demo,
             "workers_enabled": config.enable_workers,
+            # Review a batch, or apply automatically: the dispatcher's own switch (review_batch.py).
+            "apply_mode": "auto" if (service.db.get_setting("job_board_settings", {}) or {}).get("auto_apply") else "review",
             "mimo": bool(config.llm_api_key),
             "telegram": bool(config.telegram_bot_token and config.telegram_user_id),
             "capsolver": False,  # Retained response key for older dashboards; runtime uses 2Captcha.

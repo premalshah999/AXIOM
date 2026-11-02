@@ -20,9 +20,11 @@ TTL = 5  # seconds a plan is reused: every open Queue polls, and the replay walk
 RETRY_TTL = 20  # seconds the "trying again" list is reused
 
 
-def decides(priority):
+def decides(priority, automatic=True):
     """What decides the order, in plain words."""
     first = "the best fit, then new-grad roles, then the newest" if priority == "best_fit_first" else "new-grad roles, then the best fit, then the newest"
+    if not automatic:
+        first = "the rest in the order you added them"
     return (
         f"What decides the order: jobs you move to the front go first, then {first}. "
         "Only one application runs at each employer, so a second job there waits for the first, and company sites run one at a time. "
@@ -79,6 +81,14 @@ def _item(detail, kind):
     }
 
 
+def dispatching(db):
+    """Whether the dispatcher starts Ready jobs by itself (autopilot.tick): automatic applying on, and its batch not over."""
+    from .jobboard import settings
+
+    cfg = settings(db)
+    return bool(cfg.enabled and cfg.auto_apply and (db.get_setting("job_board_autopilot") or {"state": "active"}).get("state") == "active")
+
+
 def plan(service, value=None):
     """Up next, in order, with why each one waits. Reads on the calling (worker) thread."""
     from .admission import capacity
@@ -132,7 +142,10 @@ def plan(service, value=None):
         return job_id in attempted and not request.get("front")
 
     now_asked = [request_item(j, v) for j, v in ordered if not retry(j, v) and (v.get("not_before") or "") <= moment]
-    fresh = [_item(value["details"][jid], "auto") for jid in value.get("ids", []) if jid not in asked and jid in value.get("details", {})]
+    # The line is what the dispatcher will start. With automatic applying off, or its target reached, it starts only what was asked
+    # for: 70 jobs read "In queue" here with no way to queue them and no worker coming for them (2026-11-01).
+    automatic = dispatching(db)
+    fresh = [_item(value["details"][jid], "auto") for jid in value.get("ids", []) if jid not in asked and jid in value.get("details", {})] if automatic else []
     retries = [request_item(j, v) for j, v in ordered if retry(j, v) and (v.get("not_before") or "") <= moment]
     later = [request_item(j, v) for j, v in ordered if (v.get("not_before") or "") > moment]
     preparing = [item for item in fresh if item.get("tailoring")]
@@ -158,7 +171,7 @@ def plan(service, value=None):
         # How many of the first rows are exact while nothing changes: what a free worker takes on the next pass.
         "exact": min(free, len(picks)),
         "free": free,
-        "decides": decides(profile.job_priority),
+        "decides": decides(profile.job_priority, automatic),
         "reading": value,
     }
 

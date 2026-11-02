@@ -311,8 +311,9 @@ PER_COMPANY = 3  # rows one company shows before "N more at X": one employer pos
 LEVEL_NAMES = ("Intern", "New grad", "Entry", "Mid", "Senior", "Unknown")
 
 
-def page(service, q="", role="all", company="all", place="all", posted="all", platform="all", fit="match", sort="fit", number=1, size=25, level="all", group=True):
+def page(service, q="", role="all", company="all", place="all", posted="all", platform="all", fit="match", sort="fit", number=1, size=25, level="all", group=True, want="page"):
     """One page of the board, and each filter's choices with how many rows choosing it would show (every other filter kept).
+    `want`: "rows" leaves the filters' counts out (a panel that shows a few rows); "ids" answers only what Select all selects.
 
     Grouped (the default, while no company is chosen) a company shows its best PER_COMPANY rows in the order asked for, the last
     carrying `more`: how many it hides. Every count here, the total and each filter's, is of the rows shown, so a filter's number is
@@ -321,7 +322,7 @@ def page(service, q="", role="all", company="all", place="all", posted="all", pl
     if data is None:
         return {
             "planning": True, "rows": [], "total": 0, "page": 1, "pages": 1, "size": size, "all": 0, "hidden": {}, "searched_at": None, "scanning": 0, "scan_read": 0, "scan_total": 0,
-            "enabled": True, "window": 720, "facets": dict.fromkeys(("fit", "role", "company", "place", "platform", "posted", "level"), []),
+            "enabled": True, "window": 720, "selectable": 0, "ids": [], "facets": dict.fromkeys(("fit", "role", "company", "place", "platform", "posted", "level"), []),
         }
     rows = data["rows"]
     text = " ".join((q or "").casefold().split())
@@ -386,18 +387,28 @@ def page(service, q="", role="all", company="all", place="all", posted="all", pl
                 tail[row["company"]] = row["id"]
         more = {tail[name]: n - PER_COMPANY for name, n in count.items() if n > PER_COMPANY}
         shown = kept
+    # Select all takes what a person can queue, or move up the line: not what waits on an approval, or what the posting rules out.
+    actionable = lambda row: row["can_add"] or row["state"] == "queue"
+    if want == "ids":
+        return {"ids": [row["id"] for row in shown if actionable(row)]}
     size = max(1, min(100, int(size)))
     pages = max(1, -(-len(shown) // size))
     number = max(1, min(int(number), pages))
     by_count = lambda counts: sorted(counts.items(), key=lambda kv: (-kv[1], kv[0].casefold()))
     keep = ("id", "title", "company", "location", "url", "ats", "posted_at", "dated", "source", "score", "state", "line", "position", "can_add", "level", "approval", "reserved")
-    levels = facet("level", lambda r: [r["level"]])
-    return {
+    answer = {
         "rows": [{**{k: row[k] for k in keep}, "more": more.get(row["id"], 0)} for row in shown[(number - 1) * size : number * size]],
         "total": len(shown),
         "page": number,
         "pages": pages,
         "size": size,
+    }
+    if want == "rows":
+        return answer
+    levels = facet("level", lambda r: [r["level"]])
+    return {
+        **answer,
+        "selectable": sum(1 for row in shown if actionable(row)),
         "all": len(rows),
         "grouped": grouped,
         "per_company": PER_COMPANY,

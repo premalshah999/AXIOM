@@ -896,3 +896,78 @@ button.ov-who:hover b {
     text-align: right;
   }
 }
+
+/* Best matches: a job, why it fits, its fit, and the one thing to do. */
+.ov-matches > li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-4) 0 0;
+}
+.ov-match {
+  display: grid;
+  grid-template-columns: auto minmax(0, 4fr) minmax(0, 5fr) 36px;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-2) var(--space-4);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ov-match-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ov-match-who b,
+.ov-match-who span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-match-who b {
+  font-weight: 500;
+}
+.ov-match-who span,
+.ov-match-why {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+}
+.ov-match-why {
+  display: -webkit-box;
+  overflow: hidden;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.ov-match-fit {
+  text-align: right;
+}
+.ov-match-act {
+  flex: none;
+  min-width: 76px;
+  text-align: right;
+}
+.ov-match-state {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+@media (max-width: 599px) {
+  .ov-match {
+    grid-template-columns: auto minmax(0, 1fr) 28px;
+    padding: var(--space-2) var(--space-3);
+  }
+  .ov-match-why {
+    display: none;
+  }
+  .ov-matches > li {
+    padding-right: var(--space-3);
+    gap: var(--space-2);
+  }
+}
