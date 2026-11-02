@@ -526,7 +526,13 @@ export function BoardView() {
         }
         rowLabel={(r) => `${r.title} at ${r.company}`}
         loading={(!b || planning) && !board.error}
-        error={board.error && !b ? <LoadError error={board.error} retry={board.refresh} /> : undefined}
+        error={
+          board.error && !b ? (
+            <LoadError error={board.error} retry={board.refresh} />
+          ) : b?.failed ? (
+            <LoadError error={new Error("AXIOM couldn't read the job board. It tries again by itself.")} retry={board.refresh} />
+          ) : undefined
+        }
         busy={!!b && b.key !== key}
         footer={paging.total > 0 ? <Pagination paging={paging} label="Job board pages" /> : undefined}
         bulk={

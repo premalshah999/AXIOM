@@ -800,6 +800,8 @@ export type ReviewBatch = {
 
 export type BoardPage = {
   planning?: boolean;
+  /** The first read of the board failed: nothing to show, and it isn't still loading either. It is tried again by itself. */
+  failed?: boolean;
   rows: BoardRow[];
   total: number;
   /** What Select all takes: every row these filters show that can be queued or moved up the line, on any page. */

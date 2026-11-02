@@ -1,5 +1,6 @@
 """The Job board shows real, open postings, one row each, and says what will happen to them. Synthetic data only."""
 
+import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -143,3 +144,22 @@ def test_the_page_says_how_many_wait_in_the_queue_and_how_many_the_main_list_hol
     got = rows(service, fit="all", section="sites")
     assert got["all"] == 1 and got["main"] == 1 and got["sites"] == 1
     assert got["in_queue"] == 1
+
+
+def test_a_first_read_that_fails_says_so_instead_of_loading_for_good(service, monkeypatch):
+    setup(service)
+    shelf = board_view.board(service)
+
+    def broken(_service):
+        raise RuntimeError("no")
+
+    monkeypatch.setattr(board_view, "collect", broken)
+    shelf.busy.acquire()
+    shelf._fill(service)
+    shelf.at = time.monotonic()  # no second read during the test
+    got = board_view.page(service)
+    assert got["failed"] is True and got["planning"] is False
+    monkeypatch.undo()
+    shelf.busy.acquire()
+    shelf._fill(service)
+    assert board_view.page(service).get("failed") in (None, False)
