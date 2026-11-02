@@ -70,7 +70,7 @@ INCIDENT = Scenario("incident", "A saved route bounced to the career home.", PAG
 
 
 def wandering_model(monkeypatch):
-    """What the incident's model did: open the list, open a role, Apply, fill, submit. Records every control it was offered."""
+    """What the incident's model did: open a role from the list, Apply, fill, submit. Records every control it was offered."""
     offered = []
 
     async def structured(_config, _db, schema, _system, payload, *_args, **_kwargs):
@@ -78,7 +78,7 @@ def wandering_model(monkeypatch):
         observation = json.loads(payload)["observation"]
         labels = {c["label"]: c["id"] for c in observation["controls"]}
         offered.append(sorted(labels))
-        for wanted in ("See All Openings", "Data Analyst", "Apply"):
+        for wanted in ("Apply", "Data Analyst"):
             if wanted in labels:
                 return NavigationDecision(action="click", control_id=labels[wanted], reason="wander")
         if any(f.get("required") and not f.get("filled") for f in observation["fields"]):
@@ -105,7 +105,7 @@ async def desktop_chrome(service):
         *argv, "about:blank", stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
     )
     portfile = os.path.join(temp, "DevToolsActivePort")
-    for _ in range(100):
+    for _ in range(900):  # A loaded Mac can take a minute to start a Chrome.
         if os.path.exists(portfile) and os.path.getsize(portfile):
             break
         await asyncio.sleep(0.1)
