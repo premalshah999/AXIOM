@@ -1,7 +1,7 @@
 """The five words every screen uses for a job, and the one place a state becomes one of them (owner 2026-11-01: "literally all
 the numbers on the frontend are high key confusing").
 
-  applied   the employer has it (api/pipeline.confirmed_jobs)
+  applied   "Confirmed": the employer has it (api/pipeline.confirmed_jobs). One word on every screen, with Overview's "N confirmed".
   applying  running now, queued, or stopped and the app will retry it on its own
   needs     only the user can answer it
   failed    "Couldn't apply": the app has given up (outlook.given_up), with one sentence saying why
@@ -15,7 +15,7 @@ import re
 
 WORDS = ("applied", "applying", "needs", "failed", "not")
 LABELS = {
-    "applied": "Applied",
+    "applied": "Confirmed",
     "applying": "Applying",
     "needs": "Needs you",
     "failed": "Couldn't apply",

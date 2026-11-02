@@ -17,24 +17,24 @@ const percent = (part: number, whole: number) => (whole > 0 ? `${Math.min(100, M
  * baseline; only Confirmed, the point of the machine, is at full strength.
  */
 function FunnelPanel({ data, error, retry, confirmed }: { data: Funnel | null; error: Error | null; retry: () => void; confirmed: number | null }) {
-  const { go, counts } = useWorkspace();
+  const { go } = useWorkspace();
   const stages: { label: string; n: number; help: string; to: AnyRoute; lit?: boolean }[] = data
     ? [
-        { label: "Discovered", n: data.discovered, help: "Every posting AXIOM has found, all time.", to: { view: "jobs", tab: "discovered" } },
-        { label: "Eligible", n: data.eligible, help: "Passed the fit check, or you picked it yourself.", to: { view: "jobs", tab: "discovered", filter: "eligible" } },
-        { label: "Applied", n: data.applied, help: "An application started. Not all of these reached the final step.", to: { view: "jobs", tab: "pipeline" } },
+        { label: "Found", n: data.discovered, help: "Every posting AXIOM has found, all time. The Job board lists the open ones.", to: { view: "board" } },
+        { label: "Good match", n: data.eligible, help: "Scored at least your How close a match number, or you picked it yourself.", to: { view: "board" } },
+        { label: "Tried", n: data.applied, help: "An application was started. Some are still running and some did not go through; the ones the employer confirmed are under Applications.", to: { view: "ledger" } },
         { label: "Confirmed", n: confirmed ?? 0, help: "Proven by the employer's confirmation page or an email from the employer.", to: { view: "ledger" }, lit: true },
       ]
     : [];
   const top = Math.max(1, ...stages.map((s) => s.n));
   return (
-    <Panel title="From discovered to confirmed">
+    <Panel title="From found to confirmed">
       {error && !data ? (
         <ErrorLine error={error} retry={retry} />
       ) : !data ? (
         <Skeleton rows={4} mono={false} />
       ) : data.discovered === 0 ? (
-        <Empty compact title="Nothing found yet" hint="Once discovery finds jobs, this shows how many reach each stage." />
+        <Empty compact title="Nothing found yet" hint="Once AXIOM finds jobs, this shows how many reach each stage." />
       ) : (
         <>
           <ol className="ov-funnel">
@@ -54,8 +54,7 @@ function FunnelPanel({ data, error, retry, confirmed }: { data: Funnel | null; e
             ))}
           </ol>
           <p className="ov-caption">
-            All time; each percentage is of the stage above.
-            {(counts.discovered ?? 0) > 0 && ` Discovered lists the ${counts.discovered!.toLocaleString()} recent ones not applied to yet.`}
+            All time; each percentage is of the stage above. The Job board lists only the postings that are still open.
           </p>
         </>
       )}
@@ -87,7 +86,7 @@ function ScoreRow({ row, target, below }: { row: SuccessReport["platforms"][numb
         type="button"
         className="ov-score-row"
         onClick={() => go({ view: "jobs", tab: "pipeline", q: row.ats })}
-        title={`See ${plural(row.tried, "job")} on ${platformName(row.ats)}`}
+        title={`See the applications confirmed on ${platformName(row.ats)}`}
       >
         <span className="ov-score-name">
           {platformName(row.ats)}

@@ -35,6 +35,27 @@ def test_propose_history_needs_an_uploaded_resume(client):
     assert answer.status_code == 400 and answer.json() == {"detail": "Upload a resume first"}
 
 
+def test_a_resume_read_says_what_the_last_read_gave_and_leaves_the_profile_alone(client, service, resume_pdf, monkeypatch):
+    from jobpilot import models
+    from jobpilot.schemas import ProfileExtract
+
+    reads = iter([ProfileExtract(first_name="Alex", phone="+1 555 010 0100"), ProfileExtract(first_name="Sam")])
+
+    async def read(*args, **kwargs):
+        return next(reads)
+
+    monkeypatch.setattr(models, "structured", read)
+    uploaded = client.post("/api/resumes", data={"name": "Backend", "roles": ""}, files={"file": ("resume.pdf", resume_pdf, "application/pdf")})
+    extract = "/api/profile/extract?resume_id=" + uploaded.json()["id"]
+    first = client.post(extract, json={})
+    assert first.status_code == 200, first.text
+    first = first.json()
+    assert first["first_name"] == "Alex" and first["previous"] is None
+    second = client.post(extract, json={}).json()
+    assert second["first_name"] == "Sam" and second["previous"]["first_name"] == "Alex"
+    assert service.db.get_setting("profile", None) is None
+
+
 def test_organizing_evidence_without_a_model_key_is_a_409(client):
     # A RuntimeError in a handler is a 409 with the message (the shared error mapping).
     answer = client.post("/api/profile/organize", json={})

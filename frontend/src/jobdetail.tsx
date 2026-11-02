@@ -141,7 +141,7 @@ function JobSummary({ row, posting }: { row: JobRow; posting?: JobPosting | null
       {posting?.source && <span>{posting.source}</span>}
       {shownFit(job) != null && (
         <span>
-          Fit <span className="mono">{shownFit(job)}</span>
+          Match <span className="mono">{shownFit(job)}</span>
         </span>
       )}
       <a className="ax-more-link" href={posting?.link || job.url} target="_blank" rel="noreferrer noopener">

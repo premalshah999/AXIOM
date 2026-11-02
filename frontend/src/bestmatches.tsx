@@ -79,7 +79,7 @@ export function BestMatches() {
                 <span className="ov-match-why" title={r.line}>
                   {r.line}
                 </span>
-                <span className="ov-match-fit mono" title="How well it fits your profile, out of 100">
+                <span className="ov-match-fit mono" title="How close a match for your profile, out of 100">
                   {r.score ?? "–"}
                 </span>
               </button>

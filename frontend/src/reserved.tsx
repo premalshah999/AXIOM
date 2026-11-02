@@ -75,7 +75,7 @@ export function ReservedJobs() {
         void refresh();
         return r;
       },
-      (r) => r && `${plural(r.approved, "job")} approved at ${current.label}. The autopilot applies to the ones that fit.`,
+      (r) => r && `${plural(r.approved, "job")} approved at ${current.label}. AXIOM applies to the ones that match.`,
     );
 
   const columns: Column<JobRow>[] = [
@@ -88,7 +88,7 @@ export function ReservedJobs() {
         <JobCell
           {...jobWords({ ...r.job, company: r.job.company || r.reserved?.employer })}
           onOpen={() => openJob(r.job.id, r.run?.id)}
-          meta={r.state !== "reserved" ? <StatusPill state={r.state} /> : r.job.score != null ? <span className="mono">Fit {r.job.score}</span> : undefined}
+          meta={r.state !== "reserved" ? <StatusPill state={r.state} /> : r.job.score != null ? <span className="mono">Match {r.job.score}</span> : undefined}
         />
       ),
     },
@@ -112,7 +112,7 @@ export function ReservedJobs() {
           <StatusPill state={"job:" + r.job.status} />
         ),
     },
-    { key: "fit", header: "Fit", hideBelow: 600, num: true, cell: (r) => r.job.score ?? "—" },
+    { key: "fit", header: "Match", hideBelow: 600, num: true, cell: (r) => r.job.score ?? "—" },
     {
       key: "updated",
       header: "Updated",
@@ -172,7 +172,7 @@ export function ReservedJobs() {
             <div className="ax-toolbar-end">
               <ConfirmButton
                 label={`Approve all ${current.held}`}
-                question={`Lift the hold on ${plural(current.held, "job")}? The autopilot applies to the ones that fit.`}
+                question={`Lift the hold on ${plural(current.held, "job")}? AXIOM applies to the ones that match.`}
                 confirmLabel="Approve all"
                 danger={false}
                 loading={pending === "all"}

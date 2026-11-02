@@ -759,17 +759,17 @@ function FirstRun({ mail }: { mail: MailStatus | null }) {
     {
       done: p.target_roles.length > 0,
       title: "What to look for",
-      detail: p.target_roles.length ? `${p.target_roles.join(", ")} · ${p.target_locations.join(", ") || "Anywhere in the USA"}` : "Choose the roles discovery searches for.",
+      detail: p.target_roles.length ? `${p.target_roles.join(", ")} · ${p.target_locations.join(", ") || "Anywhere in the USA"}` : "Choose the roles AXIOM looks for.",
       action: "Adjust",
       onClick: () => go({ view: "profile", tab: "experience", filter: "preferences" }),
     },
     {
       done: submitting,
-      title: "Send applications automatically",
+      title: "Send applications",
       detail: submitting ? "Applications send once every required answer is checked." : "Off: nothing is sent to employers until you turn this on.",
       action: submitting ? "Settings" : pending === "submit-on" ? "Turning on…" : "Turn on",
       onClick: submitting
-        ? () => go({ view: "settings", tab: "system" })
+        ? () => go({ view: "settings", tab: "applying" })
         : () =>
             run(
               "submit-on",
@@ -777,7 +777,7 @@ function FirstRun({ mail }: { mail: MailStatus | null }) {
                 await api("/control", "PUT", { auto_submit: true });
                 await refresh();
               },
-              "Automatic submission turned on.",
+              "AXIOM will send applications.",
             ),
     },
     {

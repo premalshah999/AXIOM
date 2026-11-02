@@ -144,8 +144,8 @@ export function LedgerView() {
   const ledger = usePoll<{ applications: Success[] }>((signal) => api("/successful-applications", "GET", undefined, signal), 60000);
   const archive = usePoll<{ applications: Archived[]; log_bytes: number }>((signal) => api("/archive", "GET", undefined, signal), 60000);
   const tabs = [
-    // Applied: the employer has it. The same number as Overview and the Jobs page (jobpilot/api/pipeline.py confirmed_jobs).
-    { id: "confirmed", label: "Applied", count: ledger.data?.applications.length },
+    // Confirmed: the employer has it. The same number as Overview and the Job board (jobpilot/api/pipeline.py confirmed_jobs).
+    { id: "confirmed", label: "Confirmed", count: ledger.data?.applications.length },
     { id: "problems", label: "What went wrong" },
     { id: "failed", label: "Couldn't apply", count: counts.words?.failed },
     { id: "not", label: "Not applying", count: counts.words?.not },

@@ -36,7 +36,7 @@ REMOTE = re.compile(r"\bremote\b|\bwork from home\b|\banywhere\b", re.I)
 _CITIES = {"san francisco": "CA", "new york": "NY", "seattle": "WA", "boston": "MA", "chicago": "IL", "austin": "TX", "los angeles": "CA", "san jose": "CA", "palo alto": "CA", "denver": "CO", "atlanta": "GA"}
 
 POSTED = {"1": ("Last 24 hours", 24), "3": ("Last 3 days", 72), "7": ("Last 7 days", 168), "30": ("Last 30 days", 720)}
-FITS = {"match": "Good fits", "other": "Not a fit", "all": "Everything found"}
+FITS = {"match": "Good matches", "other": "Not a match", "all": "Everything found"}
 SORTS = ("fit", "newest", "company")
 TTL = 15  # seconds the cleaned board is reused: it is read per poll, and the listings change on the scale of hours
 

@@ -177,7 +177,7 @@ def router(service) -> APIRouter:
         tiers["job_token_cap"] = data.job_token_cap
         db.set_setting("runner_tiers", tiers)
         pacing = dict(db.get_setting(LIMIT_KEY, {}) or {})
-        pacing.update(limit=data.company_limit, reason="Set by the owner in Setup › System")
+        pacing.update(limit=data.company_limit, reason="Set by you in Settings › Applying")
         db.set_setting(LIMIT_KEY, pacing)
         return get_limits()
 

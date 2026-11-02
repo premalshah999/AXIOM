@@ -7,6 +7,8 @@ import { Wordmark } from "./shell/Brand";
 import { resumeFileRefusal } from "./format";
 import { SwitchRow } from "./setup-kit";
 import { MainPassword } from "./mainpassword";
+import { span } from "./profile-fields";
+import { mergeExtract, onlyFromRead } from "./resumeread";
 import { YesNo } from "./qform";
 import { Button, Dropzone, ErrorLine, External, Input, Loading, Monogram, Pill, Segmented, Select } from "./ui/index";
 import type { EducationEntry, Profile, WorkEntry } from "./types";
@@ -51,7 +53,7 @@ const STEPS: Step[] = [
     id: "resume",
     name: "Resume",
     title: "Start with your resume",
-    lead: "We read it once to fill in most of the next steps. You check everything before it is used.",
+    lead: "We read it once to fill in most of the next steps. Check what it found before you go on.",
     server: "resume",
     minutes: 0.75,
     skip: "I'll type it instead",
@@ -403,17 +405,6 @@ function stepProblem(step: StepId, d: Draft): string {
   }
   if (step === "preferences" && !d.target_roles.length) return "Add at least one role so AXIOM knows what to look for.";
   return "";
-}
-
-function mergeExtract(draft: Draft, x: Partial<Draft>): Draft {
-  const next = { ...draft };
-  for (const key of ["first_name", "last_name", "email", "phone", "location", "linkedin", "github", "website"] as const)
-    if (!String(next[key] || "").trim() && x[key]) next[key] = x[key] as string;
-  if (!next.work.length && x.work?.length) next.work = x.work as WorkEntry[];
-  if (!next.education.length && x.education?.length) next.education = x.education as EducationEntry[];
-  if (x.skills?.length) next.skills = Array.from(new Set([...(next.skills || []), ...x.skills]));
-  if (!next.name.trim()) next.name = [next.first_name, next.last_name].filter(Boolean).join(" ");
-  return next;
 }
 
 // ---------- connections state (the Connections step and the finish read the same copy) ----------
@@ -807,15 +798,22 @@ function ResumeStep({
     try {
       // Applications attach the newest resume unless a job chose another; picking one here makes it that one.
       await api(`/resumes/${encodeURIComponent(resumeId)}/prefer`, "POST").catch(() => null);
-      const extracted = await api<Partial<Draft>>("/profile/extract?resume_id=" + encodeURIComponent(resumeId), "POST");
-      setDraft((d) => mergeExtract(d, extracted));
+      const { previous, ...extracted } = await api<Partial<Draft> & { previous?: Partial<Draft> | null }>("/profile/extract?resume_id=" + encodeURIComponent(resumeId), "POST");
+      const before = previous ?? null;
+      const kept = !onlyFromRead(draft.work, before?.work) || !onlyFromRead(draft.education, before?.education);
+      setDraft((d) => mergeExtract(d, extracted, before));
       setState("done");
       const parts = [
         extracted.work?.length ? `${extracted.work.length} role${extracted.work.length === 1 ? "" : "s"}` : "",
         extracted.education?.length ? `${extracted.education.length} school${extracted.education.length === 1 ? "" : "s"}` : "",
-        extracted.skills?.length ? `${extracted.skills.length} skills` : "",
+        extracted.skills?.length ? `${extracted.skills.length} skill${extracted.skills.length === 1 ? "" : "s"}` : "",
       ].filter(Boolean);
-      setMessage(parts.length ? "Found " + parts.join(", ") + ". You'll check them on the next steps." : "Resume read.");
+      const after = kept
+        ? " Your own entries below stay. Remove them and read the resume again to use what it lists."
+        : extracted.work?.length || extracted.education?.length
+          ? " Check them below."
+          : " No jobs or schools were found in it. You can add them in Profile after setup.";
+      setMessage(parts.length ? "Found " + parts.join(", ") + "." + after : "Resume read, but nothing was found in it. You can add your details in Profile after setup.");
     } catch (e) {
       setState("error");
       // The server's words for a missing key name a settings file; here the fix is one step back.
@@ -911,27 +909,32 @@ function ResumeStep({
         </Section>
       )}
       {found && (
-        <Section title="What we found" hint="Edit any of it on the next steps.">
+        <Section title="What we found" hint="Remove anything that was read wrongly. You can edit the rest in Profile, under Work and education, after setup.">
           <ul className="ax-ob-found" aria-label="Found in your resume">
-            {draft.work.slice(0, 4).map((w, i) => (
+            {draft.work.map((w, i) => (
               <li key={"w" + i}>
                 <Monogram name={w.company} size="md" />
-                <span>
+                <span className="ax-ob-found-text">
                   <strong>{w.title || "Role"}</strong>
                   <small>{w.company}</small>
+                  <small>{span(w.start, w.end, w.current)}</small>
                 </span>
+                <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDraft((d) => ({ ...d, work: d.work.filter((_, k) => k !== i) }))}>
+                  Remove<span className="sr-only"> {w.title || "role"} at {w.company}</span>
+                </Button>
               </li>
             ))}
-            {draft.education.slice(0, 3).map((e, i) => (
+            {draft.education.map((e, i) => (
               <li key={"e" + i}>
                 <Monogram name={e.school} size="md" />
-                <span>
-                  <strong>
-                    {e.degree}
-                    {e.field_of_study ? " · " + e.field_of_study : ""}
-                  </strong>
+                <span className="ax-ob-found-text">
+                  <strong>{[e.degree, e.field_of_study].filter(Boolean).join(" · ") || "School"}</strong>
                   <small>{e.school}</small>
+                  <small>{span(e.start, e.end, false)}</small>
                 </span>
+                <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDraft((d) => ({ ...d, education: d.education.filter((_, k) => k !== i) }))}>
+                  Remove<span className="sr-only"> {e.degree || "school"} at {e.school}</span>
+                </Button>
               </li>
             ))}
           </ul>

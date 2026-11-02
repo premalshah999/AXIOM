@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
-import { useAction, useDraft, usePoll } from "./hooks";
+import { useAction, usePoll } from "./hooks";
 import { ConnectionFields, ConnectionsGate, FieldInput, useConnections } from "./connections";
 import { AutoApplySettings } from "./discovery";
 import { ago, plural } from "./format";
@@ -125,7 +125,7 @@ function Limits() {
                     c={c}
                     name="daily_application_limit"
                     label="Applications per day"
-                    hint={`${stats.submissions_reserved ?? 0} used today. AXIOM stops starting new ones at this number.`}
+                    hint={`${plural(stats.submissions_reserved ?? 0, "application")} sent today (Overview counts only the ones an employer confirmed). AXIOM stops starting new ones at this number.`}
                   />
                   <FieldInput
                     c={c}
@@ -332,7 +332,8 @@ const AGENT_PROVIDERS: { value: AgentModelProvider; label: string }[] = [
 function AgentControls() {
   const { refresh } = useWorkspace();
   const settings = usePoll<AgentSettings>((signal) => api("/agents", "GET", undefined, signal), 30000);
-  const [draft, setDraft, clearDraft] = useDraft<AgentSettingsUpdate | null>("agent-settings", null);
+  const [draft, setDraft] = useState<AgentSettingsUpdate | null>(null);
+  const clearDraft = () => setDraft(null);
   const { pending, run } = useAction();
   const saved = settings.data;
   // A thin or partial answer is treated as not loaded rather than crashing the page.

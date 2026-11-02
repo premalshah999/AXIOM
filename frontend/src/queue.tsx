@@ -344,7 +344,7 @@ function NextTable({
             onOpen={() => openJob(i.id)}
             meta={
               <>
-                {shownFit(i) != null && <span className="mono">Fit {shownFit(i)}</span>}
+                {shownFit(i) != null && <span className="mono">Match {shownFit(i)}</span>}
                 {i.location && <span>{i.location}</span>}
               </>
             }
@@ -352,7 +352,7 @@ function NextTable({
         ),
       },
       { key: "where", header: "Location", hideBelow: 860, width: 150, truncate: true, cell: (i) => <Note>{i.location || "Not listed"}</Note> },
-      { key: "fit", header: "Fit", num: true, hideBelow: 600, cell: (i) => (shownFit(i) == null ? "—" : shownFit(i)) },
+      { key: "fit", header: "Match", num: true, hideBelow: 600, cell: (i) => (shownFit(i) == null ? "—" : shownFit(i)) },
       { key: "why", header: "Waiting on", hideBelow: 860, width: 300, truncate: true, cell: (i) => <Note title={i.wait}>{i.wait || (i.position <= q.exact ? "The next free worker." : "")}</Note> },
       { key: "platform", header: "Platform", hideBelow: 860, cell: (i) => <Note>{platformName(i.ats)}</Note> },
       {

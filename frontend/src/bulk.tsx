@@ -65,7 +65,7 @@ const OUTCOME_LABEL: Record<ApplyOutcome, string> = {
   waiting: "waiting to start",
   preparing: "preparing a resume",
   already: "already running or applied",
-  refused: "not applied",
+  refused: "not applying",
 };
 
 function summarize(summary: ApplyManyResult["summary"]) {
@@ -91,7 +91,7 @@ export function useApplyMany() {
           }),
         (r) =>
           r
-            ? `Applied to ${plural(r.results.length, "job")}: ${summarize(r.summary)}.`
+            ? `Applying to ${plural(r.results.length, "job")}: ${summarize(r.summary)}.`
             : undefined,
       );
       if (answer) {
@@ -157,13 +157,13 @@ export function ApplyOutcomes({
       </span>
       <StatusPill
         state={r.outcome === "refused" ? "failed" : r.outcome === "already" ? r.state : appliedState(r.outcome)}
-        label={r.outcome === "refused" ? "Not applied" : undefined}
+        label={r.outcome === "refused" ? "Not applying" : undefined}
       />
     </li>
   );
   return (
     <Panel
-      title={`Applied to ${plural(result.results.length, "job")}`}
+      title={`Applying to ${plural(result.results.length, "job")}`}
       actions={
         <>
           <span className="ax-note">{summarize(result.summary)}</span>
@@ -177,7 +177,7 @@ export function ApplyOutcomes({
         {waits.size > 0 && (
           <p className="ax-note">
             {[...waits].map(([what, n]) => `${n} wait for ${what}`).join(" · ")}. They start on their own; follow them in
-            Pipeline.
+            the Queue.
           </p>
         )}
         {refused.length > 0 && (

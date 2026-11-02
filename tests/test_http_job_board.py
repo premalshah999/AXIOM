@@ -47,6 +47,30 @@ def test_board_settings_are_saved_and_visible_in_the_snapshot(client):
     assert settings["interval_hours"] == 6 and settings["early_career_only"] is True
 
 
+def test_how_close_a_match_is_one_number_on_both_screens(client, service):
+    """Settings › Applying and Profile › Job preferences both show "How close a match": saving either moves the other."""
+    service.db.set_setting("profile", {"minimum_fit": 70})
+    assert client.put("/api/job-board/settings", json={"minimum_auto_fit": 55}).status_code == 200
+    assert service.db.get_setting("profile", {})["minimum_fit"] == 55
+    # Saving the board form with the same number leaves a profile that was set apart alone.
+    service.db.set_setting("profile", {"minimum_fit": 40})
+    assert client.put("/api/job-board/settings", json={"minimum_auto_fit": 55, "interval_hours": 6}).status_code == 200
+    assert service.db.get_setting("profile", {})["minimum_fit"] == 40
+
+
+def test_how_close_a_match_reaches_a_profile_not_saved_yet(client, service):
+    """A new install has no profile: the number set in Settings is what Profile shows, and the first profile save keeps it."""
+    assert service.db.get_setting("profile", None) is None
+    assert client.put("/api/job-board/settings", json={"minimum_auto_fit": 55}).status_code == 200
+    profile = client.get("/api/profile").json()
+    assert profile["minimum_fit"] == 55
+    assert client.put("/api/profile", json=profile).status_code == 200
+    assert client.get("/api/job-board").json()["settings"]["minimum_auto_fit"] == 55
+    # And the way back: the profile moves the board.
+    assert client.put("/api/profile", json={**profile, "minimum_fit": 65}).status_code == 200
+    assert client.get("/api/job-board").json()["settings"]["minimum_auto_fit"] == 65
+
+
 def test_board_settings_reject_an_interval_outside_the_choices(client):
     assert client.put("/api/job-board/settings", json={"interval_hours": 5}).status_code == 422
 

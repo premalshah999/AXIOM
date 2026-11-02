@@ -1,7 +1,7 @@
 // Job board: which real, open postings the app found, and why each one fits or doesn't (owner, 2026-11-01: "make the job board good
 // and legit"). Pages, filters and exact counts come from the server (GET /api/board, jobpilot/board_view.py), the same reading the
 // Queue is made from, so In queue 4 here is number 4 there. Closed, stale and duplicate rows never reach it.
-import { ExternalLink, FilterX, ListChecks, Plus, Radar, RefreshCw, SearchX, ShieldCheck } from "lucide-react";
+import { ExternalLink, FilterX, ListChecks, ListOrdered, Plus, Radar, RefreshCw, SearchX, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { addManyToQueue, addToQueue, api, frontManyInQueue, moveToFront, queueCompanySites, type QueueMany } from "./api";
 import { ApplyChoice, ApplyChoices } from "./applychoice";
@@ -20,7 +20,7 @@ import "./styles/queue.css";
 const webLink = (url: string) => (/^https?:\/\//i.test(url) ? url : "");
 
 const SORTS = [
-  { value: "fit", label: "Best fit" },
+  { value: "fit", label: "Best match" },
   { value: "newest", label: "Newest" },
   { value: "company", label: "Company A to Z" },
 ] as const;
@@ -40,7 +40,7 @@ function StateCell({ r, asked, site }: { r: BoardRow; asked?: boolean; site?: bo
       </span>
     );
   if (r.state === "approval") return <span className="bd-state">Needs you</span>;
-  if (r.state === "checking") return <span className="bd-state is-idle">Checking fit</span>;
+  if (r.state === "checking") return <span className="bd-state is-idle">Checking match</span>;
   if (r.state === "ready") return site ? <span className="bd-state is-idle">Not queued</span> : <span className="bd-state">Ready</span>;
   return <span className="bd-state is-idle">Not applying</span>;
 }
@@ -126,7 +126,7 @@ export function BoardView() {
   };
   const blockers = [
     !snapshot.config.workers_enabled && "application workers are disabled",
-    !snapshot.control.auto_submit && "automatic submission is off (Settings › Applying)",
+    !snapshot.control.auto_submit && "sending is off (Settings › Applying)",
     snapshot.control.paused && "AXIOM is stopped (press Resume applications at the top)",
   ].filter(Boolean) as string[];
   const canApply = blockers.length === 0;
@@ -238,7 +238,7 @@ export function BoardView() {
           </span>
           <span className="bd-meta-line">{r.line}</span>
           <span className="bd-meta">
-            {r.score != null && <span className="mono">Fit {r.score}</span>}
+            {r.score != null && <span className="mono">Match {r.score}</span>}
             <span>{r.dated ? ago(r.posted_at, now) : `Found ${ago(r.posted_at, now)}`}</span>
             <span>{platformName(r.ats)}</span>
             <StateCell r={r} asked={inLine(r)} site={sites} />
@@ -259,10 +259,10 @@ export function BoardView() {
         </div>
       ),
     },
-    { key: "fit", header: "Fit", num: true, hideBelow: 600, cell: (r) => (r.score == null ? "—" : r.score) },
+    { key: "fit", header: "Match", num: true, hideBelow: 600, cell: (r) => (r.score == null ? "—" : r.score) },
     {
       key: "why",
-      header: fit === "match" ? "Why it fits" : "Why",
+      header: fit === "match" ? "Why it matches" : "Why",
       hideBelow: 600,
       width: 340,
       truncate: true,
@@ -365,6 +365,9 @@ export function BoardView() {
         </form>
       </Dialog>
       <TopActions>
+        <Button variant="secondary" icon={<ListOrdered size={15} aria-hidden="true" />} onClick={() => go({ view: "queue" })} title="What is running and what starts next">
+          Open the queue
+        </Button>
         {snapshot.config.apply_mode !== "auto" && (
           <Button variant="secondary" icon={<ListChecks size={15} aria-hidden="true" />} onClick={() => go({ view: "review" })}>
             Review a batch
@@ -431,7 +434,7 @@ export function BoardView() {
         {sites && <Notice tone="warn">{SITES_WARNING} Use Apply on a row, or select the rows you want and apply to them.</Notice>}
         <div className="bd-toolbar" role="group" aria-label="Filter the job board">
           <SearchBox value={query} onChange={setQuery} label="Search the job board" placeholder="Role, company or city" />
-          <Listbox label="Fit" value={fit} options={(b?.facets.fit?.length ? b.facets.fit : [{ value: "match", label: "Good fits" }]) as { value: Fit; label: string; count?: number }[]} onChange={setFit} />
+          <Listbox label="Match" value={fit} options={(b?.facets.fit?.length ? b.facets.fit : [{ value: "match", label: "Good matches" }]) as { value: Fit; label: string; count?: number }[]} onChange={setFit} />
           <Listbox prefix="Role" label="Role" value={role} options={keep(role, all("Any", b?.facets.role))} onChange={setRole} />
           <Listbox prefix="Level" label="Level" value={level} options={keep(level, all("Any", b?.facets.level))} onChange={setLevel} />
           <Listbox prefix="Company" label="Company" value={company} options={keep(company, all("Any", b?.facets.company))} onChange={setCompany} />
