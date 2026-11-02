@@ -41,6 +41,7 @@ type View = {
   rules: { ok: boolean; problems: Problem[]; warnings: Problem[]; typography?: { ok: boolean; sizes: Record<string, number[]> } | null; pages?: number | null } | null;
   rule_problems: Problem[];
   parse: { ok: boolean; items: { label: string; ok: boolean; detail: string }[] } | null;
+  origin?: string | null;
   report: { workspace_id?: string; changed_bullets?: number; added_skills?: string[]; refused?: { id: string; reason: string }[]; overflow?: boolean; summary_origin?: string };
   preview_rules: View["rules"];
   drafts: { id: string; title: string; bullets: string[]; confirmed: boolean }[];
@@ -707,6 +708,17 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
         <p className="tl-approved">
           {view.choice?.approved_how === "setting_off" ? "Approval is off in Settings, so this version goes out as it is." : "You approved this version."} The PDF below is exactly what's sent.{" "}
           <a href={routeUrl({ view: "settings", tab: "applying" })} className="ax-link" onClick={(e) => { e.preventDefault(); go({ view: "settings", tab: "applying" }); }}>Settings</a>
+        </p>
+      )}
+      {/* Versions made before tailoring stopped falling back to one (2026-11-02). */}
+      {view.origin === "profile" && (
+        <p className="ax-error tl-message" role="alert">
+          This version was built from your profile, not your resume PDF, so it can be missing bullets and projects. Tailor it again to start from your resume.
+        </p>
+      )}
+      {view.origin === "master_other" && (
+        <p className="ax-error tl-message" role="alert">
+          This started from the copy you approved of an earlier resume, not the resume you're sending now. To tailor from the new one, approve a copy of it in Resumes.
         </p>
       )}
       {view.stale && <p className="ax-error tl-message" role="alert">Your profile or this posting changed after this was tailored, so it won't be sent. Tailor it again.</p>}

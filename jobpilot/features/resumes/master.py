@@ -17,6 +17,7 @@ a draft, and applications keep using the original PDF.
 
 import io
 import json
+import logging
 import re
 import unicodedata
 from collections import Counter
@@ -29,6 +30,8 @@ from sqlalchemy import select
 from .._store import new_id, now
 from .editor import ResumeDoc, Style
 from .tables import RsMaster
+
+log = logging.getLogger(__name__)
 
 # Hyphens split words: PDF extraction breaks "exactly-once" across lines as "exactly-" / "once".
 TOKEN = re.compile(r"[a-z0-9][a-z0-9+#.%/&']*", re.I)
@@ -376,7 +379,7 @@ async def import_master(db, config, model, resume_id: str | None = None) -> dict
     if len(text) > IMPORT_TEXT_LIMIT:
         raise ResumeTooLong(
             f"Your resume is too long for AXIOM to copy word for word: about {len(text.split())} words, and it can copy about "
-            f"{IMPORT_TEXT_LIMIT // 7}. Add a shorter version in Resumes, or use plain Apply, which sends your PDF as it is."
+            f"{IMPORT_TEXT_LIMIT // 700 * 100}. Add a shorter version in Resumes, or use plain Apply, which sends your PDF as it is."
         )
     imported = await model(Imported, IMPORT_SYSTEM, json.dumps({"resume_text": text}))
     doc = _normalize(imported)
@@ -391,8 +394,11 @@ async def import_master(db, config, model, resume_id: str | None = None) -> dict
         margin_bottom=0.45,
     )
     verification = verify(source["text"] or text, doc)
-    if pdf:
-        verification["source_fill"] = measure_fill(pdf)
+    try:
+        if pdf:
+            verification["source_fill"] = measure_fill(pdf)
+    except Exception:  # How full a page looks is a nicety: the copy is already paid for and checked word by word.
+        log.info("couldn't measure the source resume's page")
     compiled = await compile_pdf(render(doc, style), timeout=30)
     if compiled.ok:
         verification["render_fill"] = measure_fill(compiled.pdf)

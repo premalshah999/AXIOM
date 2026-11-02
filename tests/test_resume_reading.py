@@ -3,6 +3,10 @@ only in where a gap fell, and tailoring quietly carried on from a resume rebuilt
 
 import asyncio
 import io
+import json
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 from PIL import Image
@@ -11,7 +15,7 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
 from jobpilot.db import Job, Resume
-from jobpilot.features.knowledge.writing import configured_model
+from jobpilot.features.knowledge.writing import LONG_REPLIES, configured_model
 from jobpilot.features.resumes import master, pipeline
 from jobpilot.features.resumes.editor import ResumeDoc
 from jobpilot.features.resumes.evidence import build as evidence_build
@@ -161,6 +165,106 @@ def counting(reply=None, error=None):
 
     model.calls = calls
     return model
+
+
+# ---------- the reply that was cut off, on the real model path ----------
+class Honest(BaseHTTPRequestHandler):
+    """An OpenAI-compatible model that stops at max_tokens as a real one does: past the cap the reply is cut off mid-JSON."""
+
+    reply = ""
+    limits: list = []
+
+    def log_message(self, *_):
+        pass
+
+    def do_POST(self):
+        asked = json.loads(self.rfile.read(int(self.headers["content-length"])))
+        limit = asked.get("max_tokens") or asked.get("max_completion_tokens")
+        Honest.limits.append(limit)
+        whole, cut = Honest.reply, len(Honest.reply) / 4 > limit
+        body = json.dumps(
+            {
+                "id": "x",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": "stub",
+                "choices": [{"index": 0, "finish_reason": "length" if cut else "stop", "message": {"role": "assistant", "content": whole[: limit * 4] if cut else whole}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": min(limit, len(whole) // 4), "total_tokens": 10 + min(limit, len(whole) // 4)},
+            }
+        ).encode()
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+@pytest.fixture
+def honest(service, monkeypatch):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Honest)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setattr(Honest, "limits", [])
+    monkeypatch.setattr(service.config, "llm_provider", "deepseek")
+    monkeypatch.setattr(service.config, "deepseek_api_key", "stub")
+    monkeypatch.setattr(service.config, "deepseek_base_url", f"http://127.0.0.1:{server.server_port}/v1")
+    yield configured_model(service.db, service.config)
+    server.shutdown()
+    server.server_close()
+
+
+def big_resume():
+    """Two pages, whose whole copy is well past 2000 tokens and inside 9000."""
+    jobs = [(f"Senior Widget Engineer {i} at Zephyr Dynamics {i}", [f"Reworked telemetry pipeline number j{i}b{k} serving warehouse clients across regions with fewer incidents and measured throughput gains" for k in range(6)]) for i in range(12)]
+    projects = [(f"Quartz Atlas {i}", [f"Built geospatial lookups variant p{i}b{k} for public transit records" for k in range(2)]) for i in range(4)]
+    skills = "Languages: Python, Rust, SQL\nTools: Docker, Kubernetes, Terraform"
+    lines = ["Alex Example", "EXPERIENCE"] + [x for head, bullets in jobs for x in (head, *bullets)] + ["PROJECTS"] + [x for head, bullets in projects for x in (head, *bullets)] + ["SKILLS", *skills.split("\n")]
+    out = io.BytesIO()
+    page = canvas.Canvas(out)
+    y = 760
+    for line in lines:
+        page.setFont("Helvetica", 8)
+        page.drawString(30, y, line)
+        y -= 10
+        if y < 40:
+            page.showPage()
+            y = 760
+    page.save()
+    entry = lambda head, bullets: {"heading": head, "bullets": [{"text": b} for b in bullets]}
+    copy = {
+        "name": "Alex Example",
+        "sections": [
+            {"title": "EXPERIENCE", "kind": "experience", "entries": [entry(*j) for j in jobs]},
+            {"title": "PROJECTS", "kind": "projects", "entries": [entry(*j) for j in projects]},
+            {"title": "SKILLS", "kind": "skills", "text": skills},
+        ],
+    }
+    return out.getvalue(), copy, jobs, projects
+
+
+def test_a_big_copy_comes_through_whole_on_the_real_model_path(service, honest):
+    pdf, copy, jobs, projects = big_resume()
+    resume = resume_row(service, pdf)
+    Honest.reply = json.dumps(copy)
+    assert len(Honest.reply) / 4 > 2000
+    doc, _, origin = asyncio.run(pipeline.source_document(service.db, service.config, honest, resume))
+    assert origin == "import" and Honest.limits == [9000]
+    experience, made, skills = doc.sections
+    assert [(e.heading, [b.text for b in e.bullets]) for e in experience.entries] == jobs
+    assert [(e.heading, [b.text for b in e.bullets]) for e in made.entries] == projects
+    assert "Terraform" in skills.text
+
+
+def test_a_reply_cut_off_at_the_cap_is_said_and_nothing_else_is_tailored(service, honest, monkeypatch):
+    """The root cause of 2026-11-01, kept honest by shrinking the cap back to what it was."""
+    monkeypatch.setitem(LONG_REPLIES, "Imported", (2000, 170))
+    pdf, copy, *_ = big_resume()
+    resume_row(service, pdf)
+    add_job(service)
+    service.db.set_setting("profile", {"name": "Alex Example", "work": [{"company": "Other Inc", "title": "Rebuilt From Profile", "description": "One long bullet."}]})
+    Honest.reply = json.dumps(copy)
+    result = asyncio.run(pipeline.prepare_resume(service.db, service.config, "j1", mode="normal", model=honest))
+    assert_stopped(result, "cut off", "Plain Apply")
+    assert master.current_master(service.db) is None and set(Honest.limits) == {2000}
 
 
 # ---------- every section survives the copy ----------
@@ -342,6 +446,15 @@ def test_a_copy_the_person_edited_is_never_buried_by_another_reading(service):
     with pytest.raises(pipeline.ResumeUnread) as stopped:
         asyncio.run(pipeline.source_document(service.db, service.config, model, resume, fresh=True))
     assert "Open Resumes" in stopped.value.detail and not model.calls
+
+
+def test_a_copy_approved_from_an_earlier_resume_is_named_as_that(service):
+    resume = resume_row(service, text_pdf())
+    row = asyncio.run(master.import_master(service.db, service.config, counting(), resume["id"]))
+    master.approve(service.db, row["id"])
+    assert asyncio.run(pipeline.source_document(service.db, service.config, counting(), resume))[2] == "master"
+    newer = {**resume, "sha": "another-upload"}
+    assert asyncio.run(pipeline.source_document(service.db, service.config, counting(), newer))[2] == "master_other"
 
 
 def test_a_resume_too_long_to_copy_is_refused_before_it_costs_anything(service):

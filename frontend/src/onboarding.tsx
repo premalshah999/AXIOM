@@ -617,9 +617,8 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
         dirty.current = false;
       }
       if (submit && submit.value !== submit.saved) {
-        // Read the current controls right before writing them back (Pause may have changed).
-        const fresh = await api<{ paused: boolean; auto_submit: boolean }>("/control");
-        await api("/control", "PUT", { ...fresh, auto_submit: submit.value });
+        // Only this switch: writing back `paused: false` counts as pressing Resume, which delivers every queued run again.
+        await api("/control", "PUT", { auto_submit: submit.value });
         setSubmit({ saved: submit.value, value: submit.value });
       }
       const state = await api<{ questionnaires?: { modules: Summary } }>("/onboarding", "PUT", {
@@ -910,7 +909,9 @@ function ResumeStep({
   }
 
   const busy = state === "uploading" || state === "reading";
-  const found = draft.work.length > 0 || draft.education.length > 0;
+  // The notes a resume's projects became: the person checks these with the rest.
+  const projects = (draft.evidence || []).filter((e) => e.id.startsWith("resume-project-"));
+  const found = draft.work.length > 0 || draft.education.length > 0 || projects.length > 0 || draft.skills.length > 0;
   return (
     <>
       <Dropzone
@@ -1015,6 +1016,30 @@ function ResumeStep({
                 </Button>
               </li>
             ))}
+            {projects.map((n) => {
+              const name = n.text.replace(/^Project:\s*/, "").split("\n")[0] || "Project";
+              return (
+                <li key={n.id}>
+                  <Monogram name={name} size="md" />
+                  <span className="ax-ob-found-text">
+                    <strong>{name}</strong>
+                    <small>Project</small>
+                  </span>
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDraft((d) => ({ ...d, evidence: d.evidence.filter((x) => x.id !== n.id) }))}>
+                    Remove<span className="sr-only"> project {name}</span>
+                  </Button>
+                </li>
+              );
+            })}
+            {draft.skills.length > 0 && (
+              <li>
+                <Monogram name="Skills" size="md" />
+                <span className="ax-ob-found-text">
+                  <strong>Skills</strong>
+                  <small>{draft.skills.join(", ")}</small>
+                </span>
+              </li>
+            )}
           </ul>
         </Section>
       )}

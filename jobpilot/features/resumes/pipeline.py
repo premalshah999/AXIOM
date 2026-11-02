@@ -169,7 +169,8 @@ async def source_document(db, config, model, resume: dict, *, fresh: bool = Fals
 
     approved = master_doc(db)
     if approved:
-        return approved[0], approved[1], "master"
+        # Still what the person approved, and the screen says when a newer resume has come since ("master_other").
+        return approved[0], approved[1], "master" if approved[2].source_resume_sha == resume["sha"] else "master_other"
     draft = current_master(db)
     if draft is not None and draft.source_resume_sha == resume["sha"]:
         if (draft.verification or {}).get("faithful"):
