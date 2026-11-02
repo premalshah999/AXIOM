@@ -68,10 +68,7 @@ GUARD = r"""(() => {
     }
   },true);
   document.addEventListener('submit', e => {
-    // A web component's button sits outside the form and clicks an unrendered proxy button inside it (UKG's ukg-button
-    // form="..."; "Create account" did nothing on six runs, 2026-11-01): the submit's control is the one the engine marked on this form.
-    const proxy=e.submitter && !e.submitter.getClientRects().length;
-    const control=(proxy && e.target?.__jpAllowedControl) || e.submitter || e.target?.__jpAllowedControl;
+    const control=e.submitter || e.target?.__jpAllowedControl;
     const text=label(control);
     if(!window.__jpArmed && !permitted(control) && !(control && pageSteps.has(control))
        && (final(text) || !/next|continue|save|review|sign ?in|log ?in/i.test(text))){
