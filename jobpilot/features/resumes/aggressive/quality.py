@@ -232,11 +232,29 @@ def tighten(text, low, high):
     return shorter if low <= len(shorter) <= high else text
 
 
+END_TARGET = re.compile(r"\s*\[target:[^\]]{1,90}\]\s*(\.?)\s*$", re.I)
+
+
+def one_headline(bullets):
+    """One headline figure per project. The prompt asks for one, and the model wrote one per bullet on 6 of 10 drafts (2026-11-02),
+    which left each out. The first stays; a later one that ends its bullet goes, and the length repair can lengthen that bullet in
+    words. One inside a sentence stays, because cutting it could break the sentence, and that draft is left out as before."""
+    seen = False
+    out = []
+    for b in bullets:
+        count = len(TARGET.findall(b))
+        if seen and count == 1 and END_TARGET.search(b):
+            b, count = END_TARGET.sub(r"\1", b).rstrip(), 0
+        seen = seen or count > 0
+        out.append(b)
+    return out
+
+
 def normalize_proposals(proposals, shapes=()):
     """Shape is arithmetic, so code settles it. Order by proof point, give each proposal its own, keep one third bullet, and
     word each bullet as a description. A resume with its own projects sets the count instead, and no more drafts than it has."""
     for p in proposals:
-        p.bullets = [describe(b) for b in p.bullets]
+        p.bullets = one_headline([describe(b) for b in p.bullets])
     if shapes:
         ordered = sorted(proposals, key=lambda p: p.proof_point)[: len(shapes)]
         for i, (p, shape) in enumerate(zip(ordered, shapes)):
