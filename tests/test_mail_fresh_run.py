@@ -325,8 +325,6 @@ async def one_run(client, service, imap, platform, kind, *, delay=DELAY, profile
 
     service.dispatch = dispatch
     site = Employer(platform, kind, imap, delay=delay, **(site_options or {}))
-    if before:
-        before(site)
     temp = tempfile.mkdtemp(prefix="mailfresh-chrome-")
     process, config.browser_cdp_url = await start_chrome(temp, site.port)
     config_workers = getattr(config, "workers", None)
@@ -335,6 +333,8 @@ async def one_run(client, service, imap, platform, kind, *, delay=DELAY, profile
         row = s.get(Job, job["id"])
         row.status, row.ats = "ready", spec["ats"]
     allow(service.db, [job["id"]])  # The Apply button on a company's own site is the owner's click (company_sites.py).
+    if before:
+        await before(site, job)
     outcome = {"state": "not started", "reason": ""}
     poller = asyncio.create_task(service.mail.poll())
     service.outbox_running = True
