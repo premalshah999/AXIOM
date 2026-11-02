@@ -21,7 +21,7 @@ def send_problem(session, artifact):
     ):
         return (
             "tailoring_stale",
-            "Your project choices changed. Rebuild and review this resume before applying.",
+            "Your project choices changed. Press Update project PDF, then review it before applying.",
         )
     selected = set(workspace.payload["selected_drafts"])
     if any(d["id"] in selected and not store.confirmed(d) for d in workspace.payload["drafts"]):

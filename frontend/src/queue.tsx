@@ -3,6 +3,7 @@
 // nothing here starts an application by itself.
 import { ArrowUpToLine, ListChecks, ListOrdered, Plus } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ApplyChoice, ApplyChoices } from "./applychoice";
 import { addManyToQueue, api, frontManyInQueue, moveToFront, removeFromQueue, removeManyFromQueue, type QueueMany } from "./api";
 import { ConfirmQueue, Refused, useSelection } from "./bulk";
 import { useWorkspace } from "./context";
@@ -381,6 +382,7 @@ function NextTable({
           ];
           return (
             <div className="ax-act" onClick={(e) => e.stopPropagation()}>
+              <ApplyChoice jobId={i.id} />
               {i.position > 1 && (
                 <Button size="sm" className="ax-lead" disabled={pending !== null} loading={pending === "front:" + i.id} icon={<ArrowUpToLine size={13} aria-hidden="true" />} onClick={() => onFront(i)}>
                   To front
@@ -394,8 +396,10 @@ function NextTable({
     ],
     [openJob, onFront, onRemove, pending],
   );
+  const ids = useMemo(() => q.next.map((i) => i.id), [q.next]);
   if (planning) return <Skeleton rows={6} />;
   return (
+    <ApplyChoices ids={ids}>
     <Table
       label="Up next, in order"
       columns={columns}
@@ -435,6 +439,7 @@ function NextTable({
         />
       }
     />
+    </ApplyChoices>
   );
 }
 

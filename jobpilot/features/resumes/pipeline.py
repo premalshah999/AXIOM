@@ -112,6 +112,13 @@ def job_identity(url: str) -> str:
         return url.strip()
 
 
+def answers_key(db, config) -> str:
+    """The key the model call will really use: the provider chosen for writing in Settings, which needn't be the install's default provider."""
+    from ...agent_settings import for_role
+
+    return for_role(db, config, "answers").llm_api_key
+
+
 def model_drafter(db, config) -> Drafter | None:
     """Deprecated (v1). Kept so existing callers keep working; prepare_resume now
     uses the configured structured model for the master-preserving pipeline."""
@@ -222,7 +229,8 @@ async def _build_mode(db, config, job, resume, profile, source_tuple, spec, mode
         except RuntimeError as exc:
             code = str(exc).split(":", 1)[0]
             known = {"compile_error", "compile_timeout", "compiler_missing", "output_too_large"}
-            raise _Fail(code if code in known else "tailoring_error", code == "compile_timeout", str(exc)) from None
+            # A provider's fault can have no message at all: its type says what it was.
+            raise _Fail(code if code in known else "tailoring_error", code == "compile_timeout", str(exc) or type(exc).__name__) from None
         pdf = Path(result.pdf_path).read_bytes()
     if result.doc is None:
         raise _Fail("tailoring_error", False, f"Mode {spec.id} returned no document, so its rules can't be checked")
@@ -300,7 +308,22 @@ def _finish(db, row_id, **fields):
         return record(row)
 
 
-async def prepare_resume(
+async def prepare_resume(db, config, job_id: str, source_resume_id: str | None = None, *, mode: str | None = None, **options) -> TailoringResult:
+    """One job's tailored resume, in one mode.
+
+    mode None is the account-wide "tailored" policy: it runs Normal and only from an approved master, else use_master. A mode the applicant chose
+    for this job starts from whatever source_document finds, and it fails plainly rather than sending something else. fresh: build anew.
+    status: ready (a tailored PDF), use_master, building, failed.
+    """
+    result = await _prepare_resume(db, config, job_id, source_resume_id, mode=mode, **options)
+    if mode is None and result.status == "ready" and result.artifact:
+        from .choice import follow_policy
+
+        follow_policy(db, job_id, result.artifact)
+    return result
+
+
+async def _prepare_resume(
     db,
     config,
     job_id: str,
@@ -366,7 +389,7 @@ async def prepare_resume(
                 detail="Tailoring starts from your approved master. Until then applications use your master PDF.",
             ),
         )
-    if model is None and getattr(config, "llm_api_key", ""):
+    if model is None and answers_key(db, config):
         from ..knowledge.writing import configured_model
 
         model = configured_model(db, config)
@@ -483,6 +506,12 @@ async def prepare_resume(
         error = TailoringError(code="timeout", retryable=True, detail="Tailoring exceeded its time limit")
         artifact = _finish(db, row_id, status="failed", error=error.model_dump())
         return TailoringResult(status="failed", artifact=artifact, error=error)
+    except Exception as exc:
+        # Anything else (a provider's own error type, a reply that won't validate). Left as "building", its lease would answer "still building" to the person's Try again for minutes.
+        log.exception("tailoring failed for %s", job_id)
+        error = TailoringError(code="tailoring_error", retryable=True, detail=type(exc).__name__)
+        artifact = _finish(db, row_id, status="failed", error=error.model_dump())
+        return TailoringResult(status="failed", artifact=artifact, error=error)
     except asyncio.CancelledError:
         _finish(
             db,
@@ -518,8 +547,10 @@ def current_identity(db, job_id: str):
         job = s.get(Job, job_id)
         if not job:
             return None
-        source = s.get(Resume, job.resume_id) if job.resume_id else None
-        source = source or s.scalar(select(Resume).where(Resume.demo.is_(False)))
+        from .choice import source_for
+
+        # The one a tailored version is built from and the queue sends, so an edit saved for this job isn't out of date the moment it's saved.
+        source = source_for(s, job)
         if not source:
             return None
         return {

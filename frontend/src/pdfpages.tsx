@@ -29,9 +29,14 @@ const files = new Map<string, Promise<ArrayBuffer>>();
 function readPdf(url: string): Promise<ArrayBuffer> {
   let file = files.get(url);
   if (!file) {
-    file = fetch(url, { credentials: "same-origin" }).then((r) => {
+    file = fetch(url, { credentials: "same-origin" }).then(async (r) => {
       if (r.status === 401) signedOut("Your session ended. Sign in again.");
-      if (!r.ok) throw new Error(r.status === 404 ? "This PDF is no longer on file." : "This PDF could not be opened.");
+      if (r.status === 404) throw new Error("This PDF is no longer on file.");
+      if (!r.ok) {
+        // A refusal that says why (a project preview that doesn't pass its checks) says it here.
+        const said = await r.json().then((b: { detail?: unknown }) => b?.detail, () => "");
+        throw new Error(typeof said === "string" && said ? said : "This PDF could not be opened.");
+      }
       return r.arrayBuffer();
     });
     files.set(url, file);

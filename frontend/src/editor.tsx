@@ -83,6 +83,8 @@ type Loaded = {
   version?: {
     job: { company: string; title: string; location: string } | null;
     sent: { state: "confirmed" | "unknown"; at: string | null } | null;
+    /** Set when this is the version a job set to a tailored resume holds. */
+    choice?: { mode: string; state: string } | null;
     built_at: string;
   } | null;
 };
@@ -372,7 +374,7 @@ function Workbench({
   const subtitle = master
     ? `${master.status === "approved" ? "Approved" : "Draft"} · ${(Math.floor((master.verification.coverage ?? 0) * 1000) / 10).toString()}% of your original words`
     : initial.base_artifact_id
-      ? [job?.title, tailoringOff ? `Draft from ${day(initial.version?.built_at)}, not in use` : day(initial.version?.built_at)].filter((x) => x && !x.endsWith("—")).join(" · ")
+      ? [job?.title, tailoringOff && !initial.version?.choice ? `Draft from ${day(initial.version?.built_at)}, not in use` : day(initial.version?.built_at)].filter((x) => x && !x.endsWith("—")).join(" · ")
       : "From your profile";
   const copyIsDraft = master?.status === "draft";
   const save = () =>
@@ -383,6 +385,7 @@ function Workbench({
           artifact_id: string;
           pages: number;
           problems: string[];
+          choice?: { mode: string; state: string } | null;
         }>("/v2/resumes/editor/save", "POST", {
           ...payload,
           style: draft.style,
@@ -398,8 +401,12 @@ function Workbench({
         r &&
         (r.problems.length
           ? `Saved as a new version. Check: ${r.problems[0]}.`
+          : r.choice
+            ? r.choice.state === "approved"
+              ? "Saved. This is the job's tailored resume now."
+              : "Saved. This is the job's tailored resume now, and it needs your approval."
           : tailoringOff
-            ? "Saved as a new version. It isn't sent to anyone while rewording is off."
+            ? "Saved as a new version. Only a job set to a tailored resume sends one."
             : draft.job
               ? "Saved as a new version. Applications for this job will use it."
               : "Saved as a new version."),
@@ -439,6 +446,11 @@ function Workbench({
         {draft.job && !master && (
           <Button size="sm" variant="ghost" className="ax-ed-job" onClick={() => openJob(draft.job!)}>
             Open job
+          </Button>
+        )}
+        {draft.job && !master && initial.version?.choice && (
+          <Button size="sm" variant="ghost" className="ax-ed-job" onClick={() => go({ view: "tailor", tailor: draft.job! })}>
+            Review and approve
           </Button>
         )}
         <span className="ax-ed-status" role="status" aria-live="polite">

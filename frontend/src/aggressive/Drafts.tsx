@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { plainError } from "../format";
 import { api } from "../api";
+import { PdfPages, usePdf } from "../pdfpages";
 import { Button } from "../ui/index";
 import "./drafts.css";
 
@@ -44,6 +45,9 @@ export function AggressiveDrafts({ workspaceId, jobId, needsUpdate, disabled, on
   const [data, setData] = useState<DraftWorkspace | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  // In place, with any trouble said here: in a new window the app has no words for a refusal, only the raw answer.
+  const preview = usePdf(previewing && data ? `/api${path(data.id)}/preview.pdf?revision=${data.revision}` : null);
   useEffect(() => {
     const abort = new AbortController();
     setData(null);
@@ -107,8 +111,9 @@ export function AggressiveDrafts({ workspaceId, jobId, needsUpdate, disabled, on
     <p className="ag-meta" role="note">Figures in [target: ...] brackets are inspired values, not results. Replace each with what you really measure.</p>
     <div className="ag-heading">
       <div><h2>Choose your projects</h2><p>Each draft takes the place of one of your projects, with the same number of bullets and the same length. Keep them, or switch back to your own.</p></div>
-      <a className="ax-btn" target="_blank" rel="noreferrer" href={`/api${path(data.id)}/preview.pdf?revision=${data.revision}`}>Preview PDF</a>
+      <Button aria-expanded={previewing} onClick={() => setPreviewing(!previewing)}>{previewing ? "Hide preview" : "Preview PDF"}</Button>
     </div>
+    {previewing && <div className="ag-preview"><PdfPages data={preview.data} error={preview.error} fit="width" label="Preview of these project choices" /></div>}
     <p className="ag-status" role="status">{unapproved
       ? `${unapproved} selected project${unapproved === 1 ? " needs" : "s need"} your approval before applications.`
       : "Project choices saved. Review and approve the final PDF before applying."}</p>
@@ -137,7 +142,7 @@ export function AggressiveDrafts({ workspaceId, jobId, needsUpdate, disabled, on
         onChange={e => chooseOriginal(p.id, e.target.checked)} />
         <span>{p.heading}</span></label>
       <ul>{p.bullets.filter(b => b.include).map(b => <li key={b.id}>{b.text}</li>)}</ul>
-    </article>) : <p>Your master resume has no projects. You can continue with its existing sections.</p>}
+    </article>) : <p>Your resume has no projects of its own. You can continue with its other sections.</p>}
     {data.report?.critique_text && <details className="ag-critique"><summary>Independent recruiter critique</summary><pre>{data.report.critique_text}</pre></details>}
     {data.report?.pillars_missing?.length ? <p className="ag-meta">Requirements without a match: {data.report.pillars_missing.join(", ")}. Coverage is advisory.</p> : null}
     {data.report?.cost?.actual_usd != null && <p className="ag-meta">Model cost: ${data.report.cost.actual_usd.toFixed(5)}</p>}
