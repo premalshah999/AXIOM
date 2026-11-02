@@ -476,6 +476,9 @@ def regroup_history_rows(fields, profile):
                     f["group"] = group
 
 
+EDUCATION_DATE_PART = re.compile(r"(?:start|end) date (?:month|year)", re.I)
+
+
 def mark_history_rows(fields):
     """Row N of a repeated, unnumbered work block is profile work entry N (current/most recent first).
 
@@ -540,6 +543,13 @@ def mark_history_rows(fields):
             if len(row_fields) == len(schools["school"]):
                 for index, f in enumerate(row_fields):
                     f["history_row"] = {"kind": "education", "index": index}
+    if not schools["school"] and len(schools["degree"]) == 1:
+        # Greenhouse's education block names no school: Degree, Discipline, "End date month", "End date year" (Quantifind,
+        # 2026-11-01). Its dates are the highest degree's, as for a single school above; left unplaced they went to the
+        # applicant although the resume holds the graduation date.
+        for f in fields:
+            if EDUCATION_DATE_PART.fullmatch(clean(f)) and block(f) == "education":
+                f["history_row"] = {"kind": "education", "index": "highest"}
     # A date no row claims (another block's "Start Date") makes that label ambiguous: it is not placed at all.
     matched.update({attr: ([f for f in v if block(f) == "work"] if all(block(f) for f in v) else [])
                     for attr, v in dates.items()})
