@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 from sqlalchemy import func, select, update
 
 from .db import Job, JobListing, Source
-from .posting_identity import placeholder_company
+from .posting_identity import placeholder_company, placeholder_title
 from .schemas import employer_from_title
 
 NOT_LISTED = "Company not listed"  # posting_identity.placeholder_company reads it as no name, so it is never stored on a job.
@@ -66,7 +66,8 @@ def from_ashby_page(page):
 def from_title(page):
     """A Lever hosted board's title is the employer's name, and nothing else."""
     match = TITLE.search(page or "")
-    return employer_from_title(htmllib.unescape(match.group(1)).strip()) if match else ""
+    name = employer_from_title(htmllib.unescape(match.group(1)).strip()) if match else ""
+    return "" if placeholder_title(name) else name  # A page label ("Jobs", "Careers") is no employer.
 
 
 def board_slug(url):

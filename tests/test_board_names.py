@@ -76,6 +76,7 @@ def test_an_ashby_page_and_a_lever_title_name_the_employer():
     assert from_ashby_page(ASHBY_PAGE % "Example Labs") == "Example Labs"
     assert from_ashby_page("<html></html>") == "" and from_ashby_page("window.__appData = {broken};</script>") == ""
     assert from_title("<html><title>Example &amp; Sons</title></html>") == "Example & Sons"
+    assert from_title("<html><title>Jobs</title></html>") == "" and from_title("<html><title>Careers</title></html>") == "" and from_title("<html></html>") == ""
 
 
 def test_a_slug_named_board_asks_its_page_once_and_its_jobs_take_the_name(service):
