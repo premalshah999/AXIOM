@@ -18,6 +18,9 @@ from ..validate import parse_check
 from . import prompts, quality, store
 from .schema import Brief, Critique, Plan, Revision, ShapeFix
 
+# Length repairs per tailoring: models miscount characters, and each round starts from the nearest wording so far.
+SHAPE_ROUNDS = 3
+
 
 def payload(source, profile, ctx, hard_text, brief, history, allowed):
     return {
@@ -218,9 +221,11 @@ async def run(job, source, profile, ctx):
         plan.proposals = quality.normalize_proposals(plan.proposals, shapes)
         real, refused = quality.apply_revision(source.doc, plan, allowed, hard, forbidden)
     request = quality.shape_request(plan.proposals, shapes, history, posting)
-    if request["bullets"]:
-        # One bounded call. It is a second chance, so a failed one only leaves those drafts out.
-        step = {"stage": "shape_repair", "issues": quality.shape_issues(plan.proposals, shapes)}
+    for round_ in range(1, SHAPE_ROUNDS + 1):
+        if not request["bullets"]:
+            break
+        # Short bounded calls, each from the nearest wording so far. A failed one only leaves those drafts out.
+        step = {"stage": "shape_repair", "round": round_, "issues": quality.shape_issues(plan.proposals, shapes)}
         attempts.append(step)
         try:
             fix = await ask(ShapeFix, prompts.SHAPE, request)
@@ -228,6 +233,12 @@ async def run(job, source, profile, ctx):
             step["left"] = quality.shape_issues(plan.proposals, shapes)
         except Exception as exc:
             step["error"] = type(exc).__name__
+            break
+        again = quality.shape_request(plan.proposals, shapes, history, posting)
+        before = {(b["draft"], b["bullet"]): b["chars"] for b in request["bullets"]}
+        if all(before.get((b["draft"], b["bullet"])) == b["chars"] for b in again["bullets"]):
+            break  # No bullet still missing came nearer: another round would ask the same.
+        request = again
     kept = plan.proposals
     if quality.proposal_issues(plan.proposals, history, posting, shapes):
         # Only the drafts that pass every check go on: with none left, the real projects carry the resume.

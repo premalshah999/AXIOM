@@ -284,8 +284,16 @@ def shape_request(proposals, shapes, history, posting):
     return {"bullets": fits, "wordings_per_bullet": max(1, min(3, FIX_REPLY_CHARS // max(room, 1)))}
 
 
+def miss(text, low, high):
+    """How many characters a bullet is outside its window (0 inside it)."""
+    n = len(text.strip())
+    return n - high if n > high else low - n if n < low else 0
+
+
 def apply_shape_fix(proposals, shapes, fix, history, posting):
-    """Each bullet takes the first wording that lands in its window and breaks no truth check. Otherwise it stays as it was."""
+    """Each bullet takes the first wording that lands in its window and breaks no truth check. Otherwise it takes the one nearest its
+    window, when that is nearer than what it has: the next round's numbers start from there (models miscount; one round left
+    every draft out on 2026-11-02)."""
     for item in sorted(fix.bullets, key=lambda x: (x.draft, x.bullet)):
         if item.draft >= min(len(proposals), len(shapes)):
             continue
@@ -293,12 +301,22 @@ def apply_shape_fix(proposals, shapes, fix, history, posting):
         if item.bullet >= len(shape) or item.bullet > len(p.bullets):
             continue
         low, high = shape[item.bullet]
+        current = p.bullets[item.bullet] if item.bullet < len(p.bullets) else ""
+        nearest = None
         for wording in item.wordings:
             text = tighten(describe(gates.sanitize(wording)), low, high)
             trial = p.model_copy(update={"bullets": [*p.bullets[: item.bullet], text, *p.bullets[item.bullet + 1 :]]})
-            if low <= len(text) <= high and not proposal_problems(trial, history, posting):
-                p.bullets = trial.bullets
+            if proposal_problems(trial, history, posting):
+                continue
+            if low <= len(text) <= high:
+                nearest = trial
                 break
+            if (current and miss(text, low, high) < miss(current, low, high)) and (
+                nearest is None or miss(text, low, high) < miss(nearest.bullets[item.bullet], low, high)
+            ):
+                nearest = trial
+        if nearest is not None:
+            p.bullets = nearest.bullets
 
 
 def proposal_problems(p, history, posting):

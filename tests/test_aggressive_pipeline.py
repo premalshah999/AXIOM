@@ -271,6 +271,8 @@ def stub(initial=None, repair=None, revision=None, fixes=None, metered=False, sh
         if kind is ShapeFix:
             if isinstance(shape_fix, Exception):
                 raise shape_fix
+            if isinstance(shape_fix, list):  # One reply per round.
+                return shape_fix.pop(0) if shape_fix else ShapeFix()
             return shape_fix or ShapeFix()
         raise AssertionError(kind)
 
@@ -1001,6 +1003,20 @@ def test_a_repair_gets_the_exact_numbers_and_the_fix_still_follows(tmp_path):
     low, high = bullet_window(REAL1)
     assert f"{proposals()[0].title}: bullet 1 has {n} characters, cut {n - high} to {n - low} so it has {low} to {high}" in issues
     assert result.report["drafts_left_out"] == []
+
+
+@needs_tex
+def test_a_fix_that_comes_nearer_gets_another_round_from_there(tmp_path):
+    """A real model miscounts: on 2026-11-02 one round left every draft out. Each round starts from the nearest wording so far."""
+    nearer = FIXED_2 + " It is checked against each dated export."  # Still over its window, but nearer than the first try.
+    model = stub(initial=too_long_plan(), shape_fix=[fix_for({(0, 0): FIXED_0, (2, 1): nearer}), fix_for({(2, 1): FIXED_2})])
+    source, ctx = context(tmp_path, model=model)
+    result = asyncio.run(run(JOB, source, PROFILE, ctx))
+    assert [c[0] for c in model.calls] == ["Brief", "Plan", "ShapeFix", "ShapeFix", "Critique"]
+    second = [c for c in model.calls if c[0] == "ShapeFix"][1][2]["bullets"]
+    assert [(x["draft"], x["bullet"], x["chars"]) for x in second] == [(2, 1, len(nearer))]
+    assert result.report["drafts_left_out"] == [] and result.drafts[2].bullets[1] == FIXED_2
+    assert [s.get("round") for s in result.report["deterministic_repairs"] if s.get("stage") == "shape_repair"] == [1, 2]
 
 
 @needs_tex
