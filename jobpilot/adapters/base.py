@@ -1445,7 +1445,7 @@ class Adapter:
             step = self.classify_page(obs)
             from ..browser import received_application_page
 
-            if step != Step.CONFIRMATION and received_application_page(obs.get("url"), self.job["url"]):
+            if step != Step.CONFIRMATION and received_application_page(obs.get("url"), (getattr(self, "job", None) or {}).get("url")):
                 # Whoever got here, the employer has this application: its "Continue" only leads to an account to watch the status.
                 return self.e.received_application()
             if step != Step.EMAIL_ENTRY:
