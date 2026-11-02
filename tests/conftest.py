@@ -246,7 +246,21 @@ def uses_session_loop(item):
     return any(getattr(d.func, "_loop_scope", None) == "session" for d in definitions)
 
 
+def smoke_entries():
+    """tests/smoke_tests.txt: the browser tests the release gate runs every time (`gate.sh smoke`). One entry per line,
+    `file.py` for a whole file or `file.py::text` for the tests whose name contains the text; `#` starts a comment."""
+    entries = []
+    path = Path(__file__).with_name("smoke_tests.txt")
+    for line in path.read_text().splitlines() if path.exists() else []:
+        line = line.split("#", 1)[0].strip()
+        if line:
+            file, _, text = line.partition("::")
+            entries.append((file.strip(), text.strip()))
+    return entries
+
+
 def pytest_collection_modifyitems(items):
+    smoke = smoke_entries()
     for item in items:
         names = set(item.fixturenames)
         browser = bool(names & BROWSER_FIXTURES) or item.get_closest_marker("browser") is not None
@@ -254,6 +268,8 @@ def pytest_collection_modifyitems(items):
         docs = " ".join(filter(None, [getattr(item.module, "__doc__", ""), getattr(item.function, "__doc__", "")]))
         if browser:
             item.add_marker(pytest.mark.browser)
+            if any(item.path.name == file and text in item.name for file, text in smoke):
+                item.add_marker(pytest.mark.smoke)
         if integration:
             item.add_marker(pytest.mark.integration)
         if not (browser or integration):
