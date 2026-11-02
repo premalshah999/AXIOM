@@ -131,15 +131,18 @@ export function ReservedJobs() {
       pin: true,
       cell: (r) =>
         r.state === "reserved" ? (
-          <Button
-            size="sm"
-            className="ax-lead"
-            disabled={pending !== null}
-            loading={pending === "approve:" + r.job.id}
-            onClick={() => approve(r.job.id)}
-          >
-            Approve and apply
-          </Button>
+          // Inside the row's own click: the press also opened the job's panel over the page.
+          <div className="ax-act" onClick={(e) => e.stopPropagation()}>
+            <Button
+              size="sm"
+              className="ax-lead"
+              disabled={pending !== null}
+              loading={pending === "approve:" + r.job.id}
+              onClick={() => approve(r.job.id)}
+            >
+              Approve and apply
+            </Button>
+          </div>
         ) : null,
     },
   ];

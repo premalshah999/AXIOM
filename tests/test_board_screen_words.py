@@ -25,6 +25,12 @@ def test_a_held_reserved_job_is_not_called_in_queue():
     assert "Needs your approval" in held
 
 
+def test_approving_a_reserved_job_does_not_also_open_its_panel():
+    held = read("reserved.tsx")
+    button = held.index("Approve and apply")
+    assert "e.stopPropagation()" in held[button - 420 : button]
+
+
 def test_a_row_says_not_queued_and_its_number_opens_the_queue():
     board = read("jobboard.tsx")
     assert 'r.state === "ready") return <span className="bd-state is-idle">Not queued</span>' in board
