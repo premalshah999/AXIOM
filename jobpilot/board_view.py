@@ -138,7 +138,7 @@ def levels_of(db, listed):
 
 def collect(service):
     """Every row the board can show, cleaned and classified, with what will happen to each. Reads on a worker thread."""
-    from .jobboard import LOCKED, board_snapshot, settings as board_settings
+    from .jobboard import LOCKED, board_snapshot, settings as board_settings, us_places
     from .queue_order import plans
     from .schemas import Profile
     from .service.queueing import fit_blocker
@@ -226,7 +226,7 @@ def collect(service):
         if roles is None:
             roles = roles_memo[title] = fitting_roles(title, profile.target_roles)
         row = {
-            "id": jid, "title": title, "company": company, "location": " ".join((job.get("location") or "").split()), "url": job["url"], "ats": job.get("ats") or "",
+            "id": jid, "title": title, "company": company, "location": " ".join(us_places(job.get("location")).split()), "url": job["url"], "ats": job.get("ats") or "",
             "posted_at": job.get("posted_at") or job.get("created_at") or "", "dated": dated(job), "source": source,
             "score": None if restricted and not job.get("score") else job.get("score"),
             "state": state, "fit": fit, "line": sentence[:400], "position": positions.get(jid), "approval": ("over" if code == "employer_limit" else "reserved") if state == "approval" else "",

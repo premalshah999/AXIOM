@@ -171,6 +171,15 @@ def us_location(location, country=""):
     return bool(US_PLACE.search(location or "") or US_REGION.search(location or ""))
 
 
+def us_places(location):
+    """The places of a multi-place posting that are not named as another country. The board lists US roles, and one that is open in
+    "Austin, TX; Toronto, Canada; London, UK" is listed for Austin: showing all three read as a foreign row (the owner counted 4,
+    2026-11-02). A place this cannot tell stays; a posting with no US place shown is returned as it was."""
+    parts = [x for x in re.split(r"\s*(?:;|\||\s/\s)\s*", str(location or "")) if x.strip()]
+    kept = [x for x in parts if not FOREIGN.search(x) or US_PLACE.search(x) and not FOREIGN.search(US_PLACE.sub(" ", x))]
+    return "; ".join(kept) if kept and len(kept) < len(parts) else str(location or "")
+
+
 NO_PARTICULAR_PLACE = re.compile(
     r"\b(?:anywhere|nationwide|all locations?|any location|open to (?:any|all)|united states|usa|u\.s\.a?\.?|us)\b", re.I
 )
