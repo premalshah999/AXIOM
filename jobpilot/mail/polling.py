@@ -50,6 +50,30 @@ LAST_SEARCHES = 3
 MATCH_HOLD_SECONDS = {"code": 600, "auto": 600, "link": 1800, "password_reset": 1800}
 
 
+# Hosts that belong to one employer alone on a platform that gives each a host of its own. A link to exactly such an origin
+# in an authenticated mail addressed to the applicant, inside a request window, is the employer's own mail whatever domain
+# sent it. The shared hosts (jobs.lever.co, job-boards.greenhouse.io, myjobs.adp.com, career4.successfactors.com) are not here:
+# many employers link to those.
+TENANT_HOSTS = {
+    "workday": re.compile(r"[a-z0-9-]+\.wd\d+\.myworkdayjobs\.com"),
+    "eightfold": re.compile(r"[a-z0-9-]+\.eightfold\.ai"),
+    "taleo": re.compile(r"[a-z0-9-]+\.taleo\.net"),
+    "avature": re.compile(r"[a-z0-9-]+\.avature\.net"),
+}
+
+
+def employer_only_host(ats, url):
+    """Whether this posting's host is used by this employer alone: a platform tenant's own host, or the employer's own career
+    site (a host no platform in the registry owns)."""
+    from ..ats import detect
+
+    host = (urlsplit(url or "").hostname or "").lower()
+    if ats == "custom":
+        return bool(host) and detect(url).id == "custom"
+    pattern = TENANT_HOSTS.get(ats)
+    return bool(pattern and pattern.fullmatch(host))
+
+
 def sf_tenant(session, job):
     """The SuccessFactors company id serving a job: named in its URL, or learned from its career pages (sf_tenant:)."""
     if not job or job.ats != "successfactors":
@@ -233,15 +257,13 @@ class PollingMixin:
                             peer = s.get(Job, peer_run.job_id) if peer_run else None
                             if peer and peer.ats == "icims" and origin(peer.url) != origin(job.url):
                                 c["icims_peers"].extend(sorted(icims_names(peer.company, peer.url)))
-                    # Some Workday tenants send reset mail from their employer's
-                    # domain. An exact tenant link can prove that sender; a shared
-                    # wdN.myworkday.com origin cannot distinguish employers.
+                    # Some employers send link and reset mail from a domain that names neither them nor their platform
+                    # (Workday tenants from the employer's domain, an unfamiliar sender on a custom career site). A link to
+                    # exactly the origin only this employer uses can prove that sender; a host shared by many employers
+                    # cannot (employer_only_host).
                     c["sender_learning"] = bool(
                         job
-                        and job.ats == "workday"
-                        and re.fullmatch(
-                            r"[a-z0-9-]+\.wd\d+\.myworkdayjobs\.com", urlsplit(job.url).hostname or ""
-                        )
+                        and employer_only_host(job.ats, job.url)
                         and origin(job.url) == (rule or {}).get("employer_origin")
                         and c["kind"] in {"link", "password_reset"}
                     )
@@ -349,7 +371,7 @@ class PollingMixin:
                                         token = extract_message(msg, proof_rule, c)
                                         if token:
                                             learned_domain = domain
-                            elif not token and diagnostics.get("rejection") == "sender" and c["employer_senders"]:
+                            if not token and diagnostics.get("rejection") == "sender" and c["employer_senders"]:
                                 learned_domain = self.family_learning(msg, rule, c)
                                 if learned_domain:
                                     token = extract_message(msg, {**rule, "sender_domains": [*rule["sender_domains"], *learned_domain]}, c)
@@ -475,7 +497,7 @@ class PollingMixin:
                                     Event(
                                         run_id=row.run_id,
                                         kind="mail_sender_learned",
-                                        message="Learned an authenticated sender from the exact Workday tenant link"
+                                        message="Learned an authenticated sender from a mail linking to the employer's own exact origin"
                                         if isinstance(learned_domain, str)
                                         else "Learned the employer's platform sender: its mail names the employer and no other open window's",
                                         data={"sender_domain": learned[0], "sender_domains": learned, "challenge_id": row.id},
