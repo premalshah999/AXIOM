@@ -34,6 +34,9 @@ class Service(QueueingMixin, ExecutionMixin, CompletionMixin, ReviewsMixin, Migr
         close_gone_postings(db)
         self.relabel_custom_ats()
         self.label_platforms_from_history()
+        from ..company_sites import leave_the_queue
+
+        leave_the_queue(db)  # A company's own site waiting in line leaves it (kept, not deleted); the owner sends it from Company sites
         self.employer_names_from_titles()
         self.tidy_board_data()
         from ..features._store import create_tables

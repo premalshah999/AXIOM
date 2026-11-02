@@ -3,7 +3,7 @@
 // Queue is made from, so In queue 4 here is number 4 there. Closed, stale and duplicate rows never reach it.
 import { ExternalLink, FilterX, ListChecks, Plus, Radar, RefreshCw, SearchX, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { addManyToQueue, addToQueue, api, frontManyInQueue, moveToFront, type QueueMany } from "./api";
+import { addManyToQueue, addToQueue, api, frontManyInQueue, moveToFront, queueCompanySites, type QueueMany } from "./api";
 import { ApplyChoice, ApplyChoices } from "./applychoice";
 import { ConfirmQueue, Refused, useSelection } from "./bulk";
 import { useWorkspace } from "./context";
@@ -13,7 +13,7 @@ import { OPEN_JOB_LINK } from "./jobintake";
 import { Pagination, type Paging } from "./pagination";
 import { TopActions, TopLine } from "./shell/Shell";
 import type { BoardFacet, BoardPage, BoardRow } from "./types";
-import { Button, Dialog, Empty, Input, Listbox, Monogram, Table, type Column } from "./ui/index";
+import { Button, Dialog, Empty, Input, Listbox, Monogram, Segmented, Table, type Column } from "./ui/index";
 import { LoadError, Notice, SearchBox } from "./worktools";
 import "./styles/queue.css";
 
@@ -26,9 +26,12 @@ const SORTS = [
 ] as const;
 type Sort = (typeof SORTS)[number]["value"];
 type Fit = "match" | "other" | "all";
+type Section = "main" | "sites";
+// Said wherever a company-site job can be sent: these are the jobs that fail most (jobpilot/company_sites.py).
+const SITES_WARNING = "Applications on company sites often fail. AXIOM sends one only when you choose it here.";
 
 // A row's place in one short phrase, the same word it has on every other screen.
-function StateCell({ r, asked }: { r: BoardRow; asked?: boolean }) {
+function StateCell({ r, asked, site }: { r: BoardRow; asked?: boolean; site?: boolean }) {
   if (asked && r.state !== "queue") return <span className="bd-state">In queue</span>;
   if (r.state === "queue")
     return (
@@ -38,7 +41,7 @@ function StateCell({ r, asked }: { r: BoardRow; asked?: boolean }) {
     );
   if (r.state === "approval") return <span className="bd-state">Needs you</span>;
   if (r.state === "checking") return <span className="bd-state is-idle">Checking fit</span>;
-  if (r.state === "ready") return <span className="bd-state">Ready</span>;
+  if (r.state === "ready") return site ? <span className="bd-state is-idle">Not queued</span> : <span className="bd-state">Ready</span>;
   return <span className="bd-state is-idle">Not applying</span>;
 }
 
@@ -70,6 +73,8 @@ export function BoardView() {
   // Grouped by company is the default: a company with hundreds of postings shows its best few and "N more at X".
   const [grouped, setGrouped] = useDraft("board-group", true);
   const [sort, setSort] = useDraft<Sort>("board-sort", "fit");
+  const [section, setSection] = useDraft<Section>("board-section", "main");
+  const sites = section === "sites";
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(25);
   useEffect(() => {
@@ -79,8 +84,8 @@ export function BoardView() {
     const timer = window.setTimeout(() => setQ(query.trim()), 250);
     return () => window.clearTimeout(timer);
   }, [query]);
-  useEffect(() => setPage(1), [q, fit, role, level, company, place, posted, platform, sort, grouped, size]);
-  const key = new URLSearchParams({ q, fit, role, level, company, place, posted, platform, sort, group: grouped ? "1" : "0", page: String(page), size: String(size) }).toString();
+  useEffect(() => setPage(1), [q, fit, role, level, company, place, posted, platform, sort, grouped, size, section]);
+  const key = new URLSearchParams({ q, fit, role, level, company, place, posted, platform, sort, group: grouped ? "1" : "0", page: String(page), size: String(size), section }).toString();
   const board = usePoll<BoardPage & { key: string }>(
     async (signal) => ({ ...(await api<BoardPage>(`/board?${key}`, "GET", undefined, signal)), key }),
     15000,
@@ -100,7 +105,7 @@ export function BoardView() {
   // A whole Select all: the server takes this many in one request (nothing starts until each job's turn).
   const selection = useSelection(5000);
   // What the filters show changed, so what was selected under them no longer means the same rows.
-  useEffect(() => selection.clear(), [q, fit, role, level, company, place, posted, platform, grouped]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => selection.clear(), [q, fit, role, level, company, place, posted, platform, grouped, section]); // eslint-disable-line react-hooks/exhaustive-deps
   const rowActs = useRowActions();
   // A row reads as in line the moment Queue is pressed; the next read of the board confirms it, or a refusal puts it back.
   const [asked, setAsked] = useState<ReadonlyMap<string, number>>(() => new Map());
@@ -134,7 +139,7 @@ export function BoardView() {
   };
   const add = async (r: BoardRow) => {
     setAsked((m) => new Map(m).set(r.id, Date.now()));
-    const out = await rowActs.act("add:" + r.id, () => addToQueue(r.id), (x) => x.message);
+    const out = await rowActs.act("add:" + r.id, () => (sites ? queueCompanySites([r.id]) : addToQueue(r.id)) as Promise<{ message: string }>, (x) => x.message);
     if (!out) setAsked((m) => { const next = new Map(m); next.delete(r.id); return next; });
     void again();
   };
@@ -144,7 +149,7 @@ export function BoardView() {
       "many",
       async () => {
         const ids = [...selection.ids];
-        const out = await (to === "front" ? frontManyInQueue([...ids].reverse()) : addManyToQueue(ids));
+        const out = await (to === "front" ? frontManyInQueue([...ids].reverse()) : sites ? queueCompanySites(ids) : addManyToQueue(ids));
         selection.clear();
         setRefused(out.refused);
         const failed = new Set(out.refused.map((x) => x.job_id));
@@ -236,7 +241,7 @@ export function BoardView() {
             {r.score != null && <span className="mono">Fit {r.score}</span>}
             <span>{r.dated ? ago(r.posted_at, now) : `Found ${ago(r.posted_at, now)}`}</span>
             <span>{platformName(r.ats)}</span>
-            <StateCell r={r} asked={inLine(r)} />
+            <StateCell r={r} asked={inLine(r)} site={sites} />
           </span>
         </button>
         {r.more > 0 && (
@@ -269,7 +274,7 @@ export function BoardView() {
       ),
     },
     { key: "when", header: "Posted, and where from", hideBelow: 860, cell: (r) => <When r={r} now={now} /> },
-    { key: "state", header: "Status", hideBelow: 600, cell: (r) => <StateCell r={r} asked={inLine(r)} /> },
+    { key: "state", header: "Status", hideBelow: 600, cell: (r) => <StateCell r={r} asked={inLine(r)} site={sites} /> },
     {
       key: "act",
       header: <span className="sr-only">Posting and queue</span>,
@@ -280,7 +285,7 @@ export function BoardView() {
         return (
           <div className="ax-act" onClick={(e) => e.stopPropagation()}>
             <ApplyChoice jobId={r.id} />
-            {r.state === "queue" && r.position !== 1 && (
+            {!sites && r.state === "queue" && r.position !== 1 && (
               <Button size="sm" className="ax-lead" loading={rowActs.busy.has("add:" + r.id)} onClick={() => void front(r)}>
                 To front
               </Button>
@@ -294,7 +299,7 @@ export function BoardView() {
               <span className="bd-state bd-queued">In queue</span>
             ) : (
               <Button size="sm" className="ax-lead" icon={<Plus size={13} aria-hidden="true" />} onClick={() => void add(r)}>
-                Queue
+                {sites ? "Apply" : "Queue"}
               </Button>
             ))}
             <Button
@@ -375,7 +380,12 @@ export function BoardView() {
           {searching ? "Searching…" : "Search now"}
         </Button>
       </TopActions>
-      {b && !planning && (
+      {b && !planning && sites && (
+        <TopLine>
+          {plural(b.all, "posting")} on a company's own site, not a platform AXIOM knows.
+        </TopLine>
+      )}
+      {b && !planning && !sites && (
         <TopLine>
           {b.all.toLocaleString()} open US postings from the last {span}, with closed ones and duplicates left out
           {progress ? `. Searching: ${progress}.` : b.searched_at ? `. Last searched ${ago(b.searched_at, now)}.` : "."}{" "}
@@ -407,6 +417,18 @@ export function BoardView() {
         </Notice>
       )}
       <div className="bd-search">
+        <div className="bd-section">
+          <Segmented<Section>
+            label="Job board section"
+            value={section}
+            onChange={setSection}
+            options={[
+              { value: "main", label: "Known platforms" },
+              { value: "sites", label: `Company sites${b?.sites != null ? " · " + b.sites.toLocaleString() : ""}` },
+            ]}
+          />
+        </div>
+        {sites && <Notice tone="warn">{SITES_WARNING} Use Apply on a row, or select the rows you want and apply to them.</Notice>}
         <div className="bd-toolbar" role="group" aria-label="Filter the job board">
           <SearchBox value={query} onChange={setQuery} label="Search the job board" placeholder="Role, company or city" />
           <Listbox label="Fit" value={fit} options={(b?.facets.fit?.length ? b.facets.fit : [{ value: "match", label: "Good fits" }]) as { value: Fit; label: string; count?: number }[]} onChange={setFit} />
@@ -448,18 +470,20 @@ export function BoardView() {
         bulk={
           <>
             <Button variant="primary" size="sm" loading={pending === "many"} disabled={pending !== null} onClick={() => setAsking("add")}>
-              {`Add to queue (${selection.ids.length.toLocaleString()})`}
+              {`${sites ? "Apply" : "Add to queue"} (${selection.ids.length.toLocaleString()})`}
             </Button>
-            <Button size="sm" disabled={pending !== null} onClick={() => setAsking("front")}>
-              To front
-            </Button>
+            {!sites && (
+              <Button size="sm" disabled={pending !== null} onClick={() => setAsking("front")}>
+                To front
+              </Button>
+            )}
           </>
         }
         empty={
           <Empty
             icon={filtered ? SearchX : Radar}
-            title={filtered ? "No jobs match these filters" : searching ? "Searching for new jobs" : "No open postings right now"}
-            hint={filtered ? "Clear a filter to see more." : searching ? `${progress ? progress + ". " : ""}Jobs appear here as they arrive.` : `Only US roles posted in the last ${span} are listed. The next scheduled search checks again.`}
+            title={filtered ? "No jobs match these filters" : sites ? "No company-site jobs" : searching ? "Searching for new jobs" : "No open postings right now"}
+            hint={filtered ? "Clear a filter to see more." : sites ? "Jobs on a company's own site appear here instead of the main list." : searching ? `${progress ? progress + ". " : ""}Jobs appear here as they arrive.` : `Only US roles posted in the last ${span} are listed. The next scheduled search checks again.`}
             action={filtered ? <Button size="sm" onClick={clear}>Clear the filters</Button> : undefined}
           />
         }
@@ -468,7 +492,8 @@ export function BoardView() {
       <ConfirmQueue
         open={asking !== null}
         count={selection.ids.length}
-        title={asking === "front" ? `Move ${plural(selection.ids.length, "job")} to the front?` : undefined}
+        title={asking === "front" ? `Move ${plural(selection.ids.length, "job")} to the front?` : sites ? `Apply to ${plural(selection.ids.length, "company-site job")}?` : undefined}
+        warning={sites ? SITES_WARNING : undefined}
         onClose={() => setAsking(null)}
         onConfirm={() => {
           const to = asking ?? "add";

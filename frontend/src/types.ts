@@ -816,6 +816,9 @@ export type BoardPage = {
   window: number;
   grouped?: boolean;
   per_company?: number;
+  /** How many company-site jobs the Company sites section holds (jobpilot/company_sites.py); they are never among `rows` of the main list. */
+  sites?: number;
+  section?: "main" | "sites";
   facets: Record<"fit" | "role" | "level" | "company" | "place" | "platform" | "posted", BoardFacet[]>;
 };
 // GET /api/jobs/{id}/posting: the job panel's posting.

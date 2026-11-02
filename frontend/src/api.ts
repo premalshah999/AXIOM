@@ -140,6 +140,8 @@ export const addToQueue = (jobId: string) => api<QueueMove>(`/queue/${jobId}/add
 /** What became of several jobs asked for at once: refusals come back one by one, each with its sentence (owner_apply.enqueue_many). */
 export type QueueMany = { added: number; already: number; refused: { job_id: string; company: string; title: string; reason: string }[]; message: string };
 export const addManyToQueue = (jobIds: string[]) => api<QueueMany>("/queue/add-many", "POST", { job_ids: jobIds });
+/** Company sites: the owner's own choice to send these (jobpilot/company_sites.py); nothing else puts one in line. */
+export const queueCompanySites = (jobIds: string[]) => api<QueueMany>("/queue/company-sites", "POST", { job_ids: jobIds });
 export const frontManyInQueue = (jobIds: string[]) => api<QueueMany>("/queue/front-many", "POST", { job_ids: jobIds });
 export const removeManyFromQueue = (jobIds: string[]) => api<{ removed: number; not_in_line: number }>("/queue/remove-many", "POST", { job_ids: jobIds });
 /** Take a job out of the queue until you put it back. */

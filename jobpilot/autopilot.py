@@ -415,6 +415,7 @@ def replenish_discovery(service, unattempted):
 # Why a candidate waited in a tick rather than being refused (autopilot.screen), shown beside the refusals.
 WAITING = {
     "focus": "The job's platform is set aside by the saved platform focus",
+    "company_site": "A company's own site: AXIOM sends it only when you choose it in Job board > Company sites",
     "busy": "Another application at this employer is running or queued; this one starts when it ends",
     "tailoring": "Preparing a tailored resume; it starts when ready",
 }
@@ -928,6 +929,11 @@ def screen_job(db, cfg, owner_profile, job, busy, *, board_ids, integrated, use_
         # Owner focus: platforms set aside for now are not dispatched.
         if current.ats in set(db.get_setting("ats_focus", {}).get("exclude", [])):
             return "focus", None, None
+        from .company_sites import allowed, is_company_site
+
+        # A company's own site waits for the owner to send it (Job board > Company sites); the batch never starts one.
+        if is_company_site(current.ats) and not allowed(s, jid):
+            return "company_site", None, None
         from .features.discovery.roles import role_fits
 
         if target_roles and not role_fits(current.title, target_roles):

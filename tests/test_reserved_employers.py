@@ -38,7 +38,7 @@ def iso(minutes_ago=0):
 def add_job(service, jid="amzn", company="Amazon", url="https://www.amazon.jobs/en/jobs/1", status="ready"):
     with service.db.exclusive() as s:
         s.add(Job(id=jid, identity=jid, url=url, company=company, title="Software Development Engineer",
-                  ats="custom", status=status, score=90, location="Remote, United States"))
+                  ats="greenhouse", status=status, score=90, location="Remote, United States"))
     return jid
 
 

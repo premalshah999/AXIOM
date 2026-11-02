@@ -226,6 +226,15 @@ def router(service) -> APIRouter:
     def add_many(data: ManyJobs):
         return many(data.job_ids)
 
+    @r.post("/api/queue/company-sites")
+    def company_sites(data: ManyJobs):
+        """Job board > Company sites: the owner sends these on purpose, one row's Apply or Select all in that section. Nothing else
+        puts a company's own site in line (company_sites.py), so the choice is remembered here, then each job is decided as a click."""
+        from ...company_sites import allow
+
+        allow(db, data.job_ids)
+        return many(data.job_ids)
+
     @r.post("/api/queue/front-many")
     def front_many(data: ManyJobs):
         return many(data.job_ids, front=True)
@@ -314,6 +323,10 @@ def router(service) -> APIRouter:
                     # Pasting the link again is the owner asking for it again. A removed job comes back unless an
                     # application may have reached the employer or it asked for an identifier (restore says which).
                     await asyncio.to_thread(restore, service, row["id"])
+                # A link the owner pastes is their own choice, a company's own site included (company_sites.py).
+                from ...company_sites import allow
+
+                await asyncio.to_thread(allow, db, [row["id"]])
                 outcome = await apply(service, row["id"])
                 results.append({"url": url, "job_id": row["id"], "created": created, **outcome, **({"resolved_url": link} if link != url else {})})
             except QueueBlocked as exc:
