@@ -367,6 +367,18 @@ def application_platform(ats_id):
     return not (unsettled(ats_id) or ats_id in AGGREGATORS)
 
 
+def platform_host(host):
+    """The host belongs to a platform the registry names, by its host alone (detect also reads an address's path, which any site can
+    copy). A job board's or a career-site front end's host is neither the employer's nor where an account lives."""
+    host = (host or "").lower().rstrip(".")
+    return any(
+        (host == domain or host.endswith("." + domain))
+        for ats in REGISTRY
+        if ats.id not in AGGREGATORS and ats.id not in VENDORS
+        for domain in ats.domains
+    )
+
+
 def marketing_host(url):
     """A platform's own marketing or corporate site (www.workable.com, icims.com), not a tenant of it. A link or script
     from there is a footer, a "Powered by" badge or a tracker: it says nothing about where this application is made.
@@ -395,6 +407,31 @@ def application_address(kind, value):
         # platform's own runtime on an employer's domain is the proof, so a script is rejected by what it is for.
         return not NOT_AN_APPLICATION.search(path)
     return True
+
+
+def apply_target(url):
+    """What an Apply link opens, however it is written: the posting its address names, else its page. The posting and its /apply, and a
+    tracking parameter, are one target."""
+    from .posting_match import _segments, _site, _strip_steps, posting_ids
+
+    return _site(url), frozenset(posting_ids(url)) or tuple(part.casefold() for part in _strip_steps(_segments(url)))
+
+
+def handoff_entries(entries, own_urls):
+    """What a page shows, for a caller that will move the run to what it finds. A page with Apply links to several postings is a job list, and
+    its first one is nobody's hand-off: only the one naming this job's own number (`own_urls`: the addresses the job was given) can be."""
+    from .posting_match import posting_ids
+
+    entries = list(entries)
+    links = {
+        apply_target(value)
+        for kind, value in entries
+        if kind in {"apply", "jsonld"} and detect(value).id != "custom" and application_address(kind, value)
+    }
+    if len(links) <= 1:
+        return entries
+    own = {number for url in own_urls if url for number in posting_ids(url)}
+    return [(kind, value) for kind, value in entries if kind not in {"apply", "jsonld"} or posting_ids(value) & own]
 
 
 def classify_embedded(entries):

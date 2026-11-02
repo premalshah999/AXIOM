@@ -427,6 +427,8 @@ async def test_a_vendor_sign_in_behind_take_assessment_gets_no_password_and_clos
     "url,on_vendor,state",
     [
         ("https://assess.vendor.test/login", True, "closed"),
+        ("https://assess.vendor.test/login", False, "closed"),  # "Go to assessment": no launcher's wording, the same vendor.
+        ("https://portal.outsidevendor.test/login", False, "waiting_browser"),
         ("https://www.linkedin.com/checkpoint/lg/login", False, "waiting_browser"),
         ("https://accounts.google.com/signin", False, "waiting_browser"),
     ],

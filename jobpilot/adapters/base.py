@@ -2938,7 +2938,8 @@ class Adapter:
         for f in passwords:
             frame_url = self.form.frames[f["id"]].url
             if not self.accounts.password_allowed(self.id, frame_url, self.job["url"]):
-                return self.defer("A password was requested on an unexpected website; not entering it")
+                host = urlsplit(frame_url).hostname or "an unknown host"
+                return self.defer(f"A password was requested on an unexpected website ({host}); not entering it")
         if (
             mode == "create"
             and known

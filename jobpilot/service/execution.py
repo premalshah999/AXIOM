@@ -360,6 +360,7 @@ class ExecutionMixin:
                 break
             await asyncio.sleep(idle)
         started = time.monotonic()
+        engine = None
         try:
             with self.db.session() as s:
                 self.check_cooldown(s, s.get(Job, run["job_id"]))
@@ -442,6 +443,10 @@ class ExecutionMixin:
                 "locations": [f"{Path(f.filename).name}:{f.lineno}:{f.name}" for f in frames[-5:]],
             }
             self._trace_failure(run_id, result["diagnostics"])
+        # Cancelled with no result of its own, the run still looked at its page (BrowserEngine.settle_possible_send): a form may have gone out,
+        # and a timed-out run is one a retry starts again.
+        if (settled := getattr(engine, "possible_send_end", None)) and result.get("state") in {"waiting_browser", "timed_out", "failed"}:
+            result = {**{k: v for k, v in result.items() if k != "recovery_cause"}, **settled}
         if result.get("state") != "stopped" or not self.return_to_queue(run_id, result, time.monotonic() - started):
             self.complete(run_id, result, time.monotonic() - started)
 

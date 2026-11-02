@@ -276,3 +276,54 @@ async def test_a_job_whose_question_excludes_the_applicants_state_is_closed(serv
     assert (await repair_run(service, run_id))["outcome"] == "closed"
     with service.db.session() as s:
         assert s.get(Run, run_id).state == "closed" and "Maryland" in s.get(Run, run_id).reason
+
+
+async def uncertain_stop(service, tmp_path, monkeypatch, receipt):
+    """A send-like stop that kept its final page, with an unsent-looking form on it, and a model that reads it as not submitted."""
+    run_id, job_id, folder = seed(service, tmp_path, state="submission_unknown", reason="A form was sent, and then the page changed")
+    with service.db.exclusive() as s:
+        s.get(Run, run_id).receipt = receipt
+    (folder / "final_outline.txt").write_text("h1: Apply: Data Analyst\nbutton: Submit application")
+    plan = RepairPlan(diagnosis="The form is still on the page.", category="submission", submission="not_submitted")
+
+    async def fake_structured(*args, **kwargs):
+        return plan
+
+    monkeypatch.setattr("jobpilot.models.structured", fake_structured)
+    return run_id, job_id, await repair_run(service, run_id)
+
+
+async def test_a_stop_on_another_posting_is_never_settled_as_not_submitted(service, tmp_path, monkeypatch):
+    """A form went out and the run stood on another posting. The model's reading of "Submit" wiped that mark and allowed a retry."""
+    run_id, job_id, summary = await uncertain_stop(service, tmp_path, monkeypatch, {"type": "possible_send", "other_posting": True})
+    assert summary["outcome"] == "unchanged"
+    with service.db.session() as s:
+        run = s.get(Run, run_id)
+        assert run.state == "submission_unknown" and run.receipt.get("other_posting") is True
+        assert s.get(Job, job_id).status != "ready"
+
+
+async def test_another_postings_thank_you_never_confirms_this_job_either(service, tmp_path, monkeypatch):
+    run_id, _, folder = seed(service, tmp_path, state="submission_unknown", reason="A form was sent, and then the page changed")
+    with service.db.exclusive() as s:
+        s.get(Run, run_id).receipt = {"type": "possible_send", "other_posting": True}
+    (folder / "final_outline.txt").write_text("h1: Thank you for your application for Data Analyst!")
+    plan = RepairPlan(diagnosis="It thanks the applicant.", category="submission", submission="confirmed",
+                      evidence_quote="Thank you for your application for Data Analyst!")
+
+    async def fake_structured(*args, **kwargs):
+        return plan
+
+    monkeypatch.setattr("jobpilot.models.structured", fake_structured)
+    assert (await repair_run(service, run_id))["outcome"] == "unchanged"
+    with service.db.session() as s:
+        run = s.get(Run, run_id)
+        assert run.state == "submission_unknown" and run.receipt.get("other_posting") is True
+
+
+async def test_a_plain_uncertain_stop_with_the_unsent_form_on_it_is_still_settled(service, tmp_path, monkeypatch):
+    """The closest case: nothing says another posting was reached, and the model can read the unsent form. It may be tried again."""
+    run_id, _, summary = await uncertain_stop(service, tmp_path, monkeypatch, {"type": "possible_send"})
+    assert summary["outcome"] == "not_submitted"
+    with service.db.session() as s:
+        assert s.get(Run, run_id).state != "submission_unknown"

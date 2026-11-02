@@ -23,6 +23,9 @@ POSTING_PARAMS = {
     "ghjid", "jobid", "jid", "reqid", "requisitionid", "jobreqid", "careerjobreqid", "postingid", "positionid",
     "jobnumber", "jobcode", "jobpostingid", "opportunityid", "vacancyid", "openingid", "job",
 }  # fmt: skip
+# ?id= and ?pid= name a posting on many sites (Eightfold's pid) and anything at all on others, so only a number counts, and it is only
+# compared on one page of the site: /apply?id=99887 can number the application its own way.
+BARE_PARAMS = {"id", "pid"}
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 YEAR = re.compile(r"(?:19|20)\d\d")
 COUNTER = re.compile(r"(?<=[0-9A-Za-z])-\d{1,2}$")  # A repost counter: R0076343-1 is R0076343.
@@ -42,6 +45,7 @@ STEP_WORD = re.compile(
     r"thank-?you|success|submitted|completed?|review|form|job|section|page|step-?\d*|\d",
     re.I,
 )
+APPLY_STEP = re.compile(r"apply(?:manually|now|withresume)?|applications?|applicationform", re.I)
 # A hyphenated page name of the site, not a role ("create-account", "job-search").
 SITE_PAGE_WORD = re.compile(
     r"\b(?:account|apply|application|applications|about|alerts?|benefits|candidate|career|careers|contact|culture|dashboard|"
@@ -96,6 +100,28 @@ def query_ids(url):
     return found
 
 
+def bare_ids(url):
+    """{parameter: number} of a bare ?id= or ?pid=."""
+    return {
+        key.casefold(): value
+        for key, value in parse_qsl(urlsplit(str(url or "")).query)
+        if key.casefold() in BARE_PARAMS and value.isdigit()
+    }
+
+
+def address_ids(url):
+    """Every number the address's parameters state."""
+    return {**bare_ids(url), **query_ids(url)}
+
+
+def _page_of(url):
+    """The page of the site an address opens, its Apply step aside: /careers and /careers/apply are one posting's."""
+    parts = [part.casefold() for part in _segments(url)]
+    while parts and APPLY_STEP.fullmatch(parts[-1]):
+        parts.pop()
+    return parts
+
+
 def _path_number(segments):
     """The address's posting number: the last one in it, read after the steps that can follow a posting's address."""
     parts = _strip_steps(segments)
@@ -110,7 +136,7 @@ def posting_ids(url):
     if found := query_ids(url):
         return set(found.values())
     number = _path_number(_segments(url))
-    return {number} if number else set()
+    return {number} if number else set(bare_ids(url).values())
 
 
 def _strip_steps(segments):
@@ -152,6 +178,9 @@ def other_posting_address(own_url, url):
     # One number in common: the same posting, whatever else the address says.
     if posting_ids(own_url) & posting_ids(url):
         return None
+    mine, here = bare_ids(own_url), bare_ids(url)
+    if (shared := mine.keys() & here.keys()) and all(mine[key] != here[key] for key in shared) and _page_of(own_url) == _page_of(url):
+        return "query"
     own_parts, parts = _strip_steps(_segments(own_url)), _strip_steps(_segments(url))
     if not own_parts or not parts or not _same_shape(own_parts, parts):
         return None
@@ -217,6 +246,9 @@ FILLER = {"a", "an", "and", "the", "of", "for", "to", "in", "at", "on", "with", 
 SAME_WORD = {"sr": "senior", "jr": "junior", "mgr": "manager", "eng": "engineer", "engg": "engineer", "dev": "developer", "swe": "engineer", "sde": "engineer"}  # fmt: skip
 LEVEL = {"i", "ii", "iii", "iv", "v", "vi", "1", "2", "3", "4", "5", "6"}
 LEVEL_SAME = {"1": "i", "2": "ii", "3": "iii", "4": "iv", "5": "v", "6": "vi"}
+# Seniority a title states. "Senior Software Engineer" is another requisition than "Software Engineer", whatever words they share.
+SENIORITY = {"senior", "junior", "staff", "principal", "lead", "associate", "intern", "trainee", "apprentice", "graduate", "grad",
+             "entry", "mid", "distinguished", "fellow", "head", "chief"}  # fmt: skip
 QUOTES = " \t\"'“”‘’:-"
 NOT_A_ROLE_WORD = re.compile(r"\b(?:jobs?|careers?|employment|opportunit(?:y|ies)|positions?|openings?|vacanc(?:y|ies)|team|us|company)\b", re.I)
 
@@ -234,9 +266,11 @@ def _levels(text):
 
 
 def clearly_other_role(own_title, stated, company=""):
-    """`stated` is a role, and plainly not the job's: no word of a role in common, or the same role at another numbered level
-    (Engineer I and Engineer II are different requisitions). Two titles for one job share words; "Staff Engineer" and "Senior
-    Engineer" can't be told apart here, and an id decides those. Unreadable, generic, or the employer's own name: not a role."""
+    """`stated` is a role, and plainly not the job's: no word of a role in common, the same role at another numbered level (Engineer I
+    and Engineer II are different requisitions), or under another seniority word ("Senior" for plain "Software Engineer", which would
+    otherwise pass the commit and read as confirmed). Two titles for one job otherwise share words. Where the job's own number is on the
+    page, that decides first, as a saved title goes stale (PostingWatch.other_role, receipt_conflict). Unreadable, generic, or the
+    employer's own name: not a role."""
     from .posting_identity import placeholder_title
 
     own, role = _meaningful(own_title), _meaningful(stated)
@@ -247,6 +281,8 @@ def clearly_other_role(own_title, stated, company=""):
     if company and role <= _meaningful(company) | {"inc", "llc", "ltd", "corp", "corporation", "company", "co", "group", "careers"}:
         return False  # "Thank you for applying for Acme".
     if own & role:
+        if own & SENIORITY != role & SENIORITY:
+            return True
         one, other = _levels(own_title), _levels(stated)
         return bool(own == role and one and other and not one & other)
     if any(a in b or b in a for a in own for b in role if min(len(a), len(b)) >= 4):
@@ -347,7 +383,7 @@ def _on_own_address(own_urls, url):
         if (
             (here.hostname or "").removeprefix("www.") == (there.hostname or "").removeprefix("www.")
             and here.path.rstrip("/").casefold() == there.path.rstrip("/").casefold()
-            and (not query_ids(own) or query_ids(own) == query_ids(url))
+            and (not address_ids(own) or address_ids(own) == address_ids(url))
         ):
             return True
     return False
@@ -429,6 +465,31 @@ def acknowledges_application(text):
     return False
 
 
+# A form's way forward, in other words than STEP_CONTROL's. A receipt's job-alert box says Subscribe.
+OTHER_STEP_CONTROL = re.compile(r"\s*(?:proceed|save(?: and| &|\s*$)|finish|confirm|start|begin|apply)\b", re.I)
+
+
+def still_applying(obs):
+    """After a write that may have been the application, with nothing able to read the page: the page in front is plainly a step of the
+    application, not what an employer shows once it has one. A form with its way forward, a review step, a sign-in or a registration, a
+    posting with its Apply. Nearly every multi-step form writes at each step, and a draft on its next step keeps its draft and its retry.
+    Anything else could be a receipt, and one that says so already is."""
+    if not obs or acknowledges_application(obs.get("text")):
+        return False
+    from .forms import FINAL
+
+    labels = [" ".join(str(control.get("label") or "").split()) for control in obs.get("controls") or ()]
+    if any(ENTRY_LABEL.fullmatch(label) for label in labels):
+        return True
+    fields = application_fields(obs)
+    if any(field.get("type") == "password" for field in fields):
+        return True
+    if fields:
+        return any(STEP_CONTROL.match(label) or FINAL.search(label) or OTHER_STEP_CONTROL.match(label) for label in labels)
+    # With nothing to answer, "Continue" is as likely the way back to the career site.
+    return any(FINAL.search(label) or re.match(r"\s*review\b", label, re.I) for label in labels)
+
+
 # The address of a write that carries no application.
 NOT_A_SEND = re.compile(
     r"log-?in|sign-?in|sign-?up|sso|oauth|auth|session|passw|regist|token|otp|verif|captcha|consent|cookie|collect|analytics|telemetry|"
@@ -474,6 +535,7 @@ class PostingWatch:
         self.job = job
         self.landing = landing  # The next page read is what the job's own address opened, with no click of ours between.
         self.sent_like = False  # A write that may have carried the application has gone out: nothing here opens the job again.
+        self.step_after_write = False  # The page after the newest such write was read, and it was the application's next step.
         self.own_urls = [u for u in dict.fromkeys((str(job.get("url") or ""), str(entry_url or ""))) if u]
         self.given_urls = tuple(self.own_urls)
         self.trail = bool(opened_fresh)
@@ -487,20 +549,27 @@ class PostingWatch:
     def numbers(self):
         return sorted({found for own in self.own_urls for found in posting_ids(own)})
 
-    def other_posting_link(self, href, base, label=""):
-        """The link opens another posting: another number in this job's own address shape, a label that reads as another role, or
+    def other_posting_link(self, href, base, label="", *, asking=False):
+        """The control opens another posting: another number in this job's own address shape, a label that reads as another role, or
         "View role" on a number this job hasn't shown. A link to an unfamiliar number labelled Apply or Continue stays a matter for
-        the page it opens: that's how a form that numbers the posting its own way is reached."""
+        the page it opens: that's how a form that numbers the posting its own way is reached. A control with no address to read (a button
+        that opens a page by script) has only its label. `asking`: the page asks for answers, and there a button labelled as a role with no
+        address is one of the answers ("Which role interests you?")."""
         href = str(href or "")
-        if not href or href.startswith(("#", "javascript:", "mailto:", "tel:")):
+        if href.startswith(("mailto:", "tel:")):
             return False
+        title, company = str(self.job.get("title") or ""), str(self.job.get("company") or "")
+        names_other = reads_as_role(label) and clearly_other_role(title, label, company)
+        if href in {"", "#"} or href.startswith("javascript:"):
+            return names_other and not asking
+        if href.startswith("#"):
+            return False  # A place on this page.
         target = urljoin(base, href)
         if _names_own_number(self.own_urls, target):
             return False
         if any(other_posting_address(own, target) for own in self.own_urls):
             return True
-        title, company = str(self.job.get("title") or ""), str(self.job.get("company") or "")
-        if reads_as_role(label) and clearly_other_role(title, label, company):
+        if names_other:
             return True
         return unrelated_posting_number(self.own_urls, target) and bool(BROWSING_LABEL.search(str(label or "")))
 
@@ -540,6 +609,8 @@ class PostingWatch:
         """A Verdict on the page at `url`. A page that passes while the run is on its trail becomes part of this job."""
         url = str(url or "")
         landing, self.landing = self.landing, False
+        if self.sent_like and not self.step_after_write and still_applying(obs):
+            self.step_after_write = True
         if not url.startswith("http"):
             return Verdict("ok")
         if why := self.other_role(url, obs, stated):

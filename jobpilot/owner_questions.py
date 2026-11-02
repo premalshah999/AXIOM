@@ -626,13 +626,10 @@ def cannot_automate(question, options=(), context=None, reason=""):
     return "", False
 
 
-MOTIVE = re.compile(r"why (?:this|our|are you|do you want)|cover letter", re.I)
-
-
 def employer_only(question, options=()):
     """True when the answer belongs to one employer ("Why this role?", "Are you related to anyone here?"). "Describe your experience with
     Python" in the same words is the same answer anywhere."""
-    from .knowledge import EMPLOYER_SPECIFIC
+    from .knowledge import EMPLOYER_SPECIFIC, MOTIVE
 
     text = tidy(question)
     return bool(EMPLOYER_SPECIFIC.search(text)) or (not choices(options) and bool(MOTIVE.search(text)))

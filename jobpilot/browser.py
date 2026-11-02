@@ -21,14 +21,16 @@ from openai import APIError
 from .models import AnswerModelUnavailable, BudgetExceeded
 
 from .answers import UNOFFERED_SOURCE, Resolver
-from .ats import EMBED_JS, LABEL_ONLY, REGISTRY, classify_embedded, detect, unsettled
+from .ats import EMBED_JS, LABEL_ONLY, REGISTRY, classify_embedded, detect, handoff_entries, unsettled
 from .posting_identity import IDENTITY_JS, identity, placeholder_title, save as save_identity
 from .posting_match import (
     PostingWatch,
     acknowledges_application,
+    application_fields,
     could_carry_application,
     other_posting_address,
     role_heading,
+    still_applying,
     unrelated_posting_number,
 )
 from .redaction import redact_data, redact_page
@@ -515,6 +517,14 @@ def header_token_endpoint(parts):
 
 # Unfinished outcomes whose tab closes once its draft is saved; their next run reopens the saved route.
 RELEASED_TAB_STATES = {"waiting_browser", "timed_out", "needs_review", "waiting_answer", "stopped"}
+# How a run ends when a retry can start it again from the job's own Apply.
+RESTARTABLE_ENDS = {"waiting_browser", "timed_out", "failed"}
+# Ends that named what is on the page: a security check, an account's refusal, a wait the site asked for, a mail wait, a question for the
+# owner. None of them is a page nothing could read.
+PAGE_WAS_READ = {"email_wait", "email_verification", "captcha", "account", "missing_fact", "social_login_only", "personal_test",
+                 "sensitive_id", "ineligible", "employer_limit", "other_posting"}  # fmt: skip
+PAGE_WAS_READ_CAUSES = {"security_challenge", "reset_cooldown", "sender_busy", "email_matched", "account_identity_conflict", "authentication",
+                        "account_acceptance", "posting_unavailable"}  # fmt: skip
 
 
 def request_shape(request):
@@ -2075,6 +2085,10 @@ class BrowserEngine:
             return self.result
         finally:
             self.settle_on_receipt_page()
+            try:
+                await self.settle_possible_send()
+            except Exception:
+                pass  # The run's own result stands; the commit's guards still hold.
             if getattr(self, "result", None) and hasattr(self, "form"):
                 self.result["browser_checkpoint"] = self.form.checkpoint_state(
                     self.run_record["packet"]["resume_sha"]
@@ -2858,7 +2872,7 @@ class BrowserEngine:
     def note_possible_send(self, request, response):
         """A write out of a form that holds answers may be the application itself, whatever its button was called (posting_match)."""
         watch, form = getattr(self, "posting_watch", None), getattr(self, "form", None)
-        if watch is None or watch.sent_like or form is None or response.status >= 400 or not self.real_write(request):
+        if watch is None or form is None or response.status >= 400 or not self.real_write(request):
             return
         if not (form.ledger or form.uploaded or getattr(form, "resume_on_file", False)):
             return
@@ -2866,7 +2880,9 @@ class BrowserEngine:
             body = request.post_data_buffer
         except Exception:
             body = b""  # Chrome withholds bodies that carry file bytes.
-        watch.sent_like = could_carry_application(request.url, body)
+        if could_carry_application(request.url, body):
+            watch.sent_like = True
+            watch.step_after_write = False  # This write's page is yet to be read.
 
     def form_post(self, response):
         """A step's form submission before the commit: where it went, the status, and the form's field names and
@@ -2926,7 +2942,7 @@ class BrowserEngine:
             return ats
         try:
             await page.wait_for_load_state("load", timeout=8000)
-            found, url, how = classify_embedded(await page.evaluate(EMBED_JS))
+            found, url, how = classify_embedded(handoff_entries(await page.evaluate(EMBED_JS), self.given_addresses()))
             if found == "greenhouse" and not url:
                 url = await self.late_greenhouse_frame(page)
         except Exception:
@@ -2997,12 +3013,14 @@ class BrowserEngine:
         try:
             landed = detect(page.url).id
             if unsettled(landed):
-                found, url, how = classify_embedded(await page.evaluate(EMBED_JS))
+                found, url, how = classify_embedded(handoff_entries(await page.evaluate(EMBED_JS), self.given_addresses()))
             else:
                 found, url, how = landed, None, "url"  # a redirect or new tab already on the platform's page
         except Exception:
             return None
         if not found or found == current or (current != "custom" and found in LABEL_ONLY):
+            return None
+        if await self.not_this_postings_page():
             return None
         form = getattr(self, "form", None)
         untouched = not (getattr(form, "ledger", None) or getattr(form, "uploaded", False))
@@ -3022,6 +3040,22 @@ class BrowserEngine:
                 self.emit("handoff_skipped", f"The page shows {found}, but the form is already in progress; staying on it", {"found": found})
             self.adopt_handoff(found)
         return found
+
+    def given_addresses(self):
+        """The addresses this job was given, never ones the run walked to."""
+        return [getattr(self, "job", {}).get("url", ""), getattr(self, "application_entry_url", "")]
+
+    async def not_this_postings_page(self):
+        """The last look before a hand-off makes this page the run's job: a job list or another posting never is, and the guard reads it
+        first (stay_on_posting, which went after the hand-off in the navigator's loop). True when it moved the run or stopped it."""
+        form = getattr(self, "form", None)
+        if form is None or self.watching_posting() is None:
+            return False
+        try:
+            obs = await form.scan()
+        except Exception:
+            return False  # A page that can't be read names no other posting; the commit looks again.
+        return await self.stay_on_posting(obs)
 
     def adopt_handoff(self, target, url=None):
         """The employer's site led to this platform: its own posting becomes the run's job URL in memory (Workday's
@@ -3168,6 +3202,8 @@ class BrowserEngine:
             self.emit("handoff", f"The application moved to {target}; its own adapter continues")
             result = await self.run_adapters(target)
             return None if result and result.get("fallback") and not self.armed else result
+        if await self.not_this_postings_page():
+            return None
         self.navigator_handed_off = True
         self.adopt_handoff(target)
         self.emit("handoff", f"The application moved to {target}; its own adapter continues")
@@ -4164,7 +4200,7 @@ class BrowserEngine:
                 }
                 return True
             return False  # Stays on the page, as it would without this guard. Other postings' links stay closed, and so does the commit.
-        if watch.just_returned or watch.returns >= 3 or not getattr(self, "application_entry_url", ""):
+        if watch.just_returned or watch.returns >= 2 or not getattr(self, "application_entry_url", ""):
             self.result = self.posting_stop("The employer's site didn't open this posting; nothing was sent")
             return True
         watch.returns += 1
@@ -4742,6 +4778,48 @@ class BrowserEngine:
                 return
             settled = self.received_application()
         except Exception:  # A page or database that is gone: the run's own result stands.
+            return
+        for key in ("recovery_cause", "blocker_type", "recoverable", "waiting_kind", "wait_handle"):
+            result.pop(key, None)
+        result.update(settled)
+
+    async def settle_possible_send(self):
+        """A write that may have been the application went out with nothing armed (a step's Continue can be the employer's real submit), and
+        the run is ending where a retry would start it again: the model is down, its time ran out, or nothing could read the page. Only the
+        model reads such a page, so what it couldn't read stayed "waiting_browser", and the retry applied a second time. The page says what
+        it can: its acknowledgement confirms it, its next step is a draft, and anything else is uncertain and isn't sent again. The result
+        changes in place, because the caller holds this same dict; a run cancelled with no result leaves its end for the worker."""
+        result = getattr(self, "result", None)
+        watch = getattr(self, "posting_watch", None)
+        if watch is None or not watch.sent_like or getattr(self, "armed", False) or self.steering():
+            return
+        if result and (
+            result.get("state") not in RESTARTABLE_ENDS
+            or result.get("waiting_kind") == "email"
+            or result.get("blocker_type") in PAGE_WAS_READ
+            or result.get("recovery_cause") in PAGE_WAS_READ_CAUSES
+        ):
+            return
+        try:
+            shown = await asyncio.wait_for(self.form.scan(), 6)
+            if not (shown.get("fields") or shown.get("controls") or str(shown.get("text") or "").strip()):
+                shown = None  # A blank tab reads as nothing: a crash's, not an employer's.
+        except Exception:
+            shown = None
+        # A tab that's gone can't say it holds no receipt, but the run may already have read this write's page: its next step (a crash mid-form).
+        if still_applying(shown) or (shown is None and watch.step_after_write):
+            return
+        settled = await self.page_acknowledged() if shown is not None else None
+        settled = settled or {
+            "state": "submission_unknown",
+            "reason": "A form went to the employer, and nothing could read the page after it, which may be the employer's receipt. It isn't sent again",
+            "blocker_type": "possible_send",
+            "receipt": {**((result or {}).get("receipt") or {}), "type": "possible_send"},
+            "diagnostics": {**((result or {}).get("diagnostics") or {}), "ended_as": (result or {}).get("state", ""), "ended_because": str((result or {}).get("reason") or "")[:200]},
+        }
+        self.emit("possible_send", "A form may have been sent, and nothing could read the page after it", {"settled": settled["state"]})
+        if result is None:
+            self.possible_send_end = settled
             return
         for key in ("recovery_cause", "blocker_type", "recoverable", "waiting_kind", "wait_handle"):
             result.pop(key, None)
@@ -5625,7 +5703,8 @@ class BrowserEngine:
                 continue  # Read the page again; a stop set the result and ends at the loop's top.
             if (watch := self.watching_posting()) is not None:
                 # The model is not offered another posting's link; forms.click refuses one if it names it anyway.
-                obs = {**obs, "controls": [c for c in obs["controls"] if not watch.other_posting_link(c.get("href"), obs["url"], c.get("label"))]}
+                asking = bool(application_fields(obs))
+                obs = {**obs, "controls": [c for c in obs["controls"] if not watch.other_posting_link(c.get("href"), obs["url"], c.get("label"), asking=asking)]}
             obs = await self.await_successfactors_handoff(obs)
             if self.result:
                 return

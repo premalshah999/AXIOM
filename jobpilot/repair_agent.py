@@ -418,6 +418,9 @@ async def _repair_run(service, run_id):
         if not run:
             return {"skipped": "missing run"}
         state, reason, job_id = run.state, run.reason or "", run.job_id
+        # A form went out and the run stood on another posting. A reconcile wipes that mark, and then a retry may send it again, or this
+        # job is booked as sent on another posting's thank-you. Only the owner settles it.
+        other_posting = bool((run.receipt or {}).get("other_posting"))
         newer = s.scalar(select(Run.id).where(Run.job_id == job_id, Run.created_at > run.created_at).limit(1))
         # Questions already sent to the owner are the repair; never ask twice or race their answer.
         asking = s.scalar(select(Review.id).where(Review.run_id == run_id, Review.answer.is_(None)).limit(1))
@@ -485,7 +488,7 @@ async def _repair_run(service, run_id):
         )
     outline = ev.get("final_page_outline", "")
     outcome = "unchanged"
-    if state == "submission_unknown":
+    if state == "submission_unknown" and not other_posting:
         quote = plan.evidence_quote.strip()
         if (
             plan.submission == "confirmed"

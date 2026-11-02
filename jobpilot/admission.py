@@ -253,6 +253,8 @@ def unknown_resubmit_allowed(session, runs, at=None, *, checked=True):
         return False
     if any((r.receipt or {}).get("other_posting") for r in runs):
         return False  # An application reached another of the employer's postings: a second send is never the answer.
+    if any((r.receipt or {}).get("type") == "possible_send" for r in runs):
+        return False  # Sent with nothing armed, and no one has read the page after it (browser.settle_possible_send): only a reading clears it.
     if len(unknown) > int(policy.get("max_resubmits", 2)):
         return False
     # A post-submit screenshot that shows the employer's confirmation means the
