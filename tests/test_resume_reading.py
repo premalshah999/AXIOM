@@ -307,6 +307,19 @@ def test_a_copy_written_in_a_looser_shape_is_still_those_words():
     assert doc.contact == ["alex@example.test"]
 
 
+def test_every_part_of_a_copy_has_its_own_id():
+    copy = whole_copy()
+    for section in copy["sections"]:
+        section["id"] = "same"
+        for entry in section["entries"]:
+            entry["id"] = "same"
+            for bullet in entry["bullets"]:
+                bullet["id"] = "b1"
+    doc = master._normalize(master.Imported(**copy))
+    ids = [s.id for s in doc.sections] + [e.id for s in doc.sections for e in s.entries] + [b.id for s in doc.sections for e in s.entries for b in e.bullets]
+    assert len(ids) == len(set(ids))
+
+
 def test_a_contact_line_of_many_items_keeps_every_word():
     copy = {**whole_copy(), "contact": [f"link{i}.example.test" for i in range(12)]}
     doc = master._normalize(master.Imported(**copy))

@@ -126,11 +126,15 @@ def doc_text(doc: ResumeDoc) -> str:
 
 def _spelled_by(word: str, pieces: Counter) -> bool:
     """Whether some of these words, end to end, spell this one exactly. Takes the ones it uses out of `pieces`."""
+    tries = [2000]  # A real word settles in a few steps; no resume may keep the event loop here.
 
     def walk(at: int) -> bool:
         if at == len(word):
             return True
         for end in range(len(word), at, -1):
+            tries[0] -= 1
+            if tries[0] < 0:
+                return False
             piece = word[at:end]
             if pieces[piece] > 0:
                 pieces[piece] -= 1
@@ -298,6 +302,16 @@ def _words(value) -> str:
 
 def _normalize(imported: Imported) -> ResumeDoc:
     sections = []
+    used: set[str] = set()
+
+    def own_id(wanted, place: str) -> str:
+        # Every later step finds a bullet by its id: two bullets called "b1" would be compared with each other's words.
+        name = str(wanted or place)
+        if name in used:
+            name = place
+        used.add(name)
+        return name
+
     for i, s in enumerate(imported.sections):
         kind = (
             s.get("kind")
@@ -313,10 +327,10 @@ def _normalize(imported: Imported) -> ResumeDoc:
                 b = b if isinstance(b, dict) else {"text": b}
                 text = _words(b.get("text"))
                 if text.strip():
-                    bullets.append({"id": b.get("id") or f"s{i}-e{j}-b{k}", "text": text, "unit_id": None, "source_text": text, "include": True})
+                    bullets.append({"id": own_id(b.get("id"), f"s{i}-e{j}-b{k}"), "text": text, "unit_id": None, "source_text": text, "include": True})
             entries.append(
                 {
-                    "id": e.get("id") or f"s{i}-e{j}",
+                    "id": own_id(e.get("id"), f"s{i}-e{j}"),
                     "heading": _words(e.get("heading")),
                     "subheading": _words(e.get("subheading")),
                     "dates": _words(e.get("dates")),
@@ -326,7 +340,7 @@ def _normalize(imported: Imported) -> ResumeDoc:
             )
         sections.append(
             {
-                "id": s.get("id") or f"s{i}",
+                "id": own_id(s.get("id"), f"s{i}"),
                 "title": _words(s.get("title")),
                 "kind": kind,
                 "entries": entries,
