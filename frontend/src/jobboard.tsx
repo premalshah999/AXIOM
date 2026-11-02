@@ -140,12 +140,6 @@ export function BoardView() {
     setPosted("all");
     setPlatform("all");
   };
-  const blockers = [
-    !snapshot.config.workers_enabled && "application workers are disabled",
-    !snapshot.control.auto_submit && "sending is off (Settings › Applying)",
-    snapshot.control.paused && "AXIOM is stopped (press Resume applications at the top)",
-  ].filter(Boolean) as string[];
-  const canApply = blockers.length === 0;
   // A job in line waits for these, so say so here: without it, a row reads In queue and nothing ever starts.
   const stalled = snapshot.control.paused
     ? "AXIOM is stopped, so jobs in the queue wait until you press Resume applications."
