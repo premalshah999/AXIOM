@@ -85,28 +85,31 @@ def create(db, job, source, profile, proposals, brief, replaces=()):
     """`replaces` holds, for each proposal in turn, the project it takes the place of. A proposal past its end adds to the page."""
     signature = fingerprint(job, source, profile)
     existing = find(db, signature)
-    if existing:
+    if existing and (existing["drafts"] or not proposals):
         return existing
-    wid = new_id("ag-")
     replaces = list(replaces)
-    drafts = [
-        {"id": wid + f":p{i}", "confirmed": False, "replaces": replaces[i] if i < len(replaces) else None, **p.model_dump()}
-        for i, p in enumerate(proposals)
-    ]
-    payload = {
-        "company": job.get("company", ""),
-        "role": job.get("title", ""),
-        "brief": brief.model_dump(),
-        "drafts": drafts,
-        "selected_drafts": [d["id"] for d in drafts],
-        "removed_projects": replaces[: len(drafts)],
-        "source_doc": source.doc.model_dump(),
-        "source_style": source.style.model_dump(),
-        "posting": job.get("description", ""),
-        "report": {},
-    }
+
+    def payload_for(wid):
+        drafts = [
+            {"id": wid + f":p{i}", "confirmed": False, "replaces": replaces[i] if i < len(replaces) else None, **p.model_dump()}
+            for i, p in enumerate(proposals)
+        ]
+        return {
+            "company": job.get("company", ""),
+            "role": job.get("title", ""),
+            "brief": brief.model_dump(),
+            "drafts": drafts,
+            "selected_drafts": [d["id"] for d in drafts],
+            "removed_projects": replaces[: len(drafts)],
+            "source_doc": source.doc.model_dump(),
+            "source_style": source.style.model_dump(),
+            "posting": job.get("description", ""),
+            "report": {},
+        }
+
+    wid = new_id("ag-")
     if db is None:
-        return {"id": wid, "revision": 0, "source_sha": source.sha, **payload}
+        return {"id": wid, "revision": 0, "source_sha": source.sha, **payload_for(wid)}
     ensure(db)
     with db.exclusive() as s:
         # Check again under the writer lock: simultaneous previews share choices.
@@ -117,10 +120,16 @@ def create(db, job, source, profile, proposals, brief, replaces=()):
                 fingerprint=signature,
                 job_key=key_for(job),
                 source_sha=source.sha,
-                payload=payload,
+                payload=payload_for(wid),
                 revision=0,
             )
             s.add(row)
+            s.flush()
+        elif not (row.payload or {}).get("drafts") and proposals:
+            # An earlier run's workspace with no drafts holds no choice. Kept, it gave every later run of this job no drafts
+            # at all: OpenAI's posting (2026-11-02), whose length repair fixed both drafts, showed none and said nothing.
+            row.payload = payload_for(row.id)
+            row.revision = (row.revision or 0) + 1
             s.flush()
         return view(row)
 
