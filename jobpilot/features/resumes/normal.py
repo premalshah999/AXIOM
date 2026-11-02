@@ -231,6 +231,10 @@ _TIGHTEN = (
     (r"\bwith the use of\b", "with"),
     (r"\bprior to\b", "before"),
 )
+# The same meaning in fewer letters, for a line a few characters over.
+_SHORTER = (
+    ("through", "via"), ("including", "with"), ("multiple", "many"), ("additional", "more"), ("developed", "built"), ("reduced", "cut"), ("using", "with"), ("around", "about"),
+)  # fmt: skip
 # Resumes drop articles anyway. Not in "twice a week", "at a time", "as a result" or "a few", which need theirs.
 _SMALL_WORD = re.compile(r"(?<![\w/-])(?<!\bas )(?:the|an?) (?!(?:week|month|day|year|quarter|shift|hour|night|time|row|few|lot|number|total|result|service)\b)")
 LITTLE_OVER = 15
@@ -244,6 +248,10 @@ def tighten(text: str, high: int) -> str:
         text = re.sub(pattern, plain, text, flags=re.I)
     if len(text) - high > LITTLE_OVER:
         return text  # Far over isn't a slip. One repair gets it, with the real count.
+    for long, short in _SHORTER:
+        if len(text) <= high:
+            return text
+        text = re.sub(rf"\b{long}\b", lambda m, s=short: gates._case(m.group(0), s), text, flags=re.I)
     while len(text) > high:
         small = list(_SMALL_WORD.finditer(text))
         if not small:
@@ -302,11 +310,16 @@ def refuse_reason(candidate: str, source_text: str, vocabulary: str, forbidden_r
     return ""
 
 
+_DANGLING = re.compile(r"\b(?:and|or|the|an?|of|for|with|to|in|on|at|by|from|that|which|as|using|including|into|while)\W*$", re.I)
+
+
 def keeps_reason(candidate: str, source_text: str) -> str:
-    """What this mode asks beyond refuse_reason: a rewrite takes no fact off the page."""
+    """What this mode asks beyond refuse_reason: a rewrite takes no fact off the page, and doesn't stop mid-sentence to fit."""
     gone = claims.dropped(candidate, source_text)
     if gone:
         return "it drops " + ", ".join(gone) + "; every number and name in the source stays"
+    if _DANGLING.search(candidate) and not _DANGLING.search(source_text):
+        return "it stops mid-sentence; end on a complete thought"
     if preserved(candidate, source_text) < NORMAL_PRESERVED:
         return "it loses too much of what the source says; keep its own words and move them"
     return ""
@@ -468,7 +481,8 @@ def rewrite_rows(doc: ResumeDoc, keywords: list[dict]) -> tuple[list[dict], list
             "min_chars": low,
             "max_chars": high,
             "aim_chars": (low + high) // 2,
-            "lead_with": [spelled(k["term"]) for k in states[:LINE_TERMS]],
+            # As the line spells it: "RAG" is already a match for "retrieval-augmented generation", and the long form wouldn't fit.
+            "lead_with": [re.search(k["pattern"], text, re.I | re.A).group(0) for k in states[:LINE_TERMS]],
             "say_as": [spelled(k["term"]) for k in say],
         }
         if gain:

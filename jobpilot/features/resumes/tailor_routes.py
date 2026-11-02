@@ -337,9 +337,10 @@ def add(r, service) -> None:
             raise HTTPException(422, "The edited PDF failed its ATS extraction checks.")
         terms = v.get("ats_terms") or []
         from . import gates
+        from .normal import forbidden_terms
 
-        # A term nothing supports, which they typed themselves. It stays, because it's their resume, and they're told plainly.
-        typed = ats.adds_forbidden(doc_plain(data.doc), evidence_text, ats.forbidden(ats.score(terms, doc_plain(source), evidence_text)))
+        # A term nothing supports, which they typed themselves. It stays, because it's their resume, and they're told plainly. A term their own bullet already says in other words isn't one.
+        typed = ats.adds_forbidden(doc_plain(data.doc), evidence_text, forbidden_terms(ats.score(terms, doc_plain(source), evidence_text), source))
         if typed:
             rules["warnings"].append({"code": "your_statement", "where": "resume", "message": "Nothing else you've given AXIOM says you have: " + ", ".join(typed[:8]) + ". Keep it only if it's true."})
 

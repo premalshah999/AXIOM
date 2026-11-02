@@ -182,6 +182,11 @@ def test_a_run_on_posting_keeps_its_real_terms_and_drops_the_legal_text_and_the_
     assert not [t for t in rows if "your" in t or "want" in t]
 
 
+def test_a_real_duty_that_sounds_like_boilerplate_stays_a_duty():
+    parts = ats.blocks("Responsibilities\nFollow safety procedures on the production floor. Provide dental care to patients. Track time off requests in Workday.")
+    assert "safety procedures" in parts["duties"] and "dental care" in parts["duties"] and "Workday" in parts["duties"]
+
+
 def test_a_word_only_repetition_made_a_term_is_marked_common():
     rows = {t["term"]: t for t in ats.terms("Requirements\nExperience with Python. Great reasoning, clear reasoning, careful reasoning.", "")}
     assert rows["reasoning"]["common"] is True
@@ -375,6 +380,7 @@ def test_a_described_term_lands_and_is_what_raises_the_score():
         ("Administered medications and documented every dose in a chart for up to 6 patients on a surgical unit", "drops Epic"),
         ("Administered medications and documented every dose in Epic for several patients on a surgical floor", "drops 6"),
         ("Reviewed old invoices and documented every dose in Epic for up to 6 people at the surgical front desk", "loses too much"),
+        ("Administered medications, documented every dose in Epic for up to 6 patients on a unit in the", "mid-sentence"),
     ],
 )
 def test_a_rewrite_that_adds_or_loses_a_fact_is_refused_for_that_reason(attempt, why):
@@ -393,10 +399,66 @@ def test_a_rewrite_that_adds_or_loses_a_fact_is_refused_for_that_reason(attempt,
         ("Saved about 2 hours a week for the team", 35, "Saved about 2 hours a week for team"),  # "a week" keeps its "a".
         ("Ran A/B tests, charts, and reports.", 34, "Ran A/B tests, charts and reports."),
         ("Ran reports.", 11, "Ran reports"),
+        ("Reduced errors by audits", 20, "Cut errors by audits"),  # The first word keeps its capital.
+        ("Ran audits using scripts through cron", 34, "Ran audits using scripts via cron"),
     ],
 )
 def test_a_small_overrun_is_tightened_without_touching_a_fact(text, high, want):
     assert normal.tighten(text, high) == want
+
+
+# What a good editor writes for these lines. If a check refuses one of these, the check is wrong.
+HONEST_REWRITES = [
+    (
+        "Built an automated reporting pipeline in SQL and Python that replaced a manual spreadsheet process for the finance team, cutting month-end report preparation from 3 days to 4 hours.",
+        "Built automated financial reporting pipeline in SQL and Python, replacing a manual spreadsheet process for the finance team and cutting month-end report preparation from 3 days to 4 hours.",
+        "financial reporting",
+    ),
+    (
+        "Cared for up to 6 patients per shift on a 32-bed medical-surgical unit, including post-operative recovery and wound care.",
+        "Delivered patient care for up to 6 per shift on a 32-bed medical-surgical unit, including post-operative recovery and wound care.",
+        "patient care",
+    ),
+    (
+        "Administered medications and documented every dose and assessment in Epic during each shift, with zero reportable charting errors in 2023",
+        "Led medication administration and documented every dose and assessment in Epic each shift, with zero reportable charting errors in 2023",
+        "medication administration",
+    ),
+    (
+        "Processed about 300 vendor invoices a month in QuickBooks and resolved payment disputes with suppliers",
+        "In QuickBooks, processed about 300 vendor invoices a month, resolved payment disputes with suppliers",
+        "QuickBooks",
+    ),
+    (
+        "Wrote integration tests with pytest and ran them in GitHub Actions on every pull request, raising coverage from 52% to 81%.",
+        "Ran pytest integration tests in GitHub Actions on every pull request, raising test coverage from 52% to 81% for the team.",
+        "GitHub Actions",
+    ),
+    (
+        "Wrote product pages and blog posts, and tracked organic traffic in Google Analytics each month for the director's report",
+        "Tracked organic traffic in Google Analytics each month for the director's report, and wrote product pages and blog posts",
+        "Google Analytics",
+    ),
+    (
+        "Reduced p95 latency on the invoice endpoint from 1.8 seconds to 400 milliseconds by adding a Redis cache",
+        "Added a Redis cache that reduced p95 latency on the invoice endpoint from 1.8 seconds to 400 milliseconds",
+        "Redis",
+    ),
+    (
+        "Moved 300 US customers to the new billing system through a staged rollout and answered every support ticket",
+        "Moved 300 US customers to the new billing system via a staged rollout and answered every single support ticket",
+        "billing",
+    ),
+]
+
+
+@pytest.mark.parametrize("line,rewrite,term", HONEST_REWRITES, ids=[r[2] for r in HONEST_REWRITES])
+def test_an_honest_rewrite_lands(line, rewrite, term):
+    keywords = ats.score(ats.terms(f"Requirements\nExperience with {term} and Kubernetes.", ""), line, line)["keywords"]
+    doc = one_bullet(line)
+    changes, refused = normal.apply_bullets(doc, [normal.PlanBullet(id="b1", text=rewrite)], keywords)
+    assert changes and not refused, refused
+    assert ats.matches(ats.pattern_for(term), doc.sections[0].entries[0].bullets[0].text)
 
 
 def test_far_over_isnt_a_slip_so_its_articles_stay_for_the_repair():

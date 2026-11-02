@@ -98,9 +98,9 @@ def hostile(posting):
 
 
 def _trim(text: str, until: int) -> str:
-    """How a model pays for a term: little words first, last ones first, then other plain words. Never a figure or a name."""
+    """How a model pays for a term: little words first, last ones first, then words that say little. It never cuts a figure or a name, so it can stay over."""
     while len(text) > until:
-        hits = list(re.finditer(r"(?<![\w/-])(?:the|an?) ", text))
+        hits = list(normal._SMALL_WORD.finditer(text))
         if not hits:
             break
         text = text[: hits[-1].start()] + text[hits[-1].end() :]
@@ -108,9 +108,9 @@ def _trim(text: str, until: int) -> str:
     for i in range(len(words) - 1, 1, -1):
         if len(" ".join(words)) <= until:
             break
-        if words[i].isalpha() and words[i] == words[i].lower() and words[i] not in {"and", "to", "of", "by", "for", "in", "on", "with", "from"}:
+        if words[i] in {"during", "also", "very", "really", "just", "short", "small", "new", "every", "each", "about", "average", "annual", "weekly", "monthly"}:
             del words[i]
-    return " ".join(words).rstrip(",;")
+    return " ".join(words)
 
 
 def _worked_in(text: str, say_as: list[str], lead_with: list[str]) -> str:

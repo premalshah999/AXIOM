@@ -68,7 +68,8 @@ INLINE_HEAD = re.compile(
 # Legal and benefits sentences a posting often runs on into, under whichever heading came last. They never describe the work.
 BOILERPLATE = re.compile(
     r"equal (?:employment )?opportunity|consideration for employment|without regard to|regardless of (?:race|age|gender|sex)|protected (?:veteran|class|status|basis)|national origin|sexual orientation"
-    r"|reasonable accommodation|e-verify|follow [\w.' ]{1,30} on\b|learn more at\b|parental leave|time off\b|health,? (?:vision|dental)|medical,? dental|dental,? (?:and )?vision|401\(?k\)?"
+    r"|reasonable accommodation|e-verify|follow [\w.' ]{1,30} on (?:linkedin|twitter|facebook|instagram|glassdoor)\b|learn more at\b|parental leave|(?:paid|discretionary|flexible|unlimited|generous) time off"
+    r"|health,? (?:vision|dental)|medical,? dental|dental,? (?:and )?vision|401\(?k\)?"
     r"|competitive (?:compensation|salary|pay|benefits)",
     re.I,
 )
