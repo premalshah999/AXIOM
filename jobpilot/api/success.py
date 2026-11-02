@@ -1,50 +1,42 @@
-"""The success number the owner asked for (2026-10-31): of the jobs AXIOM could honestly apply to, how many were confirmed.
+"""The success number the owner asked for (2026-10-31), made defensible for an investor (2026-11-02): of the jobs AXIOM was
+attempting, how many were confirmed, with every exclusion named and every confirmation graded by its evidence.
 
-Read-only and cheap: one pass over the `runs` rows of the window joined to their job's platform, never the `events` table, then
-aggregated here, so it holds on any database and on synthetic rows in tests. The definitions are the ones the 90% push was
-measured with (scratchpad/agents/land/score.sql), so this endpoint and that query agree on the same rows:
+Read-only and cheap: one pass over the `runs` rows of the window joined to their job's platform, never the `events` table
+except for the commit of a job whose only proof is an employer's "already applied" page, then aggregated by success_core.py
+(no database there, so the same rules score a saved dump). The rules and their reasons are in success_core.py; the queries
+that give the same numbers on the live database are scripts/metrics/success.sql, one named query per figure.
 
-- tried: jobs with at least one real run (not a dry run) in the window;
-- closed: the job's last run in the window ended closed or cancelled (a posting gone, a rule that drops the job, the owner's delete),
-  and it was never confirmed;
-- already applied: some run found the employer's own "already applied" (or a duplicate of a confirmed link), never confirmed;
-- owner only: the last run is waiting on something only the owner can make (references, supervisors, a video, a work sample);
-- eligible: tried, minus closed, minus already applied, minus owner only (a closed job that was confirmed anyway stays in);
-- final: confirmed at any point in the window, over the eligible jobs; first try: confirmed by the job's first run, not counting
-  a run a stop of the app interrupted before anything was sent: that was no try, and its job resumes for free.
+A job is counted once, in the cohort of the window its first real run fell in, by its last run so far. Reported side by side: attempted; raw (confirmed / attempted);
+filtered (confirmed / eligible, where eligible = attempted minus the jobs left out, each with a structured reason); first try
+(confirmed by the job's first run, over the same eligible jobs; a run a stop of the app interrupted was no try); strict
+(waiting-on-owner and in-progress jobs counted as misses); and the evidence behind the confirmations (strong, medium, weak).
 """
 
-import re
 from datetime import UTC, datetime, timedelta
-from math import floor
 
 from sqlalchemy import func, select
+from sqlalchemy.orm import aliased
 
 from ..db import Event, Job, Run
 from ..host_health import INTERRUPTED
+from .success_core import NEEDS_OWN_COMMIT, TARGET, classify_jobs, evidence, pct, tally  # noqa: F401  (pct, TARGET: importers of the old module)
 
-TARGET = 90  # percent, per platform with volume and overall (the owner's goal)
 VOLUME = 8  # a platform with fewer tried jobs says too little to hold to the target
-CLOSED = {"closed", "cancelled"}
-# Things only the owner can make; the engine can never answer them, so they're not an engine failure.
-# iCIMS packet forms carry no caption text, so a run's reason names the page's own field ids: "SupName; SupTitle" for the
-# supervisor of each work row and "Ref1LastName; Ref Name2" for references (a manufacturer's application, a trucking
-# company's, 2026-10-27). They are the same supervisor/reference facts answers/people_rules.py sends to the owner, so they
-# count the same: those two jobs read as engine failures, 2 of the 10 iCIMS jobs short of the target that week.
-OWNER_ONLY = re.compile(
-    r"supervisor|reference|\bsup(?:name|title|phone|email|contact)\b|\bref ?(?:name|\d)|"
-    r"video|writing sample|work sample|portfolio|publication",
-    re.I,
-)
-
-
-def pct(part, whole):
-    """A percentage to one decimal, or None with nothing to divide by. Never rounded up to a whole number: 89.6 is not 90."""
-    return floor(1000 * part / whole) / 10 if whole else None
-
-
-# The proof pages an employer shows for an application that is already on file (workday.py, forms.py).
-EXISTING_FLAGS = ("existing_application_notice", "reconciled_existing_submission")
+# Events that show AXIOM itself began a commit (a submit click or request), the only thing that makes an employer's
+# "already applied" page one of AXIOM's applications. Page posts (`form_post`) are not: they also carry sign-ins and drafts.
+COMMIT_KINDS = ("submitting", "submission", "submission_requests", "step_submit")
+# Receipt fields the evidence grade reads, as success_core.evidence names them.
+RECEIPT = {
+    "type": ("type",),
+    "web": ("website_confirmed",),
+    "ean": ("existing_application_notice",),
+    "res": ("reconciled_existing_submission",),
+    "mea": ("matched_existing_application",),
+    "sel": ("evidence_selector",),
+    "mail": ("email", "message_id"),
+    "trusted": ("email", "sender_trusted"),
+    "auth": ("email", "authenticated"),
+}
 
 
 def first_commits(session, job_ids):
@@ -55,68 +47,36 @@ def first_commits(session, job_ids):
         session.execute(
             select(Run.job_id, func.min(Run.created_at))
             .join(Event, Event.run_id == Run.id)
-            .where(Event.kind == "submitting", Run.job_id.in_(job_ids))
+            .where(Event.kind.in_(COMMIT_KINDS), Run.job_id.in_(job_ids))
             .group_by(Run.job_id)
         ).all()
     )
 
 
 def jobs_in_window(session, cutoff):
-    """{job id: facts} for every job with a run created since `cutoff`: the platform, whether any run confirmed or found the
-    job already applied, the state of the first real run and the state and reason of the last.
+    """One classified dict per job first tried since `cutoff`, read from all its runs (success_core.classify_jobs).
 
-    A run confirmed by the employer's "already applied" page counts as a submission only when AXIOM's own earlier attempt at the
-    job began a commit; otherwise the application was not ours and the job is already applied (2026-11-01: 64 of 74 such
-    confirmations had no commit of ours behind them). Stored results are not rewritten; only this count reads them so."""
+    A weak receipt (an employer's "already applied" page, a quoted final page, a note) confirms a job only when AXIOM's own
+    earlier attempt began a commit; otherwise the application was not ours and the job is "already on file" (2026-11-01: 64
+    of 74 such existing-application confirmations had no commit of ours behind them). Stored results are not rewritten; only
+    this count reads them so."""
+    fields = list(RECEIPT)
+    window = aliased(Run)  # a name of its own: a bare Run inside this query would correlate with the outer one
     rows = session.execute(
-        select(Run.job_id, Job.ats, Run.state, Run.reason, Run.created_at,
-               *(Run.receipt[flag].as_string() for flag in EXISTING_FLAGS))
+        select(Run.job_id, Job.ats, Run.state, Run.reason, Run.created_at, Run.packet["blocker_type"].as_string(),
+               *(Run.receipt[path[0] if len(path) == 1 else path].as_string() for path in RECEIPT.values()))
         .join(Job, Job.id == Run.job_id)
-        .where(Run.created_at >= cutoff, Job.demo.is_(False))
+        .where(Run.job_id.in_(select(window.job_id).where(window.created_at >= cutoff)), Job.demo.is_(False))
         .order_by(Run.job_id, Run.created_at, Run.id)
     ).all()
-    flagged = {r[0] for r in rows if r[2] == "confirmed" and any(v not in (None, "false", "null") for v in r[5:])}
-    owned = first_commits(session, flagged)
-    jobs = {}
-    for job_id, ats, state, reason, created, *flags in rows:
-        j = jobs.setdefault(job_id, {"ats": ats, "ok": False, "dup": False, "ghost": False, "first": None})
-        if state == "confirmed" and any(v not in (None, "false", "null") for v in flags):
-            if job_id not in owned or owned[job_id] > created:
-                state, j["ghost"] = "already_applied", True
-        j["ok"] |= state == "confirmed"
-        j["dup"] |= state == "already_applied" and not j["ghost"]
-        # Six of a night's 24 stopped runs were one restart of the app (2026-11-01): each read as a job's failed first try.
-        if j["first"] is None and state != "dry_run_passed" and (reason or "") != INTERRUPTED:
-            j["first"] = state
-        j["last"], j["why"] = state, reason or ""
-    # A job whose only runs were dry runs was never tried; one only interrupted has its retry coming, and counts as tried.
-    for j in jobs.values():
-        if j["first"] is None and j["last"] != "dry_run_passed":
-            j["first"] = j["last"]
-        # An existing application that was not ours is "already applied" unless some run of ours confirmed the job.
-        j["dup"] |= j["ghost"] and not j["ok"]
-    return [j for j in jobs.values() if j["first"] is not None]
-
-
-def tally(jobs):
-    closed = sum(j["last"] in CLOSED and not j["ok"] for j in jobs)
-    duplicate = sum(j["dup"] and not j["ok"] for j in jobs)
-    owner = sum(bool(OWNER_ONLY.search(j["why"])) and not j["ok"] and j["last"] not in CLOSED for j in jobs)
-    open_jobs = sum(j["last"] not in CLOSED and not j["dup"] for j in jobs)
-    confirmed = sum(j["ok"] for j in jobs)
-    counted = open_jobs - owner  # the jobs the engine was expected to confirm
-    final = pct(confirmed, counted)
-    return {
-        "tried": len(jobs),
-        "closed": closed,
-        "already_applied": duplicate,
-        "owner_only": owner,
-        "eligible": counted + sum(j["last"] in CLOSED and j["ok"] for j in jobs),
-        "confirmed": confirmed,
-        "final_pct": final,
-        "first_try_pct": pct(sum(j["first"] == "confirmed" for j in jobs), counted),
-        "meets_target": counted > 0 and 100 * confirmed >= TARGET * counted,
-    }
+    plain = [
+        dict(job=job, ats=ats, state=state, created=created, blocker=blocker, receipt=dict(zip(fields, values)),
+             # Six of a night's 24 stopped runs were one restart of the app (2026-11-01): each read as a job's failed first try.
+             interrupted=(reason or "") == INTERRUPTED)
+        for job, ats, state, reason, created, blocker, *values in rows
+    ]
+    flagged = {r["job"] for r in plain if r["state"] == "confirmed" and evidence(r["receipt"])[1] in NEEDS_OWN_COMMIT}
+    return classify_jobs(plain, first_commits(session, flagged), cutoff)
 
 
 def success(session, days=7, now=None):

@@ -73,18 +73,20 @@ def test_each_kind_of_job_lands_in_its_bucket(report):
     assert gh["tried"] == 9  # not the dry run, not the old run, not the demo
     assert gh["closed"] == 2 and gh["already_applied"] == 1 and gh["owner_only"] == 1
     assert gh["confirmed"] == 4  # first, second, refs_ok, confirmed_then_closed
-    # eligible: tried 9 - closed or cancelled 3 (a confirmed one stays in) - already applied 1 - owner only 1 = 4, plus the
-    # job that was confirmed before it closed.
-    assert gh["eligible"] == 5
+    # eligible = confirmed 4 (the job confirmed before it closed stays in) + failed 1 ("lost"); the closed, cancelled, already
+    # applied and owner-only jobs are left out, each under its own reason.
+    assert gh["eligible"] == 5 and gh["failed"] == 1
+    assert gh["excluded"]["closed"] == 1 and gh["excluded"]["cancelled"] == 1 and gh["excluded"]["waiting_on_owner"] == 1
 
 
 def test_final_and_first_try_use_the_same_denominator(report):
     gh = row(report, "greenhouse")
-    # counted = tried 9 - closed 3 - already applied 1 - owner only 1 = 4: first, second, lost, refs_ok
-    # (confirmed_then_closed is out of the denominator but its confirmation stays in the numerator, as in the push's query)
-    assert gh["final_pct"] == 100.0  # 4 confirmed of 4 counted
-    # Confirmed by the first run: `first` and `confirmed_then_closed` (the push's query counts the latter in the numerator too).
-    assert gh["first_try_pct"] == 50.0
+    # eligible = first, second, lost, refs_ok and confirmed_then_closed: 5; the failed "lost" is not made up for by another job
+    # (the first report left a closed-after-confirming job out of the denominator but in the numerator: 4 of 4 = 100.0)
+    assert gh["final_pct"] == 80.0  # 4 confirmed of 5 eligible
+    # Confirmed by the first run: `first` and `confirmed_then_closed`, of the same 5.
+    assert gh["first_try_pct"] == 40.0
+    assert gh["raw_pct"] == 44.4  # 4 confirmed of 9 attempted
 
 
 def test_overall_adds_the_platforms_and_flags_small_ones(report):
@@ -112,7 +114,8 @@ def test_a_stop_of_the_app_is_not_the_jobs_first_try(service):
     with service.db.session() as s:
         wd = row(success(s, 7, now=NOW), "workday")
     assert wd["tried"] == 3 and wd["confirmed"] == 1
-    assert wd["first_try_pct"] == 33.3  # the resumed run was its job's first try, and it confirmed
+    # The resumed run was its job's first try, and it confirmed. "only_cut" has its retry coming (in progress): not a miss yet.
+    assert wd["first_try_pct"] == 50.0 and wd["excluded"]["in_progress"] == 1
 
 
 def test_the_window_decides_what_counts(service):
@@ -148,9 +151,8 @@ def test_the_route_is_read_only_and_bounds_the_window(client):
     assert client.post("/api/success", json={}).status_code == 405
 
 
-def test_supervisor_and_reference_boxes_named_by_their_field_ids_are_the_owners(service):
-    # iCIMS packet forms have no caption text, so the reason carries the page's own ids; they ask for the same supervisor and
-    # reference facts as "Supervisor Name" does, and an engine cannot invent them.
+def test_jobs_waiting_on_the_owner_are_left_out_whatever_they_ask_for(service):
+    # A run that waits for an answer (state waiting_answer) is the owner's to unblock; the sentence it gives is not read.
     seed(service, {
         "sup": ("icims", [("waiting_answer", "Required application facts are missing: SupName; SupTitle; SupName", 1)], False),
         "refs": ("icims", [("waiting_answer", "Required application facts are missing: Ref1LastName; Ref1Company; EmpContact", 1)], False),
@@ -160,5 +162,4 @@ def test_supervisor_and_reference_boxes_named_by_their_field_ids_are_the_owners(
     })
     with service.db.session() as s:
         row_ = next(p for p in success(s, 7, now=NOW)["platforms"] if p["ats"] == "icims")
-    # The employer's phone is a third party's number too, but nothing here says the owner cannot find it: it stays counted.
-    assert row_["owner_only"] == 3 and row_["eligible"] == 2 and row_["confirmed"] == 1
+    assert row_["owner_only"] == 4 and row_["eligible"] == 1 and row_["confirmed"] == 1
