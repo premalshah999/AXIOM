@@ -28,7 +28,7 @@ async def test_two_large_cards_with_no_form_are_listed_as_controls_and_clickable
     labels = [b["label"] for b in obs["controls"]]
     assert "Start with my resume" in labels and "I don't have a resume" in labels
     card = next(b for b in session.buttons.values() if b["label"] == "Start with my resume")
-    await page.locator(f'[data-jp-id="{card["id"]}"]').click()
+    await session.click(card["id"], revision=obs["revision"], owner_id=obs["owner_id"])
     assert await page.evaluate("window.picked") == "resume"
 
 
