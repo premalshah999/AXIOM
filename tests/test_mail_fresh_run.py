@@ -99,12 +99,14 @@ def certificate(folder):
 class Employer:
     """One employer's site. `used` is its own record of what it took; `kind` is which mail its account step sends."""
 
-    def __init__(self, platform, kind, box, delay=DELAY, other=False, serve=True):
+    def __init__(self, platform, kind, box, delay=DELAY, other=False, serve=True, refuse=(), password=None):
         self.platform, self.kind, self.box, self.delay, self.other = platform, kind, box, delay, other
+        # Passwords this employer turns down, and every password it was sent, by where.
+        self.refuse, self.created, self.signins, self.new_passwords = set(refuse), [], [], []
         self.spec = {**PLATFORMS[platform], **PLATFORMS[platform]["other"]} if other else PLATFORMS[platform]
         self.tenants = {}  # Host -> another employer this server answers for.
         self.used, self.sent, self.posts, self.hits = set(), [], [], []
-        self.verified, self.code, self.link, self.password = False, None, None, "the-password-only-the-applicant-forgot"
+        self.verified, self.code, self.link, self.password = False, None, None, password or "the-password-only-the-applicant-forgot"
         self.expected_email = ME
         if not serve:
             return
@@ -197,8 +199,11 @@ class Employer:
         self.posts.append(path)
         form = {} if path == "/applications" else {k: v[-1] for k, v in parse_qs(raw.decode("utf-8", "replace")).items()}
         if path == "/account/create":
+            self.created.append(form.get("password"))
             if self.kind == "reset":
                 return h.reply("Sign In", SIGNIN.format(message="<p role=alert>An account with this email already exists. Please sign in.</p>"))
+            if form.get("password") in self.refuse:
+                return h.reply("Create Account", '<p role=alert>Password must not contain common words and must be 12 to 16 characters.</p>' + CREATE)
             self.mail(self.kind)
             if self.kind == "code":
                 return h.reply("Verify your email", CODE.format(message=""))
@@ -214,6 +219,7 @@ class Employer:
             self.wrong_code = form.get("code")
             return h.reply("Verify your email", CODE.format(message="<p role=alert>That code is not correct.</p>"))
         if path == "/signin":
+            self.signins.append(form.get("password"))
             if form.get("password") == self.password:
                 self.verified = True
                 if "new-password" in self.sent:
@@ -224,6 +230,9 @@ class Employer:
             self.mail("reset")
             return h.reply("Check your email", SENT)
         if path == "/password/new":
+            self.new_passwords.append(form.get("password"))
+            if form.get("password") in self.refuse:
+                return h.reply("Set a new password", "<p role=alert>Your new password must be different from your previous 3 passwords.</p>" + NEW)
             self.password = form.get("password")
             self.sent.append("new-password")
             self.used.add("reset")
@@ -281,7 +290,7 @@ async def start_chrome(temp, port):
         return process, f"http://127.0.0.1:{f.read().splitlines()[0]}"
 
 
-async def one_run(client, service, imap, platform, kind, *, delay=DELAY, profile=None):
+async def one_run(client, service, imap, platform, kind, *, delay=DELAY, profile=None, site_options=None, before=None):
     from jobpilot.outbox import poll as poll_outbox
     from jobpilot.owner_apply import apply
 
@@ -315,7 +324,7 @@ async def one_run(client, service, imap, platform, kind, *, delay=DELAY, profile
         task.add_done_callback(tasks.discard)
 
     service.dispatch = dispatch
-    site = Employer(platform, kind, imap, delay=delay)
+    site = Employer(platform, kind, imap, delay=delay, **(site_options or {}))
     temp = tempfile.mkdtemp(prefix="mailfresh-chrome-")
     process, config.browser_cdp_url = await start_chrome(temp, site.port)
     config_workers = getattr(config, "workers", None)
@@ -324,6 +333,8 @@ async def one_run(client, service, imap, platform, kind, *, delay=DELAY, profile
         row = s.get(Job, job["id"])
         row.status, row.ats = "ready", spec["ats"]
     allow(service.db, [job["id"]])  # The Apply button on a company's own site is the owner's click (company_sites.py).
+    if before:
+        await before(site, job)
     outcome = {"state": "not started", "reason": ""}
     poller = asyncio.create_task(service.mail.poll())
     service.outbox_running = True

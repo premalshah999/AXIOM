@@ -3866,6 +3866,11 @@ class Adapter:
         ):
             return None
         self.attempts["late_reset"] += 1
+        if kept := await inbox.kept_reset(self.e.run_id, self.mail_job("password_reset"), self.accounts.email):
+            self.challenge = kept
+            self.emit("auth", "An interrupted attempt held the earlier password reset's email; using it instead of asking again")
+            self.reset_in_progress = True
+            return await self.complete_password_reset(url)
         if not await self.arm_mail("password_reset") or not (self.challenge or {}).get("late_window"):
             self.release_mail()
             return None

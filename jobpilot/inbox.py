@@ -105,6 +105,15 @@ class Inbox:
                     )
             await asyncio.sleep(1)
 
+    async def kept_reset(self, run_id, job, recipient):
+        """The reset mail an interrupted attempt of this application was handed and did not use, as an open request, or None.
+        Asks the employer for nothing."""
+        rule = await self.rule(job, recipient)
+        if not rule:
+            return None
+        kept = self.mail.reclaim(run_id, rule, recipient)
+        return {**kept, "rule": rule} if kept else None
+
     def live_request(self, run_id):
         """This run's open request window, whichever controller armed it (the guided controller arms one when it
         clicks the control that sends the mail), or None."""
