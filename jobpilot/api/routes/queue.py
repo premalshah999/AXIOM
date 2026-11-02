@@ -93,7 +93,7 @@ def router(service) -> APIRouter:
         size = max(1, min(100, int(size)))
         pages = max(1, -(-len(items) // size))
         page = max(1, min(int(page), pages))
-        drop = {"employer", "lane", "details", "status", "tailoring", "not_before", "front"}
+        drop = {"employer", "lane", "details", "status", "tailoring", "not_before", "front", "paced"}
         reading = value["reading"]
         from ...features.resumes.choice import waiting_words
 

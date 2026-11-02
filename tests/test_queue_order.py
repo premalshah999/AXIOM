@@ -142,3 +142,24 @@ def test_requests_order_keeps_the_latest_click_first_and_retries_last():
     ]
     got = [job for job, _ in owner_apply.request_order(waiting, {"retry", "moved-retry"})]
     assert got == ["moved-late", "moved-early", "moved-retry", "plain", "retry"]
+
+
+def test_jobs_held_by_the_platforms_own_pace_say_why_and_when_and_are_not_promised_a_worker(service):
+    """Ashby takes one application at a time with a pause between: workers sat idle while the page promised each Ashby job the next
+    free worker (2026-11-02, empty install, 30 jobs). Such a job stays in line with its reason and its due time, and is not an
+    exact pick."""
+    from jobpilot.application_pacing import gap_key
+
+    setup(service)
+    ready(service, "g1", "Alpha", ats="greenhouse")
+    ready(service, "a1", "Beta", ats="ashby")
+    ready(service, "a2", "Gamma", ats="ashby")
+    with service.db.exclusive() as s:
+        s.add(Setting(key=gap_key("ashby"), value={"run_id": "earlier", "started_at": datetime.now(UTC).timestamp() - 30}))
+    value = queue_order.plan(service, startable.read(service))
+    waits = {i["id"]: i["wait"] for i in value["next"]}
+    assert waits["g1"] == ""
+    for jid in ("a1", "a2"):
+        assert "Ashby takes one application at a time" in waits[jid] and "It is due in about" in waits[jid]
+    assert [i["id"] for i in value["next"]][0] == "g1"
+    assert value["exact"] == 1  # only the Greenhouse job is what a free worker takes now

@@ -191,6 +191,7 @@ def require_ats_admission(session, job, run_id=None, owner_pick=False, email_con
             outcome="deferred",
             code="ats_pacing",
             not_before=datetime.fromtimestamp(_stamp(None) + 60, UTC).isoformat(),
+            detail={"pace": "limit", "limit": limit},
         )
     site_limit = SITE_LIMITS.get(_get(job, "ats"))
     if site_limit and _site_active(session, job, run_id, ["queued", "running", "submitting"]) >= site_limit:
@@ -199,6 +200,7 @@ def require_ats_admission(session, job, run_id=None, owner_pick=False, email_con
             outcome="deferred",
             code="ats_pacing",
             not_before=datetime.fromtimestamp(_stamp(None) + 60, UTC).isoformat(),
+            detail={"pace": "site"},
         )
     ats = _get(job, "ats")
     if ats not in START_GAPS:
@@ -211,6 +213,7 @@ def require_ats_admission(session, job, run_id=None, owner_pick=False, email_con
             outcome="deferred",
             code="ats_pacing",
             not_before=until,
+            detail={"pace": "throttle"},
         )
     for other, employer in active_runs(session, ("queued", "running", "submitting"), ats=ats):
         if other.id != run_id and not _exempt(employer, other):
@@ -219,6 +222,7 @@ def require_ats_admission(session, job, run_id=None, owner_pick=False, email_con
                 outcome="deferred",
                 code="ats_pacing",
                 not_before=datetime.fromtimestamp(at + 60, UTC).isoformat(),
+                detail={"pace": "busy"},
             )
     saved = session.get(Setting, gap_key(ats))
     if saved and saved.value.get("run_id") != run_id:
@@ -229,6 +233,7 @@ def require_ats_admission(session, job, run_id=None, owner_pick=False, email_con
                 outcome="deferred",
                 code="ats_pacing",
                 not_before=datetime.fromtimestamp(available, UTC).isoformat(),
+                detail={"pace": "gap", "seconds": START_GAPS[ats]},
             )
 
 
