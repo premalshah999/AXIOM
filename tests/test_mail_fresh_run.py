@@ -19,7 +19,6 @@ from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
-import httpx
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -36,6 +35,7 @@ from jobpilot.host_health import is_browser_outage
 from jobpilot.schemas import JobInput
 from mail_formats import KINDS, ME, PLATFORMS, deliver, fresh_code
 from support_budget import scaled
+from support_chrome import chrome_opens_a_tab
 from test_mail_fresh_install import link_for, onboard
 
 pytestmark = [pytest.mark.browser, pytest.mark.integration]
@@ -283,26 +283,8 @@ async def start_chrome(temp, port):
         await asyncio.sleep(0.1)
     with open(portfile) as f:
         address = f"http://127.0.0.1:{f.read().splitlines()[0]}"
-    await chrome_opens_a_tab(address)
+    await chrome_opens_a_tab(address, scaled(RUN_SECONDS))
     return process, address
-
-
-async def chrome_opens_a_tab(address):
-    """In the app the worker Chrome has been up for minutes when a run attaches. Here it is seconds old: it writes its port file
-    before it can answer, and a run that attached then on a loaded Mac ended "AXIOM's browser wasn't ready" having sent nothing
-    (dayforce-code, 2026-11-01). The test starts when Chrome has answered and opened a tab, not after some number of seconds."""
-    deadline = time.monotonic() + scaled(RUN_SECONDS)
-    async with httpx.AsyncClient(timeout=30, trust_env=False, headers={"Host": "localhost"}) as client:
-        while True:
-            try:
-                tab = await client.put(address + "/json/new?about:blank")
-                tab.raise_for_status()
-                await client.get(address + "/json/close/" + tab.json()["id"])
-                return
-            except (httpx.HTTPError, OSError, ValueError, KeyError):
-                if time.monotonic() >= deadline:
-                    raise
-                await asyncio.sleep(0.1)
 
 
 def outage(service, job_id):

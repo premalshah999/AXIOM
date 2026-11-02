@@ -123,7 +123,7 @@ def serve(port, static_root, data_dir):
 
         allow(service.db, ["ag-job"])  # A local page reads as a company's own site: the owner's click sends it.
         queued = await service.queue("ag-job", "submit", "source", owner_pick=True)
-        await asyncio.wait_for(service.execute(queued["id"]), 90)
+        await asyncio.wait_for(service.execute(queued["id"]), scaled(90))
         with service.db.session() as session:
             actual = session.get(Run, queued["id"])
             result = {
