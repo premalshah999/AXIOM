@@ -4,6 +4,8 @@ from cryptography.fernet import Fernet
 import json
 import os
 
+from ..redaction import register_credentials
+
 
 class Vault:
     def __init__(self, config):
@@ -22,7 +24,10 @@ class Vault:
         self.cipher = Fernet(key)
 
     def seal(self, value):
+        register_credentials(value)  # A password or token that passes through here is masked in events, messages and saved pages.
         return self.cipher.encrypt(json.dumps(value).encode()).decode()
 
     def open(self, value):
-        return json.loads(self.cipher.decrypt(value.encode()))
+        opened = json.loads(self.cipher.decrypt(value.encode()))
+        register_credentials(opened)
+        return opened

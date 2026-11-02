@@ -20,7 +20,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, validates
 from sqlalchemy.sql.functions import FunctionElement
 from sqlalchemy.types import TypeDecorator
 
@@ -121,6 +121,11 @@ class Run(Base):
     reason: Mapped[str] = mapped_column(Text, default="")
     receipt: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[str] = mapped_column(String, default=now)
+
+    @validates("reason")
+    def without_secrets(self, _key, value):
+        # A reason quotes a page or a service's error, and goes to the Queue, Telegram, diagnostics and the repair model.
+        return redact(value)
 
 
 class ProfileSnapshot(Base):

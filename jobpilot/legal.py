@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .db import now
 
-VERSION = "2026-11-01-beta"
+VERSION = "2026-11-02-beta"
 KEY = "legal_acceptance"
 FOLDER = Path(__file__).parent / "legal"
 

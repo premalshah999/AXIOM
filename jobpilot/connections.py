@@ -186,6 +186,9 @@ def apply(config, live=False):
             # Saved by a build that did not check, or a typo in .env: the environment's if it is one, otherwise UTC.
             value = env[name] if valid_zone(env.get(name)) else "UTC"
         object.__setattr__(config, name, value)
+    from .redaction import register_config
+
+    register_config(config)  # The keys saved in the app are secrets too, whatever their shape.
     return config
 
 

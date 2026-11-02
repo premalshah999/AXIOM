@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 import re
 import secrets
 
+from ..redaction import register
+
 LOWER, UPPER, DIGITS = "abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "0123456789"
 SPECIALS = "!@#$%&*?"  # the symbols nearly every policy that wants one accepts
 AMBIGUOUS = "O0Il1o"
@@ -92,8 +94,11 @@ def generate(rules: Rules) -> str:
             continue
         if re.search(r"(?:012|123|234|345|456|567|678|789|abc|bcd|cde|def|qwe|pass)", low):
             continue
+        register([password])  # Secret from now on, before it is typed or sealed.
         return password
-    return "".join(secrets.choice(pool) for _ in range(length))
+    password = "".join(secrets.choice(pool) for _ in range(length))
+    register([password])
+    return password
 
 
 def meets(password: str, rules: Rules) -> bool:

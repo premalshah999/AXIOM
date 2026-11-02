@@ -137,6 +137,8 @@ function App() {
       .then((s) => {
         if (!current) return;
         setAuth(s.signed_in ? "in" : "out");
+        // The Mac app's window signs itself in again when told (desktop/AXIOM.m), as it does for a 401: this answer is not one.
+        if (!s.signed_in) signedOut();
         if (s.signed_in) setWho({ name: s.name, email: s.email });
         // No session on arrival, as after Delete everything: the Mac window listens for this and signs itself in. A browser just stays
         // on the sign-in screen it was going to show.

@@ -1,6 +1,7 @@
 """Request security (sign-in, Origin and content-type rules, response headers) and the error mapping."""
 
 import logging
+import os
 from urllib.parse import urlsplit
 
 from fastapi import Request
@@ -17,7 +18,15 @@ from .sessions import COOKIE, RENEW_AFTER, same_secret
 logger = logging.getLogger(__name__)
 
 
-LOOPBACK = {"127.0.0.1", "localhost", "::1", "testserver"}
+LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+# The test client's name for itself. It is a plain host name, so a network that answers for it could point a page at this
+# computer (DNS rebinding) and reach the routes that need no sign-in, such as creating the owner account on a fresh install.
+# Only a running test accepts it; pytest sets this variable and an installation never does.
+TEST_HOST = "testserver"
+
+
+def is_test_host(name: str) -> bool:
+    return name == TEST_HOST and "PYTEST_CURRENT_TEST" in os.environ
 
 
 def host_name(value: str) -> str:
@@ -30,15 +39,15 @@ def host_name(value: str) -> str:
 
 def install(app, config, sessions, cache):
     # Only the names this installation is reached by. A web page whose domain was re-pointed at 127.0.0.1 (DNS rebinding) sends
-    # its own domain as Host, so it never matches, whatever the browser believes about the origin. "testserver" is the test
-    # client's name; no browser can be made to send it.
+    # its own domain as Host, so it never matches, whatever the browser believes about the origin.
     served = LOOPBACK | {host_name(urlsplit(config.base_url).netloc)}
 
     @app.middleware("http")
     async def security(request: Request, call_next):
         path = request.url.path
         session = None
-        if host_name(request.headers.get("host", "")) not in served:
+        name = host_name(request.headers.get("host", ""))
+        if name not in served and not is_test_host(name):
             return JSONResponse({"detail": "Open AXIOM at its own address (BASE_URL)."}, status_code=421)
         if path.startswith("/api/"):
             if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.headers.get("sec-fetch-site", "same-origin") not in {

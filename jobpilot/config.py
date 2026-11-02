@@ -275,6 +275,9 @@ class Settings(BaseSettings):
     repair_agent_enabled: bool = True
     enable_workers: bool = True
     enable_demo: bool = True
+    # The Mac app sets this: its window signs in with the access token before it shows anything, so an empty installation's sign-up
+    # needs that session. Without it, any process on this computer could claim the installation first.
+    signup_needs_session: bool = False
     allow_private_urls: bool = False  # Tests only. Never enabled by the production image.
     # The local URLs as they were before a remote choice replaced them (what a switch copies from or back to), and the choice
     # this process started with (so the screen can say a restart is needed).
@@ -345,6 +348,9 @@ class Settings(BaseSettings):
                 with os.fdopen(fd, "w") as f:
                     f.write(secrets.token_urlsafe(32))
             self.app_token = token_file.read_text().strip()
+        from .redaction import register_config
+
+        register_config(self)  # Events, Telegram and saved pages mask these exact values from now on.
         from . import db as database
         from .storage.choice import apply as apply_database_choice
 

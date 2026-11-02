@@ -9,6 +9,7 @@ import time
 from ..db import Setting
 from ..db import now
 from ..mail import origin
+from ..redaction import register
 from .errors import AccountActionError
 from .pages import CONFIRMED_ACCOUNT
 from .tenants import SF_HOSTS
@@ -207,6 +208,7 @@ class AccountStore:
         while True:
             password = "Ap9!" + "".join(secrets.choice(alphabet) for _ in range(length - 4))
             if not re.search(r"(.)\1{2,}", password):  # Dayforce ID refuses a character three times in a row
+                register([password])  # Secret from now on, before it is typed or sealed.
                 return password
 
     def get(self, url):

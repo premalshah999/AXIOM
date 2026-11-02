@@ -206,4 +206,29 @@ def prepare(cfg):
     env_file = cfg.root / ".env"
     if env_file.exists() and env_file.stat().st_mode & 0o077:
         env_file.chmod(0o600)
+    tighten(cfg)
     return cfg
+
+
+# The files that hold a key, a password or the token the window signs in with. A new one is made 0600; one that arrived another
+# way (a copy from the old install, a restore, a file someone made by hand) keeps the mode it came with.
+SECRET_FILES = ("access-token", "mail-key", "connections.enc", "database.enc", "database.json", "native/window.json")
+
+
+def tighten(cfg):
+    """Take group and other access off the secret files and the backup folder. The data folder is already 0700, so this is a
+    second lock: it matters when the folder's mode is lost (a copy, an archive, a restore)."""
+    for name in SECRET_FILES:
+        path = cfg.data_dir / name
+        try:
+            if path.is_file() and not path.is_symlink() and path.stat().st_mode & 0o077:
+                path.chmod(0o600)
+        except OSError:
+            pass
+    from .backups import folder
+
+    try:
+        if folder().is_dir() and folder().stat().st_mode & 0o077:
+            folder().chmod(0o700)  # The database copies are in it; their files are already 0600.
+    except OSError:
+        pass
