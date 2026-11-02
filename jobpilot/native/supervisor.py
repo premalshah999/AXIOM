@@ -21,7 +21,6 @@ import http.client
 import json
 import os
 import plistlib
-import re
 import resource
 import shutil
 import signal
@@ -34,6 +33,7 @@ from urllib.parse import urlsplit
 from . import backups, pg, release, services
 from .. import erase
 from .env import NativeError, load, prepare, system_chrome
+from .power import power_status
 from ..storage import mode as database_mode
 
 STABLE_SECONDS = 60.0
@@ -150,25 +150,6 @@ def _say(line):
         print(time.strftime("%Y-%m-%d %H:%M:%S ") + line, flush=True)
     except OSError:
         pass
-
-
-def power_status():
-    """{'battery': bool, 'percent': int, 'remaining': '0:50'}, or {} where pmset does not exist or did not answer."""
-    if not shutil.which("pmset"):
-        return {}
-    try:
-        out = subprocess.run(["pmset", "-g", "batt"], capture_output=True, text=True, timeout=5).stdout
-    except (OSError, subprocess.TimeoutExpired):
-        return {}
-    if "drawing from" not in out:
-        return {}  # No answer is not "on mains": see tick_power.
-    level = re.search(r"(\d+)%", out)
-    remaining = re.search(r"(\d+:\d+) remaining", out)
-    return {
-        "battery": "Battery Power" in out,
-        "percent": int(level.group(1)) if level else None,
-        "remaining": remaining.group(1) if remaining else "",
-    }
 
 
 def docker_instances():

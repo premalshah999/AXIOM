@@ -13,6 +13,7 @@ import { TopActions, TopLine } from "./shell/Shell";
 import type { ReviewBatch, ReviewRow } from "./types";
 import { Button, Empty, Listbox, Monogram, Table, type Column } from "./ui/index";
 import { LoadError, Notice } from "./worktools";
+import { WhyAction } from "./whywaiting";
 import "./styles/queue.css";
 
 const SIZES = [10, 25, 50, 100];
@@ -21,7 +22,8 @@ const webLink = (url: string) => (/^https?:\/\//i.test(url) ? url : "");
 type Accepted = { queued: number; already: number; passed: number; refused: QueueMany["refused"]; next: ReviewBatch };
 
 export function ReviewView() {
-  const { snapshot, go, openJob, version, refresh } = useWorkspace();
+  const { snapshot, counts, go, openJob, version, refresh } = useWorkspace();
+  const why = snapshot.waiting?.reason;
   const now = useNow(60000);
   const { pending, run } = useAction();
   const poll = usePoll<ReviewBatch>((signal) => api("/review-batch", "GET", undefined, signal), 30000, [version]);
@@ -64,6 +66,7 @@ export function ReviewView() {
     });
 
   const n = ticked.size;
+  const automatic = batch?.mode === "auto" && batch.dispatching !== false;
   const columns: Column<ReviewRow>[] = [
     {
       key: "job",
@@ -162,12 +165,12 @@ export function ReviewView() {
         />
       </TopActions>
       <TopLine>
-        {batch?.mode === "auto"
+        {automatic
           ? "Automatic applying is on, so good matches go in line by themselves."
           : "Your best new matches. Untick any you don't want, then accept: the ticked jobs go to the Queue, and the next batch is prepared."}
         {!!batch?.more && ` ${plural(batch.more, "more match", "more matches")} after this batch.`}
       </TopLine>
-      {batch?.mode === "auto" && (
+      {automatic && (
         <Notice tone="info" action={<button type="button" className="ax-link" onClick={() => go({ view: "settings", tab: "applying" })}>Change in Settings</button>}>
           Automatic applying doesn't wait for a review. Choose Review a batch first in Settings, Applying, to decide on each batch yourself.
         </Notice>
@@ -187,6 +190,11 @@ export function ReviewView() {
       )}
       {done && <Refused refused={done.refused} onClose={() => setDone({ ...done, refused: [] })} />}
       {snapshot.control.paused && !!rows.length && <Notice tone="warn">AXIOM is stopped. What you accept waits in the Queue until you press Resume.</Notice>}
+      {!snapshot.control.paused && !!rows.length && why?.blocking && !["nothing_in_line", "nothing_ready", "paced", "line_waits", "sending_off", "goal_reached"].includes(why.code) && (
+        <Notice tone="warn" action={<WhyAction reason={why} />}>
+          {why.says} What you accept waits in the Queue.
+        </Notice>
+      )}
       {poll.error && !!batch && <LoadError error={poll.error} retry={poll.refresh} />}
       <ApplyChoices ids={shown}>
       <Table
@@ -220,7 +228,9 @@ export function ReviewView() {
                 ? `${plural(batch.checking, "job")} still being checked against your profile. They appear here as soon as that's done.`
                 : batch?.searching
                   ? "Searching for new jobs now. The best matches appear here once they are checked against your profile."
-                  : "You've seen every good match. New ones appear here after the next search."
+                  : counts.jobs === 0
+                    ? "No jobs have been found yet. The best matches appear here once they are found and checked against your profile."
+                    : "You've seen every good match. New ones appear here after the next search."
             }
             action={
               <Button size="sm" onClick={() => go({ view: "board" })}>

@@ -271,6 +271,8 @@ export type ApplicationWorkers = {
   // Custom career-site applications run on their own slot (a third lane); absent on older servers.
   custom_workers?: number;
   assignments: ApplicationWorkerAssignment[];
+  /** Each lane's room: "normal" is the regular workers. */
+  pools?: Record<string, { limit: number; running: number; occupied: number; available: number }>;
 };
 export type AutopilotRuntime = {
   application_workers?: ApplicationWorkers;
@@ -311,6 +313,7 @@ type JobControl = {
 };
 export type Snapshot = {
   autopilot_runtime?: AutopilotRuntime;
+  waiting?: Waiting;
   job_controls?: Record<string, JobControl>;
   scheduler_health?: SchedulerHealth;
   scheduler_heartbeat?: { at?: string };
@@ -759,7 +762,23 @@ export type QueueRetry = {
   since: string;
   tries: number;
 };
+/** Why nothing is starting, one answer for every screen (jobpilot/waiting.py). */
+export type WaitReason = {
+  code: string;
+  title: string;
+  says: string;
+  next: string;
+  /** The short form beside each job it holds. */
+  row: string;
+  action: { label: string; view: "settings" | "review" | "board"; tab?: string } | null;
+  /** Nothing in line can start until this changes. */
+  blocking: boolean;
+};
+/** What else waits on the person that would give free workers something to do, with where to act on it. */
+export type WaitAsk = { says: string; links: { label: string; view: "needs"; filter: string }[] };
+export type Waiting = { reason: WaitReason | null; ask?: WaitAsk | null; battery: string; slow: string; in_line: number };
 export type QueuePage = {
+  why?: Waiting;
   at: string;
   planning?: boolean;
   paused: boolean;
@@ -768,7 +787,7 @@ export type QueuePage = {
   /** The dispatcher starts Ready jobs by itself. Off, only what was asked for starts. */
   dispatching?: boolean;
   stopped: string | null;
-  workers: { normal: number; specialist: number; custom: number; free: number };
+  workers: { normal: number; specialist: number; custom: number; free: number; normal_free?: number };
   decides: string;
   exact: number;
   running: QueueRunning[];
@@ -811,6 +830,8 @@ export type BoardFacet = { value: string; label: string; count: number };
 // GET /api/review-batch (jobpilot/review_batch.py): the open batch, and what the empty screen needs to say.
 export type ReviewRow = { id: string; title: string; company: string; location: string; url: string; ats: string; posted_at: string; dated: boolean; source: string; score: number; line: string; level: string };
 export type ReviewBatch = {
+  /** Automatic applying is on and its batch is running: good matches go in line by themselves. */
+  dispatching?: boolean;
   mode: "review" | "auto";
   planning?: boolean;
   id: string;

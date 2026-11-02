@@ -16,10 +16,13 @@ function capacity(snapshot: Snapshot) {
 /** The sidebar's one line, and how its lamp behaves. */
 export function statusLine(snapshot: Snapshot, state: PanelState): { text: string; lamp: "live" | "ask" | "off" | "ok" } {
   const { busy, limit } = capacity(snapshot);
+  const why = snapshot.waiting?.reason;
   if (state === "lost") return { text: "Connection lost", lamp: "ask" };
   if (state === "restart") return { text: "Needs a restart", lamp: "ask" };
   if (state === "paused") return { text: "Stopped", lamp: "off" };
   if (state === "complete") return { text: "Daily limit reached", lamp: "ok" };
+  // Nothing is in a browser and something holds what is in line: the one line says what, not "Applying".
+  if (!busy && why && why.code !== "nothing_in_line") return { text: why.title, lamp: why.code === "daily_limit" ? "ok" : "off" };
   if (state === "running") return { text: `Applying · ${busy} of ${limit} busy`, lamp: "live" };
   if (state === "held") return { text: "Waiting to start", lamp: "off" };
   return busy ? { text: `${busy} applying`, lamp: "live" } : { text: "Not applying", lamp: "off" };
@@ -52,5 +55,7 @@ export function panelState(snapshot: Snapshot, lost: boolean): PanelState {
 /** Whether vermilion may say "alive": applying now, or a run you started is in a browser. Paused and broken are not live. */
 export function isLive(snapshot: Snapshot, state: PanelState): boolean {
   if (state === "lost" || state === "restart" || state === "paused") return false;
-  return state === "running" || snapshot.runs.some((r) => r.state === "running" || r.state === "submitting");
+  const sending = snapshot.runs.some((r) => r.state === "running" || r.state === "submitting");
+  if (!sending && snapshot.waiting?.reason?.blocking) return false; // "Applying" with nothing moving is what read as broken.
+  return state === "running" || sending;
 }
