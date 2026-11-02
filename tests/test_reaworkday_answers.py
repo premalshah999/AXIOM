@@ -57,3 +57,35 @@ def test_the_resolver_needs_the_accept_terms_permission(service):
     answer = resolver(service).local(field(I9, options))
     assert answer and answer.value == "I Acknowledge"
     assert resolver(service, terms=False).local(field(I9, options)) is None
+
+
+ACK = ["Select One", "I Acknowledge", "I Do Not Acknowledge"]
+
+
+@pytest.mark.parametrize("label", [
+    "I acknowledge that I am at least 18 years of age.",
+    "I acknowledge that I hold a valid driver's license.",
+    "I acknowledge that I have a valid driver's license and a clean driving record.",
+    "I agree to provide proof that I am at least 18 years of age.",
+    "You must be at least 18 years of age to apply. I acknowledge.",
+    "I acknowledge that I have been employed here before.",
+    "I agree that I meet the minimum qualifications.",
+])
+def test_a_factual_declaration_is_never_a_procedure_to_acknowledge(label):
+    assert agreement_choice(label, ACK) is None
+
+
+@pytest.mark.parametrize("label", [
+    "I acknowledge that I have read the Candidate Privacy Notice.",
+    "I agree to bring my identity documents to the first day of work.",
+    "I accept the arbitration agreement described above.",
+])
+def test_reading_and_procedures_are_still_acknowledged(label):
+    assert agreement_choice(label, ACK) == "I Acknowledge"
+
+
+def test_the_resolver_leaves_an_age_claim_to_its_fact_check_even_for_a_minor(service):
+    minor = {"date_of_birth": "03/04/2015", "age": "10"}
+    claim = "I acknowledge that I am at least 18 years of age."
+    assert resolver(service, facts=minor).local(field(claim, ACK)) is None
+    assert resolver(service, facts=minor).local(field(I9, ACK)).value == "I Acknowledge"
