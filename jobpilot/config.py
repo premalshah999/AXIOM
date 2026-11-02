@@ -239,7 +239,7 @@ class Settings(BaseSettings):
     application_timeout: int = Field(default=600, ge=30, le=900)
     # Multi-page wizards with accounts and email verification (Workday, Oracle, iCIMS, Taleo...).
     multipage_timeout: int = Field(default=900, ge=60, le=1200)
-    daily_application_limit: int = Field(default=100, ge=1, le=500)
+    daily_application_limit: int = Field(default=100, ge=1, le=1000)
     daily_budget_usd: float = Field(default=5, gt=0)
     # The most any of 3,179 confirmed applications needed is 58 (2026-11-01). The old default of 18 stopped 157 of them (5%;
     # 15% of SuccessFactors, 21% of Dayforce). A call cost 0.09 cents on the default provider's rates, so a run that uses all

@@ -47,16 +47,30 @@ GUARD = r"""(() => {
   const permitted=el=>!!el && el.dataset.jpAuthControl==='true'
     && (!el.dataset.jpControlLabel || el.dataset.jpControlLabel===label(el))
     && (!final(label(el)) || el.dataset.jpFinalAuth==='true');
+  // A step the page advances by itself: its own script presses a Submit that carries no answer (Avature's
+  // ApplicationFormWidget, Two Sigma 2026-11-01: one visually hidden form, a lone "Submit", every field display:none,
+  // clicked by the wizard script on load; the guard cancelled that click and the page sat blank). A person's pointer
+  // and the engine's clicks are trusted events and stay guarded; only a script's click on a form with no rendered
+  // field passes, and so does the submit that click starts.
+  const pageSteps=new WeakSet();
+  const emptyStep=el=>{
+    const form=el.form||el.closest?.('form');
+    if(!form) return false;
+    return ![...form.querySelectorAll('input,select,textarea')].some(c =>
+      !/^(?:hidden|submit|button|image|reset)$/i.test(c.type||'') && !c.disabled && c.getClientRects().length>0
+      && getComputedStyle(c).display!=='none');
+  };
   document.addEventListener('click', e => {
     const el=e.composedPath().find(n=>n.matches?.('button,a,[role=button],input[type=submit]'));
     if(el && final(label(el)) && !window.__jpArmed && !permitted(el)){
+      if(!e.isTrusted && el.matches('button,input[type=submit]') && emptyStep(el)){ pageSteps.add(el); return; }
       e.preventDefault(); e.stopImmediatePropagation();
     }
   },true);
   document.addEventListener('submit', e => {
     const control=e.submitter || e.target?.__jpAllowedControl;
     const text=label(control);
-    if(!window.__jpArmed && !permitted(control)
+    if(!window.__jpArmed && !permitted(control) && !(control && pageSteps.has(control))
        && (final(text) || !/next|continue|save|review|sign ?in|log ?in/i.test(text))){
       e.preventDefault();e.stopImmediatePropagation();
     }
@@ -5342,6 +5356,10 @@ class BrowserEngine:
             if self.result:
                 return
             if await stop_if_sensitive(self, obs):
+                return
+            from .social_login_only import stop_if_social_login_only
+
+            if stop_if_social_login_only(self, obs):
                 return
             adapter = getattr(self, "fallback_mail_adapter", None)
             if adapter and not self.armed:
