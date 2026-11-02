@@ -543,6 +543,8 @@ def same_amount(a, b):
 
 
 def same_value(field, actual, expected):
+    if field.get("widget") == "period-picker":
+        return bool(period_dates(actual)) and period_dates(actual) == period_dates(expected)
     actual, expected = phone_value(field, actual), phone_value(field, expected)
     a, e = " ".join(str(actual).split()), " ".join(str(expected).split())
     if field.get("letter_case") == "upper" and a != a.upper():
@@ -1078,6 +1080,111 @@ def typing_timeout(text, floor=4000):
     return max(floor, min(11_000, 1500 + 30 * len(str(text))))
 
 
+PERIOD_PRESENT = re.compile(r"\b(?:present|now|current|ongoing|today)\b|至今", re.I)
+PERIOD_MONTHS = "jan feb mar apr may jun jul aug sep oct nov dec".split()
+PERIOD_DATE = re.compile(
+    r"(?<!\d)(?P<year>(?:19|20)\d\d)\s*[-/.年]?\s*(?P<month>0?[1-9]|1[0-2])(?!\d)|"
+    r"(?<!\d)(?P<month2>0?[1-9]|1[0-2])\s*[-/.]\s*(?P<year2>(?:19|20)\d\d)(?!\d)|"
+    r"\b(?P<name>jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*(?P<year3>(?:19|20)\d\d)|" + PERIOD_PRESENT.pattern,
+    re.I,
+)
+
+
+def period_dates(text):
+    """The dates a period states, in order: [(2020, 9), (2024, 6)], with "present" for an open end. "2020 - 09 2024 - 06" as a
+    picker shows it and "09/2020 - 06/2024" as an answer says it are the same period. A year alone is no date here: a month picker
+    can't take it, and it would be a guess."""
+    dates = []
+    for found in PERIOD_DATE.finditer(str(text or "")):
+        if found["year"]:
+            dates.append((int(found["year"]), int(found["month"])))
+        elif found["year2"]:
+            dates.append((int(found["year2"]), int(found["month2"])))
+        elif found["year3"]:
+            dates.append((int(found["year3"]), PERIOD_MONTHS.index(found["name"].lower()) + 1))
+        else:
+            dates.append("present")
+    return dates
+
+
+PERIOD_HOST_JS = r"""e => { for (let p = e.parentElement, depth = 0; p && depth < 3; p = p.parentElement, depth++) {
+  const r = p.getBoundingClientRect();
+  if (r.width >= 80 && r.height >= 16 && /(?:date|period|month|calendar)/i.test(typeof p.className === 'string' ? p.className : '')) return p; }
+  return null; }"""
+# Marks the open panel's item for one part of a date. A panel's list is several sibling cells of one kind, so the dates shown in the
+# picker's own label are never taken for it.
+PERIOD_ITEM_JS = r"""({kind, year, month, names}) => {
+  document.querySelectorAll('[data-jp-period-item]').forEach(e => e.removeAttribute('data-jp-period-item'));
+  const shown = e => { const r = e.getBoundingClientRect(), s = getComputedStyle(e); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
+  const words = e => (e.textContent || '').replace(/\s+/g, ' ').trim();
+  const yearText = t => /^(?:19|20)\d\d年?$/.test(t);
+  const monthText = t => /^(?:0?[1-9]|1[0-2])月?$/.test(t) || names.some(n => t.toLowerCase().startsWith(n) && t.length <= 9);
+  const open = t => /^(?:present|now|current|至今)$/i.test(t);
+  const cells = [...document.querySelectorAll('li,td,button,a,span,div,[role=option],[role=gridcell]')].filter(e => {
+    const t = words(e); return t && t.length <= 9 && !e.querySelector('li,td,button,[role=option]') && shown(e); });
+  const lists = new Map();
+  for (const e of cells) { const t = words(e); const key = e.parentElement;
+    if (!key) continue; const list = lists.get(key) || {years: [], months: [], open: []};
+    if (yearText(t)) list.years.push(e); else if (monthText(t)) list.months.push(e); else if (open(t)) list.open.push(e);
+    lists.set(key, list); }
+  const mark = e => { if (!e) return false; e.setAttribute('data-jp-period-item', '1'); return true; };
+  for (const list of lists.values()) {
+    if (kind === 'open' && list.open.length) return mark(list.open[0]);
+    if (kind === 'year' && list.years.length >= 3) return mark(list.years.find(e => parseInt(words(e), 10) === year));
+    if (kind === 'month' && list.months.length >= 6) return mark(list.months.find(e => { const t = words(e).toLowerCase();
+      return /^\d/.test(t) ? parseInt(t, 10) === month : t.startsWith(names[month - 1]); }));
+  }
+  return false;
+}"""
+
+
+async def period_pick(frame, kind, year=0, month=0):
+    if not await frame.evaluate(PERIOD_ITEM_JS, {"kind": kind, "year": year, "month": month, "names": PERIOD_MONTHS}):
+        return False
+    await frame.locator("[data-jp-period-item]").first.click(timeout=2000)
+    await asyncio.sleep(0.15)
+    return True
+
+
+async def period_picker(frame, el, value):
+    """One "Start & end date" picker: a zero-height input in a box showing "2020 - 09 | 2024 - 06", and a panel of year and month
+    lists under each half. Already showing the answer's dates, nothing is touched; otherwise each half is opened and its year and
+    month chosen, and only what the picker then shows counts."""
+    wanted = period_dates(value)
+    if len(wanted) != 2 or wanted[0] == "present":
+        raise ValueError("This period needs a start and an end date")
+    handle = await el.evaluate_handle(PERIOD_HOST_JS)
+    host = handle.as_element()
+    if host is None:
+        raise ValueError("The period picker is no longer available")
+
+    async def shown():
+        return period_dates(await host.evaluate("e => e.innerText || ''"))
+
+    if await shown() == wanted:
+        return value
+    await host.scroll_into_view_if_needed(timeout=2000)
+    box = await host.bounding_box()
+    if not box:
+        raise ValueError("The period picker is no longer available")
+    page = frame.page
+    for side, date in enumerate(wanted):
+        await page.mouse.click(box["x"] + box["width"] * (0.25 if side == 0 else 0.75), box["y"] + box["height"] / 2)
+        await asyncio.sleep(0.25)
+        done = (
+            await period_pick(frame, "open")
+            if date == "present"
+            else await period_pick(frame, "year", year=date[0]) and await period_pick(frame, "month", month=date[1])
+        )
+        if not done:
+            raise ValueError("The period picker did not offer this date")
+    await click_blank_point(frame)
+    await asyncio.sleep(0.2)
+    if await shown() != wanted:
+        raise ValueError("The period picker did not keep its dates")
+    return value
+
+
 async def human_type(el, value, timeout=4000, *, retype=False, rematch=None):
     """Fill and read back a plain input; use keys only when the write is rejected."""
     text = str(value)
@@ -1502,6 +1609,13 @@ async def open_combobox(el):
               let widget=null;
               for (let n=e.parentElement, i=0; n && i<6; n=n.parentElement, i++)
                 if (n.matches('[aria-haspopup]:not([aria-haspopup=false]),[role=combobox]')) { widget=n; break; }
+              // The input itself is the combobox and no wrapper says so (TikTok's "Are you legally authorized...", 20 "covered"
+              // writes on 8 runs, 2026-10-28..11-02): the small box holding this one control and its cover is the widget.
+              if (!widget && e.matches('[role=combobox]'))
+                for (let n=e.parentElement, i=0; n && i<5; n=n.parentElement, i++) {
+                  if (n.getBoundingClientRect().height > 90 || n.querySelectorAll('input,select,textarea').length !== 1) break;
+                  if (n.contains(hit)) { widget=n; break; }
+                }
               if(!widget || !widget.contains(hit) || widget===hit) return null;
               // The widget's own clear or remove control is not its opener.
               if(hit.closest('button,a[href],[role=button]') || [hit, ...hit.querySelectorAll('[aria-label],[title]')]

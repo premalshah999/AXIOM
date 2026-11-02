@@ -3139,6 +3139,8 @@ class FormSession:
         el = await self.live_locator(field)
         frame = self.frames[field["id"]]
         kind = field["type"]
+        if field.get("widget") == "period-picker":
+            return await widgets.period_picker(frame, el, value)
         if (
             re.search(r"\bgpa\b|grade point average", field["label"], re.I)
             and kind in {"text", "number"}

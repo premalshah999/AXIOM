@@ -32,6 +32,7 @@ APPLY = re.compile(
     re.I,
 )
 INTEREST = re.compile(r"i'?m interested", re.I)
+SUBMIT_RESUME_LINK = re.compile(r"submit (?:your |my )?(?:resume|cv)(?: now)?", re.I)
 NOT_APPLY = re.compile(r"linkedin|indeed|seek\b|glassdoor|google|facebook|refer|share|save job|alert", re.I)
 NEXT = re.compile(
     r"^(?:next|continue|save (?:and|&) continue|save (?:and|&) next|next step|proceed|continue to (?:next step|"
@@ -371,6 +372,8 @@ SEND_CODE = re.compile(
 )
 # How long a code step looks for the picture puzzle its "Get code" opens before it concludes none was shown.
 PUZZLE_WATCH_SECONDS = 12
+# How long an empty document is given to draw itself before it is read as a page.
+FIRST_PAINT_SECONDS = 15
 CONSENT_MENUS = {"select", "combobox", "dropdown", "radio"}
 CONSENT_LABEL = re.compile(r"acknowledg|agree|consent|accept|privacy|terms", re.I)
 AUTH_BUTTON = re.compile(
@@ -923,6 +926,9 @@ class Adapter:
                 b["automation_id"] in self.apply_ids
                 or APPLY.search(b["label"])
                 or APPLY.search(b["aria_label"])
+                # Apple's posting links "Submit Resume" to its application (2026-10-27, also forms.click): with no
+                # form on the page it is the way in. Read as the final submit, each run waited on a model and stopped.
+                or (b.get("href") and SUBMIT_RESUME_LINK.fullmatch(b["label"].strip()) and not self.app_fields(obs))
             )
             and not NOT_APPLY.search(b["label"] + " " + b["href"])
         ]
@@ -1309,6 +1315,7 @@ class Adapter:
                 if challenge := await self.solve_captcha():
                     return challenge
             obs = await self.form.scan()
+            obs = await self.wait_for_first_paint(obs)
             from ..browser_contracts import missing_posting_notice
 
             if not self.committed and missing_posting_notice(obs, self.job["url"]):
@@ -1419,6 +1426,23 @@ class Adapter:
             return (self.service.mail.vault.open(payload) or {}).get("kind") == "link"
         except Exception:
             return False  # an unreadable token is never opened
+
+    async def wait_for_first_paint(self, obs):
+        """An empty document has nothing to decide about yet. Career sites that draw themselves late read as a finished, settled page
+        with no text and no control: Paycom's for about 10 s after it loaded (live, 2026-11-02), ByteDance's application page too, and
+        each run paid a model call to be told to wait. Bounded: a page that stays empty goes on as before."""
+        deadline = time.monotonic() + FIRST_PAINT_SECONDS
+        while (
+            not self.committed
+            and obs.get("scan_success")
+            and not obs["fields"]
+            and not obs["controls"]
+            and not str(obs.get("text") or "").strip()
+            and time.monotonic() < deadline
+        ):
+            await asyncio.sleep(0.5)
+            obs = await self.form.scan(force=True)
+        return obs
 
     # ----- step handlers ------------------------------------------------------------------------
     async def on_job_details(self, obs):

@@ -1106,6 +1106,22 @@
     }
     if (el.closest('[role=combobox]') !== el && el.closest('[role=combobox]')) continue;
     let options = [], value = el.value || '', question = label(el), group = null, uploadRequired = false;
+    // A month-period picker's input is a zero-height focus sink (TikTok's "Start & end date", 2026-10-28..11-02: 140 write
+    // timeouts in 8 runs, and a required row read as empty with both dates on screen). What it holds is what the picker around it
+    // shows; forms._fill drives the picker, never the input.
+    if (type === 'text' && el.matches('input') && !el.value) {
+      const box = el.getBoundingClientRect();
+      if (!box.width || !box.height) {
+        for (let p = el.parentElement, depth = 0; p && depth < 3; p = p.parentElement, depth++) {
+          const area = p.getBoundingClientRect();
+          if (area.width >= 80 && area.height >= 16 && /(?:date|period|month|calendar)/i.test(typeof p.className === 'string' ? p.className : '')) {
+            widget = 'period-picker';
+            value = clean(p.innerText || '');
+            break;
+          }
+        }
+      }
+    }
     // RCM sometimes labels a picker only "Make Selection Here"; its immediately preceding instruction
     // column owns the actual question. Stop at any other control or content rather than borrowing a section.
     if (/^\s*[*✱]?\s*make selection here\s*$/i.test(question) && el.closest('.RCMFormField')) {
