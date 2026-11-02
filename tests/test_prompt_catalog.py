@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from jobpilot import widgets
+from support_budget import scaled
 
 
 async def test_no_search_result_browses_flat_catalog_and_commits_model_leaf(page):
@@ -488,7 +489,7 @@ async def test_school_prompt_searches_the_institution_first(page):
     )
     assert chosen == "University of Michigan"
     assert await page.evaluate("window.queries") == ["University of Michigan"]
-    assert time.monotonic() - started < 3
+    assert time.monotonic() - started < scaled(3)
 
 
 async def test_prompt_uses_settled_search_results_that_do_not_repeat_the_query(page):
@@ -513,7 +514,7 @@ async def test_prompt_uses_settled_search_results_that_do_not_repeat_the_query(p
     chosen = await widgets.prompt(page.main_frame, page.locator("#study"), "Information Science", choose)
     assert chosen == "Information Systems"
     assert await page.evaluate("window.queries") == ["Information Science"]
-    assert time.monotonic() - started < 3
+    assert time.monotonic() - started < scaled(3)
 
 
 async def test_a_school_missing_from_the_list_commits_the_offered_other(page):

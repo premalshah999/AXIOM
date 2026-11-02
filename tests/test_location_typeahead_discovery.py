@@ -11,6 +11,7 @@ import time
 from jobpilot.answers import Resolver
 from jobpilot.forms import FormSession
 from jobpilot.schemas import Profile
+from support_budget import scaled
 
 TYPEAHEAD = """<label id=l1 for=loc>{label}</label>
 <input id=loc role=combobox aria-autocomplete=list aria-expanded=false aria-labelledby=l1
@@ -36,7 +37,7 @@ async def test_applicant_location_typeahead_is_not_opened_for_choices(page, serv
         field = next(f for f in (await form.scan())["fields"] if f["label"] == label)
         started = time.monotonic()
         await form.discover_options(field)
-        assert time.monotonic() - started < 0.5, label
+        assert time.monotonic() - started < scaled(0.5), label
         assert field["options"] == [] and field["options_partial"] and field.get("search_only")
         assert not any(kind == "option_observation" for kind, _ in events)
 

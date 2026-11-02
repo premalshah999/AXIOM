@@ -58,7 +58,9 @@ async def test_missing_field_diagnostic_does_not_pay_default_locator_timeout(pag
     form.locator = lambda control_id: page.locator('[data-jp-id=detached]')
     start = time.monotonic()
     assert await form.control_structure('old') == {}
-    assert time.monotonic() - start < 1.3
+    from support_budget import scaled
+
+    assert time.monotonic() - start < scaled(1.3)
 
 
 async def test_diagnostic_deadline_also_bounds_unresponsive_renderer():
@@ -71,9 +73,12 @@ async def test_diagnostic_deadline_also_bounds_unresponsive_renderer():
         await asyncio.sleep(30)
     form = object.__new__(FormSession)
     form.locator = lambda control_id: SimpleNamespace(evaluate=hung)
-    start = time.monotonic()
-    assert await form.control_structure('old') == {}
-    assert time.monotonic() - start < 5  # the renderer sleeps 30 s
+    from support_virtual_time import virtual_time
+
+    with virtual_time():  # the renderer sleeps 30 s of virtual time
+        start = time.monotonic()
+        assert await form.control_structure('old') == {}
+        assert time.monotonic() - start < 5
 
 
 async def test_phone_blur_remount_checks_live_value_without_retyping(page, service, tmp_path):

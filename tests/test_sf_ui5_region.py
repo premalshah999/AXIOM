@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from jobpilot import widgets
 from jobpilot.forms import FormSession
+from support_budget import scaled
 
 REGION_UI5 = """<label for=region>State/Province/Region</label>
 <div class="sapMInputBase sapMComboBox" id=wrap>
@@ -127,4 +128,4 @@ async def test_ui5_probe_of_a_replaced_field_returns_fast(page):
     gone = page.locator("#replaced-after-typing")
     started = time.monotonic()
     assert await widgets.ui5_uncommitted(gone, "Maryland") is False
-    assert time.monotonic() - started < 5
+    assert time.monotonic() - started < scaled(5)

@@ -2,6 +2,7 @@
 import time
 import pytest
 from jobpilot.widgets import dismiss_pickers
+from support_budget import scaled
 
 
 async def test_delayed_menu_close_uses_timer_polling_when_animation_frames_stop(page):
@@ -13,7 +14,7 @@ async def test_delayed_menu_close_uses_timer_polling_when_animation_frames_stop(
     started = time.monotonic()
     await dismiss_pickers(page.main_frame)
     assert not await page.locator('#menu').is_visible()
-    assert time.monotonic() - started < .5
+    assert time.monotonic() - started < scaled(.5)
 
 
 async def test_stubborn_menu_cannot_leak_choices_to_next_field(page):

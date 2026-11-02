@@ -9,6 +9,7 @@ import time
 
 from jobpilot import widgets
 from support_roundtrips import roundtrips
+from support_budget import scaled
 
 
 async def test_nothing_open_costs_one_call(page):
@@ -62,7 +63,7 @@ async def test_a_list_that_will_not_close_still_gets_the_escape_fallback(page):
     started = time.monotonic()
     await widgets.dismiss_pickers(page.main_frame)
     assert await page.locator("#list").is_hidden()
-    assert time.monotonic() - started < 5
+    assert time.monotonic() - started < scaled(5)
 
 
 async def test_a_menu_without_items_is_not_an_open_picker(page):

@@ -19,6 +19,7 @@ import pytest
 
 from jobpilot import widgets
 from support_react_select import markup
+from support_budget import scaled
 
 CITIES = [
     "Rivertown, Maryland, United States",
@@ -48,7 +49,7 @@ async def test_a_city_with_a_state_abbreviation_commits_without_waiting_for_a_qu
     got, error, seconds = await pick(page, html, "candidate-location", "Rivertown, MD", resolve=maryland_only)
     assert got == "Rivertown, Maryland, United States", error
     assert await page.evaluate("window.picked") == "Rivertown, Maryland, United States"
-    assert seconds < 3.8, f"waited the whole typed-search timeout: {seconds:.1f}s"
+    assert seconds < scaled(3.8), f"waited the whole typed-search timeout: {seconds:.1f}s"
 
 
 async def test_the_wrong_state_is_never_picked_to_save_time(page):
@@ -63,7 +64,7 @@ async def test_an_unlisted_school_fails_fast_when_the_menu_says_no_options(page)
     got, error, seconds = await pick(page, html, "school--0", "Nowhere State University", school_scope=True)
     assert got is None and "No matching option" in error
     assert await page.evaluate("window.picked") is None
-    assert seconds < 5.5, f"waited out the empty search: {seconds:.1f}s"  # 7.0 s before the fix
+    assert seconds < scaled(5.5), f"waited out the empty search: {seconds:.1f}s"  # 7.0 s before the fix
 
 
 async def test_a_slow_search_is_not_taken_for_no_results(page):

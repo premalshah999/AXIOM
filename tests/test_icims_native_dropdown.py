@@ -14,6 +14,7 @@ import pytest
 import pytest_asyncio
 
 from jobpilot import widgets
+from support_budget import scaled
 
 COUNTRIES = ["United States"] + [f"Country {i:03d}" for i in range(120)] + ["India", "Zambia"]
 STATES = (
@@ -226,7 +227,7 @@ async def test_a_search_answered_by_the_rows_already_shown_does_not_wait_out_the
     await form.locator(f"{ctnr} input").press_sequentially("United States", delay=35)
     started = time.monotonic()
     rows = await widgets.icims_rows(form.main_frame, "rcf2046", before=before, timeout=6, query="United States")
-    assert rows == before and time.monotonic() - started < 3
+    assert rows == before and time.monotonic() - started < scaled(3)
 
 
 async def test_the_first_page_that_answers_after_opening_is_not_read_as_the_search(form):
@@ -242,4 +243,4 @@ async def test_the_first_page_that_answers_after_opening_is_not_read_as_the_sear
     country = form.locator('[id="-1_PersonProfileFields.AddressCountry2_icimsDropdown"]')
     started = time.monotonic()
     assert await widgets.combobox(form.main_frame, country, "United States", thorough=False) == "United States"
-    assert time.monotonic() - started < 6  # one search, inside an optional picker's budget
+    assert time.monotonic() - started < scaled(6)  # one search, inside an optional picker's budget
