@@ -54,6 +54,7 @@ async def review_page(page, service, monkeypatch, tmp_path):
     engine = BrowserEngine(service, "synthetic-run")
     engine.page, engine.job = page, {"id": "phenom-job", "url": JOB, "demo": False}
     engine.form = FormSession(page, Resolver(Profile(), service.db, service.config), tmp_path / "resume.pdf", lambda *a, **k: None)
+    await engine.form.scan()
     return engine, posts, bought
 
 
