@@ -129,7 +129,17 @@ def typed(name, value):
     try:
         return _adapter(name).validate_python(value)
     except Exception as exc:
-        raise ValueError(f"{FIELDS[name][1]}: {str(exc).splitlines()[-1].strip()[:120]}") from None
+        # The last line of a validation error is a link to its documentation, which is what the person used to read.
+        first = (exc.errors() or [{}])[0] if hasattr(exc, "errors") else {}
+        bound = first.get("ctx") or {}
+        why = (
+            f"must be {bound['le']} or less" if "le" in bound
+            else f"must be {bound['ge']} or more" if "ge" in bound
+            else f"must be more than {bound['gt']}" if "gt" in bound
+            else f"must be less than {bound['lt']}" if "lt" in bound
+            else "isn't a valid value"
+        )
+        raise ValueError(f"{FIELDS[name][1]} {why}") from None
 
 
 def stored(config):

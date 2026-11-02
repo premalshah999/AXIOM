@@ -243,7 +243,7 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
       <input
         type="number"
         min={1}
-        max={500}
+        max={1000}
         step={1}
         required
         value={goal}
@@ -254,7 +254,7 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
       />
       <span>a day</span>
       <span id="target-hint" className="sr-only">
-        The most applications AXIOM sends in a day, 1 to 500. The same number as Applications per day in Settings.
+        The most applications AXIOM sends in a day, 1 to 1000. The same number as Applications per day in Settings.
       </span>
     </label>
   );
