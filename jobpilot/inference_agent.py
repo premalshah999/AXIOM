@@ -27,6 +27,8 @@ NEVER_INFER = re.compile(
 
 INSTRUCTIONS = (
     "You answer one job-application question for the applicant, using only the evidence pack. "
+    "When max_characters is set, the answer must be one complete answer of at most target_characters characters, "
+    "even if the question allows more words. "
     "Answer when the value follows from the evidence: direct facts, saved answers to equivalent "
     "questions, simple derivations (age or 18+ from confirmed age facts; graduation status from "
     "education dates; current employment from work history; relocation/hybrid/onsite from stated "
@@ -162,6 +164,9 @@ async def infer(resolver, field):
             "required": bool(field.get("required")),
             "options": options,
             "max_characters": field.get("maxlength") if (field.get("maxlength") or 0) > 0 else None,
+            # A box can hold far less than the question's own "200 words or less" (Atlas Copco's SuccessFactors: 200 characters):
+            # the box wins, and a whole answer that fits is written rather than a long one that is cut to nothing.
+            "target_characters": int(field["maxlength"] * 0.8) if (field.get("maxlength") or 0) > 0 else None,
             "evidence": pack,
         },
         default=str,

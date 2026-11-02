@@ -589,7 +589,7 @@ class ModelBatchMixin:
                         "instruction": "Use exact reference IDs supplied in confirmed_facts, evidence or reviewed_answers. "
                         "Interpret the actual question; an employer name is not an immigration fact. "
                         "Choose an exact offered option or a supported search value for a partial catalog. "
-                        "For field_limit, rewrite below max_characters while preserving the supported answer. "
+                        "For field_limit, rewrite below max_characters while preserving the supported answer; when the question asks for more words than the box holds, the box wins: write one complete, self-contained answer of at most 80% of max_characters, never a cut-off one. "
                         "A yes/no question does not need a narrative unless it explicitly asks for an explanation.",
                     }
                     repairs.append(field)
