@@ -4,7 +4,7 @@
 import { ArrowLeft, RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, ApiError } from "./api";
-import { routeUrl, useWorkspace } from "./context";
+import { routeUrl, useWorkspace, type AnyRoute } from "./context";
 import { useAction, usePoll } from "./hooks";
 import { PdfPages, usePdf } from "./pdfpages";
 import { SwitchRow } from "./setup-kit";
@@ -176,8 +176,8 @@ function Diff({ from, to }: { from: string; to: string }) {
 
 // ---------- The small control, for wherever a job is queued ----------
 /** The screen a tailored resume was opened from, so Back returns there and not always to the Queue. */
-let cameFrom: { view: string; tab?: string; filter?: string; job?: string } | null = null;
-const BACK_WORDS: Record<string, string> = { queue: "Queue", board: "Job board", review: "Review batch", needs: "Needs you", ledger: "Applications", resumes: "Resumes", overview: "Overview" };
+let cameFrom: AnyRoute | null = null;
+const BACK_WORDS: Record<string, string> = { queue: "Queue", board: "Job board", review: "Review batch", needs: "Needs you", ledger: "Applications", resumes: "Resumes", batch: "Overview" };
 
 /**
  * "Apply" or "Apply with tailored resume" and a mode. Off by default. On a list, pass `known` and `modes` from one GET /v2/resumes/tailor/choices?job_ids=... so
@@ -311,11 +311,11 @@ export function TailorApprovalRow() {
 function useBack() {
   const { go } = useWorkspace();
   const to = cameFrom;
-  return { label: to ? BACK_WORDS[to.view] ?? "Back" : "Queue", go: () => go(to ? ({ tailor: undefined, ...to } as Parameters<typeof go>[0]) : { view: "queue", tailor: undefined }) };
+  return { label: to ? BACK_WORDS[to.view] ?? "Back" : "Queue", go: () => go(to ?? { view: "queue" }) };
 }
 
 export function TailorView() {
-  const { route } = useWorkspace();
+  const { route, go } = useWorkspace();
   const jobId = route.tailor;
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState("");
@@ -343,7 +343,13 @@ export function TailorView() {
     return () => clearInterval(t);
   }, [preparing]);
   const back = useBack();
-  if (!jobId) return <div className="ax-page"><p className="ax-note">Open a job and choose Apply with tailored resume.</p></div>;
+  if (!jobId)
+    return (
+      <div className="ax-page">
+        <p className="ax-note">To tailor a resume, choose Apply with tailored resume on a job.</p>
+        <p><button type="button" className="ax-link" onClick={() => go({ view: "board" })}>Open the Job board</button></p>
+      </div>
+    );
   if (error && !view)
     return (
       <div className="ax-page">
@@ -435,7 +441,7 @@ function Failed({ view, onChanged }: { view: View; onChanged: () => Promise<void
       </p>
       <span className="tl-failed-acts">
         {fix && (
-          <Button onClick={() => go({ ...fix.to, tailor: undefined } as Parameters<typeof go>[0])}>
+          <Button onClick={() => go(fix.to)}>
             {fix.label}
           </Button>
         )}
@@ -563,7 +569,7 @@ function NotChosen({ view, onChanged }: { view: View; onChanged: () => Promise<v
         )}
         {!view.resume_name && (
           <p className="ax-note">
-            <button type="button" className="ax-link" onClick={() => go({ view: "resumes", tailor: undefined } as Parameters<typeof go>[0])}>Add your resume</button> to apply to this job or tailor it.
+            <button type="button" className="ax-link" onClick={() => go({ view: "resumes" })}>Add your resume</button> to apply to this job or tailor it.
           </p>
         )}
         <ScoreBar score={view.ats.score} source={null} keywords={rows} tiers={scoreTiers(rows, live.tiers)}>
@@ -784,7 +790,7 @@ function Review({ view, onView, onChanged, notice, setNotice }: { view: View; on
       {approved && !dirty && (
         <p className="tl-approved">
           {view.choice?.approved_how === "setting_off" ? "Approval is off in Settings, so this version goes out as it is." : "You approved this version."} The PDF under "The PDF that's sent" is exactly what goes out.{" "}
-          <a href={routeUrl({ view: "settings", tab: "applying" })} className="ax-link" onClick={(e) => { e.preventDefault(); go({ view: "settings", tab: "applying", tailor: undefined } as Parameters<typeof go>[0]); }}>Change this in Settings</a>
+          <a href={routeUrl({ view: "settings", tab: "applying" })} className="ax-link" onClick={(e) => { e.preventDefault(); go({ view: "settings", tab: "applying" }); }}>Change this in Settings</a>
         </p>
       )}
       {view.stale && !locked && <p className="ax-error tl-message" role="alert">Your resume, your profile or this posting changed after this was tailored, so it won't be sent. Tailor it again.</p>}

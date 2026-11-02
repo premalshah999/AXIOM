@@ -119,7 +119,7 @@ def test_a_started_application_can_be_read_but_not_changed(client, service, stat
     view = client.get("/api/v2/resumes/tailor/job/j1").json()
     assert view["started"] is True
     for answer in (
-        client.post("/api/v2/resumes/tailor/job/j1/retry"),
+        client.post("/api/v2/resumes/tailor/job/j1/retry", json={}),
         client.post("/api/v2/resumes/tailor/job/j1/save", json={"doc": view["doc"]}),
         client.post("/api/v2/resumes/tailor/job/j1/approve", json={"artifact_id": artifact, "apply": False}),
     ):

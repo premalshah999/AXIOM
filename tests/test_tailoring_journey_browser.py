@@ -178,7 +178,23 @@ def serve(port, static_root, data_dir):
                 if not s.get(Job, jid):
                     s.add(Job(id=jid, identity=jid, url=f"{employer.base}/jobs/{i}", title=f"Reporting Analyst {i}", company=f"ExampleWorks {i}", location="Austin, TX", description=POSTING, status="ready", score=90, reason="Good fit", ats="greenhouse"))
                     s.add(JobListing(job_id=jid, source_id="src", posted_at=time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()), date_basis="posted", location="Austin, TX", country="US", career_level="", match_reason="x", active=True))
+        await refresh()
         return {"employer": employer.base}
+
+    async def refresh():
+        from jobpilot import board_view, queue_order, startable
+
+        def again():
+            startable.reading(service).reload(service)
+            queue_order.plans(service).now(service)
+            board_view.board(service).reload(service)
+
+        await asyncio.to_thread(again)
+
+    @app.post("/api/journey/refresh")
+    async def refreshed():
+        await refresh()
+        return {}
 
     @app.post("/api/journey/model")
     async def model_control(data: dict):

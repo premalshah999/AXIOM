@@ -922,7 +922,7 @@ function VersionPreview({ id, items, tailoringOff }: { id: string; items: Artifa
             )}
             {ready && <DownloadButton url={versionUrl(id)} name={`Resume for ${company}`} variant="secondary" />}
             {ready && a?.choice && a.job_id && (
-              <Button size="sm" variant="primary" icon={<ListChecks size={14} aria-hidden="true" />} onClick={() => go({ view: "tailor", tailor: a.job_id!, artifact: undefined })}>
+              <Button size="sm" variant="primary" icon={<ListChecks size={14} aria-hidden="true" />} onClick={() => go({ view: "tailor", tailor: a.job_id! })}>
                 Review
               </Button>
             )}

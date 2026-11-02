@@ -449,7 +449,7 @@ function Workbench({
           </Button>
         )}
         {draft.job && !master && initial.version?.choice && (
-          <Button size="sm" variant="ghost" className="ax-ed-job" onClick={() => go({ view: "tailor", tailor: draft.job!, artifact: undefined })}>
+          <Button size="sm" variant="ghost" className="ax-ed-job" onClick={() => go({ view: "tailor", tailor: draft.job! })}>
             Review and approve
           </Button>
         )}
