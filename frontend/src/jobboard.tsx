@@ -364,9 +364,10 @@ export function BoardView() {
     },
   ];
 
-  const all = (label: string, facet?: BoardFacet[], rename?: (f: BoardFacet) => string) => [
+  // A filter offers no choice that opens nothing, unless it is the one chosen.
+  const all = (label: string, chosen: string, facet?: BoardFacet[], rename?: (f: BoardFacet) => string) => [
     { value: "all", label },
-    ...(facet ?? []).filter((f) => f.count > 0).map((f) => ({ value: f.value, label: rename ? rename(f) : f.label, count: f.count })),
+    ...(facet ?? []).filter((f) => f.count > 0 || f.value === chosen).map((f) => ({ value: f.value, label: rename ? rename(f) : f.label, count: f.count })),
   ];
   const keep = (value: string, options: { value: string; label: string; count?: number }[]) =>
     value === "all" || options.some((o) => o.value === value) ? options : [...options, { value, label: value, count: 0 }];
@@ -475,12 +476,12 @@ export function BoardView() {
         <div className="bd-toolbar" role="group" aria-label="Filter the job board">
           <SearchBox value={query} onChange={setQuery} label="Search the job board" placeholder="Role, company or city" />
           <Listbox label="Fit" value={fit} options={(b?.facets.fit?.length ? b.facets.fit : [{ value: "match", label: "Good fits" }]) as { value: Fit; label: string; count?: number }[]} onChange={setFit} />
-          <Listbox prefix="Role" label="Role" value={role} options={keep(role, all("Any", b?.facets.role))} onChange={setRole} />
-          <Listbox prefix="Level" label="Level" value={level} options={keep(level, all("Any", b?.facets.level))} onChange={setLevel} />
-          <Listbox prefix="Company" label="Company" value={company} options={keep(company, all("Any", b?.facets.company))} onChange={setCompany} />
-          <Listbox prefix="Location" label="Location" value={place} options={keep(place, all("Any", b?.facets.place))} onChange={setPlace} />
-          <Listbox prefix="Posted" label="Posted" value={posted} options={keep(posted, all("Any", b?.facets.posted))} onChange={setPosted} />
-          <Listbox prefix="Platform" label="Platform" value={platform} options={keep(platform, all("Any", b?.facets.platform, (f) => platformName(f.value)))} onChange={setPlatform} />
+          <Listbox prefix="Role" label="Role" value={role} options={keep(role, all("Any", role, b?.facets.role))} onChange={setRole} />
+          <Listbox prefix="Level" label="Level" value={level} options={keep(level, all("Any", level, b?.facets.level))} onChange={setLevel} />
+          <Listbox prefix="Company" label="Company" value={company} options={keep(company, all("Any", company, b?.facets.company))} onChange={setCompany} />
+          <Listbox prefix="Location" label="Location" value={place} options={keep(place, all("Any", place, b?.facets.place))} onChange={setPlace} />
+          <Listbox prefix="Posted" label="Posted" value={posted} options={all("Any", posted, b?.facets.posted)} onChange={setPosted} />
+          <Listbox prefix="Platform" label="Platform" value={platform} options={keep(platform, all("Any", platform, b?.facets.platform, (f) => platformName(f.value)))} onChange={setPlatform} />
           {filtered && (
             <Button variant="ghost" size="sm" icon={<FilterX size={14} aria-hidden="true" />} onClick={clear}>
               Clear
