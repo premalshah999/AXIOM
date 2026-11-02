@@ -142,7 +142,7 @@ def view(db, config, job_id: str) -> dict:
     source_doc = editor.ResumeDoc.model_validate(v["source_doc"]) if v.get("source_doc") else None
     doc = editor.ResumeDoc.model_validate(v["editor"]["doc"]) if v.get("editor", {}).get("doc") else None
     inv, evidence_text = _evidence_text(profile, resume_text, source_doc)
-    terms = v.get("ats_terms") or ats.terms(job["description"], job["title"], supported_terms(inv))
+    terms = v.get("ats_terms") or ats.terms(job["description"], job["title"], supported_terms(inv), company=job.get("company", ""))
     source_text = doc_plain(source_doc) if source_doc else resume_text
     now_text = doc_plain(doc) if doc else source_text
     master = current_master(db, approved_only=True)
@@ -337,9 +337,10 @@ def add(r, service) -> None:
             raise HTTPException(422, "The edited PDF failed its ATS extraction checks.")
         terms = v.get("ats_terms") or []
         from . import gates
+        from .normal import forbidden_terms
 
-        # A term nothing supports, which they typed themselves. It stays, because it's their resume, and they're told plainly.
-        typed = ats.adds_forbidden(doc_plain(data.doc), evidence_text, ats.forbidden(ats.score(terms, doc_plain(source), evidence_text)))
+        # A term nothing supports, which they typed themselves. It stays, because it's their resume, and they're told plainly. A term their own bullet already says in other words isn't one.
+        typed = ats.adds_forbidden(doc_plain(data.doc), evidence_text, forbidden_terms(ats.score(terms, doc_plain(source), evidence_text), source))
         if typed:
             rules["warnings"].append({"code": "your_statement", "where": "resume", "message": "Nothing else you've given AXIOM says you have: " + ", ".join(typed[:8]) + ". Keep it only if it's true."})
 
@@ -429,7 +430,7 @@ def add(r, service) -> None:
         job, resume_text, _ = _job(db, data.job_id)
         profile = db.get_setting("profile", {}) or {}
         inv, evidence_text = _evidence_text(profile, resume_text)
-        terms = ats.terms(job["description"], job["title"], supported_terms(inv))
+        terms = ats.terms(job["description"], job["title"], supported_terms(inv), company=job.get("company", ""))
         with db.session() as s:
             row = s.get(RsTailorChoice, data.job_id)
             base = s.get(RsArtifact, row.artifact_id) if row and row.artifact_id else None

@@ -14,8 +14,9 @@ Rules, each from the reference pipeline's hard-won checks or from how parsers ma
   equal-opportunity text never drive a keyword.
 - The posting's own spelling is what's shown (`CI/CD`, not `CI` and `CD`). Matching tolerates case, plurals and hyphens; an alias only
   counts both ways when it's the same thing (RAG, Retrieval-Augmented Generation).
-- A missing term is one of two things: `available`, the applicant's own history says it; `needed`, nothing they gave us says it. A
-  `needed` term is never inserted anywhere, by anyone, and the UI says "you'd need this".
+- A missing term is one of two things: `available`, the applicant's own history says it; `needed`, nothing they gave us says it in those
+  words. A `needed` term is never inserted anywhere, by anyone, and the UI says "you'd need this". The one way it reaches a resume is
+  when a bullet already says it in other forms of its own words, "Administered medications" for "medication administration" (normal.py).
 - Coverage is advisory. 60-70% of requirement terms is a natural resume; chasing 100% is how stuffing happens.
 
 Every term carries a `pattern` that Python and the browser run identically, so the screen rescores on each keystroke without a request
@@ -44,20 +45,33 @@ HEADINGS = {
         r"(?:minimum |basic |required |key |must[- ]have |essential |core )*(?:requirements?|qualifications?|skills(?: and experience| required)?|competenc(?:y|ies))"
         r"|what you(?:'|’| wi)ll need|what we(?:'|’| a)re looking for|what you bring|what you(?:'|’)ll bring|what you have|you have|you bring"
         r"|who you are|about you|must haves?|your background|your experience|experience(?: required)?|education(?: and experience)?|licens(?:e|ure)s?(?: and certifications?)?|certifications?"
+        r"|(?:you (?:may|might|could|will) be|you(?:'|’)ll be|you(?:'|’)re|you are) an? (?:great |good |strong |ideal )?(?:fit|match)(?: if)?|(?:the )?ideal candidate"
     ),
     "duties": (
         r"(?:key |core |primary |main )*(?:responsibilit(?:y|ies)|duties)|what you(?:'|’| wi)ll do|what you(?:'|’)ll be doing|the role|about the role|about this role|your role"
         r"|in this role|day[- ]to[- ]day|you will|job description|position summary|role overview|overview of the role|the job|the work"
     ),
-    "preferred": r"(?:preferred|desired|additional)(?: qualifications?| skills?| experience)?|nice[- ]to[- ]haves?|good to have|bonus(?: points)?|pluses|extra credit",
+    "preferred": (
+        r"(?:preferred|desired|additional)(?: qualifications?| skills?| experience)?|nice[- ]to[- ]haves?|good to have|bonus(?: points)?|pluses|extra credit"
+        r"|helpful(?:,? but not required)?|not required,? but [\w ]+|even better(?: if)?"
+    ),
     "other": (
         r"about (?:us|the company|the team|our company|[A-Z][\w&. ]{1,30})|who we are|benefits?|perks|compensation|salary|pay(?: range)?|what we offer|why (?:join|work)[\w ]*"
         r"|equal (?:employment )?opportunity|eeo|diversity[\w ]*|our (?:values|culture|mission|story)|how to apply|location|work (?:authorization|environment)|physical demands|disclaimer"
+        r"|why you(?:'|’)ll love[\w ]*|what success looks like|how we work|show us what you(?:'|’)ve built|life at [\w ]+"
     ),
 }
 HEAD = {tier: re.compile(rf"^\W*(?:{body})\W*$", re.I) for tier, body in HEADINGS.items()}
 INLINE_HEAD = re.compile(
     r"(?<=[.!?;\s])((?:minimum |basic |preferred |required |key )?(?:requirements|qualifications|responsibilities|duties|benefits|nice to have|what you(?:'|’| wi)ll (?:do|need|bring))\s*:)",
+    re.I,
+)
+# Legal and benefits sentences a posting often runs on into, under whichever heading came last. They never describe the work.
+BOILERPLATE = re.compile(
+    r"equal (?:employment )?opportunity|consideration for employment|without regard to|regardless of (?:race|age|gender|sex)|protected (?:veteran|class|status|basis)|national origin|sexual orientation"
+    r"|reasonable accommodation|e-verify|follow [\w.' ]{1,30} on (?:linkedin|twitter|facebook|instagram|glassdoor)\b|learn more at\b|parental leave|(?:paid|discretionary|flexible|unlimited|generous) time off"
+    r"|health,? (?:vision|dental)|medical,? dental|dental,? (?:and )?vision|401\(?k\)?"
+    r"|competitive (?:compensation|salary|pay|benefits)",
     re.I,
 )
 SOFT_PREFERRED = re.compile(r"\b(?:preferred|a plus|is a bonus|nice to have|desirable|ideally|not required)\b", re.I)
@@ -204,6 +218,9 @@ def blocks(description: str) -> dict:
         where = tier if tier else ("other" if seen else "duties")
         # By the sentence: a posting flattened to one paragraph ends in "forklift preferred", and that doesn't make all of it optional.
         for sentence in re.split(r"(?<=[.!?;])\s+", line):
+            if BOILERPLATE.search(sentence):
+                out["other"].append(sentence)
+                continue
             # A requirement that calls itself optional counts as preferred.
             soft = where in {"required", "duties"} and SOFT_PREFERRED.search(sentence)
             out["preferred" if soft else where].append(sentence)
@@ -235,8 +252,8 @@ def _acceptable(term: str) -> bool:
     return not all(w.lower() in STOP or w.lower() in GENERIC for w in term.split())
 
 
-def _candidates(text: str, own_terms: list[str]) -> dict[str, str]:
-    """{normalized: the posting's spelling} found in one block."""
+def _candidates(text: str, own_terms: list[str]) -> tuple[dict[str, str], set[str]]:
+    """({normalized: the posting's spelling} found in one block, the keys only a word count made terms)."""
     found: dict[str, str] = {}
     low = text.lower()
 
@@ -264,7 +281,8 @@ def _candidates(text: str, own_terms: list[str]) -> dict[str, str]:
         add(m.group(0))
     for m in LEAD_INS.finditer(text):
         for item in _list_items(m.group(1)):
-            if item and len(item.split()) <= 4 and not any(w.lower() in GENERIC for w in item.split()):
+            # "want to continue developing your engineering" came from one sentence running on past its list: a real term has no "your" or "want to" inside it.
+            if item and len(item.split()) <= 4 and not any(w.lower() in GENERIC or w.lower() in STOP - {"of", "for"} for w in item.split()):
                 add(item)
     for m in TITLE_PHRASE.finditer(text):
         phrase = _clean_candidate(m.group(0))
@@ -288,14 +306,20 @@ def _candidates(text: str, own_terms: list[str]) -> dict[str, str]:
     for w in words:
         if len(w) >= 6 and w not in STOP and w not in GENERIC:
             singles[w] = singles.get(w, 0) + 1
+    frequent = set()
     for key, count in singles.items():
         if count >= 3:
+            if norm(key) not in found:
+                frequent.add(norm(key))
             add(key)
-    return found
+    return found, frequent
 
 
-def terms(description: str, title: str = "", own_terms: list[str] | None = None, limit: int = MAX_TERMS) -> list[dict]:
-    """The posting's keywords: each with its tier, weight and pattern, in the order a recruiter would care about them."""
+def terms(description: str, title: str = "", own_terms: list[str] | None = None, limit: int = MAX_TERMS, company: str = "") -> list[dict]:
+    """The posting's keywords: each with its tier, weight and pattern, in the order a recruiter would care about them.
+
+    `common` marks a plain word that's here only because the posting repeats it ("building", "follow"): it counts in the score, but it's no skill, so nobody claims or adds it as one.
+    """
     own = [t for t in (own_terms or []) if t and len(t) <= 40]
     parts = blocks(description)
     picked: dict[str, dict] = {}
@@ -304,11 +328,17 @@ def terms(description: str, title: str = "", own_terms: list[str] | None = None,
         text = parts[tier]
         if not text:
             continue
-        for key, spelling in _candidates(text, own).items():
+        found, frequent = _candidates(text, own)
+        for key, spelling in found.items():
             position += 1
             if key in picked:
                 continue
-            picked[key] = {"term": spelling, "key": key, "tier": tier, "weight": WEIGHTS[tier], "order": position}
+            picked[key] = {"term": spelling, "key": key, "tier": tier, "weight": WEIGHTS[tier], "order": position, **({"common": True} if key in frequent else {})}
+    # The employer's own name is what the posting talks about, not something an applicant could have.
+    employer = norm(company)
+    for key in list(picked):
+        if employer and (key == employer or key in employer.split()):
+            picked.pop(key)
     # One thing, two spellings: keep the posting's more visible one and let its pattern match both.
     for key in list(picked):
         for alias in ALIASES.get(key, []):
@@ -316,6 +346,10 @@ def terms(description: str, title: str = "", own_terms: list[str] | None = None,
             if other in picked and other != key and key in picked:
                 first, second = sorted((key, other), key=lambda k: (-picked[k]["weight"], picked[k]["order"]))
                 picked.pop(second, None)
+    # The same word twice, once in the plural: the first spelling's pattern already matches both.
+    for key in list(picked):
+        if key.endswith("s") and key[:-1] in picked:
+            picked.pop(key)
     # A fragment of a longer term isn't its own term when the longer one is here ("learning" beside "machine learning").
     for key in sorted(picked, key=len, reverse=True):
         if key not in picked:

@@ -153,6 +153,51 @@ def test_a_short_flattened_posting_splits_too_and_a_sentence_isnt_a_name():
     assert "Tableau Knowledge of GAAP" not in found
 
 
+# The shape of a real posting that read as 30 "required" terms such as employment, protected, follow and its own employer, with Python and SQL pushed off the list.
+RUN_ON = """Who We Are:
+Northwind is the partner for supply chain automation.
+What You'll Do:
+Build applications and workflows using APIs, data and code.
+You May Be a Great Fit If
+You can write code in a language such as Python, JavaScript, or TypeScript and want to continue developing your engineering skills.
+You have some familiarity with APIs, SQL or data structures, Git, testing, and debugging.
+Experience
+A typical candidate has one to three years of relevant experience, from full-time employment or internships.
+Helpful, but Not Required
+Familiarity with vector databases, embedding models, or evaluation tools.
+What Success Looks Like
+Earn the trust of teammates through follow-through and curiosity, building, leading and follow-up at Northwind and Northwind teams.
+Why You'll Love Working at Northwind:
+Discretionary Time Off for all employees. Industry leading health, vision, and dental benefits.
+Learn more at northwind.example and follow Northwind on LinkedIn.
+All qualified applicants will receive consideration for employment without regard to race, color, religion, sex, sexual orientation, gender identity, national origin, age, disability or protected veteran status, or any other legally protected basis.
+"""
+
+
+def test_a_run_on_posting_keeps_its_real_terms_and_drops_the_legal_text_and_the_employer():
+    rows = {t["term"].lower(): t for t in ats.terms(RUN_ON, "Builder", company="Northwind")}
+    assert {"python", "javascript", "typescript", "sql", "git", "debugging", "data structures"} <= set(rows)
+    assert rows["python"]["tier"] == "required" and rows["vector databases"]["tier"] == "preferred"
+    assert not set(rows) & {"northwind", "employment", "protected", "follow", "linkedin", "dental", "building", "leading"}
+    assert not [t for t in rows if "your" in t or "want" in t]
+
+
+def test_a_real_duty_that_sounds_like_boilerplate_stays_a_duty():
+    parts = ats.blocks("Responsibilities\nFollow safety procedures on the production floor. Provide dental care to patients. Track time off requests in Workday.")
+    assert "safety procedures" in parts["duties"] and "dental care" in parts["duties"] and "Workday" in parts["duties"]
+
+
+def test_a_word_only_repetition_made_a_term_is_marked_common():
+    rows = {t["term"]: t for t in ats.terms("Requirements\nExperience with Python. Great reasoning, clear reasoning, careful reasoning.", "")}
+    assert rows["reasoning"]["common"] is True
+    assert not rows["Python"].get("common")
+
+
+def test_the_same_word_in_the_plural_is_one_term():
+    rows = [t["term"].lower() for t in ats.terms("Requirements\nExperience with evaluation.\nDuties\nBuild evaluations and test them.", "")]
+    assert rows.count("evaluation") == 1 and "evaluations" not in rows
+
+
 def test_the_score_is_the_weighted_share_and_says_what_a_missing_term_is():
     rows = [
         {"term": "Python", "pattern": ats.pattern_for("Python"), "tier": "required", "weight": 3},
@@ -248,12 +293,252 @@ def test_the_prompt_carries_the_lists_and_never_the_culture_prose(tmp_path):
     source, ctx = ctx_for(tmp_path)
     data = json.loads(normal.plan_prompt(JOB, source, ctx.ats_source))
     assert "Kubernetes" in data["do_not_use"]
-    assert "Tableau" in data["use_if_it_fits"]
+    assert "Tableau" in data["summary_terms"]
     assert "winning culture" not in json.dumps(data) and "snack" not in json.dumps(data)
     row = next(b for b in data["bullets"] if b["id"] == "b1")
-    assert row["max_chars"] == len(B1) and row["min_chars"] == int(len(B1) * 0.9 + 0.999)
-    assert "Python" in row["may_use"] and "Tableau" not in row["may_use"]
+    assert row["chars"] == row["max_chars"] == len(B1) and row["min_chars"] == int(len(B1) * 0.9 + 0.999)
+    assert row["min_chars"] <= row["aim_chars"] <= row["max_chars"]
+    assert "Python" in row["lead_with"] and "Tableau" not in row["lead_with"] + row["say_as"]
     assert "@" not in normal.plan_prompt(JOB, source, ctx.ats_source)  # Contact details aren't the model's to see.
+
+
+# ---------- What makes an edit land, and what stops a false one ----------
+NURSE = "Administered medications and documented every dose in Epic for up to 6 patients on a surgical unit"
+
+
+def one_bullet(text):
+    return ResumeDoc(name="Sam Sample", contact=["sam@example.test"], sections=[
+        Section(id="experience", title="Experience", kind="experience", entries=[Entry(id="r1", heading="Registered Nurse", subheading="Sample Hospital", dates="07/2020 - Present", bullets=[Bullet(id="b1", text=text)])]),
+    ])
+
+
+def keywords_for(posting, text):
+    return ats.score(ats.terms(posting, ""), text, text)["keywords"]
+
+
+@pytest.mark.parametrize(
+    "term,text,says",
+    [
+        ("medication administration", NURSE, True),
+        ("patient care", "Cared for up to six patients per shift", True),
+        ("financial reporting", "Built a reporting pipeline in SQL for the finance team", True),
+        ("documentation", "Documented every dose", True),
+        ("Snowflake", "snowflake", False),  # A name is stated or it isn't.
+        ("Excel", "Excelled at the close", False),
+        ("Spark", "Sparked a redesign", False),
+        ("Kubernetes", NURSE, False),
+        ("infection control", NURSE, False),
+        ("data engineering", "Cleaned survey data in pandas, wrote a report on response bias, presented it to the board, then answered their many questions and later joined the engineering team", False),
+    ],
+)
+def test_a_term_is_described_only_by_the_lines_own_words(term, text, says):
+    assert normal.described(term, text) is says
+
+
+def test_each_line_is_told_what_it_can_honestly_gain_and_a_line_with_nothing_isnt_offered():
+    posting = "Requirements\nExperience with medication administration, patient care, Epic and Kubernetes."
+    doc = one_bullet(NURSE)
+    doc.sections[0].entries[0].bullets.append(Bullet(id="b2", text="Trained at the front desk during a staff shortage last winter"))
+    rows, rest = normal.rewrite_rows(doc, keywords_for(posting, NURSE))
+    assert [r["id"] for r in rows] == ["b1"] and rest == ["Trained at the front desk during a staff shortage last winter"]
+    assert rows[0]["say_as"] == ["medication administration"] and rows[0]["lead_with"] == ["Epic"]  # It says "patients", but no care.
+    assert "Kubernetes" not in json.dumps(rows)
+
+
+def test_a_term_is_offered_on_two_lines_at_most_and_the_reply_stays_under_its_cap():
+    text = "Administered medications and documented every dose in the chart on a surgical unit"
+    doc = one_bullet(text)
+    doc.sections[0].entries[0].bullets += [Bullet(id=f"b{i}", text=text) for i in range(2, 6)]
+    rows, _ = normal.rewrite_rows(doc, keywords_for("Requirements\nExperience with medication administration.", ""))
+    assert sum("medication administration" in r["say_as"] for r in rows) == 2
+    long = "Administered medications and documented every dose in the chart on a surgical unit. " * 12
+    doc = one_bullet(long.strip())
+    doc.sections[0].entries[0].bullets += [Bullet(id=f"b{i}", text=long.strip() + " again") for i in range(2, 12)]
+    rows, rest = normal.rewrite_rows(doc, keywords_for("Requirements\nExperience with documentation and medication administration.", ""))
+    assert sum(len(r["text"]) for r in rows) <= normal.MAX_REPLY_CHARS and rest
+
+
+def test_a_described_term_lands_and_is_what_raises_the_score():
+    posting = "Requirements\nExperience with medication administration and Kubernetes."
+    line = "Administered medications and documented every single dose in Epic for up to 6 patients on a busy surgical unit"
+    good = "Led medication administration and documented every dose in Epic for up to 6 patients on a busy surgical unit"
+    doc = one_bullet(line)
+    keywords = keywords_for(posting, doc_plain(doc))
+    assert next(k for k in keywords if k["term"] == "medication administration")["status"] == "needed"
+    changes, refused = normal.apply_bullets(doc, [normal.PlanBullet(id="b1", text=good)], keywords)
+    assert not refused and changes
+    assert ats.score(ats.terms(posting, ""), doc_plain(doc), "")["score"] > ats.score(ats.terms(posting, ""), line, "")["score"]
+
+
+@pytest.mark.parametrize(
+    "attempt,why",
+    [
+        ("Administered medications, documented each dose in Epic on Kubernetes for up to 6 patients on a unit", "Kubernetes"),  # Nothing supports it.
+        ("Administered medications, documented each dose in Epic and Tableau for up to 6 patients on a unit", "Tableau"),  # True elsewhere, not on this line.
+        ("Administered medications for infection control, documented each dose in Epic for up to 6 patients", "claims infection control"),  # No capital for claims.py to see.
+        ("Administered medications and documented every dose in Epic for up to 9 patients on a surgical unit", "unsupported number"),
+        ("Administered medications and documented every dose in a chart for up to 6 patients on a surgical unit", "drops Epic"),
+        ("Administered medications and documented every dose in Epic for several patients on a surgical floor", "drops 6"),
+        ("Reviewed old invoices and documented every dose in Epic for up to 6 people at the surgical front desk", "loses too much"),
+        ("Administered medications, documented every dose in Epic for up to 6 patients on a unit in the", "mid-sentence"),
+    ],
+)
+def test_a_rewrite_that_adds_or_loses_a_fact_is_refused_for_that_reason(attempt, why):
+    doc = one_bullet(NURSE)
+    keywords = ats.score(ats.terms("Requirements\nExperience with Kubernetes, Tableau and infection control.", ""), NURSE, NURSE + " Tableau")["keywords"]
+    changes, refused = normal.apply_bullets(doc, [normal.PlanBullet(id="b1", text=attempt)], keywords)
+    assert not changes and why in refused[0]["reason"], refused
+    assert doc.sections[0].entries[0].bullets[0].text == NURSE
+
+
+@pytest.mark.parametrize(
+    "text,high,want",
+    [
+        ("Built a tool for the team in order to save time", 44, "Built a tool for the team to save time"),
+        ("Built a tool for the finance team and the sales team", 49, "Built a tool for the finance team and sales team"),
+        ("Saved about 2 hours a week for the team", 35, "Saved about 2 hours a week for team"),  # "a week" keeps its "a".
+        ("Ran A/B tests, charts, and reports.", 34, "Ran A/B tests, charts and reports."),
+        ("Ran reports.", 11, "Ran reports"),
+        ("Reduced errors by audits", 20, "Cut errors by audits"),  # The first word keeps its capital.
+        ("Ran audits using scripts through cron", 34, "Ran audits using scripts via cron"),
+    ],
+)
+def test_a_small_overrun_is_tightened_without_touching_a_fact(text, high, want):
+    assert normal.tighten(text, high) == want
+
+
+# What a good editor writes for these lines. If a check refuses one of these, the check is wrong.
+HONEST_REWRITES = [
+    (
+        "Built an automated reporting pipeline in SQL and Python that replaced a manual spreadsheet process for the finance team, cutting month-end report preparation from 3 days to 4 hours.",
+        "Built automated financial reporting pipeline in SQL and Python, replacing a manual spreadsheet process for the finance team and cutting month-end report preparation from 3 days to 4 hours.",
+        "financial reporting",
+    ),
+    (
+        "Cared for up to 6 patients per shift on a 32-bed medical-surgical unit, including post-operative recovery and wound care.",
+        "Delivered patient care for up to 6 per shift on a 32-bed medical-surgical unit, including post-operative recovery and wound care.",
+        "patient care",
+    ),
+    (
+        "Administered medications and documented every dose and assessment in Epic during each shift, with zero reportable charting errors in 2023",
+        "Led medication administration and documented every dose and assessment in Epic each shift, with zero reportable charting errors in 2023",
+        "medication administration",
+    ),
+    (
+        "Processed about 300 vendor invoices a month in QuickBooks and resolved payment disputes with suppliers",
+        "In QuickBooks, processed about 300 vendor invoices a month, resolved payment disputes with suppliers",
+        "QuickBooks",
+    ),
+    (
+        "Wrote integration tests with pytest and ran them in GitHub Actions on every pull request, raising coverage from 52% to 81%.",
+        "Ran pytest integration tests in GitHub Actions on every pull request, raising test coverage from 52% to 81% for the team.",
+        "GitHub Actions",
+    ),
+    (
+        "Wrote product pages and blog posts, and tracked organic traffic in Google Analytics each month for the director's report",
+        "Tracked organic traffic in Google Analytics each month for the director's report, and wrote product pages and blog posts",
+        "Google Analytics",
+    ),
+    (
+        "Reduced p95 latency on the invoice endpoint from 1.8 seconds to 400 milliseconds by adding a Redis cache",
+        "Added a Redis cache that reduced p95 latency on the invoice endpoint from 1.8 seconds to 400 milliseconds",
+        "Redis",
+    ),
+    (
+        "Moved 300 US customers to the new billing system through a staged rollout and answered every support ticket",
+        "Moved 300 US customers to the new billing system via a staged rollout and answered every single support ticket",
+        "billing",
+    ),
+]
+
+
+@pytest.mark.parametrize("line,rewrite,term", HONEST_REWRITES, ids=[r[2] for r in HONEST_REWRITES])
+def test_an_honest_rewrite_lands(line, rewrite, term):
+    keywords = ats.score(ats.terms(f"Requirements\nExperience with {term} and Kubernetes.", ""), line, line)["keywords"]
+    doc = one_bullet(line)
+    changes, refused = normal.apply_bullets(doc, [normal.PlanBullet(id="b1", text=rewrite)], keywords)
+    assert changes and not refused, refused
+    assert ats.matches(ats.pattern_for(term), doc.sections[0].entries[0].bullets[0].text)
+
+
+def test_far_over_isnt_a_slip_so_its_articles_stay_for_the_repair():
+    text = "Built a tool for the team and the other team and the third team and a fourth"
+    assert normal.tighten(text, len(text) - 40) == text
+
+
+def test_the_repair_gets_the_real_numbers_and_the_lines_own_terms():
+    long = NURSE.replace(" a ", " ") + " and then some more"
+    _, refused = normal.apply_bullets(one_bullet(NURSE), [normal.PlanBullet(id="b1", text=long)], [])
+    over = len(long) - len(NURSE)
+    assert refused[0]["attempt"] == long and f"it has {len(long)} characters" in refused[0]["reason"] and f"cut at least {over}" in refused[0]["reason"]
+    _, short = normal.apply_bullets(one_bullet(NURSE), [normal.PlanBullet(id="b1", text=NURSE[:80])], [])
+    assert f"add at least {normal.bullet_window(NURSE)[0] - len(NURSE[:80].strip())}" in short[0]["reason"]
+    row = json.loads(normal.repair_prompt(refused, keywords_for("Requirements\nExperience with medication administration and Epic.", NURSE)))["bullets"][0]
+    assert row["source"] == NURSE and row["attempt"] == long and row["max_chars"] == len(NURSE)
+    assert set(row["may_use"]) == {"medication administration", "Epic"}
+
+
+def test_us_customers_isnt_first_person_but_we_is():
+    line = "Moved 300 US customers to the new billing system and answered every support ticket in the first week"
+    good = "Moved 300 US customers to new billing system and answered every support ticket during the first week"
+    assert normal.apply_bullets(one_bullet(line), [normal.PlanBullet(id="b1", text=good)], [])[0]
+    bad = "Moved 300 US customers to the new billing system and we answered every support ticket in first week"
+    assert "first person" in normal.apply_bullets(one_bullet(line), [normal.PlanBullet(id="b1", text=bad)], [])[1][0]["reason"]
+
+
+@pytest.mark.parametrize(
+    "skills,want",
+    [
+        ("Python, SQL\nLanguages: English", "Python, SQL, Docker\nLanguages: English"),
+        ("Languages: Python, SQL\nTools: Excel", "Languages: Python, SQL\nTools: Excel, Docker"),
+        ("Languages: English", "Languages: English\nSkills: Docker"),
+    ],
+)
+def test_an_added_skill_joins_a_line_it_belongs_on(skills, want):
+    doc = ResumeDoc(name="A", sections=[Section(id="skills", title="Skills", kind="skills", text=skills)])
+    assert normal.add_skills(doc, ["Docker"], ["Docker"], "") == ["Docker"]
+    assert doc.sections[0].text == want
+
+
+@needs_tex
+def test_a_word_the_posting_only_repeats_is_never_added_as_a_skill(tmp_path):
+    posting = "Requirements\nExperience with Python. Great models, clear models, careful models."
+    doc = source_doc()
+    text = doc_plain(doc) + " models"
+    source = modes.SourceResume(id="res", sha="sha", text=text, doc=doc, style=editor.Style())
+    from jobpilot.features.resumes.evidence import build
+
+    terms = ats.terms(posting, "")
+    assert next(t for t in terms if t["term"] == "models")["common"]
+    ctx = modes.ModeContext(db=None, config=None, model=stub(plan_of(skills=["Models"])), compile_fn=compile_pdf, work_dir=tmp_path, evidence=build(PROFILE, text), ats_terms=terms, ats_source=ats.score(terms, doc_plain(doc), text))
+    result = asyncio.run(normal.run({**JOB, "description": posting}, source, PROFILE, ctx))
+    assert result.report["added_skills"] == []
+    assert "models" not in {i.lower() for i in skill_items(next(s for s in result.doc.sections if s.kind == "skills").text)}
+
+
+@needs_tex
+def test_a_reply_with_no_bullets_gets_one_repair_call_and_no_more(tmp_path):
+    source, ctx = ctx_for(tmp_path, model=stub(plan_of()))
+    result = asyncio.run(normal.run(JOB, source, PROFILE, ctx))
+    assert [c[0] for c in ctx.model.calls] == ["NormalPlan", "BulletRepair"]
+    assert result.report["offered_bullets"] >= 1 and result.report["changed_bullets"] == 0 and result.report["refused"] == []
+    assert "no rewrite came back" in ctx.model.calls[1][2]
+
+
+@needs_tex
+def test_a_fixed_bullet_isnt_reported_as_refused(tmp_path):
+    fixed = "Built a reporting pipeline in Python and SQL that replaced a manual spreadsheet process for finance teams"
+    source, ctx = ctx_for(tmp_path, model=stub(plan_of(B1 + " and more"), repair=normal.BulletRepair(bullets=[normal.PlanBullet(id="b1", text=fixed)])))
+    result = asyncio.run(normal.run(JOB, source, PROFILE, ctx))
+    assert result.report["refused"] == [] and result.report["repaired_bullets"] == 1 and result.report["changed_bullets"] == 1
+
+
+def test_the_prompt_stays_small_and_its_example_counts_are_true():
+    assert len(normal.SYSTEM) < 6000
+    assert f"Good, {len(normal._GOOD)} characters" in normal.SYSTEM
+    low, high = normal.bullet_window(normal._EXAMPLE)
+    assert low <= len(normal._GOOD) <= high < len(normal._LONG)
+    assert normal.described("financial reporting", normal._EXAMPLE) and normal.described("vendor management", "Paid vendor invoices and managed petty cash")
 
 
 # ---------- The choice, approval, and the send path ----------
