@@ -65,7 +65,7 @@ def router(service, sessions, throttle) -> APIRouter:
         fresh = not exists and fresh_installation(db)
         result = {
             "exists": exists,
-            "signup_allowed": fresh or (authed and not exists),
+            "signup_allowed": (fresh and not config.signup_needs_session) or (authed and not exists),
             "signed_in": authed,
             # has_data: a profile or jobs exist without an account, so only the access token opens it.
             "installation": "has_account" if exists else "fresh" if fresh else "has_data",
@@ -95,6 +95,8 @@ def router(service, sessions, throttle) -> APIRouter:
         authed = signed_in(request)
         if account(db).get("password_hash"):
             raise HTTPException(409, "An account already exists on this installation. Sign in instead.")
+        if config.signup_needs_session and not authed:
+            raise HTTPException(403, "Sign in with this installation's access token first.")
         if not (fresh_installation(db) or authed):
             raise HTTPException(
                 403,

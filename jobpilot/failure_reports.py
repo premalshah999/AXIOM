@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from .db import Event, Job, Run, now
+from .redaction import redact
 
 
 class Explanation(BaseModel):
@@ -15,7 +16,8 @@ class Explanation(BaseModel):
 
 
 def clean(text):
-    text = re.sub(r"https?://\S+", "[URL omitted]", str(text))
+    text = redact(str(text), loose=True)
+    text = re.sub(r"https?://\S+", "[URL omitted]", text)
     text = re.sub(r"[\w.+-]+@[\w.-]+", "[email omitted]", text)
     text = re.sub(
         r"(?i)\b(?:password|api[_ -]?key|app[_ -]?token|otp|verification code)\s*[:=]\s*\S+",

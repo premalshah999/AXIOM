@@ -23,7 +23,7 @@ from .models import AnswerModelUnavailable, BudgetExceeded
 from .answers import UNOFFERED_SOURCE, Resolver
 from .ats import EMBED_JS, LABEL_ONLY, REGISTRY, classify_embedded, detect, unsettled
 from .posting_identity import IDENTITY_JS, identity, placeholder_title, save as save_identity
-from .redaction import redact
+from .redaction import redact_data, redact_page
 from .email_browser import EmailBrowser, redacted_url
 from .failure_reports import clean
 from .forms import AUTH, ENTRY, FINAL, STALE_CHOICE, FormSession, NetworkMonitor, ResumeAttachmentError
@@ -2069,9 +2069,9 @@ class BrowserEngine:
                         # Qualcomm (2026-10-17): two confirmed pages were missed and their markup was unknown.
                         # Keep the element outline and visible text of an unproven commit; no input values.
                         outline = await asyncio.wait_for(page.evaluate(FINAL_OUTLINE), 4)
-                        (self.dir / "final_outline.txt").write_text(str(outline)[:200_000])
+                        (self.dir / "final_outline.txt").write_text(redact_page(str(outline)[:200_000], self.run_secrets()))
                     ledger = getattr(getattr(self, "form", None), "ledger", {})
-                    (self.dir / "answers.json").write_text(json.dumps(ledger, indent=2))
+                    (self.dir / "answers.json").write_text(json.dumps(redact_data(ledger), indent=2))
                 except Exception:
                     pass
             if external and hasattr(self, "page"):
@@ -3249,8 +3249,8 @@ class BrowserEngine:
             if catalog and not (sensitive or metadata_only):
                 # Workday question definitions and value lists: what the page renders its pickers from.
                 # .jsonl: step-record readers glob *.json and expect one step summary per file.
-                (folder / f"{name}.catalog.jsonl").write_text("".join(json.dumps(entry) + "\n" for entry in catalog))
-            (folder / f"{name}.json").write_text(json.dumps(summary, indent=1))
+                (folder / f"{name}.catalog.jsonl").write_text("".join(json.dumps(redact_data(entry)) + "\n" for entry in catalog))
+            (folder / f"{name}.json").write_text(json.dumps(redact_data(summary), indent=1))
             # The form's structure in every application frame, without any value, on every step: password steps keep
             # no HTML, and iCIMS renders its form inside an iframe the page HTML omits (389 of ~700 iCIMS step records
             # held only the outer careers page). Recovery steps too: VTG's false commit happened in the recovery agent,
@@ -3259,7 +3259,7 @@ class BrowserEngine:
             lines = []
             for frame in await self.form.application_frames():
                 controls = await frame.evaluate(FORM_STRUCTURE_JS)
-                lines.append(json.dumps({"url": redacted_url(frame.url), "controls": controls}) + "\n")
+                lines.append(json.dumps(redact_data({"url": redacted_url(frame.url), "controls": controls})) + "\n")
             (folder / f"{name}.form.jsonl").write_text("".join(lines))
             if sensitive or metadata_only:
                 return
@@ -3268,11 +3268,13 @@ class BrowserEngine:
             html = await page.content()
             # A site can echo the password this app typed into a hidden field or a script (found in saved pages of three runs,
             # 2026-11-01): the saved copy keeps the page and loses the value.
-            (folder / f"{name}.html").write_text(
-                redact(html[:3_000_000], extra=(self.config.application_password, self.config.icims_login))
-            )
+            (folder / f"{name}.html").write_text(redact_page(html[:3_000_000], self.run_secrets()))
         except Exception:
             pass
+
+    def run_secrets(self):
+        """What a site could echo into a saved page that this run may not have opened yet."""
+        return (self.config.application_password, self.config.icims_login)
 
     async def prepare_popup(self, page):
         await self.prepare_page(page)

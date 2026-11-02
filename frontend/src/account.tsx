@@ -1192,6 +1192,7 @@ const CANNOT_REMOVE = [
   "Applications already sent. The employers have them.",
   "Accounts AXIOM created at employers. Close them on the employers' sites; their emails to you stay in your own mailbox.",
   "Your AI key and your Gmail app password. They still work at the services that issued them: revoke them there.",
+  "Copies outside AXIOM: a Time Machine backup of this Mac, or a database copy you saved to another folder.",
 ];
 
 /** Delete everything: stops work, removes the data and leaves the app as on its first run. Typed confirmation, and no undo. */

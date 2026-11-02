@@ -20,6 +20,7 @@ from ..accounts import Accounts, password_rules
 from ..captcha_observation import ARM_JS
 from ..forms import AUTH, COOKIE_NOTICE, FINAL, LAUNCHER, SURVEY_DONE
 from ..privacy import acknowledge_privacy_notice, dismiss_cookies
+from ..redaction import redact_page
 from ..employer_limit import APPLICATION_LIMIT, application_cap
 from ..mail_errors import MailPending, code_inline_wait
 
@@ -3925,7 +3926,7 @@ class Adapter:
             folder = getattr(self.e, "dir", None)
             if folder is not None:
                 html = await self.page.content()
-                (folder / "reset_page.html").write_text(html[:400_000])
+                (folder / "reset_page.html").write_text(redact_page(html[:400_000]))
         except Exception:
             pass
 

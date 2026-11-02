@@ -15,6 +15,7 @@ from sqlalchemy import case, select, update
 from .db import Budget, Event, Run
 from .model_admission import admission, priority
 from . import provider_health
+from .redaction import redact
 
 _deadline = ContextVar("model_deadline", default=None)
 _request_sent = ContextVar("model_request_sent", default=None)
@@ -637,6 +638,20 @@ def unreadable_reply(exc):
     return False
 
 
+# The invisible "tag" letters (U+E0000 block): a page can say something to a model with them and nothing to a person, because many
+# models read them as plain text. No form's label or option needs them. Zero-width spaces stay: a label can hold one, and the model's
+# answer has to match it, and they carry no words a person cannot see.
+UNSEEN = re.compile("[\U000e0000-\U000e007f]")
+
+
+def outgoing(prompt):
+    """A prompt as it may leave this computer. Page text is in it: a site that echoed a password must not hand it to the model
+    provider, and whatever a page hid from people is not for the model to act on either. Nothing typed into a form passes here."""
+    if isinstance(prompt, str):
+        return redact(UNSEEN.sub("", prompt))
+    return prompt
+
+
 async def _structured(
     config,
     db,
@@ -652,6 +667,7 @@ async def _structured(
 ):
     from .agent_settings import for_role, require
 
+    prompt = outgoing(prompt)
     purpose = output_type.__name__
     navigation = purpose in {
         "NavigationDecision",
