@@ -19,7 +19,7 @@ from ..service import Service
 from ..accounts import Accounts, password_rules
 from ..accounts.pages import optional_account_section
 from ..captcha_observation import ARM_JS
-from ..forms import AUTH, COOKIE_NOTICE, FINAL, LAUNCHER, SURVEY_DONE, final_by_marking
+from ..forms import AUTH, COOKIE_NOTICE, FINAL, LAUNCHER, SURVEY_DONE, final_by_marking, opens_another_page
 from ..privacy import acknowledge_privacy_notice, dismiss_cookies
 from ..redaction import redact_page
 from ..employer_limit import APPLICATION_LIMIT, application_cap
@@ -957,6 +957,12 @@ class Adapter:
         prepared = await observe() if observe else []
         return prepared[0] if len(prepared) == 1 else None
 
+    def submit_resume_entry(self, b):
+        """A "Submit Resume" link is the way in only to another page, before this run wrote anything (forms.opens_another_page)."""
+        frame = (getattr(self.form, "frames", None) or {}).get(b.get("id"))
+        url = getattr(frame, "url", "") or getattr(getattr(self.form, "page", None), "url", "")
+        return opens_another_page(b.get("href"), url) and not getattr(self.form, "wrote_anything", lambda: True)()
+
     def find_apply(self, obs):
         hits = [
             b
@@ -967,7 +973,7 @@ class Adapter:
                 or APPLY.search(b["aria_label"])
                 # Apple's posting links "Submit Resume" to its application (2026-10-27, also forms.click): with no
                 # form on the page it is the way in. Read as the final submit, each run waited on a model and stopped.
-                or (b.get("href") and SUBMIT_RESUME_LINK.fullmatch(b["label"].strip()) and not self.app_fields(obs))
+                or (SUBMIT_RESUME_LINK.fullmatch(b["label"].strip()) and not self.app_fields(obs) and self.submit_resume_entry(b))
             )
             and not NOT_APPLY.search(b["label"] + " " + b["href"])
         ]
