@@ -161,7 +161,7 @@ class EmailBrowser:
         """The employer's site handed off to its platform (browser.adopt_handoff): the job URL and platform changed, so the
         rule cached here is the career site's, whose senders are not the platform's (Databricks and OneImaging ran on
         Greenhouse holding a custom rule). An open request keeps the rule it was armed with."""
-        if self.identity() == self.bound or self.challenge_id:
+        if not hasattr(self, "bound") or self.identity() == self.bound or self.challenge_id:
             return False
         self.bound = self.identity()
         self.rebound = False
