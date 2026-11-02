@@ -1637,9 +1637,10 @@ class BrowserEngine:
                 resume_artifact_id=run["packet"].get("resume_artifact_id"),
             )
             self.form = FormSession(page, resolver, resume, self.emit)
-            # A saved route or a kept tab did not walk here from the job's own address this time, so what it shows isn't taken on trust.
+            # A reopened route did not walk here from the job's own address, so what it shows isn't taken on trust. A kept tab did: its
+            # form may be numbered its own way, and sending it back would lose a draft or a code on its way.
             self.posting_watch = self.form.posting_watch = PostingWatch(
-                job, opened_fresh=not resumed and not reopened_route, entry_url=getattr(self, "application_entry_url", "")
+                job, opened_fresh=not reopened_route, entry_url=getattr(self, "application_entry_url", "")
             )
             if run["packet"].get("owner_hands"):
                 self.form.owner_hands = True  # Take over's hand-back: the page's values are the owner's (forms.adopt_owner_values)
@@ -2302,8 +2303,13 @@ class BrowserEngine:
         state = self.desktop_resume_state(saved) or {}
         packet = self.run_record.get("packet", {})
         route = state.get("url", "")
-        if route and (other_posting_address(self.job["url"], route) or unrelated_posting_number([self.job["url"]], route)):
-            return None  # A saved page of another posting is no way back into this one: restart from the job's own address.
+        if route and not saved.get("armed"):
+            # A saved page of another posting is no way back into this one: restart from the job's own address. A form numbered its
+            # own way can't be told from that here, and its mail wait keeps its page.
+            if other_posting_address(self.job["url"], route) or (
+                not packet.get("email_wait_resume") and unrelated_posting_number([self.job["url"]], route)
+            ):
+                return None
         if (
             self.job.get("ats") == "oracle"
             and "/apply/" in urlsplit(state.get("url", "")).path
@@ -4038,12 +4044,12 @@ class BrowserEngine:
         watch = self.watching_posting()
         if watch is None:
             return False
-        verdict = watch.judge(self.page.url, obs)
+        verdict = watch.judge((getattr(self.form, "page", None) or self.page).url, obs)
         if verdict.kind == "ok":
             watch.just_returned = False
             return False
         self.emit("posting_guard", "This page isn't the job's own posting", {"kind": verdict.kind, "why": verdict.why[:200]})
-        if watch.just_returned or watch.returns >= 2 or not getattr(self, "application_entry_url", ""):
+        if watch.just_returned or watch.returns >= 3 or not getattr(self, "application_entry_url", ""):
             self.result = self.posting_stop("The employer's site didn't open this posting; nothing was sent")
             return True
         watch.returns += 1
@@ -5417,7 +5423,7 @@ class BrowserEngine:
                 continue  # Read the page again; a stop set the result and ends at the loop's top.
             if (watch := self.watching_posting()) is not None:
                 # The model is not offered another posting's link; forms.click refuses one if it names it anyway.
-                obs = {**obs, "controls": [c for c in obs["controls"] if not watch.other_posting_link(c.get("href"), self.page.url)]}
+                obs = {**obs, "controls": [c for c in obs["controls"] if not watch.other_posting_link(c.get("href"), obs["url"])]}
             obs = await self.await_successfactors_handoff(obs)
             if self.result:
                 return

@@ -182,7 +182,7 @@ ROLE_IN_RECEIPT = re.compile(
 )
 # A form that says which job it is for: "Apply for X", "Applying for X", "Application for X", "Apply: X".
 ROLE_ON_FORM = re.compile(
-    r"^\s*(?:(?:you(?:'re| are)\s+)?apply(?:ing)?\s+(?:for|to)|apply\s*[:–—-]|application\s+(?:for|to)|job\s+application\s*[:–—-]|"
+    r"^\s*(?:(?:you(?:'re| are)\s+)?apply(?:ing)?\s+for|apply\s*[:–—-]|application\s+for|job\s+application\s*[:–—-]|"
     r"(?:job\s+title|position|role)\s*:)\s*(?:the\s+)?(?P<role>.{2,140}?)\s*$",
     re.I,
 )
@@ -196,6 +196,7 @@ SAME_WORD = {"sr": "senior", "jr": "junior", "mgr": "manager", "eng": "engineer"
 LEVEL = {"i", "ii", "iii", "iv", "v", "vi", "1", "2", "3", "4", "5", "6"}
 LEVEL_SAME = {"1": "i", "2": "ii", "3": "iii", "4": "iv", "5": "v", "6": "vi"}
 QUOTES = " \t\"'“”‘’:-"
+NOT_A_ROLE_WORD = re.compile(r"\b(?:jobs?|careers?|employment|opportunit(?:y|ies)|positions?|openings?|vacanc(?:y|ies)|team|us|company)\b", re.I)
 
 
 def _words(text):
@@ -248,7 +249,8 @@ def role_on_form(headings):
     for heading in headings or ():
         if match := ROLE_ON_FORM.match(str(heading or "")):
             role = match["role"].strip(QUOTES)
-            if role and not GENERIC_ROLE.fullmatch(role):
+            # "Apply for jobs at Acme", "Application for Employment": a heading can't be taken for a role unless it reads as one.
+            if role and role[0].isupper() and not GENERIC_ROLE.fullmatch(role) and not NOT_A_ROLE_WORD.search(role):
                 return role
     return ""
 
@@ -366,15 +368,16 @@ def looks_like_listing(obs, url, own_urls):
     if _on_own_address(own_urls, url) or _names_own_number(own_urls, url) or application_fields(obs):
         return False
     controls = (obs or {}).get("controls") or ()
-    entries = sum(bool(ENTRY_LABEL.fullmatch(str(c.get("label") or ""))) for c in controls)
-    if entries == 1:
-        return False  # One Apply is this page's own posting, whatever its "similar jobs" list says.
-    if entries >= 2 or len(links_to_other_postings(controls, own_urls, url)) >= 2 or len(role_links(controls)) >= 3:
+    entries = [c for c in controls if ENTRY_LABEL.fullmatch(str(c.get("label") or ""))]
+    # One Apply, even at the top and foot of the page, is this page's own posting, whatever its "similar jobs" list says. A list's
+    # rows each go somewhere else.
+    if entries and len({urlsplit(urljoin(url, str(c.get("href") or ""))).path for c in entries}) == 1:
+        return False
+    if entries or len(links_to_other_postings(controls, own_urls, url)) >= 2 or len(role_links(controls)) >= 3:
         return True
     # A page with no list at all is only a listing by its address, an ancestor of the job's own or named like one.
     path = urlsplit(str(url or "")).path.rstrip("/")
-    own_path = next((urlsplit(own).path.rstrip("/") for own in own_urls if _site(own) == _site(url)), None)
-    if own_path is None or len(controls) < 3 or any(STEP_CONTROL.match(str(c.get("label") or "")) for c in controls):
+    if len(controls) < 3 or any(STEP_CONTROL.match(str(c.get("label") or "")) for c in controls):
         return False  # An application step at a plain address still has its Next.
     return not path or bool(LISTING_ADDRESS.search(path))
 

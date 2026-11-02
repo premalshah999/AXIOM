@@ -128,6 +128,7 @@ def test_the_role_a_form_heading_names():
     assert role_on_form(["Apply for Data Analyst"]) == "Data Analyst"
     assert role_on_form(["Careers", "Apply: Data Analyst"]) == "Data Analyst"
     assert role_on_form(["Application Form", "Apply", "Personal Information", "Apply for this job"]) == ""
+    assert role_on_form(["Apply to Join Our Team", "Apply for Jobs at Acme", "Application for Employment"]) == ""
 
 
 GIVEN = {"title": "Quantitative Software Engineer", "company": "Two Sigma Example", "url": JOB}
@@ -187,11 +188,14 @@ def test_a_career_home_is_a_listing_and_the_jobs_own_page_is_not():
     assert not looks_like_listing({"fields": [], "controls": roles + controls("Apply")}, HOME + "/x-y", own)
     # A real form or a sign-in isn't a list.
     assert not looks_like_listing({"fields": [{"label": "Email", "type": "email"}], "controls": roles}, HOME + "/Login", own)
-    # A list's own rows, each with its Apply.
-    assert looks_like_listing({"fields": [], "controls": controls("Apply", "Apply")}, HOME + "/x-y", own)
+    # A list's own rows, each with its Apply, and one posting's Apply at its top and foot.
+    rows = [{"label": "Apply", "href": "/apply/1"}, {"label": "Apply", "href": "/apply/2"}]
+    assert looks_like_listing({"fields": [], "controls": rows}, HOME + "/x-y", own)
+    assert not looks_like_listing({"fields": [], "controls": controls("Apply Now", "Apply Now", "Careers at Example")}, HOME + "/x-y", own)
     # A plain page at a listing's address counts, unless it has a step to go on with.
     plain = controls("About Us", "Contact", "Log in", href="")
     assert looks_like_listing({"fields": [], "controls": plain}, HOME, own)
+    assert looks_like_listing({"fields": [], "controls": plain}, "https://corporate.example.org/careers/", own)  # A closed board's bounce.
     assert not looks_like_listing({"fields": [], "controls": plain + controls("Continue", href="")}, HOME, own)
 
 
