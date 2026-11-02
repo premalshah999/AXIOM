@@ -2,7 +2,7 @@
 typed text only in their own pattern ("MMM d, yyyy") and only on Enter, so "12/2025" left every
 employment row red. The wizard also requires an end date for the current role."""
 
-from datetime import date
+from datetime import UTC, date, datetime
 
 from jobpilot import widgets
 from jobpilot.answers import Resolver
@@ -113,6 +113,6 @@ async def test_immediately_in_a_date_picker_is_today(page, tmp_path):
     obs = await form.scan()
     field = obs["fields"][0]  # the fixture label does not reach the shadow input; the fill is what matters
     await form.fill(field, "Immediately")
-    today = date.today()
+    today = datetime.now(UTC).date()  # With no config the form's zone is UTC; date.today() is a day behind after 7 pm in New York.
     expected = f"{['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][today.month - 1]} {today.day}, {today.year}"
     assert await page.locator("ui5-date-picker").get_attribute("value") == expected

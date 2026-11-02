@@ -765,7 +765,7 @@ class EmailBrowser:
                     # own code step does this (base.submit_code); a run that parked for the mail and came back finishes here.
                     from .accounts import Accounts
 
-                    accounts = Accounts(e.service, e.profile, e.job["url"])
+                    accounts = Accounts(e.service, e.form.resolver.profile, e.job["url"])
                     if accounts.store.state(e.page.url) in {"created_locally", "signing_in", "verification_pending"}:
                         accounts.mark(e.page.url, "authenticated")
                     e.emit(
