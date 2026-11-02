@@ -24,7 +24,7 @@ RAW_WORDS = ("project_quality", "_", "Exceeded", "status_code", "pdflatex", "Err
         ({"code": "no_source"}, "profile"),
         ({"code": "missing_description", "detail": "The posting text has not been fetched yet"}, None),
         ({"code": "timeout", "detail": "Tailoring exceeded its time limit"}, None),
-        ({"code": "compiler_missing", "detail": "pdflatex is not installed on this host"}, None),
+        ({"code": "compiler_missing", "detail": "The part of AXIOM that makes PDFs is missing from this Mac. Install AXIOM again."}, None),
         ({"code": "compile_error", "detail": "compile_error: Undefined control sequence"}, None),
         ({"code": "tailoring_error", "detail": "project_quality: Use 2,2,2 or 2,2,3 proposal bullets; A: name an actual posting tool"}, None),
         ({"code": "tailoring_error", "detail": "Exceeded maximum retries (1) for output validation"}, None),
