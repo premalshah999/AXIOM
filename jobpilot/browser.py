@@ -4094,7 +4094,7 @@ class BrowserEngine:
                 }
                 return True
             return False  # Stays on the page, as it would without this guard. Other postings' links stay closed, and so does the commit.
-        if watch.just_returned or watch.returns >= 3 or not getattr(self, "application_entry_url", ""):
+        if watch.just_returned or watch.returns >= 2 or not getattr(self, "application_entry_url", ""):
             self.result = self.posting_stop("The employer's site didn't open this posting; nothing was sent")
             return True
         watch.returns += 1
