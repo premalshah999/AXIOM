@@ -28,6 +28,7 @@ from sqlalchemy import select
 
 import fake_imap
 from jobpilot import browser as browser_module, gmail_imap
+from jobpilot.company_sites import allow
 from jobpilot.db import Event, Job, MailChallenge, MailRule, Resume, Run
 from jobpilot.discovery import add_job
 from jobpilot.schemas import JobInput
@@ -322,6 +323,7 @@ async def one_run(client, service, imap, platform, kind, *, delay=DELAY, profile
     with service.db.exclusive() as s:
         row = s.get(Job, job["id"])
         row.status, row.ats = "ready", spec["ats"]
+    allow(service.db, [job["id"]])  # The Apply button on a company's own site is the owner's click (company_sites.py).
     outcome = {"state": "not started", "reason": ""}
     poller = asyncio.create_task(service.mail.poll())
     service.outbox_running = True
