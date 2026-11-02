@@ -350,6 +350,22 @@ def unavailable_posting_redirect(source, destination):
     return ""
 
 
+def received_application_page(page_url, job_url):
+    """The employer's own "your application was received" address for THIS posting: a success status and the posting's own id on a
+    thank-you path (Humana's Phenom site, 2026-11-01: /us/en/applythankyou?status=success&jobSeqNo=HUMHUMUSR434028EXTERNALENUS, "One
+    Last Step! ... creating your Candidate Home Account"). Its Workday sign-in that follows only makes an account to watch the status; the
+    application itself was posted before it. True only when the address names this posting."""
+    try:
+        parts = urlsplit(page_url or "")
+        query = {k.lower(): v for k, v in parse_qsl(parts.query)}
+    except ValueError:
+        return False
+    if not re.search(r"/(?:apply-?)?thank-?you/?$", parts.path, re.I) or (query.get("status") or "").lower() != "success":
+        return False
+    ident = query.get("jobseqno") or ""
+    return len(ident) >= 8 and ident.lower() in (job_url or "").lower()
+
+
 def unavailable_posting_response(response):
     """Follow only the initial document's actual HTTP redirect chain, including short links. The reason kind, or ''."""
     if response is None or response.status != 200:
@@ -1534,6 +1550,15 @@ class BrowserEngine:
                 landing_response = await self.open_application_route(page, embedded, saved_state)
                 entry_url = self.application_entry_url = embedded
                 self.emit("ats_handoff", "The employer's Ashby board is off; opened the form its own site embeds")
+            if reopened_route and received_application_page(page.url, job["url"]):
+                # The saved route is the employer's own receipt page for this posting: an earlier attempt posted the application
+                # (its tab timed out after the post). Signing in to the employer's candidate site would only start a second one.
+                self.result = {
+                    "state": "submission_unknown",
+                    "reason": "The employer's page says this application was received; it was not sent again. Its email receipt will confirm it",
+                }
+                self.emit("received_page", "The employer's own thank-you page for this posting is open; nothing was resent")
+                return self.result
             if not reopened_route and (kind := unavailable_posting_response(landing_response)):
                 self.result = {"state": "closed", "reason": UNAVAILABLE_POSTING[kind]}
                 return self.result
