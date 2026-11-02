@@ -115,6 +115,13 @@ def test_markup_without_an_application_shows_no_platform():
         ("https://careers.example.test/jobs/27974?gh_jid=abc", None),
         ("https://careers.example.test/jobs?icims=1", None),
         ("https://careers.example.test/jobs/27974", None),
+        # Portal paths only one platform uses: Eightfold's position page, Avature's unprefixed JobDetail page.
+        ("https://apply.careers.example.test/careers/job/1970393557045536", "eightfold"),
+        ("https://jobs.example.test/careers/job/893397927110/", "eightfold"),
+        ("https://careers.example.test/careers/JobDetail/New-York-Engineer/14014", "avature"),
+        ("https://www.example.test/careers/job/8036615003", None),  # Ten digits: a Greenhouse-style requisition.
+        ("https://www.example.test/careers/job/1970393557045536/apply", None),
+        ("https://careers.example.test/careers/JobDetail/campus", None),
         # A platform's own address is read by its host, never by this.
         ("https://job-boards.greenhouse.io/acme/jobs/4455?gh_jid=4455", None),
     ],

@@ -41,3 +41,28 @@ async def test_a_custom_radio_without_its_own_text_is_its_value(page, tmp_path):
     obs = await form.scan()
     field = next(f for f in obs["fields"] if f["type"] == "radiogroup")
     assert field["options"] == ["YES", "NO"]
+
+
+WHOLE_PAGE = """<div id=app aria-hidden="true"><header><a href="#a">Jobs</a><a href="#b">Teams</a></header>
+<main><label>First name <input name=first></label><label>Last name <input name=last></label><label>Email <input name=email></label>
+<label>Phone <input name=phone></label><label>Website <input name=site></label><label>Gender <input type=radio name=g value=m></label>
+<label>Other <input type=radio name=g value=o></label><button>Cancel</button><button>Submit</button></main></div>"""
+
+
+async def test_a_wrapper_hiding_the_whole_page_with_no_modal_open_is_the_page(page, tmp_path):
+    """Meta's application page (2026-11-01): the entire app sat in one aria-hidden div and the scan read an empty page."""
+    fields, controls = await scan(page, tmp_path, WHOLE_PAGE)
+    assert {"First name", "Last name", "Email"} <= {f.strip() for f in fields} and "Submit" in controls
+
+
+async def test_the_same_wrapper_hides_the_page_behind_an_open_modal(page, tmp_path):
+    fields, controls = await scan(page, tmp_path, WHOLE_PAGE + MODAL)
+    assert not any("First name" in f for f in fields) and "Submit" not in controls
+
+
+async def test_a_hidden_section_beside_a_live_page_stays_hidden(page, tmp_path):
+    html = ('<nav><a href="#1">One</a><a href="#2">Two</a><a href="#3">Three</a><a href="#4">Four</a></nav>'
+            '<div aria-hidden="true"><label>Mirror <input name=m1></label><label>Mirror2 <input name=m2></label></div>'
+            '<form><label>Real <input name=real></label><button>Send</button></form>')
+    fields, _ = await scan(page, tmp_path, html)
+    assert any("Real" in f for f in fields) and not any("Mirror" in f for f in fields)
