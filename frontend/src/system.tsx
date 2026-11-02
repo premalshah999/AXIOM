@@ -125,7 +125,7 @@ function Limits() {
                     c={c}
                     name="daily_application_limit"
                     label="Applications per day"
-                    hint={`${stats.submissions_reserved ?? 0} used today. AXIOM stops starting new ones at this number.`}
+                    hint={`${plural(stats.submissions_reserved ?? 0, "application")} sent today (Overview counts only the ones an employer confirmed). AXIOM stops starting new ones at this number.`}
                   />
                   <FieldInput
                     c={c}
