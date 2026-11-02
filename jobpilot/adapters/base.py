@@ -34,6 +34,7 @@ APPLY = re.compile(
     re.I,
 )
 INTEREST = re.compile(r"i'?m interested", re.I)
+SUBMIT_RESUME_LINK = re.compile(r"submit (?:your |my )?(?:resume|cv)(?: now)?", re.I)
 NOT_APPLY = re.compile(r"linkedin|indeed|seek\b|glassdoor|google|facebook|refer|share|save job|alert", re.I)
 NEXT = re.compile(
     r"^(?:next|continue|save (?:and|&) continue|save (?:and|&) next|next step|proceed|continue to (?:next step|"
@@ -964,6 +965,9 @@ class Adapter:
                 b["automation_id"] in self.apply_ids
                 or APPLY.search(b["label"])
                 or APPLY.search(b["aria_label"])
+                # Apple's posting links "Submit Resume" to its application (2026-10-27, also forms.click): with no
+                # form on the page it is the way in. Read as the final submit, each run waited on a model and stopped.
+                or (b.get("href") and SUBMIT_RESUME_LINK.fullmatch(b["label"].strip()) and not self.app_fields(obs))
             )
             and not NOT_APPLY.search(b["label"] + " " + b["href"])
         ]

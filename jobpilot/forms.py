@@ -6506,7 +6506,8 @@ class FormSession:
         # A "Submit" that this guard allowed for a profile/account popup or a tax-credit
         # launcher must also pass the page's own click guard, or the click is silently
         # cancelled (Starbucks "Create your profile": the agent clicked Submit for minutes).
-        page_final_ok = bool(account_form or launcher)
+        # So must the link that opens an application: Apple's "Submit Resume" passed the guard above and was then refused here.
+        page_final_ok = bool(account_form or launcher or posting_link)
         # Marked controls pass the page's submit guard: auth/step controls, entry links, and
         # ordinary navigation labels.
         permitted = (
