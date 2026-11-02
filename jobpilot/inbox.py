@@ -89,7 +89,7 @@ class Inbox:
         while True:
             try:
                 challenge = self.mail.begin(
-                    run_id, rule, recipient, kind, resume_challenge_id=resume_challenge_id
+                    run_id, rule, recipient, kind, since=since, resume_challenge_id=resume_challenge_id
                 )
                 challenge["rule"] = rule
                 return challenge

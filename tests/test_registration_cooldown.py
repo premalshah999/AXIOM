@@ -174,3 +174,48 @@ def test_a_pixel_on_another_host_and_a_read_are_not_a_registration():
     assert not press_sees("https://px.ads.test/collect")
     assert not press_sees("https://www.google-analytics.com/g/collect")
     assert not press_sees("https://careers-example.platform.test/register", method="GET")
+
+
+async def test_a_busy_mail_sender_does_not_spend_a_registration(service):
+    """The stamp was written before the mail lease: two busy-sender attempts used up the day's allowance unsent."""
+    flow, engine, form = flow_for(service)
+    flow.store.save(URL, flow.store.shared(), "created_locally", **sent(600))
+    engine.email_verification.prepare_submission = AsyncMock(side_effect=ValueError("Another application is verifying with this sender"))
+    try:
+        await flow.handle()
+    except ValueError:
+        pass
+    assert form.clicked == []
+    assert len(flow.store.record(URL)["create_sent"]) == 1  # only the other run's
+
+
+async def test_an_inert_create_press_does_not_spend_a_registration(service):
+    flow, engine, form = flow_for(service)
+    form.page = engine.page = SimpleNamespace(url=URL, on=lambda *a: None, remove_listener=lambda *a: None)  # nothing is posted
+    flow.store.save(URL, flow.store.shared(), "created_locally", **sent(600))
+    try:
+        await flow.handle()
+    except (AttributeError, TypeError, KeyError):
+        pass
+    assert form.clicked == ["create"]
+    assert len(flow.store.record(URL)["create_sent"]) == 1
+
+
+async def test_a_create_press_that_posts_is_still_counted(service):
+    flow, engine, form = flow_for(service)
+    handlers = []
+    form.page = engine.page = SimpleNamespace(url=URL, on=lambda name, fn: handlers.append(fn), remove_listener=lambda *a: None)
+
+    async def click(control_id, auth_control=False):
+        form.clicked.append(control_id)
+        for fn in handlers:
+            fn(SimpleNamespace(url="https://careers.example.test/register", method="POST", resource_type="xhr"))
+
+    form.click = click
+    flow.store.save(URL, flow.store.shared(), "created_locally", **sent(600))
+    try:
+        await flow.handle()
+    except (AttributeError, TypeError, KeyError):
+        pass
+    stamps = flow.store.record(URL)["create_sent"]
+    assert len(stamps) == 2 and stamps[-1][1] == "run-now"
