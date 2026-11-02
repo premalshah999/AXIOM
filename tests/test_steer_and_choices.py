@@ -81,10 +81,11 @@ async def test_nothing_is_taken_back_unless_the_owner_holds_it(service):
 def test_the_hand_back_is_used_by_one_run_only(service):
     job_id, _ = make(service, "paused", status="paused")
     hold(service, job_id, "yours")
-    steer.release(service, job_id, hands=True)
+    page = {"target_id": "tab-1", "url": "https://jobs.example.test/apply"}
+    steer.release(service, job_id, hands=page)
     with service.db.exclusive() as s:
-        assert steer.hands_back(s, job_id) is True
-        assert steer.hands_back(s, job_id) is False
+        assert steer.hands_back(s, job_id) == page
+        assert steer.hands_back(s, job_id) is None
     with service.db.session() as s:
         assert s.get(Job, job_id).status == "ready"  # The application was approved before it stopped.
         assert s.get(Setting, "job_control:" + job_id).value["state"] == "active"
