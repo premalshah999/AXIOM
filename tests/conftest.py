@@ -18,6 +18,7 @@ from jobpilot.config import Settings
 from jobpilot.db import Database
 from jobpilot.features._store import create_tables
 from jobpilot.service import Service
+from support_budget import stretch_playwright_ceilings
 
 
 # The app runs with TZ=UTC (native/env.py), so its naive date.today() is the UTC date. A test that computes "today" on a
@@ -26,6 +27,8 @@ from jobpilot.service import Service
 os.environ["TZ"] = "UTC"
 if hasattr(time, "tzset"):
     time.tzset()
+
+stretch_playwright_ceilings()
 
 
 @pytest.fixture(autouse=True)
