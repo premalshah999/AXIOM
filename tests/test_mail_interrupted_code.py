@@ -64,6 +64,15 @@ async def test_an_interrupted_reset_keeps_its_link_for_the_next_attempt_of_the_s
     assert service.mail.claim(kept["id"]) == TOKEN["password_reset"]  # no second email was asked for
 
 
+async def test_the_inbox_hands_it_over_with_its_rule_so_the_link_opens_on_the_employers_origin(service):
+    rule, run, challenge = await interrupted(service)
+    job = {"url": "https://careers.example.test/jobs/1", "ats": "custom"}
+    kept = await service.inbox.kept_reset(second_run(service), job, ME)
+    assert kept["id"] == challenge["id"] and kept["rule"]["employer_origin"] == "https://careers.example.test"
+    assert service.inbox.live(kept) and await service.inbox.wait(kept) == TOKEN["password_reset"]
+    assert await service.inbox.kept_reset(second_run(service, run_id="d" * 32), job, ME) is None
+
+
 async def test_a_temporary_password_is_kept_like_a_link(service):
     box, run, rule = await configured(service)
     challenge = service.mail.begin(run["id"], rule, ME, "password_reset")
