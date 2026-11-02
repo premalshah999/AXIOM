@@ -213,10 +213,12 @@ def test_only_the_recovery_counters_and_the_prompt_read_the_strategy():
     assert readers <= {
         "answer_quality.py",  # the advice call budget (budget_class)
         "browser.py",  # the time budget and the worker context (budget_class)
+        "control_agent.py",  # its own attempt hash, also named strategy, not this
         "models.py",  # the model-call budget (budget_class)
         "pipeline_comparison.py",
         "recovery.py",
         "service/execution.py",  # the run timeout (budget_class)
+        "specialist.py",  # the queued event's note
         "service/queueing.py",
     }
 
