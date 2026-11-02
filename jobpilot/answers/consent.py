@@ -222,6 +222,15 @@ REFUSE_OPTION = re.compile(r"\b(?:do not|don.?t|did not|decline|disagree|refuse|
 READ_QUESTION = re.compile(
     r"\b(?:have|did) you (?:read|review(?:ed)?)(?: and (?:understood?|understand|agreed?(?: to)?|accept(?:ed)?|acknowledged?))?\b[^.?!]{0,60}\?\W*$", re.I
 )
+# Pennant's Workday (2026-11-01): "I agree to submit the Employment Verification Form (I-9) within three business days of employment ..." offered
+# only "I Acknowledge" / "I Do Not Acknowledge", which no run could pick. A bare acknowledgement of a procedure accepts it, never an oath: a label
+# that swears, certifies, declares or states a record is not this.
+ACK_OPTION = re.compile(r"^\s*i\s+(?:acknowledge|accept|agree|consent)\W*$", re.I)
+ACK_FORBIDDEN = re.compile(
+    r"\b(?:swear|certify|attest|declare|affirm|under penalty|perjury|oath|convicted|criminal|felony|arrest\w*|registered|selective service|"
+    r"authori[sz]ed to work|citizen\w*|veteran|disabilit\w*)\b",
+    re.I,
+)
 PLACEHOLDER_OPTION = re.compile(r"^\s*(?:-+|select\b.*|choose\b.*|please (?:select|choose)\b.*)?\s*$", re.I)
 
 
@@ -234,6 +243,13 @@ def agreement_choice(label, options):
     if READ_QUESTION.search(str(label).strip()):
         yes = [o for o in offered if o.strip().casefold() == "yes"]
         return yes[0] if yes and any(o.strip().casefold() == "no" for o in offered) else None
+    if (
+        not ACK_FORBIDDEN.search(str(label))
+        and len([o for o in offered if ACK_OPTION.fullmatch(o)]) == 1
+        and len([o for o in offered if REFUSE_OPTION.search(o)]) == 1
+        and ACKNOWLEDGEMENT.search(str(label))
+    ):
+        return next(o for o in offered if ACK_OPTION.fullmatch(o))
     agree = [o for o in offered if AGREE_OPTION.search(o) and not REFUSE_OPTION.search(o) and not EMBEDDED_DISCLOSURE.search(o) and not CONTACT_CONSENT.search(o)]
     refuse = [o for o in offered if REFUSE_OPTION.search(o)]
     return agree[0] if len(agree) == 1 and len(refuse) == 1 else None

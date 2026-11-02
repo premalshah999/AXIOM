@@ -193,6 +193,30 @@ def arithmetic_answer(label):
     return None
 
 
+def birth_year(facts):
+    """The year of the recorded date of birth, else None."""
+    born = str((facts or {}).get("date_of_birth") or "").strip()
+    match = re.search(r"\b((?:19|20)\d{2})\b", born)
+    return int(match[1]) if match else None
+
+
+GENERATION_QUESTION = re.compile(r"\bgeneration\b", re.I)
+GENERATION_RANGE = re.compile(r"\b((?:19|20)\d{2})\s*[-\u2013\u2014]\s*(?:((?:19|20)\d{2})|(?:onward|onwards|present|today|now)\b)", re.I)
+
+
+def generation_choice(label, options, year):
+    """The option whose birth-year range holds the applicant's birth year, for a menu that names generations by years ("1997 - 2009
+    (Generation Z)", Rocket's Workday 2026-11-01), else None. Only a menu whose every year range is read, and exactly one holds the year."""
+    if year is None or not GENERATION_QUESTION.search(str(label or "")):
+        return None
+    holding = []
+    for option in options:
+        found = GENERATION_RANGE.search(str(option))
+        if found and int(found[1]) <= year <= int(found[2] or 9999):
+            holding.append(option)
+    return holding[0] if len(holding) == 1 else None
+
+
 class LocalRulesMixin:
     def history_attested(self):
         """The applicant confirmed that the saved work history is complete."""
@@ -653,6 +677,8 @@ class LocalRulesMixin:
             age, source = applicant_age(p.facts)
             if age is not None and (passes := age_threshold(label, age)) is not None:
                 return self._ans(f, yes_no_options["yes" if passes else "no"], [source])
+        if (chosen := generation_choice(f["label"], options, birth_year(p.facts))) is not None:
+            return self._ans(f, chosen, ["fact:date_of_birth"])
         if re.fullmatch(r"(?:your )?age(?: in years)?|how old are you", label) and "age" in p.facts:
             return self._ans(f, p.facts["age"], ["fact:age"])
         if (
