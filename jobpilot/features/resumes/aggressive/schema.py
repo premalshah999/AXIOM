@@ -24,7 +24,7 @@ class Proposal(BaseModel):
     descriptor: str = Field(max_length=40)
     data_source: str = Field(min_length=3, max_length=160)
     tools: list[str] = Field(min_length=1, max_length=10)
-    bullets: list[str] = Field(min_length=2, max_length=3)
+    bullets: list[str] = Field(min_length=1, max_length=8)
     build_plan: list[str] = Field(min_length=1, max_length=8)
     metric_shape: Literal["none", "count", "range", "before/after", "latency", "coverage"] = "none"
 
@@ -43,7 +43,8 @@ class Plan(BaseModel):
     bullets: list[Rewrite] = Field(default_factory=list, max_length=100)
     project_order: list[str] = Field(default_factory=list, max_length=30)
     categories: list[Category] = Field(default_factory=list, max_length=5)
-    proposals: list[Proposal] = Field(min_length=3, max_length=3)
+    # One per project_shapes item, or three for a resume with no projects. The gates check the count.
+    proposals: list[Proposal] = Field(min_length=1, max_length=3)
 
 
 class Revision(BaseModel):
@@ -51,6 +52,18 @@ class Revision(BaseModel):
     project_order: list[str] = Field(default_factory=list, max_length=30)
     categories: list[Category] = Field(default_factory=list, max_length=5)
     proposals: list[Proposal] = Field(default_factory=list, max_length=3)
+
+
+class BulletFix(BaseModel):
+    draft: int = Field(ge=0, le=2)
+    bullet: int = Field(ge=0, le=7)
+    wordings: list[str] = Field(min_length=1, max_length=3)
+
+
+class ShapeFix(BaseModel):
+    """The one bounded length repair: a short reply under the default token cap, holding only the bullets that missed."""
+
+    bullets: list[BulletFix] = Field(default_factory=list, max_length=24)
 
 
 class Critique(BaseModel):

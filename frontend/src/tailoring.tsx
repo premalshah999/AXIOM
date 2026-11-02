@@ -744,6 +744,8 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
                 {s.entries.map((e, ei) => {
                   const removable = !view.report.workspace_id && s.kind === "projects" && source.sections.some((x) => x.entries.some((y) => y.id === e.id));
                   const generated = !!view.report.workspace_id && !source.sections.some((x) => x.entries.some((y) => y.id === e.id));
+                  // A project a draft took the place of isn't on this resume, and "Choose your projects" above brings it back.
+                  if (view.report.workspace_id && !e.include) return null;
                   return (
                     <article key={e.id} className={"tl-entry" + (e.include ? "" : " is-off")}>
                       <header>
@@ -801,13 +803,14 @@ function Review({ view, onView, onChanged }: { view: View; onView: (v: View) => 
 
 function Checks({ view, sized }: { view: View; sized?: Record<string, number[]> }) {
   const rules = view.preview_rules || view.rules;
+  const off = view.removed_projects?.length ?? 0;
   const type = sized && `Name ${sized.name?.[0] ?? "?"} pt, headings ${sized.section?.[0] ?? "?"}, sub-headings ${sized.sub?.[0] ?? "?"}, bullets ${sized.bullet?.[0] ?? "?"}, read from the PDF`;
   return (
     <section className="tl-checks" aria-label="Checks">
       <h2>Checks</h2>
       <ul>
         <li className={rules?.ok ? "is-ok" : "is-bad"}>
-          {rules?.ok ? "Bullets within length and count; nothing removed; only your own skills" : rules?.problems?.[0]?.message || "Not checked"}
+          {rules?.ok ? `Bullets within length and count; ${off ? `${off} of your projects ${off === 1 ? "is" : "are"} off this resume` : "nothing removed"}; only your own skills` : rules?.problems?.[0]?.message || "Not checked"}
         </li>
         {type && <li className={rules?.typography?.ok ? "is-ok" : "is-bad"}>{type}</li>}
         {(view.parse?.items || []).map((i) => (

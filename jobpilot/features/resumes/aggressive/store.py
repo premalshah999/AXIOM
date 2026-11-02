@@ -15,6 +15,9 @@ from ..editor import Bullet, Entry, ResumeDoc
 from .schema import Proposal
 
 
+DRAFT_FORMAT = "takes-the-place-v1"
+
+
 class Workspace(FeatureBase):
     __tablename__ = "rs_aggressive_workspaces"
     id: Mapped[str] = mapped_column(String, primary_key=True)
@@ -41,8 +44,9 @@ def fingerprint(job, source, profile):
                 # Import attaches provenance without changing the source words.
                 bullet.pop("source_text", None)
                 bullet.pop("unit_id", None)
+    # DRAFT_FORMAT: a workspace from before drafts took the place of projects is never reused for a new tailoring.
     return digest(
-        [source.id, source.sha, document, profile_digest(profile), job.get("url"), job.get("description")]
+        [source.id, source.sha, document, profile_digest(profile), job.get("url"), job.get("description"), DRAFT_FORMAT]
     )
 
 
@@ -77,20 +81,25 @@ def get(db, workspace_id):
         return view(row)
 
 
-def create(db, job, source, profile, proposals, brief):
+def create(db, job, source, profile, proposals, brief, replaces=()):
+    """`replaces` holds, for each proposal in turn, the project it takes the place of. A proposal past its end adds to the page."""
     signature = fingerprint(job, source, profile)
     existing = find(db, signature)
     if existing:
         return existing
     wid = new_id("ag-")
-    drafts = [{"id": wid + f":p{i}", "confirmed": False, **p.model_dump()} for i, p in enumerate(proposals)]
+    replaces = list(replaces)
+    drafts = [
+        {"id": wid + f":p{i}", "confirmed": False, "replaces": replaces[i] if i < len(replaces) else None, **p.model_dump()}
+        for i, p in enumerate(proposals)
+    ]
     payload = {
         "company": job.get("company", ""),
         "role": job.get("title", ""),
         "brief": brief.model_dump(),
         "drafts": drafts,
         "selected_drafts": [d["id"] for d in drafts],
-        "removed_projects": [],
+        "removed_projects": replaces[: len(drafts)],
         "source_doc": source.doc.model_dump(),
         "source_style": source.style.model_dump(),
         "posting": job.get("description", ""),
