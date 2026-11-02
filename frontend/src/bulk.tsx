@@ -198,7 +198,7 @@ export function ApplyOutcomes({
 
 // Said before anything joins the line, because each of these becomes a real application to a real employer. With sending off the
 // jobs would only wait, so that is said too, with the way to turn it on in the same press.
-export function ConfirmQueue({ open, count, onClose, onConfirm, title }: { open: boolean; count: number; onClose: () => void; onConfirm: () => void; title?: string }) {
+export function ConfirmQueue({ open, count, onClose, onConfirm, title, warning }: { open: boolean; count: number; onClose: () => void; onConfirm: () => void; title?: string; warning?: string }) {
   const { snapshot, refresh } = useWorkspace();
   const { pending, run } = useAction();
   const sending = snapshot.control.auto_submit;
@@ -237,6 +237,7 @@ export function ConfirmQueue({ open, count, onClose, onConfirm, title }: { open:
         </>
       }
     >
+      {warning && <strong>{warning} </strong>}
       AXIOM sends a real application to each of these employers, in its turn, using your profile and resume. You can take any of them out of the Queue before it starts.
       {!sending && " Sending is off in Settings, so with Queue only they wait there until you turn it on."}
     </Dialog>

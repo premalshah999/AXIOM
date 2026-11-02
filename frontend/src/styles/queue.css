@@ -190,6 +190,9 @@
 .bd-sort {
   margin-left: auto;
 }
+.bd-section {
+  margin-bottom: var(--space-2);
+}
 .bd-job {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
