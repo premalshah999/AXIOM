@@ -486,7 +486,6 @@ class FlowHandleMixin:
             state = recorded  # a sign-in attempt never erases an unanswered reset (it requested one on every run)
         else:
             state = "created_locally" if creating else "signing_in"
-        extra = {}
         if creating:
             # Each Create mails a passcode: an account the employer never confirmed is registered at most twice a day
             # across runs (adapters.base.create_allowed), where it was six times (SuccessFactors, 2026-10-27..29).
@@ -496,13 +495,16 @@ class FlowHandleMixin:
             if not create_allowed(current, getattr(e, "run_id", "")):
                 e.result = create_limit_result()
                 return True
-            extra = {"create_sent": create_stamp(current, getattr(e, "run_id", ""))}
+            # Stamped only once the mail lease is held and Create is about to be pressed (below): a busy sender or an
+            # inert press sends nothing, and the adapter's create path never counted those either.
+            before_sent = (current or {}).get("create_sent") or []
+            stamp = create_stamp(current, getattr(e, "run_id", ""))
         # A Create that replaced a saved login keeps it, so "Account Already Exists" can restore it.
         replaced = saved if creating and saved and saved.get("password") != creds["password"] else None
         if replaced:
-            self.store.save(account_url, creds, state, previous=replaced, **extra)
+            self.store.save(account_url, creds, state, previous=replaced)
         else:
-            self.store.save(account_url, creds, state, **extra)
+            self.store.save(account_url, creds, state)
         self.attempts.add(signature)
         if dfid == "sign_in":
             self.attempts.add(("dayforce_id", "signin"))
@@ -518,7 +520,23 @@ class FlowHandleMixin:
                 # sign-in that could never succeed.
                 e.emit("account", "Acknowledged the employer's privacy notice before creating the account")
         e.emit("account", "Creating an employer account" if creating else "Signing in with the saved account")
-        await e.form.click(buttons[0]["id"], auth_control=True)
+        if creating:
+            self.store.save(account_url, creds, state, create_sent=stamp)
+            from ..adapters.base import SiteWrites
+
+            writes = SiteWrites(getattr(e.form, "page", None) or e.page)
+            with writes:
+                try:
+                    await e.form.click(buttons[0]["id"], auth_control=True)
+                except BaseException:
+                    if not writes.seen:
+                        self.store.save(account_url, creds, state, create_sent=before_sent)
+                    raise
+            if not writes.seen:
+                # Pressed, and the page sent nothing: no registration went out (adapters.base, Atlas Copco 2026-11-01).
+                self.store.save(account_url, creds, state, create_sent=before_sent)
+        else:
+            await e.form.click(buttons[0]["id"], auth_control=True)
         e.page = e.form.page
         if dfid == "register":
             outcome, after, info = await self.dayforce_id_result("register")
