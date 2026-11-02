@@ -104,17 +104,19 @@ async def desktop_chrome(service):
     process = await asyncio.create_subprocess_exec(
         *argv, "about:blank", stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
     )
-    portfile = os.path.join(temp, "DevToolsActivePort")
-    for _ in range(900):  # A loaded Mac can take a minute to start a Chrome.
-        if os.path.exists(portfile) and os.path.getsize(portfile):
-            break
-        await asyncio.sleep(0.1)
-    with open(portfile) as f:
-        service.config.browser_cdp_url = f"http://127.0.0.1:{f.read().splitlines()[0]}"
-    yield
-    process.kill()
-    await process.wait()
-    shutil.rmtree(temp, ignore_errors=True)
+    try:
+        portfile = os.path.join(temp, "DevToolsActivePort")
+        for _ in range(900):  # A loaded Mac can take a minute to start a Chrome.
+            if os.path.exists(portfile) and os.path.getsize(portfile):
+                break
+            await asyncio.sleep(0.1)
+        with open(portfile) as f:
+            service.config.browser_cdp_url = f"http://127.0.0.1:{f.read().splitlines()[0]}"
+        yield
+    finally:  # Even when the Chrome was too slow for this fixture: it never outlives the test.
+        process.kill()
+        await process.wait()
+        shutil.rmtree(temp, ignore_errors=True)
 
 
 def saved_route(monkeypatch):
