@@ -203,6 +203,18 @@ def selected(db, config):
     }
 
 
+def account_reason(db, config):
+    """The owner's fix, when the provider is held back by a refused key or an empty account rather than an outage.
+
+    A run parked behind such a cooldown said only "The selected model provider is unavailable", the same words as a
+    provider outage, so nothing told the owner (or a friend on a fresh install) that a key or a top-up was what was
+    needed (18 runs 2026-10-31/11-01 carried it). A replaced key ends the cooldown (status), so only a live one reads."""
+    for state in selected(db, config).values():
+        if state["state"] in {"cooldown", "recovering"} and state.get("last_error") in ACCOUNT_REASONS:
+            return ACCOUNT_REASONS[state["last_error"]]
+    return None
+
+
 def dispatch_gate(db, config):
     """Whether, and how widely, new work may start: the model's cooldown first, then the host (host_health.check)."""
     chosen = selected(db, config).values()

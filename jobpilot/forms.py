@@ -6081,7 +6081,16 @@ class FormSession:
                 await locator.evaluate("e => { e.value = '' }", timeout=5000)
             except PlaywrightError:
                 pass  # A replaced input is found again by the next attempt's set_input_files.
-            await locator.set_input_files(str(self.resume_path), timeout=15000)
+            try:
+                await locator.set_input_files(str(self.resume_path), timeout=15000)
+            except PlaywrightTimeoutError:
+                # The widget drops its input once it lists a file (clear_resume_input), so a later pass finds none: 5 runs
+                # of 16 "Browser control failed at forms.py:5784/5788" were this 15 s timeout (2026-10-31/11-01). Listed
+                # means the upload worked; otherwise another pass or the form's own upload check says what is missing.
+                if await self.greenhouse_resume_listed():
+                    return
+                await self.page.wait_for_timeout(1500)
+                continue
             if await self.greenhouse_resume_listed():
                 return
             await self.page.wait_for_timeout(1500)
@@ -7208,7 +7217,7 @@ class FormSession:
                         "evidence": text[max(0, match.start() - 20) : match.end() + 200], "missing_fields": []}
             from .employer_limit import application_cap
 
-            if cap := application_cap(tail):
+            if cap := application_cap(tail, refused=True):
                 # The employer's own application limit (Benchling, Aurora, OpenAI on Ashby): nothing was accepted.
                 return {"type": "explicit_rejection_page", "url": self.page.url, "category": "employer_limit",
                         "cap": cap, "evidence": text[max(0, match.start() - 20) : match.end() + 300],

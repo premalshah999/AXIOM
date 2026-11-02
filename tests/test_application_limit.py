@@ -82,3 +82,11 @@ def test_the_closed_check_reads_the_page_notice_not_the_body():
     assert closed_notice({"headings": ["This position has been filled"], "text": ""})
     assert closed_notice({"errors": [], "text": "Sorry, this position has been filled.\nSearch jobs"})
     assert closed_notice({"headings": ["Engineer"], "text": PROSE}) is None
+
+
+def test_a_refused_submission_that_names_limits_on_how_often_and_how_many_roles_is_the_employers_limit():
+    from jobpilot.employer_limit import application_cap
+
+    page = "Example Co has set specific limits on how often and how many roles you can apply for."
+    assert application_cap(page, refused=True) == {"limit": None, "days": None}
+    assert application_cap(page) is None  # A posting's own policy note holds nobody.
