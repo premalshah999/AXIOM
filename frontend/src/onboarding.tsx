@@ -4,7 +4,7 @@ import { ArrowLeft, ArrowRight, Check as Tick, FileText, Mail, SlidersHorizontal
 import { api, ApiError } from "./api";
 import { routeUrl } from "./context";
 import { Wordmark } from "./shell/Brand";
-import { resumeFileRefusal } from "./format";
+import { resumeFileRefusal, plainError } from "./format";
 import { SwitchRow } from "./setup-kit";
 import { MainPassword } from "./mainpassword";
 import { YesNo } from "./qform";
@@ -590,7 +590,7 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
       else if (completed) onDone();
       else go(toIndex);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : (e as Error).message);
+      setError(plainError((e as Error).message));
     } finally {
       setSaving(false);
     }

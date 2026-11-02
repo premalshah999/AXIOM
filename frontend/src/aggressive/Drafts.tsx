@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { plainError } from "../format";
 import { api } from "../api";
 import { Button } from "../ui/index";
 import "./drafts.css";
@@ -48,7 +49,7 @@ export function AggressiveDrafts({ workspaceId, jobId, needsUpdate, disabled, on
     setError("");
     api<DraftWorkspace>(path(workspaceId), "GET", undefined, abort.signal)
       .then(setData)
-      .catch((e: Error) => { if (e.name !== "AbortError") setError(e.message); });
+      .catch((e: Error) => { if (e.name !== "AbortError") setError(plainError(e.message)); });
     return () => abort.abort();
   }, [workspaceId]);
 

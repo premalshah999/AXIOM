@@ -23,6 +23,7 @@ from sqlalchemy import or_, select
 
 from .admission import QueueBlocked
 from .db import Job, Run, Setting
+from .vocabulary import plain_sentence
 
 MAX_SECONDS = 480
 MAX_STARTS = 3
@@ -242,7 +243,7 @@ def repeat_stop_block(session, job_id, *, at=None, aliases=None):
     if last + REPEAT_STOP_SPACING <= at:
         return None
     return QueueBlocked(
-        f"{REPEAT_STOP_REFUSAL} {times} times ({(reason or '')[:140].rstrip('. ')}). It is retried once a day until "
+        f"{REPEAT_STOP_REFUSAL} {times} times ({plain_sentence(reason)[:140].rstrip('. ')}). It is retried once a day until "
         "something changes; applying again yourself starts it afresh",
         outcome="deferred", code="repeated_stop", not_before=(last + REPEAT_STOP_SPACING).isoformat(),
     )
@@ -291,7 +292,7 @@ def job_ceiling_block(session, job_id, *, at=None, aliases=None):
     if engine != engine_version() and last + JOB_TRY_SPACING <= at:
         return None
     return QueueBlocked(
-        f"{JOB_CEILING_REFUSAL} {count} times and it keeps stopping (latest: {(reason or 'no reason recorded')[:140].rstrip('. ')}). "
+        f"{JOB_CEILING_REFUSAL} {count} times and it keeps stopping (latest: {(plain_sentence(reason) or 'no reason recorded')[:140].rstrip('. ')}). "
         "It is tried again after an app update; applying again yourself starts it afresh",
         outcome="deferred", code="job_ceiling", not_before=(max(last, at) + JOB_TRY_SPACING).isoformat(),
     )

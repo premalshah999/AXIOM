@@ -282,6 +282,28 @@ async def test_a_closed_tab_or_give_it_back_hands_back_nothing(service, monkeypa
         assert steer.hands_back(s, job_id) is None
 
 
+async def test_an_opening_that_never_finished_has_a_way_out_and_one_still_going_does_not(service, monkeypatch):
+    job_id = seed_job(service, status="paused")
+    run_id = seed_run(service, job_id, state="running", mode="dry_run")
+    held(service, job_id, phase="opening")
+    with service.db.exclusive() as s:
+        row = s.get(Setting, steer.KEY + job_id)
+        row.value = {**row.value, "run_id": run_id, "at": steer.now()}
+    assert steer.status(service, job_id)["stuck"] is False
+    with pytest.raises(ValueError, match="still opening"):
+        await steer.finish(service, job_id, "back")
+    # A restart ended the run without handing it over.
+    with service.db.exclusive() as s:
+        s.get(Run, run_id).state = "waiting_browser"
+    assert steer.status(service, job_id)["stuck"] is True
+    with pytest.raises(ValueError, match="still opening"):
+        await steer.finish(service, job_id, "done")  # Nothing was on the screen to keep.
+    monkeypatch.setattr(steer, "_targets", lambda config: {})
+    service.queue = AsyncMock(return_value={"id": "next"})
+    assert (await steer.finish(service, job_id, "back"))["state"] == "queued"
+    assert steer.record(service.db, job_id)["phase"] == "released"
+
+
 def test_only_the_very_page_handed_back_counts_as_what_the_person_saw():
     handed = {"target_id": "tab-1", "url": "https://jobs.example.test/apply"}
     assert steer.owner_saw(handed, True, "tab-1", handed["url"])
@@ -359,8 +381,10 @@ def test_library_errors_and_crashes_become_plain_words(app, config, service, mon
         answer = plain.post("/api/reviews/any", json={"answer": "x"})
         assert answer.status_code == status
         assert answer.json()["detail"] == vocabulary.PROBLEM
-    # A sentence the app wrote stands.
+    # A sentence the app wrote stands, without the code in front of it, and a validator's report as text names its field.
     assert vocabulary.plain_error("Choose one of the offered answers") == "Choose one of the offered answers"
+    assert vocabulary.plain_error("no_model: Add your AI key in Settings > Connections") == "Add your AI key in Settings > Connections"
+    assert vocabulary.plain_error(RAW[0]) == "Email isn't valid."
 
 
 def test_the_job_page_gets_plain_reports_and_a_plain_activity_and_the_record_keeps_the_rest(client, service):

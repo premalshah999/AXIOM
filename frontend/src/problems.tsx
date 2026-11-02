@@ -6,8 +6,10 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
 import { ago, jobWords } from "./format";
-import { useNow, usePoll } from "./hooks";
+import { useSelection } from "./bulk";
+import { useAction, useNow, usePoll } from "./hooks";
 import { Pagination, type Paging } from "./pagination";
+import { PipelineBulk, type KnownRuns } from "./pipelinebulk";
 import { TopLine } from "./shell/Shell";
 import type { Problem, ProblemPage } from "./types";
 import { Empty, Listbox, Table, type Column } from "./ui/index";
@@ -31,6 +33,28 @@ export function ProblemList() {
   const list = usePoll<ProblemPage>((signal) => api(`/problems?${key}`, "GET", undefined, signal), 30000, [key, version]);
   const now = useNow(30000);
   const rows = list.data?.rows ?? [];
+  // A row is an attempt and a selection acts on jobs: two attempts of one job are one job to retry or remove.
+  const selection = useSelection(5000);
+  const { pending, run } = useAction();
+  const [seen, setSeen] = useState<Record<string, Problem>>({});
+  useEffect(() => setSeen((s) => ({ ...s, ...Object.fromEntries(rows.map((r) => [r.run_id, r])) })), [rows]);
+  useEffect(() => selection.clear(), [kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  const selectAll = () =>
+    run("select", async () => {
+      const found: Problem[] = [];
+      for (let at = 1; ; at += 1) {
+        const part = await api<ProblemPage>(`/problems?${new URLSearchParams({ days: "7", page: String(at), size: "200", kind })}`);
+        found.push(...part.rows);
+        if (at >= part.pages) break;
+      }
+      setSeen((s) => ({ ...s, ...Object.fromEntries(found.map((r) => [r.run_id, r])) }));
+      selection.replace(new Set(found.map((r) => r.run_id)));
+    });
+  const picked = selection.ids.map((id) => seen[id]).filter((r): r is Problem => !!r);
+  const jobIds = [...new Set(picked.map((r) => r.job_id))];
+  const known: KnownRuns = {};
+  // An attempt that may have been sent is the one a verdict is about, whichever row came first.
+  for (const r of picked) if (!known[r.job_id] || r.state === "submission_unknown") known[r.job_id] = { id: r.run_id, state: r.state };
   const paging: Paging = {
     items: rows,
     total: list.data?.total ?? 0,
@@ -115,6 +139,11 @@ export function ProblemList() {
         rows={rows}
         rowKey={(r) => r.run_id}
         onRowClick={(r) => openJob(r.job_id, r.run_id)}
+        selected={selection.chosen}
+        onSelectedChange={selection.replace}
+        rowLabel={(r) => r.company || "attempt"}
+        selectAll={paging.total ? { count: paging.total, run: selectAll, busy: pending === "select" } : undefined}
+        bulk={<PipelineBulk selection={{ ids: jobIds, clear: selection.clear }} known={known} />}
         loading={!list.data && !list.error}
         error={list.error && !list.data ? <LoadError error={list.error} retry={list.refresh} /> : undefined}
         footer={paging.total > 0 ? <Pagination paging={paging} label="What went wrong pages" /> : undefined}

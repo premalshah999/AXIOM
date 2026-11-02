@@ -122,7 +122,8 @@ def plain_error(text):
     text = str(text or "")
     if found := _VALIDATOR_REPORT.search(text):
         return plain_validation([{"loc": found["field"].split("."), "msg": found["msg"], "type": found["type"]}])
-    text = " ".join(text.split())
+    # "no_model: Add your AI key in Settings": a code for the program in front of the sentence for the person.
+    text = re.sub(r"^[a-z]+(?:_[a-z0-9]+)+:\s*", "", " ".join(text.split()))
     return PROBLEM if not text or is_developer_text(text) else text
 
 

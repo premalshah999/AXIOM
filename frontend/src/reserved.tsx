@@ -10,7 +10,7 @@ import { useAction, useDraft, useNow, usePoll } from "./hooks";
 import { appliedState, rowFromServer, stateInfo, STATES, withMarks, type JobRow } from "./model";
 import { Pagination, type Paging } from "./pagination";
 import type { ReservedEmployer, ReservedPage, ReservedRules } from "./types";
-import { ago, jobWords, plural } from "./format";
+import { ago, jobWords, plural, plainReason } from "./format";
 import { ShieldCheck, SearchX } from "lucide-react";
 import { Button, Check, Drawer, Empty, Input, Table, type Column } from "./ui/index";
 import { Chips, ConfirmButton, JobCell, LoadError, Note, SearchBox, StatusPill } from "./worktools";
@@ -104,9 +104,9 @@ export function ReservedJobs() {
         r.state !== "reserved" ? (
           <StatusPill state={r.state} />
         ) : r.run ? (
-          <Note title={r.run.reason}>
+          <Note title={plainReason(r.run.reason)}>
             {plural(r.attempts, "try", "tries")} · last: {stateInfo(r.run.state).label}
-            {r.run.reason ? ` · ${r.run.reason}` : ""}
+            {r.run.reason ? ` · ${plainReason(r.run.reason)}` : ""}
           </Note>
         ) : (
           <StatusPill state={"job:" + r.job.status} />

@@ -17,7 +17,7 @@ import {
   type MasterView,
   type Page,
 } from "./features";
-import { ago, day, plural, resumeFileRefusal } from "./format";
+import { ago, day, plural, resumeFileRefusal, isDeveloperText } from "./format";
 import { useAction, useDraft, usePoll } from "./hooks";
 import { Pagination, type Paging } from "./pagination";
 import { downloadPdf, PdfPages, PdfThumb, usePdf } from "./pdfpages";
@@ -938,7 +938,7 @@ function VersionPreview({ id, items, tailoringOff }: { id: string; items: Artifa
                     : a.sent?.state === "unknown"
                       ? `An application to ${company} used this version, but its outcome wasn't confirmed.`
                       : a.status === "failed"
-                        ? a.error?.detail || (a.error?.code || "").replaceAll("_", " ") || "It couldn't be built."
+                        ? (a.error?.detail && !isDeveloperText(a.error.detail) ? a.error.detail : "It couldn't be built.")
                         : a.status === "kept_master"
                           ? "The reworded version didn't read better than your resume, so your resume was kept."
                           : tailoringOff

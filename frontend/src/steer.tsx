@@ -7,7 +7,7 @@ import { useWorkspace } from "./context";
 import { useAction, usePoll } from "./hooks";
 import { Button, ConfirmButton } from "./ui/index";
 
-type Steer = { job_id: string; phase: "" | "opening" | "yours" | "released"; tab_open?: boolean; title?: string; browser?: boolean };
+type Steer = { job_id: string; phase: "" | "opening" | "yours" | "released"; tab_open?: boolean; title?: string; browser?: boolean; stuck?: boolean };
 
 /** The steered jobs: the Needs you page lists them as what is in your hands. */
 export function useSteered(): { job_id: string; phase: string }[] {
@@ -66,14 +66,25 @@ export function SteerPanel({ jobId }: { jobId: string }) {
   return (
     <section className="nd-steer" aria-label="You have this application">
       {state.phase === "opening" ? (
-        <p>Opening the application in Chrome at the point it stopped. It is yours as soon as the page is ready.</p>
+        state.stuck ? (
+          <>
+            <p>The application didn't open. Give it back and it carries on by itself, or take it over again later.</p>
+            <div className="nd-actions">
+              <Button variant="primary" loading={pending === "back"} disabled={pending !== null} onClick={() => void end("back")}>
+                Give it back
+              </Button>
+            </div>
+          </>
+        ) : (
+          <p>Opening the application in Chrome at the point it stopped. It is yours as soon as the page is ready.</p>
+        )
       ) : (
         <>
           <p>
             <strong>This application is open in Chrome for you.</strong>{" "}
             {state.tab_open
               ? "Finish what it stopped on, then tell AXIOM how it went. Nothing else touches that tab meanwhile."
-              : "The Chrome tab was closed. Done, continue opens the application again from the draft."}
+              : "The Chrome tab was closed. Done, continue opens the application again from the draft, and checks every answer as usual: what you typed in that tab counts only if the form saved it."}
           </p>
           <div className="nd-actions">
             <Button variant="primary" loading={pending === "done"} disabled={pending !== null} onClick={() => void end("done")}>
@@ -93,8 +104,8 @@ export function SteerPanel({ jobId }: { jobId: string }) {
             </Button>
           </div>
           <p className="ax-note">
-            Done, continue reads the page again and carries on from where you left it. Give it back returns the application to automatic
-            without that. If you pressed Submit yourself, choose I submitted it myself: continuing could send it twice.
+            Done, continue keeps what is on the page you have open and carries on from there. Give it back returns the application to automatic,
+            and AXIOM checks every answer as usual. If you pressed Submit yourself, choose I submitted it myself: either of the others could send it twice.
           </p>
         </>
       )}

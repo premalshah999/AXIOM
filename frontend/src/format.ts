@@ -170,7 +170,23 @@ const RESTRICTIONS: Record<string, string> = {
   security_clearance: "The posting requires a security clearance.",
   visa_status: "The posting does not accept your work authorization.",
 };
-export function plainReason(text?: string | null) {
+// What only the code's authors can read: a validator's report and its link, a stack trace, an exception's name, a source file, a
+// snake_case name, name=value, a field's internal id, a browser driver's call, the engine's notes to itself. jobpilot/vocabulary.py
+// DEVELOPER says the same; the server cleans what it writes, and this is the last door before a screen.
+const DEVELOPER =
+  /errors\.pydantic\.dev|for further information visit|\bvalidation errors? for\b|\binput should be\b|traceback|stack ?trace|\bpython -m\b|\bjobpilot\b|\bapplypilot\b|\bblocker\b|\bobservation\b|\bfill (?:reports?|results?|tool)\b|\bpage-wide fill\b|\brepair instruction\b|\bowned-page\b|\brevision \d+\b|\bcontrol failure\b|\bquality repair\b|\[(?:URL|email|number|secret) omitted\]|\brecovery budget\b|\bexecution budget\b|\bdraft restarts?\b|\bworker host\b/i;
+const DEVELOPER_CASED =
+  /\[type=\w+|\b\w+\.py\b|\b(?:[A-Z][a-z]+)+(?:Error|Exception)\b|\bException\b|\bNoneType\b|\b(?:Locator|Page|BrowserContext|ElementHandle|Frame)\.[a-z_]+|\bpage\.\w+\(|\bTimeout \d+ ?ms\b|\b\d+ ?ms exceeded\b|\bf\d-[a-z0-9]+(?:-[a-z0-9]+)*\b|\b[a-z]+(?:_[a-z0-9]+)+\b|\b[a-z]\w*=\S+|\bdata-[a-z-]+\b|\bCDP\b|\bDOM\b|Cannot read propert|is not a function|is not defined|Unexpected token|Failed to fetch|Load failed|NetworkError/;
+export const isDeveloperText = (text?: string | null) => !!text && (DEVELOPER.test(text) || DEVELOPER_CASED.test(text));
+export const PROBLEM = "Something went wrong on AXIOM's side. Try again.";
+/** An error's words on a screen: a sentence the app wrote stands, anything only the code's authors can read becomes a plain one. */
+export const plainError = (text?: string | null) => {
+  const said = (text || "").replace(/^[a-z]+(?:_[a-z0-9]+)+:\s*/, "");
+  return !said || isDeveloperText(said) ? PROBLEM : said;
+};
+
+/** A stored reason as a person reads it. `stuck`: what to say when nothing in it can be shown; "" for words that aren't about an application going wrong (a fit note). */
+export function plainReason(text?: string | null, stuck = "AXIOM got stuck on this site's pages.") {
   let s = (text || "").trim();
   if (!s) return "";
   const check = s.match(/Eligibility check:\s*(\w+)/);
@@ -186,6 +202,23 @@ export function plainReason(text?: string | null) {
   if (/^Worker error\b/i.test(s)) return "AXIOM hit a problem of its own.";
   if (/debugging endpoint|automation connection|Chromium (?:missing|did not|exited)/i.test(s)) return "AXIOM couldn't use its browser.";
   if (/^An explicit hiring restriction conflicts with confirmed applicant fact/i.test(s)) return "The posting has a hiring restriction you do not meet.";
+  // What only the code reads goes; what is left is often a fine sentence. Otherwise a person reads the one thing they can use.
+  s = s
+    .replace(/^Repair agent:\s*/i, "")
+    .replace(/\s*\([^()]*\bf\d-[a-z0-9]+-[a-z0-9]+[^()]*\)|\s*\bf\d-[a-z0-9]+-[a-z0-9]+\b/gi, "")
+    .replace(/\s*\((?:[^()]*https?:\/\/[^()]*|\[URL omitted\])\)|\s*(?:at |on )?https?:\/\/\S+|\s*(?:at |on )?\[URL omitted\]/gi, "")
+    .replace(/;?\s*(?:the job was removed under the owner rule|jobs that ask are dropped)?\s*\(?\bowner rule\)?\s*$/i, "")
+    .replace(/\bcomboboxes\b/gi, "menus")
+    .replace(/\bcombobox\b/gi, "menu")
+    .trim();
+  if (isDeveloperText(s)) {
+    const first = (s.split(/(?<=[.!?])\s|;\s|\s\|\s/)[0] || "").trim();
+    if (first && !isDeveloperText(first)) return first.charAt(0).toUpperCase() + first.slice(1);
+    if (/auth_required|employer sign-in|sign-in must/i.test(text || "")) return "The employer's sign-in did not finish.";
+    if (/resume_attached|resume attachment|resume file upload/i.test(text || "")) return "The site would not take the resume.";
+    if (/not_found=|page not found|\b404\b/i.test(text || "")) return "The posting is no longer available.";
+    return stuck;
+  }
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 

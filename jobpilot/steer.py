@@ -27,6 +27,7 @@ keeps nothing by hand: every answer on that page goes through the usual checks (
 """
 
 import re
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from sqlalchemy import select
@@ -40,6 +41,8 @@ TAKEABLE = {"waiting_answer", "needs_review", "waiting_browser", "timed_out", "f
 # "I submitted it myself" and the evidence forms exist for those.
 COMMITTED_STATES = {"confirmed", "already_applied", "submitting", "submission_unknown"}
 ACTIVE_STATES = {"queued", "running", "submitting"}
+# Rebuilding a draft takes a few minutes at most; past this the panel offers the way out.
+OPENING_PATIENCE = timedelta(minutes=10)
 # A page whose address or title says the application went through.
 CONFIRMATION = re.compile(
     r"thank[\s-]*you|\bconfirm(?:ation|ed)?\b|\bsubmitted\b|\bsuccess(?:ful)?\b|application[\s-]*(?:received|complete)|"
@@ -122,11 +125,27 @@ def surface(config, target_id):
         return False
 
 
+def opening_stuck(service, job_id, held):
+    """True when the run opening the application for the owner has ended without handing it over, or has taken far too long. A restart
+    can end that run without the hand-over (complete), and the job would stay paused and "opening" with no way out."""
+    with service.db.session() as s:
+        run = s.get(Run, held.get("run_id") or "")
+        if run is None or run.state not in ACTIVE_STATES:
+            return True
+    try:
+        since = datetime.fromisoformat(str(held.get("at")))
+    except ValueError:
+        return True
+    return datetime.now(UTC) - (since if since.tzinfo else since.replace(tzinfo=UTC)) > OPENING_PATIENCE
+
+
 def status(service, job_id):
     """What the Take over panel shows for one job."""
     held = record(service.db, job_id)
     phase = held.get("phase", "")
     out = {"job_id": job_id, "phase": phase, "run_id": held.get("run_id", ""), "since": held.get("at", "")}
+    if phase == "opening":
+        out["stuck"] = opening_stuck(service, job_id, held)
     if phase == "yours":
         target = (service.db.get_setting("desktop_job:" + job_id, {}) or {}).get("target_id")
         tabs = _targets(service.config)
@@ -275,8 +294,13 @@ async def finish(service, job_id, how):
 
     held = record(service.db, job_id)
     if held.get("phase") == "opening":
-        raise ValueError("The application is still opening. Give it a moment.")
-    if held.get("phase") != "yours":
+        if how != "back" or not opening_stuck(service, job_id, held):
+            raise ValueError("The application is still opening. Give it a moment.")
+        with service.db.exclusive() as s:
+            run = s.get(Run, held.get("run_id") or "")
+            if run is not None and run.state == "queued":
+                run.state, run.finished_at = "cancelled", now()
+    elif held.get("phase") != "yours":
         raise ValueError("You don't have this application.")
     target = (service.db.get_setting("desktop_job:" + job_id, {}) or {}).get("target_id")
     tab = (_targets(service.config) or {}).get(target or "")

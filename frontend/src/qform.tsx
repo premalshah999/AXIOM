@@ -2,6 +2,7 @@
 // Shared by Setup › Knowledge and the setup guide's optional step. Every answer is optional and saves on its own;
 // nothing here is required to apply. API: GET/PUT /api/knowledge/questionnaires (jobpilot/features/knowledge).
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { plainError } from "./format";
 import { ArrowLeft, Check, ChevronDown, Plus, Trash2 } from "lucide-react";
 import { api, ApiError } from "./api";
 import { span as spanOf } from "./profile-fields";
@@ -60,7 +61,7 @@ function mergeAnswers(before: Record<string, unknown> | undefined, next: Record<
 }
 
 export const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-const fail = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : "Could not save");
+const fail = (e: unknown) => (e instanceof ApiError || e instanceof Error ? plainError(e.message) : "Could not save");
 
 // ---------- data ----------
 export function useQuestionnaires() {

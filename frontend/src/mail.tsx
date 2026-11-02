@@ -9,7 +9,7 @@ import { Pagination, usePagination } from "./pagination";
 import { Card } from "./connections";
 import { SecretInput } from "./setup-kit";
 import type { MailChallenge, MailRule, MailStatus, Mailbox } from "./types";
-import { ago, day, stamp } from "./format";
+import { ago, day, stamp, plainReason } from "./format";
 import { SearchBox } from "./worktools";
 import "./styles/settings.css";
 import {
@@ -368,7 +368,7 @@ export function MailSettings() {
               cell: (c) => {
                 const s = STATE[c.state] || { label: c.state.replaceAll("_", " "), tone: "neutral" as PillTone };
                 return (
-                  <span title={c.reason || undefined}>
+                  <span title={plainReason(c.reason) || undefined}>
                     <Pill tone={s.tone} dot>
                       {s.label}
                     </Pill>

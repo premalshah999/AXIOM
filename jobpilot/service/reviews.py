@@ -269,8 +269,9 @@ class ReviewsMixin:
                     # page answers one job's question and Needs you sees only the first 100, so the server clears every other job
                     # asking. A tick box, a caption under its question and a list reused nowhere else (reusable_answer) stayed asked.
                     this = oq.same_question(review.question, review.options, context)
-                    for other, owner, employer in s.execute(
-                        select(Review, Run, Job)
+                    # Columns only for the run and the job: a whole run row decodes its packet (~320 KB), here for every open question.
+                    for other, owner_id, company in s.execute(
+                        select(Review, Run.id, Job.company)
                         .join(Run, Review.run_id == Run.id)
                         .join(Job, Run.job_id == Job.id)
                         .where(
@@ -303,11 +304,9 @@ class ReviewsMixin:
                             # a bare date caption is never carried to another form's field.
                             continue
                         fits = oq.fits_form(answer, other.question, other.options, other.context)
-                        if fits and (
-                            scope == "personal" or employer.company.casefold() == job.company.casefold()
-                        ):
+                        if fits and (scope == "personal" or company.casefold() == job.company.casefold()):
                             other.answer = answer
-                            enqueue(s, "fact_resume", other.id, {"review_id": other.id}, run_id=owner.id)
+                            enqueue(s, "fact_resume", other.id, {"review_id": other.id}, run_id=owner_id)
         message = (
             "Saved. I'll attach this file whenever an application asks for it."
             if question_kind == "upload"
