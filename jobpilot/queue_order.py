@@ -279,6 +279,7 @@ def active_rows(service):
             {
                 "job_id": row.id, "run_id": row.run_id, "title": row.title, "company": row.company, "url": row.url, "ats": row.ats, "location": row.location,
                 "state": row.state, "since": row.started_at or row.created_at, "phase": phases.get(row.run_id, ""),
+                "gate": getattr(service, "claim_gates", {}).get(row.run_id, "") if row.state == "queued" else "",
             }
             for row in rows
         ],

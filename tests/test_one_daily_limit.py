@@ -41,3 +41,24 @@ def test_the_discovery_form_cannot_set_a_second_goal(client, service):
     body = {k: v for k, v in body.items() if k in {"enabled", "auto_apply", "batch_target", "minimum_auto_fit", "max_age_hours", "early_career_only", "review_size"}}
     client.put("/api/job-board/settings", json=body)
     assert service.db.get_setting("job_board_settings")["batch_target"] == 40
+
+
+def test_start_turns_on_account_and_terms_permissions_only_when_the_dialog_allows_it(client, service, monkeypatch):
+    from jobpilot import apply_permissions
+    from jobpilot.schemas import Profile
+
+    async def started(service, target):
+        return {"batch": autopilot.start_batch(service.db, target)}
+
+    monkeypatch.setattr(autopilot, "start_autonomous", started)
+    monkeypatch.setattr(autopilot, "batch_snapshot", lambda service: {})
+    service.dispatch = object()
+    service.db.set_setting("profile", {"first_name": "Alex"})
+    flags = lambda: apply_permissions.missing(Profile.model_validate(service.db.get_setting("profile", {})))  # noqa: E731
+    assert len(flags()) == 3
+    for body in ({"target": 20}, {"target": 20, "permissions": "decline"}):
+        assert client.post("/api/job-board/autopilot/start", json=body).status_code == 200
+        assert len(flags()) == 3  # never silently, and an explicit No keeps them off
+    assert client.post("/api/job-board/autopilot/start", json={"target": 20, "permissions": "allow"}).status_code == 200
+    assert flags() == []
+    assert service.db.get_setting("profile")["first_name"] == "Alex"

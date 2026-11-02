@@ -687,6 +687,8 @@ export type QueueRunning = {
   state: string;
   since: string;
   phase: string;
+  /** For a queued run: the gate it is waiting at, in words. */
+  gate?: string;
 };
 export type QueueItem = {
   id: string;

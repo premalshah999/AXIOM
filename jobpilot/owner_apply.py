@@ -223,6 +223,8 @@ def enqueue(service, job_id, front=False, hold=None):
 
 def _enqueue_row(s, job, front, hold):
     known = s.get(Setting, KEY + job.id)
+    if (refused := s.get(Setting, REFUSED + job.id)) is not None:
+        s.delete(refused)  # Asked again: the new answer replaces the old one.
     if job.status in {*ALREADY, "queued"}:
         return _approve_row(s, job)
     if known is None:
@@ -352,6 +354,24 @@ def back_in_line(service, job_id):
     return {"job_id": job_id, "state": status, "message": "Back in the queue."}
 
 
+REFUSED = "owner_apply_refused:"
+
+
+def _refuse(db, job_id, exc):
+    """A request the dispatcher refuses for good ends, but not silently: what it said stays with the job (startable.read shows it
+    as the reason it is held) until the owner asks again."""
+    with db.exclusive() as s:
+        row = s.get(Setting, KEY + job_id)
+        if row is not None:
+            s.delete(row)
+        value = {"reason": str(exc)[:240], "code": getattr(exc, "code", "refused"), "outcome": getattr(exc, "outcome", "excluded"), "at": now()}
+        marker = s.get(Setting, REFUSED + job_id)
+        if marker is None:
+            s.add(Setting(key=REFUSED + job_id, value=value))
+        else:
+            marker.value = value
+
+
 def _forget(db, job_id):
     with db.exclusive() as s:
         row = s.get(Setting, KEY + job_id)
@@ -392,8 +412,17 @@ async def due(service, limit, retries=None):
     # 247 resumed repeat-failures queued ahead of fresh postings filled every worker on 2026-10-24; their retries
     # succeed about one time in eight, first attempts far more often.
     rows = request_order(waiting, attempted)
+    from .db import Job
+    from .pipeline_comparison import custom_site
+
+    with service.db.session() as s:
+        lanes = {job_id: "custom" if custom_site({"ats": ats}) else "normal" for job_id, ats in s.execute(
+            select(Job.id, Job.ats).where(Job.id.in_([job_id for job_id, _ in waiting])))} if waiting else {}
+    full = set()
     started = retried = tries = 0
     for job_id, value in rows:
+        if lanes.get(job_id, "normal") in full:
+            continue
         if started >= limit or tries >= max(TRIES, 3 * limit):
             break
         # What the user moved to the front is theirs to start first, an earlier attempt or not.
@@ -409,12 +438,15 @@ async def due(service, limit, retries=None):
                 await off_loop(service.db.set_setting, KEY + job_id, {
                     **value, "code": exc.code, "reason": str(exc)[:300], "not_before": _retry_at(exc), "tried": now()})
                 if exc.code == "worker_capacity":
-                    break  # The pool is full: every other request would be refused the same way.
+                    # Only that pool is full: a company-site request must not stop the normal ones, nor the reverse.
+                    full.add(lanes.get(job_id, "normal"))
+                    if full >= {"normal", "custom"}:
+                        break
                 continue
-            _forget(service.db, job_id)  # A permanent refusal (closed, protected, excluded) ends the request.
+            _refuse(service.db, job_id, exc)  # A permanent refusal (closed, protected, excluded) ends the request, with its reason kept.
             continue
-        except ValueError:
-            _forget(service.db, job_id)
+        except ValueError as exc:
+            _refuse(service.db, job_id, exc)
             continue
         _forget(service.db, job_id)
         started += 1

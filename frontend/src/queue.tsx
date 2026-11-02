@@ -236,7 +236,7 @@ function Running({ q, paused }: { q: QueuePage; paused: boolean }) {
         <ol className="qu-live">
           {rows.map((r: QueueRunning) => {
             const words = jobWords(r);
-            const doing = LOOKS[r.state] ?? progressOf(r.state, r.phase ? progressFrom([{ kind: r.phase }]) : null).doing;
+            const doing = ((r.state === "queued" && r.gate) || LOOKS[r.state]) ?? progressOf(r.state, r.phase ? progressFrom([{ kind: r.phase }]) : null).doing;
             const elapsed = r.since ? (now - new Date(r.since).getTime()) / 1000 : 0;
             const pausable = r.state === "running" || r.state === "queued";
             return (

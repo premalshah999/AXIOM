@@ -127,6 +127,8 @@ def source_from_link(text):
 
 class BatchStart(BaseModel):
     target: int = Field(default=100, ge=1, le=500)
+    # The answer to the Start dialog's account-and-terms question (apply_permissions.py): only "allow" turns them on.
+    permissions: Literal["allow", "decline"] | None = None
 
 
 def router(service) -> APIRouter:
@@ -139,6 +141,10 @@ def router(service) -> APIRouter:
 
         if not service.dispatch:
             raise HTTPException(409, "Application workers are disabled")
+        if data.permissions == "allow":
+            from ...apply_permissions import grant
+
+            grant(db)
         if "target" in data.model_fields_set and data.target != config.daily_application_limit:
             # The number beside Start is the daily limit (Settings › Limits › Applications per day): one value.
             from ... import connections

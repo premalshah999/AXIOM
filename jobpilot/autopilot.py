@@ -825,8 +825,12 @@ async def owner_requests_only(service):
     from .owner_apply import due
     from .pipeline_comparison import NORMAL, pool_capacity
 
+    from .pipeline_comparison import CUSTOM
+
     with service.db.session() as s:
+        # Each pool is scheduled on its own: a full normal pool must not stop a company-site request (due() skips a full lane's jobs).
         room = pool_capacity(s, NORMAL, service.config.topology).available
+        room += pool_capacity(s, CUSTOM, service.config.topology).available
     return await due(service, room)
 
 
