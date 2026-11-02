@@ -411,6 +411,8 @@ function stepProblem(step: StepId, d: Draft): string {
 let lastRead: Partial<Draft> | null = null;
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
+const US_STATES = new Set("AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY".split(" "));
+
 function mergeExtract(draft: Draft, x: Partial<Draft>, before: Partial<Draft> | null): Draft {
   const next = { ...draft };
   for (const key of ["first_name", "last_name", "email", "phone", "location", "linkedin", "github", "website"] as const) {
@@ -424,6 +426,10 @@ function mergeExtract(draft: Draft, x: Partial<Draft>, before: Partial<Draft> | 
     const old = new Set(before?.skills ?? []);
     next.skills = Array.from(new Set([...(next.skills || []).filter((k) => !old.has(k)), ...x.skills]));
   }
+  // The resume lists "Austin, TX": the Contact step asks for city and state, so hand it those instead of leaving them blank.
+  const place = /^\s*([^,]+),\s*([A-Z]{2})(?:\s+(\d{5}(?:-\d{4})?))?\s*(?:,|$)/.exec(x.location || "");
+  if (place && US_STATES.has(place[2]!) && !next.address.city.trim() && !next.address.state.trim())
+    next.address = { ...next.address, city: place[1]!.trim(), state: place[2]!, postal_code: next.address.postal_code.trim() || place[3] || "" };
   if (!next.name.trim() || (before && next.name === [before.first_name, before.last_name].filter(Boolean).join(" ")))
     next.name = [next.first_name, next.last_name].filter(Boolean).join(" ");
   return next;
