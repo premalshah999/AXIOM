@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 from jobpilot.answers import Resolver
 from jobpilot.forms import FormSession
 from jobpilot.schemas import Answer, Profile
+from support_budget import scaled
 
 
 def session(page, service, tmp_path, profile=None):
@@ -124,4 +125,4 @@ async def test_a_control_rerendered_after_the_scan_is_stale_quickly_not_a_crash(
     started = time.monotonic()
     with pytest.raises(ValueError, match="stale"):
         await form.click(button["id"], step_control=True)
-    assert time.monotonic() - started < 10
+    assert time.monotonic() - started < scaled(10)

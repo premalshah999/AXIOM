@@ -4,6 +4,7 @@ import time
 
 from jobpilot.forms import FormSession, NetworkMonitor
 from jobpilot.page_clock import PageClock
+from support_virtual_time import virtual_time
 
 
 async def test_a_frame_replaced_during_the_wait_is_read_again_not_retried_until_the_deadline():
@@ -25,9 +26,10 @@ async def test_a_frame_replaced_during_the_wait_is_read_again_not_retried_until_
     form.clock = PageClock()  # __init__ is skipped; settle is timed on it
     form.application_frames = frames
     form.network = None
-    started = time.monotonic()
-    assert await form.settle(timeout=8)
-    assert time.monotonic() - started < 6, "the wait kept calling the detached frame"
+    with virtual_time():  # a retry loop that backs off until the deadline would show as 8 s of virtual time
+        started = time.monotonic()
+        assert await form.settle(timeout=8)
+        assert time.monotonic() - started < 6, "the wait kept calling the detached frame"
     assert len(reads) == 2
 
 

@@ -14,6 +14,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -127,7 +128,7 @@ def serve(port, static_root, data_dir):
 
         allow(service.db, ["ag-job"])  # A local page reads as a company's own site: the owner's click sends it.
         queued = await service.queue("ag-job", "submit", "source", owner_pick=True)
-        await asyncio.wait_for(service.execute(queued["id"]), 90)
+        await asyncio.wait_for(service.execute(queued["id"]), 180)
         with service.db.session() as session:
             actual = session.get(Run, queued["id"])
             result = {
@@ -194,7 +195,7 @@ def build_ui(tmp_path):
         env=clean_env,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=180,
     )
     assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
     return harness / "dist"
@@ -235,7 +236,8 @@ async def test_drafts_approval_original_switch_and_exact_upload(page, tmp_path):
     )
     headers = {"Authorization": "Bearer aggressive-test-token"}
     try:
-        for _ in range(200):
+        deadline = time.monotonic() + 180  # until the app answers: importing it is slow on a busy Mac
+        while True:
             try:
                 response = urllib.request.urlopen(
                     urllib.request.Request(url + "/api/aggressive-test/health", headers=headers), timeout=0.3
@@ -244,8 +246,8 @@ async def test_drafts_approval_original_switch_and_exact_upload(page, tmp_path):
                     break
             except (urllib.error.URLError, TimeoutError):
                 await asyncio.sleep(0.1)
-        else:
-            raise AssertionError((tmp_path / "server.log").read_text()[-3000:])
+            if time.monotonic() >= deadline:
+                raise AssertionError((tmp_path / "server.log").read_text()[-3000:])
         await page.context.set_extra_http_headers(headers)
         response = await page.request.post(url + "/api/aggressive-test/generate", data={})
         assert response.ok, await response.text()

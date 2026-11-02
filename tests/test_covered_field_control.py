@@ -9,6 +9,7 @@ import pytest
 from playwright.async_api import Error as PlaywrightError
 
 from jobpilot import widgets
+from support_budget import scaled
 
 PAGE = """<style>body{margin:0} #degree{position:absolute;left:150px;top:150px;width:200px;height:30px}
 #popup{position:absolute;left:100px;top:100px;width:300px;height:200px;background:#eee}</style>
@@ -33,7 +34,7 @@ async def test_a_loading_popup_over_a_field_is_closed_by_a_real_click_and_the_fi
     await widgets.field_click(page.locator("#degree"), timeout=4000)
     assert await page.evaluate("window.clicks") == 1
     assert await page.locator("#popup").count() == 0
-    assert time.monotonic() - started < 3, "the native click's 4 s wait is not paid first"
+    assert time.monotonic() - started < scaled(3), "the native click's 4 s wait is not paid first"
 
 
 async def test_a_popup_that_closes_on_escape_only_is_closed_too(page):

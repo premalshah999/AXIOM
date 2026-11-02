@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import time
 from io import BytesIO
 from pathlib import Path
 
@@ -17,6 +18,14 @@ from jobpilot.config import Settings
 from jobpilot.db import Database
 from jobpilot.features._store import create_tables
 from jobpilot.service import Service
+
+
+# The app runs with TZ=UTC (native/env.py), so its naive date.today() is the UTC date. A test that computes "today" on a
+# developer's Mac in New York would expect a different day for five hours every evening (test_sf_ui5_date, 2026-11-01).
+# Pin the test process to what production sees, before anything reads a clock; child processes inherit it.
+os.environ["TZ"] = "UTC"
+if hasattr(time, "tzset"):
+    time.tzset()
 
 
 @pytest.fixture(autouse=True)
@@ -237,7 +246,22 @@ def uses_session_loop(item):
     return any(getattr(d.func, "_loop_scope", None) == "session" for d in definitions)
 
 
-def pytest_collection_modifyitems(items):
+def smoke_entries():
+    """tests/smoke_tests.txt: what `gate.sh smoke` runs, browser or not. One entry per line, `file.py` for a whole file or
+    `file.py::text` for the tests whose name contains the text; `#` starts a comment."""
+    entries = []
+    path = Path(__file__).with_name("smoke_tests.txt")
+    for line in path.read_text().splitlines() if path.exists() else []:
+        line = line.split("#", 1)[0].strip()
+        if line:
+            file, _, text = line.partition("::")
+            entries.append((file.strip(), text.strip()))
+    return entries
+
+
+def pytest_collection_modifyitems(config, items):
+    smoke = smoke_entries()
+    unnamed = set(smoke)
     for item in items:
         names = set(item.fixturenames)
         browser = bool(names & BROWSER_FIXTURES) or item.get_closest_marker("browser") is not None
@@ -245,6 +269,10 @@ def pytest_collection_modifyitems(items):
         docs = " ".join(filter(None, [getattr(item.module, "__doc__", ""), getattr(item.function, "__doc__", "")]))
         if browser:
             item.add_marker(pytest.mark.browser)
+        listed = {(file, text) for file, text in smoke if item.path.name == file and text in item.name}
+        if listed:
+            item.add_marker(pytest.mark.smoke)
+            unnamed -= listed
         if integration:
             item.add_marker(pytest.mark.integration)
         if not (browser or integration):
@@ -253,6 +281,22 @@ def pytest_collection_modifyitems(items):
             item.add_marker(pytest.mark.regression)
         if asyncio.iscoroutinefunction(item.function) and uses_session_loop(item):
             item.add_marker(pytest.mark.asyncio(loop_scope="session"), append=False)
+    if "smoke" in (config.getoption("markexpr") or "") and not config.option.file_or_dir:
+        config.smoke_unnamed = sorted(unnamed)
+
+
+RUN_BEGAN = (time.time(), time.monotonic())
+
+
+def pytest_terminal_summary(terminalreporter, config):
+    """A guard renamed or moved would otherwise leave the smoke list without a word. A Mac that slept stopped the run where it stood, and
+    what was in flight ran out its timeouts on waking: a smoke run sat 7 h 27 min behind a closed lid on battery and looked hung, and its
+    failures looked real (2026-11-02). The monotonic clock doesn't count sleep and the wall clock does, so the run can say so."""
+    for file, text in getattr(config, "smoke_unnamed", []):
+        terminalreporter.write_line(f"tests/smoke_tests.txt names no test: {file}{'::' + text if text else ''}", yellow=True)
+    slept = (time.time() - RUN_BEGAN[0]) - (time.monotonic() - RUN_BEGAN[1])
+    if slept > 60:
+        terminalreporter.write_line(f"The Mac slept {slept / 60:.0f} minutes during this run: a failure above may be its timeouts running out across the sleep.", yellow=True)
 
 
 @pytest.fixture(autouse=True)

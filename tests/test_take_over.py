@@ -30,6 +30,7 @@ from jobpilot.db import Event, Job, Resume, Review, Run, Setting
 from jobpilot.discovery import add_job
 from jobpilot.answers import Resolver
 from jobpilot.schemas import Answer, JobInput
+from support_chrome import chrome_opens_a_tab
 
 pytestmark = [pytest.mark.browser, pytest.mark.integration]
 
@@ -107,12 +108,14 @@ async def start_chrome(temp):
     argv = browser_module.throwaway_chrome(executable, temp, True)
     process = await asyncio.create_subprocess_exec(*argv, "about:blank", stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
     portfile = os.path.join(temp, "DevToolsActivePort")
-    for _ in range(100):
+    for _ in range(3000):  # until Chrome has written its port
         if os.path.exists(portfile) and os.path.getsize(portfile):
             break
         await asyncio.sleep(0.1)
     with open(portfile) as f:
-        return process, f"http://127.0.0.1:{f.read().splitlines()[0]}"
+        address = f"http://127.0.0.1:{f.read().splitlines()[0]}"
+    await chrome_opens_a_tab(address, 300)
+    return process, address
 
 
 async def until(check, seconds, step=0.5):
@@ -307,7 +310,7 @@ async def test_i_submitted_it_myself_is_recorded_as_sent_and_a_retry_is_refused(
             state = await page.evaluate("[...document.querySelectorAll('input')].map(i => [i.id, i.type === 'file' ? i.files.length : i.value, i.validity.valid])")
             assert all(v[2] for v in state), state
             await page.click("button[type=submit]", no_wait_after=True)
-            for _ in range(50):
+            for _ in range(1500):  # until the employer's page has answered
                 if await page.title() == "Thank you":
                     break
                 await asyncio.sleep(0.2)

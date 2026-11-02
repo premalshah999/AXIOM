@@ -10,6 +10,7 @@ import time
 
 from jobpilot.forms import FormSession
 from jobpilot.page_clock import PageClock
+from support_budget import scaled
 
 WIDGET = "https://www.linkedin.com/talentwidgets/apply-with-linkedin"
 PAGE = f"""<!doctype html><title>Apply</title><label>Name<input id=n></label>
@@ -45,7 +46,7 @@ async def test_a_stalled_sign_in_widget_document_does_not_hold_the_wait(page):
     assert form.network.quiet(0.3)
     started = time.monotonic()
     await form.settle(timeout=6)
-    assert time.monotonic() - started < 2.5, "the readiness wait ran to its deadline on the widget"
+    assert time.monotonic() - started < scaled(2.5), "the readiness wait ran to its deadline on the widget"
     release.set()
 
 

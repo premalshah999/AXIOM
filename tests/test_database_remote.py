@@ -12,6 +12,7 @@ from sqlalchemy import select
 from database_support import scratch_pg  # noqa: F401 - the fixture
 from jobpilot.db import Database, Event, Job, Run, Setting
 from jobpilot.storage import remote_db
+from support_budget import scaled
 
 
 @pytest.fixture
@@ -102,7 +103,7 @@ def test_other_events_are_batched_off_the_callers_thread_and_flushed_on_read(rem
     began = time.perf_counter()
     for i in range(50):
         db.event("r1", "field_timing", f"f{i}")
-    assert time.perf_counter() - began < 0.5, "emitting never waits for the network"
+    assert time.perf_counter() - began < scaled(0.5), "emitting never waits for the network"
     with db.session() as s:  # A read of events sees everything already emitted.
         assert len(s.scalars(select(Event).where(Event.run_id == "r1")).all()) == 50
     assert count(scratch, name, "events") == 50

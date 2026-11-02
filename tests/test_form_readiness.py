@@ -2,6 +2,7 @@
 import time
 from jobpilot.forms import FormSession
 from jobpilot.page_clock import PageClock
+from support_budget import scaled
 
 
 def form_for(page):
@@ -22,7 +23,7 @@ async def test_decorative_and_hidden_ticks_do_not_hold_form_readiness(page):
       </script>''')
     start = time.monotonic()
     assert await form_for(page).settle(timeout=1.5, quiet=.15)
-    assert time.monotonic() - start < .9
+    assert time.monotonic() - start < scaled(.9)
 
 
 async def test_changing_question_does_not_become_ready_until_stable(page):

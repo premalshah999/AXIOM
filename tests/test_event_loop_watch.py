@@ -38,23 +38,44 @@ def _engine(armed=False):
 
 
 def test_watch_keeps_event_loop_responsive_during_slow_db_reads():
+    """The loop must keep running while a read is in flight. Counted, not timed: the read holds until the test has seen the
+    loop tick five times (or five seconds pass), so a read on the loop's own thread shows as zero ticks, and a busy machine
+    cannot turn a stopwatch margin into a failure."""
+    ticks = {"count": 0, "during": []}
+    release = threading.Event()
+
+    class HeldDB(SlowDB):
+        @contextmanager
+        def session(self):
+            start = ticks["count"]
+            self.threads.append(threading.current_thread() is threading.main_thread())
+            release.wait(5)  # released by the test once the loop has ticked; on the loop's own thread nothing ticks meanwhile
+            ticks["during"].append(ticks["count"] - start)
+            with SlowDB.session(self) as inner:
+                yield inner
+
     async def scenario():
-        db = SlowDB("running", None, read_seconds=1.0)
+        db = HeldDB("running", None, read_seconds=0)
         execution = asyncio.ensure_future(asyncio.sleep(30))
-        gaps = []
 
         async def ticker():
-            last = time.monotonic()
             while True:
                 await asyncio.sleep(0.01)
-                now = time.monotonic()
-                gaps.append(now - last)
-                last = now
+                ticks["count"] += 1
 
         tick = asyncio.create_task(ticker())
         monitor = asyncio.create_task(watch(SimpleNamespace(db=db), _engine(), execution, "run-1"))
-        # Two polls: a read, a 1 s pause, a read. Wait for the second read to start instead of a fixed time, which a loaded run can overrun.
-        for _ in range(500):
+        for _ in range(1000):  # until a read is in flight and the loop has ticked five times since it began
+            if db.threads and ticks["count"] >= 5:
+                start_count = ticks["count"]
+                for _ in range(1000):
+                    if ticks["count"] - start_count >= 5:
+                        break
+                    await asyncio.sleep(0.01)
+                break
+            await asyncio.sleep(0.01)
+        release.set()
+        for _ in range(1000):  # and a second read after the pause
             if len(db.threads) >= 2:
                 break
             await asyncio.sleep(0.02)
@@ -62,14 +83,12 @@ def test_watch_keeps_event_loop_responsive_during_slow_db_reads():
         tick.cancel()
         execution.cancel()
         await asyncio.gather(monitor, tick, execution, return_exceptions=True)
-        return db, gaps
+        return db
 
-    db, gaps = asyncio.run(scenario())
+    db = asyncio.run(scenario())
     assert len(db.threads) >= 2, "watch() should have polled the database repeatedly"
     assert not any(db.threads), "DB reads must run in a worker thread, not on the event loop"
-    # A read on the loop would stall it for the whole 1.0 s read; a 0.5 s bound leaves room for scheduler jitter under
-    # four test workers, which a 0.1 s margin around a 0.4 s read did not.
-    assert max(gaps) < 0.5, f"event loop stalled for {max(gaps):.3f}s during a DB read"
+    assert ticks["during"][0] >= 5, f"the event loop ticked {ticks['during'][0]} times during a read: it was blocked"
 
 
 def test_owner_pause_interrupts_unarmed_run_and_releases_writer():

@@ -624,6 +624,8 @@ COMMIT_WATCH_SECONDS = 3
 # How long a commit waits for a token's callback to start the send before pressing the button itself.
 COMMIT_TOKEN_SECONDS = 8
 RECEIVED_REASON = "The employer's own page for this posting shows the application went through, so it was not sent again"
+# The one look at the page for an acknowledgement after a commit that ended in a mail wait, a deadline or a control failure.
+POST_COMMIT_LOOK_SECONDS = 3
 # Controls whose disabled state means the page has an unfinished requirement.
 STEP_ACTION = re.compile(
     r"^\s*(?:next|continue|save (?:and|&) continue|submit(?: application)?|apply|sign ?in|log ?in|create account|register)\s*$",
@@ -4299,7 +4301,7 @@ class BrowserEngine:
         if not self.armed or getattr(self, "form", None) is None:
             return None
         try:
-            receipt = await asyncio.wait_for(self.form.proof(), timeout=3)
+            receipt = await asyncio.wait_for(self.form.proof(), timeout=POST_COMMIT_LOOK_SECONDS)
         except Exception:
             return None
         if not receipt or receipt == getattr(self, "pre_commit_proof", None):

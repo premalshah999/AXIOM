@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from jobpilot.forms import FormSession
 from jobpilot.page_clock import PageClock
 from support_roundtrips import roundtrips
+from support_budget import scaled
 
 
 def form_for(page, network=None):
@@ -59,7 +60,7 @@ async def test_a_page_that_never_settles_still_times_out_with_few_calls(page):
     with roundtrips() as calls:
         started = time.monotonic()
         assert not await form_for(page).settle(timeout=0.8, quiet=0.2)
-        assert time.monotonic() - started < 2.5  # an 0.8 s timeout; the margin is for a loaded machine, a runaway wait still fails
+        assert time.monotonic() - started < scaled(2.5)  # an 0.8 s timeout; the margin is for a loaded machine, a runaway wait still fails
     assert calls.total <= 3, dict(calls)
 
 

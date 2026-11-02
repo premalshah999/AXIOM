@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from jobpilot import widgets
+from support_budget import scaled
 
 HTML = (Path(__file__).parent / "fixtures" / "rcm_paginated_faithful.html").read_text()
 FIELD_BUDGET = 12  # forms.FIELD_WRITE_SECONDS
@@ -37,7 +38,7 @@ async def timed(page, catalog, value, choose=None):
 
 async def test_a_small_catalog_commits_its_exact_entry(page):
     el, got, took = await timed(page, YES_NO, "Yes")
-    assert got == "Yes" and took < 5
+    assert got == "Yes" and took < scaled(5)
     await el.evaluate("e => e.blur()")
     assert await el.input_value() == "Yes"
     assert await page.locator("#tor__fcustq").input_value() == "1"
@@ -49,7 +50,7 @@ async def test_an_answer_spelled_differently_reaches_the_resolver_inside_the_bud
         return "Non-Veteran"
 
     el, got, took = await timed(page, VETERAN, "I am not a protected veteran", choose=choose)
-    assert got in {"Non-Veteran", "Not a Protected Veteran"} and took < 9
+    assert got in {"Non-Veteran", "Not a Protected Veteran"} and took < scaled(9)
 
 
 async def test_an_entry_on_the_third_page_is_reached(page):
@@ -64,7 +65,7 @@ async def test_an_unoffered_answer_fails_fast_and_closes_the_list(page):
     with pytest.raises(ValueError):
         async with asyncio.timeout(FIELD_BUDGET):
             await widgets._rcm_paginated(page.main_frame, el, "Martian")
-    assert time.monotonic() - started < 6
+    assert time.monotonic() - started < scaled(6)
     assert await page.locator(".sf-combo-listselect").count() == 0
 
 
@@ -74,7 +75,7 @@ async def test_a_disabled_dependent_list_is_refused_at_once(page):
     started = time.monotonic()
     with pytest.raises(ValueError, match="earlier answer"):
         await widgets._rcm_paginated(page.main_frame, el, "Yes")
-    assert time.monotonic() - started < 1
+    assert time.monotonic() - started < scaled(1)
 
 
 SCHOOLS = [f"University of Somewhere {i:04d}" for i in range(1200)] + ["University of Elmsworth, Pine Park"]

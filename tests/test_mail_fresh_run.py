@@ -31,15 +31,18 @@ from jobpilot import browser as browser_module, gmail_imap
 from jobpilot.company_sites import allow
 from jobpilot.db import Event, Job, MailChallenge, MailRule, Resume, Run
 from jobpilot.discovery import add_job
+from jobpilot.host_health import is_browser_outage
 from jobpilot.schemas import JobInput
 from mail_formats import KINDS, ME, PLATFORMS, deliver, fresh_code
+from support_chrome import chrome_opens_a_tab
 from test_mail_fresh_install import link_for, onboard
 
 pytestmark = [pytest.mark.browser, pytest.mark.integration]
-RUN_SECONDS = float(os.environ.get("MAILFRESH_RUN_SECONDS", "120"))
+RUN_SECONDS = float(os.environ.get("MAILFRESH_RUN_SECONDS", "300"))  # a ceiling on a wait for the outcome, paid only by a run that fails (120 s ended two runs "running" beside nine workers, 2026-11-01)
 # A real employer's mail takes seconds: longer than the three seconds a run waits in the browser for a link, so the run parks,
 # the mail matches, and the run comes back. That is the path real link and reset mail takes.
 DELAY = float(os.environ.get("MAILFRESH_DELAY", "8"))
+OUTAGE_RETRIES = 2
 CHOICES = os.environ.get("MAILFRESH_ONLY", "")
 CASES = [
     (p, k)
@@ -282,12 +285,23 @@ async def start_chrome(temp, port):
         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
     )
     portfile = os.path.join(temp, "DevToolsActivePort")
-    for _ in range(100):
+    for _ in range(3000):  # until Chrome has written its port: ten seconds failed on a loaded Mac
         if os.path.exists(portfile) and os.path.getsize(portfile):
             break
         await asyncio.sleep(0.1)
     with open(portfile) as f:
-        return process, f"http://127.0.0.1:{f.read().splitlines()[0]}"
+        address = f"http://127.0.0.1:{f.read().splitlines()[0]}"
+    await chrome_opens_a_tab(address, RUN_SECONDS)
+    return process, address
+
+
+def outage(service, job_id):
+    """The job's last run ended "AXIOM's browser wasn't ready": nothing was sent, and the app tries again by itself. The autopilot
+    that does that isn't running here, so the test presses Apply again, at most OUTAGE_RETRIES times; the third outage in a row
+    pauses the app's starts (host_health.note_browser), so a browser that never comes up still fails the test."""
+    with service.db.session() as s:
+        last = s.scalars(select(Run).where(Run.job_id == job_id).order_by(Run.created_at.desc()).limit(1)).first()
+        return bool(last and is_browser_outage(last.state, last.reason))
 
 
 async def one_run(client, service, imap, platform, kind, *, delay=DELAY, profile=None, site_options=None, before=None):
@@ -343,12 +357,17 @@ async def one_run(client, service, imap, platform, kind, *, delay=DELAY, profile
         result = await apply(service, job["id"])  # The Apply button.
         outcome["applied"] = str(result)[:120]
         deadline = time.monotonic() + RUN_SECONDS
+        retries = OUTAGE_RETRIES
         while time.monotonic() < deadline:
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.25)  # a poll of the database, not a pace: the run ends within a quarter second of finishing
             with service.db.session() as s:
                 states = [r.state for r in s.scalars(select(Run).where(Run.job_id == job["id"]))]
             live = any(x in {"queued", "running", "submitting"} for x in states) or tasks
             parked = states and states[-1] in {"waiting_email"}
+            if not live and retries and outage(service, job["id"]):
+                retries -= 1
+                await apply(service, job["id"])
+                continue
             if kind in site.used and not live:
                 break
             if states and not live and not parked:
@@ -452,11 +471,16 @@ async def test_two_employers_on_one_shared_sender_in_two_real_runs_each_type_the
         for job_id in jobs:
             await apply(service, job_id)
         deadline = time.monotonic() + RUN_SECONDS
+        retries = dict.fromkeys(jobs, OUTAGE_RETRIES)
         while time.monotonic() < deadline and not ("code" in first.used and "code" in second.used):
-            await asyncio.sleep(3)
+            await asyncio.sleep(1)
             # A platform that runs one application at a time defers the second: the autopilot starts it when its turn comes.
             with service.db.session() as s:
                 waiting = [j for j in jobs if not s.scalar(select(Run.id).where(Run.job_id == j).limit(1))]
+            for job_id in jobs:
+                if retries[job_id] and outage(service, job_id):
+                    retries[job_id] -= 1
+                    waiting.append(job_id)
             for job_id in waiting:
                 await apply(service, job_id)
     finally:

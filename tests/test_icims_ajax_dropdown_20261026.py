@@ -16,6 +16,7 @@ from jobpilot import widgets
 from jobpilot.answers import Resolver
 from jobpilot.forms import FormSession
 from jobpilot.schemas import EducationEntry, Profile
+from support_budget import scaled
 
 FIXTURE = (Path(__file__).parent / "fixtures" / "icims_ajax_dropdown.html").read_text()
 FIRST_PAGE = [  # As production read it (event 277260), unescaped.
@@ -72,7 +73,7 @@ async def test_the_highest_degree_is_picked_from_a_server_searched_list_within_t
     assert answer.disposition == "answer"
     started = time.monotonic()
     assert await form.fill(field, answer.value) == "Master's Level Degree"
-    assert time.monotonic() - started < 10
+    assert time.monotonic() - started < scaled(10)
     assert await page.evaluate(
         "(s => [s.options.length, s.options[s.selectedIndex].text])(document.getElementById('rcf2011'))"
     ) == [1, "Master's Level Degree"]

@@ -20,6 +20,25 @@ from jobpilot.native.supervisor import Child, Supervisor
 ROOT = Path(__file__).resolve().parent.parent
 
 
+@pytest.fixture(autouse=True)
+def children_can_trap_interrupt():
+    """A process started in the background of a non-interactive shell (a nohup run, an agent's `&`) has SIGINT ignored, the
+    test process inherits that and so does every `sh` it spawns, and a shell cannot trap a signal that was ignored on entry:
+    the postgres stand-in never saw its SIGINT and the stop-order tests failed there and passed in a terminal (2026-11-01).
+    Give the children the default, as launchd does."""
+    previous = signal.getsignal(signal.SIGINT)
+    changed = False
+    if previous is signal.SIG_IGN:
+        try:
+            signal.signal(signal.SIGINT, signal.default_int_handler)
+            changed = True
+        except ValueError:  # not the main thread: nothing can be changed here
+            pass
+    yield
+    if changed:
+        signal.signal(signal.SIGINT, previous)
+
+
 @pytest.fixture
 def cfg(tmp_path):
     (tmp_path / ".env").write_text(f"POSTGRES_PASSWORD=synthetic\nDATA_DIR={tmp_path}/data\nAPP_PORT=59180\n")
@@ -31,8 +50,9 @@ def child(name, script, **kwargs):
     return Child(name, ["sh", "-c", script], **kwargs)
 
 
-def advance(sup, until, seconds=6.0):
-    """Tick the supervisor until `until()` holds, as its loop does."""
+def advance(sup, until, seconds=30.0):
+    """Tick the supervisor until `until()` holds, as its loop does. It returns the moment the condition holds, so the ceiling
+    costs nothing on a pass; it is generous because a loaded machine starts a shell slowly (6 s failed under load)."""
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         sup.tick(time.monotonic())
@@ -185,8 +205,8 @@ def test_the_app_waits_for_the_database_and_restarts_after_it_comes_back(cfg, mo
     assert advance(sup, lambda: app.state == "up")
     first = app.pid
     os.kill(database.pid, signal.SIGKILL)
-    assert advance(sup, lambda: database.restarts == 1 and database.state == "up", seconds=8)
-    assert advance(sup, lambda: app.pid not in (None, first) and app.state == "up", seconds=8)
+    assert advance(sup, lambda: database.restarts == 1 and database.state == "up", seconds=30)
+    assert advance(sup, lambda: app.pid not in (None, first) and app.state == "up", seconds=30)
     sup.shutdown()
 
 
@@ -689,7 +709,7 @@ def test_only_the_one_that_died_restarts_unless_it_named_the_other(cfg, tmp_path
     assert advance(sup, lambda: gateway.pid not in (None, gateway_pid) and gateway.state == "up")
     assert mail.pid == mail_pid and applier.pid == applier_pid, "nothing else was touched"
     os.kill(applier_pid, signal.SIGKILL)
-    assert advance(sup, lambda: mail.pid not in (None, mail_pid) and mail.state == "up", seconds=8)
+    assert advance(sup, lambda: mail.pid not in (None, mail_pid) and mail.state == "up", seconds=30)
     assert gateway.state == "up", "a `restart_with` is opt-in"
     sup.shutdown()
 
