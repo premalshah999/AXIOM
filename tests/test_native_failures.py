@@ -17,6 +17,7 @@ import pytest
 from jobpilot.native import backups, desktop, pg, supervisor
 from jobpilot.native.env import NativeError, load, prepare
 from jobpilot.native.supervisor import Child, Supervisor
+from test_native_supervisor import children_can_trap_interrupt  # noqa: F401  (autouse: a run started with `&` ignores SIGINT)
 
 FULL = OSError(errno.ENOSPC, "No space left on device")
 
