@@ -72,6 +72,8 @@ def in_posting(posting, tool):
     return bool(words) and all(contains(posting, w) for w in words)
 
 
+# A draft's figure is an inspired value, and says so on the resume itself: the employer sees the PDF, not the app's notes.
+TARGET = re.compile(r"\[target:[^\]]{1,90}\]", re.I)
 FUTURE = re.compile(r"\b(?:will|would|should|shall)\s+(?:also\s+)?([a-z]+)", re.I)
 COMMAND = re.compile(
     r"^(Add|Analy[sz]e|Benchmark|Build|Check|Collect|Compare|Create|Design|Develop|Document|Evaluate|Implement|Make|Map|Measure|"
@@ -146,8 +148,8 @@ def proposal_problems(p, history, posting):
         problems.append(f"{p.title}: a solo project needs solo obstacles")
     if sum(bool(gates.ANY_METRIC.search(b)) for b in p.bullets) > 1:
         problems.append(f"{p.title}: at most one headline metric")
-    if any(gates.ANY_METRIC.search(b) and "[measure after building]" not in b for b in p.bullets):
-        problems.append(f"{p.title}: mark unmeasured results [measure after building]")
+    if any(gates.ANY_METRIC.search(TARGET.sub("", b)) for b in p.bullets):
+        problems.append(f"{p.title}: mark unmeasured results [target: ...]")
     if any(re.match(r"Built|Deployed|Achieved|Reduced|Shipped|Saved", b) for b in p.bullets):
         problems.append(f"{p.title}: proposed work must not claim completed work")
     if inputs[norm(p.data_source)] >= 3 and any(

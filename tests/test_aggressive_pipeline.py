@@ -505,6 +505,23 @@ def test_rewording_never_turns_a_draft_into_finished_work():
     assert any("completed work" in w for w in quality.proposal_problems(quality.normalize_proposals(ps)[0], [], POSTING))
 
 
+def test_a_draft_figure_is_allowed_only_as_a_stated_target():
+    ps = proposals()
+    ps[0].bullets[0] = "Public record explorer built on NYC Open Data for readers [target: p95 under 200 ms]."
+    assert quality.proposal_problems(ps[0], [], POSTING) == []
+    ps[0].bullets[0] = "Public record explorer on NYC Open Data with p95 under 200 ms."  # stated as fact
+    assert any("unmeasured" in w for w in quality.proposal_problems(ps[0], [], POSTING))
+    ps[0].bullets[0] = "Public record explorer on NYC Open Data [p95 under 200 ms]."  # brackets that don't say target
+    assert any("unmeasured" in w for w in quality.proposal_problems(ps[0], [], POSTING))
+    ps[0].bullets[0] = "Public record explorer on NYC Open Data [target: 95% parsed], cutting review time by 40%."
+    assert any("unmeasured" in w for w in quality.proposal_problems(ps[0], [], POSTING))
+    ps[0].bullets = [
+        "Public record explorer on NYC Open Data [target: 95% parsed].",
+        "Handles missing fields without dropping rows [target: under 1% lost].",
+    ]
+    assert any("one headline metric" in w for w in quality.proposal_problems(ps[0], [], POSTING))
+
+
 async def test_choosing_a_mode_again_retries_a_stored_failure(monkeypatch):
     from types import SimpleNamespace
 
