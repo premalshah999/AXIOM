@@ -149,6 +149,7 @@ def obs(fields=(), controls=(), text=""):
     [
         obs(["First name", "Email"], ["Next"]),  # The next step.
         obs(["Project"], ["Save and continue"]),
+        obs(["Project"], ["Proceed"]),
         obs(["Project"], ["Submit application"]),  # The same form back, with its errors.
         obs([], ["Edit", "Submit application"]),  # A review step.
         obs([], ["Back", "Review"]),

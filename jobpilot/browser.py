@@ -21,7 +21,7 @@ from openai import APIError
 from .models import AnswerModelUnavailable, BudgetExceeded
 
 from .answers import UNOFFERED_SOURCE, Resolver
-from .ats import EMBED_JS, LABEL_ONLY, REGISTRY, classify_embedded, detect, unsettled
+from .ats import EMBED_JS, LABEL_ONLY, REGISTRY, classify_embedded, detect, handoff_entries, unsettled
 from .posting_identity import IDENTITY_JS, identity, placeholder_title, save as save_identity
 from .posting_match import (
     PostingWatch,
@@ -2942,7 +2942,7 @@ class BrowserEngine:
             return ats
         try:
             await page.wait_for_load_state("load", timeout=8000)
-            found, url, how = classify_embedded(await page.evaluate(EMBED_JS), own_urls=self.given_addresses())
+            found, url, how = classify_embedded(handoff_entries(await page.evaluate(EMBED_JS), self.given_addresses()))
             if found == "greenhouse" and not url:
                 url = await self.late_greenhouse_frame(page)
         except Exception:
@@ -3013,7 +3013,7 @@ class BrowserEngine:
         try:
             landed = detect(page.url).id
             if unsettled(landed):
-                found, url, how = classify_embedded(await page.evaluate(EMBED_JS), own_urls=self.given_addresses())
+                found, url, how = classify_embedded(handoff_entries(await page.evaluate(EMBED_JS), self.given_addresses()))
             else:
                 found, url, how = landed, None, "url"  # a redirect or new tab already on the platform's page
         except Exception:

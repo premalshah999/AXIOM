@@ -21,7 +21,7 @@ from .tenants import outside_sign_in
 
 
 class FlowHandleMixin:
-    def outside_sign_in(self, url, obs):
+    def refused_sign_in(self, url, obs):
         """The result that ends this pass when `url` isn't a sign-in the saved password may be typed into, else None. The owner's rule: no
         application is made with third-party logins (social_login_only). The model pressed "Sign in using LinkedIn" on a posting
         (2026-11-02) and the saved password was then typed into LinkedIn's own login, three times over two runs."""
@@ -90,7 +90,7 @@ class FlowHandleMixin:
         if any(e.form.frames[f["id"]] != frame for f in passwords):
             raise AccountActionError("Account password fields span different frames", "observation_failure")
         account_url = frame.url
-        if stop := self.outside_sign_in(account_url, obs):
+        if stop := self.refused_sign_in(account_url, obs):
             e.result = stop
             return True
         creating = len(passwords) > 1 or any(f.get("autocomplete") == "new-password" for f in passwords)
@@ -398,7 +398,7 @@ class FlowHandleMixin:
         # on the resulting controls, so the account action cannot send empty replacements.
         obs = await e.form.scan()
         # Filling the form above can move the frame; the frame is checked again at the moment its password is typed.
-        if stop := self.outside_sign_in(frame.url, obs):
+        if stop := self.refused_sign_in(frame.url, obs):
             e.result = stop
             return True
         for f in obs["fields"]:

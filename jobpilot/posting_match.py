@@ -465,6 +465,10 @@ def acknowledges_application(text):
     return False
 
 
+# A form's way forward, in other words than STEP_CONTROL's. A receipt's job-alert box says Subscribe.
+OTHER_STEP_CONTROL = re.compile(r"\s*(?:proceed|save(?: and| &|\s*$)|finish|confirm|start|begin|apply)\b", re.I)
+
+
 def still_applying(obs):
     """After a write that may have been the application, with nothing able to read the page: the page in front is plainly a step of the
     application, not what an employer shows once it has one. A form with its way forward, a review step, a sign-in or a registration, a
@@ -481,7 +485,7 @@ def still_applying(obs):
     if any(field.get("type") == "password" for field in fields):
         return True
     if fields:
-        return any(STEP_CONTROL.match(label) or FINAL.search(label) for label in labels)
+        return any(STEP_CONTROL.match(label) or FINAL.search(label) or OTHER_STEP_CONTROL.match(label) for label in labels)
     # With nothing to answer, "Continue" is as likely the way back to the career site.
     return any(FINAL.search(label) or re.match(r"\s*review\b", label, re.I) for label in labels)
 

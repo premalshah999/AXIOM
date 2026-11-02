@@ -10,7 +10,7 @@ import pytest
 
 from gallery.scenarios import EMAIL_FIELD, NAME_FIELDS, POSTING, RESUME_FIELD, SUBMIT_BUTTON, THANKS, form, page
 from gallery.site import Scenario
-from jobpilot.ats import classify_embedded, detect_embedded
+from jobpilot.ats import classify_embedded, detect_embedded, handoff_entries
 from jobpilot.browser import BrowserEngine, NavigationDecision
 from jobpilot.posting_match import PostingWatch, posting_ids, receipt_conflict
 
@@ -28,7 +28,7 @@ def apply_links(*urls):
 
 def test_a_list_with_several_apply_targets_is_no_hand_off():
     entries = apply_links(WORKDAY.format("Data-Analyst_R100"), WORKDAY.format("Tech-Lead_R200"), WORKDAY.format("Credit-Associate_R300"))
-    assert classify_embedded(entries, own_urls=[OWN_PAGE]) == (None, None, "")
+    assert classify_embedded(handoff_entries(entries, [OWN_PAGE])) == (None, None, "")
 
 
 def test_the_platforms_label_is_still_read_when_nothing_moves_the_run():
@@ -51,21 +51,21 @@ def test_the_platforms_label_is_still_read_when_nothing_moves_the_run():
     ],
 )
 def test_a_real_hand_off_from_the_employers_page_to_its_own_platform_still_goes(entries):
-    found, url, _ = classify_embedded(entries, own_urls=[OWN_PAGE])
+    found, url, _ = classify_embedded(handoff_entries(entries, [OWN_PAGE]))
     assert found == "workday" and "Software-Engineer_R100" in url
 
 
 def test_among_several_the_one_naming_this_job_is_the_hand_off():
     own = "https://careers.acme.test/jobs/R200"
     entries = apply_links(WORKDAY.format("Data-Analyst_R100"), WORKDAY.format("Software-Engineer_R200"), WORKDAY.format("Tech-Lead_R300"))
-    found, url, _ = classify_embedded(entries, own_urls=[own])
+    found, url, _ = classify_embedded(handoff_entries(entries, [own]))
     assert found == "workday" and "R200" in url
 
 
 def test_a_frame_holding_the_form_is_still_the_answer_beside_a_list():
     frame = "https://boards.greenhouse.io/embed/job_app?for=acme&token=123"
     entries = [("frame", frame), *apply_links(WORKDAY.format("Data-Analyst_R100"), WORKDAY.format("Tech-Lead_R200"))]
-    assert classify_embedded(entries, own_urls=[OWN_PAGE])[:2] == ("greenhouse", frame)
+    assert classify_embedded(handoff_entries(entries, [OWN_PAGE]))[:2] == ("greenhouse", frame)
 
 
 def engine(page_url, entries=(), *, watch=None, obs=None, ats="custom"):
