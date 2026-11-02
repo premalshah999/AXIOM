@@ -315,7 +315,7 @@ export function QuestionCard({
   const notApplicable =
     note || compact
       ? undefined
-      : kind === "text" && !shape.placeholder && (shape.input === "text" || shape.input === "paragraph") && (shape.max ?? 8) >= 3
+      : kind === "text" && !q.context?.search_only && !shape.placeholder && (shape.input === "text" || shape.input === "paragraph") && (shape.max ?? 8) >= 3
         ? "N/A"
         : kind === "choice"
           ? q.options.find((o) => /^(n\/?a|not applicable|does not apply)\b/i.test(o.trim()))

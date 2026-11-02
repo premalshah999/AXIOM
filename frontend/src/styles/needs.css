@@ -634,17 +634,38 @@ button.nd-asking:hover strong {
   border-radius: var(--radius-sm);
   background: var(--inset);
 }
-.nd-choice-list .ax-check {
+.nq-answer .nd-choice-list .ax-check {
+  justify-content: flex-start;
   align-items: flex-start;
+  min-height: 0;
   padding: var(--space-1) var(--space-2);
+  border: 0;
   border-radius: var(--radius-sm);
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
   overflow-wrap: anywhere;
 }
-.nd-choice-list .ax-check:hover {
+.nq-answer .nd-choice-list .ax-check:hover {
   background: var(--hover);
 }
-.nd-choice-list .ax-check:has(input:checked) {
+.nq-answer .nd-choice-list .ax-check,
+.nq-answer .nd-choice-list .ax-check:has(input:checked) {
+  color: var(--ink);
+}
+.nq-answer .nd-choice-list .ax-check:has(input:checked) {
+  border-color: transparent;
   background: var(--active);
+}
+.nq-answer .nd-choice-list[role="radiogroup"].nd-choice-list .ax-check input {
+  position: static;
+  width: auto;
+  height: auto;
+  margin-top: 3px;
+  opacity: 1;
+  pointer-events: auto;
+  appearance: auto;
+  accent-color: var(--ink);
 }
 /* Ticking several rows of the inbox: the box sits beside the row's button, not inside it. */
 .nd-bulk {
