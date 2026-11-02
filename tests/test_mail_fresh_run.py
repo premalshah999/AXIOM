@@ -277,7 +277,7 @@ async def start_chrome(temp, port):
         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
     )
     portfile = os.path.join(temp, "DevToolsActivePort")
-    for _ in range(600):  # until Chrome has written its port: ten seconds failed on a loaded Mac
+    for _ in range(3000):  # until Chrome has written its port: ten seconds failed on a loaded Mac
         if os.path.exists(portfile) and os.path.getsize(portfile):
             break
         await asyncio.sleep(0.1)
