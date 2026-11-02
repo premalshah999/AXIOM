@@ -30,6 +30,8 @@ COUNTER = re.compile(r"(?<=[0-9A-Za-z])-\d{1,2}$")  # A repost counter: R0076343
 CODE_SEGMENT = re.compile(r"(?:[A-Za-z]{0,5}[-_]?)?\d{3,}(?:-\d{1,2})?")
 # A title that carries its code after an underscore, as Workday's do: Software-Engineer_R0076343-1, Analyst_10079702-WD-1, Backend_Q326SWEB2.
 UNDERSCORE_TAIL = re.compile(r".*[A-Za-z0-9-]_([A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)")
+# A code of letters and digits at the end of an address: /j/ABC123DEF0.
+MIXED_CODE = re.compile(r"[A-Za-z0-9]{6,}")
 # Or after a hyphen: senior-engineer-73421, Engineer-REQ-0586.
 HYPHEN_TAIL = re.compile(r".*[A-Za-z0-9][-]((?:[A-Za-z]{1,5}-?)?\d{4,})(?:-\d{1,2})?")
 # Or first: 7440000-senior-engineer, e59f8d41d06d01-senior-engineer.
@@ -37,7 +39,7 @@ HEAD = re.compile(r"(\d{6,}|[0-9a-f]{10,})-[A-Za-z].*")
 # What follows a posting's address on the way through its application, never another posting.
 STEP_WORD = re.compile(
     r"apply(?:manually|now|withresume)?|applications?|applicationform|autofill|login|signin|sign-in|register|confirmation|thanks|"
-    r"thank-?you|success|submitted|completed?|review|form|job|step-?\d*|\d",
+    r"thank-?you|success|submitted|completed?|review|form|job|section|page|step-?\d*|\d",
     re.I,
 )
 # A hyphenated page name of the site, not a role ("create-account", "job-search").
@@ -47,6 +49,10 @@ SITE_PAGE_WORD = re.compile(
     r"profile|register|reset|results?|roles?|search|settings|sign|signin|signup|students?|talent|teams?|terms|verify)\b",
     re.I,
 )
+
+
+# A segment that names a page of the application rather than a place or a title, wherever in the word it stands (JobDetail, ApplicationForm).
+PAGE_PART = re.compile(r"job|apply|applic|career|posting|position|detail|form|login|portal|search|opening|requisition", re.I)
 
 
 def _segments(url):
@@ -62,13 +68,18 @@ def _code(text):
 
 
 def _segment_id(segment, *, last):
-    """The posting number a path segment holds, else None."""
+    """The posting number a path segment holds, else None. A code with letters counts only at the end of the address: earlier it is
+    usually the employer's own (Oracle's /sites/CX_1001/job/2617302, UltiPro's /ABC1000/JobBoard/...), the same in all its postings."""
     if UUID.fullmatch(segment):
         return segment.casefold()
-    if CODE_SEGMENT.fullmatch(segment):
+    if segment.isdigit():
         # A bare year in the middle of a path is part of a date.
-        return None if not last and YEAR.fullmatch(segment) else _code(segment)
+        return None if (not last and YEAR.fullmatch(segment)) or len(segment) < 3 else segment
+    if last and (CODE_SEGMENT.fullmatch(segment) or MIXED_CODE.fullmatch(segment) and re.search(r"\d", segment) and re.search(r"[A-Za-z]", segment)):
+        return _code(segment)
     for pattern in (UNDERSCORE_TAIL, HYPHEN_TAIL, HEAD):
+        if pattern is UNDERSCORE_TAIL and not last and "-" not in segment:
+            continue  # CX_1001 in the middle of an address is the employer's, not a title with its code.
         if (match := pattern.fullmatch(segment)) and any(c.isdigit() for c in match[1]) and len(match[1]) >= 3:
             # "2027" ends many titles ("New-Grad-2027"): it numbers no posting.
             return None if YEAR.fullmatch(match[1]) else _code(match[1])
@@ -85,13 +96,21 @@ def query_ids(url):
     return found
 
 
+def _path_number(segments):
+    """The address's posting number: the last one in it, read after the steps that can follow a posting's address."""
+    parts = _strip_steps(segments)
+    for i in range(len(parts) - 1, -1, -1):
+        if found := _segment_id(parts[i], last=i == len(parts) - 1):
+            return found
+    return None
+
+
 def posting_ids(url):
-    """Every posting number the address states."""
-    segments = _segments(url)
-    return {
-        *query_ids(url).values(),
-        *(found for i, part in enumerate(segments) if (found := _segment_id(part, last=i == len(segments) - 1))),
-    }
+    """The posting number the address states: a parameter that names a posting says so outright, else the path's own."""
+    if found := query_ids(url):
+        return set(found.values())
+    number = _path_number(_segments(url))
+    return {number} if number else set()
 
 
 def _strip_steps(segments):
@@ -109,11 +128,14 @@ def _same_shape(a, b):
     """The two addresses are the same kind of page: every segment equal, apart from the posting's number and its readable slug."""
     if len(a) != len(b):
         return False
-    for i, (x, y) in enumerate(zip(a, b)):
+    for i, (x, y) in enumerate(zip(a, b, strict=True)):
         if x.casefold() == y.casefold():
             continue
-        numbered = _segment_id(x, last=i == len(a) - 1) and _segment_id(y, last=i == len(b) - 1)
-        if not numbered and not (_slug(x) and _slug(y)):
+        last = i == len(a) - 1
+        numbered = _segment_id(x, last=last) and _segment_id(y, last=last)
+        # Beside the number, a place stands where a title's slug does: /job/Austin/Analyst_R100, /job/Remote/Engineer_R200.
+        beside = not last and _segment_id(a[i + 1], last=i + 2 == len(a)) and _segment_id(b[i + 1], last=i + 2 == len(b))
+        if not numbered and not (_slug(x) and _slug(y)) and not (beside and not (PAGE_PART.search(x) or PAGE_PART.search(y))):
             return False
     return True
 
@@ -135,7 +157,7 @@ def other_posting_address(own_url, url):
         return None
     if [p.casefold() for p in own_parts] == [p.casefold() for p in parts]:
         return None
-    if posting_ids("/" + "/".join(own_parts)) and posting_ids("/" + "/".join(parts)):
+    if _path_number(own_parts) and _path_number(parts):
         return "path"
     # No numbers: two readable slugs side by side ("/careers/data-analyst", "/careers/senior-engineer"), when both read as roles.
     if (
@@ -266,10 +288,11 @@ def receipt_conflict(job, receipt):
     title, company, url = str(job.get("title") or ""), str(job.get("company") or ""), str(job.get("url") or "")
     wording = " ".join(str(receipt.get(key) or "") for key in ("confirmation", "evidence"))
     role = role_in_receipt(wording, company)
-    if role and clearly_other_role(title, role, company):
+    receipt_url = str(receipt.get("url") or "")
+    # A receipt at the job's own number is this job's, whatever it calls it: a saved title goes stale when the employer renames a posting.
+    if role and clearly_other_role(title, role, company) and not posting_ids(url) & posting_ids(receipt_url):
         return f'The employer\'s receipt names "{role[:120]}", but this job is "{title[:120]}". Not recorded as sent for this job'
     own_numbers = posting_ids(url) | {str(n) for n in receipt.get("posting_numbers") or ()}
-    receipt_url = str(receipt.get("url") or "")
     if other_posting_address(url, receipt_url) in {"query", "path"} and not posting_ids(receipt_url) & own_numbers:
         return f'The receipt\'s address carries another posting\'s number, not this job\'s ("{title[:120]}"). Not recorded as sent for this job'
     stated = text_posting_numbers(wording)
@@ -304,6 +327,10 @@ SEARCH_FIELD = re.compile(
     re.I,
 )
 NOT_FOR_APPLICANT = {"search", "hidden"}
+UNDERSCORE_CODE = re.compile(r"_[A-Za-z0-9-]+$")
+TITLE_SMALL_WORD = {"of", "and", "the", "for", "in", "at", "to", "a", "an", "on", "with", "or"}
+# Words of a link that opens a page to read rather than a step of an application ("View role", "Read more"). "View application" is a step.
+BROWSING_LABEL = re.compile(r"^(?!.*applic).*\b(?:view|see|read|learn|explore|details?|more)\b", re.I | re.S)
 STEP_CONTROL = re.compile(r"\s*(?:next|continue|save (?:and|&) continue|review|submit)\b", re.I)
 
 
@@ -328,6 +355,23 @@ def _on_own_address(own_urls, url):
 
 def _names_own_number(own_urls, url):
     return bool({found for own in own_urls for found in posting_ids(own)} & posting_ids(url))
+
+
+def reads_as_role(text):
+    """Text that reads as a job title: a few words, each capitalized, with a word for a kind of job. "Talk to your recruiter" isn't."""
+    text = " ".join(str(text or "").split())
+    if not text or len(text) > 90 or not ROLE_LINK.fullmatch(text) or not ROLE_WORD.search(text):
+        return False
+    return all(w[0].isupper() or w[0].isdigit() or w.casefold() in TITLE_SMALL_WORD for w in re.findall(r"[^\W_]+", text))
+
+
+def role_heading(own_title, headings, company=""):
+    """The page's main heading is another role's title: a form or posting usually heads itself with its role. Only when no heading
+    of the page reads as this job's, and "Personal Information" or "Application Form" name no role at all."""
+    roles = [h for h in headings or () if reads_as_role(h)]
+    if not roles or not all(clearly_other_role(own_title, h, company) for h in roles):
+        return ""
+    return " ".join(str(roles[0]).split())
 
 
 def links_to_other_postings(controls, own_urls, base):
@@ -362,10 +406,50 @@ def application_fields(obs):
     ]
 
 
+def acknowledges_application(text):
+    """The page says an application went through: the end of a run, whatever else is on the page. A receipt often lists similar jobs,
+    and reading it as a job list sent the run back to Apply again. A statement counts, not a question, a condition or a promise ("How
+    do I know my application was received?"), and a career home's "Thank you for your interest" states nothing."""
+    from .adapters.base import CONFIRM_TEXT
+    from .final_page import ACKNOWLEDGEMENT, HEDGE_BEFORE, NEGATION
+
+    text = str(text or "")
+    for pattern in (ACKNOWLEDGEMENT, CONFIRM_TEXT):
+        for match in pattern.finditer(text):
+            start = max(text.rfind(c, 0, match.start()) for c in ".!?\n") + 1
+            ends = [i for i in (text.find(c, match.end()) for c in ".!?\n") if i >= 0]
+            end = min(ends) if ends else len(text)
+            if (
+                text[end : end + 1] != "?"
+                and "interest" not in match[0].casefold()
+                and not HEDGE_BEFORE.search(text[start : match.start()])
+                and not NEGATION.search(text[start:end])
+            ):
+                return True
+    return False
+
+
+# The address of a write that carries no application.
+NOT_A_SEND = re.compile(
+    r"log-?in|sign-?in|sign-?up|sso|oauth|auth|session|passw|regist|token|otp|verif|captcha|consent|cookie|collect|analytics|telemetry|"
+    r"beacon|track|search|autocomplete|typeahead|alert|subscribe|newsletter",
+    re.I,
+)
+
+
+def could_carry_application(url, body=b""):
+    """A write that may have sent the application, for all the run can tell: a step's Continue can be the employer's real submit. A
+    sign-in or a registration can't, and neither can a site's own housekeeping."""
+    return not NOT_A_SEND.search(urlsplit(str(url or "")).path) and not re.search(rb"passw", body or b"", re.I)
+
+
 def looks_like_listing(obs, url, own_urls):
     """A career home, a job search or a list of jobs rather than this posting. Never the job's own address, one that states its
-    number, or a page that asks for anything beyond a search: a sign-in, a form and a posting with its Apply control all stay."""
+    number, a page that acknowledges an application, or one that asks for anything beyond a search: a sign-in, a form and a posting
+    with its Apply control all stay."""
     if _on_own_address(own_urls, url) or _names_own_number(own_urls, url) or application_fields(obs):
+        return False
+    if acknowledges_application((obs or {}).get("text")):
         return False
     controls = (obs or {}).get("controls") or ()
     entries = [c for c in controls if ENTRY_LABEL.fullmatch(str(c.get("label") or ""))]
@@ -386,42 +470,88 @@ class PostingWatch:
     """What one run has seen of its posting. `trail` is True while the run has walked here from its own posting's address, through
     sign-in or an Apply: that walk is what makes a form's own numbering part of this job, and the only thing that does."""
 
-    def __init__(self, job, *, opened_fresh=True, entry_url=""):
+    def __init__(self, job, *, opened_fresh=True, entry_url="", landing=False):
         self.job = job
+        self.landing = landing  # The next page read is what the job's own address opened, with no click of ours between.
+        self.sent_like = False  # A write that may have carried the application has gone out: nothing here opens the job again.
         self.own_urls = [u for u in dict.fromkeys((str(job.get("url") or ""), str(entry_url or ""))) if u]
+        self.given_urls = tuple(self.own_urls)
         self.trail = bool(opened_fresh)
         self.returns = 0
         self.just_returned = False  # The last move went back to the job's own address, and the page after it isn't read yet.
 
+    def names_given_number(self, url):
+        """The address states the number the job was given: the strongest word there is, and a saved title can be stale beside it."""
+        return _names_own_number(self.given_urls, str(url or ""))
+
     def numbers(self):
         return sorted({found for own in self.own_urls for found in posting_ids(own)})
 
-    def other_posting_link(self, href, base):
-        """The link opens another posting's address. An unrelated number on an Apply link stays a matter for the page it opens."""
-        return bool(links_to_other_postings([{"href": href}], self.own_urls, base))
-
-    def other_posting(self, url, obs=None, stated=""):
-        """Why the page belongs to another job, else "". `stated`: the title the page's own structured data gives."""
+    def other_posting_link(self, href, base, label=""):
+        """The link opens another posting: another number in this job's own address shape, a label that reads as another role, or
+        "View role" on a number this job hasn't shown. A link to an unfamiliar number labelled Apply or Continue stays a matter for
+        the page it opens: that's how a form that numbers the posting its own way is reached."""
+        href = str(href or "")
+        if not href or href.startswith(("#", "javascript:", "mailto:", "tel:")):
+            return False
+        target = urljoin(base, href)
+        if _names_own_number(self.own_urls, target):
+            return False
+        if any(other_posting_address(own, target) for own in self.own_urls):
+            return True
         title, company = str(self.job.get("title") or ""), str(self.job.get("company") or "")
-        if stated and clearly_other_role(title, stated, company):
-            return f'the page is for "{stated[:120]}", not "{title[:120]}"'
-        role = role_on_form((obs or {}).get("headings"))
-        if role and clearly_other_role(title, role, company):
-            return f'the page is for "{role[:120]}", not "{title[:120]}"'
+        if reads_as_role(label) and clearly_other_role(title, label, company):
+            return True
+        return unrelated_posting_number(self.own_urls, target) and bool(BROWSING_LABEL.search(str(label or "")))
+
+    def other_role(self, url, obs=None, stated=""):
+        """Why the page's own words make it another job's, else "". `stated`: the title its structured data or main heading gives."""
+        title, company = str(self.job.get("title") or ""), str(self.job.get("company") or "")
+        if self.names_given_number(url):
+            return ""
+        for role in (stated, role_on_form((obs or {}).get("headings"))):
+            if role and clearly_other_role(title, role, company):
+                return f'the page is for "{role[:120]}", not "{title[:120]}"'
+        return ""
+
+    def other_address(self, url):
+        """Why the page's address makes it another job's, else ""."""
+        if self.names_given_number(url):
+            return ""
         if not _names_own_number(self.own_urls, url) and any(other_posting_address(own, url) for own in self.own_urls):
             return "the page's address carries another posting's number"
         if not self.trail and unrelated_posting_number(self.own_urls, url):
             return "the page's address carries a posting number this run never walked to from its own posting"
         return ""
 
+    def other_posting(self, url, obs=None, stated=""):
+        """Why the page belongs to another job, else ""."""
+        return self.other_role(url, obs, stated) or self.other_address(url)
+
+    def moved_by_employer(self, url, obs):
+        """What the job's own address opened, at another number: a posting that moved keeps its title, so its heading and slug are read.
+        One that names another role is a closed job's redirect to another, and a page that names nothing has no difference to read."""
+        title, company = str(self.job.get("title") or ""), str(self.job.get("company") or "")
+        slug = next((part for part in reversed(_strip_steps(_segments(url))) if _slug(part)), "")
+        words = re.sub(r"[-_]+", " ", UNDERSCORE_CODE.sub("", slug))
+        return not role_heading(title, (obs or {}).get("headings"), company) and not clearly_other_role(title, words, company)
+
     def judge(self, url, obs=None, *, stated=""):
         """A Verdict on the page at `url`. A page that passes while the run is on its trail becomes part of this job."""
         url = str(url or "")
+        landing, self.landing = self.landing, False
         if not url.startswith("http"):
             return Verdict("ok")
-        if why := self.other_posting(url, obs, stated):
+        if why := self.other_role(url, obs, stated):
+            self.trail = False  # Nothing reached from here is this job's until the run stands on its own address again.
             return Verdict("other_posting", why)
+        if why := self.other_address(url):
+            if not (landing and self.moved_by_employer(url, obs)):
+                self.trail = False
+                return Verdict("other_posting", why)
+            self.own_urls.append(url)
         if looks_like_listing(obs, url, self.own_urls):
+            self.trail = False
             return Verdict("listing", "the page is a career home or job list")
         if _on_own_address(self.own_urls, url) or _names_own_number(self.own_urls, url):
             self.trail = True

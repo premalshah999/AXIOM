@@ -6347,7 +6347,7 @@ class FormSession:
                 "This informational policy link leaves the application. Fill its consent checkbox or use the acknowledgement dialog."
             )
         watch = getattr(self, "posting_watch", None)
-        if watch and button.get("href") and not auth_control and watch.other_posting_link(button["href"], self.page.url):
+        if watch and button.get("href") and not auth_control and watch.other_posting_link(button["href"], self.page.url, button["label"]):
             raise ValueError("That link opens a different posting. This run applies to its own job only; use this job's own controls.")
         from .history_editor_guard import education_save_context, education_saved
 

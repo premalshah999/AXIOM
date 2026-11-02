@@ -767,6 +767,53 @@ form_for_other_role = Scenario(
 _POSTING_DATA = """<script type="application/ld+json">{"@context":"https://schema.org","@type":"JobPosting","title":"%s",
 "hiringOrganization":{"@type":"Organization","name":"ExampleSoft"}}</script>"""
 
+form_heading_is_other_role = Scenario(
+    "form_main_heading_is_another_role",
+    "The form heads itself with another role's title and says nothing else about it: the last look before the submit stops it.",
+    {
+        "/jobs/1": page("Software Engineer", POSTING + APPLY_LINK),
+        "/apply/1": page("Apply", "<h1>Data Analyst</h1>" + form(NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD, SUBMIT_BUTTON)),
+        "/submit/1": THANKS,
+    },
+    state="waiting_browser",
+    applications=0,
+)
+
+form_heading_is_own_role = Scenario(
+    "form_main_heading_is_this_role_with_its_team",
+    "The form heads itself with this role's title and its team: it goes through.",
+    {
+        "/jobs/1": page("Software Engineer", POSTING + APPLY_LINK),
+        "/apply/1": page("Apply", "<h1>Software Engineer, Platform</h1>" + form(NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD, SUBMIT_BUTTON)),
+        "/submit/1": THANKS,
+    },
+)
+
+posting_moved = Scenario(
+    "posting_moved_to_a_new_number",
+    "The job's own address redirects to the same role under a new number, as a repost does: this job.",
+    {
+        "/careers/job/70011": lambda request: (302, "/careers/job/70022"),
+        "/careers/job/70022": page("Software Engineer", POSTING + APPLY_LINK),
+        **THREE_PAGES,
+    },
+    start="/careers/job/70011",
+)
+
+closed_redirects_to_other_role = Scenario(
+    "closed_job_redirects_to_another_role",
+    "The job's own address redirects to another role under a new number, as a closed posting can: not this job, and nothing is sent.",
+    {
+        "/careers/job/70011": lambda request: (302, "/careers/job/70033"),
+        "/careers/job/70033": page("Data Analyst", "<h1>Data Analyst</h1>" + APPLY_LINK),
+        **THREE_PAGES,
+    },
+    start="/careers/job/70011",
+    state="waiting_browser",
+    applications=0,
+    never=("/apply/1",),
+)
+
 form_data_other_role = Scenario(
     "form_structured_data_names_another_role",
     "Only the page's structured data tells: the form is another posting's, so the last look before the submit stops it.",
@@ -863,8 +910,50 @@ receipt_own_number = Scenario(
     applications=0,
 )
 
+# ---- this guard never sends an application twice -------------------------------------------------------------------------------
+
+SIMILAR_ROWS = "".join(
+    f'<p><a href="/jobs/{n}">{title}</a></p>'
+    for n, title in ((70031, "Data Analyst"), (70032, "Kubernetes Tech Lead"), (70033, "Credit Risk Associate"), (70034, "Product Designer"))
+)
+STEP_THAT_SENDS = page(
+    "Apply",
+    "<h1>Apply: Software Engineer</h1>"
+    + form(NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD, '<p><button id="go" type="submit">Continue</button></p>'),
+)
+receipt_with_similar_jobs = Scenario(
+    "step_button_sends_and_the_receipt_lists_similar_jobs",
+    "The form's Continue is the employer's real submit, with nothing armed, and its receipt lists other roles: it reads as a job list, and "
+    "going back would apply again. One application, confirmed.",
+    {
+        "/jobs/1": page("Software Engineer", POSTING + APPLY_LINK),
+        "/apply/1": STEP_THAT_SENDS,
+        "/submit/1": page("Thank you", "<h1>Thank you for applying!</h1><p>Your application has been received.</p><h2>Similar jobs</h2>" + SIMILAR_ROWS),
+    },
+)
+
+home_thanks_for_interest = Scenario(
+    "career_home_thanks_for_your_interest",
+    "A career home that thanks the visitor for their interest and explains how applications are received acknowledges nothing: it's a listing.",
+    {
+        OWN: lambda request: (302, "/careers/welcome"),
+        "/careers/welcome": page(
+            "Careers",
+            "<h1>Careers</h1><p>Thank you for your interest in careers at ExampleSoft. How do I know my application was received?</p>" + SIMILAR_ROWS,
+        ),
+        "/apply/1": PLAIN_FORM,
+        "/submit/1": THANKS,
+    },
+    start=OWN,
+    state="waiting_browser",
+    applications=0,
+    never=("/jobs/70031", "/jobs/70032", "/apply/1"),
+)
+
 SCENARIOS += [
+    receipt_with_similar_jobs, home_thanks_for_interest,
     career_home_bounce, career_home_then_back, own_redirect, own_form_numbers_itself, form_adds_number, posting_with_similar_jobs,
-    form_for_other_role, form_data_other_role, form_data_own_role, receipt_other_role, receipt_own_role, receipt_employer_named,
+    form_for_other_role, form_heading_is_other_role, form_heading_is_own_role, posting_moved, closed_redirects_to_other_role,
+    form_data_other_role, form_data_own_role, receipt_other_role, receipt_own_role, receipt_employer_named,
     receipt_other_number, receipt_own_number,
 ]  # fmt: skip

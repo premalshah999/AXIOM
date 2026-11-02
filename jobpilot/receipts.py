@@ -1026,6 +1026,8 @@ async def check_receipts(mail, run_id=None):
                     not row
                     or row.state not in {"confirmed", "submission_unknown"}
                     or row.receipt.get("email_confirmed")
+                    # The application reached another posting (posting_match): a thank-you mail is that posting's.
+                    or row.receipt.get("other_posting")
                     or receipt_claimed(s, msg, receipt)
                 ):
                     continue
@@ -1298,6 +1300,7 @@ async def reconcile_approved_drafts(mail, job_ids, max_pages=8):
                         not latest
                         or latest.id != source["id"]
                         or latest.state in {"confirmed", "queued", "running", "submitting"}
+                        or (latest.receipt or {}).get("other_posting")
                     ):
                         continue
                     latest.receipt = {

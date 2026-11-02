@@ -2593,6 +2593,7 @@ class Adapter:
         if (
             self.committed
             or self.attempts["reopen"]
+            or getattr(getattr(self.e, "posting_watch", None), "sent_like", False)  # Going back could send it twice.
             or any(f.get("required") for f in fields)
             or self.find_final(obs)
             or self.find_next(obs)
