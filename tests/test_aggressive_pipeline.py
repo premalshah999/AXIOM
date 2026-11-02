@@ -719,7 +719,7 @@ def test_the_long_replies_get_room_and_others_keep_the_default():
 
 def test_a_draft_figure_is_allowed_only_as_a_stated_target():
     ps = proposals()
-    ps[0].bullets[0] = "Public record explorer built on NYC Open Data for readers [target: p95 under 200 ms]."
+    ps[0].bullets[0] = "Public record explorer on NYC Open Data for readers [target: p95 under 200 ms]."
     assert quality.proposal_problems(ps[0], [], POSTING) == []
     ps[0].bullets[0] = "Public record explorer on NYC Open Data with p95 under 200 ms."  # stated as fact
     assert any("unmeasured" in w for w in quality.proposal_problems(ps[0], [], POSTING))
@@ -730,6 +730,125 @@ def test_a_draft_figure_is_allowed_only_as_a_stated_target():
     ps[0].bullets = [
         "Public record explorer on NYC Open Data [target: 95% parsed].",
         "Handles missing fields without dropping rows [target: under 1% lost].",
+    ]
+    assert any("one headline metric" in w for w in quality.proposal_problems(ps[0], [], POSTING))
+
+
+@pytest.mark.parametrize(
+    "bullet",
+    [
+        "Fact checker on NYC Open Data reaches 95 percent accuracy on 40000 claims.",
+        "Fact checker on NYC Open Data reaches ninety-five percent accuracy.",
+        "Fact checker on NYC Open Data reaches 95% accuracy.",
+        "Fact checker on NYC Open Data that covers 40000 claims.",
+        "Fact checker on NYC Open Data that covers 40,000 claims.",
+        "Fact checker on NYC Open Data that covers forty thousand claims.",
+        "Fact checker on NYC Open Data that runs 2x faster than a spreadsheet.",
+        "Fact checker on NYC Open Data that runs x10 faster than a spreadsheet.",
+        "Fact checker on NYC Open Data that runs twice as fast as a spreadsheet.",
+        "Fact checker on NYC Open Data that doubles reader throughput.",
+        "Fact checker on NYC Open Data that costs $5 a month.",
+        "Fact checker on NYC Open Data that answers in under200ms.",
+        "Fact checker on NYC Open Data with sub-200 ms lookups.",
+        "Fact checker on NYC Open Data with a 30-day window.",
+        "Fact checker on NYC Open Data that checks 3 sources.",
+        "Fact checker on NYC Open Data from 2024.",
+        "Fact checker on NYC Open Data that finishes in five minutes.",
+        "Fact checker on NYC Open Data with GPT-4 at 90 percent recall.",
+        "Fact checker on NYC Open Data with Python 95 accuracy.",
+        "Fact checker on NYC Open Data [p95 under 200 ms].",
+    ],
+)
+def test_no_figure_stands_outside_a_target_bracket(bullet):
+    ps = proposals()
+    ps[0].bullets[0] = bullet
+    fixed = quality.normalize_proposals(ps)  # describe() runs first, as it does in every real run.
+    assert any("unmeasured" in w for w in quality.proposal_problems(fixed[0], [], POSTING)), bullet
+
+
+@pytest.mark.parametrize(
+    "bullet",
+    [
+        "Log explorer on NYC Open Data stored in S3 for readers [target: p95 under 200 ms].",
+        "Summarizer on NYC Open Data that compares GPT-4 with GPT-3.5 and Llama 3.",
+        "Service in Python 3 and Java 17 on NYC Open Data with an EC2 host and K8s manifests.",
+        "Parser on NYC Open Data with SHA-256 hashes, UTF-8 text, Neo4j storage and OAuth 2.0.",
+        "Filing review on NYC Open Data for SEC 10-K forms, comparing three methods at one desk.",
+        "Reader on NYC Open Data that flags double counting and scaffolds a second service.",
+    ],
+)
+def test_a_name_holding_a_digit_is_not_a_figure(bullet):
+    ps = proposals()
+    ps[0].bullets[0] = bullet
+    fixed = quality.normalize_proposals(ps)
+    assert quality.proposal_problems(fixed[0], [], POSTING) == [], bullet
+
+
+@pytest.mark.parametrize(
+    "bullet",
+    [
+        "Developed a public explorer from NYC Open Data for readers.",
+        "Public explorer from NYC Open Data, developed for readers.",
+        "Public explorer from NYC Open Data that was deployed for readers.",
+        "Public explorer from NYC Open Data and shipped to readers.",
+        "Public explorer from NYC Open Data, launched for readers.",
+        "Public explorer from NYC Open Data that achieved a clear review.",
+        "Public explorer from NYC Open Data that reduced review time.",
+        "Public explorer from NYC Open Data that increased reader trust.",
+        "Public explorer from NYC Open Data that improved review quality.",
+        "Public explorer from NYC Open Data that saved review time.",
+        "Public explorer from NYC Open Data, delivered to readers.",
+        "Public explorer built on NYC Open Data for readers.",
+        "Public explorer on NYC Open Data that has been used by readers.",
+        "Will have built a public explorer from NYC Open Data for readers.",
+        "Would be shipped as a public explorer from NYC Open Data.",
+        "Leveraged NYC Open Data for a public explorer for readers.",  # sanitize() says "used".
+        "Parsed the NYC Open Data records for a public explorer.",
+        "Refactored a public explorer from NYC Open Data for readers.",
+        "Public explorer from NYC Open Data that parsed the records.",
+        "Automated the review of NYC Open Data for a public explorer.",
+    ],
+)
+def test_a_draft_never_claims_finished_work_anywhere_in_a_bullet(bullet):
+    from jobpilot.features.resumes import gates
+
+    ps = proposals()
+    ps[0].bullets[0] = gates.sanitize(bullet)
+    fixed = quality.normalize_proposals(ps)  # describe() must not turn any of these into a passing bullet.
+    assert any("completed work" in w for w in quality.proposal_problems(fixed[0], [], POSTING)), bullet
+
+
+@pytest.mark.parametrize(
+    "bullet",
+    [
+        "Public explorer from NYC Open Data that builds a report and deploys it locally for one reader.",
+        "Compares NYC Open Data records and reduces each to a short summary for readers.",
+        "Distributed rate limiter on NYC Open Data that handles partial failures with bounded retries.",
+        "Automated review checklist on NYC Open Data, designed so a reader can replay one failed record.",
+        "Compares published schedules from NYC Open Data with structured logs, using built-in checks.",
+        "Feed parser on NYC Open Data that keeps rejected rows beside established methods.",
+    ],
+)
+def test_a_present_tense_description_stays_allowed(bullet):
+    ps = proposals()
+    ps[0].bullets[0] = bullet
+    fixed = quality.normalize_proposals(ps)
+    assert quality.proposal_problems(fixed[0], [], POSTING) == [], bullet
+
+
+def test_a_title_holds_no_figure_or_finished_work_and_two_targets_are_two_metrics():
+    ps = proposals()
+    ps[0].title = "Explorer With 40000 Claims"
+    assert any("unmeasured" in w for w in quality.proposal_problems(ps[0], [], POSTING))
+    ps = proposals()
+    ps[0].title = "Deployed Claims Explorer"
+    assert any("completed work" in w for w in quality.proposal_problems(ps[0], [], POSTING))
+    ps = proposals()
+    ps[0].title = "Tiered Claims Explorer"  # An adjective, not a claim.
+    assert quality.proposal_problems(ps[0], [], POSTING) == []
+    ps[0].bullets = [
+        "Public record explorer on NYC Open Data [target: ninety percent parsed].",
+        "Handles missing fields without dropping rows [target: few rows lost].",
     ]
     assert any("one headline metric" in w for w in quality.proposal_problems(ps[0], [], POSTING))
 
