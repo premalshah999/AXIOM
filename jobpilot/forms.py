@@ -3553,6 +3553,8 @@ class FormSession:
             committed = await widgets.date_parts(frame, field, value)
         elif kind == "pills":
             committed = await widgets.pills(el, value)
+        elif field.get("widget") == "period-month":
+            committed = await widgets.period_month(frame, el, value)
         elif field.get("widget") == "date-text":
             if re.fullmatch(r"\s*(?:immediately|immediate|asap|as soon as possible|right away)\s*", str(value), re.I):
                 # Availability "Immediately" in a date box is today's date: Paylocity's "Available to Start" raised
@@ -6483,7 +6485,7 @@ class FormSession:
                   if(!auth && !window.__jpArmed && /\bsubmit\b|send (?:my )?application|complete (?:my )?application|finish application|\babsenden\b|bewerbung (?:abschicken|einreichen)|envoyer ma candidature|\bsoumettre\b/i.test(label))return false;
                   el.dataset.jpAuthControl='true';el.dataset.jpControlLabel=label;
                   el.dataset.jpFinalAuth=String(auth);
-                  const f=el.closest('form');if(f)f.__jpAllowedControl=el;
+                  const f=el.closest('form')||(el.getAttribute('form')&&el.ownerDocument.getElementById(el.getAttribute('form')));if(f)f.__jpAllowedControl=el;
                   return true;
                 }""",
                 bool(auth_control or page_final_ok),
@@ -6535,7 +6537,7 @@ class FormSession:
             if permitted:
                 try:
                     await el.evaluate(
-                        "el => {delete el.dataset.jpAuthControl;delete el.dataset.jpControlLabel;delete el.dataset.jpFinalAuth;const f=el.closest('form');if(f?.__jpAllowedControl===el)delete f.__jpAllowedControl}"
+                        "el => {delete el.dataset.jpAuthControl;delete el.dataset.jpControlLabel;delete el.dataset.jpFinalAuth;const f=el.closest('form')||(el.getAttribute('form')&&el.ownerDocument.getElementById(el.getAttribute('form')));if(f?.__jpAllowedControl===el)delete f.__jpAllowedControl}"
                     )
                 except Exception:
                     pass

@@ -1082,6 +1082,9 @@
       widget = 'ui5wc-valuehelp';
     }
     if (type === 'combobox' && el.getRootNode().host?.hasAttribute('ui5-select')) widget = 'ui5wc-select';
+    // One month-range picker for a history row (TikTok's "Start & end date", 2026-11-01): its only input is a focus sink of no height, and what it
+    // holds shows in two labels beside it. It is written through its panel, and read as "MM/YYYY - MM/YYYY", the form its answer takes.
+    if (type === 'text' && !widget && el.matches('input[class*="date-picker-period"][class*="hidden-input"]')) widget = 'period-month';
     // Select2's clipped native control may still have a client rect. Its adjacent container owns the one
     // visible trigger; scan that trigger to reach AJAX rows even when the select appears geometrically visible.
     if (el.matches('select.select2-hidden-accessible[aria-hidden="true"]')) {
@@ -1395,6 +1398,15 @@
       }
       // Local caption recovery can include the adjacent upload button's text.
       if (/^(?:resume(?:\s*\/\s*cv)?|cv)\s+(?:attach|upload|choose file)$/i.test(question)) question = 'Resume/CV';
+    }
+    if (widget === 'period-month') {
+      const sides=[...(el.parentElement?.children || [])].filter(side => /period-month-label/.test(side.className || '')).map(side => {
+        const shown=clean(side.innerText).replace(/\s*-\s*/g,'-');
+        const date=shown.match(/^(\d{4})-(\d{1,2})$/);
+        // A side with no value shows its placeholder "YYYY-MM"; the end side's one word is its "Present" choice.
+        return date ? date[2].padStart(2,'0')+'/'+date[1] : (/^[^\d-]+$/.test(shown) ? 'Present' : '');
+      });
+      value=sides.length===2 && sides[0] && sides[1] ? sides[0]+' - '+sides[1] : '';
     }
     if (widget === 'date-text' && dateFormat === 'month-year') {
       const picker=composedClosest(el,'spl-date-picker');

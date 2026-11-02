@@ -68,7 +68,10 @@ GUARD = r"""(() => {
     }
   },true);
   document.addEventListener('submit', e => {
-    const control=e.submitter || e.target?.__jpAllowedControl;
+    // A web component's button sits outside the form and clicks an unrendered proxy button inside it (UKG's ukg-button
+    // form="..."; "Create account" did nothing on six runs, 2026-11-01): the submit's control is the one the engine marked on this form.
+    const proxy=e.submitter && !e.submitter.getClientRects().length;
+    const control=(proxy && e.target?.__jpAllowedControl) || e.submitter || e.target?.__jpAllowedControl;
     const text=label(control);
     if(!window.__jpArmed && !permitted(control) && !(control && pageSteps.has(control))
        && (final(text) || !/next|continue|save|review|sign ?in|log ?in/i.test(text))){
@@ -127,6 +130,8 @@ GREENHOUSE_RECEIPT = r"""(() => {
   }, true);
 })()"""
 
+# How long a pre-submit page with no readable document is waited for before the run stops on it.
+OBSERVATION_WAIT_SECONDS = 20
 # Already reliable with the single-page fast path + navigation model; keep their behavior.
 AGENT_FIRST = {"greenhouse", "ashby", "lever", "smartrecruiters", "workable", "bamboohr"}
 # Platforms whose stored browser state sends the applicant into a sign-in that does not exist (see
@@ -865,8 +870,9 @@ EDITOR_COMMIT = re.compile(r"\s*(?:update|save)\s*", re.I)
 
 def is_dismiss_control(button):
     """Recognize explicit dismissal labels on a currently observed button."""
+    # "Close Sign up for Career Profile dialog" (Meta, 2026-11-01): a dialog's own close button names the dialog it closes.
     return bool(re.fullmatch(
-        r"\s*(?:close(?:\s+(?:menu|dialog|modal|popup))?|cancel|dismiss|not now|no thanks|×)\s*",
+        r"\s*(?:close(?:\s+(?:menu|dialog|modal|popup)|\s.{1,80}\s(?:dialog|modal|popup))?|cancel|dismiss|not now|no thanks|×)\s*",
         button.get("label") or "", re.I,
     ))
 
@@ -4911,7 +4917,10 @@ class BrowserEngine:
                 "reason": "Submission page cannot be inspected; reconcile its outcome before retrying",
             }
             return obs
-        for _ in range(2):
+        # A page that commits empty and draws itself a moment later (SuccessFactors' redirects after Apply; 16 runs on six platforms since 10-12 ended
+        # "stopped responding" after about 5 s, Belden's 530 s in) is waited for. Only a run that was going to stop pays for this.
+        deadline = time.monotonic() + OBSERVATION_WAIT_SECONDS
+        while True:
             try:
                 await self.form.settle(timeout=2)
                 obs = await self.form.scan()
@@ -4919,6 +4928,9 @@ class BrowserEngine:
                     return obs
             except PlaywrightError:
                 pass
+            if time.monotonic() >= deadline:
+                break
+            await asyncio.sleep(1)
         if any(record.get("verified") for record in self.form.ledger.values()):
             self.result = {
                 "state": "waiting_browser",

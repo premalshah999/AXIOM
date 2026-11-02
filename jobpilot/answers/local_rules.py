@@ -47,6 +47,10 @@ CURRENCY = re.compile(
 )
 # The question asks which currency, by name: "Salary Expectation - Currency", "Currency:", not "amount and currency".
 CURRENCY_MENU = re.compile(r"(?:^|[\s\-–—:*(])currency\b(?!\s*\w)", re.I)
+# A question that asks which of a posting's places this application is for, on a normalized label.
+APPLY_LOCATION = re.compile(
+    r"\b(?:locations?|offices?|cities|sites?)\b.{0,30}\b(?:you(?: d| would)? (?:like|want|wish|prefer) to (?:apply|work|be considered)|(?:are )?applying)\b"
+)
 from .history import EDUCATION
 from .history import WORK
 from .intents import INTENTS
@@ -719,6 +723,15 @@ class LocalRulesMixin:
                     return self._ans(f, match, ["fact:relocation_preferences"])
             if places:
                 return self._ans(f, places[0], ["fact:relocation_locations"])
+        if options and APPLY_LOCATION.search(label):
+            # "Please select one or more locations where you'd like to apply" beside the posting's own offices (Meta, 2026-11-01): the page
+            # marks nothing required, then refuses Submit with none chosen. The person chose this posting at the place it names; another
+            # office is a preference they never stated, and a posting named elsewhere goes on to the other rules.
+            where = normalize(str((getattr(self, "job", None) or {}).get("location") or ""))
+            named = [o for o in options if (place := normalize(o)) and re.search(r"(?:^|\s)" + re.escape(place) + r"(?:$|\s)", where)]
+            if named:
+                many = f.get("type") in {"checkboxgroup", "select-multiple"}
+                return self._ans(f, "\n".join(named) if many else named[0], ["job:location"])
         employer = f.get("employer", self.employer)
         if re.search(r"preferred.{0,60}programming language|programming language.{0,60}interview", label):
             # Interview language is a delegated preference among actual skills.
