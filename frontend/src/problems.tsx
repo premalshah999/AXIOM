@@ -37,7 +37,9 @@ export function ProblemList() {
   const selection = useSelection(5000);
   const { pending, run } = useAction();
   const [seen, setSeen] = useState<Record<string, Problem>>({});
-  useEffect(() => setSeen((s) => ({ ...s, ...Object.fromEntries(rows.map((r) => [r.run_id, r])) })), [rows]);
+  useEffect(() => {
+    if (list.data) setSeen((s) => ({ ...s, ...Object.fromEntries(list.data!.rows.map((r) => [r.run_id, r])) }));
+  }, [list.data]);
   useEffect(() => selection.clear(), [kind]); // eslint-disable-line react-hooks/exhaustive-deps
   const selectAll = () =>
     run("select", async () => {

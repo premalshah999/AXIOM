@@ -171,7 +171,7 @@ function useJobActions(row: JobRow, detailed = false) {
       tone: "danger",
       confirm: committed
         ? "Hide this job? A sent application is not withdrawn."
-        : "Delete this job? It leaves the pipeline and board. History is kept.",
+        : "Delete this job? It leaves your lists, and its history is kept.",
       confirmLabel: committed ? "Hide it" : "Delete",
       run: () => control("delete"),
     });

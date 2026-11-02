@@ -4,6 +4,8 @@ Every way of starting a job again is refused once it was sent or may have been; 
 multi-pick and a Yes/No that says "multiple" are what they are; Take over hands back only the page the person looked at; and no screen
 is handed a validator's report, a stack trace, a source file or an internal id. Synthetic data only."""
 
+import re
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -423,3 +425,13 @@ def test_the_job_page_gets_plain_reports_and_a_plain_activity_and_the_record_kee
 def test_a_video_the_form_requires_says_so_and_offers_no_answer_box():
     shown = present({"question": "Please upload a video introducing yourself", "options": [], "context": {"type": "file", "required": True}, "reason": ""})
     assert shown["kind"] == "cannot_automate" and "video" in shown["cannot_automate"]
+
+
+def test_no_screen_prints_a_stored_reason_or_a_raw_record_as_it_stands():
+    """Every stored reason goes through plainReason on its way to a screen, and an engine record is a download, not a page."""
+    source = Path(__file__).resolve().parents[1] / "frontend" / "src"
+    for path in source.rglob("*.tsx"):
+        text = path.read_text()
+        assert not re.search(r">\s*\{[\w.?!]*\.reason\}\s*<", text), path
+        assert "JSON.stringify(receipt" not in text and "JSON.stringify(report" not in text, path
+        assert "<datalist" not in text or path.name != "questions.tsx", path  # A list that shows nothing until something is typed.
