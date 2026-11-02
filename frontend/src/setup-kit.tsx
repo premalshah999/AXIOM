@@ -43,7 +43,8 @@ export function SaveBar({
   note?: ReactNode;
   disabled?: boolean;
 }) {
-  useUnsaved(dirty);
+  // Once Save is pressed nothing is left to lose: moving on while it finishes needs no question.
+  useUnsaved(dirty && !saving);
   // Nothing to save, nothing to show: the toast already said "saved".
   if (!dirty && !saving) return null;
   return (

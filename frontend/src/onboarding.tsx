@@ -881,7 +881,7 @@ function ResumeStep({
         extracted.skills?.length ? `${extracted.skills.length} skill${extracted.skills.length === 1 ? "" : "s"}` : "",
       ].filter(Boolean);
       const after = kept
-        ? " Your list below already had entries of your own, so it stays as it is. Remove anything you don't want."
+        ? " Your own entries below stay. Remove them and read the resume again to use what it lists."
         : extracted.work?.length || extracted.education?.length
           ? " Check them below."
           : " No jobs or schools were found in it. You can add them in Profile after setup.";
