@@ -769,7 +769,7 @@ function FirstRun({ mail }: { mail: MailStatus | null }) {
       detail: submitting ? "Applications send once every required answer is checked." : "Off: nothing is sent to employers until you turn this on.",
       action: submitting ? "Settings" : pending === "submit-on" ? "Turning on…" : "Turn on",
       onClick: submitting
-        ? () => go({ view: "settings", tab: "system" })
+        ? () => go({ view: "settings", tab: "applying" })
         : () =>
             run(
               "submit-on",
