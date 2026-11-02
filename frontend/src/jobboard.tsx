@@ -30,18 +30,34 @@ type Section = "main" | "sites";
 // Said wherever a company-site job can be sent: these are the jobs that fail most (jobpilot/company_sites.py).
 const SITES_WARNING = "Applications on company sites often fail. AXIOM sends one only when you choose it here.";
 
-// A row's place in one short phrase, the same word it has on every other screen.
-function StateCell({ r, asked, site }: { r: BoardRow; asked?: boolean; site?: boolean }) {
+// A row's place in one short phrase, the same word it has on every other screen. `onQueue`: its number is the way to the Queue page.
+function StateCell({ r, asked, onQueue }: { r: BoardRow; asked?: boolean; onQueue?: () => void }) {
   if (asked && r.state !== "queue") return <span className="bd-state">In queue</span>;
-  if (r.state === "queue")
-    return (
-      <span className="bd-state">
+  if (r.state === "queue") {
+    const words = (
+      <>
         In queue <b>{r.position}</b>
-      </span>
+      </>
     );
+    return onQueue ? (
+      <button
+        type="button"
+        className="ax-link bd-state"
+        title="Open the queue"
+        onClick={(e) => {
+          e.stopPropagation();
+          onQueue();
+        }}
+      >
+        {words}
+      </button>
+    ) : (
+      <span className="bd-state">{words}</span>
+    );
+  }
   if (r.state === "approval") return <span className="bd-state">Needs you</span>;
   if (r.state === "checking") return <span className="bd-state is-idle">Checking fit</span>;
-  if (r.state === "ready") return site ? <span className="bd-state is-idle">Not queued</span> : <span className="bd-state">Ready</span>;
+  if (r.state === "ready") return <span className="bd-state is-idle">Not queued</span>;
   return <span className="bd-state is-idle">Not applying</span>;
 }
 
@@ -124,12 +140,12 @@ export function BoardView() {
     setPosted("all");
     setPlatform("all");
   };
-  const blockers = [
-    !snapshot.config.workers_enabled && "application workers are disabled",
-    !snapshot.control.auto_submit && "automatic submission is off (Settings › Applying)",
-    snapshot.control.paused && "AXIOM is stopped (press Resume applications at the top)",
-  ].filter(Boolean) as string[];
-  const canApply = blockers.length === 0;
+  // A job in line waits for these, so say so here: without it, a row reads In queue and nothing ever starts.
+  const stalled = snapshot.control.paused
+    ? "AXIOM is stopped, so jobs in the queue wait until you press Resume applications."
+    : !snapshot.control.auto_submit
+      ? "Sending is off, so jobs in the queue wait until you turn it on."
+      : "";
 
   const again = async () => {
     await board.refresh();
@@ -204,12 +220,30 @@ export function BoardView() {
         await board.refresh();
         return r;
       },
-      (r) => r && `Searching ${plural(r.queued_sources, "employer board")} and the new-grad lists. New jobs appear here as they arrive.`,
+      (r) => r && `Searching ${r.queued_sources ? plural(r.queued_sources, "employer board") + " and " : ""}the new-grad lists. New jobs appear here as they arrive.`,
     );
   const searching = (b?.scanning ?? 0) > 0;
+  // The numbers move while a search runs: read them sooner than the page's fifteen seconds.
+  useEffect(() => {
+    if (!searching) return;
+    const timer = window.setInterval(reread, 4000);
+    return () => window.clearInterval(timer);
+  }, [searching, reread]);
   // What the search has done so far, in the words the person would use: boards read of all.
   const progress = b && searching && b.scan_total ? `${(b.scan_read ?? 0).toLocaleString()} of ${b.scan_total.toLocaleString()} employer boards read` : "";
   const span = !b ? "" : b.window >= 720 ? "30 days" : b.window >= 168 ? "7 days" : "48 hours";
+  const everSearched = !!b?.searched_at || searching;
+  const inTheQueue = b?.in_queue ?? 0;
+  // How many wait, and the way to them: the answer to "where did it go?".
+  const queueLine = inTheQueue > 0 && (
+    <>
+      {" "}
+      <button type="button" className="ax-link" onClick={() => go({ view: "queue" })}>
+        {plural(inTheQueue, "job")} in the queue
+      </button>
+      .
+    </>
+  );
 
   const columns: Column<BoardRow>[] = [
     {
@@ -241,7 +275,7 @@ export function BoardView() {
             {r.score != null && <span className="mono">Fit {r.score}</span>}
             <span>{r.dated ? ago(r.posted_at, now) : `Found ${ago(r.posted_at, now)}`}</span>
             <span>{platformName(r.ats)}</span>
-            <StateCell r={r} asked={inLine(r)} site={sites} />
+            <StateCell r={r} asked={inLine(r)} />
           </span>
         </button>
         {r.more > 0 && (
@@ -259,7 +293,7 @@ export function BoardView() {
         </div>
       ),
     },
-    { key: "fit", header: "Fit", num: true, hideBelow: 600, cell: (r) => (r.score == null ? "—" : r.score) },
+    { key: "fit", header: <span title="How closely this job matches your profile, out of 100">Fit</span>, num: true, hideBelow: 600, cell: (r) => (r.score == null ? "—" : r.score) },
     {
       key: "why",
       header: fit === "match" ? "Why it fits" : "Why",
@@ -269,12 +303,12 @@ export function BoardView() {
       min: 180,
       cell: (r) => (
         <span className="bd-line" title={r.line}>
-          {r.line}
+          {r.line || "—"}
         </span>
       ),
     },
     { key: "when", header: "Posted, and where from", hideBelow: 860, cell: (r) => <When r={r} now={now} /> },
-    { key: "state", header: "Status", hideBelow: 600, cell: (r) => <StateCell r={r} asked={inLine(r)} site={sites} /> },
+    { key: "state", header: "Status", hideBelow: 600, cell: (r) => <StateCell r={r} asked={inLine(r)} onQueue={() => go({ view: "queue" })} /> },
     {
       key: "act",
       header: <span className="sr-only">Posting and queue</span>,
@@ -332,7 +366,7 @@ export function BoardView() {
 
   const all = (label: string, facet?: BoardFacet[], rename?: (f: BoardFacet) => string) => [
     { value: "all", label },
-    ...(facet ?? []).map((f) => ({ value: f.value, label: rename ? rename(f) : f.label, count: f.count })),
+    ...(facet ?? []).filter((f) => f.count > 0).map((f) => ({ value: f.value, label: rename ? rename(f) : f.label, count: f.count })),
   ];
   const keep = (value: string, options: { value: string; label: string; count?: number }[]) =>
     value === "all" || options.some((o) => o.value === value) ? options : [...options, { value, label: value, count: 0 }];
@@ -379,36 +413,28 @@ export function BoardView() {
         <Button variant="secondary" onClick={() => setAdding(true)}>
           Add a board
         </Button>
-        <Button loading={searching || pending === "scan"} disabled={pending !== null || !b?.enabled || !snapshot.config.workers_enabled} onClick={scan} icon={<RefreshCw size={14} aria-hidden="true" />}>
-          {searching ? "Searching…" : "Search now"}
+        <Button
+          loading={searching || pending === "scan"}
+          disabled={pending !== null || !b?.enabled || !snapshot.config.workers_enabled}
+          title={!snapshot.config.workers_enabled ? "Application workers are off in this installation, so nothing can search." : b && !b.enabled ? "Job search is off." : undefined}
+          onClick={scan}
+          icon={<RefreshCw size={14} aria-hidden="true" />}
+        >
+          {pending === "scan" ? "Starting the search…" : searching ? "Searching…" : "Search now"}
         </Button>
       </TopActions>
       {b && !planning && sites && (
         <TopLine>
-          {plural(b.all, "posting")} on a company's own site, not a platform AXIOM knows.
+          {plural(b.all, "posting")} on a company's own site, not a platform AXIOM knows.{queueLine}
         </TopLine>
       )}
       {b && !planning && !sites && (
         <TopLine>
-          {b.all.toLocaleString()} open US postings from the last {span}, with closed ones and duplicates left out
-          {progress ? `. Searching: ${progress}.` : b.searched_at ? `. Last searched ${ago(b.searched_at, now)}.` : "."}{" "}
-          {grouped && company === "all" ? (
-            <>
-              Each company shows its best {b.per_company ?? 3} (
-              <button type="button" className="ax-link" onClick={() => setGrouped(false)}>
-                show every job
-              </button>
-              ).{" "}
-            </>
-          ) : !grouped ? (
-            <>
-              All jobs are shown (
-              <button type="button" className="ax-link" onClick={() => setGrouped(true)}>
-                group by company
-              </button>
-              ).{" "}
-            </>
-          ) : null}
+          {everSearched || b.all > 0
+            ? `${b.all.toLocaleString()} open US ${b.all === 1 ? "posting" : "postings"} from the last ${span}, with closed ones and duplicates left out.`
+            : "No search has run yet."}
+          {progress ? ` Searching: ${progress}.` : b.searched_at ? ` Last searched ${ago(b.searched_at, now)}.` : ""}
+          {queueLine}{" "}
           <button type="button" className="ax-link" onClick={() => go({ view: "settings", tab: "discovery" })}>
             What it looks for
           </button>
@@ -419,6 +445,20 @@ export function BoardView() {
           Job search is off, so no new postings arrive.
         </Notice>
       )}
+      {stalled && (b?.in_queue ?? 0) > 0 && (
+        <Notice
+          tone="warn"
+          action={
+            snapshot.control.paused ? undefined : (
+              <button type="button" className="ax-link" onClick={() => go({ view: "settings", tab: "applying" })}>
+                Open Settings
+              </button>
+            )
+          }
+        >
+          {stalled}
+        </Notice>
+      )}
       <div className="bd-search">
         <div className="bd-section">
           <Segmented<Section>
@@ -426,7 +466,7 @@ export function BoardView() {
             value={section}
             onChange={setSection}
             options={[
-              { value: "main", label: "Known platforms" },
+              { value: "main", label: `Main list${b?.main != null ? " · " + b.main.toLocaleString() : ""}` },
               { value: "sites", label: `Company sites${b?.sites != null ? " · " + b.sites.toLocaleString() : ""}` },
             ]}
           />
@@ -439,7 +479,7 @@ export function BoardView() {
           <Listbox prefix="Level" label="Level" value={level} options={keep(level, all("Any", b?.facets.level))} onChange={setLevel} />
           <Listbox prefix="Company" label="Company" value={company} options={keep(company, all("Any", b?.facets.company))} onChange={setCompany} />
           <Listbox prefix="Location" label="Location" value={place} options={keep(place, all("Any", b?.facets.place))} onChange={setPlace} />
-          <Listbox prefix="Posted" label="Posted" value={posted} options={all("Any", b?.facets.posted)} onChange={setPosted} />
+          <Listbox prefix="Posted" label="Posted" value={posted} options={keep(posted, all("Any", b?.facets.posted))} onChange={setPosted} />
           <Listbox prefix="Platform" label="Platform" value={platform} options={keep(platform, all("Any", b?.facets.platform, (f) => platformName(f.value)))} onChange={setPlatform} />
           {filtered && (
             <Button variant="ghost" size="sm" icon={<FilterX size={14} aria-hidden="true" />} onClick={clear}>
@@ -465,6 +505,25 @@ export function BoardView() {
         onSelectedChange={selection.replace}
         canSelect={(r) => r.can_add || r.state === "queue"}
         selectAll={b && !planning ? { count: b.selectable, run: selectAll, busy: pending === "select" } : undefined}
+        idle={
+          b && !planning && company === "all" ? (
+            grouped ? (
+              <span className="bd-group">
+                Each company shows its best {b.per_company ?? 3}.{" "}
+                <button type="button" className="ax-link" onClick={() => setGrouped(false)}>
+                  Show every job
+                </button>
+              </span>
+            ) : (
+              <span className="bd-group">
+                Every job is shown.{" "}
+                <button type="button" className="ax-link" onClick={() => setGrouped(true)}>
+                  Group by company
+                </button>
+              </span>
+            )
+          ) : undefined
+        }
         rowLabel={(r) => `${r.title} at ${r.company}`}
         loading={(!b || planning) && !board.error}
         error={board.error && !b ? <LoadError error={board.error} retry={board.refresh} /> : undefined}
@@ -483,12 +542,41 @@ export function BoardView() {
           </>
         }
         empty={
-          <Empty
-            icon={filtered ? SearchX : Radar}
-            title={filtered ? "No jobs match these filters" : sites ? "No company-site jobs" : searching ? "Searching for new jobs" : "No open postings right now"}
-            hint={filtered ? "Clear a filter to see more." : sites ? "Jobs on a company's own site appear here instead of the main list." : searching ? `${progress ? progress + ". " : ""}Jobs appear here as they arrive.` : `Only US roles posted in the last ${span} are listed. The next scheduled search checks again.`}
-            action={filtered ? <Button size="sm" onClick={clear}>Clear the filters</Button> : undefined}
-          />
+          (() => {
+            const clearing = <Button size="sm" onClick={clear}>Clear the filters</Button>;
+            if (filtered) return <Empty icon={SearchX} title="No jobs match these filters" hint="Clear a filter to see more." action={clearing} />;
+            if (sites) return <Empty icon={Radar} title="No company-site jobs" hint="Jobs on a company's own site appear here instead of the main list." />;
+            if (searching) return <Empty icon={Radar} title="Searching for new jobs" hint={`${progress ? progress + ". " : ""}Jobs appear here as they arrive.`} />;
+            // Something was found, none of it a fit: "no open postings" would contradict the count above.
+            if (b && b.all > 0)
+              return (
+                <Empty
+                  icon={Radar}
+                  title="No good fits right now"
+                  hint={`${plural(b.all, "open posting")} found, none close to your profile.`}
+                  action={<Button size="sm" onClick={() => setFit("all")}>Show everything found</Button>}
+                />
+              );
+            if (!snapshot.profile.target_roles?.length)
+              return (
+                <Empty
+                  icon={Radar}
+                  title="Tell AXIOM which roles you want"
+                  hint="It searches employer boards for the roles in your profile."
+                  action={<Button size="sm" onClick={() => go({ view: "profile" })}>Open Profile</Button>}
+                />
+              );
+            if (b && !b.searched_at)
+              return (
+                <Empty
+                  icon={Radar}
+                  title="No search has run yet"
+                  hint="Search now reads employer boards for the roles in your profile. It takes a few minutes, and jobs appear here as they arrive."
+                  action={b.enabled && snapshot.config.workers_enabled ? <Button size="sm" loading={pending === "scan"} disabled={pending !== null} onClick={scan}>Search now</Button> : undefined}
+                />
+              );
+            return <Empty icon={Radar} title="No open postings right now" hint={`Only US roles posted in the last ${span} are listed. The next scheduled search checks again.`} />;
+          })()
         }
       />
       </ApplyChoices>
@@ -496,6 +584,7 @@ export function BoardView() {
         open={asking !== null}
         count={selection.ids.length}
         title={asking === "front" ? `Move ${plural(selection.ids.length, "job")} to the front?` : sites ? `Apply to ${plural(selection.ids.length, "company-site job")}?` : undefined}
+        confirmLabel={asking === "front" ? `Move ${plural(selection.ids.length, "job")}` : sites ? `Apply to ${plural(selection.ids.length, "job")}` : undefined}
         warning={sites ? SITES_WARNING : undefined}
         onClose={() => setAsking(null)}
         onConfirm={() => {

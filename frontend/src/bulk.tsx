@@ -198,7 +198,7 @@ export function ApplyOutcomes({
 
 // Said before anything joins the line, because each of these becomes a real application to a real employer. With sending off the
 // jobs would only wait, so that is said too, with the way to turn it on in the same press.
-export function ConfirmQueue({ open, count, onClose, onConfirm, title, warning }: { open: boolean; count: number; onClose: () => void; onConfirm: () => void; title?: string; warning?: string }) {
+export function ConfirmQueue({ open, count, onClose, onConfirm, title, warning, confirmLabel }: { open: boolean; count: number; onClose: () => void; onConfirm: () => void; title?: string; warning?: string; confirmLabel?: string }) {
   const { snapshot, refresh } = useWorkspace();
   const { pending, run } = useAction();
   const sending = snapshot.control.auto_submit;
@@ -222,7 +222,7 @@ export function ConfirmQueue({ open, count, onClose, onConfirm, title, warning }
           </Button>
           {sending ? (
             <Button variant="primary" onClick={onConfirm}>
-              {`Queue ${noun}`}
+              {confirmLabel ?? `Queue ${noun}`}
             </Button>
           ) : (
             <>

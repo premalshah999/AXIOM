@@ -165,6 +165,10 @@ export function AddJobDialog() {
             <p className="ax-error" role="alert">
               {error}
             </p>
+          ) : text.trim() && !links.length ? (
+            <p className="ax-error" role="alert">
+              That isn't a web link. Copy the whole address from your browser, starting with https://.
+            </p>
           ) : (
             <p className="ax-hint">
               {links.length

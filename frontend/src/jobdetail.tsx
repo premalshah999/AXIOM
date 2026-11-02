@@ -199,17 +199,31 @@ function nextStep(state: string, paused: boolean, place?: QueuePlace | null, hol
 
 /** The status first, in words, with what to do next inside it. */
 function StatusBlock({ state, reason, earlier, hold, place, next, children }: { state: string; reason?: string; earlier?: string; hold?: Hold | null; place?: QueuePlace | null; next?: string; children?: React.ReactNode }) {
-  const { snapshot } = useWorkspace();
+  const { snapshot, go } = useWorkspace();
   const info = stateInfo(state);
+  // A job with a place in line reads In queue; a Ready one without one is not in it, whatever the lists call Ready.
+  const word = place || state === "pending:waiting" ? "In queue" : state === "job:ready" ? "Not queued" : undefined;
   return (
     <section className="dr-status" aria-label="Status">
       {earlier && <p className="ax-note">Earlier attempt, {earlier}</p>}
       <p className="dr-status-word">
-        {hold ? <StatusPill state={state} label={hold.label ?? "Held"} tone="hold" /> : <StatusPill state={state} />}
+        {hold ? <StatusPill state={state} label={hold.label ?? "Held"} tone="hold" /> : <StatusPill state={state} label={word} />}
       </p>
       {(hold ? hold.reason : info.explain) && <p className="dr-status-why">{hold ? hold.reason : info.explain}</p>}
       {!hold && reason && <p className="dr-status-reason">{reason}</p>}
-      {!earlier && <p className="dr-next">{next || nextStep(state, snapshot.control.paused, place, hold, snapshot.config.apply_mode)}</p>}
+      {!earlier && (
+        <p className="dr-next">
+          {next || nextStep(state, snapshot.control.paused, place, hold, snapshot.config.apply_mode)}
+          {place && (
+            <>
+              {" "}
+              <button type="button" className="ax-link" onClick={() => go({ view: "queue" })}>
+                Open the queue
+              </button>
+            </>
+          )}
+        </p>
+      )}
       {children}
     </section>
   );

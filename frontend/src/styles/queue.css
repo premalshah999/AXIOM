@@ -282,6 +282,26 @@
   align-items: center;
   gap: 4px;
 }
+/* How a job is applied to, in a row: it keeps its width, or the table squeezes it to an empty box. */
+.ax-act .tl-choice.is-compact {
+  flex: none;
+  flex-wrap: nowrap;
+}
+.ax-act .tl-choice.is-compact .tl-choice-pick {
+  flex: none;
+  width: 108px;
+}
+.ax-act .tl-choice.is-compact .ax-control {
+  height: 28px;
+  min-height: 28px;
+  padding-block: 0;
+  font-size: var(--text-meta);
+}
+.bd-group {
+  color: var(--ink-2);
+  font-size: var(--text-meta);
+  font-weight: 400;
+}
 @container ax-table (max-width: 599px) {
   .bd-job {
     align-items: start;

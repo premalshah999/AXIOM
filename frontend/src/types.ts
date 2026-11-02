@@ -808,6 +808,10 @@ export type BoardPage = {
   pages: number;
   size: number;
   all: number;
+  /** How many jobs the main list holds, whichever section is showing. */
+  main?: number;
+  /** Every job waiting in line, whichever list it came from: the number the Queue page opens. */
+  in_queue?: number;
   hidden: { blank: number; stale: number; closed: number; applied: number; twin: number };
   searched_at: string | null;
   scanning: number;

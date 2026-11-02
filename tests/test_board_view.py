@@ -115,3 +115,31 @@ def test_the_board_says_how_many_boards_of_the_search_are_read(service):
     service.db.set_setting("job_board_scan:old", {"state": "complete", "started_at": "2026-01-01T00:00:00+00:00"})
     got = rows(service)
     assert (got["scanning"], got["scan_read"], got["scan_total"]) == (2, 2, 4)
+
+
+def test_a_search_shows_at_once_though_the_board_itself_was_read_earlier(service):
+    """Search now answered "Searching 667 boards" and the page said nothing for up to half a minute: the cleaned board is kept for seconds."""
+    setup(service)
+    listing(service, "a")
+    rows(service, fit="all")  # the cleaned board, read and kept
+    before = board_view.page(service, fit="all")
+    assert before["scanning"] == 0 and before["scan_total"] == 0
+    at = datetime.now(UTC).isoformat()
+    service.db.set_setting("job_board_requested", {"at": at})
+    for n, state in enumerate(("queued", "running", "complete")):
+        service.db.set_setting(f"job_board_scan:s{n}", {"state": state, "started_at": at})
+    now = board_view.page(service, fit="all")
+    assert (now["scanning"], now["scan_read"], now["scan_total"]) == (2, 1, 3)
+    assert now["searched_at"] == at
+
+
+def test_the_page_says_how_many_wait_in_the_queue_and_how_many_the_main_list_holds(service):
+    from jobpilot.owner_apply import KEY
+
+    setup(service)
+    listing(service, "a", company="Alpha Example")
+    listing(service, "b", company="Beta Example", ats="custom")
+    service.db.set_setting(KEY + "a", {"at": datetime.now(UTC).isoformat(), "code": "queue", "reason": "", "not_before": datetime.now(UTC).isoformat()})
+    got = rows(service, fit="all", section="sites")
+    assert got["all"] == 1 and got["main"] == 1 and got["sites"] == 1
+    assert got["in_queue"] == 1

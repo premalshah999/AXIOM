@@ -235,9 +235,25 @@ def collect(service):
     sites = [row for row in out.values() if is_company_site(row["ats"])]
     at = datetime.now(UTC)
     window = at - timedelta(hours=cfg.max_age_hours)
-    with db.session() as s:
-        from .db import Setting
+    return {
+        "rows": rows,
+        "sites": sites,
+        "hidden": hidden,
+        "in_queue": len(positions),
+        "enabled": cfg.enabled,
+        "window": cfg.max_age_hours,
+        "live_window": cfg.window_hours("greenhouse"),
+        "oldest": window.isoformat(),
+    }
 
+
+def scan_state(db):
+    """How the search stands: read per request, not kept with the cleaned board, or Search now answered "Searching 667 boards" while the
+    page said nothing for up to half a minute and its progress moved in jumps of that size."""
+    from .db import Setting
+
+    at = datetime.now(UTC)
+    with db.session() as s:
         started = s.scalar(
             select(func.max(Setting.value["started_at"].as_string())).where(Setting.key.startswith("job_board_scan:", autoescape=True))
         )
@@ -260,17 +276,10 @@ def collect(service):
             ) or 0
     requested = db.get_setting("job_board_requested", {}).get("at")
     return {
-        "rows": rows,
-        "sites": sites,
-        "hidden": hidden,
         "searched_at": max(filter(None, (started, requested)), default=None),
         "scanning": scanning or 0,
         "scan_read": read,
         "scan_total": total,
-        "enabled": cfg.enabled,
-        "window": cfg.max_age_hours,
-        "live_window": cfg.window_hours("greenhouse"),
-        "oldest": window.isoformat(),
     }
 
 
@@ -327,7 +336,7 @@ def page(service, q="", role="all", company="all", place="all", posted="all", pl
     data = board(service).ready(service)
     if data is None:
         return {
-            "planning": True, "rows": [], "total": 0, "page": 1, "pages": 1, "size": size, "all": 0, "sites": 0, "section": section, "hidden": {}, "searched_at": None, "scanning": 0, "scan_read": 0, "scan_total": 0,
+            "planning": True, "rows": [], "total": 0, "page": 1, "pages": 1, "size": size, "all": 0, "main": 0, "sites": 0, "in_queue": 0, "section": section, "hidden": {}, "searched_at": None, "scanning": 0, "scan_read": 0, "scan_total": 0,
             "enabled": True, "window": 720, "selectable": 0, "ids": [], "facets": dict.fromkeys(("fit", "role", "company", "place", "platform", "posted", "level"), []),
         }
     rows = data["sites"] if section == "sites" else data["rows"]
@@ -416,15 +425,14 @@ def page(service, q="", role="all", company="all", place="all", posted="all", pl
         **answer,
         "selectable": sum(1 for row in shown if actionable(row)),
         "all": len(rows),
+        "main": len(data["rows"]),
         "sites": len(data["sites"]),
+        "in_queue": data["in_queue"],
         "section": section,
         "grouped": grouped,
         "per_company": PER_COMPANY,
         "hidden": data["hidden"],
-        "searched_at": data["searched_at"],
-        "scanning": data["scanning"],
-        "scan_read": data["scan_read"],
-        "scan_total": data["scan_total"],
+        **scan_state(service.db),
         "enabled": data["enabled"],
         "window": data["window"],
         "facets": {
