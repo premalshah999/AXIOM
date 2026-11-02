@@ -81,6 +81,7 @@ function Limits() {
   const c = useConnections();
   const limits = usePoll<Limits>((signal) => api("/limits", "GET", undefined, signal), 60000);
   const [draft, setDraft] = useState<Limits | null>(null);
+  const [aiFold, setAiFold] = useState(false);
   const { pending, run } = useAction();
   const stats = snapshot.stats || ({} as Snapshot["stats"]);
   const value = draft || limits.data;
@@ -148,7 +149,8 @@ function Limits() {
               )}
               {value && (
                 // The engine's own dials: out of the way of someone setting a daily limit.
-                <details className="ax-fold" open={!!tokenError}>
+                // Opens for a refused number and stays open once it is fixed: it used to shut in the person's face, mid-edit.
+                <details className="ax-fold" open={aiFold || !!tokenError} onToggle={(e) => setAiFold(e.currentTarget.open)}>
                   <summary>How much AI one application may use</summary>
                   <div className="st-fields">
                     <Input

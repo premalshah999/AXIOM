@@ -144,7 +144,7 @@ def typed(name, value):
     except Exception as exc:
         # The last line of a validation error is a link to its documentation, which is what the person used to read.
         first = (exc.errors() or [{}])[0] if hasattr(exc, "errors") else {}
-        bound = first.get("ctx") or {}
+        bound = {k: int(v) if float(v).is_integer() else v for k, v in (first.get("ctx") or {}).items() if isinstance(v, (int, float))}
         why = (
             f"must be {bound['le']} or less" if "le" in bound
             else f"must be {bound['ge']} or more" if "ge" in bound

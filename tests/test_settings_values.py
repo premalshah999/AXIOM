@@ -16,7 +16,7 @@ def config(tmp_path, **env):
     ({"daily_application_limit": "1001"}, "Applications per day must be 1000 or less"),
     ({"daily_application_limit": "0"}, "Applications per day must be 1 or more"),
     ({"daily_application_limit": "ten"}, "Applications per day isn't a valid value"),
-    ({"daily_budget_usd": "0"}, "must be more than 0"),
+    ({"daily_budget_usd": "0"}, "must be more than 0$"),
     ({"max_model_calls": "301"}, "AI calls per application must be 300 or less"),
     ({"captcha_timeout": "5"}, "Seconds to wait for a solve must be 10 or more"),
     ({"captcha_image_rounds": "9"}, "Paid image rounds per puzzle must be 8 or less"),

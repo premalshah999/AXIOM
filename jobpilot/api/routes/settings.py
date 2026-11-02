@@ -54,8 +54,12 @@ def router(service) -> APIRouter:
         from ... import connections
         from ...agent_settings import current
 
-        used = current(db, config).models.answers
-        return {**connections.status(config), "provider": used, "model_ready": bool(getattr(config, used + "_api_key", ""))}
+        status = connections.status(config)
+        try:
+            used = current(db, config).models.answers
+        except ValueError:  # A row this build cannot read must not take the keys page with it.
+            return status
+        return {**status, "provider": used, "model_ready": bool(getattr(config, used + "_api_key", ""))}
 
     def save_values(values):
         from ... import connections
