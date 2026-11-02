@@ -90,6 +90,7 @@ export function AggressiveDrafts({ workspaceId, jobId, needsUpdate, disabled, on
   const unapproved = data.drafts.filter(d => data.selected_drafts.includes(d.id) && !d.confirmed).length;
   return <section className="ag-drafts" aria-label="Aggressive project drafts" aria-busy={busy}>
     <p className="ag-warning" role="note">{INSPIRED_WARNING}</p>
+    <p className="ag-meta" role="note">Figures in [target: ...] brackets are inspired values, not results. Replace each with what you really measure.</p>
     <div className="ag-heading">
       <div><h2>Choose your projects</h2><p>Drafts are included in this preview. Keep them, or switch to projects from your master resume.</p></div>
       <a className="ax-btn" target="_blank" rel="noreferrer" href={`/api${path(data.id)}/preview.pdf?revision=${data.revision}`}>Preview PDF</a>
