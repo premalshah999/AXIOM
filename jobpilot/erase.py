@@ -191,20 +191,30 @@ def on_this_computer(url):
     return urlsplit(url).hostname in {"127.0.0.1", "localhost", "::1"}
 
 
+# Far more rounds than a cluster has log files: each one finishes a file, and the loop ends when the old ones are gone.
+LOG_ROUNDS = 400
+
+
 def forget_write_ahead_log(engine, say):
-    """Dropping a table leaves its rows in PostgreSQL's write-ahead log, kept for reuse, until new writes happen to cover them: a
-    resume's text was still readable in pg_wal after everything was deleted. With recycling off, a checkpoint removes the finished
-    segments instead of keeping them. A failure here leaves the database empty as promised, so it is reported and nothing more."""
+    """Dropping a table leaves its rows behind: in PostgreSQL's write-ahead log, whose finished files are kept and renamed for reuse
+    until new writes happen to cover them, and in the samples pg_statistic took of each column. A resume's text was still readable in
+    pg_wal after everything was deleted. VACUUM FULL rewrites the catalogs; then, with recycling off, each round finishes one log file
+    and a checkpoint removes it instead of keeping it, until none of the old files is left. A failure here leaves the database empty
+    as promised, so it is reported and nothing more."""
     from sqlalchemy import text
 
     try:
         with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            connection.execute(text("VACUUM FULL"))
             connection.execute(text("ALTER SYSTEM SET wal_recycle = off"))
             connection.execute(text("SELECT pg_reload_conf()"))
             time.sleep(1)
-            for _ in range(3):
+            for _ in range(LOG_ROUNDS):
+                connection.execute(text("CHECKPOINT"))
                 connection.execute(text("SELECT pg_switch_wal()"))
                 connection.execute(text("CHECKPOINT"))
+                if connection.scalar(text("SELECT count(*) FROM pg_ls_waldir() WHERE name ~ '^[0-9A-F]{24}$'")) <= 2:
+                    break
             connection.execute(text("ALTER SYSTEM RESET wal_recycle"))
             connection.execute(text("SELECT pg_reload_conf()"))
     except Exception as exc:
