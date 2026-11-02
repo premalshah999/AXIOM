@@ -8,8 +8,9 @@ from .master import measure_fill
 
 PAGE_PT = 792
 TARGET_GAP_PT = 16  # About 1.5 lines of 9 pt text: the target state, not a problem to fix.
-MAX_WIDEN = {"section_gap": 14.0, "entry_gap": 8.0, "bullet_gap": 3.5}
-LINE_SPACING_STEPS = (1.08, 1.15)  # Once the gaps are at their limit. Beyond this it stops looking like a resume.
+# A short resume stays tight (owner, 2026-11-02: "tighten the spacing"): spacing never grows far to fill a page.
+MAX_WIDEN = {"section_gap": 5.0, "entry_gap": 2.0, "bullet_gap": 0.5}
+LINE_SPACING_STEPS = ()
 # Tighter and tighter, sizes untouched. Past the last step the content really doesn't fit one page.
 TIGHTER = (
     {"section_gap": 5, "entry_gap": 2, "bullet_gap": 0.5},

@@ -25,6 +25,7 @@ export type DraftWorkspace = {
   report?: {
     critique_text?: string;
     overflow_message?: string;
+    drafts_left_out?: { title: string; problems: string[] }[];
     cost?: { actual_usd: number | null };
     pillars_missing?: string[];
   };
@@ -89,6 +90,7 @@ export function AggressiveDrafts({ workspaceId, jobId, needsUpdate, disabled, on
   const unapproved = data.drafts.filter(d => data.selected_drafts.includes(d.id) && !d.confirmed).length;
   return <section className="ag-drafts" aria-label="Aggressive project drafts" aria-busy={busy}>
     <p className="ag-warning" role="note">{INSPIRED_WARNING}</p>
+    <p className="ag-meta" role="note">Figures in [target: ...] brackets are inspired values, not results. Replace each with what you really measure.</p>
     <div className="ag-heading">
       <div><h2>Choose your projects</h2><p>Drafts are included in this preview. Keep them, or switch to projects from your master resume.</p></div>
       <a className="ax-btn" target="_blank" rel="noreferrer" href={`/api${path(data.id)}/preview.pdf?revision=${data.revision}`}>Preview PDF</a>
@@ -99,6 +101,7 @@ export function AggressiveDrafts({ workspaceId, jobId, needsUpdate, disabled, on
     {error && <p className="ag-error" role="alert">{error}</p>}
     {needsUpdate && <div className="ag-heading"><p>Project choices changed. Update the PDF, then review it before applying. This uses no AI.</p><Button disabled={busy || disabled} onClick={updatePdf}>Update project PDF</Button></div>}
     {data.report?.overflow_message && <p className="ag-error">{data.report.overflow_message}</p>}
+    {data.report?.drafts_left_out?.length ? <p className="ag-meta">{data.report.drafts_left_out.length} project draft{data.report.drafts_left_out.length === 1 ? " was" : "s were"} left out because {data.report.drafts_left_out.length === 1 ? "it" : "they"} didn't pass the checks.</p> : null}
     <details className="ag-brief"><summary>What this job needs</summary>
       <p>{data.brief.product}</p><ol>{data.brief.proof_points.map(p => <li key={p}>{p}</li>)}</ol>
       <p>{data.brief.seniority}</p><p>{data.brief.real_stack.join(", ")}</p>
