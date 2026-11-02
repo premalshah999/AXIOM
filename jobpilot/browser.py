@@ -30,6 +30,7 @@ from .posting_match import (
     could_carry_application,
     other_posting_address,
     role_heading,
+    still_applying,
     unrelated_posting_number,
 )
 from .redaction import redact_data, redact_page
@@ -516,6 +517,14 @@ def header_token_endpoint(parts):
 
 # Unfinished outcomes whose tab closes once its draft is saved; their next run reopens the saved route.
 RELEASED_TAB_STATES = {"waiting_browser", "timed_out", "needs_review", "waiting_answer", "stopped"}
+# How a run ends when a retry can start it again from the job's own Apply.
+RESTARTABLE_ENDS = {"waiting_browser", "timed_out", "failed"}
+# Ends that named what is on the page: a security check, an account's refusal, a wait the site asked for, a mail wait, a question for the
+# owner. None of them is a page nothing could read.
+PAGE_WAS_READ = {"email_wait", "email_verification", "captcha", "account", "missing_fact", "social_login_only", "personal_test",
+                 "sensitive_id", "ineligible", "employer_limit", "other_posting"}  # fmt: skip
+PAGE_WAS_READ_CAUSES = {"security_challenge", "reset_cooldown", "sender_busy", "email_matched", "account_identity_conflict", "authentication",
+                        "account_acceptance", "posting_unavailable"}  # fmt: skip
 
 
 def request_shape(request):
@@ -2076,6 +2085,10 @@ class BrowserEngine:
             return self.result
         finally:
             self.settle_on_receipt_page()
+            try:
+                await self.settle_possible_send()
+            except Exception:
+                pass  # The run's own result stands; the commit's guards still hold.
             if getattr(self, "result", None) and hasattr(self, "form"):
                 self.result["browser_checkpoint"] = self.form.checkpoint_state(
                     self.run_record["packet"]["resume_sha"]
@@ -2859,7 +2872,7 @@ class BrowserEngine:
     def note_possible_send(self, request, response):
         """A write out of a form that holds answers may be the application itself, whatever its button was called (posting_match)."""
         watch, form = getattr(self, "posting_watch", None), getattr(self, "form", None)
-        if watch is None or watch.sent_like or form is None or response.status >= 400 or not self.real_write(request):
+        if watch is None or form is None or response.status >= 400 or not self.real_write(request):
             return
         if not (form.ledger or form.uploaded or getattr(form, "resume_on_file", False)):
             return
@@ -2867,7 +2880,9 @@ class BrowserEngine:
             body = request.post_data_buffer
         except Exception:
             body = b""  # Chrome withholds bodies that carry file bytes.
-        watch.sent_like = could_carry_application(request.url, body)
+        if could_carry_application(request.url, body):
+            watch.sent_like = True
+            watch.step_after_write = False  # This write's page is yet to be read.
 
     def form_post(self, response):
         """A step's form submission before the commit: where it went, the status, and the form's field names and
@@ -4763,6 +4778,48 @@ class BrowserEngine:
                 return
             settled = self.received_application()
         except Exception:  # A page or database that is gone: the run's own result stands.
+            return
+        for key in ("recovery_cause", "blocker_type", "recoverable", "waiting_kind", "wait_handle"):
+            result.pop(key, None)
+        result.update(settled)
+
+    async def settle_possible_send(self):
+        """A write that may have been the application went out with nothing armed (a step's Continue can be the employer's real submit), and
+        the run is ending where a retry would start it again: the model is down, its time ran out, or nothing could read the page. Only the
+        model reads such a page, so what it couldn't read stayed "waiting_browser", and the retry applied a second time. The page says what
+        it can: its acknowledgement confirms it, its next step is a draft, and anything else is uncertain and isn't sent again. The result
+        changes in place, because the caller holds this same dict; a run cancelled with no result leaves its end for the worker."""
+        result = getattr(self, "result", None)
+        watch = getattr(self, "posting_watch", None)
+        if watch is None or not watch.sent_like or getattr(self, "armed", False) or self.steering():
+            return
+        if result and (
+            result.get("state") not in RESTARTABLE_ENDS
+            or result.get("waiting_kind") == "email"
+            or result.get("blocker_type") in PAGE_WAS_READ
+            or result.get("recovery_cause") in PAGE_WAS_READ_CAUSES
+        ):
+            return
+        try:
+            shown = await asyncio.wait_for(self.form.scan(), 6)
+            if not (shown.get("fields") or shown.get("controls") or str(shown.get("text") or "").strip()):
+                shown = None  # A blank tab reads as nothing: a crash's, not an employer's.
+        except Exception:
+            shown = None
+        # A tab that's gone can't say it holds no receipt, but the run may already have read this write's page: its next step (a crash mid-form).
+        if still_applying(shown) or (shown is None and watch.step_after_write):
+            return
+        settled = await self.page_acknowledged() if shown is not None else None
+        settled = settled or {
+            "state": "submission_unknown",
+            "reason": "A form went to the employer, and nothing could read the page after it, which may be the employer's receipt. It isn't sent again",
+            "blocker_type": "possible_send",
+            "receipt": {**((result or {}).get("receipt") or {}), "type": "possible_send"},
+            "diagnostics": {**((result or {}).get("diagnostics") or {}), "ended_as": (result or {}).get("state", ""), "ended_because": str((result or {}).get("reason") or "")[:200]},
+        }
+        self.emit("possible_send", "A form may have been sent, and nothing could read the page after it", {"settled": settled["state"]})
+        if result is None:
+            self.possible_send_end = settled
             return
         for key in ("recovery_cause", "blocker_type", "recoverable", "waiting_kind", "wait_handle"):
             result.pop(key, None)

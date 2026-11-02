@@ -465,6 +465,27 @@ def acknowledges_application(text):
     return False
 
 
+def still_applying(obs):
+    """After a write that may have been the application, with nothing able to read the page: the page in front is plainly a step of the
+    application, not what an employer shows once it has one. A form with its way forward, a review step, a sign-in or a registration, a
+    posting with its Apply. Nearly every multi-step form writes at each step, and a draft on its next step keeps its draft and its retry.
+    Anything else could be a receipt, and one that says so already is."""
+    if not obs or acknowledges_application(obs.get("text")):
+        return False
+    from .forms import FINAL
+
+    labels = [" ".join(str(control.get("label") or "").split()) for control in obs.get("controls") or ()]
+    if any(ENTRY_LABEL.fullmatch(label) for label in labels):
+        return True
+    fields = application_fields(obs)
+    if any(field.get("type") == "password" for field in fields):
+        return True
+    if fields:
+        return any(STEP_CONTROL.match(label) or FINAL.search(label) for label in labels)
+    # With nothing to answer, "Continue" is as likely the way back to the career site.
+    return any(FINAL.search(label) or re.match(r"\s*review\b", label, re.I) for label in labels)
+
+
 # The address of a write that carries no application.
 NOT_A_SEND = re.compile(
     r"log-?in|sign-?in|sign-?up|sso|oauth|auth|session|passw|regist|token|otp|verif|captcha|consent|cookie|collect|analytics|telemetry|"
@@ -510,6 +531,7 @@ class PostingWatch:
         self.job = job
         self.landing = landing  # The next page read is what the job's own address opened, with no click of ours between.
         self.sent_like = False  # A write that may have carried the application has gone out: nothing here opens the job again.
+        self.step_after_write = False  # The page after the newest such write was read, and it was the application's next step.
         self.own_urls = [u for u in dict.fromkeys((str(job.get("url") or ""), str(entry_url or ""))) if u]
         self.given_urls = tuple(self.own_urls)
         self.trail = bool(opened_fresh)
@@ -583,6 +605,8 @@ class PostingWatch:
         """A Verdict on the page at `url`. A page that passes while the run is on its trail becomes part of this job."""
         url = str(url or "")
         landing, self.landing = self.landing, False
+        if self.sent_like and not self.step_after_write and still_applying(obs):
+            self.step_after_write = True
         if not url.startswith("http"):
             return Verdict("ok")
         if why := self.other_role(url, obs, stated):

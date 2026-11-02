@@ -473,7 +473,7 @@ long_agreements = Scenario(
 resume_modal = Scenario(
     "a_popup_that_only_asks_for_the_resume",
     "\"Apply with resume\" over the form with one Upload button that opens the computer's file picker: its click changed nothing, four runs (Paylocity, CleanSlate 2026-11-01).",
-    {**simple_apply, "/apply/1": page("Apply", """<h1>Associate Engineer</h1>
+    {**simple_apply, "/apply/1": page("Apply", """<h1>Software Engineer</h1>
     <div class="modal in" role="dialog" aria-labelledby="t" id="gate" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:505"><div class="modal-dialog" style="background:#fff;width:420px;margin:120px auto;padding:20px">
       <h4 id="t">Apply with resume</h4><p>Upload your resume and we'll automatically fill out your application</p>
       <input accept=".doc,.docx,.pdf" id="force" type="file" style="display:none" onchange="document.getElementById('gate').remove()">
