@@ -648,7 +648,7 @@ SCENARIOS = [
 # A saved route bounced to a career home, and the browser opened another role from its list, applied to it, and booked that receipt as
 # the job it was given (2026-11-01). Each guard sits beside the closest legitimate case it must let through.
 
-OWN = "/careers/JobDetail/New-York-Software-Engineer/13045"
+OWN = "/careers/JobDetail/New-York-Software-Engineer/61001"
 
 
 def _roles_list(request=None):
@@ -657,22 +657,22 @@ def _roles_list(request=None):
         """<form action="/careers/OpenRoles" method="get" role="search"><label for="k">Keywords</label><input id="k" name="k">
         <label for="w">Location</label><input id="w" name="w"><button type="submit">Search</button></form><h2>Roles</h2>
         <p><a href="/careers/OpenRoles">See All Openings</a></p>
-        <p><a href="/careers/JobDetail/New-York-Data-Analyst/14102">Data Analyst</a></p>
-        <p><a href="/careers/JobDetail/Tokyo-Kubernetes-Tech-Lead/14350">Kubernetes Tech Lead</a></p>
-        <p><a href="/careers/JobDetail/London-Credit-Risk-Associate/14377">Credit Risk Associate</a></p>""",
+        <p><a href="/careers/JobDetail/New-York-Data-Analyst/62002">Data Analyst</a></p>
+        <p><a href="/careers/JobDetail/Tokyo-Kubernetes-Tech-Lead/62350">Kubernetes Tech Lead</a></p>
+        <p><a href="/careers/JobDetail/London-Credit-Risk-Associate/62377">Credit Risk Associate</a></p>""",
     )
 
 
 OTHER_ROLES = {
     "/careers": _roles_list,
     "/careers/OpenRoles": _roles_list,
-    "/careers/JobDetail/New-York-Data-Analyst/14102": page(
-        "Data Analyst", '<h1>Data Analyst</h1><p><a class="apply" href="/careers/ApplicationForm?jobId=14102">Apply</a></p>'
+    "/careers/JobDetail/New-York-Data-Analyst/62002": page(
+        "Data Analyst", '<h1>Data Analyst</h1><p><a class="apply" href="/careers/ApplicationForm?jobId=62002">Apply</a></p>'
     ),
     "/careers/ApplicationForm": page("Apply", "<h1>Application</h1>" + form(NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD, SUBMIT_BUTTON)),
     "/submit/1": THANKS,
 }
-ELSEWHERE = ("/careers/JobDetail/New-York-Data-Analyst/14102", "/careers/ApplicationForm")
+ELSEWHERE = ("/careers/JobDetail/New-York-Data-Analyst/62002", "/careers/ApplicationForm")
 
 
 def _bounce_once(request):
@@ -731,10 +731,10 @@ own_form_numbers_itself = Scenario(
 
 form_adds_number = Scenario(
     "apply_address_adds_an_id_the_board_lacks",
-    "The board address has no number and its Apply adds one (/careers/ApplicationForm?jobId=14102): no difference to read, so it goes through.",
+    "The board address has no number and its Apply adds one (/careers/ApplicationForm?jobId=62002): no difference to read, so it goes through.",
     {
         "/careers/software-engineer": page(
-            "Software Engineer", POSTING + '<p><a class="apply" href="/careers/ApplicationForm?jobId=14102">Apply</a></p>'
+            "Software Engineer", POSTING + '<p><a class="apply" href="/careers/ApplicationForm?jobId=62002">Apply</a></p>'
         ),
         "/careers/ApplicationForm": PLAIN_FORM,
         "/submit/1": THANKS,

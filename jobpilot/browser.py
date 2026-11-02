@@ -4066,7 +4066,7 @@ class BrowserEngine:
     async def stay_on_posting(self, obs):
         """While a run works on a job it never browses to another. A career home, a job list or another posting isn't this job: the
         only move from one is back to the job's own address, and when that doesn't help the run stops with nothing sent. A saved
-        route bounced to Two Sigma's home, and the navigator opened another role from its list and applied to it (2026-11-01; four
+        route bounced to a career home, and the navigator opened another role from its list and applied to it (2026-11-01; five
         more in the stored receipts). True when the page moved or a result was set: the caller reads the page again or ends."""
         watch = self.watching_posting()
         if watch is None:

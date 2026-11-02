@@ -22,9 +22,9 @@ from test_gallery import explain, run_scenario
 
 pytestmark = [pytest.mark.browser, pytest.mark.gallery, pytest.mark.integration]
 
-OWN = "/careers/JobDetail/New-York-Software-Engineer/13045"
-ROUTE = "/careers/ApplicationFormWidget?jobId=13045"
-OTHER = "/careers/JobDetail/New-York-Data-Analyst/14102"
+OWN = "/careers/JobDetail/New-York-Software-Engineer/61001"
+ROUTE = "/careers/ApplicationFormWidget?jobId=61001"
+OTHER = "/careers/JobDetail/New-York-Data-Analyst/62002"
 
 
 def career_home(_request=None):
@@ -36,8 +36,8 @@ def career_home(_request=None):
             f'<p><a href="{href}">{label}</a></p>'
             for href, label in (
                 (OTHER, "Data Analyst"),
-                ("/careers/JobDetail/Tokyo-Kubernetes-Tech-Lead/14350", "Kubernetes Tech Lead"),
-                ("/careers/JobDetail/London-Credit-Risk-Associate/14377", "Credit Risk Associate"),
+                ("/careers/JobDetail/Tokyo-Kubernetes-Tech-Lead/62350", "Kubernetes Tech Lead"),
+                ("/careers/JobDetail/London-Credit-Risk-Associate/62377", "Credit Risk Associate"),
             )
         ),
     )
@@ -51,7 +51,7 @@ def application_form(request):
 
 
 def receipt(request):
-    role = {"13045": "Software Engineer", "14102": "Data Analyst"}.get(request.form.get("jobId"), "this position")
+    role = {"61001": "Software Engineer", "62002": "Data Analyst"}.get(request.form.get("jobId"), "this position")
     return f"""<!doctype html><html lang="en"><meta charset="utf-8"><title>Application Successful</title><body><h1>Thank you</h1>
     <p>Your application for {role} has been submitted.</p></body></html>"""
 
@@ -61,8 +61,8 @@ PAGES = {
     "/careers/ApplicationFormWidget": lambda request: (302, "/careers"),
     "/careers": career_home,
     "/careers/OpenRoles": career_home,
-    OWN: page("Software Engineer", POSTING + '<p><a class="apply" href="/careers/ApplicationForm?jobId=13045">Apply</a></p>'),
-    OTHER: page("Data Analyst", '<h1>Data Analyst</h1><p><a class="apply" href="/careers/ApplicationForm?jobId=14102">Apply</a></p>'),
+    OWN: page("Software Engineer", POSTING + '<p><a class="apply" href="/careers/ApplicationForm?jobId=61001">Apply</a></p>'),
+    OTHER: page("Data Analyst", '<h1>Data Analyst</h1><p><a class="apply" href="/careers/ApplicationForm?jobId=62002">Apply</a></p>'),
     "/careers/ApplicationForm": application_form,
     "/submit/1": receipt,
 }
@@ -161,7 +161,7 @@ async def test_all_three_guards_the_run_goes_back_and_applies_to_its_own_job(ser
     saved_route(monkeypatch)
     site, outcome, events, why = await replay(service)
     assert outcome["state"] == "confirmed", why
-    assert sent_job_ids(site) == ["13045"], why
+    assert sent_job_ids(site) == ["61001"], why
     assert OTHER not in site.hits, why
     assert "/careers/ApplicationFormWidget" in site.hits, why  # It did start from the saved route, and it did bounce.
     assert any(kind == "posting_guard" for kind, _ in events), why
@@ -200,7 +200,7 @@ async def test_guard_three_alone_keeps_the_receipt_from_confirming_this_job(serv
     guard_two_off(monkeypatch)
     monkeypatch.setattr("jobpilot.adapters.base.Adapter.leave_site_page", _never_leaves, raising=False)
     site, outcome, events, why = await replay(service)
-    assert sent_job_ids(site) == ["14102"], why  # One application reached the other posting, once.
+    assert sent_job_ids(site) == ["62002"], why  # One application reached the other posting, once.
     assert outcome["state"] == "submission_unknown", why
     assert "Data Analyst" in outcome["reason"] and "Software Engineer" in outcome["reason"], why
     assert outcome["receipt"].get("other_posting") is True and not outcome["receipt"].get("website_confirmed"), why
@@ -214,7 +214,7 @@ async def test_with_all_three_off_the_replica_is_the_incident(service, monkeypat
     guard_three_off(monkeypatch)
     monkeypatch.setattr("jobpilot.adapters.base.Adapter.leave_site_page", _never_leaves, raising=False)
     site, outcome, events, why = await replay(service)
-    assert sent_job_ids(site) == ["14102"], why
+    assert sent_job_ids(site) == ["62002"], why
     assert outcome["state"] == "confirmed", why
 
 
@@ -242,7 +242,7 @@ def model_with_labels(monkeypatch, wanted):
 NO_APPLY = page(
     "Software Engineer",
     POSTING + f"""<h2>Similar jobs</h2><p><a href="{OTHER}">Data Analyst</a></p>
-    <p><a href="/careers/roles/14350">Kubernetes Tech Lead</a></p><p><a href="/careers/roles/14377">View role</a></p>""",
+    <p><a href="/careers/roles/62350">Kubernetes Tech Lead</a></p><p><a href="/careers/roles/62377">View role</a></p>""",
 )
 
 
@@ -253,7 +253,7 @@ async def test_the_model_is_not_offered_another_posting_on_the_jobs_own_page(ser
     why = explain(scenario, site, outcome, events, service.config.data_dir)
     assert seen, why
     assert all(not {"Data Analyst", "Kubernetes Tech Lead", "View role"} & set(labels) for labels in seen), why
-    assert OTHER not in site.hits and "/careers/roles/14350" not in site.hits, why
+    assert OTHER not in site.hits and "/careers/roles/62350" not in site.hits, why
     assert site.posts == [], why
 
 

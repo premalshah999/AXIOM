@@ -1,6 +1,6 @@
 """Whether a page belongs to the posting this run was given, from what the page and its address state.
 
-A run was given one job and applied to another (2026-11-01, saved as 13045, sent as 14102): its saved route bounced to the career
+A run was given one job and applied to another (2026-11-01): its saved route bounced to the career
 home, the guided browser opened a different role from the list, and the receipt was booked against the job it was given. Three
 guards use this module: the browser may not open another posting, the commit stops on one, and a receipt naming another role is
 not a confirmation of this job.
