@@ -22,7 +22,9 @@ for a proposal is NOT a skill the applicant has. No invented links, employers, s
 Descriptors: Personal project, Open source, Internal tool, Research, or one genuine one-word domain.
 Return proposals in proof-point order 0, 1, 2. data_source is the input's short proper name, at most six words, and
 bullet 1 must use that name exactly. tools must hold at least one tool or method spelled exactly as the posting spells it.
-Exactly two bullets each, at most one proposal has a third (6–7 total). Bullet 1: what the project is, its real
+When project_shapes is supplied, write one proposal per shape: exactly that many bullets, and each bullet between its
+min_chars and max_chars. Count the characters. Otherwise exactly two bullets each, at most one proposal has a third (6–7
+total). Bullet 1: what the project is, its real
 data source, who it helps. Bullet 2: a decision, tradeoff, obstacle or production concern it handles. Optional third:
 how it is checked.
 Write each bullet as a resume reads: a plain description of the project and what it does, opening with the thing

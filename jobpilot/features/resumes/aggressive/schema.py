@@ -24,7 +24,7 @@ class Proposal(BaseModel):
     descriptor: str = Field(max_length=40)
     data_source: str = Field(min_length=3, max_length=160)
     tools: list[str] = Field(min_length=1, max_length=10)
-    bullets: list[str] = Field(min_length=2, max_length=3)
+    bullets: list[str] = Field(min_length=1, max_length=8)
     build_plan: list[str] = Field(min_length=1, max_length=8)
     metric_shape: Literal["none", "count", "range", "before/after", "latency", "coverage"] = "none"
 

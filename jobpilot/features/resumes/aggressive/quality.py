@@ -107,11 +107,38 @@ def describe(bullet):
     return COMMAND.sub(lambda m: third_person(m[1]), text)
 
 
-def normalize_proposals(proposals):
+def project_shapes(doc):
+    """Bullet lengths of the resume's own projects, in order: a draft takes one's place, at its size."""
+    return [
+        [len(b.text) for b in e.bullets if b.include and b.text.strip()]
+        for s in doc.sections
+        if s.include and s.kind == "projects"
+        for e in s.entries
+        if e.include
+    ]
+
+
+def shape_problems(p, shape):
+    """The owner's rule for every bullet: the same count as the project it replaces, and the same length or up to 10% shorter."""
+    if len(p.bullets) != len(shape):
+        return [f"{p.title}: use exactly {len(shape)} bullets, like the project it replaces"]
+    return [
+        f"{p.title}: bullet {i + 1} is {len(b)} characters, it must be {int(n * 0.9 + 0.999)} to {n}"
+        for i, (b, n) in enumerate(zip(p.bullets, shape))
+        if not n * 0.9 <= len(b) <= n
+    ]
+
+
+def normalize_proposals(proposals, shapes=()):
     """Shape is arithmetic, so code settles it. Order by proof point, give each proposal its own, keep one third bullet, and
-    word each bullet as a description."""
+    word each bullet as a description. A resume with its own projects sets the count instead, and no more drafts than it has."""
     for p in proposals:
         p.bullets = [describe(b) for b in p.bullets]
+    if shapes:
+        ordered = sorted(proposals, key=lambda p: p.proof_point)[: len(shapes)]
+        for i, p in enumerate(ordered):
+            p.proof_point = min(i, 2)
+        return ordered
     ordered = sorted(proposals, key=lambda p: p.proof_point)
     free = [i for i in range(len(ordered)) if i not in {p.proof_point for p in ordered}]
     seen = set()
@@ -162,26 +189,34 @@ def proposal_problems(p, history, posting):
     return problems
 
 
-def proposal_issues(proposals, history, posting):
+def proposal_issues(proposals, history, posting, shapes=()):
     problems = []
-    if len({p.archetype for p in proposals}) != 3:
-        problems.append("Choose three distinct project archetypes")
-    if [p.proof_point for p in proposals] != [0, 1, 2]:
-        problems.append("Order proposals by proof point 0, 1, 2, exactly once each")
-    counts = [len(p.bullets) for p in proposals]
-    if sum(counts) not in (6, 7) or counts.count(3) > 1:
-        problems.append("Use 2,2,2 or 2,2,3 proposal bullets")
+    if len({p.archetype for p in proposals}) != len(proposals):
+        problems.append("Choose distinct project archetypes")
+    if shapes:
+        for p, shape in zip(proposals, shapes):
+            problems += shape_problems(p, shape)
+    else:
+        if len(proposals) != 3:
+            problems.append("Choose three distinct project archetypes")
+        if [p.proof_point for p in proposals] != [0, 1, 2]:
+            problems.append("Order proposals by proof point 0, 1, 2, exactly once each")
+        counts = [len(p.bullets) for p in proposals]
+        if sum(counts) not in (6, 7) or counts.count(3) > 1:
+            problems.append("Use 2,2,2 or 2,2,3 proposal bullets")
     for p in proposals:
         problems += proposal_problems(p, history, posting)
     return problems
 
 
-def keep_sound(proposals, history, posting):
+def keep_sound(proposals, history, posting, shapes=()):
     """After the one repair: the drafts that pass every check, and why the others were left out. A failed draft never reaches
     a resume, and it no longer costs the person the rest of the tailoring (every real-model run failed that way, 2026-11-01)."""
     kept, dropped, archetypes = [], [], set()
-    for p in proposals:
+    for i, p in enumerate(proposals):
         problems = proposal_problems(p, history, posting)
+        if i < len(shapes):
+            problems += shape_problems(p, shapes[i])
         if p.archetype in archetypes:
             problems.append(f"{p.title}: repeats another draft's archetype")
         if problems:

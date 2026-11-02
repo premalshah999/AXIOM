@@ -172,13 +172,18 @@ async def run(job, source, profile, ctx):
     base, extra = quality.inventory(source.doc, profile, ctx.evidence)
     allowed = list(dict.fromkeys([*base, *extra]))
     history = store.recent(ctx.db, job)
+    shapes = quality.project_shapes(source.doc)
     data = payload(source, profile, ctx, hard, brief, history, allowed)
+    if shapes:
+        data["project_shapes"] = [
+            [{"min_chars": int(n * 0.9 + 0.999), "max_chars": n} for n in shape] for shape in shapes
+        ]
     plan = sanitize_plan(await ask(Plan, prompts.WRITE, data))
-    plan.proposals = quality.normalize_proposals(plan.proposals)
+    plan.proposals = quality.normalize_proposals(plan.proposals, shapes)
     forbidden = [r for r in ctx.ats_source.get("keywords", []) if r.get("status") == "needed"]
     real, refused = quality.apply_revision(source.doc, plan, allowed, hard, forbidden)
     posting = job["description"]
-    issues = quality.proposal_issues(plan.proposals, history, posting)
+    issues = quality.proposal_issues(plan.proposals, history, posting, shapes)
     dropped = []
     if refused or issues:
         attempts.append({"stage": "generation", "refused_edits": refused, "proposal_issues": issues})
@@ -189,14 +194,16 @@ async def run(job, source, profile, ctx):
                 {**data, "previous_plan": plan.model_dump(), "issues": issues, "refused_edits": refused},
             )
         )
-        plan.proposals = quality.normalize_proposals(plan.proposals)
+        plan.proposals = quality.normalize_proposals(plan.proposals, shapes)
         real, refused = quality.apply_revision(source.doc, plan, allowed, hard, forbidden)
-        if quality.proposal_issues(plan.proposals, history, posting):
+        if quality.proposal_issues(plan.proposals, history, posting, shapes):
             # Only the drafts that pass every check go on: with none left, the real projects carry the resume.
-            plan.proposals, dropped = quality.keep_sound(plan.proposals, history, posting)
+            plan.proposals, dropped = quality.keep_sound(plan.proposals, history, posting, shapes)
             attempts.append({"stage": "drafts_left_out", "drafts": dropped})
     # Refused factual/length edits stay at source. They never bypass the guard.
-    workspace = store.create(ctx.db, job, source, profile, plan.proposals, brief)
+    # A draft takes the place of the project at its position; "Use only my original projects" brings them back.
+    originals = [e.id for s in source.doc.sections if s.include and s.kind == "projects" for e in s.entries if e.include]
+    workspace = store.create(ctx.db, job, source, profile, plan.proposals, brief, removed=originals[: len(plan.proposals)])
     doc, selected = with_projects(real, workspace)
     result = await compile_and_check(
         doc, source, ctx, selected, workspace, allowed, tailored_style(source.style)
@@ -227,8 +234,8 @@ async def run(job, source, profile, ctx):
             # Sanitize before re-running every proposal gate. The original
             # draft's bullet count is the fixed budget for critique edits.
             revised = sanitize_plan(Plan(proposals=revision.proposals)).proposals
-            revised = quality.normalize_proposals(revised)
-            proposal_errors = quality.proposal_issues(revised, history, posting)
+            revised = quality.normalize_proposals(revised, shapes)
+            proposal_errors = quality.proposal_issues(revised, history, posting, shapes)
             if [len(p.bullets) for p in revised] != [len(p["bullets"]) for p in workspace["drafts"]]:
                 proposal_errors.append("Critique changes a draft project's bullet count")
             if proposal_errors:

@@ -77,7 +77,7 @@ def get(db, workspace_id):
         return view(row)
 
 
-def create(db, job, source, profile, proposals, brief):
+def create(db, job, source, profile, proposals, brief, removed=()):
     signature = fingerprint(job, source, profile)
     existing = find(db, signature)
     if existing:
@@ -90,7 +90,7 @@ def create(db, job, source, profile, proposals, brief):
         "brief": brief.model_dump(),
         "drafts": drafts,
         "selected_drafts": [d["id"] for d in drafts],
-        "removed_projects": [],
+        "removed_projects": list(removed),
         "source_doc": source.doc.model_dump(),
         "source_style": source.style.model_dump(),
         "posting": job.get("description", ""),
