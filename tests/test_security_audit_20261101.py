@@ -82,3 +82,12 @@ def test_secret_files_and_the_backup_folder_lose_group_and_other_access(tmp_path
     assert all(stat.S_IMODE((data / name).stat().st_mode) == 0o600 for name in env.SECRET_FILES)
     assert stat.S_IMODE(copies.stat().st_mode) == 0o700
     assert stat.S_IMODE(plain.stat().st_mode) == 0o644  # only the files that hold a secret
+
+
+def test_the_test_clients_host_name_is_not_served_outside_a_test(client, monkeypatch):
+    # "testserver" is a plain host name: a network that answers for it could aim a page at this computer. Only a running test
+    # accepts it (pytest sets PYTEST_CURRENT_TEST; an installation never does).
+    assert client.get("/api/control").status_code == 200
+    monkeypatch.delenv("PYTEST_CURRENT_TEST")
+    assert client.get("/api/control").status_code == 421
+    assert client.get("/api/control", headers={"Host": "127.0.0.1:8080"}).status_code == 200
