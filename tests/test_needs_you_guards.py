@@ -448,6 +448,7 @@ def test_no_screen_prints_a_stored_reason_or_a_raw_record_as_it_stands():
     assert "(?<" not in (source / "format.ts").read_text()
     for path in source.rglob("*.tsx"):
         text = path.read_text()
-        assert not re.search(r">\s*\{[\w.?!]*\.reason\}\s*<", text), path
+        # `block.reason` is the app's own sentence about a video or a writing sample (owner_questions.cannot_automate).
+        assert not re.search(r">\s*\{(?!block\.)[\w.?!]*\.reason\}\s*<", text), path
         assert "JSON.stringify(receipt" not in text and "JSON.stringify(report" not in text, path
         assert "<datalist" not in text or path.name != "questions.tsx", path  # A list that shows nothing until something is typed.
