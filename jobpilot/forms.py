@@ -7311,6 +7311,9 @@ class FormSession:
             # JazzHR re-renders the form with this banner (Axtria 2026-10-25); Workday's review page lists "Errors
             # Found" with this hint while its finalize call answers 200 (Airbus 2026-10-25). Nothing was submitted.
             r"please fix the highlighted errors and try again|answer all required questions to submit this application|"
+            # Meta's career site beside its Submit, over a required location group it marks only after the click (2026-11-02):
+            # nothing was sent, and the run ended as an uncertain submission. Many sites use the same words.
+            r"please complete (?:the|all) (?:missing|required) fields|"
             # Workable's banner with HTTP 412 from /api/v1/jobs/<code>/apply when it throttles a candidate
             # (2026-10-23): nothing was accepted, and the same application went through later.
             r"something went wrong\. we are working on this,? please try again later|"
@@ -7346,7 +7349,7 @@ class FormSession:
                 # accepted): the employer paces one application at a time and says this one "has not been submitted".
                 return {"type": "explicit_rejection_page", "url": self.page.url, "category": "throttled",
                         "evidence": text[max(0, match.start() - 20) : match.end() + 300], "missing_fields": []}
-            if re.search(r"answered all questions|highlighted errors|answer all required questions", phrase):
+            if re.search(r"answered all questions|highlighted errors|answer all required questions|complete (?:the|all) (?:missing|required) fields", phrase):
                 return {"type": "explicit_rejection_page", "url": self.page.url, "category": "validation",
                         "evidence": text[max(0, match.start() - 20) : match.end() + 200],
                         "missing_fields": self.inline_field_errors(await self.scan(force=True))[:10]}

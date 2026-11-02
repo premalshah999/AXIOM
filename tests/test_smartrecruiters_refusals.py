@@ -78,6 +78,8 @@ async def test_unanswered_required_preliminary_question_is_a_validation_refusal(
 @pytest.mark.parametrize("message", [
     "Please fix the highlighted errors and try again.",  # JazzHR (Axtria 2026-10-25)
     "Errors Found. Page Error. Answer all required questions to submit this application.",  # Workday (Airbus)
+    "Location preferences must have at least one selected. Cancel Please complete the missing fields Submit",  # Meta 2026-11-02
+    "Please complete all required fields.",
 ])
 async def test_other_platforms_field_refusals_are_validation(page, tmp_path, message):
     r = await rejection(page, tmp_path, message)
