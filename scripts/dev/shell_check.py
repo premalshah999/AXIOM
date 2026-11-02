@@ -28,6 +28,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 BUNDLE_ID = "app.axiom.shellcheck"
+SNAPSHOTS = ""
 KEY_FILES = (
     "python/lib/python3.12/importlib/__init__.py",
     "app/jobpilot/native/desktop.py",
@@ -68,8 +69,13 @@ write("state.json", state)
 flags = {"term": False, "usr1": False}
 signal.signal(signal.SIGTERM, lambda *_: flags.update(term=True))
 signal.signal(signal.SIGUSR1, lambda *_: flags.update(usr1=True))
+owner = int(args[-1])
 while not flags["term"]:
     time.sleep(0.1)
+    try:
+        os.kill(owner, 0)
+    except ProcessLookupError:
+        sys.exit(0)
     state["power"] = json.load(open(scenario_path)).get("power", {})
     write("state.json", state)
 state.update(phase="stopping", finishing=scenario.get("finishing", []))
@@ -120,8 +126,9 @@ class Window:
             (self.home / "fake" / name).unlink(missing_ok=True)
         self.save_scenario()
         env = {"HOME": str(home), "PATH": "/usr/bin:/bin", "LANG": "en_US.UTF-8", "AXIOM_SHELL_DRIVE": str(self.drive), "AXIOM_SHELL_BACKGROUND": "1"}
-        self.process = subprocess.Popen([bundle / "Contents" / "MacOS" / "AXIOM"], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                        stderr=subprocess.PIPE, start_new_session=True)
+        with open(bundle.parent / "window-stderr.log", "ab") as stderr:
+            self.process = subprocess.Popen([bundle / "Contents" / "MacOS" / "AXIOM"], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                            stderr=stderr, start_new_session=True)
         self.ids = 0
 
     def save_scenario(self):
@@ -188,6 +195,10 @@ class Window:
         except subprocess.TimeoutExpired:
             return False
 
+    def shot(self, name):
+        if SNAPSHOTS:
+            self.op(op="snapshot", path=str(Path(SNAPSHOTS) / f"{name}.png"))
+
     def close(self):
         if self.process.poll() is None:
             self.process.kill()
@@ -209,7 +220,7 @@ class Check:
             self.failures.append(text)
 
 
-def build(work):
+def build(work, source=None):
     """The bundle: the real window, Info.plist with its own identifier, and a stand-in for everything under Resources."""
     from jobpilot.native.desktop import write_install_manifest
 
@@ -217,7 +228,7 @@ def build(work):
     resources = bundle / "Contents" / "Resources"
     (bundle / "Contents" / "MacOS").mkdir(parents=True)
     subprocess.run(["clang", "-O1", "-fobjc-arc", "-Wall", "-Werror", "-mmacosx-version-min=13.0", "-arch", "arm64", "-framework", "Cocoa", "-framework", "WebKit",
-                    str(ROOT / "desktop" / "AXIOM.m"), "-o", str(bundle / "Contents" / "MacOS" / "AXIOM")], check=True)
+                    str(source or ROOT / "desktop" / "AXIOM.m"), "-o", str(bundle / "Contents" / "MacOS" / "AXIOM")], check=True)
     (bundle / "Contents" / "Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": BUNDLE_ID, "CFBundleName": "AXIOM-QA", "CFBundleExecutable": "AXIOM",
                                                                      "CFBundleShortVersionString": "1.0.0", "CFBundleVersion": "shellcheck", "CFBundlePackageType": "APPL"}))
     for relative in KEY_FILES:
@@ -254,6 +265,7 @@ def quit_scenarios(check, bundle, work, base):
         check(Api.stops == ["Bearer synthetic-token"], "Stop and Quit recorded the stop first, under the token")
         check("Waiting for 1 application in the final submit step (Acme Example), up to 2:00 more" in seen.get("m", ""), "the drain names what it waits for")
         check("never sends it twice" in seen.get("m", ""), "and says cutting it off is not sending it twice")
+        window.shot("finishing-up")
         window.op(op="js", body="document.querySelector('#acts a').click();return 1;")
         check(window.ended(), "Quit now ends it, and the window closes itself")
         check((home / "fake" / "usr1").exists(), "by SIGUSR1 to the supervisor, as docs/DESKTOP.md says")
@@ -380,6 +392,7 @@ def incomplete(check, bundle, work, base):
             check(seen.get("t") == "AXIOM was not copied completely", f"{what}: the window says so")
             check("drag it from the AXIOM disk image to Applications again, using Finder" in seen.get("m", ""), f"{what}: and says what to do")
             check(seen.get("a") == ["Show in Finder", "Copy diagnostics"], f"{what}: with its two links")
+            window.shot("incomplete-copy")
             check("The installed copy is incomplete" in window.log(), f"{what}: the log has it")
             check(not (home / "Library" / "Application Support" / "AXIOM" / "data" / "native" / "state.json").exists(), f"{what}: nothing was started")
             window.op(op="menu", title="Quit AXIOM")
@@ -417,6 +430,7 @@ def full_disk(check, bundle, work, base):
             check(seen.get("t") == "This Mac's disk is full", "it says the disk is full")
             check("Free some space" in seen.get("m", ""), "and what to do")
             check(seen.get("a") == ["Try again", "Copy diagnostics", "Open logs"], "with a way to try again")
+            window.shot("disk-full")
             window.op(op="menu", title="Quit AXIOM")
             check(window.ended(10), "and Quit works")
         finally:
@@ -442,19 +456,25 @@ def main(argv=None):
     parser.add_argument("--work", help="Where the throwaway bundle and homes go")
     parser.add_argument("--keep", action="store_true")
     parser.add_argument("--full-disk", action="store_true")
+    parser.add_argument("--only-full-disk", action="store_true")
+    parser.add_argument("--source", help="Build the window from this file, to see what another version does")
+    parser.add_argument("--snapshots", help="A folder for pictures of what the window showed")
     options = parser.parse_args(argv)
+    global SNAPSHOTS
+    SNAPSHOTS = options.snapshots or ""
     work = Path(os.path.realpath(tempfile.mkdtemp(prefix="axs-", dir=options.work)))
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Api)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_port}"
     check = Check()
     try:
-        bundle = build(work)
-        quit_scenarios(check, bundle, work, base)
-        battery(check, bundle, work, base)
-        update_dialogs(check, bundle, work, base)
-        incomplete(check, bundle, work, base)
-        if options.full_disk:
+        bundle = build(work, options.source)
+        if not options.only_full_disk:
+            quit_scenarios(check, bundle, work, base)
+            battery(check, bundle, work, base)
+            update_dialogs(check, bundle, work, base)
+            incomplete(check, bundle, work, base)
+        if options.full_disk or options.only_full_disk:
             full_disk(check, bundle, work, base)
     finally:
         server.shutdown()
