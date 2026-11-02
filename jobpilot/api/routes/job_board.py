@@ -112,8 +112,9 @@ def source_from_link(text):
     if "://" not in link:
         link = "https://" + link
     parts = urlsplit(link)
-    if parts.scheme not in {"http", "https"} or not parts.hostname:
-        raise ValueError("Paste the link to a company's job board")
+    # Words with spaces, or a word with no dot in it, are not an address: it used to be saved as a board named after itself.
+    if parts.scheme not in {"http", "https"} or not parts.hostname or "." not in parts.hostname or re.search(r"\s", link):
+        raise ValueError("That isn't a web link. Paste the link to the company's list of jobs, starting with https://.")
     name, _ = employer_of(link)  # a shared platform with no company in the link is refused here
     kind = BOARD_KINDS.get(detect(link).id, "career_page")
     path = [part for part in parts.path.split("/") if part]
@@ -315,10 +316,13 @@ def router(service) -> APIRouter:
     @r.post("/api/job-board/sources/link")
     async def add_source_by_link(data: SourceLink):
         """Add a company's job board from a link alone: its name, kind and board address are read from the link."""
+        from ...link_intake import URL_REFUSALS
+
         try:
             name, kind, url = source_from_link(data.url)
+            await public_url(url, config.allow_private_urls)
         except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
+            raise HTTPException(422, URL_REFUSALS.get(str(exc), str(exc))) from exc
         added = await add_source(SourceInput(name=name, kind=kind, url=url))
         return {**added, "name": name, "kind": kind, "url": url}
 

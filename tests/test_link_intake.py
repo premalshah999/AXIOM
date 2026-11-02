@@ -9,7 +9,7 @@ opened the wrong page. Each now unwraps, follows the board once, or stops with a
 import pytest
 
 from jobpilot.db import Job
-from jobpilot.link_intake import board_name, employer_link, listing_kind, prepare, unwrap
+from jobpilot.link_intake import board_name, employer_link, listing_kind, opens as real_opens, prepare, unwrap
 
 POSTING = "https://careers.example.test/job/ABC123/Data-Engineer?utm_source=board&ss=paid"
 WRAPPED = (
@@ -250,3 +250,42 @@ def test_an_imported_link_is_the_owners_pick_and_is_not_ranked_first(client, ser
     assert answer.status_code == 200 and answer.json()["run"] == {"id": "r1"} and len(asked) == 1
     refused = client.post("/api/jobs", json={"url": "https://jobs.lever.co/acme"})
     assert refused.status_code == 400 and "list of jobs" in refused.text
+
+
+ARTICLE = "<!doctype html><title>About us</title><h1>About Northwind</h1><p>" + "We make things that people like to use every day. " * 12 + "</p>"
+POSTING_PAGE = "<!doctype html><title>Data Analyst</title><h1>Data Analyst</h1><p>" + "You will analyse data with SQL and Python. " * 6 + "</p><a href='/apply'>Apply for this job</a>"
+SCRIPT_SHELL = "<!doctype html><title>Careers</title><div id='root'></div><script>" + "render(); " * 400 + "</script>"
+
+
+@pytest.mark.parametrize(
+    "page, link, refused",
+    [
+        (ARTICLE, "https://www.example.test/about", True),
+        (POSTING_PAGE, "https://www.example.test/about", False),
+        (SCRIPT_SHELL, "https://www.example.test/job/1", False),  # a page built by its script says nothing about the job
+        ("<!doctype html><title>Sorry</title><h1>Just a moment</h1>", "https://www.example.test/job/1", False),  # nor does a bot check
+        (ARTICLE, "https://jobs.lever.co/acme/11111111-2222-3333-4444-555555555555", False),  # a known platform's page is its posting
+        (ARTICLE.replace("<h1>", '<script type="application/ld+json">{"@type":"JobPosting"}</script><h1>'), "https://www.example.test/job/1", False),
+    ],
+)
+def test_only_a_page_we_can_read_that_plainly_is_no_job_is_refused(page, link, refused):
+    from jobpilot.link_intake import not_a_posting
+
+    assert not_a_posting(page, link) is refused
+
+
+async def test_a_pasted_article_stops_before_any_job_exists_and_a_posting_goes_through(monkeypatch):
+    monkeypatch.setattr("jobpilot.link_intake.opens", real_opens)  # conftest leaves every other test's made-up hosts unread
+
+    async def article(url, allow_private=False):
+        return ARTICLE, url
+
+    monkeypatch.setattr("jobpilot.network.fetch", article)
+    link, problem = await prepare("https://www.example.test/about")
+    assert "doesn't look like a job posting" in problem and "Nothing was added" in problem
+
+    async def posting(url, allow_private=False):
+        return POSTING_PAGE, url
+
+    monkeypatch.setattr("jobpilot.network.fetch", posting)
+    assert await prepare("https://www.example.test/about") == ("https://www.example.test/about", "")

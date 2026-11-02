@@ -280,7 +280,8 @@ export function DrawerActions({ row, started, asking, place, hold }: { row: JobR
   const start = useStartActions(row, started, place, hold);
   const busy = base.busy || start.pending !== null;
   const pending = base.pending ?? start.pending;
-  const all = [...start.acts, ...base.acts];
+  // First in line already: "Move to the front" would do nothing.
+  const all = [...start.acts, ...base.acts].filter((a) => !(a.id === "front" && place?.position === 1));
   const danger = all.filter((a) => a.tone === "danger");
   const normal = all.filter((a) => a.tone !== "danger");
   const lead = normal.find((a) => a.tone === "primary") ?? (asking ? undefined : normal[0]);

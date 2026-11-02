@@ -1,5 +1,7 @@
 """HTTP contract of the job-board routes: snapshot, settings, managed sources, scans, selection, unattended batch."""
 
+import pytest
+
 from jobpilot.db import Source
 
 SOURCE = {"name": "Acme Example", "kind": "greenhouse", "url": "https://boards.example.test/acme"}
@@ -124,3 +126,22 @@ def test_a_board_is_added_from_a_link_alone_and_a_posting_link_becomes_its_board
     assert again.json()["id"] == posting.json()["id"]  # the same board, however it was pasted
     assert client.post("/api/job-board/sources/link", json={"url": "https://boards.greenhouse.io"}).status_code == 422  # no company named
     assert client.post("/api/job-board/sources/link", json={"url": "ftp://example.test"}).status_code == 422
+
+
+@pytest.mark.parametrize("text", ["not a link", "justoneword", "ftp://example.test/jobs"])
+def test_words_are_not_a_job_board(client, text):
+    answer = client.post("/api/job-board/sources/link", json={"url": text})
+    assert answer.status_code == 422
+    assert "isn't a web link" in answer.json()["detail"]
+
+
+def test_a_board_at_no_website_says_so_in_plain_words(client, config, monkeypatch):
+    config.allow_private_urls = False
+
+    def nothing(*a, **k):
+        raise OSError("nodename nor servname provided")
+
+    monkeypatch.setattr("jobpilot.network.socket.getaddrinfo", nothing)
+    answer = client.post("/api/job-board/sources/link", json={"url": "https://no-such-host.example.test/careers"})
+    assert answer.status_code == 422
+    assert answer.json()["detail"].startswith("There's no website at that address")

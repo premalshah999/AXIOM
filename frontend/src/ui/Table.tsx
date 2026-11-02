@@ -15,9 +15,9 @@ export type Column<T> = {
   truncate?: boolean;
   /** The narrowest a truncating column gets before the table scrolls sideways (default 160). */
   min?: number;
-  /** Dropped when the table is narrower than this (under 860px, or under 600px), so the job, its
+  /** Dropped when the table is narrower than this (under 1100px, 860px or 600px), so the job, its
    *  status and its actions stay in view. Everything dropped is in the job's drawer. */
-  hideBelow?: 860 | 600;
+  hideBelow?: 1100 | 860 | 600;
   /** Stays in view at the right edge while the rest scrolls sideways (the row's actions). */
   pin?: boolean;
   /** Let the cell wrap onto several lines (rows grow past 40px). */
