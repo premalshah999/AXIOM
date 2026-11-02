@@ -500,6 +500,16 @@ def test_a_faithful_two_page_copy_is_used_again_without_another_call(service):
     assert origin == "import" and len(model.calls) == 1
 
 
+def test_a_copy_stored_as_different_only_for_its_gaps_is_used_without_another_call(service):
+    resume = resume_row(service, text_pdf())
+    asyncio.run(pipeline.source_document(service.db, service.config, counting(), resume))
+    with service.db.exclusive() as s:
+        row = s.get(master.RsMaster, master.current_master(service.db).id)
+        row.verification = {**row.verification, "faithful": False, "coverage": 0.93}
+    model = counting()
+    assert asyncio.run(pipeline.source_document(service.db, service.config, model, resume))[2] == "import" and not model.calls
+
+
 def test_a_copy_the_person_edited_is_never_buried_by_another_reading(service):
     resume = resume_row(service, text_pdf())
     short = whole_copy()

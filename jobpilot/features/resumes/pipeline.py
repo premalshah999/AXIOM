@@ -165,7 +165,7 @@ async def source_document(db, config, model, resume: dict, *, fresh: bool = Fals
     until 2026-11-01, has one long bullet per job and no projects, and nobody was told it wasn't theirs. So this says why it stopped.
     fresh: the person asked to try again, so read a copy that differs once more. Otherwise the same PDF isn't paid for twice."""
     from .editor import ResumeDoc, Style
-    from .master import ResumeTooLong, current_master, different_words, import_master, master_doc, unread_words
+    from .master import ResumeTooLong, current_master, different_words, import_master, master_doc, unread_words, verify
 
     approved = master_doc(db)
     if approved:
@@ -173,8 +173,10 @@ async def source_document(db, config, model, resume: dict, *, fresh: bool = Fals
         return approved[0], approved[1], "master" if approved[2].source_resume_sha == resume["sha"] else "master_other"
     draft = current_master(db)
     if draft is not None and draft.source_resume_sha == resume["sha"]:
-        if (draft.verification or {}).get("faithful"):
-            return ResumeDoc.model_validate(draft.doc), Style.model_validate(draft.style), "import"
+        doc = ResumeDoc.model_validate(draft.doc)
+        # Checked again: a copy stored before the check stopped counting gaps as differences is usually already right.
+        if (draft.verification or {}).get("faithful") or verify(resume["text"], doc)["faithful"]:
+            return doc, Style.model_validate(draft.style), "import"
         # A copy the person edited is theirs to approve: another reading would bury it.
         if not fresh or draft.origin == "edited":
             raise ResumeUnread(f"{different_words(draft.verification or {})} {CHECK_THE_COPY}")
