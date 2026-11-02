@@ -12,7 +12,7 @@ from jobpilot.features.resumes.aggressive.integration import refresh
 from jobpilot.features.resumes.aggressive.schema import Choice, Confirmation
 from jobpilot.features.resumes.compiler import compile_pdf
 from jobpilot.features.resumes.tables import RsArtifact
-from test_aggressive_pipeline import add_job, needs_tex, proposals, stub
+from test_aggressive_pipeline import ORIGINALS, add_job, needs_tex, proposals, stub
 
 
 def pending(service):
@@ -86,14 +86,13 @@ def test_originals_only_and_explicit_replacement_pass_shared_rules(service):
         Choice(
             revision=ws["revision"],
             selected_drafts=[d["id"] for d in ws["drafts"]],
-            removed_projects=["original"],
+            removed_projects=list(ORIGINALS),
         ),
     )
     replaced = asyncio.run(refresh(service, "ag-job", ws["id"], ws["revision"]))
-    assert replaced["rules"]["ok"] and replaced["removed_projects"] == ["original"]
-    assert not next(e for s in replaced["doc"]["sections"] for e in s["entries"] if e["id"] == "original")[
-        "include"
-    ]
+    assert replaced["rules"]["ok"] and replaced["removed_projects"] == list(ORIGINALS)
+    for key in ORIGINALS:
+        assert not next(e for s in replaced["doc"]["sections"] for e in s["entries"] if e["id"] == key)["include"]
     # The registered model path also forwards this explicit removal.
     result = asyncio.run(
         pipeline.prepare_resume(
@@ -101,7 +100,7 @@ def test_originals_only_and_explicit_replacement_pass_shared_rules(service):
         )
     )
     assert result.status == "ready", result
-    assert result.artifact.validation["removed_projects"] == ["original"]
+    assert result.artifact.validation["removed_projects"] == list(ORIGINALS)
 
 
 @needs_tex

@@ -217,13 +217,13 @@ async def run(job, source, profile, ctx):
         )
         plan.proposals = quality.normalize_proposals(plan.proposals, shapes)
         real, refused = quality.apply_revision(source.doc, plan, allowed, hard, forbidden)
-    misses = quality.shape_issues(plan.proposals, shapes)
-    if misses:
+    request = quality.shape_request(plan.proposals, shapes, history, posting)
+    if request["bullets"]:
         # One bounded call. It is a second chance, so a failed one only leaves those drafts out.
-        step = {"stage": "shape_repair", "issues": misses}
+        step = {"stage": "shape_repair", "issues": quality.shape_issues(plan.proposals, shapes)}
         attempts.append(step)
         try:
-            fix = await ask(ShapeFix, prompts.SHAPE, quality.shape_request(plan.proposals, shapes))
+            fix = await ask(ShapeFix, prompts.SHAPE, request)
             quality.apply_shape_fix(plan.proposals, shapes, fix, history, posting)
             step["left"] = quality.shape_issues(plan.proposals, shapes)
         except Exception as exc:

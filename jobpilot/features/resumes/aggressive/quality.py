@@ -193,10 +193,13 @@ def normalize_proposals(proposals, shapes=()):
     return sorted(ordered, key=lambda p: p.proof_point)
 
 
-def shape_request(proposals, shapes):
-    """The short request for one bounded fix: only the bullets that miss, each with its exact numbers."""
+def shape_request(proposals, shapes, history, posting):
+    """The short request for one bounded fix: only the bullets that miss, each with its exact numbers. A draft that already
+    fails a truth check is going to be left out, so nothing is spent on it."""
     wanted = []
     for d, (p, shape) in enumerate(zip(proposals, shapes)):
+        if proposal_problems(p, history, posting):
+            continue
         for i, (low, high) in enumerate(shape):
             text = p.bullets[i].strip() if i < len(p.bullets) else ""
             n = len(text)
