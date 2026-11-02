@@ -42,7 +42,11 @@ test_locator_single_roundtrip.py
 test_submit_controls.py
 test_confirmation_pages.py
 test_tick_boxes.py
-test_prompt_catalog.py::test_the_catalog_decides
+test_prompt_catalog.py::test_consent_
+test_prompt_catalog.py::test_privacy_dialog
+test_prompt_catalog.py::test_submit_application_dialog
+test_prompt_catalog.py::test_model_cannot_commit_unoffered
+test_prompt_catalog.py::test_react_select_multi
 test_oracle_commit.py
 test_dayforce_submit_step.py
 test_dayforce_confirmation_page.py
