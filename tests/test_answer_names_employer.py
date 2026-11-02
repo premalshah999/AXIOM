@@ -44,6 +44,13 @@ def answer_of(service, review_id):
         "Why do you want this job?",
         "What interests you about working with us?",
         "What attracts you to this opportunity?",
+        "Describe what attracted you to this opportunity",
+        "Tell us why we should hire you",
+        "Why should we hire you?",
+        "What motivated you to apply?",
+        "What is your motivation for applying?",
+        "What about the company appeals to you?",
+        "What makes you a good fit?",
         "Reason for applying",
         "Cover letter",
     ],
@@ -121,6 +128,14 @@ def test_a_saved_answer_that_names_its_employer_is_kept_with_it():
     assert saved["scope"] == "employer"
     plain = learned_answer("r2", "Which city do you live in?", "Boston", [], "Acme")
     assert plain["scope"] == "personal"
+
+
+@pytest.mark.parametrize("question", ["What motivated you to apply?", "Why should we hire you?", "Describe what attracted you to this opportunity"])
+def test_why_this_job_is_saved_for_one_employer_even_saved_earlier_as_anyones(question):
+    assert learned_answer("r1", question, "Your fraud-detection work drew me.", [], "Acme")["scope"] == "employer"
+    old = ReviewedAnswer(id="r", question=question, answer="Your fraud-detection work drew me.", options=[],
+                         employer="Acme", scope="personal", layer="fact")
+    assert applicable(old, "Acme") and not applicable(old, "Birch Labs")
 
 
 def test_an_answer_saved_before_this_rule_still_stays_with_its_employer():

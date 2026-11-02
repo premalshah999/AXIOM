@@ -273,8 +273,9 @@ EMPLOYER_SPECIFIC = re.compile(
 )
 # Why this employer, however it is put ("Tell us why you want to work here"). "Why did you leave your last job?" is about the applicant.
 MOTIVE = re.compile(
-    r"\bwhy (?:this|our|are you|do you want|would you(?: like)?|you(?:'d| would)? (?:want|like|wish)|you(?:'re| are) (?:interested|applying)|us\b)|"
-    r"\bwhat (?:interests|attracts|excites|draws|appeals to) you\b|\bwhat (?:makes|made) you (?:want|interested|apply|choose)\b|"
+    r"\bwhy (?:this|our|are you|do you want|would you(?: like)?|you(?:'d| would)? (?:want|like|wish)|you(?:'re| are) (?:interested|applying)|us\b|should\b|we\b)|"
+    r"\bwhat (?:interest(?:s|ed)|attract(?:s|ed)|excite[sd]|draws|drew) you\b|\bappeal(?:s|ed) to you\b|\bmotivat(?:es|ed|ion)\b|"
+    r"\bwhat (?:makes|made) you (?:want|interested|apply|choose|the (?:right|best)|an? (?:good|great|strong|ideal))\b|\bthis opportunity\b|"
     r"\binterest(?:ed)? in (?:working|joining|this|our|us\b)|\breasons? for (?:applying|your interest|wanting)\b|\bcover letter\b",
     re.I,
 )
@@ -316,8 +317,9 @@ def applicable(answer, employer):
     # An answer given to one employer stays with it; with no employer on either side there is nothing to say it is the
     # same one.
     same = bool(employer) and answer.employer.casefold() == employer.casefold()
-    # One that names its employer stays with it however it was saved: an older row can't reach another employer either.
-    return same or (answer.scope == "personal" and not mentions_employer(answer.answer, answer.employer))
+    # One that names its employer, or says why it wanted that job, stays with it however it was saved: an older row can't reach another employer either.
+    written_for_it = mentions_employer(answer.answer, answer.employer) or (not answer.options and bool(MOTIVE.search(answer.question)))
+    return same or (answer.scope == "personal" and not written_for_it)
 
 
 def relevant_fact(label, key):
