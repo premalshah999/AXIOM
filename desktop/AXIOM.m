@@ -1238,8 +1238,9 @@ static NSString *const SignedOutScript =
                   Log([@"A newer version exists: " stringByAppendingString:latest]);
                   NSAlert *alert = [NSAlert new];
                   alert.messageText = [NSString stringWithFormat:@"AXIOM %@ is available", latest];
-                  alert.informativeText = [NSString stringWithFormat:@"You have %@. Open the download page, get the new disk image, and drag AXIOM "
-                                                                     @"over the old one in Applications. Your jobs and settings stay.",
+                  alert.informativeText = [NSString stringWithFormat:@"You have %@. Open the download page and get the new disk image. Quit AXIOM, then "
+                                                                     @"drag the new one over the old one in Applications. Your jobs and settings stay. The Mac "
+                                                                     @"may ask you to allow it again, the same way as the first time.",
                                                                      answer[@"current"] ?: @"an older version"];
                   NSButton *get = [alert addButtonWithTitle:@"Open the download page"];
                   NSButton *later = [alert addButtonWithTitle:@"Later"];

@@ -79,6 +79,17 @@ def test_a_copy_that_stopped_part_way_says_the_same_thing_everywhere():
     assert "Use Finder, not Terminal" in flat(README) and "use Finder, not Terminal" in flat(FRIENDS)
 
 
+def test_an_update_says_to_quit_first_and_that_the_mac_may_ask_again():
+    """Finder refuses to replace an app that is open, and each new unsigned version is a new app to Gatekeeper. "You only do this once"
+    would read as something being wrong."""
+    alert = flat(WINDOW[WINDOW.index('@"AXIOM %@ is available"') : WINDOW.index("get.target = later.target")].replace('"\n', "").replace('@"', ""))
+    for text in (flat(README), flat(FRIENDS), alert):
+        assert re.search(r"[Qq]uit(s)? AXIOM", text), text[:60]
+        assert "Your jobs" in text or "their data stays" in text
+    assert "ask you to allow" in alert and "ask you to allow" in flat(README)
+    assert "only do this once for each version" in flat(README) and "only do this once for each version" in flat(FRIENDS)
+
+
 def test_quit_is_described_as_it_is():
     desktop_doc = flat((ROOT / "docs" / "DESKTOP.md").read_text())
     for button in ("Stop and Quit", "Quit", "Keep Running"):

@@ -28,9 +28,16 @@ HOW TO OPEN AXIOM THE FIRST TIME
 
 6. Open AXIOM again. If it asks once more, click Open or Open Anyway.
 
-You only do this once. If you cannot find Open Anyway, double-click
-AXIOM again and look again straight away: it is offered for about
-an hour after each try.
+You only do this once for each version. If you cannot find Open
+Anyway, double-click AXIOM again and look again straight away: it is
+offered for about an hour after each try.
+
+
+TO UPDATE AXIOM
+
+Quit AXIOM first. Then drag the new AXIOM onto Applications and choose
+Replace. Your jobs, settings and accounts stay. The Mac may ask you to
+allow the new version, the same way as above.
 
 
 IF SOMETHING GOES WRONG
