@@ -99,6 +99,16 @@ def _approve(service, job_id):
         return _approve_row(s, job)
 
 
+def _refuse_company_site(s, job):
+    """Bulk and automatic paths (Select all, the review batch, Needs you's Approve) never carry a company's own site into the line; the
+    owner sends one from Job board > Company sites, or by Apply on its own page. (The queue's own door says the same at the start,
+    after the duplicate guards.)"""
+    from .company_sites import WHY, allowed, is_company_site
+
+    if not job.demo and is_company_site(job.ats) and not allowed(s, job.id):
+        raise QueueBlocked(WHY, outcome="excluded", code="company_site")
+
+
 def _approve_row(s, job):
     job_id = job.id
     if job.status in {"queued", "running", "submitting"}:
@@ -108,12 +118,6 @@ def _approve_row(s, job):
                 "message": f'This job is already applied: "{" ".join((job.title or "").split())[:120] or "untitled role"}" at {job.company or "this employer"}.'}
     if job.status == "archived":
         raise ValueError("This job was removed; restore it before applying")
-    from .company_sites import WHY, allowed, is_company_site
-
-    # Bulk and automatic paths (Select all, the review batch, Needs you's Approve) never carry a company's own site into the line;
-    # the owner sends one from Job board > Company sites, or by Apply on its own page.
-    if not job.demo and is_company_site(job.ats) and not allowed(s, job_id):
-        raise QueueBlocked(WHY, outcome="excluded", code="company_site")
     if job.status != "ready":
         # The newest: the file the person gave AXIOM last, never an older or mistaken upload (a first run, 2026-11-01).
         job.resume_id = job.resume_id or s.scalar(
@@ -188,6 +192,7 @@ def refusal(session, job, hold=None):
         return
     # The approval stays each job's own: a reserved employer never joins the line by a click on Queue or Select all.
     require_approval(session, job)
+    _refuse_company_site(session, job)
     if re.match(r"(?:an )?explicit hiring restriction", job.reason or "", re.I):
         raise QueueBlocked("The posting's own requirements rule you out, so this job can't be queued.", code="excluded")
     if hold and hold.get("code") in REFUSED_HOLDS:

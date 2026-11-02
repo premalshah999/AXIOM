@@ -319,12 +319,6 @@ class QueueingMixin:
             # recovery, the repair agent, a remembered Apply (owner 2026-10-27: "these scrapers should not apply before
             # my permission"). Before the owner's pick is recorded, so a refused click leaves nothing behind.
             require_approval(s, job)
-            from ..company_sites import WHY, allowed, is_company_site
-
-            # A company's own site is never started by anything automatic, nor by a click on the main list: the owner sends it from
-            # Job board > Company sites (company_sites.py). A retry of an earlier run is that run's own continuation.
-            if mode == "submit" and not retry and not job.demo and is_company_site(job.ats) and not allowed(s, job_id):
-                raise QueueBlocked(WHY, outcome="excluded", code="company_site")
             from ..owner_apply import PICK, picked
 
             if owner_pick and not job.demo and not picked(s, job_id):
@@ -445,6 +439,13 @@ class QueueingMixin:
                     outcome="protected",
                     code="submitted_or_uncertain",
                 )
+            from ..company_sites import WHY, allowed, is_company_site
+
+            # A company's own site is never started by anything automatic, nor by a click on the main list: the owner sends it from
+            # Job board > Company sites (company_sites.py). After the duplicate guards above, which still decide first; a retry of an
+            # earlier run is that run's own continuation.
+            if mode == "submit" and not retry and not job.demo and is_company_site(job.ats) and not allowed(s, job_id):
+                raise QueueBlocked(WHY, outcome="excluded", code="company_site")
             require_intake(s, job_id)
             if mode == "submit":
                 from ..application_budget import require_allowance
