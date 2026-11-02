@@ -47,3 +47,35 @@ async def test_workday_auth_uses_shared_native_cookie_action(page):
     auth.engine = SimpleNamespace(page=page, profile=Profile(accept_all_application_terms=True))
     assert await auth.dismiss_cookies()
     assert await page.evaluate("window.accepted")
+
+
+SONI_BAR = """<button id=submit onclick="window.sent=true">Submit</button>
+  <div id=bar style="position:fixed;bottom:0;left:0;right:0;height:60px;background:#222;color:white">
+    This website uses analytics and tracking technologies to improve user experience.
+    <button id=accept onclick="window.accepted=event.isTrusted;document.querySelector('#bar').remove()">Accept</button>
+    <button id=decline onclick="window.declined=event.isTrusted;document.querySelector('#bar').remove()">Decline</button>
+  </div>"""
+
+
+async def test_a_tracking_bar_without_the_word_cookie_is_declined_when_nothing_is_saved(page):
+    """Soni's bar covered the form's Submit on every run (custom site, 2026-10-31); declining gives no consent."""
+    await page.set_content(SONI_BAR)
+    assert await dismiss_cookies(page, authorized=False) is True
+    assert await page.evaluate("window.declined") and not await page.evaluate("!!window.accepted")
+    assert await page.locator("#bar").count() == 0
+
+
+async def test_the_same_bar_is_accepted_with_the_saved_consent(page):
+    await page.set_content(SONI_BAR)
+    assert await dismiss_cookies(page, authorized=True) is True
+    assert await page.evaluate("window.accepted") and not await page.evaluate("!!window.declined")
+
+
+async def test_a_decline_button_outside_a_tracking_notice_is_never_clicked(page):
+    await page.set_content(
+        '<div style="position:fixed;bottom:0">Do you accept the offer? '
+        '<button onclick="window.sent=true">Decline</button></div>'
+        '<div>Analytics report <button onclick="window.sent=true">Decline</button></div>'
+    )
+    assert await dismiss_cookies(page, authorized=False) is False
+    assert not await page.evaluate("!!window.sent")

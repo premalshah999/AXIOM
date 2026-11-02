@@ -1591,6 +1591,35 @@
       // A progress-step item ("Candidate Info / Questionnaire / Submit") is not an action button.
       stepper: !!el.closest('.ant-steps,[role=tablist]'),
     })).filter(x => x.label);
+  // A page that asks "how do you want to continue?" with a few large clickable cards and no form: JobDiva's "Register with
+  // Us" offered "Start with my resume" / "I don't have a resume" as styled divs, so the scan listed only the site's header
+  // links, the run clicked "Register With Us" again until it stopped, and five JobDiva jobs never got past it (2026-10-23..30).
+  // Narrow on purpose: no fields on the page, 2 to 4 sibling cards of one kind that are each large, show a pointer and hold
+  // no native control or link of their own (a list of jobs holds links). Each is a button labelled by its first line.
+  if (!fields.length) {
+    const POINTER = el => style(el).cursor === 'pointer' && visible(el);
+    const groups = new Map();
+    for (const el of all) {
+      if (!(el.parentElement && POINTER(el)) || el.matches('button,a,[role=button],input,select,textarea,label,li,option,tr,td,th')) continue;
+      if (POINTER(el.parentElement) && el.parentElement !== document.body) continue;  // the outermost pointer element only
+      if (el.querySelector('button,a,input,select,textarea,[role=button],[role=link]') || consumed.has(el)) continue;
+      const r = el.getBoundingClientRect(), text = (el.innerText || '').trim();
+      if (r.width < 200 || r.height < 50 || r.height > 400 || text.length < 8 || text.length > 300) continue;
+      const key = el.parentElement;
+      groups.set(key, [...(groups.get(key) || []), el]);
+    }
+    for (const cards of groups.values()) {
+      if (cards.length < 2 || cards.length > 4 || new Set(cards.map(c => c.tagName)).size !== 1) continue;
+      for (const el of cards) {
+        const label = clean((el.innerText || '').split('\n').map(x => x.trim()).find(Boolean) || '');
+        if (!label) continue;
+        buttons.push({
+          id: id(el), label, partner: false, href: '', type: '', automation_id: '', aria_label: '', html_id: el.id || '',
+          section: section(el), group: groupOf(el), stepper: false, card: true,
+        });
+      }
+    }
+  }
   // Disabled actions are not controls, but a disabled Submit says the page is still incomplete.
   const disabledActions = all.filter(el => el.matches('button,input[type=submit],[role=button]') && visible(el)
       && (el.disabled || el.getAttribute('aria-disabled') === 'true') && !el.closest(CAPTCHA_BOX))
