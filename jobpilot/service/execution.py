@@ -343,6 +343,7 @@ class ExecutionMixin:
         try:
             with self.db.session() as s:
                 self.check_cooldown(s, s.get(Job, run["job_id"]))
+            from ..pipeline_comparison import budget_class
             from ..specialist import pool_boost
             from ..tiers import clamp, time_budget
 
@@ -352,7 +353,7 @@ class ExecutionMixin:
                 max(self.config.application_timeout, self.config.multipage_timeout),
                 clamp((run.get("packet") or {}).get("runner_tier", 1)),
                 job.get("ats", ""),
-                boost=pool_boost(self.config, (run.get("packet") or {}).get("worker_pool")),
+                boost=pool_boost(self.config, budget_class(run.get("packet") or {})),
             )
             run_budget = max(outer, self.config.application_timeout, self.config.multipage_timeout) + 45
             lifetime = (run.get("packet") or {}).get("application_deadline")

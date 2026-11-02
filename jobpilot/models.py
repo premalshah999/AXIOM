@@ -358,7 +358,11 @@ class MeteredTransport(httpx.AsyncBaseTransport):
             # Columns only: s.get(Run) decoded the whole packet on the shared loop before every model call.
             run = (
                 s.execute(
-                    select(Run.model_calls, Run.packet["worker_pool"].as_string().label("pool")).where(
+                    select(
+                        Run.model_calls,
+                        Run.packet["worker_pool"].as_string().label("pool"),
+                        Run.packet["strategy"].as_string().label("strategy"),
+                    ).where(
                         Run.id == self.run_id
                     )
                 ).first()
@@ -369,7 +373,11 @@ class MeteredTransport(httpx.AsyncBaseTransport):
                 raise BudgetExceeded("Daily model budget reached")
             from .tiers import call_limit
 
-            if run and run.model_calls >= call_limit(self.config, self.tier, run.pool):
+            from .pipeline_comparison import budget_class
+
+            if run and run.model_calls >= call_limit(
+                self.config, self.tier, budget_class({"worker_pool": run.pool, "strategy": run.strategy})
+            ):
                 raise BudgetExceeded("Application model-call limit reached")
             budget.spent += reserve
             if run:

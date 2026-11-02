@@ -37,7 +37,7 @@ from .accounts import AccountFlow
 from .captcha import CaptchaSolver, challenge_frame, checkbox_frame
 from .captcha_observation import ARM_JS, DISARM_JS, PROVIDER_FRAME_JS
 from .privacy import deny_location, dismiss_cookies
-from .pipeline_comparison import worker_context
+from .pipeline_comparison import budget_class, worker_context
 
 GUARD = r"""(() => {
   if(""" + PROVIDER_FRAME_JS + r""")return;
@@ -1701,6 +1701,7 @@ class BrowserEngine:
                 if adapters or ats in MULTIPAGE
                 else self.config.application_timeout
             )
+            from .pipeline_comparison import budget_class
             from .specialist import pool_boost
             from .tiers import clamp, time_budget
 
@@ -1708,7 +1709,7 @@ class BrowserEngine:
                 budget,
                 clamp(run["packet"].get("runner_tier", 1)),
                 ats,
-                boost=pool_boost(self.config, run["packet"].get("worker_pool")),
+                boost=pool_boost(self.config, budget_class(run["packet"])),
             )
             self.budget = budget
             # Where the job link itself led (Dell's Oracle link redirects to enterpriseplatform.dell.com): the
@@ -5477,7 +5478,7 @@ class BrowserEngine:
                 "controller or quality reviewer. Prioritize those fields and their history rows; do not interpret "
                 "a control or quality failure as a missing personal fact. Return only the requested JSON."
                 + " "
-                + worker_context(self.job.get("ats"), self.run_record["packet"].get("worker_pool", "normal")),
+                + worker_context(self.job.get("ats"), budget_class(self.run_record["packet"])),
                 # Stable content first (prompt_layout.navigation_payload): the scan counter inside the observation
                 # cut the cached prefix at ~1.8k of 20-40k tokens on every step (cache hit 1792 tokens, 2026-10-28).
                 dumps_payload(

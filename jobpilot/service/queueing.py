@@ -329,12 +329,12 @@ class QueueingMixin:
                 board = self.db.get_setting("job_board_settings", {}) or {}
                 if blocker := fit_blocker(profile, board, job.title):
                     raise QueueBlocked(blocker[0], code=blocker[1])
-            from ..pipeline_comparison import routed_pool
+            from ..pipeline_comparison import routed_budget
             from ..specialist import pool_boost
             from ..tiers import job_over_budget
 
             # A job already routed to a specialist has the larger token cap, whichever run it continues from.
-            routed = routed_pool(s, job, recovery_source_run)
+            routed = routed_budget(s, job, recovery_source_run)
             if mode == "submit" and job_over_budget(s, self.db, job_id, pool_boost(self.config, routed)):
                 raise QueueBlocked(
                     "This job already used its model budget for today; it will not be retried until tomorrow",
@@ -487,10 +487,12 @@ class QueueingMixin:
                 recovery_row = s.get(Setting, "draft_recovery:" + job_id)
                 source = s.get(Run, recovery_source_run)
                 control = s.get(Setting, "control").value
-                from ..pipeline_comparison import SPECIALIST, assign_pool
+                from ..pipeline_comparison import SPECIALIST, STRATEGY_ESCALATED, assign_pool, assign_strategy
                 from ..recovery import CONTINUATION_CAUSES, specialist_attempts
 
-                specialist = source and assign_pool(s, job, source) == SPECIALIST
+                specialist = source and (
+                    assign_pool(s, job, source) == SPECIALIST or assign_strategy(job, source) == STRATEGY_ESCALATED
+                )
                 exhausted = (
                     specialist_attempts(s, job_id) >= self.config.specialist_attempts
                     if specialist
@@ -662,13 +664,21 @@ class QueueingMixin:
                     artifact_id=resume_artifact_id,
                     continuation=continuation,
                 )
-            from ..pipeline_comparison import assign, assign_pool, normalize_ats, pool_capacity
+            from ..pipeline_comparison import (
+                STRATEGY_ESCALATED,
+                assign,
+                assign_pool,
+                assign_strategy,
+                normalize_ats,
+                pool_capacity,
+            )
             from ..run_profile import keep as keep_profile
 
             pipeline_source = continuation or (
                 s.get(Run, recovery_source_run) if recovery_source_run else None
             )
             assigned_pool = worker_pool = assign_pool(s, job, pipeline_source)
+            strategy = assign_strategy(job, pipeline_source)
             if worker_pool == "custom" and not self.config.topology.custom:
                 raise QueueBlocked(
                     "Applications on custom career sites are turned off (Settings › Connections › Workers); this one "
@@ -746,6 +756,7 @@ class QueueingMixin:
                     **artifact_packet,
                     "application_pipeline": assign(s, job, pipeline_source),
                     "worker_pool": worker_pool,
+                    **({"strategy": strategy} if strategy == STRATEGY_ESCALATED else {}),
                     "ats_specialist": normalize_ats(job.ats),
                     **(
                         {"specialist_escalation": pipeline_source.packet["specialist_escalation"]}
@@ -765,10 +776,11 @@ class QueueingMixin:
                     + (
                         recovery_row.value.get("cause") not in {"email_matched", "worker_interrupted"}
                         and worker_pool != "specialist"
+                        and strategy != STRATEGY_ESCALATED
                     ),
                     **(
                         {"specialist_attempts": specialist_attempts(s, job_id)}
-                        if worker_pool == "specialist"
+                        if worker_pool == "specialist" or strategy == STRATEGY_ESCALATED
                         else {}
                     ),
                     "recovery_run_id": run.id,
@@ -801,7 +813,7 @@ class QueueingMixin:
             from ..specialist import routing_note
 
             routing = routing_note(
-                assigned_pool, worker_pool, pipeline_source.packet if pipeline_source else None
+                assigned_pool, worker_pool, pipeline_source.packet if pipeline_source else None, strategy
             )
         self.db.event(
             run.id, "queued", "Application queued", {"mode": mode, "resume": chosen.name, **routing}

@@ -215,6 +215,9 @@ class Settings(BaseSettings):
     company_logos: bool = True
     # Wall-clock time, model calls and the per-job token cap are this many times larger on a specialist.
     specialist_budget_multiplier: float = Field(default=1.5, ge=1, le=3)
+    # The same for a custom site's escalated run, which stays on the custom-site worker. 1: it gets a different
+    # strategy (the failed ones listed, its own attempts) but no larger cost ceiling; raising it is the owner's call.
+    custom_escalation_multiplier: float = Field(default=1.0, ge=1, le=3)
     # Failures on ATS workers before a job moves to a specialist.
     specialist_after_failures: int = Field(default=2, ge=1, le=5)
     # Specialist attempts per job before it is left for the owner.

@@ -16,6 +16,17 @@ SPECIALIST = "specialist"
 CUSTOM = "custom"
 POOLS = (NORMAL, SPECIALIST, CUSTOM)
 
+# A run has two independent properties. Its LANE (`worker_pool`) is which workers' slots it may occupy, and it
+# follows the kind of site (a custom career site only ever runs on the custom-site worker). Its STRATEGY is how hard
+# the recovery tries: a standard run, or an escalated one that carries the failed strategies of earlier runs, its own
+# attempt allowance and (for a specialist) a larger budget. A specialist is an escalated run in its own lane; a custom
+# site cannot change lanes, so it escalates in place and records it as `strategy`. They used to be one field, which
+# left every custom job on the standard strategy for good (CODEX_CUSTOM_ATS_AUDIT item 3).
+STRATEGY_STANDARD = "standard"
+STRATEGY_ESCALATED = "escalated"
+# Budget class of an escalated run that stays in the custom lane (pool_boost reads it, never a slot).
+CUSTOM_ESCALATED = "custom_escalated"
+
 
 def _get(row, key, default=None):
     return row.get(key, default) if isinstance(row, dict) else getattr(row, key, default)
@@ -47,6 +58,28 @@ def custom_site(job):
 
     # A named platform only the generic driver runs (Pinpoint, Gem...) is still a site it learns as it goes.
     return custom_like(normalize_ats(_get(job, "ats") or ""))
+
+
+def escalated(run):
+    """Has this run been given the escalated recovery strategy, whatever lane it runs in?"""
+    packet = _packet(run)
+    return packet.get("worker_pool") == SPECIALIST or packet.get("strategy") == STRATEGY_ESCALATED
+
+
+def budget_class(run):
+    """What the run's time, model-call and token budget is sized by: its lane, or CUSTOM_ESCALATED for a custom site."""
+    packet = _packet(run)
+    if packet.get("strategy") == STRATEGY_ESCALATED and packet.get("worker_pool") == CUSTOM:
+        return CUSTOM_ESCALATED
+    return packet.get("worker_pool", NORMAL)
+
+
+def assign_strategy(job, source=None):
+    """The recovery strategy of the next run. A specialist-lane run is escalated by its lane, so only a lane that
+    cannot change (the custom-site worker) records it; the lane itself is assign_pool's."""
+    if custom_site(job) and _packet(source).get("specialist_escalation", {}).get("eligible") is True:
+        return STRATEGY_ESCALATED
+    return STRATEGY_STANDARD
 
 
 def assign_pool(session, job, source=None):
@@ -87,6 +120,15 @@ def routed_pool(session, job, source_id=None):
     runs = list(session.scalars(select(Run).options(defer(Run.packet)).where(Run.job_id == job.id)))
     source = session.get(Run, source_id) if source_id else None
     return assign_pool(session, job, continued_run(runs, source))
+
+
+def routed_budget(session, job, source_id=None):
+    """The budget class of the job's next run (routed_pool, plus an escalated custom site's)."""
+    runs = list(session.scalars(select(Run).options(defer(Run.packet)).where(Run.job_id == job.id)))
+    source = continued_run(runs, session.get(Run, source_id) if source_id else None)
+    if assign_strategy(job, source) == STRATEGY_ESCALATED:
+        return CUSTOM_ESCALATED
+    return assign_pool(session, job, source)
 
 
 def assign(session, job, source=None):
@@ -289,7 +331,7 @@ def worker_context(job_ats, pool=NORMAL):
 
         brief = next((item.guidance for item in REGISTRY if normalize_ats(item.id) == ats), "")
     context = GENERAL_CONTEXT + " " + brief
-    if pool == SPECIALIST:
+    if pool in {SPECIALIST, CUSTOM_ESCALATED}:
         context += (
             " Difficult-flow owner: continue the preserved unsubmitted checkpoint. Read prior observations, "
             "attempted strategies and postconditions before choosing a materially different supported "
