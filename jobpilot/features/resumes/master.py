@@ -358,7 +358,7 @@ def _normalize(imported: Imported) -> ResumeDoc:
         # The validator's own text ("List should have at most...") is no use to a person. Which part, in their resume's words, is.
         where = next((e["loc"] for e in exc.errors()), ())
         title = sections[where[1]]["title"] if len(where) > 1 and where[0] == "sections" and isinstance(where[1], int) and where[1] < len(sections) else ""
-        raise ValueError(
+        raise ResumeTooLong(
             f"Part of your resume{f', under {title},' if title else ''} is longer than AXIOM's copy of a resume can hold, so it can't be copied word for word. "
             "Add a shorter version in Resumes, or use plain Apply, which sends your PDF as it is."
         ) from None

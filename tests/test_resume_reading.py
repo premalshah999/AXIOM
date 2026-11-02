@@ -336,9 +336,9 @@ def test_more_than_a_copy_can_hold_is_said_in_a_persons_words(service):
     resume = resume_row(service, text_pdf())
     copy = whole_copy()
     copy["sections"][0]["entries"][0]["bullets"] = [{"text": f"bullet {i}"} for i in range(30)]
-    with pytest.raises(ValueError) as refused:
-        asyncio.run(master.import_master(service.db, service.config, counting(copy), resume["id"]))
-    assert "under EXPERIENCE" in str(refused.value) and "validation" not in str(refused.value)
+    with pytest.raises(pipeline.ResumeUnread) as refused:
+        asyncio.run(pipeline.source_document(service.db, service.config, counting(copy), resume))
+    assert "under EXPERIENCE" in refused.value.detail and "validation" not in refused.value.detail
 
 
 def test_two_columns_go_to_the_model_whole():
@@ -553,12 +553,17 @@ def test_a_resume_too_long_to_copy_is_refused_before_it_costs_anything(service):
     assert "too long" in stopped.value.detail and not stopped.value.retryable and not model.calls
 
 
-def test_the_import_button_says_what_happened_in_plain_words(client, service, monkeypatch):
+@pytest.mark.parametrize("kind", ["library", "schema"])
+def test_the_import_button_says_what_happened_in_plain_words(client, service, monkeypatch, kind):
+    from pydantic_ai.exceptions import UnexpectedModelBehavior
+
     assert upload(client, text_pdf()).status_code == 200
     monkeypatch.setattr(service.config, service.config.llm_provider + "_api_key", "k")
 
     async def cut_off(*_a, **_k):
-        raise ValueError("Exceeded maximum retries (1) for output validation")
+        if kind == "library":
+            raise UnexpectedModelBehavior("Exceeded maximum retries (1) for output validation")
+        master.Imported.model_validate({"sections": 1})
 
     monkeypatch.setattr("jobpilot.features.knowledge.writing.configured_model", lambda *_a, **_k: cut_off)
     reply = client.post("/api/v2/resumes/master/import", json={})
