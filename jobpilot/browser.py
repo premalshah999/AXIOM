@@ -3228,7 +3228,9 @@ class BrowserEngine:
         # What the site did since the previous step (value-free); account steps can carry one-use links.
         network = getattr(self.form, "network", None)
         entries = network.take_journal() if network else []
-        if not (sensitive or metadata_only):
+        # Recovery steps keep the journal too (host, path, status, never a value): UKG's "Create account" click changed nothing
+        # on the page in six runs and no record said whether the site was asked anything (2026-11-01).
+        if not sensitive:
             summary["network"] = entries
         catalog = network.take_catalog() if network else []
         try:

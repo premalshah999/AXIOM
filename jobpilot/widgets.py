@@ -1044,7 +1044,10 @@ async def ensure_uncovered(el):
         // their combobox (Microsoft sign-up country list). They are part of the
         // open control; the click-point ownership check still applies.
         if(e.closest('[role="listbox"],[role="option"],[role="menu"],[role="menuitem"],[role="tree"],[role="grid"]'))return false;
-        return dialogs.length && !dialogs.some(d=>d.contains(e));
+        // Composed containment: a control inside a web component's shadow tree (UKG's modal Close button) is inside the
+        // dialog that holds the component, though dialog.contains() stops at the shadow boundary.
+        const within=(d,n)=>{for(;n;n=n.parentNode||n.host){if(n===d)return true}return false};
+        return dialogs.length && !dialogs.some(d=>within(d,e));
     }""")
     if blocked:
         raise ValueError("Control is covered by the active dialog or inert")
