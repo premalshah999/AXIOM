@@ -112,7 +112,7 @@ class Resolver(
         # Source channels ("social media") whose follow-up question offered no truthful option on this application: the
         # parent menu is answered again without them (answers/sources.py).
         self.dead_sources = set()
-        # This application's tax-credit survey outcome, set by the form session (forms.note_survey): "" none launched, "launched", "finished".
+        # This application's tax-credit survey outcome, set by the form session (forms.note_survey): "" none launched, "launched", "finished", "declined".
         self.survey = ""
 
     @property

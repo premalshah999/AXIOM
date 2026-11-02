@@ -5391,6 +5391,15 @@ class BrowserEngine:
             if adapter and not self.armed:
                 from .adapters.base import Step
 
+                if (
+                    adapter.in_assessment()
+                    and adapter.assessment_opt_out_wanted()
+                    and await adapter.opt_out_of_assessment(obs)
+                ):
+                    # The employer calls the survey voluntary: declined with its own control, before the model answers any of it
+                    # (Fifth Third, 2026-11-02: the model opened and answered it, and opened it again, on every run).
+                    self.page = self.form.page
+                    continue
                 if adapter.classify_page(obs) == Step.ALREADY_APPLIED:
                     self.result = await adapter.on_already_applied(obs)
                     return

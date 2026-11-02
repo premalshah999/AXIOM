@@ -49,3 +49,16 @@ def test_the_form_session_records_the_survey_outcome_on_its_resolver(service):
     session.note_survey("finished")
     session.note_survey("launched")  # a second launch never erases a finished survey
     assert resolver.survey == "finished"
+
+
+def test_a_survey_this_run_declined_is_no_and_coming_back_from_it_finishes_nothing(service):
+    from jobpilot.forms import FormSession
+
+    resolver = Resolver(Profile(), service.db, service.config, job={"ats": "workday", "url": "https://example.test/j"})
+    session = FormSession(None, resolver, None, lambda *a, **k: None)
+    session.note_survey("launched")
+    session.note_survey("declined")
+    session.note_survey("finished")  # return_to_opener runs on the way back from a declined survey as well
+    assert resolver.survey == "declined"
+    answer = resolver.local(field("Did you complete the WOTC survey?"))
+    assert answer.value == "No" and answer.evidence_ids == ["policy:wotc-survey-declined-in-run"]

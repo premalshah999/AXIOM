@@ -1875,13 +1875,24 @@ class FormSession:
 
     def note_survey(self, state):
         """This application's survey outcome for the answer rules: "launched" when the run opened the tax-credit survey, "finished" once the run
-        came back from it. A resolver without the attribute (a test double) simply has no record."""
-        if state == "launched" and getattr(self.resolver, "survey", "") == "finished":
+        came back from it, "declined" when it used the questionnaire's own way out (coming back from that finishes nothing). A resolver without
+        the attribute (a test double) simply has no record."""
+        current = getattr(self.resolver, "survey", "")
+        if (state == "launched" and current == "finished") or (state == "finished" and current == "declined"):
             return
         try:
             self.resolver.survey = state
         except AttributeError:
             pass
+
+    async def launching_step_says_voluntary(self):
+        """Whether the step the survey is opened from calls it voluntary: whoever opens it, the guided flow or the model."""
+        from .adapters.base import survey_called_voluntary
+
+        try:
+            return survey_called_voluntary((await self.scan()).get("text", ""))
+        except Exception:
+            return False  # Unread is not voluntary.
 
     def assessment_tab_returned(self):
         """The launched survey's tab now shows the application's own host: its last link was the way back."""
@@ -6451,6 +6462,7 @@ class FormSession:
             self.assessment_origin = urlsplit(opener.url).hostname or ""
             self.assessment_return = opener.url
             self.note_survey("launched")
+            self.survey_voluntary = await self.launching_step_says_voluntary()
         # A "Submit" that this guard allowed for a profile/account popup or a tax-credit
         # launcher must also pass the page's own click guard, or the click is silently
         # cancelled (Starbucks "Create your profile": the agent clicked Submit for minutes).

@@ -10,7 +10,9 @@ import json
 from collections import Counter
 from types import SimpleNamespace
 
-from jobpilot.adapters.base import Step
+import pytest
+
+from jobpilot.adapters.base import Step, survey_called_voluntary
 from jobpilot.adapters.workday import Workday
 from jobpilot.browser import BrowserEngine
 
@@ -304,19 +306,84 @@ async def test_a_required_survey_is_answered_not_declined_the_first_time():
     assert adapter.filled == 1 and [c for c, _ in adapter.form_clicks] == ["next"]
 
 
-async def test_a_finished_survey_the_application_still_demands_is_declined_on_the_second_opening():
-    """Smithfield (Synergi): eight finished surveys and Workday still said "You must complete the assessment test"."""
+async def test_a_required_survey_is_never_declined_even_when_finished_and_not_on_record():
+    """Smithfield (Synergi): finished surveys and Workday still said "You must complete the assessment test". The employer requires it and
+    never calls it voluntary, so its Opt-Out is not the run's to press: that is a decision for the person."""
     adapter = await opened()
     adapter.e.form.page = adapter.workday_page
     adapter.e.form.survey_finished = True
     demand = {**await adapter.scan(), "errors": ["Error - Page Error You must complete the assessment test to continue with your job application."]}
-    assert await adapter.launch_assessment(demand, again=True) is True and adapter.assessment_unrecorded
+    assert await adapter.launch_assessment(demand, again=True) is True
     adapter.open_questionnaire([{"id": "next", "label": "Next", "automation_id": ""},
                                 {"id": "out", "label": "Opt-Out", "automation_id": ""}])
     adapter.text = "Tax credit screening"
-    adapter.closes_on = "out"
+    assert not adapter.assessment_opt_out_wanted()
     await adapter.on_form(await adapter.scan())
-    assert [c for c, _ in adapter.form_clicks] == ["out"] and adapter.filled == 0 and adapter.returned == 1
+    assert [c for c, _ in adapter.form_clicks] == ["next"] and adapter.filled == 1
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Work Opportunity Tax Credit. This is not a voluntary survey; you must complete it.",
+        "Work Opportunity Tax Credit questionnaire. This survey is not voluntary.",
+        "Take the tax credit questionnaire below. Voluntary Self-Identification of Disability: this survey is voluntary.",
+        "Take Assessment Complete the tax credit questionnaire",
+        "This survey is voluntary.",  # No word of a tax credit: whose survey that is, nothing says.
+    ],
+)
+def test_what_is_not_the_employer_calling_this_survey_voluntary(text):
+    assert not survey_called_voluntary(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        VOLUNTARY_TEXT,
+        "As part of its administration of the tax credit program, EY requests that you complete the following on-line survey. Your "
+        "participation in the survey is voluntary, but encouraged.",
+    ],
+)
+def test_the_employers_own_words_call_it_voluntary(text):
+    assert survey_called_voluntary(text)
+
+
+async def test_a_declined_survey_with_nothing_left_to_press_goes_back_to_the_application():
+    """Whatever the vendor's last page says: no field, no way on, and the survey was declined."""
+    adapter = Scripted()
+    adapter.controls, adapter.text = [take()], VOLUNTARY_TEXT
+    assert await adapter.on_form(await adapter.scan()) is None
+    decline_page(adapter)
+    assert await adapter.on_form(await adapter.scan()) is None and adapter.e.form.survey_declined
+    adapter.controls, adapter.text = [], "You have opted out of the screening."
+    returned = []
+
+    async def back():
+        returned.append(True)
+        return True
+
+    adapter.e.form.return_from_questionnaire = back
+    assert await adapter.on_form(await adapter.scan()) is None
+    assert returned and adapter.filled == 1  # fill_page ran on an empty page; nothing in the survey was answered
+
+
+async def test_a_second_label_identical_to_the_pressed_decline_is_not_its_confirmation():
+    """A postback page shows the same "Decline" again under a new id: it is not the "Opt Out" confirmation."""
+    adapter = Scripted()
+    adapter.controls, adapter.text = [take()], VOLUNTARY_TEXT
+    assert await adapter.on_form(await adapter.scan()) is None
+    decline_page(adapter)
+    original = adapter.form_click
+
+    async def click(control_id, auth_control=False, step_control=False, launch=False):
+        await original(control_id, auth_control, step_control, launch)
+        if control_id == "decline":
+            adapter.controls = [{"id": "decline2", "label": "Decline tax credit screening.", "automation_id": ""},
+                                {"id": "next", "label": "Next", "automation_id": ""}]
+
+    adapter.e.form.click = click
+    assert await adapter.on_form(await adapter.scan()) is None
+    assert [c for c, _ in adapter.form_clicks] == ["decline"]
 
 
 async def test_a_page_that_cannot_be_inspected_mid_redirect_is_read_again_not_given_up_on():

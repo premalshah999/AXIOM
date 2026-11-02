@@ -177,6 +177,8 @@ ASSESSMENT_VOLUNTARY = re.compile(
     r"\bprefer not to complete\b[^.]{0,120}\b(?:decline|opt[\s-]*out)\b",
     re.I,
 )
+# Another survey's words on the same page: Oracle's one page holds the voluntary self-identification beside the tax-credit launcher.
+OTHER_SURVEY = re.compile(r"self[- ]identif|equal (?:employment )?opportunity|\beeo\b|\bdisabilit|\bgender\b|\bethnic|\brace\b", re.I)
 ASSESSMENT_OPT_OUT = re.compile(r"\s*(?:decline|opt[\s-]*out)\b[\w\s,'\-]{0,60}\W*", re.I)
 # A test of the applicant themself, which only they can take. GreatAmerica's Workday step opened the Predictive Index: 87 adjectives
 # describing how you act (2026-10-30), and ten runs went round it and its login page. Answering it for them would be inventing them.
@@ -210,6 +212,19 @@ def personal_test(text):
     for found in PERSONAL_TEST.finditer(text):
         around = text[max(0, found.start() - 160) : found.end() + 160]
         if not NOT_A_TEST_CONTEXT.search(around) and (TEST_DIRECTIVE.search(around) or len(text) <= SHORT_STEP):
+            return True
+    return False
+
+
+def survey_called_voluntary(text):
+    """The employer says this tax-credit questionnaire is voluntary, in so many words, next to what it says about the tax credit. Declining is
+    only for this: a survey the employer requires ("You must complete the assessment test") is never declined, however often it went wrong."""
+    text = text or ""
+    for found in ASSESSMENT_VOLUNTARY.finditer(text):
+        if re.search(r"\bnot\s+(?:an?\s+)?$", text[max(0, found.start() - 8) : found.start()], re.I):
+            continue
+        near = text[max(0, found.start() - 160) : found.end() + 160]
+        if TAX_CREDIT.search(text[max(0, found.start() - 400) : found.end() + 400]) and not OTHER_SURVEY.search(near):
             return True
     return False
 
@@ -1081,13 +1096,8 @@ class Adapter:
             return False
         self.attempts["assessment"] += 1
         self.assessment_from = urlsplit(self.page.url).hostname or ""
-        if ASSESSMENT_VOLUNTARY.search(obs.get("text", "")):
+        if survey_called_voluntary(obs.get("text", "")):
             self.assessment_voluntary = True
-        if again and getattr(self.form, "survey_finished", False) and ASSESSMENT_DEMAND.search(
-            " ".join(str(e) for e in obs.get("errors", []))
-        ):
-            # Finished once and still not on record: answering it again changes nothing (Smithfield, eight finished surveys).
-            self.assessment_unrecorded = True
         self.emit("assessment", "Opening the employer's tax-credit questionnaire", {"control": take["label"][:40]})
         await self.dismiss_overlays()
         # A launcher by its automation id or label: the run returns to this tab when a survey tab closes itself, and to
@@ -1129,8 +1139,9 @@ class Adapter:
             # question when a radio is clicked and never shows Next (Allison Transmission, PepsiCo 2026-10-25).
             self.emit("assessment", "The questionnaire moved to its next question")
             return None
-        if not forward and not obs["fields"] and SURVEY_DONE.search(obs.get("text", "")):
-            # Finished on its own host ("Thank you ... you may close this window"): back to the application.
+        if not forward and not obs["fields"] and (SURVEY_DONE.search(obs.get("text", "")) or getattr(self.form, "survey_declined", False)):
+            # Finished on its own host ("Thank you ... you may close this window"), or declined with nothing left to press: back to the
+            # application.
             if await self.form.return_from_questionnaire():
                 return None
         if not forward and not self.attempts["assessment_settle"]:
@@ -1177,28 +1188,41 @@ class Adapter:
         return obs
 
     def assessment_opt_out_wanted(self):
-        """Declining is the questionnaire's own way out where the employer calls it voluntary, and where a finished one is still not
-        on the application's record. It answers nothing, so nothing in it can be untrue."""
+        """Declining is the questionnaire's own way out where the employer calls it voluntary, and nowhere else: not for a required survey
+        that finished without being recorded. It answers nothing, so nothing in it can be untrue. The launch may have been the guided
+        flow's or the model's (the form reads the step it was opened from)."""
         return self.attempts["assessment_opt_out"] < 2 and bool(
-            getattr(self, "assessment_voluntary", False) or getattr(self, "assessment_unrecorded", False)
+            getattr(self, "assessment_voluntary", False) or getattr(self.form, "survey_voluntary", False)
         )
 
     async def opt_out_of_assessment(self, obs):
         """Press the questionnaire's decline control, and its confirmation ("Opt Out" beside "Take Survey"), then go back to the
-        application. False when the page offers no such control."""
+        application. False when the page offers no such control. The run's record says declined, never finished: "Did you complete the
+        WOTC survey?" is answered from it."""
         control = next((c for c in obs["controls"] if ASSESSMENT_OPT_OUT.fullmatch(c["label"] or "")), None)
         if not control:
             return False
         self.attempts["assessment_opt_out"] += 1
         self.emit("assessment", "Declining the optional tax-credit questionnaire", {"control": control["label"][:40]})
         await self.dismiss_overlays()
+        note = getattr(self.form, "note_survey", None)
+        pressed = " ".join(control["label"].split()).casefold()
         try:
             await self.form.click(control["id"], auth_control=True, step_control=True)
+            if note:
+                note("declined")
+            self.form.survey_declined = True
             await self.form.settle(timeout=6)
             if not self.form.page.is_closed():
                 after = await self.form.scan()
                 confirm = next(
-                    (c for c in after["controls"] if c["id"] != control["id"] and ASSESSMENT_OPT_OUT.fullmatch(c["label"] or "")),
+                    (
+                        c
+                        for c in after["controls"]
+                        if c["id"] != control["id"]
+                        and " ".join((c["label"] or "").split()).casefold() != pressed
+                        and ASSESSMENT_OPT_OUT.fullmatch(c["label"] or "")
+                    ),
                     None,
                 )
                 if confirm:
