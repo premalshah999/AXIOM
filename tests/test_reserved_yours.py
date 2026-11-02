@@ -21,7 +21,7 @@ def fresh_rules():
 
 def add_job(service, jid, company, url="https://jobs.example.test/1"):
     with service.db.exclusive() as s:
-        s.add(Job(id=jid, identity=jid, url=url, company=company, title="Software Engineer", ats="custom", status="ready", score=90,
+        s.add(Job(id=jid, identity=jid, url=url, company=company, title="Software Engineer", ats="greenhouse", status="ready", score=90,
                   location="Remote, United States"))
     return jid
 
