@@ -96,6 +96,9 @@ class Engine:
     def current_repair_instruction(self):
         return ""
 
+    def watching_posting(self):
+        return None
+
     def successfactors_application_step(self, obs):
         return False
 
