@@ -296,6 +296,41 @@ def router(service) -> APIRouter:
 
             return JSONResponse(status_code=202, content=await start(service, job_id))
 
+    # Take over: the owner finishes an application by hand in the app's Chrome (jobpilot/steer.py). Optional; unused, nothing changes.
+    @r.get("/api/steer")
+    def steered():
+        from ...steer import steered_jobs
+
+        return {"jobs": [{"job_id": k, **v} for k, v in steered_jobs(service.db).items()]}
+
+    @r.get("/api/jobs/{job_id}/steer")
+    def steer_status(job_id: str):
+        from ...steer import status
+
+        return status(service, job_id)
+
+    @r.post("/api/jobs/{job_id}/take-over")
+    async def take_over(job_id: str):
+        from ...steer import start
+
+        try:
+            return await start(service, job_id)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+
+    @r.post("/api/jobs/{job_id}/steer/{how}")
+    async def steer_finish(job_id: str, how: str):
+        from ...steer import finish, submitted
+
+        try:
+            if how == "submitted":
+                return submitted(service, job_id)
+            if how not in {"done", "back"}:
+                raise HTTPException(404)
+            return await finish(service, job_id, how)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+
     @r.delete("/api/jobs/{job_id}")
     async def remove_job(job_id: str):
         from ...job_control import manage

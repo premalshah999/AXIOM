@@ -611,3 +611,7 @@ button.nd-asking:hover strong {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Take over: the panel shown while you have an application (steer.tsx). Plain: a sentence, three buttons, a note. */
+.nd-steer { display: grid; gap: var(--space-3, 12px); padding: var(--space-4, 16px) 0; }
+.nd-steer p { margin: 0; }

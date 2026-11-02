@@ -7,6 +7,7 @@ import type { Job, Review } from "./types";
 import { ago, employerOf, linkHost, plural } from "./format";
 import { Button, ConfirmButton, Dropzone, Listbox } from "./ui/index";
 import { RowMenu } from "./worktools";
+import { takeOverJob, TakeOverButton } from "./steer";
 import "./styles/work.css";
 import "./styles/needs.css";
 
@@ -100,6 +101,13 @@ export async function deliver(reviews: Review[], post: (review: Review) => Promi
   }
   if (failure) throw sent ? new Error(`Sent to ${sent} of ${reviews.length}. ${failure.message}`) : failure;
   return { message, sent };
+}
+/** One answer to every row of a question: one request when it is on several applications (the server answers each, then settles once). */
+export async function answerAll(reviews: Review[], answer: string) {
+  if (reviews.length === 1) return deliver(reviews, (r) => postAnswer(r, answer));
+  const result = await api<{ message?: string; sent: number; of: number; failed?: string }>("/reviews/batch", "POST", { ids: reviews.map((r) => r.id), answer });
+  if (result.failed) throw new Error(`Sent to ${result.sent} of ${result.of}. ${result.failed}`);
+  return { message: result.message, sent: result.sent };
 }
 export const postAnswer = (review: Review, answer: string) => api<{ message?: string }>("/reviews/" + review.id, "POST", { answer });
 
@@ -207,7 +215,8 @@ export function QuestionCard({
   const uid = useId();
   const id = "q-" + q.id;
   const listId = "q-options-" + q.id;
-  const ready = kind === "upload" ? !!file : !!answer.trim();
+  const searched = kind === "choice" && !q.multiple && !q.allow_other && q.options.length > 12;
+  const ready = kind === "upload" ? !!file : searched ? q.options.includes(answer) : !!answer.trim();
   const whole = q.display_question || q.question;
   const { place, text } = questionParts(review);
   const shape = shapeOf(q.requirement);
@@ -216,13 +225,13 @@ export function QuestionCard({
   const reach = [job, ...others].filter((j): j is Job => !!j);
   const count = reach.length;
 
-  const send = (post: (r: Review) => Promise<{ message?: string }>, after?: () => void) => {
+  const send = (post: (r: Review) => Promise<{ message?: string }>, after?: () => void, text?: string) => {
     onSending?.(q.id);
     return run(
       "save",
       async () => {
         try {
-          const result = await deliver(reviews, post);
+          const result = text !== undefined ? await answerAll(reviews, text) : await deliver(reviews, post);
           after?.();
           await refresh();
           onSaved?.(q.id, result.message);
@@ -248,7 +257,7 @@ export function QuestionCard({
           },
           () => setFile(null),
         )
-      : send((r) => postAnswer(r, answer.trim()), clear);
+      : send((r) => postAnswer(r, answer.trim()), clear, answer.trim());
 
   // "Not applicable" is only an answer where the form can take those words: free text, or a choice that offers them.
   const notApplicable =
@@ -345,6 +354,26 @@ export function QuestionCard({
           </label>
         ))}
       </div>
+    ) : kind === "choice" && q.options.length > 12 ? (
+      <>
+        {/* A long list is searched, not scrolled: type a few letters and pick from what the form offers. */}
+        <input
+          data-answer
+          className="ax-control"
+          aria-label={label}
+          list={listId}
+          required
+          value={answer}
+          onChange={(e) => setAnswer(e.target.value)}
+          placeholder={`Search ${q.options.length} choices`}
+        />
+        <datalist id={listId}>
+          {q.options.map((x) => (
+            <option key={x} value={x} />
+          ))}
+        </datalist>
+        {!!answer && !q.options.includes(answer) && <p className="ax-hint">Pick one of the choices the form offers.</p>}
+      </>
     ) : kind === "choice" ? (
       <Listbox
         label={label}
@@ -571,8 +600,9 @@ export function QuestionCard({
             Skip
           </Button>
         )}
+        {reach.length === 1 && !compact && <TakeOverButton jobId={reach[0]!.id} />}
         {notApplicable && !hideControl && (
-          <Button variant="ghost" disabled={pending !== null} onClick={() => void send((r) => postAnswer(r, notApplicable), clear)}>
+          <Button variant="ghost" disabled={pending !== null} onClick={() => void send((r) => postAnswer(r, notApplicable), clear, notApplicable)}>
             Not applicable to me
           </Button>
         )}
@@ -594,6 +624,14 @@ export function QuestionCard({
               label="More about this question"
               actions={[
                 ...(reach.length === 1 ? [{ id: "open", label: "Open job", onSelect: () => openJob(reach[0]!.id, q.run_id) }] : []),
+                // One application at a time: the button above is for a question on a single one.
+                ...(reach.length > 1
+                  ? reach.slice(0, 5).map((j) => ({
+                      id: "take:" + j.id,
+                      label: `Take over ${j.company || linkHost(j.url) || "an application"}`,
+                      onSelect: () => void run("take", async () => { await takeOverJob(j.id); await refresh(); }, "Opening the application in Chrome. It is yours as soon as the page is ready."),
+                    }))
+                  : []),
                 ...(reach.length ? [{ id: "drop", label: dropLabel, danger: true, confirm: `${dropLabel}? ${dropNote}`, confirmLabel: "Drop", onSelect: () => void drop() }] : []),
               ]}
             />

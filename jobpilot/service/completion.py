@@ -107,6 +107,10 @@ class CompletionMixin:
         )
 
     def complete(self, run_id, result, elapsed):
+        from .. import steer
+
+        if steer.is_steer_run(self.db, run_id):
+            return steer.complete(self, run_id, result, elapsed)  # Take over: the owner has this application.
         with self.db.exclusive() as s:
             run = s.get(Run, run_id)
             if not run or run.state == "cancelled":

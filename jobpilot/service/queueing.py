@@ -17,6 +17,7 @@ from ..schemas import Profile
 from .. import shortlinks
 from ..admission import QueueBlocked, employer_partition, requisition_twins, temporary_time, require_intake
 from ..runtime import engine_version, profile_version
+from ..steer import hands_back as steer_hands, opening as steer_opening
 from .states import ACTIVE, RETRYABLE
 
 # Admission is synchronous database work: dozens of guard queries inside the app lock (a PostgreSQL advisory lock).
@@ -306,7 +307,7 @@ class QueueingMixin:
                 raise QueueBlocked("Job not found", code="not_found")
             from ..job_control import require_running
 
-            require_running(s, job_id)
+            require_running(s, job_id, mode)
             from ..stop import refuse
 
             # Every path that starts an application comes through here, whoever asks: the batch, a retry, an answered
@@ -690,6 +691,9 @@ class QueueingMixin:
                     "match_approved": job.status == "ready"
                     or bool(retry and any(x.packet.get("match_approved") for x in previous)),
                     "engine_version": engine_version(),
+                    # Take over's rebuilding run: the engine keeps its tab open for the owner whatever the result.
+                    **({"steer": True} if mode == "dry_run" and steer_opening(s, job.id) else {}),
+                    **({"owner_hands": True} if mode == "submit" and steer_hands(s, job.id) else {}),
                     "model_version": self.config.llm_provider + ":" + self.config.llm_model,
                     "runner_tier": job_tier(self.db, job.id),
                     "profile_version": profile_version(packet_profile),
