@@ -388,6 +388,12 @@ class PollingMixin:
                         else:
                             seen = {m["id"] for m in messages}
                             messages += [m for m in unbranded.get("messages", []) if m["id"] not in seen]
+                    outside = None
+                    if not messages and c["kind"] in {"link", "password_reset"}:
+                        try:
+                            outside = await self.outside_senders(c)
+                        except Exception:
+                            outside = None  # A diagnosis never fails the verification poll.
                     if c["sender_learning"]:
                         # Beside the sender search, not inside it: a busy mailbox's "confirm" and "password" mail must never
                         # read as "too many candidates" and fail the window. The newest few are enough for a mail just asked for.
@@ -405,12 +411,6 @@ class PollingMixin:
                         )
                         seen = {m["id"] for m in messages}
                         messages += [m for m in worded.get("messages", []) if m["id"] not in seen]
-                    outside = None
-                    if not messages and c["kind"] in {"link", "password_reset"}:
-                        try:
-                            outside = await self.outside_senders(c)
-                        except Exception:
-                            outside = None  # A diagnosis never fails the verification poll.
                     for m in messages[: 20 + UNBRANDED_MAX_CANDIDATES]:
                         with self.db.session() as s:
                             if s.get(MailConsumption, c["mailbox_id"] + ":" + m["id"]):
