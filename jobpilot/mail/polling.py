@@ -165,7 +165,11 @@ class PollingMixin:
                     proposed = c.expires
                     c.expires = self.window_deadline(run, c.expires)
                     owner_gone = not run or (run.state not in {"running", "submitting"} and not self.waiting_owner(run, c.id))
-                    if owner_gone or (
+                    if c.state == "consumed" and c.payload and owner_gone and c.expires >= current:
+                        # Handed over and its application stopped (the app quit, the browser died) before it said it had
+                        # used it: kept sealed for that application's next attempt (revive) until its hold ends.
+                        c.state, c.reason = "cancelled", "The application stopped after the email was handed over"
+                    elif owner_gone or (
                         c.expires < current
                         and (
                             c.state != "pending"
@@ -179,6 +183,11 @@ class PollingMixin:
                         c.state, c.payload = "expired", ""
                     elif c.expires < current:
                         last_chance.append(c.id)
+                for kept in s.scalars(
+                    select(MailChallenge).where(MailChallenge.state == "cancelled", MailChallenge.payload != "")
+                ):
+                    if kept.expires < current:
+                        kept.payload = ""  # the hold on an unused mail has ended
                 ended = self.end_dead_email_waits(s)
                 pending = [
                     record(c)

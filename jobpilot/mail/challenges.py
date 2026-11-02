@@ -284,6 +284,8 @@ class ChallengesMixin:
                     "request_id": previous.id,
                     "generation": (meta.value if meta else {}).get("generation", 1),
                 }
+            if kept := self.revive(s, run, rule, recipient, kind, current):
+                return kept
             if self.sender_blocker(s, rule, run_id, kind, current):
                 raise ValueError("Another application is verifying with this sender; retry after it finishes")
             # A legacy supplied timestamp cannot backdate a new request. Observed
@@ -362,6 +364,42 @@ class ChallengesMixin:
             )
             return {**record(c), "request_id": c.id, "generation": generation, "late_window": late is not None}
 
+    def revive(self, s, run, rule, recipient, kind, current):
+        """The mail an interrupted attempt of this same application was handed and did not use, once.
+
+        Only the same job, address and employer rule; only while its hold (MATCH_HOLD_SECONDS, set when it matched) lasts;
+        never for an application that already went through; never twice, so a code the site rejected is not offered again.
+        It starts the next attempt without asking the employer for another mail."""
+        for row in s.scalars(
+            select(MailChallenge)
+            .where(
+                MailChallenge.rule_id == rule["id"],
+                MailChallenge.recipient == recipient.lower(),
+                MailChallenge.state == "cancelled",
+                MailChallenge.payload != "",
+                MailChallenge.expires > current,
+            )
+            .order_by(MailChallenge.since.desc())
+        ):
+            if kind != "auto" and row.kind not in {"auto", kind}:
+                continue
+            meta = s.get(Setting, "mail_request:" + row.id)
+            source = s.get(Run, row.run_id)
+            if (
+                (meta and meta.value.get("revived"))
+                or not source
+                or source.job_id != run.job_id
+                or source.state in {"confirmed", "already_applied", "submission_unknown"}
+            ):
+                continue
+            row.run_id, row.state, row.reason = run.id, "matched", "A claimed email was kept for this application's next attempt"
+            row.expires = self.window_deadline(run, max(row.expires, current + 60))
+            generation = (meta.value if meta else {}).get("generation", 1)
+            if meta:
+                meta.value = {**meta.value, "revived": True, "matched_at": current}
+            return {**record(row), "request_id": row.id, "generation": generation}
+        return None
+
     @staticmethod
     def late_since(s, rule, recipient, kind, current):
         """The start of this employer's earliest unanswered request of this kind that ended within LATE_MAIL_VALIDITY,
@@ -397,7 +435,11 @@ class ChallengesMixin:
     def outcome(self, challenge_id, state, reason=""):
         with self.db.exclusive() as s:
             if (c := s.get(MailChallenge, challenge_id)) and c.state in LIVE:
-                c.state, c.reason, c.payload = state, reason[:200], ""
+                # An interruption after the handoff (the browser closed, the app quit, the run was replaced) keeps the sealed
+                # mail for this application's next attempt (revive): the message is consumed, so no search can find it again,
+                # and asking the employer again voids it. A verified, failed or expired request keeps nothing.
+                kept = c.payload if c.state == "consumed" and state == "cancelled" else ""
+                c.state, c.reason, c.payload = state, reason[:200], kept
                 # A consumed continuation must not keep pointing at its terminal
                 # request when the website requires a fresh bounded resend.
                 owner = s.get(Run, c.run_id)
@@ -424,7 +466,9 @@ class ChallengesMixin:
                 c.state, c.payload, c.reason = "cancelled", "", "Application no longer owns this verification"
                 return None
             token = self.vault.open(c.payload)
-            c.state, c.payload, c.reason = "consumed", "", "Matched email handed to its application owner"
+            # The sealed mail stays until the request ends (outcome, expiry): the browser can still be interrupted before it
+            # uses what it was handed. Nothing reads a consumed request's payload (summary leaves it out).
+            c.state, c.reason = "consumed", "Matched email handed to its application owner"
             return token
 
     async def wait(self, challenge_id, *, max_wait_seconds=None):
