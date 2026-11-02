@@ -88,6 +88,19 @@ def test_the_numbers_an_address_states(url, numbers):
         # A page of the site beside a slug address.
         ("https://acme.com/careers/data-analyst", "https://acme.com/careers/create-account", None),
         ("https://acme.com/careers/data-analyst", "https://acme.com/careers/job-search", None),
+        # A bare ?id= or ?pid= number: on one page of the site it names the record that page shows.
+        ("https://acme.com/job?id=1234", "https://acme.com/job?id=5678", "query"),
+        ("https://acme.com/careers?pid=11122", "https://acme.com/careers?pid=33344", "query"),
+        ("https://acme.com/careers?pid=11122", "https://acme.com/careers/apply?pid=33344", "query"),
+        ("https://acme.com/job?id=1234", "https://acme.com/job?id=1234&step=2", None),
+        ("https://acme.com/careers?pid=11122", "https://acme.com/careers/apply?pid=11122", None),
+        # A form that numbers the application its own way, a word that isn't a number, a page that adds one.
+        ("https://acme.com/job?id=1234", "https://acme.com/apply?id=99887", None),
+        ("https://acme.com/jobs?id=eng", "https://acme.com/jobs?id=ops", None),
+        ("https://acme.com/job?id=1234", "https://acme.com/job", None),
+        ("https://acme.com/jobs/data-analyst", "https://acme.com/jobs/data-analyst?id=5678", None),
+        # The path's own number says it is the same posting, whatever the id beside it is.
+        ("https://acme.com/job/12345?id=999", "https://acme.com/job/12345?id=111", None),
         # Nothing to compare.
         ("", JOB, None),
         (JOB, "", None),
@@ -104,6 +117,13 @@ def test_another_postings_address(own, url, expected):
         ("Software Engineer I", "Software Engineer II", ""),
         ("Software Engineer 1", "Software Engineer II", ""),
         ("Nurse", "Data Analyst", ""),
+        # A different seniority word is a different requisition, and "Senior" would otherwise read as confirmed for this job.
+        ("Software Engineer", "Senior Software Engineer", ""),
+        ("Senior Software Engineer", "Software Engineer", ""),
+        ("Staff Engineer", "Senior Engineer", ""),
+        ("Associate", "Senior Associate", ""),
+        ("Software Engineer", "Software Engineer Intern", ""),
+        ("Sr. Software Engineer", "Principal Software Engineer", ""),
     ],
 )
 def test_clearly_another_role(own, stated, company):
@@ -122,9 +142,12 @@ def test_clearly_another_role(own, stated, company):
         ("Software Engineer", "ExampleSoft Inc", "ExampleSoft"),
         ("Software Engineer", "this position", ""),
         ("Software Engineer", "", ""),
+        ("Senior Software Engineer", "Software Engineer, Senior", ""),  # The same word, where the employer puts it.
+        ("Sr Software Engineer", "Senior Software Engineer (Remote)", ""),
+        ("Jr. Analyst", "Junior Analyst", ""),
+        ("Senior Analyst", "Senior Engineer", ""),  # The same seniority: the words decide, as before.
         ("Untitled role", "Data Analyst", ""),  # The job states no title to compare.
         ("", "Data Analyst", ""),
-        ("Staff Engineer", "Senior Engineer", ""),  # Can't be told from a title alone; an id decides those.
     ],
 )
 def test_not_clearly_another_role(own, stated, company):

@@ -409,8 +409,19 @@ def application_address(kind, value):
     return True
 
 
-def classify_embedded(entries):
+def apply_target(url):
+    """What an Apply link opens, however it is written: the posting its address names, else its page. The posting and its /apply, and a
+    tracking parameter, are one target."""
+    from .posting_match import _segments, _site, _strip_steps, posting_ids
+
+    return _site(url), frozenset(posting_ids(url)) or tuple(part.casefold() for part in _strip_steps(_segments(url)))
+
+
+def classify_embedded(entries, own_urls=None):
     """(ats id, url or None, how) for what a page shows of the platform behind it, or (None, None, "").
+
+    `own_urls`: the caller will move the run to what this finds, and these are the addresses the job was given. A page with Apply links to
+    several postings is a job list, and the first one is nobody's hand-off: only the one naming this job's own number can be.
 
     A real application link beats a vendor's script: PwC, Ascension and Crowe's Phenom pages carry Phenom's scripts and
     apply on Workday or Oracle, yet a script-only hit returned "phenom" and no application link was ever followed
@@ -420,10 +431,21 @@ def classify_embedded(entries):
     for the label alone, never a place to navigate to: the page's form already works where it is, and a real platform's hit
     outranks it. A platform's domain is not proof by itself: its marketing site, a tracking script or a newsletter form
     on it shows only that the employer uses the vendor for something (application_address)."""
-    hits = []
+    hits, several, own_numbers = [], False, set()
+    if own_urls is not None:
+        from .posting_match import posting_ids
+
+        several = len({
+            apply_target(value)
+            for k, value in entries
+            if k in {"apply", "jsonld"} and detect(value).id != "custom" and application_address(k, value)
+        }) > 1
+        own_numbers = {number for own in own_urls if own for number in posting_ids(own)}
     for rank, kind in enumerate(("frame", "apply", "jsonld", "form", "meta", "link", "script", "dom")):
         for k, value in entries:
             if k != kind:
+                continue
+            if several and kind in {"apply", "jsonld"} and not posting_ids(value) & own_numbers:
                 continue
             ats_id, url = None, None
             if kind in {"frame", "form", "apply", "jsonld", "script"} and (found := detect(value)).id != "custom":

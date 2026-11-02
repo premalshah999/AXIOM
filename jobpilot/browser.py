@@ -26,6 +26,7 @@ from .posting_identity import IDENTITY_JS, identity, placeholder_title, save as 
 from .posting_match import (
     PostingWatch,
     acknowledges_application,
+    application_fields,
     could_carry_application,
     other_posting_address,
     role_heading,
@@ -2926,7 +2927,7 @@ class BrowserEngine:
             return ats
         try:
             await page.wait_for_load_state("load", timeout=8000)
-            found, url, how = classify_embedded(await page.evaluate(EMBED_JS))
+            found, url, how = classify_embedded(await page.evaluate(EMBED_JS), own_urls=self.given_addresses())
             if found == "greenhouse" and not url:
                 url = await self.late_greenhouse_frame(page)
         except Exception:
@@ -2997,12 +2998,14 @@ class BrowserEngine:
         try:
             landed = detect(page.url).id
             if unsettled(landed):
-                found, url, how = classify_embedded(await page.evaluate(EMBED_JS))
+                found, url, how = classify_embedded(await page.evaluate(EMBED_JS), own_urls=self.given_addresses())
             else:
                 found, url, how = landed, None, "url"  # a redirect or new tab already on the platform's page
         except Exception:
             return None
         if not found or found == current or (current != "custom" and found in LABEL_ONLY):
+            return None
+        if await self.not_this_postings_page():
             return None
         form = getattr(self, "form", None)
         untouched = not (getattr(form, "ledger", None) or getattr(form, "uploaded", False))
@@ -3022,6 +3025,22 @@ class BrowserEngine:
                 self.emit("handoff_skipped", f"The page shows {found}, but the form is already in progress; staying on it", {"found": found})
             self.adopt_handoff(found)
         return found
+
+    def given_addresses(self):
+        """The addresses this job was given, never ones the run walked to."""
+        return [getattr(self, "job", {}).get("url", ""), getattr(self, "application_entry_url", "")]
+
+    async def not_this_postings_page(self):
+        """The last look before a hand-off makes this page the run's job: a job list or another posting never is, and the guard reads it
+        first (stay_on_posting, which went after the hand-off in the navigator's loop). True when it moved the run or stopped it."""
+        form = getattr(self, "form", None)
+        if form is None or self.watching_posting() is None:
+            return False
+        try:
+            obs = await form.scan()
+        except Exception:
+            return False  # A page that can't be read names no other posting; the commit looks again.
+        return await self.stay_on_posting(obs)
 
     def adopt_handoff(self, target, url=None):
         """The employer's site led to this platform: its own posting becomes the run's job URL in memory (Workday's
@@ -3168,6 +3187,8 @@ class BrowserEngine:
             self.emit("handoff", f"The application moved to {target}; its own adapter continues")
             result = await self.run_adapters(target)
             return None if result and result.get("fallback") and not self.armed else result
+        if await self.not_this_postings_page():
+            return None
         self.navigator_handed_off = True
         self.adopt_handoff(target)
         self.emit("handoff", f"The application moved to {target}; its own adapter continues")
@@ -5625,7 +5646,8 @@ class BrowserEngine:
                 continue  # Read the page again; a stop set the result and ends at the loop's top.
             if (watch := self.watching_posting()) is not None:
                 # The model is not offered another posting's link; forms.click refuses one if it names it anyway.
-                obs = {**obs, "controls": [c for c in obs["controls"] if not watch.other_posting_link(c.get("href"), obs["url"], c.get("label"))]}
+                asking = bool(application_fields(obs))
+                obs = {**obs, "controls": [c for c in obs["controls"] if not watch.other_posting_link(c.get("href"), obs["url"], c.get("label"), asking=asking)]}
             obs = await self.await_successfactors_handoff(obs)
             if self.result:
                 return
