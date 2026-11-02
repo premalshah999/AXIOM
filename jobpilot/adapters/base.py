@@ -54,6 +54,12 @@ GUEST_EMAIL_EXISTS = re.compile(
     r"e-?mail(?: address)?[^\n]{0,80}?\balready (?:exists|registered|in use)\b[^.\n]{0,80}\bguest\b", re.I
 )
 SEND_LINK = re.compile(r"send e-?mail", re.I)
+# The page an emailed link opens when the employer refuses it: nobody was signed in, however politely it loaded.
+REFUSED_LINK = re.compile(
+    r"\blinks?\b[^.\n]{0,40}\b(?:expired|no longer valid|invalid|already (?:been )?used)\b"
+    r"|\b(?:expired|invalid)\s+(?:(?:verification|sign-?in|confirmation)\s+)?link\b",
+    re.I,
+)
 # A posting's own comment box and video upload (SuccessFactors: "Write a reply..." and "Upload Video" beside Apply now).
 POSTING_WIDGET = re.compile(r"^(?:write|leave|add|post) an? (?:reply|comment)\b|^(?:upload )?(?:a )?video\W*$", re.I)
 
@@ -729,8 +735,8 @@ class Adapter:
     # How long a questionnaire page without questions or a way forward is given to open its pop-up.
     ASSESSMENT_SETTLE_SECONDS = 2.5
     ASSESSMENT_RECORD_SECONDS = 20
-    # A run released by a matched emailed sign-in link opens it first (matched_link_waiting). Workday, Oracle and iCIMS
-    # keep their own continuations of a parked mail wait.
+    # A run released by a matched emailed sign-in link opens it first (matched_link_waiting). Workday and iCIMS keep their
+    # own continuations of a parked mail wait.
     link_resume = True
     # The last page of this run that offered "Forgot your password?".
     sign_in_page = None
@@ -1608,6 +1614,12 @@ class Adapter:
             self.finish_mail("failed", "Expected a verification link, received a code")
             return self.defer("The employer sent a code where the page expected a link")
         await self.open_link(token["value"])
+        obs = await self.form.scan()
+        if REFUSED_LINK.search(obs["text"]):
+            # Recorded as accepted, the account read as signed in and each try asked for another link.
+            self.finish_mail("failed", "The employer refused this link")
+            await self.return_to_application()
+            return None
         self.finish_mail("verified", "Website accepted the verification link")
         self.accounts.mark(self.page.url, "authenticated")
         self.emit("email_verified", "Employer email verification completed")

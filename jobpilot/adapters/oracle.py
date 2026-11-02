@@ -22,7 +22,6 @@ KEEP_SIGNED_IN = re.compile(r"^\s*keep me signed in\b", re.I)
 class Oracle(Adapter):
     id = "oracle"
     name = "Oracle Recruiting"
-    link_resume = False  # its own continuation of a parked mail wait
     next_ids = ("apply-flow-next", "next-button")
 
     async def on_form(self, obs):

@@ -85,9 +85,74 @@ def test_anything_else_is_left_to_the_ordinary_flow(service, token, state, kind,
     assert value.classify_page(OBS) != Step.VERIFY_LINK
 
 
-@pytest.mark.parametrize("cls", [Workday, Oracle, ICIMS])
+@pytest.mark.parametrize("cls", [Workday, ICIMS])
 def test_platforms_with_their_own_continuation_keep_it(service, cls):
     assert cls.link_resume is False and Adapter.link_resume is True
+
+
+def test_oracle_opens_a_matched_link_first(service):
+    """A new install parked on Oracle's first link, signed in again on waking and created a second account request. That
+    mailed a new link, which voided the one it then opened: 15 emails in two minutes, and nothing verified."""
+    assert Oracle.link_resume is True
+    assert adapter(service, seed(service), Oracle).classify_page(OBS) == Step.VERIFY_LINK
+
+
+def test_oracle_leaves_a_matched_code_to_its_code_step(service):
+    value = adapter(service, seed(service, {"kind": "code", "value": "000000"}), Oracle)
+    assert value.classify_page(OBS) != Step.VERIFY_LINK
+
+
+def link_visit(service, monkeypatch, text):
+    """on_verify_link opening a link onto a page that says `text`; returns the adapter and what it recorded."""
+    value = adapter(service, None)
+    seen = SimpleNamespace(mail=[], marked=[], returned=0)
+
+    async def ready(kind):
+        return {"kind": "link", "value": "https://jobs.example.test/verify?token=t"}
+
+    async def visit(url):
+        return None
+
+    async def scan():
+        return {**OBS, "text": text, "fields": [{"id": "f", "type": "text", "label": "Name"}]}
+
+    async def settle(timeout=0):
+        return None
+
+    async def back():
+        seen.returned += 1
+
+    monkeypatch.setattr(Adapter, "mail_rule_known", True)
+    value.inbox, value.wait_email, value.open_link = SimpleNamespace(configured=True), ready, visit
+    value.e = SimpleNamespace(form=SimpleNamespace(scan=scan, settle=settle, page=SimpleNamespace(url=OBS["url"])))
+    value.finish_mail = lambda state, reason: seen.mail.append(state)
+    value.accounts = SimpleNamespace(mark=lambda url, state: seen.marked.append(state))
+    value.emit = lambda *a, **k: None
+    value.return_to_application = back
+    value.classify = lambda obs: Step.FORM
+    return value, seen
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "This link has expired. Please ask for a new link.",
+        "Your verification link is no longer valid",
+        "That link has already been used.",
+        "Invalid link",
+    ],
+)
+async def test_a_refused_link_is_not_recorded_as_accepted(service, monkeypatch, text):
+    value, seen = link_visit(service, monkeypatch, text)
+    assert await value.on_verify_link(OBS) is None
+    assert seen.mail == ["failed"] and not seen.marked and seen.returned == 1
+
+
+@pytest.mark.parametrize("text", ["Your email has been verified. My Information", "Links to our benefits and privacy policy"])
+async def test_an_accepted_link_signs_the_account_in(service, monkeypatch, text):
+    value, seen = link_visit(service, monkeypatch, text)
+    await value.on_verify_link(OBS)
+    assert seen.mail == ["verified"] and seen.marked == ["authenticated"]
 
 
 def test_a_sign_in_form_that_came_back_unchanged_is_not_retried_on_the_same_build():
