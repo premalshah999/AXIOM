@@ -335,6 +335,11 @@
   }
   .bd-search {
     display: flex;
+    flex-wrap: wrap;
+  }
+  .bd-search > .bd-section,
+  .bd-search > .ax-notice {
+    flex: 1 1 100%;
   }
   .bd-search .ax-search {
     flex: 1;
