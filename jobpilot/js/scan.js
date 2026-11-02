@@ -874,7 +874,9 @@
   }
   for (const [name, all_] of Object.entries(boxNames)) {
     if (all_.length < 2 || excluded(all_[0]) || consumed.has(all_[0])) continue;
-    const shown = all_.filter(c => visible(c) || (c.labels && c.labels[0] && visible(c.labels[0])));
+    // Rippling's box is a zero-size input inside a visible role=checkbox row (DESRI 2026-11-01): without the row both Yes/No
+    // answers were each a lone "Unlabelled field" and the question's words were never read.
+    const shown = all_.filter(c => visible(c) || (c.labels && c.labels[0] && visible(c.labels[0])) || visible(c.closest('[role=checkbox]')));
     if (!shown.length) continue;
     // Atlas Copco's SAP sign-up form (2026-10-31) keeps hidden copies of "Receive new job posting notifications" from its
     // other screens under the same name: the group read as three boxes ("*", "*", the caption) with no question, and the
