@@ -247,6 +247,11 @@ def router(service) -> APIRouter:
     def update(data: BoardSettings):
         # The goal is the daily limit (Settings › Limits); this form no longer carries a second number.
         data = data.model_copy(update={"batch_target": config.daily_application_limit})
+        # "How close a match" is on this form and on Profile › Job preferences: one number, shown twice. Profile → board is
+        # synced when the profile is saved (routes/profile.py); this is the way back, so neither screen keeps an old value.
+        profile = db.get_setting("profile", None)
+        if isinstance(profile, dict) and profile.get("minimum_fit") != data.minimum_auto_fit and settings(db).minimum_auto_fit != data.minimum_auto_fit:
+            db.set_setting("profile", {**profile, "minimum_fit": data.minimum_auto_fit})
         if data.auto_apply:
             from ...autopilot import start_batch
 
