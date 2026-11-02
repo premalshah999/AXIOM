@@ -7,6 +7,9 @@ from ...db import Resume
 from ...schemas import ProfileExtract, Profile
 
 
+LAST_READ_KEY = "profile_last_resume_read"
+
+
 def sync_address(stored, value):
     """Facts JSON and the structured address describe one address: whichever you edited wins."""
     from ...schemas import ADDRESS_FACTS
@@ -129,6 +132,11 @@ def router(service) -> APIRouter:
             raise ValueError(_unread_resume(exc)) from exc
         except Exception as exc:
             raise ValueError(_unread_resume(exc)) from exc
-        return result.model_dump()
+        # The setup guide tells what a read gave from what the person typed: a second resume replaces the first one's jobs, also
+        # after the guide was closed and reopened. Nothing goes into the profile here.
+        extracted = result.model_dump()
+        previous = db.get_setting(LAST_READ_KEY, None)
+        db.set_setting(LAST_READ_KEY, extracted)
+        return {**extracted, "previous": previous}
 
     return r

@@ -7,6 +7,7 @@ import { Wordmark } from "./shell/Brand";
 import { resumeFileRefusal } from "./format";
 import { SwitchRow } from "./setup-kit";
 import { MainPassword } from "./mainpassword";
+import { span } from "./profile-fields";
 import { YesNo } from "./qform";
 import { Button, Dropzone, ErrorLine, External, Input, Loading, Monogram, Pill, Segmented, Select } from "./ui/index";
 import type { EducationEntry, Profile, WorkEntry } from "./types";
@@ -405,36 +406,76 @@ function stepProblem(step: StepId, d: Draft): string {
   return "";
 }
 
-// What the last resume read gave, so reading a different resume replaces it rather than stacking on top (work and schooling are only
-// filled when empty; without this, choosing another resume left the first one's jobs in place under a message saying the new
-// ones were found). Entries the person has since edited no longer match, so they are kept.
-let lastRead: Partial<Draft> | null = null;
-const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+// ---------- what a resume read gives the form ----------
+// A resume writes its phone with the country code ("+1 (555) 010-0100"), and the Contact step has a box for the code: left in the
+// number, applications would send it twice. A calling code is one digit (1, 7), two (these ranges) or three.
+const callingCode = (digits: string) =>
+  /^[17]/.test(digits) ? digits.slice(0, 1) : /^(2[07]|3[0-469]|4[013-9]|5[1-8]|6[0-6]|8[1246]|9[0-58])/.test(digits) ? digits.slice(0, 2) : digits.slice(0, 3);
 
-const US_STATES = new Set("AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY".split(" "));
+function splitPhone(raw: string) {
+  const text = raw.trim().replace(/^\(\s*(\+\s*\d{1,3})\s*\)/, "$1");
+  const digits = text.replace(/\D/g, "");
+  // "1 (555) 010-0100" is a US number written with its leading 1.
+  const code = text.startsWith("+") ? callingCode(digits) : digits.length === 11 && digits.startsWith("1") ? "1" : "";
+  if (!code) return { phone: text, code: "" };
+  let at = 0;
+  for (let seen = 0; seen < code.length; at++) if (/\d/.test(text[at]!)) seen++;
+  return { phone: text.slice(at).replace(/^[\s.\-)/]+/, ""), code: "+" + code };
+}
 
-function mergeExtract(draft: Draft, x: Partial<Draft>, before: Partial<Draft> | null): Draft {
+const US_STATE_NAMES = new Set(
+  "alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|district of columbia|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming".split("|"),
+);
+const US_STATE_CODES = new Set("AL AK AZ AR CA CO CT DC DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY".split(" "));
+
+/** "Austin, TX", "Austin, Texas, USA", "Austin TX 78701": the Contact step asks for city and state. Anywhere else stays for the person to type. */
+function cityState(location: string) {
+  const text = location.replace(/\(.*?\)/g, " ").trim();
+  // Without a comma, only a state code can say where the city ends.
+  const parts = text.includes(",") ? text.split(",").map((part) => part.trim()) : (/^(.+?)\s+([A-Za-z]{2}(?:\s+\d{5}(?:-\d{4})?)?)$/.exec(text)?.slice(1) ?? []);
+  for (let i = 1; i < parts.length; i++) {
+    const m = /^(.*?)(?:\s+(\d{5}(?:-\d{4})?))?$/.exec(parts[i]!)!;
+    const state = m[1]!.replace(/\./g, "").trim();
+    const code = state.toUpperCase();
+    if (parts[i - 1] && (US_STATE_CODES.has(code) || US_STATE_NAMES.has(state.toLowerCase())))
+      return { city: parts[i - 1]!, state: US_STATE_CODES.has(code) ? code : state, postal_code: m[2] || "" };
+  }
+  return null;
+}
+
+const asRead = (x: Partial<Draft>) => ({ ...x, ...splitPhone(x.phone || ""), place: cityState(x.location || "") });
+const sameEntry = (a: object, b: object) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
+/** Nothing in this list but what the last resume read put there (some may have been removed since), so a new read may replace it. */
+const onlyFromRead = <T extends object>(list: T[], read?: T[]) => list.every((entry) => (read ?? []).some((other) => sameEntry(entry, other)));
+
+/**
+ * A box or list takes the new resume's value when it is empty or still holds what the last read put there; what the person typed stays.
+ * `last` is the server's memory of that read (POST /profile/extract), so choosing another resume replaces the first one's jobs and
+ * schools rather than leaving them under a message saying the new ones were found, also after the guide was closed and reopened.
+ */
+function mergeExtract(draft: Draft, raw: Partial<Draft>, last: Partial<Draft> | null): Draft {
+  const x = asRead(raw);
+  const before = last ? asRead(last) : null;
+  const ours = (now: unknown, was: unknown) => !String(now ?? "").trim() || (!!before && String(now ?? "") === String(was ?? ""));
   const next = { ...draft };
-  for (const key of ["first_name", "last_name", "email", "phone", "location", "linkedin", "github", "website"] as const) {
-    const unchanged = before && String(next[key] || "") === String(before[key] || "");
-    if ((!String(next[key] || "").trim() || unchanged) && x[key]) next[key] = x[key] as string;
-  }
-  if (x.work?.length && (!next.work.length || (before && same(next.work, before.work)))) next.work = x.work as WorkEntry[];
-  if (x.education?.length && (!next.education.length || (before && same(next.education, before.education))))
-    next.education = x.education as EducationEntry[];
-  if (x.skills?.length) {
+  for (const key of ["first_name", "last_name", "email", "phone", "location", "linkedin", "github", "website"] as const)
+    if (x[key] && ours(next[key], before?.[key])) next[key] = x[key] as string;
+  if (x.code && next.phone === x.phone) next.phone_country_code = x.code;
+  if (onlyFromRead(next.work, before?.work)) next.work = raw.work ?? [];
+  if (onlyFromRead(next.education, before?.education)) next.education = raw.education ?? [];
+  if (raw.skills?.length) {
     const old = new Set(before?.skills ?? []);
-    next.skills = Array.from(new Set([...(next.skills || []).filter((k) => !old.has(k)), ...x.skills]));
+    next.skills = Array.from(new Set([...(next.skills || []).filter((k) => !old.has(k)), ...raw.skills]));
   }
-  // The Contact step has a field for the country code: a resume's "+1 (555) 010-0100" would otherwise send "+1" twice.
-  const code = (next.phone_country_code || "").trim();
-  if (code && next.phone !== draft.phone && next.phone.trim().startsWith(code)) next.phone = next.phone.trim().slice(code.length).replace(/^[\s.-]+/, "");
-  // The resume lists "Austin, TX": the Contact step asks for city and state, so hand it those instead of leaving them blank.
-  const place = /^\s*([^,]+),\s*([A-Z]{2})(?:\s+(\d{5}(?:-\d{4})?))?\s*(?:,|$)/.exec(x.location || "");
-  if (place && US_STATES.has(place[2]!) && !next.address.city.trim() && !next.address.state.trim())
-    next.address = { ...next.address, city: place[1]!.trim(), state: place[2]!, postal_code: next.address.postal_code.trim() || place[3] || "" };
-  if (!next.name.trim() || (before && next.name === [before.first_name, before.last_name].filter(Boolean).join(" ")))
-    next.name = [next.first_name, next.last_name].filter(Boolean).join(" ");
+  const { city, state, postal_code } = next.address;
+  if (x.location && ours(city, before?.place?.city) && ours(state, before?.place?.state))
+    next.address = {
+      ...next.address,
+      city: x.place?.city ?? "",
+      state: x.place?.state ?? "",
+      postal_code: ours(postal_code, before?.place?.postal_code) ? (x.place?.postal_code ?? "") : postal_code,
+    };
+  if (ours(next.name, [before?.first_name, before?.last_name].filter(Boolean).join(" "))) next.name = [next.first_name, next.last_name].filter(Boolean).join(" ");
   return next;
 }
 
@@ -804,13 +845,6 @@ function WelcomeStep() {
   );
 }
 
-/** "2022-06 to now": how long a job or course ran, as the resume read it. */
-function span(start?: string, end?: string, current?: boolean) {
-  const from = (start || "").trim();
-  const to = current ? "now" : (end || "").trim();
-  return from && to ? `${from} to ${to}` : from ? `from ${from}` : to ? `to ${to}` : "";
-}
-
 // ---------- Resume ----------
 function ResumeStep({
   draft,
@@ -836,9 +870,9 @@ function ResumeStep({
     try {
       // Applications attach the newest resume unless a job chose another; picking one here makes it that one.
       await api(`/resumes/${encodeURIComponent(resumeId)}/prefer`, "POST").catch(() => null);
-      const extracted = await api<Partial<Draft>>("/profile/extract?resume_id=" + encodeURIComponent(resumeId), "POST");
-      const before = lastRead;
-      lastRead = extracted;
+      const { previous, ...extracted } = await api<Partial<Draft> & { previous?: Partial<Draft> | null }>("/profile/extract?resume_id=" + encodeURIComponent(resumeId), "POST");
+      const before = previous ?? null;
+      const kept = !onlyFromRead(draft.work, before?.work) || !onlyFromRead(draft.education, before?.education);
       setDraft((d) => mergeExtract(d, extracted, before));
       setState("done");
       const parts = [
@@ -846,7 +880,12 @@ function ResumeStep({
         extracted.education?.length ? `${extracted.education.length} school${extracted.education.length === 1 ? "" : "s"}` : "",
         extracted.skills?.length ? `${extracted.skills.length} skills` : "",
       ].filter(Boolean);
-      setMessage(parts.length ? "Found " + parts.join(", ") + ". Check them below." : "Resume read, but no jobs or schools were found in it. You can add them in Profile after setup.");
+      const after = kept
+        ? " Your list below already had entries of your own, so it stays as it is. Remove anything you don't want."
+        : extracted.work?.length || extracted.education?.length
+          ? " Check them below."
+          : " No jobs or schools were found in it. You can add them in Profile after setup.";
+      setMessage(parts.length ? "Found " + parts.join(", ") + "." + after : "Resume read, but nothing was found in it. You can add your details in Profile after setup.");
     } catch (e) {
       setState("error");
       // The server's words for a missing key name a settings file; here the fix is one step back.
@@ -949,7 +988,8 @@ function ResumeStep({
                 <Monogram name={w.company} size="md" />
                 <span className="ax-ob-found-text">
                   <strong>{w.title || "Role"}</strong>
-                  <small>{[w.company, span(w.start, w.end, w.current)].filter(Boolean).join(" · ")}</small>
+                  <small>{w.company}</small>
+                  <small>{span(w.start, w.end, w.current)}</small>
                 </span>
                 <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDraft((d) => ({ ...d, work: d.work.filter((_, k) => k !== i) }))}>
                   Remove<span className="sr-only"> {w.title || "role"} at {w.company}</span>
@@ -960,11 +1000,9 @@ function ResumeStep({
               <li key={"e" + i}>
                 <Monogram name={e.school} size="md" />
                 <span className="ax-ob-found-text">
-                  <strong>
-                    {e.degree}
-                    {e.field_of_study ? " · " + e.field_of_study : ""}
-                  </strong>
-                  <small>{[e.school, span(e.start, e.end, false)].filter(Boolean).join(" · ")}</small>
+                  <strong>{[e.degree, e.field_of_study].filter(Boolean).join(" · ") || "School"}</strong>
+                  <small>{e.school}</small>
+                  <small>{span(e.start, e.end, false)}</small>
                 </span>
                 <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDraft((d) => ({ ...d, education: d.education.filter((_, k) => k !== i) }))}>
                   Remove<span className="sr-only"> {e.degree || "school"} at {e.school}</span>
