@@ -1,7 +1,7 @@
 // Job board: which real, open postings the app found, and why each one fits or doesn't (owner, 2026-11-01: "make the job board good
 // and legit"). Pages, filters and exact counts come from the server (GET /api/board, jobpilot/board_view.py), the same reading the
 // Queue is made from, so In queue 4 here is number 4 there. Closed, stale and duplicate rows never reach it.
-import { ExternalLink, FilterX, ListChecks, Plus, Radar, RefreshCw, SearchX, ShieldCheck } from "lucide-react";
+import { ExternalLink, FilterX, ListChecks, ListOrdered, Plus, Radar, RefreshCw, SearchX, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { addManyToQueue, addToQueue, api, frontManyInQueue, moveToFront, queueCompanySites, type QueueMany } from "./api";
 import { ApplyChoice, ApplyChoices } from "./applychoice";
@@ -365,6 +365,9 @@ export function BoardView() {
         </form>
       </Dialog>
       <TopActions>
+        <Button variant="secondary" icon={<ListOrdered size={15} aria-hidden="true" />} onClick={() => go({ view: "queue" })} title="What is running and what starts next">
+          Open the queue
+        </Button>
         {snapshot.config.apply_mode !== "auto" && (
           <Button variant="secondary" icon={<ListChecks size={15} aria-hidden="true" />} onClick={() => go({ view: "review" })}>
             Review a batch
