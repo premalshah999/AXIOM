@@ -75,6 +75,19 @@ def test_the_browser_switch_is_not_offered_where_it_cannot_apply(tmp_path):
     assert "headless" in names(config(tmp_path, browser_cdp_url=""))
 
 
+def test_a_new_config_never_takes_a_freed_ones_environment(tmp_path):
+    """id() is reused once a config is freed: the next config read the old one's empty keys as its own and lost its key."""
+    import weakref
+
+    class Gone:
+        pass
+
+    c = Settings(_env_file=None, data_dir=tmp_path, twocaptcha_api_key="synthetic")
+    connections._ENV[id(c)] = (weakref.ref(Gone()), {name: "" for name in connections.FIELDS})
+    assert c.prepare().twocaptcha_api_key == "synthetic"
+    assert connections.status(c)  # Its own environment now, read once.
+
+
 class _Reply:
     def __init__(self, status, body=None):
         self.status_code, self._body = status, body if body is not None else {}

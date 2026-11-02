@@ -10,14 +10,30 @@ falls back to .env again. Secrets are never returned to the browser: only whethe
 import json
 import os
 import re
+import weakref
 from zoneinfo import ZoneInfo
 
 import httpx
 from cryptography.fernet import Fernet, InvalidToken
 
 FILE = "connections.enc"
-# id(config) -> the environment's own values, kept so that clearing a saved value falls back to .env.
+# id(config) -> (that config, held weakly; the environment's own values), kept so that clearing a saved value falls back to .env.
+# The config is held too: a freed config's id() goes to the next one, which then took the old one's empty keys for its own
+# environment and lost the key it was made with (two settings tests, 2026-11-02).
 _ENV = {}
+
+
+def _environment(config, read=True):
+    """The environment's own values for this config, read the first time when `read`; {} when they never were."""
+    held = _ENV.get(id(config))
+    if held is not None and held[0]() is config:
+        return held[1]
+    if not read:
+        return {}
+    key = id(config)
+    values = {name: str(getattr(config, name, "") or "") for name in FIELDS}
+    _ENV[key] = (weakref.ref(config, lambda ref: _ENV.pop(key) if _ENV.get(key, (None,))[0] is ref else None), values)
+    return values
 
 # name -> (group, label, secret, help)
 FIELDS = {
@@ -170,7 +186,7 @@ def stored(config):
 def apply(config, live=False):
     """Lay the saved values over the environment's, remembering the environment's for status and clearing. `live`: the
     app is running, so startup-only settings (RESTART) keep their running value until the next start."""
-    env = _ENV.setdefault(id(config), {name: str(getattr(config, name, "") or "") for name in FIELDS})
+    env = _environment(config)
     saved = stored(config)
     for name in FIELDS:
         if live and name in RESTART:
@@ -235,7 +251,7 @@ def save(config, updates):
 def status(config):
     """What the Connections page shows: per field whether it is set and where from; secrets are masked."""
     saved = stored(config)
-    env = _ENV.get(id(config), {})
+    env = _environment(config, read=False)
     fields = []
     for name, (group, label, secret, help_text) in FIELDS.items():
         if name == "headless" and getattr(config, "browser_cdp_url", ""):
