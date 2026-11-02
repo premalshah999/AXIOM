@@ -328,7 +328,7 @@ async def test_a_page_after_a_send_that_says_nothing_is_never_left_to_apply_agai
     why = explain(scenario, site, outcome, events, service.config.data_dir)
     assert len(site.applications()) == 1, why
     assert site.hits.count("/apply/1") == 1, why
-    assert outcome["state"] != "confirmed", why
+    assert outcome["state"] == "submission_unknown", why  # The model asked for help: nothing has read this page, and no retry may restart it.
 
 
 async def test_without_these_checks_the_guard_would_have_sent_it_twice(service, monkeypatch):
