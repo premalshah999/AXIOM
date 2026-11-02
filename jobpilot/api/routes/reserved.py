@@ -8,6 +8,7 @@ then join the pipeline like any other employer's, and the autopilot applies to t
 
 import logging
 import threading
+import time
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -34,6 +35,7 @@ class ApproveAll(BaseModel):
 
 
 _REREAD = threading.Lock()
+REREAD_AFTER = 0.5  # seconds: the click's own answer goes out first, without the read competing for the interpreter
 
 
 def reread(service):
@@ -49,6 +51,7 @@ def reread(service):
         from ...queue_order import plans
         from ...startable import reading
 
+        time.sleep(REREAD_AFTER)
         while True:
             try:
                 reading(service).reload(service)

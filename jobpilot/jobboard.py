@@ -1086,6 +1086,24 @@ def backed_off(db, ids, at):
     return out
 
 
+def one_of_each(boards):
+    """(id, kind) boards as ids, one board of each platform in turn. In catalog order a new install read every Ashby board first: after
+    four minutes all 58 boards read and every request were on one host, and all a new user could see was the platform that starts
+    one application every 150 seconds."""
+    kinds = {}
+    for board_id, kind in boards:
+        kinds.setdefault(kind, []).append(board_id)
+    out, turn = [], [iter(ids) for ids in kinds.values()]
+    while turn:
+        for ids in list(turn):
+            board_id = next(ids, None)
+            if board_id is None:
+                turn.remove(ids)
+            else:
+                out.append(board_id)
+    return out
+
+
 async def request_scan(db, enqueue):
     """Queue a scan of every managed board now: the Search now button, and the first search of a new install.
     Returns (ids of all boards, how many were queued). A board already queued or running is left alone."""
@@ -1097,7 +1115,7 @@ async def request_scan(db, enqueue):
         setup_sources(db)
         with db.session() as s:
             wanted = Source.id.in_(managed_ids(db))
-            ids = list(s.scalars(select(Source.id).where(wanted, Source.enabled.is_(True))))
+            ids = one_of_each(s.execute(select(Source.id, Source.kind).where(wanted, Source.enabled.is_(True))).all())
         claimed = []
         dead = backed_off(db, ids, datetime.now(UTC))
         for sid in ids:

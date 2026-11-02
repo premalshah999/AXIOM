@@ -8,10 +8,11 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import select
 
 from jobpilot.db import Job, JobListing, Source
 from jobpilot.features.discovery.feeds import SWEEP_KEY, sweep
-from jobpilot.jobboard import board_snapshot, keep_last_read, request_scan, scrape_source
+from jobpilot.jobboard import board_snapshot, keep_last_read, one_of_each, request_scan, scrape_source
 
 AT = datetime.now(UTC)
 HOURS_AGO = lambda n: (AT - timedelta(hours=n)).isoformat()  # noqa: E731
@@ -207,3 +208,20 @@ def test_the_batch_counts_read_listings_the_way_the_board_does(service):
         listing(s, "asleep", 20, "s-asleep")
     assert shown(service) == {"ExampleSoft/asleep"}
     assert batch_snapshot(service)["inventory"]["fresh"] == 1
+
+
+def test_a_search_reads_one_board_of_each_platform_in_turn(service):
+    """A new user's first minutes were all one platform, and all one host's traffic: the catalog lists every Ashby board first."""
+    assert one_of_each([("a1", "ashby"), ("a2", "ashby"), ("a3", "ashby"), ("g1", "greenhouse"), ("w1", "workday"), ("g2", "greenhouse")]) == ["a1", "g1", "w1", "a2", "g2", "a3"]
+    asked = []
+
+    async def noted(source_id):
+        asked.append(source_id)
+        return True
+
+    asyncio.run(request_scan(service.db, noted))
+    with service.db.session() as s:
+        kinds = {row.id: row.kind for row in s.execute(select(Source.id, Source.kind))}
+    assert len(asked) > 100  # the catalog
+    first = [kinds[source_id] for source_id in asked[:4]]
+    assert len(set(first)) >= 3, first
