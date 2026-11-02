@@ -87,6 +87,7 @@ def forms(value):
         value.replace("&", "&amp;").replace('"', "&quot;"),  # How a browser writes an attribute back out.
         quote(value, safe=""),
         quote(value),
+        quote(value, safe="!'()*~"),  # As a page's own script encodes it (encodeURIComponent).
         quote_plus(value),
         json.dumps(value)[1:-1],
         json.dumps(value, ensure_ascii=False)[1:-1],
@@ -132,6 +133,8 @@ def register_credentials(value):
     are a site's own saved session, not ours, and are left out so that the list stays as long as the accounts are."""
     if not isinstance(value, dict):
         return
+    if value.get("kind") == "password":  # A temporary password an employer mailed (mail/extraction.py).
+        register([value.get("value")])
     register([
         item for key, item in value.items()
         if isinstance(item, str) and len(item) <= 512 and CREDENTIAL_KEY.search(str(key)) and not NOT_A_CREDENTIAL.search(str(key))
@@ -244,6 +247,9 @@ class MaskedStream(io.TextIOBase):
     @property
     def encoding(self):
         return self.stream.encoding
+
+    def __getattr__(self, name):  # `buffer`, `reconfigure`: what a library may ask of the real stream.
+        return getattr(self.stream, name)
 
 
 def mask_this_process():

@@ -139,6 +139,13 @@ def test_what_describes_an_oauth_token_is_not_registered_and_the_token_is():
     assert redact(text) == text
 
 
+def test_a_temporary_password_an_employer_mailed_is_a_secret_and_a_code_is_not():
+    redaction.register_credentials({"kind": "password", "value": "Tmp-Synth-Pw-4411"})
+    assert "Tmp-Synth-Pw-4411" not in redact("signed in with Tmp-Synth-Pw-4411")
+    redaction.register_credentials({"kind": "code", "value": "90817263"})
+    assert redact("Job 90817263") == "Job 90817263"
+
+
 def test_the_database_password_in_its_address_is_a_secret():
     config = SimpleNamespace(database_url="postgresql+psycopg://applypilot:Sy%21nthPw-99887766@127.0.0.1:5/applypilot", dbos_database_url="")
     original = redaction.known_from
@@ -228,3 +235,25 @@ def test_a_generated_password_is_a_secret_before_it_is_typed_or_sealed():
 
     password = password_rules.generate(password_rules.Rules())
     assert password not in redact(f"typed {password}")
+
+
+def test_copy_diagnostics_masks_a_password_with_no_tell_tale_word_or_shape(tmp_path):
+    from jobpilot.native import desktop
+
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "access-token").write_text("Synth-Window-Token-778899")
+    cfg = SimpleNamespace(values={"APPLICATION_PASSWORD": "Zq9!Synth&Diag7", "TIMEZONE": "UTC"}, data_dir=data)
+    desktop.remember_secrets(cfg)
+    text = desktop.scrub("the page said Zq9!Synth&Diag7 and Synth-Window-Token-778899 in UTC")
+    assert "Zq9" not in text and "Synth-Window" not in text and "in UTC" in text
+
+
+def test_a_runs_reason_never_stores_a_secret_and_keeps_its_words():
+    from jobpilot.db import Run
+
+    redaction.register(["Synth-Reason-Secret-9911", "summer"])
+    run = Run(job_id="j", reason="The page said Synth-Reason-Secret-9911 about the summer term")
+    assert "Synth-Reason" not in run.reason and "the summer term" in run.reason
+    run.reason = ""
+    assert run.reason == ""
