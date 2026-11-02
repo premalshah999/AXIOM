@@ -546,6 +546,14 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
     // The setup guide is its own scroll region (.ax-screen); the document never scrolls.
     document.querySelector(".ax-screen")?.scrollTo({ top: 0 });
   }, []);
+  // Whether a resume is on file: "I'll type it instead" leaves none, and applications can't start without one.
+  const [haveResume, setHaveResume] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (STEPS[at]?.id === "ready")
+      api<{ id: string }[]>("/resumes")
+        .then((list) => setHaveResume(list.length > 0))
+        .catch(() => setHaveResume(null));
+  }, [at]);
   // Move focus to the new step's title so keyboard and screen-reader users land on it.
   useEffect(() => {
     if (draft) heading.current?.focus({ preventScroll: true });
@@ -644,7 +652,7 @@ export function Onboarding({ onDone, onExit }: { onDone: () => void; onExit: () 
   const finishAt = () => persist(at, true, () => window.location.assign(routeUrl({ view: "profile", tab: "knowledge" })));
   const hello = (account.name || "").trim().split(/\s+/)[0];
   // The finish says "ready" only when nothing AXIOM needs is missing.
-  const lines = last ? readyLines(draft, submit?.value ?? null, linked) : [];
+  const lines = last ? readyLines(draft, submit?.value ?? null, linked, haveResume) : [];
   const unfinished = lines.filter((l) => !l.ok && !l.optional).length;
   const title = current.id === "welcome" && hello ? `Welcome, ${hello}` : last && unfinished ? "Almost ready" : current.title;
   const lead = last && unfinished ? "Your profile is saved. You can finish the rest here, or any time later, then press Start on the next screen." : current.lead;
@@ -1816,12 +1824,19 @@ function yesno(v: unknown) {
 type Line = { id: string; step: StepId; label: string; detail: string; ok: boolean; optional?: boolean };
 
 /** What the finish lists: each thing AXIOM will use, whether it is complete, and the step that fixes it. */
-function readyLines(draft: Draft, submit: boolean | null, linked: Linked): Line[] {
+function readyLines(draft: Draft, submit: boolean | null, linked: Linked, haveResume: boolean | null): Line[] {
   const f = foldFacts(draft.facts);
   const name = [draft.first_name, draft.last_name].filter(Boolean).join(" ");
   const authorized = yesno(f.work_authorization_us);
   const sponsor = yesno(f.requires_future_sponsorship_us);
   return [
+    {
+      id: "resume",
+      step: "resume",
+      label: "Resume",
+      detail: haveResume === false ? "Not added. Applications can't start without one." : haveResume ? "Added. Employers get this file as it is." : "Could not check.",
+      ok: haveResume !== false,
+    },
     {
       id: "contact",
       step: "profile",
