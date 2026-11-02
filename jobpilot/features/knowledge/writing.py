@@ -192,8 +192,9 @@ Model = Callable[[type, str, str], Awaitable[BaseModel]]
 
 # Replies that hold a whole resume. A resume's transcription ran past 2000 tokens, was cut off and failed validation, and every
 # tailoring then fell back to a resume rebuilt from the profile: one bullet per job and no projects (2026-11-01). Once per resume or
-# per tailoring, never per application step.
-LONG_REPLIES = {"Imported": (9000, 170), "Plan": (6000, 120), "Revision": (6000, 120)}
+# per tailoring, never per application step. The recruiter critique reads the whole posting and the PDF's text: on an ML posting
+# it ran past 35 s twice and the tailoring failed (2026-11-02); SpaceX's took 29 s for 1,262 tokens.
+LONG_REPLIES = {"Imported": (9000, 170), "Plan": (6000, 120), "Revision": (6000, 120), "Critique": (4000, 120)}
 
 
 def configured_model(db, config, run_id=None) -> Model:
