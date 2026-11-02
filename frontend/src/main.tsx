@@ -64,6 +64,12 @@ function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [who, setWho] = useState<{ name?: string; email?: string }>({});
   const [palette, setPalette] = useState(false);
+  // Where you are, for the one question below: moving to another page or Settings section with unsaved changes asks first.
+  const here = useRef(route);
+  here.current = route;
+  const [leaving, setLeaving] = useState<Route | null>(null);
+  // Opening a job's panel or changing a filter stays on the page; only a different page or section loses the form.
+  const losesForm = (next: Route) => hasUnsaved() && (next.view !== here.current.view || next.tab !== here.current.tab);
 
   const notify = useCallback((tone: Toast["tone"], text: string) => {
     const id = Date.now() + Math.random();
@@ -88,8 +94,14 @@ function App() {
     // An old link (?view=setup&tab=email) is rewritten to its new home in the address bar; the page was already told.
     const pop = () => {
       const next = parseRoute();
-      const here = location.pathname + location.search + location.hash;
-      if (routeUrl(next) !== here) history.replaceState(null, "", routeUrl(next));
+      // Back or Forward: the browser has already moved, so the address goes back while the question is asked.
+      if (losesForm(next)) {
+        history.pushState(null, "", routeUrl(here.current));
+        setLeaving(next);
+        return;
+      }
+      const address = location.pathname + location.search + location.hash;
+      if (routeUrl(next) !== address) history.replaceState(null, "", routeUrl(next));
       setRoute(next);
     };
     pop();
@@ -102,10 +114,6 @@ function App() {
   }, []);
 
   useLeaveWarning();
-  // Where you are, for the one question below: moving to another page or Settings section with unsaved changes asks first.
-  const here = useRef(route);
-  here.current = route;
-  const [leaving, setLeaving] = useState<Route | null>(null);
   const move = useCallback((next: Route) => {
     history.pushState(null, "", routeUrl(next));
     setRoute(next);
@@ -113,11 +121,10 @@ function App() {
   const go = useCallback(
     (raw: AnyRoute) => {
       const next = canonical(raw);
-      const now = here.current;
-      // Opening a job's panel or changing a filter stays on the page; only a different page or section loses the form.
-      if (hasUnsaved() && (next.view !== now.view || next.tab !== now.tab)) setLeaving(next);
+      if (losesForm(next)) setLeaving(next);
       else move(next);
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [move],
   );
 
