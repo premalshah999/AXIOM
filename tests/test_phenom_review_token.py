@@ -3,6 +3,7 @@ commit no token is delivered; inside it exactly one is, the application is poste
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -23,12 +24,12 @@ PAGE = """<!doctype html><title>Review</title><h1>AI Engineer (R-434028)</h1><h2
   <button type=submit id=go class="btn primary-button btn-submit" atm-id=submit-button aria-label=Continue>Continue</button></form>"""
 
 
-async def review_page(page, service, monkeypatch, tmp_path):
+async def review_page(page, service, monkeypatch, tmp_path, frame_stays=False):
     posts = []
 
     async def route(request):
         if request.request.method == "POST":
-            posts.append(request.request.url)
+            posts.append(urlsplit(request.request.url).path)
             await request.fulfill(status=200, content_type="application/json", body="{}")
         elif "applythankyou" in request.request.url:
             await request.fulfill(status=200, content_type="text/html", body="<h1>One Last Step!</h1><p>There's just one last step.</p>")
@@ -39,14 +40,20 @@ async def review_page(page, service, monkeypatch, tmp_path):
     await page.goto(REVIEW)
     await page.evaluate(HOOK)
     await page.evaluate(
-        """thanks => { window.clicks = 0; document.querySelector('#go').addEventListener('click', () => { window.clicks += 1; });
+        """({thanks, frameStays}) => {
+        // A press of the button is a post of its own, so `posts` shows any click, whatever page the run ended on.
+        document.querySelector('#go').addEventListener('click', () => { fetch('/pressed', {method: 'POST', body: '{}'}); });
+        if (frameStays) {
+          const f = document.createElement('iframe'); f.title = 'recaptcha challenge expires in two minutes';
+          f.style.cssText = 'width:300px;height:200px'; f.srcdoc = 'Challenge'; document.body.append(f);
+        }
         window.grecaptcha = {render: () => 1};
         grecaptcha.render('widget', {sitekey: 'fixture', callback: async () => {
-          document.querySelector('#go').disabled = true;
+          if (!frameStays) document.querySelector('#go').disabled = true;
           await fetch('/applySubmit', {method: 'POST', body: '{}'});
-          setTimeout(() => { location.href = thanks; }, 300);
+          if (!frameStays) setTimeout(() => { location.href = thanks; }, 300);
         }}); }""",
-        THANKS,
+        {"thanks": THANKS, "frameStays": frame_stays},
     )
     service.config.twocaptcha_api_key = "synthetic-key"
     bought = AsyncMock(return_value={"token": "synthetic-token"})
@@ -65,14 +72,13 @@ async def test_no_token_outside_the_commit_and_exactly_one_inside_it(page, servi
     assert await engine.browser_challenge() is None and posts == [] and not bought.called
     with pytest.raises(ValueError, match="submit action"):  # A plain click (the model's) is refused until the commit.
         await engine.form.click(final[0]["id"])
-    assert await page.evaluate("window.clicks") == 0 and posts == []
+    assert posts == []
 
     engine.armed = True
     assert await engine.commit_by_token(final[0]) is True
     await page.wait_for_url("**/applythankyou**")
-    assert posts == ["https://careers.acme-health.test/applySubmit"] and bought.await_count == 1
     assert await engine.browser_challenge() is None and bought.await_count == 1  # A second token would be a second application.
-    assert await page.evaluate("window.clicks") == 0 and len(posts) == 1
+    assert posts == ["/applySubmit"]  # One post, and no press of the button after it.
 
 
 async def test_a_run_that_ends_on_the_thank_you_page_is_settled_as_sent(page, service, monkeypatch, tmp_path):
@@ -89,14 +95,12 @@ async def test_a_run_that_ends_on_the_thank_you_page_is_settled_as_sent(page, se
 
 
 async def test_a_token_delivered_under_a_frame_that_stays_drawn_is_a_possible_send(page, service, monkeypatch, tmp_path):
-    """Real solver, real page: the provider's frame stays on the page after the callback posted, and the solver reports a check."""
-    engine, posts, bought = await review_page(page, service, monkeypatch, tmp_path)
-    await page.evaluate(
-        """() => { const f = document.createElement('iframe'); f.title = 'recaptcha challenge expires in two minutes';
-        f.style.cssText = 'width:300px;height:200px'; f.srcdoc = 'Challenge'; document.body.append(f);
-        grecaptcha.render('widget', {sitekey: 'fixture', callback: async () => { await fetch('/applySubmit', {method: 'POST', body: '{}'}); }}); }"""
-    )
+    """Real solver, real page: the provider's frame stays drawn after the callback posted, and the solver reports a check. That report is
+    no proof of nothing sent, so the commit stays armed and nothing follows it."""
+    engine, posts, bought = await review_page(page, service, monkeypatch, tmp_path, frame_stays=True)
     engine.armed = True
     final = (await engine.form.application_submit_controls())[0]
     assert await engine.commit_by_token(final) is True
     assert engine.armed is True and engine.commit_token_sent is True and bought.await_count == 1
+    assert await engine.browser_challenge() is None and bought.await_count == 1
+    assert posts == ["/applySubmit"]

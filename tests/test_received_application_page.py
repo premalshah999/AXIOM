@@ -256,9 +256,9 @@ async def test_the_commit_stays_armed_through_a_possible_send_and_nothing_clicks
 
         def __init__(self):
             self.committed, self.commit_pages, self.job = False, set(), {"ats": "custom", "id": "j"}
-            self.form = SimpleNamespace(scan=scan, proof=nothing, click=click, locator=lambda _: None, meta={})
+            form = SimpleNamespace(scan=scan, proof=nothing, click=click, locator=lambda _: None, meta={})
             self.e = SimpleNamespace(
-                armed=False, form=self.form, commit_by_token=by_token, commit_not_delivered=not_delivered, quality_gate=nothing,
+                armed=False, form=form, commit_by_token=by_token, commit_not_delivered=not_delivered, quality_gate=nothing,
                 try_reserve_commit=nothing, solve_captcha=nothing, release_reservation=nothing,
             )
 
