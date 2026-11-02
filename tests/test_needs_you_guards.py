@@ -186,10 +186,20 @@ def test_an_answer_tied_to_one_employer_stays_with_it(client, service):
     assert answer_of(service, "q-b") is None
 
 
+def test_a_story_about_a_skill_in_the_same_words_is_the_same_answer_anywhere(client, service):
+    control(service)
+    question = "Describe your experience with Python."
+    waiting(service, "a", "Acme", question, [], {"type": "textarea"})
+    waiting(service, "b", "Birch Labs", question, [], {"type": "textarea"})
+    assert client.post("/api/reviews/q-a", json={"answer": "Four years of services."}).status_code == 200
+    assert answer_of(service, "q-b") == "Four years of services."
+
+
 def test_the_page_never_groups_an_employers_own_question_across_employers():
     for wording in ("Why do you want to join our team?", "Have you previously worked for this company?", "Describe your interest in this role."):
         assert employer_only(wording), wording
     assert not employer_only("Are you at least 18 years old?", ["Yes", "No"])
+    assert not employer_only("Describe your experience with Python.")
     assert present({"question": "Why do you want to join our team?", "options": [], "context": {}, "reason": ""})["employer_only"]
 
 

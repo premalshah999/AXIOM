@@ -6,7 +6,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import aliased
 
 from ..db import Event, Job, MailChallenge, Review, Run, Setting, now
-from ..knowledge import learned_answer
+from ..knowledge import learned_answer, mentions_employer
 from .. import profile_photo
 from ..admission import QueueBlocked, temporary_time, require_intake
 from ..runtime import engine_version
@@ -269,6 +269,7 @@ class ReviewsMixin:
                     # page answers one job's question and Needs you sees only the first 100, so the server clears every other job
                     # asking. A tick box, a caption under its question and a list reused nowhere else (reusable_answer) stayed asked.
                     this = oq.same_question(review.question, review.options, context)
+                    tied = oq.employer_only(review.question, review.options) or mentions_employer(review.question, job.company or "")
                     # Columns only for the run and the job: a whole run row decodes its packet (~320 KB), here for every open question.
                     for other, owner_id, company in s.execute(
                         select(Review, Run.id, Job.company)
@@ -281,14 +282,15 @@ class ReviewsMixin:
                             Job.status != "archived",
                         )
                     ):
+                        same_words = oq.same_question(other.question, other.options, other.context or {}) == this
                         if other.key != review.key and (
-                            question_kind == "upload"
+                            not same_words
+                            or question_kind == "upload"
                             or other.key in {"manual", "session"}
                             or other.key.startswith("repair:")
                             or review.key.startswith("repair:")
                             or oq.unread(other.question, other.reason)
                             or oq.kind(other.question, other.options, other.context or {}, other.reason) != question_kind
-                            or oq.same_question(other.question, other.options, other.context or {}) != this
                         ):
                             continue
                         if row_scoped and (
@@ -304,7 +306,7 @@ class ReviewsMixin:
                             # a bare date caption is never carried to another form's field.
                             continue
                         fits = oq.fits_form(answer, other.question, other.options, other.context)
-                        if fits and (scope == "personal" or company.casefold() == job.company.casefold()):
+                        if fits and (scope == "personal" or company.casefold() == job.company.casefold() or (same_words and not tied)):
                             other.answer = answer
                             enqueue(s, "fact_resume", other.id, {"review_id": other.id}, run_id=owner_id)
         message = (
