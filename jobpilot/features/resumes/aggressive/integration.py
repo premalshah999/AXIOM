@@ -218,10 +218,8 @@ async def refresh(service, job_id, workspace_id, revision, *, compile_fn=compile
                     **identity,
                 )
             )
-            current.artifact_id, current.state, current.updated_at = artifact_id, "review", now()
-            current.approved_artifact_id = current.approved_sha = current.approved_at = (
-                current.approved_how
-            ) = None
+            # A new file loses any approval. It waits for the person unless they've turned that off and it passes the send rules, which is what the row then says.
+            choice.adopt(s, job_id, artifact_id, sha256_bytes(built["pdf"]), send_rules["ok"])
             stored.payload = {**stored.payload, "report": report}
     except BaseException:
         path.unlink(missing_ok=True)

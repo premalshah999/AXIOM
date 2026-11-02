@@ -213,7 +213,8 @@ async def _build_mode(db, config, job, resume, profile, source_tuple, spec, mode
         except RuntimeError as exc:
             code = str(exc).split(":", 1)[0]
             known = {"compile_error", "compile_timeout", "compiler_missing", "output_too_large"}
-            raise _Fail(code if code in known else "tailoring_error", code == "compile_timeout", str(exc)) from None
+            # A provider's fault can have no message at all: its type says what it was.
+            raise _Fail(code if code in known else "tailoring_error", code == "compile_timeout", str(exc) or type(exc).__name__) from None
         pdf = Path(result.pdf_path).read_bytes()
     if result.doc is None:
         raise _Fail("tailoring_error", False, f"Mode {spec.id} returned no document, so its rules can't be checked")
@@ -475,6 +476,12 @@ async def prepare_resume(
         return TailoringResult(status="failed", artifact=artifact, error=fail.error)
     except TimeoutError:
         error = TailoringError(code="timeout", retryable=True, detail="Tailoring exceeded its time limit")
+        artifact = _finish(db, row_id, status="failed", error=error.model_dump())
+        return TailoringResult(status="failed", artifact=artifact, error=error)
+    except Exception as exc:
+        # Anything else (a provider's own error type, a reply that won't validate). Left as "building", its lease would answer "still building" to the person's Try again for minutes.
+        log.exception("tailoring failed for %s", job_id)
+        error = TailoringError(code="tailoring_error", retryable=True, detail=type(exc).__name__)
         artifact = _finish(db, row_id, status="failed", error=error.model_dump())
         return TailoringResult(status="failed", artifact=artifact, error=error)
     except asyncio.CancelledError:

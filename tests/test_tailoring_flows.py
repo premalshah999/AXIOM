@@ -219,6 +219,24 @@ def test_a_section_with_every_entry_taken_off_needs_no_heading():
     assert not any("Projects" in i["label"] for i in parsed["items"])
 
 
+@needs_tex
+def test_an_unexpected_fault_ends_in_words_and_trying_again_isnt_told_its_still_building(client, service):
+    add_job(service)
+    choice.choose(service.db, "j1", "normal")
+    base = stub(plan_of())
+
+    async def faulty(output_type, system, user):
+        if output_type is normal.NormalPlan:
+            raise KeyError("a reply no pipeline expected")
+        return await base(output_type, system, user)
+
+    assert asyncio.run(choice.run(service.db, service.config, "j1", model=faulty))["state"] == "failed"
+    view = client.get("/api/v2/resumes/tailor/job/j1").json()
+    assert "Try again" in view["failure"]["message"] and "KeyError" not in view["failure"]["message"]
+    row = service.db  # The artifact isn't left building, so a retry builds at once.
+    assert asyncio.run(choice.run(row, service.config, "j1", model=stub(plan_of()), fresh=True))["state"] == "review"
+
+
 def test_the_plain_mode_is_offered_first():
     assert modes.listing()[0]["id"] == "normal"
 

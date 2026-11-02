@@ -52,6 +52,7 @@ _FAULTS = (
     (r"^no_model\b", NEEDS_KEY, "connections"),
     (r"^missing_description\b", READ_POSTING, None),
     (r"^(project_quality|quality|rules)\b", "The AI's draft didn't pass AXIOM's checks, so it wasn't kept. Each try writes a new one, so try again.", None),
+    (r"No API key", NEEDS_KEY, "connections"),
     (r"status_code: 40[13]\b|AuthenticationError|PermissionDenied|\bAPI key\b", "The AI service refused your key. Check it in Settings, under Connections, then try again.", "connections"),
     (r"status_code: 402\b|status_code: 429\b|RateLimit|insufficient|quota|credit", "The AI service says this key is out of credit or over its limit. Check it in Settings, under Connections, then try again.", "connections"),
     (r"Daily model budget|BudgetExceeded", "Today's AI spending limit has been reached. Try again tomorrow, or raise it in Settings, under Limits.", "applying"),
