@@ -80,11 +80,13 @@ TARGET = re.compile(r"\[target:[^\]]{1,90}\]", re.I)
 NAMES = re.compile(
     r"\b(?:Python|PHP|Perl|Ruby|Rust|Scala|Swift|Kotlin|Vue|Rails|Django|React|Spark|Hadoop|Redis|MySQL|HTTP|TLS|OAuth|SOC)[ /-]?\d(?:\.\d+)*\b"
     r"|\b(?:Java|Node|Node\.js|Angular|Postgres|PostgreSQL|Ubuntu|Windows|Fedora)[ -]?\d{1,2}(?:\.\d+)*\b"
-    r"|\b(?i:gpt|llama|claude|gemini|mistral|phi|qwen|bert|resnet|yolo)[ -]?v?\d[\w.]*"
+    r"|\b(?i:gpt|llama|claude|gemini|mistral|phi|qwen|bert|yolo)[ -]?v?\d(?:\.\d+)?[a-z]?\b|\b(?i:resnet)[ -]?\d{2,3}\b"
     r"|\b[A-Z]{2,}[A-Za-z]*-\d[\w.]*"  # SHA-256, ISO-27001, COVID-19, UTF-8
     r"|\b[A-Z]-\d{1,2}\b"  # S-1, W-2, K-12
-    # A letter leads the digit: S3, EC2, K8s, Neo4j, OAuth2, x86. "x10" and "under200ms" are figures with a letter in front.
-    r"|\b(?![xX](?!86\b|64\b)\d)(?!(?i:under|over|sub|top|upto|above|below|near|less|more|about|around|approx|min|max)\d)[A-Za-z][A-Za-z+#]*\d[A-Za-z0-9]*\b"
+    # A letter leads the digit: S3, EC2, K8s, Neo4j, OAuth2, x86. "x10", "under200ms" and "recall95" are figures with letters in front.
+    r"|\b(?![xX](?!86\b|64\b)\d)"
+    r"(?!(?i:under|over|sub|top|upto|above|below|near|less|more|about|around|approx|min|max|recall|score|rate|cost|uptime|latency)\d)"
+    r"[A-Za-z][A-Za-z+#]{0,6}\d[A-Za-z0-9]*\b"
     r"|\b(?:10-[KQ]|8-K)\b|\bISO \d{3,5}\b|\b(?:Microsoft|Office) 365\b"
 )
 FIGURE = re.compile(
@@ -99,14 +101,14 @@ FIGURE = re.compile(
 # Past tense says the work is done, wherever it sits in the bullet. A present-tense description, "Compares...", stays allowed.
 COMPLETED = re.compile(
     r"\b(?:(?<!pre-)built(?!-in\b)|developed|deployed|shipped|launched|achieved|reduced|increased|improved|saved|delivered|created"
-    r"|implemented|completed|finished|rolled out|migrated|optimi[sz]ed|streamlined|boosted|eliminated|exceeded|grew|won|earned|led"
+    r"|implemented|completed|finished|rolled out|migrated|optimi[sz]ed|streamlined|boosted|eliminated|exceeded|grew|won(?!')|earned|led"
     r"|spearheaded|architected|drove|wrote|ran|began|gave|took|analy[sz]ed|used(?! (?:cars?|vehicles?|goods|books?)\b)"
     r"|designed(?! (?:so|to|for|around)\b)|was|were|had|did|(?:has|have) (?:been|[a-z]+ed))\b",
     re.I,
 )
 # Any other verb in the past tense, by the "the" it acts on: "parsed the filings", though not "parsed filings" further in.
-ACTED_ON = re.compile(r"\b[a-z]+(?<!e)(?<!emb)ed (?:a|an|the|each|every|all|its|their)\b", re.I)
-OPENED_PAST = re.compile(r"^[A-Z][a-z]+(?<!e)ed\b")
+ACTED_ON = re.compile(r"\b[a-z]+(?<!e)(?<!mb)ed (?:a|an|the|each|every|all|its|their)\b", re.I)
+OPENED_PAST = re.compile(r"^[A-Z][a-z]+(?<!e)(?<!mb)ed\b")
 # What can open a description as a plain adjective: "Distributed rate limiter", though never "Distributed the limiter".
 ADJECTIVES = frozenset(
     "aggregated annotated automated cached containerized curated distributed embedded federated guided labeled labelled layered "
@@ -139,7 +141,9 @@ def describe(bullet):
 
     def said(match):
         opening = match.start() == 0 or bullet[: match.start()].rstrip()[-1:] in ".:;"
-        word = third_person(match[1])
+        # "Will shipped" stays "Shipped", so the check still refuses it. Inflected, it would read "Shippeds" and pass.
+        finished = COMPLETED.fullmatch(match[1]) or re.search(r"(?<!e)(?<!mb)ed$", match[1], re.I)
+        word = match[1] if finished else third_person(match[1])
         return word.capitalize() if opening else word
 
     text = FUTURE.sub(said, bullet.strip())

@@ -536,6 +536,7 @@ def test_shape_is_settled_by_code_order_proof_points_and_one_third_bullet():
         ("Compare query results, then will also apply a fix.", "Compares query results, then applies a fix."),
         ("FastAPI identity service that issues session cookies.", "FastAPI identity service that issues session cookies."),
         ("Handles partial failures with bounded retries.", "Handles partial failures with bounded retries."),
+        ("Will need source records, and will embed a viewer.", "Needs source records, and embeds a viewer."),
     ],
 )
 def test_a_draft_reads_as_a_description_not_a_to_do_list(written, reads):
@@ -757,6 +758,8 @@ def test_a_draft_figure_is_allowed_only_as_a_stated_target():
         "Fact checker on NYC Open Data with GPT-4 at 90 percent recall.",
         "Fact checker on NYC Open Data with Python 95 accuracy.",
         "Fact checker on NYC Open Data [p95 under 200 ms].",
+        "Fact checker on NYC Open Data with recall95 on each batch.",
+        "Fact checker on NYC Open Data with a GPT 95 accuracy score.",
     ],
 )
 def test_no_figure_stands_outside_a_target_bracket(bullet):
@@ -802,6 +805,9 @@ def test_a_name_holding_a_digit_is_not_a_figure(bullet):
         "Public explorer on NYC Open Data that has been used by readers.",
         "Will have built a public explorer from NYC Open Data for readers.",
         "Would be shipped as a public explorer from NYC Open Data.",
+        "Will shipped a public explorer from NYC Open Data for readers.",
+        "Public explorer from NYC Open Data that should delivered readers a summary.",
+        "Will parsed the NYC Open Data records for a public explorer.",
         "Leveraged NYC Open Data for a public explorer for readers.",  # sanitize() says "used".
         "Parsed the NYC Open Data records for a public explorer.",
         "Refactored a public explorer from NYC Open Data for readers.",
@@ -827,6 +833,7 @@ def test_a_draft_never_claims_finished_work_anywhere_in_a_bullet(bullet):
         "Automated review checklist on NYC Open Data, designed so a reader can replay one failed record.",
         "Compares published schedules from NYC Open Data with structured logs, using built-in checks.",
         "Feed parser on NYC Open Data that keeps rejected rows beside established methods.",
+        "Embeddings viewer on NYC Open Data that won't drop a row and can embed the source.",
     ],
 )
 def test_a_present_tense_description_stays_allowed(bullet):
