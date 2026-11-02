@@ -3,6 +3,27 @@
 import re
 
 
+def optional_account_section(fields, controls, passwords, final):
+    """One application with an optional "create an account" section inside it (Meta, 2026-11-01): the page holds the application's own
+    resume and fields and a final Submit, and no password is required. It is the form, not an account step: the optional boxes stay
+    empty and Submit goes through the normal review. The site's own "Sign up" beside it is not this section's action."""
+    named = [f for f in fields if f["type"] not in {"password", "file", "checkbox"} and not f.get("side_login")]
+    return (
+        bool(passwords)
+        and not any(f.get("required") for f in passwords)
+        and any(f["type"] == "file" for f in fields)
+        and len(named) >= 3
+        and any(final.search(b["label"]) for b in controls)
+    )
+
+
+# The page's own line about the login it was just sent, where it marks no error (ClearCompany's "Incorrect username or password", 2026-10-30).
+REFUSED_LOGIN_TEXT = re.compile(r"\b(?:incorrect|invalid|wrong) (?:user ?name|e-?mail|password|login|credentials)\b", re.I)
+
+
+FIRST_TIME = re.compile(r"\bfirst[- ]time\b", re.I)
+
+
 # States that prove the employer holds an account for this email. "signing_in" and "created_locally" prove nothing.
 CONFIRMED_ACCOUNT = {
     "authenticated", "password_reset", "exists", "locked", "verification_pending", "password_unknown"

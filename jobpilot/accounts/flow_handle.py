@@ -11,9 +11,12 @@ from . import password_rules
 from .errors import AccountActionError
 from .pages import ACCOUNT_EXISTS
 from .pages import CONFIRM_EMAIL
+from .pages import FIRST_TIME
 from .pages import PASSWORD_MAXIMUM
+from .pages import REFUSED_LOGIN_TEXT
 from .pages import REQUIRED_INPUT
 from .pages import login_identifier
+from .pages import optional_account_section
 from .pages import registration_state
 from .credentials import account_host_allowed
 from .tenants import account_tenant
@@ -86,6 +89,14 @@ class FlowHandleMixin:
 
             e.result = assessment_login_result(obs.get("text", ""))
             return True
+        from ..forms import FINAL
+
+        if not re.search(r"/(?:create[-_]account|sign[-_]?up|register)(?:/|$)", urlsplit(getattr(e.form.page, "url", "")).path, re.I) and optional_account_section(
+            obs["fields"], obs["controls"], passwords, FINAL
+        ):
+            # Meta (2026-11-01): recovery re-entered this flow for a rejected Current location, took the optional passwords for a sign-up
+            # form, and pressed the recruiting chat's "Sign up", whose dialog then hid the form's Submit from every later scan.
+            return False
         frame = e.form.frames[passwords[0]["id"]]
         if any(e.form.frames[f["id"]] != frame for f in passwords):
             raise AccountActionError("Account password fields span different frames", "observation_failure")
@@ -174,17 +185,25 @@ class FlowHandleMixin:
             # Westinghouse (SuccessFactors) 2026-10-16/17 and AMETEK 10-18: the employer already holds this
             # email's account, yet a refused or unanswered sign-in led to Create, whose password then replaced the
             # working one. A known account signs in, resets a refused password by mail, and is never registered again.
-            from ..adapters.base import BAD_CREDENTIALS, LOCKED
+            from ..adapters.base import BAD_CREDENTIALS, FORGOT, LOCKED
 
             # A lockout after refused sign-ins is recovered the same way: the mailbox reset sets the shared password
             # and clears it (Amazon 2026-10-27, owner: resets are always allowed).
             refusal = next((x for x in errors if BAD_CREDENTIALS.search(x) or LOCKED.search(x)), "")
+            if not refusal and (scope, False) in self.attempts and (said := REFUSED_LOGIN_TEXT.search(str(obs.get("text") or ""))):
+                refusal = said.group()
             if not saved or ((scope, False) in self.attempts and refusal and not page_refused):
                 return await self.recover_sign_in(
                     scope, refusal or "No saved login for this employer account"
                 )
             if (scope, False) in self.attempts:
                 if ("retry", scope) in self.attempts:
+                    if ("recover", scope) not in self.attempts and any(
+                        FORGOT.search(b.get("label", "")) and FIRST_TIME.search(b.get("label", "")) for b in obs.get("controls", [])
+                    ):
+                        # ClearCompany's "Forgot password or your first time signing in?" (2026-10-30): an account the employer made
+                        # from an earlier application has no password yet, and the page itself says this link is how to set one.
+                        return await self.recover_sign_in(scope, "The employer kept its sign-in form after the saved login was sent")
                     e.result = {
                         "state": "waiting_browser",
                         "reason": "The employer returned its sign-in page without accepting or refusing the saved "

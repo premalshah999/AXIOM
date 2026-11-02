@@ -11,7 +11,7 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
-from urllib.parse import parse_qsl, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urljoin, urlsplit, urlunsplit
 
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
@@ -648,6 +648,21 @@ REVIEW_ADDRESS = re.compile(r"[?&]step(?:name)?=[^&#]*review", re.I)
 def final_by_marking(control, url):
     """A forward-worded control that the application's own markup and address say is its submit."""
     return str(control.get("atm_id") or "").casefold() == "submit-button" and bool(REVIEW_ADDRESS.search(str(url or "")))
+
+
+SUBMIT_RESUME = re.compile(r"submit (?:your |my )?(?:resume|cv)(?: now)?", re.I)
+
+
+def opens_another_page(href, page_url):
+    """A link's own address is another page's: not empty, not a jump within this page (#...), not a script (javascript:), and not
+    this page's own path. A review step's "Submit Resume" postback link is none of these (2026-11-02 safety review)."""
+    href = str(href or "").strip()
+    if not href or href.startswith("#"):
+        return False
+    target, here = urlsplit(urljoin(str(page_url or ""), href)), urlsplit(str(page_url or ""))
+    if target.scheme not in {"http", "https"}:
+        return False
+    return (target.hostname, target.path.rstrip("/")) != (here.hostname, here.path.rstrip("/"))
 
 
 # SuccessFactors application pages (classic career site, the candidate portal wizard, Career Site
@@ -1492,6 +1507,8 @@ class FormSession:
         # A control's dom id -> the history row it sits in, read from its block when the scan did not mark one
         # (enrich_pending); applied to the next scan so the row's own profile entry answers it.
         self.row_hints = {}
+        # Anything answered or uploaded in this run, kept across documents: the ledger starts again on each new one.
+        self.wrote_this_run = False
         self.owner_id = uuid.uuid4().hex
         self.revision = 0
         self._revision_hash = ""
@@ -1757,9 +1774,14 @@ class FormSession:
             return False
         return (self.owner_snapshot or {}).get(self.field_key(x), object()) == x.get("value")
 
+    def wrote_anything(self):
+        """This run has answered or uploaded something, on this document or an earlier one."""
+        return self.wrote_this_run or bool(self.ledger or self.uploaded or self.document_uploads)
+
     def record_answer(self, field, value, evidence_ids, verified=False):
         from .answer_context import digest
 
+        self.wrote_this_run = True
         options = list(field.get("options", []))
         if (
             field["type"]
@@ -2300,6 +2322,7 @@ class FormSession:
 
     def reset_document_verification(self):
         """A fresh entry must verify its actual fields, not an old document ledger."""
+        self.wrote_this_run = self.wrote_anything()
         self.ledger = {}
         self.expected = {}
         self.expected_labels = {}
@@ -3595,6 +3618,8 @@ class FormSession:
             committed = await widgets.date_parts(frame, field, value)
         elif kind == "pills":
             committed = await widgets.pills(el, value)
+        elif field.get("widget") == "period-month":
+            committed = await widgets.period_month(frame, el, value)
         elif field.get("widget") == "date-text":
             if re.fullmatch(r"\s*(?:immediately|immediate|asap|as soon as possible|right away)\s*", str(value), re.I):
                 # Availability "Immediately" in a date box is today's date: Paylocity's "Available to Start" raised
@@ -6416,10 +6441,12 @@ class FormSession:
         account_form = await self.intermediate_submit(control_id, before)
         # Apple's posting page links "Submit Resume" to its application (2026-10-27): a link to another address on a page
         # with no application fields opens the application, it submits nothing. Refused as a final submit, the
-        # navigator repeated the click until its recovery budget ended.
+        # navigator repeated the click until its recovery budget ended. Only as the way in: a review step that shows the answers
+        # as text and submits with a "#" or javascript: link, or a run that has already written anything, is the commit's.
         posting_link = bool(
-            button.get("href")
-            and re.fullmatch(r"submit (?:your |my )?(?:resume|cv)(?: now)?", button["label"].strip(), re.I)
+            SUBMIT_RESUME.fullmatch(button["label"].strip())
+            and opens_another_page(button.get("href"), getattr(self.frames.get(control_id), "url", "") or self.page.url)
+            and not self.wrote_anything()
             and not any(
                 f["type"] not in {"search", "hidden"} and not re.search(r"search|keyword|location", f["label"], re.I)
                 for f in self.fields.values()
@@ -6504,7 +6531,8 @@ class FormSession:
         # A "Submit" that this guard allowed for a profile/account popup or a tax-credit
         # launcher must also pass the page's own click guard, or the click is silently
         # cancelled (Starbucks "Create your profile": the agent clicked Submit for minutes).
-        page_final_ok = bool(account_form or launcher)
+        # So must the link that opens an application: Apple's "Submit Resume" passed the guard above and was then refused here.
+        page_final_ok = bool(account_form or launcher or posting_link)
         # Marked controls pass the page's submit guard: auth/step controls, entry links, and
         # ordinary navigation labels.
         permitted = (

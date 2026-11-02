@@ -17,8 +17,9 @@ from playwright.async_api import Error as PlaywrightError
 
 from ..service import Service
 from ..accounts import Accounts, password_rules
+from ..accounts.pages import optional_account_section
 from ..captcha_observation import ARM_JS
-from ..forms import AUTH, COOKIE_NOTICE, FINAL, LAUNCHER, SURVEY_DONE, final_by_marking
+from ..forms import AUTH, COOKIE_NOTICE, FINAL, LAUNCHER, SURVEY_DONE, final_by_marking, opens_another_page
 from ..privacy import acknowledge_privacy_notice, dismiss_cookies
 from ..redaction import redact_page
 from ..employer_limit import APPLICATION_LIMIT, application_cap
@@ -33,6 +34,7 @@ APPLY = re.compile(
     re.I,
 )
 INTEREST = re.compile(r"i'?m interested", re.I)
+SUBMIT_RESUME_LINK = re.compile(r"submit (?:your |my )?(?:resume|cv)(?: now)?", re.I)
 NOT_APPLY = re.compile(r"linkedin|indeed|seek\b|glassdoor|google|facebook|refer|share|save job|alert", re.I)
 NEXT = re.compile(
     r"^(?:next|continue|save (?:and|&) continue|save (?:and|&) next|next step|proceed|continue to (?:next step|"
@@ -955,6 +957,12 @@ class Adapter:
         prepared = await observe() if observe else []
         return prepared[0] if len(prepared) == 1 else None
 
+    def submit_resume_entry(self, b):
+        """A "Submit Resume" link is the way in only to another page, before this run wrote anything (forms.opens_another_page)."""
+        frame = (getattr(self.form, "frames", None) or {}).get(b.get("id"))
+        url = getattr(frame, "url", "") or getattr(getattr(self.form, "page", None), "url", "")
+        return opens_another_page(b.get("href"), url) and not getattr(self.form, "wrote_anything", lambda: True)()
+
     def find_apply(self, obs):
         hits = [
             b
@@ -963,6 +971,9 @@ class Adapter:
                 b["automation_id"] in self.apply_ids
                 or APPLY.search(b["label"])
                 or APPLY.search(b["aria_label"])
+                # Apple's posting links "Submit Resume" to its application (2026-10-27, also forms.click): with no
+                # form on the page it is the way in. Read as the final submit, each run waited on a model and stopped.
+                or (SUBMIT_RESUME_LINK.fullmatch(b["label"].strip()) and not self.app_fields(obs) and self.submit_resume_entry(b))
             )
             and not NOT_APPLY.search(b["label"] + " " + b["href"])
         ]
@@ -1324,16 +1335,7 @@ class Adapter:
                 for b in obs["controls"]
             )
             new_password = any(f.get("autocomplete") == "new-password" for f in passwords)
-            if (
-                not create_path
-                and not any(f["required"] for f in passwords)
-                and any(f["type"] == "file" for f in fields)
-                and len([f for f in meaningful if f["type"] not in {"password", "file"}]) >= 3
-                and any(self.final.search(b["label"]) for b in obs["controls"])
-            ):
-                # One application with an optional "create an account" section inside it (Meta, 2026-11-01): the page holds the
-                # application's own resume and fields and a final Submit, and no password is required. It is the form, not an
-                # account step; the optional password boxes stay empty and Submit goes through the normal review.
+            if not create_path and optional_account_section(fields, obs["controls"], passwords, self.final):
                 return Step.FORM
             return (
                 Step.CREATE_ACCOUNT
@@ -2263,7 +2265,29 @@ class Adapter:
             ],
         )
 
+    @staticmethod
+    def blank_page(obs):
+        return not (obs.get("fields") or obs.get("controls") or str(obs.get("text") or "").strip())
+
+    async def wait_for_blank_page(self):
+        """True once a page with nothing on it has drawn itself. A redirect can commit an empty document that fills in seconds later; asked about it, the
+        model reasons over nothing, and it is paid for (a run with no model stopped here on a page that was about to show its form)."""
+        from ..browser import OBSERVATION_WAIT_SECONDS
+
+        deadline = time.monotonic() + OBSERVATION_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            await asyncio.sleep(1)
+            try:
+                await self.form.settle(timeout=2)
+                if not self.blank_page(await self.form.scan()):
+                    return True
+            except PlaywrightError:
+                pass  # The document is being replaced; the next read sees the new one.
+        return False
+
     async def on_unknown(self, obs):
+        if self.blank_page(obs) and not self.committed and await self.wait_for_blank_page():
+            return None  # The main loop reads the page again and classifies what it drew.
         cancel = [b for b in obs["controls"] if re.fullmatch(r"cancel|go back|back", b["label"].strip(), re.I)]
         if GUEST_EMAIL_EXISTS.search(obs.get("text", "")) and len(cancel) == 1:
             # Textron's Taleo (2026-11-01): the guest route answered "The email address provided already exists and cannot

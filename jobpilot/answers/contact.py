@@ -11,14 +11,19 @@ def address_location_option(options, address):
     if not (address.city and address.state and address.country):
         return None
     matches = []
+    state = _alias_group(address.state) | {norm(address.state)}
     for option in options:
         parts = [norm(part) for part in option.split(",")]
         if (
             len(parts) >= 3
             and parts[0] == norm(address.city)
-            and any(part in _alias_group(address.state) for part in parts[1:])
+            and any(part in state for part in parts[1:])
             and any(part in _alias_group(address.country) for part in parts[1:])
         ):
+            matches.append(option)
+        elif len(parts) == 2 and parts[0] == norm(address.city) and parts[1] in state:
+            # "Exampleton, MD": a list of a home country's places names no country (Meta's Current location, 2026-11-01: the search
+            # listed the applicant's city in eleven places and every row read as "no matching option").
             matches.append(option)
     unique = list(dict.fromkeys(matches))
     if len(unique) > 1 and address.county:
