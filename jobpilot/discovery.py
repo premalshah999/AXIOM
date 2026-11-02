@@ -498,6 +498,14 @@ async def enrich(db, config, job_id):
             "description": soup.get_text(" ", strip=True)[:40000],
             "title": "" if placeholder_title(page_title) else page_title,
         }
+    if not details.get("company"):
+        # Only what the page states about its one posting (microdata, an ATS's page props): see posting_identity.
+        from .posting_identity import identity, page_inputs
+
+        try:
+            details["company"] = identity(page_inputs(html)).get("company", "")
+        except Exception:  # noqa: BLE001 - unreadable markup is no evidence.
+            pass
     with db.session() as s:
         item = s.get(Job, job_id)
         for key, value in details.items():
@@ -520,11 +528,11 @@ UNREAD_TRIES = "title_read:"
 
 
 async def read_blank_titles(db, config, limit=30):
-    """Jobs saved with no role (links pasted before the role was read at adding): read each page once a day, a few per start."""
+    """Jobs saved with no role or no employer (links pasted before they were read at adding): read each page once a day, a few per start."""
     from .db import Setting
 
     with db.session() as s:
-        blank = [j for j in s.scalars(select(Job.id).where(Job.title == "", Job.demo.is_(False), Job.status.notin_(("archived", "closed"))).limit(limit * 3))]
+        blank = [j for j in s.scalars(select(Job.id).where(or_(Job.title == "", Job.company == ""), Job.demo.is_(False), Job.status.notin_(("archived", "closed"))).limit(limit * 3))]
     done = 0
     for job_id in blank:
         if done >= limit:

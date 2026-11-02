@@ -329,6 +329,42 @@ def board(service):
     return service.board_view
 
 
+LOGO_AHEAD = 150  # Companies whose icons are looked up before anyone scrolls to them: the first pages of the default order.
+
+
+def companies_to_warm(service, limit=LOGO_AHEAD):
+    """The companies of the best-ranked open postings, once each, in the order a person meets them. An icon is looked up only
+    after a page asks for it, two companies at a time, so a page of 25 filled its letters with logos over a minute and the next
+    page started over: 336 of 1,012 companies on the board had one (2026-11-02)."""
+    data = board(service).value
+    if not data:
+        return []
+    ranked = sorted((row for row in data["rows"] if row["fit"] == "match"), key=lambda r: (-(r["score"] if r["score"] is not None else -1), r["id"]))
+    return list(dict.fromkeys(row["company"] for row in ranked))[:limit]
+
+
+def warm_logos(service, companies):
+    """Queue the icons of these companies for the background lookup (logos.Shelf): never waits on the network. Runs on the event loop."""
+    from .db import Job
+    from .logos import shelf
+
+    if not service.config.company_logos or not companies:
+        return 0
+
+    def postings(company):
+        with service.db.session() as s:
+            rows = s.execute(select(Job.url, Job.description).where(Job.company == company).order_by(Job.created_at.desc()).limit(6)).all()
+        return [(u, (d or "")[:20_000]) for u, d in rows]
+
+    kept = shelf(service.config.data_dir)
+    if not kept.scanned:
+        kept.scan()
+    before = len(kept.waiting)
+    for company in companies:
+        kept.request(company, postings)
+    return len(kept.waiting) - before
+
+
 PER_COMPANY = 3  # rows one company shows before "N more at X": one employer posting hundreds of roles filled the first pages
 LEVEL_NAMES = ("Intern", "New grad", "Entry", "Mid", "Senior", "Unknown")
 

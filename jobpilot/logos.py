@@ -13,7 +13,7 @@ letter tile, and a wrong logo is worse than none. Only images that parse are kep
 draws (the page never loads a 1000 px image for a 24 px square), an SVG only after a script-free check.
 
 Finding is slow and uses the network, so it never happens while a page waits: a page asks `Shelf.states` (a memory lookup) and the
-ones not yet looked up are queued, two at a time, on a background worker; the page asks again a few seconds later.
+ones not yet looked up are queued, four at a time, on a background worker; the page asks again a few seconds later.
 """
 
 import asyncio
@@ -579,12 +579,12 @@ async def find(company, urls, descriptions=(), third_party=True):
 class Shelf:
     """The logos kept in one data folder, as an index in memory, and the background queue that fills it.
 
-    A page never waits on the network: `states` answers from the index and queues the companies it has not looked up. Two
+    A page never waits on the network: `states` answers from the index and queues the companies it has not looked up. Four
     workers look up one company at a time (its postings from `lookup`, then `find`), keep the image or remember the miss, and the
     page asks again. Every company is looked up once however many rows name it (the queue holds a company once), a miss is
     remembered for a month, and being offline for ten minutes."""
 
-    WORKERS = 2
+    WORKERS = 4  # each looks up a different company's own pages; one third party (Google's favicons) sees at most four at a time
     LIMIT = 2000  # Companies waiting: more than any page names, and a bound on what a stream of made-up names can queue.
 
     def __init__(self, data_dir):
