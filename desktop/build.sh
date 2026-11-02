@@ -23,6 +23,13 @@ fail() { printf 'build: %s\n' "$*" >&2; exit 1; }
 
 [ "$(uname -s)" = Darwin ] || fail "this builds a Mac app, on a Mac"
 [ "$(uname -m)" = arm64 ] || fail "arm64 only for now"
+# Licensing, asked now: a wrong word or a missing key pair must not build for minutes first.
+case "${AXIOM_LICENSE:-off}" in
+  off) ;;
+  on) [ -n "${AXIOM_LICENSE_PUBLIC_KEY:-}" ] || [ -f "${AXIOM_LICENSE_HOME:-$HOME/.config/axiom-license}/private.key" ] \
+    || fail "no license key pair here. Run: scripts/axiom-license init" ;;
+  *) fail "AXIOM_LICENSE is on or off" ;;
+esac
 for tool in uv npm clang hdiutil iconutil codesign install_name_tool otool ditto; do
   command -v "$tool" >/dev/null 2>&1 || fail "$tool is needed to build"
 done
@@ -99,8 +106,13 @@ if [ "${AXIOM_LICENSE:-off}" = on ]; then
     || fail "no license key pair here. Run: scripts/axiom-license init"
   [ -n "$license_public" ] || fail "no license public key"
   printf '{"required": true, "public_key": "%s"}\n' "$license_public" >"$resources/app/jobpilot/license_build.json"
-elif [ "${AXIOM_LICENSE:-off}" != off ]; then
-  fail "AXIOM_LICENSE is on or off"
+  # Read back by the app's own code, as the app will read it. A key typed wrong would refuse every key for good; one that broke the
+  # file would quietly switch licensing off.
+  PYTHONDONTWRITEBYTECODE=1 PYTHONSAFEPATH=1 PYTHONPATH="$resources/app" "$py" -c "
+from jobpilot import licensing
+build = licensing.load_build()
+raise SystemExit(0 if build.required and licensing.public_key_of(build.public_key) else 1)" 2>/dev/null \
+    || { rm -f "$resources/app/jobpilot/license_build.json"; fail "the license public key is not a valid key"; }
 fi
 cp "$root/scripts/chrome-worker.sh" "$root/scripts/chrome-twin.sh" "$resources/app/scripts/"
 cp "$root/scripts/lib/chrome.sh" "$resources/app/scripts/lib/"
@@ -208,3 +220,4 @@ say "Done"
 printf 'App   %s (%s)\n' "$app" "$(du -sh "$app" | cut -f1)"
 printf 'Image %s (%s)\n' "$build/AXIOM.dmg" "$(du -sh "$build/AXIOM.dmg" | cut -f1)"
 printf 'macOS %s or later (from the strictest binary inside)\n' "$minimum"
+if [ -f "$resources/app/jobpilot/license_build.json" ]; then echo "License key: required"; else echo "License key: not asked for"; fi

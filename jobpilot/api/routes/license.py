@@ -8,22 +8,28 @@ from pydantic import BaseModel, Field
 from ...licensing import LicenseError, licensing
 
 
+# The longest key the owner's command can print is about 1,300 characters, line breaks aside.
+MOST = 4000
+
+
 class KeyIn(BaseModel):
-    key: str = Field(max_length=2000)
+    key: str = Field(max_length=200_000)
 
 
 def router(service) -> APIRouter:
-    folder = service.config.data_dir
+    config = service.config
     r = APIRouter()
 
     @r.get("/api/license")
     def read():
-        return licensing(folder).status()
+        return licensing(config).status()
 
     @r.post("/api/license/key")
     def enter(data: KeyIn):
+        if len(data.key) > MOST:
+            raise HTTPException(400, "That is far longer than an AXIOM key. Paste only the key, starting with AXIOM1-.")
         try:
-            return licensing(folder).install(data.key)
+            return licensing(config).install(data.key)
         except LicenseError as exc:
             raise HTTPException(400, str(exc)) from None
 

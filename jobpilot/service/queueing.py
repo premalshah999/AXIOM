@@ -313,12 +313,13 @@ class QueueingMixin:
             # Every path that starts an application comes through here, whoever asks: the batch, a retry, an answered
             # question, a matched email, the repair agent, Telegram, an Apply click.
             refuse(s)
+            license_mark = {}
             if not job.demo:
-                from ..licensing import require_license
+                from ..licensing import admit as admit_license
 
                 # A key (when this build asks for one) is needed to START an application; a retry or continuation of one already
                 # started is not stopped by it, and neither is the demo, which sends nothing.
-                require_license(self.config.data_dir, continuing=bool(recovery_source_run))
+                license_mark = admit_license(s, self.config, job_id, retry=retry, source_run=recovery_source_run)
             from ..reserved import require_approval
 
             # FAANG, MANGO and the Big Four wait for the owner's approval of this job, whichever path asks: the autopilot,
@@ -716,6 +717,7 @@ class QueueingMixin:
                     "model_version": self.config.llm_provider + ":" + self.config.llm_model,
                     "runner_tier": job_tier(self.db, job.id),
                     "profile_version": profile_version(packet_profile),
+                    **license_mark,
                     **(
                         {
                             "source_run_id": continuation.id,

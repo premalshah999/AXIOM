@@ -8,8 +8,8 @@ How it works (docs/LICENSING.md):
 - No network is used anywhere in this module. Nothing is sent, nothing is fetched.
 - It is OFF unless the build says otherwise (`license_build.json` next to this file, written by desktop/build.sh when
   AXIOM_LICENSE=on). Off means every function here lets everything through and the screen never appears.
-- An expired or missing key stops NEW applications from starting (`require_license`, called by queue admission and by the claim
-  of a queued run). It never touches an application that is already running, a continuation of one, or the person's data.
+- An expired or missing key stops NEW applications from starting (`admit` in queue admission, `require_license` in the claim of a
+  queued run). It never touches an application that is already running, a continuation of one, or the person's data.
 - The latest moment this Mac has seen is remembered, so setting the clock back does not bring an expired key back to life.
 
 What it cannot do, said plainly: it cannot revoke a key (nothing is checked online, so a key works until its date), and it cannot
@@ -30,6 +30,7 @@ import threading
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
@@ -46,6 +47,8 @@ SEEN_WRITE_SECONDS = 600
 # More than this behind the latest moment seen is called out on the screen as a clock that was set back.
 CLOCK_NOTE_AFTER = timedelta(days=1)
 _MAC_CHARS = re.compile(r"^[A-Z2-7]{12}$")
+# In a run's packet: admission found that this run continues an application already started, so the claim holds it for no key.
+CONTINUES = "continues_started"
 
 
 class LicenseError(ValueError):
@@ -247,9 +250,10 @@ def _utcnow() -> datetime:
 class Licensing:
     """The license of one installation (one data folder). `status()` is cheap enough to ask every second."""
 
-    def __init__(self, data_dir, clock=None):
+    def __init__(self, data_dir, clock=None, zone=""):
         self.folder = Path(data_dir) / "license"
         self.clock = clock or _utcnow
+        self.zone = zone  # The person's own calendar (config.timezone): the app's server process runs in UTC (native/env.py).
         self._lock = threading.Lock()
         self._cached: tuple[datetime, dict] | None = None
 
@@ -284,11 +288,19 @@ class Licensing:
         except OSError:
             pass  # A read-only disk must not stop the app; the clock memory is best effort.
 
+    def _day(self, moment: datetime) -> date:
+        """The calendar day a person on this Mac reads at `moment`."""
+        try:
+            return moment.astimezone(ZoneInfo(self.zone)).date()
+        except (ValueError, KeyError, OSError):  # No zone set, or one this Mac does not know.
+            return moment.astimezone().date()
+
     # -- the answer
     def status(self) -> dict:
         now = self.clock()
         with self._lock:
-            if self._cached and (now - self._cached[0]).total_seconds() < CACHE_SECONDS:
+            # A clock set back makes the age negative: that is asked afresh, or the old answer would stand until the clock caught up.
+            if self._cached and 0 <= (now - self._cached[0]).total_seconds() < CACHE_SECONDS:
                 return self._cached[1]
             result = self._compute(now)
             self._cached = (now, result)
@@ -309,7 +321,7 @@ class Licensing:
         note = ""
         if latest and wall < latest - CLOCK_NOTE_AFTER:
             note = (
-                f"This Mac's clock is behind the last date AXIOM saw ({nice_date(latest.astimezone().date())}). "
+                f"This Mac's clock is behind the last date AXIOM saw ({nice_date(self._day(latest))}). "
                 "Keys are counted from that later date until the clock catches up."
             )
         result = {
@@ -322,10 +334,10 @@ class Licensing:
             result.update(state="none", reason=str(exc), blocking=True)
             return result
         result["code"] = code
-        today = now.astimezone().date()
+        today = self._day(now)
         try:
             text = self.key_path.read_text()
-        except OSError:
+        except (OSError, ValueError):  # Gone, unreadable, or not text at all: there is no key here.
             text = ""
         if not text.strip():
             result.update(
@@ -362,8 +374,11 @@ class Licensing:
         latest = _parse_moment(seen.get("latest"))
         now = max(wall, latest) if latest else wall
         code = machine_code()
-        check_key(text, public_key_of(build.public_key), code, now.astimezone().date())
-        _write_private(self.key_path, re.sub(r"\s+", "", text) + "\n")
+        check_key(text, public_key_of(build.public_key), code, self._day(now))
+        try:
+            _write_private(self.key_path, re.sub(r"\s+", "", text) + "\n")
+        except OSError:
+            raise LicenseError("AXIOM could not save the key on this Mac. Check that the disk is not full, then try again.") from None
         self._remember(max(now, wall), activated=True)
         with self._lock:
             self._cached = None
@@ -377,11 +392,11 @@ class Licensing:
         if status["state"] == "expired":
             return False, (
                 "Your AXIOM key has run out, so new applications are paused. Ones already started finish, and your data is "
-                "untouched. Enter a new key in AXIOM to carry on."
+                "untouched. Enter a new key in Settings, under License key, to carry on."
             )
         if status["state"] == "invalid":
             return False, status["reason"] + " New applications are paused until a key that works on this Mac is entered."
-        return False, "AXIOM needs a valid key to start new applications. Enter one in AXIOM to carry on."
+        return False, "AXIOM needs a valid key to start new applications. Enter one in Settings, under License key, to carry on."
 
 
 def _parse_moment(value) -> datetime | None:
@@ -396,23 +411,50 @@ _instances: dict[Path, Licensing] = {}
 _instances_lock = threading.Lock()
 
 
-def licensing(data_dir) -> Licensing:
-    """The one `Licensing` of a data folder in this process."""
-    path = Path(data_dir).resolve()
+def licensing(config) -> Licensing:
+    """The one `Licensing` of this installation's data folder in this process."""
+    path = Path(config.data_dir).resolve()
     with _instances_lock:
         if path not in _instances:
-            _instances[path] = Licensing(path)
+            _instances[path] = Licensing(path, zone=getattr(config, "timezone", ""))
         return _instances[path]
 
 
-def require_license(data_dir, *, continuing: bool = False) -> None:
+def require_license(config, *, continuing: bool = False) -> None:
     """The gate for NEW applications. `continuing` is an application already started (a retry of it, an answered question, a
     matched email, the check of an earlier submission): it is never stopped by a key, only a fresh start is. Deferred, so what
     asked keeps its place and starts once a key is entered (the same way Stop holds it)."""
     if continuing:
         return
-    allowed, why = licensing(data_dir).allows_new()
+    allowed, why = licensing(config).allows_new()
     if not allowed:
         from .admission import QueueBlocked, temporary_time
 
         raise QueueBlocked(why, outcome="deferred", code="license", not_before=temporary_time())
+
+
+def _started_before(session, job_id, retry) -> bool:
+    """Whether this job has an application already under way: a run of it reached a worker, and this asks to retry it or that run
+    is waiting to go on. An old attempt that simply ended, clicked Apply on again, is a new start."""
+    from sqlalchemy import select
+
+    from .db import Run
+    from .pipeline_comparison import CONTINUABLE_STATES
+
+    states = list(session.scalars(select(Run.state).where(Run.job_id == job_id, Run.started_at.is_not(None))))
+    return bool(states) and (retry or any(state in CONTINUABLE_STATES for state in states))
+
+
+def admit(session, config, job_id, *, retry=False, source_run=None) -> dict:
+    """Queue admission's gate. What it returns goes into the run's packet, so the claim decides as admission did. A build that asks
+    for no key reads nothing and adds nothing."""
+    if not licensing(config).status()["required"]:
+        return {}
+    continuing = bool(source_run) or _started_before(session, job_id, retry)
+    require_license(config, continuing=continuing)
+    return {CONTINUES: True} if continuing else {}
+
+
+def returned_mark(config) -> dict:
+    """For the packet of a running application that Stop returned to the queue: it had started, so Resume carries on with it."""
+    return {CONTINUES: True} if licensing(config).status()["required"] else {}

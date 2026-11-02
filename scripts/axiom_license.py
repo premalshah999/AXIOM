@@ -74,7 +74,7 @@ def expiry(args) -> date:
         try:
             end = date.fromisoformat(args.until)
         except ValueError:
-            raise SystemExit("--until needs a date like 2027-01-31")
+            raise SystemExit("--until needs a date like 2027-01-31") from None
     else:
         end = today + timedelta(days=args.days)
     if end < today:

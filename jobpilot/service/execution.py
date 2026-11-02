@@ -131,7 +131,9 @@ class ExecutionMixin:
                 return False
             run.state, run.started_at, run.finished_at, run.reason = "queued", None, None, ""
             checkpoint = result.get("browser_checkpoint")
-            run.packet = {**run.packet, **({"browser_checkpoint": checkpoint} if checkpoint else {})}
+            from ..licensing import returned_mark
+
+            run.packet = {**run.packet, **returned_mark(self.config), **({"browser_checkpoint": checkpoint} if checkpoint else {})}
             job.status = "queued"
             from ..application_slots import release_slot
 
@@ -229,16 +231,17 @@ class ExecutionMixin:
                 except QueueBlocked as exc:
                     gate = host_health.Gate(0, "deployment_hold", str(exc))
                 if not s.get(Job, row.job_id).demo:
-                    from ..licensing import require_license
+                    from ..licensing import CONTINUES, require_license
 
                     try:
                         # A run queued before the key ran out waits here, holding no browser, and starts once a key is entered.
-                        # What continues an application already started (a source run, a matched email, a check of an earlier
-                        # submission) is never held by it.
+                        # What continues an application already started (what admission found, a source run, a matched email, a
+                        # check of an earlier submission) is never held by it.
                         require_license(
-                            self.config.data_dir,
+                            self.config,
                             continuing=bool(
-                                row.packet.get("source_run_id")
+                                row.packet.get(CONTINUES)
+                                or row.packet.get("source_run_id")
                                 or row.packet.get("email_wait_resume")
                                 or row.packet.get("verification_only")
                             ),
