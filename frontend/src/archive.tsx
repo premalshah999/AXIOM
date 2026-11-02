@@ -40,7 +40,8 @@ export function ArchiveList({ archive }: { archive: ReturnType<typeof usePoll<{ 
     run(
       "restore",
       async () => {
-        const outcomes = await Promise.allSettled(ids.map((id) => api(`/jobs/${id}/restore`, "POST")));
+        const outcomes: PromiseSettledResult<unknown>[] = [];
+        for (let i = 0; i < ids.length; i += 4) outcomes.push(...(await Promise.allSettled(ids.slice(i, i + 4).map((id) => api(`/jobs/${id}/restore`, "POST")))));
         const back = outcomes.filter((o) => o.status === "fulfilled").length;
         selection.clear();
         await Promise.all([archive.refresh(), refresh()]);
