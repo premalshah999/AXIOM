@@ -160,7 +160,7 @@ function Sending({
         }
       : {
           line: "Employers get a version of your approved resume, reworded for each job.",
-          sub: "It uses only what's in your approved copy, and the application waits until that job's version is ready.",
+          sub: "It uses only what's in your approved copy. Each application waits for its version, and for your approval unless you've turned that off in Settings, under Applying.",
         };
   return (
     <section className="ax-panel rs-state" aria-label="What employers get">
@@ -387,6 +387,7 @@ function SetupPath({ data, name, refresh }: { data: MasterStatus; name?: string;
           <li>Employers get a version of your approved copy reworded for each job, not {name || "your PDF"} as uploaded.</li>
           <li>It only rewords what's in your approved copy. It never adds a tool, metric or project.</li>
           <li>Each version takes a moment and one model call, and the application waits for it.</li>
+          <li>You approve each version before it's sent, unless you've turned that off in Settings, under Applying.</li>
           <li>You can turn it off here at any time.</li>
         </ul>
       </Dialog>

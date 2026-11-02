@@ -237,6 +237,43 @@ def test_an_unexpected_fault_ends_in_words_and_trying_again_isnt_told_its_still_
     assert asyncio.run(choice.run(row, service.config, "j1", model=stub(plan_of()), fresh=True))["state"] == "review"
 
 
+@needs_tex
+def test_the_account_wide_switch_goes_through_the_same_review_and_ends_with_the_switch(client, service):
+    from jobpilot.features.resumes import master
+
+    add_job(service)
+    imported = asyncio.run(master.import_master(service.db, service.config, stub(plan_of()), "r1"))
+    master.approve(service.db, imported["id"], accept_differences=True)
+    assert client.put("/api/v2/resumes/policy", json={"mode": "tailored", "resume_id": "r1"}).status_code == 200
+    # Nothing is chosen until a version exists: the job has no row, and the screen has no version.
+    assert choice.get_choice(service.db, "j1") is None
+    result = asyncio.run(pipeline.prepare_resume(service.db, service.config, "j1", model=stub(plan_of())))
+    assert result.status == "ready", result.error
+    # It waits for a review, and now a screen offers one.
+    row = choice.get_choice(service.db, "j1")
+    assert (row.mode, row.state, row.artifact_id) == ("normal", "review", result.artifact.artifact_id)
+    view = client.get("/api/v2/resumes/tailor/job/j1").json()
+    assert view["doc"] and view["choice"]["state"] == "review" and view["rules"]["ok"]
+    with service.db.exclusive() as s:
+        with pytest.raises(QueueBlocked) as caught:
+            choice.artifact_for_queue(s, s.get(Job, "j1"), "submit")
+    assert caught.value.code == choice.REVIEW
+    # Plain Apply can't be promised while the switch would still ask for a version.
+    with pytest.raises(LookupError, match="turn rewording off in Resumes"):
+        choice.choose(service.db, "j1", "off")
+    client.post("/api/v2/resumes/tailor/job/j1/approve", json={"artifact_id": row.artifact_id, "apply": False}).raise_for_status()
+    with service.db.exclusive() as s:
+        assert choice.artifact_for_queue(s, s.get(Job, "j1"), "submit") == row.artifact_id
+    # The switch off means the uploaded resume, whatever it had chosen. A job the person chose stays theirs.
+    with service.db.exclusive() as s:
+        s.add(Job(id="j2", identity="j2", url="https://jobs.example.test/j2", title="Analyst", company="Northwind", status="ready", score=90, description=POSTING, resume_id="r1"))
+        s.add(RsTailorChoice(job_id="j2", mode="normal", state="review"))
+    assert client.put("/api/v2/resumes/policy", json={"mode": "master", "resume_id": "r1"}).status_code == 200
+    assert choice.get_choice(service.db, "j1") is None
+    assert choice.get_choice(service.db, "j2") is not None
+    assert choice.choose(service.db, "j2", "off") is None
+
+
 def test_the_plain_mode_is_offered_first():
     assert modes.listing()[0]["id"] == "normal"
 

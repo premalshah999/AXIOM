@@ -292,7 +292,22 @@ def _finish(db, row_id, **fields):
         return record(row)
 
 
-async def prepare_resume(
+async def prepare_resume(db, config, job_id: str, source_resume_id: str | None = None, *, mode: str | None = None, **options) -> TailoringResult:
+    """One job's tailored resume, in one mode.
+
+    mode None is the account-wide "tailored" policy: it runs Normal and only from an approved master, else use_master. A mode the applicant chose
+    for this job starts from whatever source_document finds, and it fails plainly rather than sending something else. fresh: build anew.
+    status: ready (a tailored PDF), use_master, building, failed.
+    """
+    result = await _prepare_resume(db, config, job_id, source_resume_id, mode=mode, **options)
+    if mode is None and result.status == "ready" and result.artifact:
+        from .choice import follow_policy
+
+        follow_policy(db, job_id, result.artifact)
+    return result
+
+
+async def _prepare_resume(
     db,
     config,
     job_id: str,
@@ -305,12 +320,6 @@ async def prepare_resume(
     mode: str | None = None,
     fresh: bool = False,
 ) -> TailoringResult:
-    """One job's tailored resume, in one mode.
-
-    mode None is the account-wide "tailored" policy: it runs Normal and only from an approved master, else use_master. A mode the applicant chose
-    for this job starts from whatever source_document finds, and it fails plainly rather than sending something else. fresh: build anew.
-    status: ready (a tailored PDF), use_master, building, failed.
-    """
     from ...db import Job, Resume
     from ...models import COST_METER
     from .master import master_doc

@@ -399,6 +399,7 @@ async def test_nothing_to_a_tailored_pdf_on_the_employers_form(page, tmp_path):
         assert hashlib.sha256(stored).hexdigest() == approved["artifact"]["pdf_sha"]
 
         # Queue, Job board and Review batch all offer the choice, on the same one row each.
+        assert (await page.request.post(url + "/api/journey/refresh", data={})).ok
         await page.goto(url + "/?view=queue")
         queue_row = page.locator("select[aria-label='How to apply']")
         await queue_row.first.wait_for(timeout=20000)

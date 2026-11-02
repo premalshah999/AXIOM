@@ -28,6 +28,8 @@ BROKEN = "tailoring_rules"
 UNCONFIRMED = "tailoring_unconfirmed"
 STARTED = frozenset({"queued", "running", "submitting", "waiting_browser", "confirmed", "submission_unknown", "already_applied"})
 ALREADY_STARTED = "This application has already started, so its resume can't change now."
+ACCOUNT_WIDE = "Rewording every job is on, so this job gets its own version. To send your uploaded resume, turn rewording off in Resumes."
+FOLLOWED = "tailor_followed:"  # A job's choice that the account-wide switch made, not the person: it ends when the switch does.
 _TASKS: dict[str, asyncio.Task] = {}
 
 TRY_AGAIN = "Something went wrong while tailoring. Nothing was sent. Try again."
@@ -123,6 +125,54 @@ def lease() -> str:
     return (datetime.now(UTC) + timedelta(seconds=LEASE_SECONDS)).isoformat()
 
 
+def _account_wide_in(session) -> bool:
+    from ...db import Setting
+
+    policy = session.get(Setting, "application_resume_policy")
+    return ((policy.value if policy else {}) or {}).get("mode") == "tailored"
+
+
+def follow_policy(db, job_id: str, artifact) -> None:
+    """The account-wide switch is every job choosing Normal, so its version goes through the same screen and the same approval. With no choice here the job
+    waited on "review the tailored resume" while no screen offered one (the guard at the send asks for an approved choice, as it should)."""
+    from ...db import Setting
+
+    approved = False
+    with db.exclusive() as s:
+        if not _account_wide_in(s) or s.get(RsTailorChoice, job_id) is not None:
+            return
+        approved = not _approval_required_in(s) and bool((artifact.validation.get("rules") or {}).get("ok"))
+        s.add(
+            RsTailorChoice(
+                job_id=job_id,
+                mode=artifact.validation.get("mode") or "normal",
+                state="approved" if approved else "review",
+                artifact_id=artifact.artifact_id,
+                approved_artifact_id=artifact.artifact_id if approved else None,
+                approved_sha=artifact.pdf_sha if approved else None,
+                approved_at=now() if approved else None,
+                approved_how="setting_off" if approved else None,
+            )
+        )
+        if s.get(Setting, FOLLOWED + job_id) is None:
+            s.add(Setting(key=FOLLOWED + job_id, value={"at": now()}))
+    if approved:
+        wake(db, job_id)
+
+
+def policy_off(db) -> None:
+    """The account-wide switch went off: "employers get your resume as uploaded". What the switch chose ends with it, unless the application has started."""
+    from ...db import Job, Setting
+
+    with db.exclusive() as s:
+        for mark in s.scalars(select(Setting).where(Setting.key.like(FOLLOWED + "%"))).all():
+            job_id = mark.key[len(FOLLOWED):]
+            job, row = s.get(Job, job_id), s.get(RsTailorChoice, job_id)
+            if row is not None and (job is None or job.status not in STARTED):
+                s.delete(row)
+            s.delete(mark)
+
+
 def get_choice(db, job_id: str) -> RsTailorChoice | None:
     with db.session() as s:
         return s.get(RsTailorChoice, job_id)
@@ -152,6 +202,9 @@ def choose(db, job_id: str, mode: str | None) -> dict | None:
             raise LookupError(ALREADY_STARTED)
         if mode in (None, "", "off"):
             if row is not None:
+                if _account_wide_in(s):
+                    # Queue admission would still ask this job for its version, and then wait for an approval no screen offers.
+                    raise LookupError(ACCOUNT_WIDE)
                 s.delete(row)
             return None
         if modes.get(mode) is None:

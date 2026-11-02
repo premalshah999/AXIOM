@@ -410,6 +410,8 @@ def router(service) -> APIRouter:
             "automatic_tailoring": data.mode == "tailored",
         }
         db.set_setting("application_resume_policy", policy)
+        if data.mode == "master":
+            choice.policy_off(db)
         return policy
 
     @r.post("/master/import")
