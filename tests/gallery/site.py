@@ -132,6 +132,7 @@ class Scenario:
     terms: bool = False  # The profile accepts cookie and application terms, which dismissing a cookie dialog waits for.
     title: str = "Software Engineer"
     company: str = "ExampleSoft"
+    location: str = "Remote"
     profile: dict = field(default_factory=dict)  # Profile values beyond the name, email and facts: an address, saved answers.
     uploaded: tuple = ()  # File inputs that must have arrived with bytes in them.
 

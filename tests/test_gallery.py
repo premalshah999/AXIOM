@@ -62,7 +62,7 @@ async def run_scenario(service, scenario, mode="submit"):
     service.dispatch = dispatch
     site = Site(scenario.pages)
     job, _ = add_job(service.db, JobInput(url=site.base + scenario.start, title=scenario.title, company=scenario.company,
-                                          location="Remote", description="A synthetic posting."))
+                                          location=scenario.location, description="A synthetic posting."))
     with service.db.exclusive() as s:
         s.get(Job, job["id"]).status = "ready"  # What ranking leaves a job in.
     allow(service.db, [job["id"]])  # A local page reads as a company's own site: the owner's click sends it.

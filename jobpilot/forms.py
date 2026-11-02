@@ -3595,6 +3595,8 @@ class FormSession:
             committed = await widgets.date_parts(frame, field, value)
         elif kind == "pills":
             committed = await widgets.pills(el, value)
+        elif field.get("widget") == "period-month":
+            committed = await widgets.period_month(frame, el, value)
         elif field.get("widget") == "date-text":
             if re.fullmatch(r"\s*(?:immediately|immediate|asap|as soon as possible|right away)\s*", str(value), re.I):
                 # Availability "Immediately" in a date box is today's date: Paylocity's "Available to Start" raised

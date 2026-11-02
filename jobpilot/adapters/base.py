@@ -17,6 +17,7 @@ from playwright.async_api import Error as PlaywrightError
 
 from ..service import Service
 from ..accounts import Accounts, password_rules
+from ..accounts.pages import optional_account_section
 from ..captcha_observation import ARM_JS
 from ..forms import AUTH, COOKIE_NOTICE, FINAL, LAUNCHER, SURVEY_DONE, final_by_marking
 from ..privacy import acknowledge_privacy_notice, dismiss_cookies
@@ -1324,16 +1325,7 @@ class Adapter:
                 for b in obs["controls"]
             )
             new_password = any(f.get("autocomplete") == "new-password" for f in passwords)
-            if (
-                not create_path
-                and not any(f["required"] for f in passwords)
-                and any(f["type"] == "file" for f in fields)
-                and len([f for f in meaningful if f["type"] not in {"password", "file"}]) >= 3
-                and any(self.final.search(b["label"]) for b in obs["controls"])
-            ):
-                # One application with an optional "create an account" section inside it (Meta, 2026-11-01): the page holds the
-                # application's own resume and fields and a final Submit, and no password is required. It is the form, not an
-                # account step; the optional password boxes stay empty and Submit goes through the normal review.
+            if not create_path and optional_account_section(fields, obs["controls"], passwords, self.final):
                 return Step.FORM
             return (
                 Step.CREATE_ACCOUNT

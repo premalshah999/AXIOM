@@ -949,7 +949,10 @@ async def popup_search_box(frame, scope):
               const drop = list.closest('.select2-dropdown,.select2-drop,.chosen-drop');
               const own = drop ? [...drop.querySelectorAll('input.select2-search__field,input.select2-input,.chosen-search input')]
                 .filter(shown) : [];
-              const box = linked.length === 1 ? linked[0] : own.length === 1 ? own[0] : null;
+              // A popover that holds its own search box above its list (Meta's Current location, 2026-11-01: a button names the popover,
+              // whose input names the list inside it and has the focus): the popup's one writable input that declares itself a search.
+              const inner = [...list.querySelectorAll('input[aria-autocomplete],input[type=search],input[aria-label*=search i],input[placeholder*=search i]')].filter(shown);
+              const box = linked.length === 1 ? linked[0] : own.length === 1 ? own[0] : inner.length === 1 ? inner[0] : null;
               if (!box) return false;
               box.setAttribute('data-jp-search', token);
               return true;
@@ -1044,7 +1047,10 @@ async def ensure_uncovered(el):
         // their combobox (Microsoft sign-up country list). They are part of the
         // open control; the click-point ownership check still applies.
         if(e.closest('[role="listbox"],[role="option"],[role="menu"],[role="menuitem"],[role="tree"],[role="grid"]'))return false;
-        return dialogs.length && !dialogs.some(d=>d.contains(e));
+        // Composed containment: a control inside a web component's shadow tree (UKG's modal Close button) is inside the
+        // dialog that holds the component, though dialog.contains() stops at the shadow boundary.
+        const within=(d,n)=>{for(;n;n=n.parentNode||n.host){if(n===d)return true}return false};
+        return dialogs.length && !dialogs.some(d=>within(d,e));
     }""")
     if blocked:
         raise ValueError("Control is covered by the active dialog or inert")
@@ -1317,6 +1323,38 @@ async def dispatch_owned_click(handle, *, pointer_sequence=False):
                 }""", pointer_sequence)
 
 
+# The element on top of a control's click point is a page-loading sheet: a loader role, an aria-busy region, a spinner or
+# loader class, or a sheet that holds a "loading" image. A dialog, popup or menu is not one: those are closed by clear_cover.
+BUSY_COVER_JS = r"""e => {
+  const r = e.getBoundingClientRect();
+  if (!r.width || !r.height) return false;
+  const hit = e.ownerDocument.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+  if (!hit || hit === e || e.contains(hit)) return false;
+  const named = n => [typeof n.className === 'string' ? n.className : '', n.id || '', n.getAttribute('aria-label') || ''].join(' ');
+  for (let n = hit, depth = 0; n && n !== e.ownerDocument.body && depth < 6; n = n.parentElement, depth++) {
+    if (n.matches('[role=dialog],[aria-modal=true],[role=listbox],[role=menu]')) return false;
+    if (n.getAttribute('aria-busy') === 'true' || /(?:^|[\s_-])(?:loader|loading|spinner|overlaybg|busy)(?:$|[\s_-])/i.test(named(n))) return true;
+    const kids = n.querySelectorAll('img[alt*=loading i],[role=progressbar],[role=alert][aria-label*=loading i],.spinner,.loader');
+    if (kids.length && n.getBoundingClientRect().height >= innerHeight * 0.5) return true;
+  }
+  return false;
+}"""
+
+
+async def wait_busy_cover(handle, budget=15.0):
+    """True once a loading sheet that covered this control has gone; False when none covered it or it never left."""
+    try:
+        if not await handle.evaluate(BUSY_COVER_JS):
+            return False
+        frame = await handle.owner_frame()
+        if frame is None:
+            return False
+        await frame.wait_for_function(f"e => !({BUSY_COVER_JS})(e)", arg=handle, timeout=int(budget * 1000), polling=100)
+        return True
+    except Exception:
+        return False
+
+
 async def safe_click(el, timeout=4000, *, field_control=False, _reresolved=0):
     # Keep an exact node handle through React replacement and type restoration.
     await ensure_uncovered(el)
@@ -1378,7 +1416,12 @@ async def safe_click(el, timeout=4000, *, field_control=False, _reresolved=0):
                 # enabled state and that no other element covers its click point.
                 clicked = await dispatch_owned_click(handle)
                 if not clicked:
-                    raise
+                    # A loading overlay over the page (Humana's Phenom form after the resume parse, 2026-11-01: a grey
+                    # sheet with a spinner and role=alert "loading") refuses every click until the page finishes.
+                    # Wait for it to go, then click once more with the real pointer.
+                    if not await wait_busy_cover(handle):
+                        raise
+                    await handle.click(timeout=timeout)
     except Exception as exc:
         # The click can navigate while Playwright is waiting for it to finish,
         # destroying this handle's context before the timeout fallback reads it.
@@ -1408,6 +1451,55 @@ async def safe_click(el, timeout=4000, *, field_control=False, _reresolved=0):
 
 async def field_click(el, timeout=4000):
     return await safe_click(el, timeout, field_control=True)
+
+
+PERIOD_ENDS = re.compile(r"\s*(\d{1,2})/(\d{4})\s*-\s*(?:(\d{1,2})/(\d{4})|(present|current|now|today))\s*", re.I)
+
+
+async def period_month(frame, el, value):
+    """A month-range picker whose panel lists years and months (TikTok's "Start & end date", 2026-11-01). Each side opens a panel on a click of its
+    label; a year and then a month complete that side and move on to the other. Its input has no height and takes no typing, so every run
+    timed out on it. "Present" is the one entry of the end panel's year list that is not a year. Returns the answer once both sides show it."""
+    ends = PERIOD_ENDS.fullmatch(str(value))
+    if not ends:
+        raise ValueError("A date range needs its start and end month")
+    labels = el.locator('xpath=../div[contains(@class,"period-month-label")]')
+    if await labels.count() != 2:
+        raise ValueError("The date range's two sides could not be read")
+
+    async def choose(month, year):
+        panel = frame.locator('[class*="period-month-panel"]:not([class*="-panel-"])').locator("visible=true").last
+        await panel.wait_for(state="visible", timeout=3000)
+        columns = panel.locator('[class*="period-month-panel-list"]:not([class*="-list-"])')
+        if await columns.count() != 2:
+            raise ValueError("The date range's panel has no year and month lists")
+        rows = columns.nth(0).locator('[class*="period-month-panel-list-item"]')
+        if year is None:
+            present = rows.filter(has_not_text=re.compile(r"^\s*\d{4}\s*$"))
+            if await present.count() != 1:
+                raise ValueError("The date range offers no present choice")
+            await present.first.click(timeout=3000)
+            return
+        pick = rows.filter(has_text=re.compile(rf"^\s*{year}\s*$"))
+        if await pick.count() != 1:
+            raise ValueError(f"The date range offers no year {year}")
+        await pick.first.click(timeout=3000)
+        months = columns.nth(1).locator('[class*="period-month-panel-list-item"]')
+        pick = months.filter(has_text=re.compile(rf"^\s*0?{int(month)}\s*$"))
+        if await pick.count() != 1:
+            raise ValueError(f"The date range offers no month {month}")
+        await pick.first.click(timeout=3000)
+
+    await labels.nth(0).click(timeout=3000)
+    await choose(ends[1], ends[2])
+    await asyncio.sleep(0.15)
+    if not await frame.locator('[class*="period-month-panel"]:not([class*="-panel-"])').locator("visible=true").count():
+        await labels.nth(1).click(timeout=3000)
+    await choose(ends[3], ends[4])
+    await asyncio.sleep(0.15)
+    if ends[5]:
+        return f"{int(ends[1]):02d}/{ends[2]} - {ends[5]}"
+    return f"{int(ends[1]):02d}/{ends[2]} - {int(ends[3]):02d}/{ends[4]}"
 
 
 def _preferred(opts, prefer):
@@ -1500,9 +1592,14 @@ async def open_combobox(el):
               const hit=e.ownerDocument.elementFromPoint(r.x+r.width/2, r.y+r.height/2);
               if(!hit || hit===e) return null;
               let widget=null;
-              for (let n=e.parentElement, i=0; n && i<6; n=n.parentElement, i++)
+              // A select's input that takes no pointer until the select has focus (TikTok's two work-authorization menus, 2026-11-01: placeholder over
+              // input, "covered" on every run, and "no offered choices"): the outermost element named a select is the widget.
+              const through=getComputedStyle(e).pointerEvents==='none';
+              for (let n=e.parentElement, i=0; n && i<6; n=n.parentElement, i++) {
                 if (n.matches('[aria-haspopup]:not([aria-haspopup=false]),[role=combobox]')) { widget=n; break; }
-              if(!widget || !widget.contains(hit) || widget===hit) return null;
+                if (through && typeof n.className==='string' && /select/i.test(n.className)) widget=n;
+              }
+              if(!widget || !widget.contains(hit) || (widget===hit && !through)) return null;
               // The widget's own clear or remove control is not its opener.
               if(hit.closest('button,a[href],[role=button]') || [hit, ...hit.querySelectorAll('[aria-label],[title]')]
                 .some(n=>/clear|delete|remove|close/i.test((n.getAttribute('aria-label')||'')+' '+(n.getAttribute('title')||''))))
@@ -3358,6 +3455,9 @@ async def combobox(
         await frame.page.keyboard.type(str(value)[:24], delay=12)
         opts = await wait_options(frame, scope, timeout=1.5, owner=el)
         choice = best_option(opts, value)
+        if not choice and resolve and opts:
+            picked = resolve([o["text"] for o in eligible(opts)])
+            choice = next((o for o in eligible(opts) if o["text"] == picked), None) if picked else None
     if not choice:
         await el.press("Escape")
         error = ValueError("No matching option is offered")

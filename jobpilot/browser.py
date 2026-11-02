@@ -137,6 +137,8 @@ GREENHOUSE_RECEIPT = r"""(() => {
   }, true);
 })()"""
 
+# How long a pre-submit page with no readable document is waited for before the run stops on it.
+OBSERVATION_WAIT_SECONDS = 20
 # Already reliable with the single-page fast path + navigation model; keep their behavior.
 AGENT_FIRST = {"greenhouse", "ashby", "lever", "smartrecruiters", "workable", "bamboohr"}
 # Platforms whose stored browser state sends the applicant into a sign-in that does not exist (see
@@ -3384,7 +3386,9 @@ class BrowserEngine:
         # What the site did since the previous step (value-free); account steps can carry one-use links.
         network = getattr(self.form, "network", None)
         entries = network.take_journal() if network else []
-        if not (sensitive or metadata_only):
+        # Recovery steps keep the journal too (host, path, status, never a value): UKG's "Create account" click changed nothing
+        # on the page in six runs and no record said whether the site was asked anything (2026-11-01).
+        if not sensitive:
             summary["network"] = entries
         catalog = network.take_catalog() if network else []
         try:
@@ -5226,8 +5230,17 @@ class BrowserEngine:
             )
             self.emit("navigation", "Opened the employer's SuccessFactors login to start its session")
             await self.page.goto(login, wait_until="domcontentloaded", timeout=60000)
-            await self.form.settle(timeout=6)
-            obs = await self.form.scan()
+            # The login page redirects once more after domcontentloaded; a scan in that window reads no document (Farmers,
+            # 2026-11-01: three empty reads ended the run "stopped responding" on a sign-in page that rendered a moment later).
+            for attempt in range(6):
+                await self.form.settle(timeout=6 if attempt == 0 else 3)
+                try:
+                    obs = await self.form.scan()
+                except PlaywrightError:
+                    obs = {**obs, "observation_failure": True}
+                if not blank(obs) and not obs.get("observation_failure"):
+                    break
+                await asyncio.sleep(1.5)
         return obs
 
     async def recover_empty_observation(self, obs):
@@ -5248,7 +5261,10 @@ class BrowserEngine:
                 "reason": "Submission page cannot be inspected; reconcile its outcome before retrying",
             }
             return obs
-        for _ in range(2):
+        # A page that commits empty and draws itself a moment later (SuccessFactors' redirects after Apply; 16 runs on six platforms since 10-12 ended
+        # "stopped responding" after about 5 s, Belden's 530 s in) is waited for. Only a run that was going to stop pays for this.
+        deadline = time.monotonic() + OBSERVATION_WAIT_SECONDS
+        while True:
             try:
                 await self.form.settle(timeout=2)
                 obs = await self.form.scan()
@@ -5256,6 +5272,9 @@ class BrowserEngine:
                     return obs
             except PlaywrightError:
                 pass
+            if time.monotonic() >= deadline:
+                break
+            await asyncio.sleep(1)
         if any(record.get("verified") for record in self.form.ledger.values()):
             self.result = {
                 "state": "waiting_browser",
