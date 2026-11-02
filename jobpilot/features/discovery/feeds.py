@@ -835,6 +835,12 @@ async def sweep(db, window_days: int = 7) -> dict:
             early_career_only=bool(board.get("early_career_only", False)),
         )
         counts = await asyncio.to_thread(ingest, db, postings)
+        try:
+            from ...platform_label import label_resolved_short_links
+
+            counts["relabelled"] = await asyncio.to_thread(label_resolved_short_links, db)
+        except Exception:  # noqa: BLE001 - a label is an extra; the sweep result stands without it
+            pass
         # Jobs should reach ranking with their description; HTML pages are often blocked.
         try:
             from .postings import fill_missing_text

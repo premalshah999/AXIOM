@@ -299,3 +299,22 @@ def test_a_career_site_proven_on_one_platform_speaks_for_its_other_jobs(service)
     with service.db.session() as session:
         assert session.get(Job, "b").ats == "icims"
         assert session.get(Job, "e").ats == "custom"  # This host shows two platforms.
+
+
+def test_a_short_link_resolved_after_start_is_labelled_without_a_restart(service):
+    """The sweep resolves a few short links each time; the startup pass had labelled only those resolved before it."""
+    from jobpilot.admission import SHARED_LINK_HOSTS
+    from jobpilot.db import Setting
+    from jobpilot.platform_label import label_resolved_short_links
+    from jobpilot.shortlinks import cache_key
+
+    short_host = sorted(SHARED_LINK_HOSTS)[0]
+    short, final = f"https://{short_host}/z", "https://job-boards.greenhouse.io/examplecorp/jobs/11"
+    with service.db.session() as session:
+        session.add(Job(id="s1", url=short, identity="s1", ats="custom", company="Example", title="Engineer", status="new", location="", description="x", demo=False))
+        session.add(Job(id="s2", url=f"https://{short_host}/y", identity="s2", ats="custom", company="Example", title="Engineer", status="new", location="", description="x", demo=False))
+        session.add(Setting(key=cache_key(short), value={"url": short, "final": final}))
+        session.commit()
+    assert label_resolved_short_links(service.db) == 1
+    assert row(service, "s1")[0] == "greenhouse" and row(service, "s2")[0] == "custom"
+    assert label_resolved_short_links(service.db) == 0
