@@ -642,3 +642,229 @@ SCENARIOS = [
     paylocity_address,
     inline_account,
 ]
+
+
+# ---- the run stays on the job it was given ---------------------------------------------------------------------------------
+# A saved route bounced to a career home, and the browser opened another role from its list, applied to it, and booked that receipt as
+# the job it was given (2026-11-01). Each guard sits beside the closest legitimate case it must let through.
+
+OWN = "/careers/JobDetail/New-York-Software-Engineer/13045"
+
+
+def _roles_list(request=None):
+    return page(
+        "Careers",
+        """<form action="/careers/OpenRoles" method="get" role="search"><label for="k">Keywords</label><input id="k" name="k">
+        <label for="w">Location</label><input id="w" name="w"><button type="submit">Search</button></form><h2>Roles</h2>
+        <p><a href="/careers/OpenRoles">See All Openings</a></p>
+        <p><a href="/careers/JobDetail/New-York-Data-Analyst/14102">Data Analyst</a></p>
+        <p><a href="/careers/JobDetail/Tokyo-Kubernetes-Tech-Lead/14350">Kubernetes Tech Lead</a></p>
+        <p><a href="/careers/JobDetail/London-Credit-Risk-Associate/14377">Credit Risk Associate</a></p>""",
+    )
+
+
+OTHER_ROLES = {
+    "/careers": _roles_list,
+    "/careers/OpenRoles": _roles_list,
+    "/careers/JobDetail/New-York-Data-Analyst/14102": page(
+        "Data Analyst", '<h1>Data Analyst</h1><p><a class="apply" href="/careers/ApplicationForm?jobId=14102">Apply</a></p>'
+    ),
+    "/careers/ApplicationForm": page("Apply", "<h1>Application</h1>" + form(NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD, SUBMIT_BUTTON)),
+    "/submit/1": THANKS,
+}
+ELSEWHERE = ("/careers/JobDetail/New-York-Data-Analyst/14102", "/careers/ApplicationForm")
+
+
+def _bounce_once(request):
+    """The application's first opening loses the session and lands on the career home. Opened again from the posting, it holds."""
+    if request.site.state.get("bounced"):
+        return PLAIN_FORM
+    request.site.state["bounced"] = True
+    return (302, "/careers")
+
+
+career_home_bounce = Scenario(
+    "career_home_instead_of_posting",
+    "The posting's address lands on the career home, whose list holds other roles: nothing may be opened or sent, and the run says so.",
+    {OWN: lambda request: (302, "/careers"), **OTHER_ROLES},
+    start=OWN,
+    state="waiting_browser",
+    applications=0,
+    never=ELSEWHERE,
+)
+
+career_home_then_back = Scenario(
+    "career_home_then_back_to_the_posting",
+    "Apply bounces to the career home once: the browser goes back to the job's own address, never to a role in the list, and gets through.",
+    {
+        OWN: page("Software Engineer", POSTING + '<p><a class="apply" href="/careers/start">Apply</a></p>'),
+        "/careers/start": _bounce_once,
+        **OTHER_ROLES,
+    },
+    start=OWN,
+    never=ELSEWHERE,
+)
+
+own_redirect = Scenario(
+    "own_address_redirects_to_its_posting",
+    "A short address redirects to the posting under another shape: the job's own redirect is not another posting.",
+    {
+        "/r/software-engineer": lambda request: (302, "/careers/job/77123"),
+        "/careers/job/77123": page("Software Engineer", POSTING + APPLY_LINK),
+        **THREE_PAGES,
+    },
+    start="/r/software-engineer",
+)
+
+own_form_numbers_itself = Scenario(
+    "own_form_numbers_the_posting_its_own_way",
+    "A career site's /job/900100200 opens /talentcommunity/apply/45678: the form's own number, reached from the job's own Apply, is this job.",
+    {
+        "/job/Software-Engineer/900100200": page(
+            "Software Engineer", POSTING + '<p><a class="apply" href="/talentcommunity/apply/45678/">Apply</a></p>'
+        ),
+        "/talentcommunity/apply/45678/": PLAIN_FORM,
+        "/submit/1": THANKS,
+    },
+    start="/job/Software-Engineer/900100200",
+)
+
+form_adds_number = Scenario(
+    "apply_address_adds_an_id_the_board_lacks",
+    "The board address has no number and its Apply adds one (/careers/ApplicationForm?jobId=14102): no difference to read, so it goes through.",
+    {
+        "/careers/software-engineer": page(
+            "Software Engineer", POSTING + '<p><a class="apply" href="/careers/ApplicationForm?jobId=14102">Apply</a></p>'
+        ),
+        "/careers/ApplicationForm": PLAIN_FORM,
+        "/submit/1": THANKS,
+    },
+    start="/careers/software-engineer",
+)
+
+SIMILAR_JOBS = """<h2>Similar jobs</h2><p><a href="/jobs/2">Data Analyst</a></p><p><a href="/jobs/3">Support Associate</a></p>
+<p><a href="/jobs/4">Product Designer</a></p>"""
+
+posting_with_similar_jobs = Scenario(
+    "posting_with_similar_jobs_beside_apply",
+    "The job's own page lists other roles under its Apply: it stays this job's page, and only its own Apply is used.",
+    {"/jobs/1": page("Software Engineer", POSTING + APPLY_LINK + SIMILAR_JOBS), **THREE_PAGES},
+    never=("/jobs/2", "/jobs/3", "/jobs/4"),
+)
+
+form_for_other_role = Scenario(
+    "form_heading_names_another_role",
+    "The application form's own heading says it is for another role: nothing is sent.",
+    {
+        "/jobs/1": page("Software Engineer", POSTING + APPLY_LINK),
+        "/apply/1": page("Apply", "<h1>Apply for Data Analyst</h1>" + form(NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD, SUBMIT_BUTTON)),
+        "/submit/1": THANKS,
+    },
+    state="waiting_browser",
+    applications=0,
+)
+
+_POSTING_DATA = """<script type="application/ld+json">{"@context":"https://schema.org","@type":"JobPosting","title":"%s",
+"hiringOrganization":{"@type":"Organization","name":"ExampleSoft"}}</script>"""
+
+form_data_other_role = Scenario(
+    "form_structured_data_names_another_role",
+    "Only the page's structured data tells: the form is another posting's, so the last look before the submit stops it.",
+    {
+        "/jobs/1": page("Software Engineer", POSTING + APPLY_LINK),
+        "/apply/1": page(
+            "Apply", _POSTING_DATA % "Data Analyst" + "<h1>Application</h1>" + form(NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD, SUBMIT_BUTTON)
+        ),
+        "/submit/1": THANKS,
+    },
+    state="waiting_browser",
+    applications=0,
+)
+
+form_data_own_role = Scenario(
+    "form_structured_data_words_the_same_role_differently",
+    "The form's structured data gives a longer title for the same role, and a heading that names a step: both pass.",
+    {
+        "/jobs/1": page("Software Engineer", POSTING + APPLY_LINK),
+        "/apply/1": page(
+            "Apply",
+            _POSTING_DATA % "Software Engineer, Platform (Remote)"
+            + "<h1>Application Form</h1>"
+            + form(NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD, SUBMIT_BUTTON),
+        ),
+        "/submit/1": THANKS,
+    },
+)
+
+
+def _receipt(words):
+    return f"""<!doctype html><html lang="en"><meta charset="utf-8"><title>Application Successful</title><body><h1>Thank you</h1><p>{words}</p></body></html>"""
+
+
+receipt_other_role = Scenario(
+    "receipt_names_another_role",
+    "The employer's receipt names another role: the one application stays on record as unknown, and is not sent again.",
+    {
+        "/jobs/1": page("Software Engineer", POSTING + APPLY_LINK),
+        "/apply/1": PLAIN_FORM,
+        "/submit/1": _receipt("Your application for Data Analyst has been submitted."),
+    },
+    state="submission_unknown",
+)
+
+receipt_own_role = Scenario(
+    "receipt_names_this_role_in_other_words",
+    "The receipt names this role with its team and place: confirmed.",
+    {
+        "/jobs/1": page("Software Engineer", POSTING + APPLY_LINK),
+        "/apply/1": PLAIN_FORM,
+        "/submit/1": _receipt("Your application for Software Engineer, Platform (Remote) has been submitted."),
+    },
+)
+
+receipt_employer_named = Scenario(
+    "receipt_names_the_employer",
+    "\"Thank you for applying to ExampleSoft Inc\": a receipt that names the employer names no role, and confirms.",
+    {
+        "/jobs/1": page("Software Engineer", POSTING + APPLY_LINK),
+        "/apply/1": PLAIN_FORM,
+        "/submit/1": _receipt("Thank you for applying to ExampleSoft Inc. Your application has been received."),
+    },
+)
+
+
+def _to_receipt(path):
+    return lambda request: (302, path) if request.method == "POST" else _receipt("Thank you for applying. Your application has been received.")
+
+
+def _numbered(*, confirmed_at):
+    apply_page = page("Apply", "<h1>Apply: Software Engineer</h1>" + form(NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD, SUBMIT_BUTTON, action=confirmed_at))
+    return {
+        "/jobs/70011": page("Software Engineer", POSTING + '<p><a class="apply" href="/apply/70011">Apply for this job</a></p>'),
+        "/apply/70011": apply_page,
+        confirmed_at: _to_receipt(confirmed_at),
+    }
+
+
+receipt_other_number = Scenario(
+    "receipt_address_carries_another_number",
+    "A generic thank-you, at another posting's address: the receipt's own address says where the application went. Unknown, never resent.",
+    _numbered(confirmed_at="/jobs/70022/confirmation"),
+    start="/jobs/70011",
+    state="submission_unknown",
+    applications=0,
+)
+
+receipt_own_number = Scenario(
+    "receipt_address_carries_this_number",
+    "The same thank-you at the job's own confirmation address: confirmed.",
+    _numbered(confirmed_at="/jobs/70011/confirmation"),
+    start="/jobs/70011",
+    applications=0,
+)
+
+SCENARIOS += [
+    career_home_bounce, career_home_then_back, own_redirect, own_form_numbers_itself, form_adds_number, posting_with_similar_jobs,
+    form_for_other_role, form_data_other_role, form_data_own_role, receipt_other_role, receipt_own_role, receipt_employer_named,
+    receipt_other_number, receipt_own_number,
+]  # fmt: skip

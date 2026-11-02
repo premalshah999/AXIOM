@@ -119,6 +119,18 @@ class CompletionMixin:
             if run.state == "confirmed" and result.get("state") != "confirmed":
                 return  # Trusted asynchronous receipt reconciliation is terminal.
             state = result.get("state", "failed")
+            if state == "confirmed" and result.get("receipt"):
+                from ..posting_match import receipt_conflict
+
+                listed = s.get(Job, run.job_id)
+                if why := receipt_conflict(
+                    {"title": listed.title, "company": listed.company, "url": listed.url}, result["receipt"]
+                ):
+                    # The application went somewhere, but not demonstrably to this job (2026-11-01: "Your application for AI Solutions
+                    # Developer" booked as Quantitative Software Engineer). Unknown, marked so that nothing resends it.
+                    state = "submission_unknown"
+                    result = {**result, "state": state, "reason": why, "blocker_type": "other_posting",
+                              "receipt": {**result["receipt"], "other_posting": True}}
             from ..sensitive_ids import sensitive_field
 
             asked = [
@@ -562,6 +574,14 @@ class CompletionMixin:
                 verdict, why = final_page_verdict(
                     evidence, url=_last_observed_url(folder), outline=_saved_outline(folder)
                 )
+                from ..posting_match import receipt_conflict
+
+                listed = s.get(Job, run.job_id)
+                if other := receipt_conflict(
+                    {"title": listed.title, "company": listed.company, "url": listed.url},
+                    {"evidence": evidence, "url": _last_observed_url(folder)},
+                ):
+                    raise ValueError(other + "; the run is left as it is")
                 if verdict == "rejected":
                     raise ValueError(why + "; the run is left as it is")
                 if verdict == "already_applied":
