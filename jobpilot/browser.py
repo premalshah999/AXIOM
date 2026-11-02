@@ -966,10 +966,12 @@ def navigation_supported_answers(form, obs):
         if (
             field.get("type") not in {"prompt", "combobox", "dropdown", "select", "pills"}
             or re.search(
-                r"password|email|verification|security code|authentication code|one.time|\botp\b|token",
+                r"email|verification|security code|authentication code|one.time|\botp\b|token",
                 field["label"],
                 re.I,
             )
+            # A credential box names itself briefly: a long question that mentions a password in passing is a question (Brown, Q10).
+            or (len(field["label"]) <= 120 and re.search(r"password", field["label"], re.I))
             or (field["id"] not in pending and field.get("value") and field.get("valid", True))
         ):
             continue
