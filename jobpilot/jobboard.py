@@ -16,7 +16,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import and_, case, func, or_, select
 
 from .db import Job, JobListing, Run, Setting, Source, now
 from .board_data import clean_location, expired_internship
@@ -969,6 +969,41 @@ async def scrape_source(source, db, config):
         raise
 
 
+UNREAD_HOURS = 72  # Without any read at all, a listing older than this is no longer called open (the app has not looked in days).
+
+
+def seen_window_hours(interval_hours):
+    return max(6, (interval_hours or 2) * 2 + 1)
+
+
+def unconfirmed(at, interval_hours):
+    """SQL: a listing that is no longer shown as open because it was not seen lately AND that means it is gone.
+
+    Not seen within the window is not enough: a Mac that sleeps, or a scan that works through thousands of boards over hours,
+    leaves listings unread for longer than the window while nothing has found them gone, and the board read "No open postings"
+    until the scans caught up (production 2026-11-02: 2,710 of 5,270 active listings were past a 6-hour cutoff). A listing is
+    gone when its own board, or the new-grad list, was read successfully after it was last seen and did not show it. Until
+    then it stays open, for at most UNREAD_HOURS."""
+    from .features.discovery.feeds import SWEEP_KEY
+
+    seen = JobListing.last_seen
+    sweep = (
+        select(Setting.value["finished_at"].as_string())
+        .where(Setting.key == SWEEP_KEY, Setting.value["state"].as_string() != "error")
+        .scalar_subquery()
+    )
+    scan = (
+        select(Setting.value["finished_at"].as_string())
+        .where(Setting.key == "job_board_scan:" + JobListing.source_id, Setting.value["state"].as_string() == "complete")
+        .correlate(JobListing)
+        .scalar_subquery()
+    )
+    read_since = func.coalesce(case((JobListing.source_id.startswith("feed:", autoescape=True), sweep), else_=scan), "") > seen
+    cutoff = (at - timedelta(hours=seen_window_hours(interval_hours))).isoformat()
+    unread = (at - timedelta(hours=UNREAD_HOURS)).isoformat()
+    return and_(seen < cutoff, or_(seen < unread, read_since))
+
+
 LISTED = "listing__"
 # A listing in one of these states is already owned or protected (frontend/src/jobboard.tsx LOCKED). "closed" is a posting
 # that is gone or whose employer restriction rules the applicant out: not something found and waiting to be applied to
@@ -1089,7 +1124,6 @@ def board_snapshot(db, limit=500, *, jobs_only=False):
     dropped were 22% of the executor threads' interpreter time and most of this function's garbage (py-spy 2026-10-30)."""
     cfg = settings(db)
     at = datetime.now(UTC)
-    seen_cutoff = (at - timedelta(hours=max(6, cfg.interval_hours * 2 + 1))).isoformat()
     ids = set() if jobs_only else managed_ids(db)
     with db.session() as s:
         # Columns, not whole rows: every fresh posting's description was read (and dropped) on each board poll and
@@ -1111,7 +1145,7 @@ def board_snapshot(db, limit=500, *, jobs_only=False):
                 JobListing.country == "US",
                 within_window(cfg, at),
                 JobListing.posted_at <= at.isoformat(),
-                JobListing.last_seen >= seen_cutoff,
+                ~unconfirmed(at, cfg.interval_hours),
                 Job.demo.is_(False),
                 Job.status != "archived",
             )

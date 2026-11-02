@@ -82,9 +82,26 @@ def dated(job):
     return bool(basis) and "inferred" not in basis and basis != "added"
 
 
+# What one source adds to a title that another leaves out: "New Grad 2027:", "(Early Career)", a dash spelt two ways. A year stays unless it
+# belongs to the new-grad label, since "Summer 2026" and "Summer 2027" are different postings.
+_LABELS = re.compile(
+    r"\b20\d\d\s+(?:new\s+)?(?:(?:college|university)\s+)?grad\w*|"
+    r"\b(?:(?:new|recent)\s+)?(?:(?:college|university)\s+)?grad(?:uate)?s?\b(?:\s*,?\s*(?:class of\s*)?20\d\d)?|"
+    r"\bearly[- ]career\b|\bentry[- ]level\b",
+    re.I,
+)
+
+
+def title_key(title):
+    """A title as every source spells it the same: without the new-grad label, case, punctuation and word breaks."""
+    text = _LABELS.sub(" ", str(title or "").casefold())
+    return " ".join(re.findall(r"[a-z0-9+#]+", text))
+
+
 def key_of(job):
-    """One posting whatever link it came under: the employer, the title and the place."""
-    return tuple(" ".join((job.get(k) or "").casefold().split()) for k in ("company", "title", "location"))
+    """One posting whatever link or list it came under: the employer, the title without its labels, and the place."""
+    company, location = (" ".join((job.get(k) or "").casefold().split()) for k in ("company", "location"))
+    return company, title_key(job.get("title")) or " ".join((job.get("title") or "").casefold().split()), location
 
 
 def _restricted(reason):
@@ -127,7 +144,7 @@ def collect(service):
     from .service.queueing import fit_blocker
     from .shortlinks import is_shortlink
     from .startable import reading
-    from .features.discovery.roles import role_fits
+    from .features.discovery.roles import fitting_roles
 
     db = service.db
     value = reading(service).get(service)
@@ -207,7 +224,7 @@ def collect(service):
             state, fit, sentence = "ready", "match", _line(reason, source)
         roles = roles_memo.get(title)
         if roles is None:
-            roles = roles_memo[title] = [role for role in profile.target_roles if role_fits(title, [role])]
+            roles = roles_memo[title] = fitting_roles(title, profile.target_roles)
         row = {
             "id": jid, "title": title, "company": company, "location": " ".join((job.get("location") or "").split()), "url": job["url"], "ats": job.get("ats") or "",
             "posted_at": job.get("posted_at") or job.get("created_at") or "", "dated": dated(job), "source": source,

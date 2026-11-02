@@ -60,7 +60,9 @@ def _candidates(db, policy: DiscoveryPolicy, at, manual_only=False) -> tuple[lis
     # 1000 unclassified postings were mostly sites the autopilot will never apply to.
     excluded_ats = set((db.get_setting("ats_focus", {}) or {}).get("exclude", []))
     board = db.get_setting("job_board_settings", {}) or {}
-    seen_cutoff = at - timedelta(hours=max(6, board.get("interval_hours", 2) * 2 + 1))
+    from ...jobboard import unconfirmed
+
+    gone = unconfirmed(at, board.get("interval_hours", 2))  # the board's own reading of "no longer seen" (jobboard.unconfirmed)
     with db.session() as s:
         excluded_ats.update(
             row.key.removeprefix("ats_outage:")
@@ -98,7 +100,7 @@ def _candidates(db, policy: DiscoveryPolicy, at, manual_only=False) -> tuple[lis
                 Job.id, Job.url, Job.identity, Job.title, Job.company, Job.location, Job.ats, Job.status, Job.score,
                 Job.resume_id, JobListing.job_id.label("listed"), JobListing.posted_at, JobListing.date_basis,
                 JobListing.first_seen, JobListing.last_seen, JobListing.active, JobListing.country,
-                Source.kind.label("source_kind"),
+                Source.kind.label("source_kind"), gone.label("unconfirmed"),
             )
             .outerjoin(JobListing, JobListing.job_id == Job.id)
             .outerjoin(Source, Source.id == JobListing.source_id)
@@ -131,12 +133,7 @@ def _candidates(db, policy: DiscoveryPolicy, at, manual_only=False) -> tuple[lis
                 continue
             if listing is not None:
                 ok, basis = fresh(listing.posted_at, listing.date_basis, listing.first_seen, policy, at, listing.source_kind)
-                try:
-                    seen = datetime.fromisoformat(listing.last_seen.replace("Z", "+00:00"))
-                    seen = seen if seen.tzinfo else seen.replace(tzinfo=UTC)
-                except (ValueError, TypeError, AttributeError):
-                    seen = None
-                if not ok or not listing.active or seen is None or seen < seen_cutoff:
+                if not ok or not listing.active or not listing.last_seen or listing.unconfirmed:
                     stats["stale_or_undated"] += 1
                     continue
                 posted, country = listing.posted_at, listing.country
