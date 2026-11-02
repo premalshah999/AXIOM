@@ -3,13 +3,16 @@
 Every attempted job lands in exactly one bucket, named by a code from the run's own fields (its state, its blocker type, the
 owner's deleted-job setting, the receipt), never by reading a failure sentence:
 
-- confirmed: some run of the window ended confirmed (an employer's "already applied" page that AXIOM never committed to is not);
+- confirmed: some settled run of the window ended confirmed (an application AXIOM cannot claim, `ours`, is not);
 - excluded, with the reason: `EXCLUDED` below, one code per job, tested in that order. Only these leave the eligible count;
 - failed: everything else, split by "state:blocker" so nothing hides in a total.
 
 eligible = confirmed + failed. Reported side by side (success.py): attempted, raw (confirmed / attempted), filtered (confirmed /
 eligible), first try, strict (waiting-on-owner and in-progress jobs counted as misses) and the share of eligible jobs confirmed
 on strong evidence. A confirmation is only as good as its receipt: `evidence` ranks it.
+
+`ours` is also what the Applications list's "sent" filters and Overview's "Confirmed today" read (routes/state.py): there is one
+definition of an application AXIOM cannot claim.
 """
 
 from collections import Counter
@@ -30,6 +33,10 @@ EXCLUDED = {
 # What the first success.py report called "closed": jobs that ended by a rule, the employer or the owner's decision.
 ENDED = ("employer_limit", "sensitive_id_required", "closed", "cancelled", "paused_by_owner")
 IN_FLIGHT = {"queued", "running", "submitting", "waiting_email"}
+# What shows AXIOM itself began a commit: the event the engine writes before its submit click, the one receipts, recovery and
+# housekeeping read, and the one housekeeping keeps. Detail events (submission_requests, step_submit, submission) are trimmed with
+# a run's logs after a week, so a count that read them would change as logs aged, and step_submit is an iCIMS step before the last.
+COMMIT_EVENT = "submitting"
 # Weak receipts that speak of an application without proving AXIOM made it. With no commit of AXIOM's on the job they leave it
 # "already on file". A bare confirmed run with no receipt at all (never stored today) is only graded weak: it stays counted.
 NEEDS_OWN_COMMIT = {"existing_application_view", "final_page_quote", "dashboard_status", "applicant_recorded", "page_text_rejected"}
@@ -44,6 +51,26 @@ def pct(part, whole):
 
 def yes(value):
     return value not in FALSE
+
+
+def fields(receipt):
+    """What these rules read from a stored receipt, under the names `evidence` uses. `pending`: its evidence is still being
+    reconciled (pipeline.settled_confirmation), so it is no confirmation yet."""
+    receipt = receipt if isinstance(receipt, dict) else {}
+    email = receipt.get("email")
+    email = email if isinstance(email, dict) else {}
+    return {
+        "type": receipt.get("type"),
+        "web": receipt.get("website_confirmed"),
+        "ean": receipt.get("existing_application_notice"),
+        "res": receipt.get("reconciled_existing_submission"),
+        "mea": receipt.get("matched_existing_application"),
+        "sel": receipt.get("evidence_selector"),
+        "mail": email.get("message_id"),
+        "trusted": email.get("sender_trusted"),
+        "auth": email.get("authenticated"),
+        "pending": receipt.get("evidence_reconciliation") == "pending",
+    }
 
 
 def evidence(r):
@@ -77,26 +104,46 @@ def evidence(r):
     return "weak", "unrecognised"
 
 
-def classify_jobs(rows, committed=None, since=""):
+def needs_own_commit(r):
+    """Whether a confirmation's receipt only speaks of an application, so `ours` must look for AXIOM's commit."""
+    return evidence(r)[1] in NEEDS_OWN_COMMIT
+
+
+def ours(r, commit_at, created):
+    """The one test of whether AXIOM can claim a confirmed run created at `created`: its receipt proves the send by itself, or
+    AXIOM's own commit on the job came first (`commit_at`: the created_at of the job's earliest run with a `COMMIT_EVENT`). Without
+    that, an employer's already-applied page, a quoted final page or a note is someone else's application (2026-11-01: 64 of 74
+    existing-application pages, 33 of 74 mails matched to one, had no commit of AXIOM's behind them). Stored results are not
+    rewritten; readers of a stored confirmation ask this."""
+    return not needs_own_commit(r) or (commit_at is not None and commit_at <= created)
+
+
+def classify_jobs(rows, committed=None, since="", blockers=None):
     """Jobs (one dict each, with `outcome`) from run rows ordered by job, created_at, id, for the jobs first tried since `since`.
 
     The cohort is the jobs first attempted in the window, with every run they have had since. A job first tried a week ago and
     confirmed on a retry today belongs to last week's cohort: counted by its last-seven-days runs alone, its retry reads as a
     first try (205 of the week's 1,822 jobs, 136 of them confirmed).
 
-    A row: job, ats, state, created, interrupted (a stop of the app, which sent nothing), blocker (the run's blocker type),
-    receipt (the fields `evidence` reads). `committed`: {job: created_at of its earliest run that began a commit}. An
-    weak receipt that only speaks of an application (an employer's already-applied page, a quoted final page, the applicant's own note) confirms a job only when
-    AXIOM's own commit came first; otherwise someone else's application stands and the job is "already on file". A job the owner deleted after a failed
-    run stays a failure: deleting a stuck job (94 of the week's 1,822) does not make the engine's miss the owner's."""
+    A row: run, job, ats, state, created, interrupted (a stop of the app, which sent nothing), receipt (`fields`), and blocker
+    (the run's blocker type; or pass `blockers`). `committed`: {job: created_at of its earliest run that began a commit}. A job
+    the owner deleted after a failed run stays a failure: deleting a stuck job (94 of the week's 1,822) does not make the engine's
+    miss the owner's.
+
+    `blockers`: reads {run id: blocker type} for a list of run ids, instead of a `blocker` on every row. A blocker decides only a
+    job still unconfirmed, by its last run, and it lives in the run's packet, so only those packets are ever read: every run's,
+    once a minute, is what starved the database on 2026-10-29."""
     committed = committed or {}
     jobs = {}
     for r in rows:
         j = jobs.setdefault(r["job"], {"id": r["job"], "ats": r["ats"], "ok": False, "dup": False, "first": None, "ev": None, "started": None})
         state = r["state"]
         if state == "confirmed":
-            tier, kind = evidence(r.get("receipt") or {})
-            if kind in NEEDS_OWN_COMMIT and not (r["job"] in committed and committed[r["job"]] <= r["created"]):
+            receipt = r.get("receipt") or {}
+            tier, kind = evidence(receipt)
+            if receipt.get("pending"):
+                state = "submission_unknown"  # what the Jobs page reads it as: not in the ledger, not yet confirmed
+            elif not ours(receipt, committed.get(r["job"]), r["created"]):
                 state = "already_applied"
             elif j["ev"] is None or RANK[tier] < RANK[j["ev"][0]]:
                 j["ev"] = (tier, kind)
@@ -105,15 +152,21 @@ def classify_jobs(rows, committed=None, since=""):
         if j["first"] is None and state != "dry_run_passed" and not r["interrupted"]:
             j["first"], j["started"] = state, r["created"]
         j["last"], j["interrupted"], j["blocker"] = state, bool(r["interrupted"]), r.get("blocker") or ""
-        j["last_at"] = r["created"]
+        j["last_run"], j["last_at"] = r.get("run"), r["created"]
     out = []
     for j in jobs.values():
         # A job whose only runs were dry runs was never tried; one only interrupted has its retry coming, and counts as tried.
         if j["first"] is None and j["last"] != "dry_run_passed":
             j["first"], j["started"] = j["last"], j["last_at"]
         if j["first"] is not None and j["started"] >= since:
-            j["outcome"], j["failure"] = outcome(j)
             out.append(j)
+    if blockers:
+        open_jobs = [j for j in out if not (j["ok"] or j["dup"] or j["interrupted"] or j["last"] in IN_FLIGHT)]
+        found = blockers([j["last_run"] for j in open_jobs])
+        for j in open_jobs:
+            j["blocker"] = found.get(j["last_run"]) or ""
+    for j in out:
+        j["outcome"], j["failure"] = outcome(j)
     return out
 
 

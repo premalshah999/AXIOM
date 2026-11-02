@@ -145,7 +145,7 @@ def test_an_empty_window_is_all_zeros_and_no_percentage(service):
 
 def test_the_route_is_read_only_and_bounds_the_window(client):
     ok = client.get("/api/success")
-    assert ok.status_code == 200 and ok.json()["days"] == 7 and set(ok.json()) == {"days", "target", "overall", "platforms"}
+    assert ok.status_code == 200 and ok.json()["days"] == 7 and set(ok.json()) == {"days", "since", "target", "overall", "platforms"}
     assert client.get("/api/success", params={"days": 0}).status_code == 422
     assert client.get("/api/success", params={"days": 91}).status_code == 422
     assert client.post("/api/success", json={}).status_code == 405
