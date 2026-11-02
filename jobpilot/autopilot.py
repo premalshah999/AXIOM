@@ -462,15 +462,27 @@ def start_batch(db, target=100):
     return batch
 
 
+def apply_daily_limit(db, limit):
+    """The daily limit is the only goal: Settings › Limits › Applications per day (config.daily_application_limit), also the
+    number on the Overview. A change there reaches the running batch's target and the saved batch default at once, instead of the
+    batch keeping the number it started with."""
+    board = db.get_setting("job_board_settings", {}) or {}
+    if board.get("batch_target") != limit:
+        db.set_setting("job_board_settings", {**board, "batch_target": limit})
+    batch = db.get_setting("job_board_autopilot", {}) or {}
+    if batch.get("state") == "active" and batch.get("target") != limit:
+        db.set_setting("job_board_autopilot", {**batch, "target": limit})
+
+
 def persist_batch(db, batch):
     current = db.get_setting("job_board_autopilot", {})
     if current.get("started_at") == batch["started_at"]:
         # queue() committed these IDs before dispatch; never overwrite its durable outbox on an error.
         batch["run_ids"] = list(dict.fromkeys([*current.get("run_ids", []), *batch["run_ids"]]))
         batch["queued"] = len(batch["run_ids"])
-        # A goal the owner raised while this tick ran is kept: the tick wrote back its stale copy and the raise to 477
-        # was lost (2026-10-29).
-        batch["target"] = max(batch.get("target", 0), current.get("target", 0))
+        # A goal changed while this tick ran is kept (the newest writer wins, up or down): the tick wrote back its stale copy and
+        # a raise to 477 was lost (2026-10-29). The goal is the daily limit (apply_daily_limit).
+        batch["target"] = current.get("target", batch.get("target", 0))
     db.set_setting("job_board_autopilot", batch)
 
 
@@ -1008,10 +1020,12 @@ async def tick(service):
         await rank_for_review(service, cfg)
         return
     async with service.autopilot_lock:
-        batch = db.get_setting("job_board_autopilot") or start_batch(db, cfg.batch_target)
+        batch = db.get_setting("job_board_autopilot") or start_batch(db, service.config.daily_application_limit)
         if batch.get("state") != "active":
             await owner_requests_only(service)
             return
+        # The goal is the daily limit, whichever screen or file set it last.
+        batch["target"] = service.config.daily_application_limit
         with db.session() as s:
             owned_jobs = select(Run.job_id).where(Run.id.in_(batch["run_ids"]))
             # Every confirmation since the batch started counts toward its goal, whoever started it (Apply, bulk

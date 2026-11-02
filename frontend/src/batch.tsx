@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { api } from "./api";
 import { useWorkspace } from "./context";
-import { useAction, useDraft, useNow, usePoll } from "./hooks";
+import { useAction, useNow, usePoll } from "./hooks";
 import { DayChart, DotPatterns } from "./identity/DayChart";
 import { LiveWork, type LiveRow } from "./identity/LiveWork";
 import { MasterKey } from "./identity/MasterKey";
@@ -158,7 +158,27 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
   const active = state === "active";
   const target = rt.target || batch.target || 100;
   const confirmed = rt.confirmed ?? 0;
-  const [goal, setGoal] = useDraft("batch-target", counts.jobs || snapshot.jobs.length ? 100 : 25);
+  // One value: Settings › Limits › Applications per day. This field reads and writes the same setting, so the two always agree.
+  const limit = snapshot.config.daily_limit;
+  const [typed, setTyped] = useState<number | null>(null);
+  const goal = typed ?? limit;
+  const setGoal = (value: number) => setTyped(value);
+  const saveLimit = (raw: number) => {
+    const value = Math.max(1, Math.min(500, Math.round(raw || limit)));
+    if (value === limit) {
+      setTyped(null);
+      return Promise.resolve();
+    }
+    return run(
+      "limit",
+      async () => {
+        await api("/connections", "PUT", { values: { daily_application_limit: String(value) } });
+        await refresh();
+        setTyped(null);
+      },
+      `Applications per day: ${value}. Settings shows the same number.`,
+    );
+  };
   const workers = snapshot.config.workers_enabled;
   const noResume = snapshot.resumes.length === 0;
   const noKey = !snapshot.config.mimo;
@@ -213,26 +233,40 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
       "Resumed. Existing progress is kept.",
     );
 
+  const dailyLimit = (
+    <label className="ov-target">
+      <span>Up to</span>
+      <input
+        type="number"
+        min={1}
+        max={500}
+        step={1}
+        required
+        value={goal}
+        disabled={pending !== null}
+        onChange={(e) => setGoal(Number(e.target.value))}
+        onBlur={() => void saveLimit(goal)}
+        aria-describedby="target-hint"
+      />
+      <span>a day</span>
+      <span id="target-hint" className="sr-only">
+        The most applications AXIOM sends in a day, 1 to 500. The same number as Applications per day in Settings.
+      </span>
+    </label>
+  );
   const key = !workers ? null : !active ? (
     <form
       className="ov-key"
       onSubmit={(e) => {
         e.preventDefault();
-        const value = Math.max(1, Math.min(500, Math.round(goal || 25)));
+        const value = Math.max(1, Math.min(500, Math.round(goal || limit)));
         // A batch sends on its own, which turns "Let me review first" off. Said before it happens, not found out afterwards.
         if (!snapshot.control.auto_submit || reviewing) setConfirmStart(value);
         else begin(value);
       }}
     >
       <MasterKey type="submit" word="Start" icon="start" aria-label="Start applying" busy={pending === "start"} disabled={pending !== null || noResume || noKey} />
-      <label className="ov-target">
-        <span>Apply until</span>
-        <input type="number" min={1} max={500} step={1} required value={goal} onChange={(e) => setGoal(Number(e.target.value))} aria-describedby="target-hint" />
-        <span>confirmed</span>
-      </label>
-      <span id="target-hint" className="sr-only">
-        Up to 500 confirmed applications.
-      </span>
+      {dailyLimit}
     </form>
   ) : stopped ? (
     <div className="ov-key">
@@ -249,6 +283,7 @@ function Hero({ work, applications, models }: { work: WorkingState; applications
   ) : (
     <div className="ov-key">
       <MasterKey word="Stop" icon="pause" aria-label="Stop applying" busy={pending === "pause"} disabled={pending !== null} onClick={pause} />
+      {dailyLimit}
       <p className="ov-key-note">Stops now. One already sending finishes.</p>
     </div>
   );

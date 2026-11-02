@@ -209,10 +209,6 @@ export function AutoApplySettings() {
             !Number.isFinite(form!.minimum_auto_fit) || form!.minimum_auto_fit < 0 || form!.minimum_auto_fit > 100
               ? "A number from 0 to 100."
               : undefined;
-          const targetError =
-            !Number.isInteger(form!.batch_target) || form!.batch_target < 1 || form!.batch_target > 500
-              ? "A whole number from 1 to 500."
-              : undefined;
           const sizeError =
             !Number.isInteger(form!.review_size) || form!.review_size < 5 || form!.review_size > 100 ? "A whole number from 5 to 100." : undefined;
           return (
@@ -270,24 +266,12 @@ export function AutoApplySettings() {
                     value={Number.isFinite(form!.minimum_auto_fit) ? form!.minimum_auto_fit : ""}
                     onChange={(e) => f.set("minimum_auto_fit", Number(e.target.value))}
                   />
-                  {!!form!.auto_apply && (
-                    <Input
-                      label="Applications to aim for"
-                      hint="AXIOM stops once this many have gone through, 1 to 500."
-                      error={targetError}
-                      type="number"
-                      min={1}
-                      max={500}
-                      value={Number.isFinite(form!.batch_target) ? form!.batch_target : ""}
-                      onChange={(e) => f.set("batch_target", Number(e.target.value))}
-                    />
-                  )}
                 </div>
               </Panel>
               <SaveBar
                 dirty={f.dirty}
                 saving={f.saving}
-                disabled={!!fitError || !!targetError || !!sizeError}
+                disabled={!!fitError || !!sizeError}
                 onSave={f.save}
                 onDiscard={f.discard}
                 label="Save"

@@ -61,6 +61,56 @@ def limit_sentence(company, count, limit):
     return f"{name} already has {count:,} application{'' if count == 1 else 's'}; your limit is {limit:,}."
 
 
+def span_words(seconds):
+    """A wait in plain words: 'about a minute', 'about 8 minutes', 'about 3 hours'."""
+    seconds = max(0, int(seconds))
+    if seconds < 90:
+        return "about a minute"
+    if seconds < 90 * 60:
+        return f"about {round(seconds / 60)} minutes"
+    hours = round(seconds / 3600)
+    return f"about {hours} hour{'' if hours == 1 else 's'}"
+
+
+def pace_sentence(ats, exc, now_ts=None):
+    """Why a job the dispatcher would otherwise start waits on its platform's pace, and when it is due, in plain words."""
+    name = {"smartrecruiters": "SmartRecruiters", "icims": "iCIMS", "adp": "ADP", "successfactors": "SuccessFactors"}.get(ats, (ats or "This platform").title())
+    detail = exc.detail or {}
+    try:
+        due = datetime.fromisoformat(exc.not_before).timestamp() - (now_ts or time.time()) if exc.not_before else 60
+    except ValueError:
+        due = 60
+    when = f"It is due in {span_words(due)}."
+    kind = detail.get("pace")
+    if kind == "gap":
+        gap = detail.get("seconds", 0)
+        return f"{name} takes one application at a time, {span_words(gap).removeprefix('about ')} apart, so employers there are not flooded. {when}"
+    if kind == "throttle":
+        return f"{name} refused the last application as too many, so new ones wait until it accepts again. {when}"
+    if kind == "limit":
+        n = detail.get("limit", 1)
+        return f"{name} takes only {n} application{'' if n == 1 else 's'} at a time, and {'it is' if n == 1 else 'they are'} busy. {when}"
+    if kind == "site":
+        return f"Another application on this employer's site is verifying its email first. {when}"
+    return f"Another {name} application is under way, and {name} takes them one at a time. {when}"
+
+
+def pacing_wait(db, job_id, ats):
+    """{"until", "reason"} when the platform's own pace (application_pacing.require_ats_admission, the one the dispatcher
+    applies) holds this job for now, else None. Workers sit idle for these: the Queue says so instead of promising a start."""
+    from .application_pacing import SITE_LIMITS, START_GAPS, ats_limit, require_ats_admission
+
+    with db.session() as s:
+        if ats not in START_GAPS and ats not in SITE_LIMITS and ats_limit(s, ats) is None:
+            return None
+        try:
+            require_ats_admission(s, s.get(Job, job_id), owner_pick=True)
+        except QueueBlocked as exc:
+            if exc.code == "ats_pacing":
+                return {"until": exc.not_before or "", "reason": pace_sentence(ats, exc)}
+    return None
+
+
 def classify(message):
     """(code, plain sentence) for a refusal the dispatcher's screen raised."""
     text = str(message)
@@ -185,8 +235,10 @@ def read(service):
             verdict = ("protected" if why["outcome"] == "protected" else "excluded", str(why.get("reason", ""))[:240])
         if verdict is None:
             can.append(r.id)
+            pace = pacing_wait(db, r.id, r.ats)
             # What Queue needs: the fields the dispatcher sorts on, and the job's employer and lane.
             details[r.id] = {
+                **({"paced": pace} if pace else {}),
                 "id": r.id, "title": r.title, "company": r.company, "location": job.get("location") or r.location, "url": r.url, "ats": r.ats,
                 "score": r.score, "status": r.status, "posted_at": job.get("posted_at") or "", "career_level": job.get("career_level") or "",
                 "tailoring": state == "tailoring",

@@ -9,6 +9,7 @@ exact while nothing changes; past them the replay assumes applications end in th
 cannot be known. The page says so in those words.
 """
 
+import logging
 import threading
 import time
 from collections import deque
@@ -149,7 +150,11 @@ def plan(service, value=None):
     retries = [request_item(j, v) for j, v in ordered if retry(j, v) and (v.get("not_before") or "") <= moment]
     later = [request_item(j, v) for j, v in ordered if (v.get("not_before") or "") > moment]
     preparing = [item for item in fresh if item.get("tailoring")]
-    fresh = [item for item in fresh if not item.get("tailoring")]
+    # Held by the platform's own pace (one at a time, a pause between starts): a free worker does not take these now, so they are
+    # neither "the next free worker" nor counted in the exact picks. They say why and when instead (2026-11-02: workers sat idle
+    # behind a line of Ashby jobs and the page promised each one the next free worker).
+    paced = [item for item in fresh if item.get("paced") and not item.get("tailoring")]
+    fresh = [item for item in fresh if not item.get("tailoring") and not item.get("paced")]
     picks, stuck = replay([*now_asked, *fresh, *retries], rooms, occupied, [(employer, "normal") for employer in sorted(occupied)])
     free = sum(max(0, n) for n in rooms.values())
     custom_off = not topology.custom
@@ -158,6 +163,8 @@ def plan(service, value=None):
         out.append({**item, "wait": _wait(item, delayed)})
     for item in stuck:
         out.append({**item, "wait": "Company-site applications are off in Settings, so this one waits." if custom_off and item["lane"] == "custom" else "Waiting for a worker."})
+    for item in sorted(paced, key=lambda i: i["paced"].get("until") or ""):
+        out.append({**item, "wait": item["paced"]["reason"]})
     for item in preparing:
         out.append({**item, "wait": "Preparing a tailored resume first. It joins the line when that is ready."})
     for item in later:
@@ -202,6 +209,7 @@ class Plans:
         try:
             self.value, self.at = plan(service), time.monotonic()
         except Exception:
+            logging.getLogger(__name__).exception("The Queue could not be planned")
             self.at = time.monotonic() - TTL / 2  # try again shortly; keep serving the last plan
         finally:
             self.busy.release()
