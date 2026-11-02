@@ -36,7 +36,7 @@ from mail_formats import KINDS, ME, PLATFORMS, deliver, fresh_code
 from test_mail_fresh_install import link_for, onboard
 
 pytestmark = [pytest.mark.browser, pytest.mark.integration]
-RUN_SECONDS = float(os.environ.get("MAILFRESH_RUN_SECONDS", "120"))
+RUN_SECONDS = float(os.environ.get("MAILFRESH_RUN_SECONDS", "300"))  # a ceiling on a wait for the outcome, paid only by a run that fails (120 s ended two runs "running" beside nine workers, 2026-11-01)
 # A real employer's mail takes seconds: longer than the three seconds a run waits in the browser for a link, so the run parks,
 # the mail matches, and the run comes back. That is the path real link and reset mail takes.
 DELAY = float(os.environ.get("MAILFRESH_DELAY", "8"))
@@ -273,7 +273,7 @@ async def start_chrome(temp, port):
         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
     )
     portfile = os.path.join(temp, "DevToolsActivePort")
-    for _ in range(100):
+    for _ in range(600):  # until Chrome has written its port: ten seconds failed on a loaded Mac
         if os.path.exists(portfile) and os.path.getsize(portfile):
             break
         await asyncio.sleep(0.1)

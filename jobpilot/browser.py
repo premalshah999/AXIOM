@@ -581,6 +581,8 @@ NOTHING_SENT_SECONDS = 60
 COMMIT_INPUT_GRACE_SECONDS = 1.5
 # Each read of the page for the witness. A page too busy to answer is doubt: the click stays uncertain.
 COMMIT_WATCH_SECONDS = 3
+# The one look at the page for an acknowledgement after a commit that ended in a mail wait, a deadline or a control failure.
+POST_COMMIT_LOOK_SECONDS = 3
 # Controls whose disabled state means the page has an unfinished requirement.
 STEP_ACTION = re.compile(
     r"^\s*(?:next|continue|save (?:and|&) continue|submit(?: application)?|apply|sign ?in|log ?in|create account|register)\s*$",
@@ -4102,7 +4104,7 @@ class BrowserEngine:
         if not self.armed or getattr(self, "form", None) is None:
             return None
         try:
-            receipt = await asyncio.wait_for(self.form.proof(), timeout=3)
+            receipt = await asyncio.wait_for(self.form.proof(), timeout=POST_COMMIT_LOOK_SECONDS)
         except Exception:
             return None
         if not receipt or receipt == getattr(self, "pre_commit_proof", None):

@@ -211,7 +211,9 @@ async def test_rejection_gains_inline_errors_beside_a_banner_that_names_other_fi
         "<input type=email></label><label>Password<input type=password></label></div>",
     ],
 )
-async def test_workday_submitted_dialog_is_proof_after_a_commit_exit(page, service, tmp_path, body):
+async def test_workday_submitted_dialog_is_proof_after_a_commit_exit(page, service, tmp_path, body, monkeypatch):
+    # The look is bounded at 3 s in the app; a Mac running a release beside nine workers needed more (2026-11-01).
+    monkeypatch.setattr("jobpilot.browser.POST_COMMIT_LOOK_SECONDS", 30)
     resolver = Resolver(
         Profile(),
         service.db,
