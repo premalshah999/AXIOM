@@ -1,0 +1,55 @@
+# The browser tests the release gate runs every time (`scripts/dev/gate.sh smoke`); the full browser run (`gate.sh browser`)
+# is for changes to the engine and runs less often. One entry per line: `file.py` is the whole file, `file.py::text` the tests
+# whose name contains the text. Nothing here is removed from the full run, and a guard is never dropped to make this fast.
+#
+# What belongs here: every test that guards a duplicate or uncertain send, consent, mail or the truthfulness of an answer, and
+# one or two tests per platform family and per kind of widget, so that a change to the engine that breaks a whole family shows.
+# Keep it under about five minutes on an idle machine: `gate.sh smoke` prints its slowest tests; move a slow file out and name a
+# faster one for the same guard rather than letting the gate grow.
+
+# A commit that may have been sent is never sent again; a refused one is read as refused.
+test_commit_click_undelivered.py
+test_post_commit_rejection.py
+test_workday_submitted_state.py
+test_submission_control_mutation.py
+test_employer_application_cap.py
+
+# Consent and agreements are ticked only where the person allowed it.
+test_consent_dialog_submit.py
+test_orphan_agreement_checkbox.py
+test_microsoft_consent_modal.py
+test_dayforce_clickwrap.py
+test_icims_privacy_acknowledge.py
+test_sf_privacy_notice.py
+
+# Mail: a code, link or reset reaches only its own application.
+test_mail_browser.py
+test_mail_fake_imap_e2e.py
+test_embedded_greenhouse_code.py
+test_mail_fresh_run.py::test_a_new_install_receives_and_uses_the_mail[custom-code]
+test_mail_fresh_run.py::test_a_new_install_receives_and_uses_the_mail[custom-link]
+test_mail_fresh_run.py::test_a_new_install_receives_and_uses_the_mail[custom-reset]
+
+# Answers: policy-bound questions are answered from the person's facts or left to them.
+test_major_policy.py
+test_salary_midpoint.py
+test_stated_char_limit.py
+
+# The engine's readiness, click and confirmation paths, and one or two files per platform family.
+test_form_readiness.py
+test_settle_roundtrips.py
+test_locator_single_roundtrip.py
+test_submit_controls.py
+test_confirmation_pages.py
+test_tick_boxes.py
+test_prompt_catalog.py::test_the_catalog_decides
+test_oracle_commit.py
+test_dayforce_submit_step.py
+test_dayforce_confirmation_page.py
+test_eightfold_search_box.py
+test_smartrecruiters_refusals.py
+test_taleo_error_named_fields.py
+test_sf_ui5_date.py
+test_icims_protocol.py
+test_greenhouse_phone.py
+test_account_walkthrough.py
