@@ -14,6 +14,7 @@ export type View =
   | "profile"
   | "settings"
   | "editor"
+  | "tailor"
   | "soon-axe"
   | "soon-network"
   | "soon-emails";
@@ -24,6 +25,8 @@ export type Route = {
   job?: string;
   run?: string;
   artifact?: string;
+  /** The job whose tailored resume is open (not `job`, which opens the job's panel over the page). */
+  tailor?: string;
   /** A list's search, so a number elsewhere can open the list behind it ("Workday" on Overview opens Jobs searched for it). */
   q?: string;
 };
@@ -41,6 +44,7 @@ const VIEWS: View[] = [
   "profile",
   "settings",
   "editor",
+  "tailor",
   "soon-axe",
   "soon-network",
   "soon-emails",
@@ -162,6 +166,7 @@ export function parseRoute(href = location.href): Route {
     job: q.get("job") || undefined,
     run: q.get("run") || undefined,
     artifact: q.get("artifact") || undefined,
+    tailor: q.get("tailor") || undefined,
     q: q.get("q") || undefined,
   });
 }
@@ -171,10 +176,10 @@ export function routeUrl(raw: AnyRoute) {
   const url = new URL(location.href);
   // A path-style entry (/settings) would otherwise outrank the batch view, which has no ?view=.
   if (isPageName(pathName(url))) url.pathname = "/";
-  for (const key of ["view", "tab", "filter", "job", "run", "artifact", "q", "page"])
+  for (const key of ["view", "tab", "filter", "job", "run", "artifact", "tailor", "q", "page"])
     url.searchParams.delete(key);
   if (route.view !== "batch") url.searchParams.set("view", route.view);
-  for (const key of ["tab", "filter", "job", "run", "artifact", "q"] as const)
+  for (const key of ["tab", "filter", "job", "run", "artifact", "tailor", "q"] as const)
     if (route[key]) url.searchParams.set(key, route[key]!);
   return url.pathname + url.search + url.hash;
 }

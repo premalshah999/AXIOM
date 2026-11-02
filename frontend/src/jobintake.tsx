@@ -5,6 +5,7 @@ import { useNotify } from "./hooks";
 import { appliedState } from "./model";
 import type { Job } from "./types";
 import { linkHost, plural } from "./format";
+import { HowToApply } from "./tailoring";
 import { Button, Dialog } from "./ui/index";
 import { StatusPill } from "./worktools";
 
@@ -34,6 +35,7 @@ export function AddJobDialog() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [results, setResults] = useState<LinkResult[]>([]);
+  const [mode, setMode] = useState("off");
   const links = linksIn(text);
   const autoApply = snapshot.profile.autonomous && snapshot.control.auto_submit && !snapshot.control.paused;
 
@@ -49,7 +51,7 @@ export function AddJobDialog() {
 
   const add = async (urls: string[]): Promise<LinkResult[]> => {
     try {
-      const answer = await api<{ results: LinkResult[] }>("/queue/links", "POST", { urls });
+      const answer = await api<{ results: LinkResult[] }>("/queue/links", "POST", { urls, tailor_mode: mode === "off" ? null : mode });
       return answer.results;
     } catch (e) {
       // Without application workers (a demo installation) the links are saved instead.
@@ -170,6 +172,7 @@ export function AddJobDialog() {
                 : "One link, or several on separate lines."}
             </p>
           )}
+          <HowToApply value={mode} onChange={setMode} disabled={pending} />
         </div>
       )}
     </Dialog>

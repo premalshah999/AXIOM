@@ -1601,6 +1601,11 @@ class BrowserEngine:
             original = Path(run["packet"]["resume_path"])
             if hashlib.sha256(original.read_bytes()).hexdigest() != run["packet"]["resume_sha"]:
                 raise RuntimeError("Selected resume changed since this run was queued")
+            # Approved when queued isn't enough: an edit since then needs a new approval.
+            from .features.resumes.choice import run_problem
+
+            if not job["demo"] and (held := run_problem(self.db, run["packet"])):
+                raise RuntimeError(held)
             resume = self.nice_resume(run)
             from .knowledge import KnowledgeBase
 

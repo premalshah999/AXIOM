@@ -88,6 +88,9 @@ def documents():
                 for header, headings in (("center", "rule"), ("left", "plain")):
                     style = editor.Style(template=template, font=font, font_size=size, header=header, headings=headings)
                     yield f"{template}-{font}-{size}-{header}", _forced(editor, doc, style, font)
+    # The per-job tailored resume: fixed type sizes in bp, dates in italics, on any font its source chose.
+    for font in editor.FONTS:
+        yield f"tailored-fixed-{font}", _forced(editor, doc, editor.tailored_style(editor.Style(font=font)), font)
     # The tailored resume's own preamble (latex.py), which the editor's renderer does not share.
     yield "tailored", latex.PREAMBLE + "\\begin{document}{\\small\\itshape x}\\textbf{y} \\textbar\\end{document}\n"
     # What a person typing LaTeX by hand reaches for first.

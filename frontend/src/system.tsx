@@ -8,6 +8,7 @@ import { ConnectionFields, ConnectionsGate, FieldInput, useConnections } from ".
 import { AutoApplySettings } from "./discovery";
 import { ago, plural } from "./format";
 import { Facts, RestartNotice, SaveBar, SwitchRow } from "./setup-kit";
+import { TailorApprovalRow } from "./tailoring";
 import type {
   AgentModelProvider,
   AgentSettings,
@@ -55,6 +56,7 @@ export function ApplyingSettings() {
             disabled={pending !== null}
             onChange={() => toggle(control.auto_submit ? "AXIOM will stop before sending." : "AXIOM will send applications.")}
           />
+          <TailorApprovalRow />
         </Panel>
       </section>
       <section className="st-group" aria-labelledby="st-auto">
