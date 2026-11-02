@@ -276,21 +276,28 @@ def normalize_proposals(proposals, shapes=()):
 
 
 def shape_request(proposals, shapes, history, posting):
-    """The short request for one bounded fix: only the bullets that miss, each with its exact numbers. A draft that already
-    fails a truth check is going to be left out, so nothing is spent on it."""
+    """The short request for one bounded fix: only the bullets that miss, each with its exact numbers, and the bullets holding a
+    stray figure. A draft that fails any other truth check is going to be left out, so nothing is spent on it."""
     wanted = []
     for d, (p, shape) in enumerate(zip(proposals, shapes)):
-        if proposal_problems(p, history, posting):
+        if blocking(p, history, posting):
             continue
         for i, (low, high) in enumerate(shape):
             text = p.bullets[i].strip() if i < len(p.bullets) else ""
             n = len(text)
-            if low <= n <= high:
+            figure = stated_figure(text) if text else None
+            if low <= n <= high and not figure:
                 continue
-            change = f"cut {n - high} to {n - low} characters" if n > high else f"add {low - n} to {high - n} characters"
+            change = (
+                "keep the length" if low <= n <= high
+                else f"cut {n - high} to {n - low} characters" if n > high
+                else f"add {low - n} to {high - n} characters"
+            )
+            if figure:
+                change = f'say it without the number or figure "{figure}" (only a [target: ...] bracket holds one), and {change}'
             # Aimed past the middle, the way it has to move: a model asked for a change makes part of it (239 for 242 to 268 after
             # three rounds aimed at the middle, 2026-11-02).
-            aim = low + (high - low) // 3 if n > high else low + 2 * (high - low) // 3
+            aim = n if low <= n <= high else low + (high - low) // 3 if n > high else low + 2 * (high - low) // 3
             wanted.append(
                 {"draft": d, "title": p.title, "data_source": p.data_source, "tools": p.tools, "bullet": i, "text": text,
                  "chars": n, "min_chars": low, "max_chars": high, "aim_chars": aim, "change": change}
@@ -311,10 +318,19 @@ def miss(text, low, high):
     return n - high if n > high else low - n if n < low else 0
 
 
+STRAY_FIGURE = "with no other number or figure"
+
+
+def blocking(p, history, posting):
+    """A draft's problems the short fix can't reword away. A stray figure in a bullet it can: that bullet goes to the fix, which
+    says it without the number (2 of 10 drafts left out for one, 2026-11-02). One in the title can't."""
+    return [x for x in proposal_problems(p, history, posting) if STRAY_FIGURE not in x or stated_figure(p.title)]
+
+
 def apply_shape_fix(proposals, shapes, fix, history, posting):
-    """Each bullet takes the first wording that lands in its window and breaks no truth check. Otherwise it takes the one nearest its
-    window, when that is nearer than what it has: the next round's numbers start from there (models miscount; one round left
-    every draft out on 2026-11-02)."""
+    """Each bullet takes the first wording that lands in its window, holds no stray figure and breaks no other truth check.
+    Otherwise it takes the nearest such wording, when that is nearer than what it has: the next round's numbers start from there
+    (models miscount; one round left every draft out on 2026-11-02). A figure counts as further off than any length."""
     for item in sorted(fix.bullets, key=lambda x: (x.draft, x.bullet)):
         if item.draft >= min(len(proposals), len(shapes)):
             continue
@@ -323,21 +339,23 @@ def apply_shape_fix(proposals, shapes, fix, history, posting):
             continue
         low, high = shape[item.bullet]
         current = p.bullets[item.bullet] if item.bullet < len(p.bullets) else ""
-        nearest = None
+
+        def off(text):
+            return (bool(stated_figure(text)), miss(text, low, high))
+
+        best, best_off = None, off(current) if current else (True, 10**6)
         for wording in item.wordings:
             text = tighten(describe(gates.sanitize(wording)), low, high)
             trial = p.model_copy(update={"bullets": [*p.bullets[: item.bullet], text, *p.bullets[item.bullet + 1 :]]})
-            if proposal_problems(trial, history, posting):
+            if stated_figure(text) or blocking(trial, history, posting):
                 continue
-            if low <= len(text) <= high:
-                nearest = trial
+            if off(text) == (False, 0):
+                best = trial
                 break
-            if (current and miss(text, low, high) < miss(current, low, high)) and (
-                nearest is None or miss(text, low, high) < miss(nearest.bullets[item.bullet], low, high)
-            ):
-                nearest = trial
-        if nearest is not None:
-            p.bullets = nearest.bullets
+            if off(text) < best_off:
+                best, best_off = trial, off(text)
+        if best is not None:
+            p.bullets = best.bullets
 
 
 def proposal_problems(p, history, posting):
