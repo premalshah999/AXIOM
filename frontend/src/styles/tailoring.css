@@ -1,12 +1,12 @@
 /* The tailoring screen and its small control (src/tailoring.tsx). The marks read in both themes because each is a tint of the text's own background. */
 .tl-page {
-  --tl-hit-bg: color-mix(in srgb, #2f9e62 26%, transparent);
-  --tl-have-bg: color-mix(in srgb, #c7931a 30%, transparent);
+  --tl-hit-bg: color-mix(in srgb, var(--mark-hit) 26%, transparent);
+  --tl-have-bg: color-mix(in srgb, var(--mark-have) 30%, transparent);
   --tl-need-bg: color-mix(in srgb, var(--signal) 20%, transparent);
   gap: var(--space-4);
 }
 .tl-choice {
-  --tl-hit-bg: color-mix(in srgb, #2f9e62 26%, transparent);
+  --tl-hit-bg: color-mix(in srgb, var(--mark-hit) 26%, transparent);
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
