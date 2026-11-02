@@ -1116,7 +1116,8 @@
           const area = p.getBoundingClientRect();
           if (area.width >= 80 && area.height >= 16 && /(?:date|period|month|calendar)/i.test(typeof p.className === 'string' ? p.className : '')) {
             widget = 'period-picker';
-            value = clean(p.innerText || '');
+            // "Start date - End date" is its placeholder, not a value.
+            value = /\d/.test(p.innerText || '') ? clean(p.innerText) : '';
             break;
           }
         }

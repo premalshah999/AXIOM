@@ -121,7 +121,7 @@ tracking_bar = Scenario(
         "/apply/1": page(
             "Apply",
             '<div role="dialog" aria-modal="true" style="position:fixed;left:10%;right:10%;bottom:0;top:5%;background:#fff;overflow:auto;padding:16px"><h1>Apply</h1>'
-            + form(NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD, '<p style="position:absolute;bottom:0">' + SUBMIT_BUTTON + "</p>").replace(
+            + form(NAME_FIELDS, EMAIL_FIELD, RESUME_FIELD, '<div style="position:absolute;bottom:0">' + SUBMIT_BUTTON + "</div>").replace(
                 '<form ', '<form style="min-height:88%;position:relative" '
             )
             + """</div><div id="bar" style="position:fixed;left:0;right:0;bottom:0;height:80px;background:#222;color:#fff;z-index:50;padding:8px">
