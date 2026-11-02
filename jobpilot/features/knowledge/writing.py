@@ -190,11 +190,18 @@ class Written(BaseModel):
 Model = Callable[[type, str, str], Awaitable[BaseModel]]
 
 
+# Replies that hold a whole resume. A resume's transcription ran past 2000 tokens, was cut off and failed validation, and every
+# tailoring then fell back to a resume rebuilt from the profile: one bullet per job and no projects (2026-11-01). Once per resume or
+# per tailoring, never per application step.
+LONG_REPLIES = {"Imported": (9000, 170), "Plan": (6000, 120), "Revision": (6000, 120)}
+
+
 def configured_model(db, config, run_id=None) -> Model:
     from ...models import structured
 
     async def call(output_type, system, user):
-        return await structured(config, db, output_type, system, user, run_id, max_tokens=2000, timeout=35)
+        limit, wait = LONG_REPLIES.get(output_type.__name__, (2000, 35))
+        return await structured(config, db, output_type, system, user, run_id, max_tokens=limit, timeout=wait)
 
     return call
 

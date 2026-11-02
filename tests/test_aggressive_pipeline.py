@@ -505,6 +505,20 @@ def test_rewording_never_turns_a_draft_into_finished_work():
     assert any("completed work" in w for w in quality.proposal_problems(quality.normalize_proposals(ps)[0], [], POSTING))
 
 
+def test_a_tailored_page_is_tight_at_the_owners_sizes():
+    style = editor.tailored_style(editor.Style())
+    assert {style.margin_top, style.margin_bottom, style.margin_left, style.margin_right} == {0.25}
+    assert (style.section_gap, style.entry_gap, style.bullet_gap) == (3, 1, 0)
+    assert style.name_size == 16.0 and style.font_size == 9.0
+
+
+def test_the_long_replies_get_room_and_others_keep_the_default():
+    from jobpilot.features.knowledge.writing import LONG_REPLIES
+
+    assert LONG_REPLIES["Imported"][0] >= 8000 and LONG_REPLIES["Imported"][1] >= 120
+    assert "Answer" not in LONG_REPLIES and "Brief" not in LONG_REPLIES
+
+
 def test_a_draft_figure_is_allowed_only_as_a_stated_target():
     ps = proposals()
     ps[0].bullets[0] = "Public record explorer built on NYC Open Data for readers [target: p95 under 200 ms]."
