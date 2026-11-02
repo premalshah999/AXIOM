@@ -252,6 +252,9 @@ def collect(service):
     sites = [row for row in out.values() if is_company_site(row["ats"])]
     at = datetime.now(UTC)
     window = at - timedelta(hours=cfg.max_age_hours)
+    # A job in line keeps its row whatever its age, so the header's words about age can name them.
+    longest = (at - timedelta(hours=max(cfg.max_age_hours, cfg.window_hours("greenhouse")))).isoformat()
+    in_line_older = sum(1 for row in rows if row["position"] is not None and row["posted_at"] < longest)
     with db.session() as s:
         from .db import Setting
 
@@ -287,6 +290,7 @@ def collect(service):
         "enabled": cfg.enabled,
         "window": cfg.max_age_hours,
         "live_window": cfg.window_hours("greenhouse"),
+        "in_line_older": in_line_older,
         "oldest": window.isoformat(),
     }
 
@@ -429,7 +433,7 @@ def page(service, q="", role="all", company="all", place="all", posted="all", pl
     if data is None:
         return {
             "planning": True, "rows": [], "total": 0, "page": 1, "pages": 1, "size": size, "all": 0, "sites": 0, "section": section, "hidden": {}, "searched_at": None, "scanning": 0, "scan_read": 0, "scan_total": 0,
-            "enabled": True, "window": 720, "selectable": 0, "ids": [], "facets": dict.fromkeys(("fit", "role", "company", "place", "platform", "posted", "level"), []),
+            "enabled": True, "window": 720, "live_window": 720, "selectable": 0, "ids": [], "facets": dict.fromkeys(("fit", "role", "company", "place", "platform", "posted", "level"), []),
         }
     rows = data["sites"] if section == "sites" else data["rows"]
     text = " ".join((q or "").casefold().split())
@@ -528,6 +532,8 @@ def page(service, q="", role="all", company="all", place="all", posted="all", pl
         "scan_total": data["scan_total"],
         "enabled": data["enabled"],
         "window": data["window"],
+        "live_window": data["live_window"],
+        "in_line_older": data["in_line_older"],
         "facets": {
             "fit": [{"value": k, "label": FITS[k], "count": shown_count("fit", lambda r: k == "all" or r["fit"] == k)} for k in FITS],
             "role": [{"value": k, "label": k, "count": n} for k, n in by_count(facet("role", lambda r: r["roles"]))],

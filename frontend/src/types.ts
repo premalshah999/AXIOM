@@ -816,6 +816,8 @@ export type BoardPage = {
   scan_total?: number;
   enabled: boolean;
   window: number;
+  live_window?: number;
+  in_line_older?: number;
   grouped?: boolean;
   per_company?: number;
   /** How many company-site jobs the Company sites section holds (jobpilot/company_sites.py); they are never among `rows` of the main list. */
